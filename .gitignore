@@ -34,10 +34,15 @@ env/
 
 # Project specific
 backups/
+logs/
+log_info/
 *.pyc
 *.pyo
 .env
 *.log
+
+# Pytest cache
+.pytest_cache/
 
 # Workspace - Agent generated files (do NOT commit)
 workspace/
@@ -45,3 +50,4 @@ workspace/
 # OS
 .DS_Store
 Thumbs.db
+
