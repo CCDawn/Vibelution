@@ -2,6 +2,7 @@
 
 # 核心依赖
 requests>=2.28.0
+tiktoken>=0.7.0            # Token 计数（用于日志实时显示输入 token 数）
 psutil>=5.9.0
 rich>=13.7.0              # CLI 富文本渲染引擎 (Claude Code 级 TUI)
 

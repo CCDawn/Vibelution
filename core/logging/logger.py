@@ -37,7 +37,7 @@ from typing import Optional, Dict, Any, Callable
 # ============================================================================
 
 try:
-    from core.cli_ui import (
+    from core.ui.cli_ui import (
         get_ui,
         ui_print_header,
         ui_thinking,
@@ -370,14 +370,11 @@ class ConversationLogger:
             from rich.console import Console
             _token_console = Console(force_terminal=True)
             _token_console.print(
-                "[dim]\\[TOKEN] 输入: {} | 消息: {} | 模型: {}[/dim]".format(
-                    total_input_tokens, len(messages), model or "?"
-                )
+                f"[dim]\[TOKEN] 输入: {total_input_tokens} | 消息: {len(messages)} | 模型: {model or '?'}[/dim]"
             )
         except Exception:
             import sys
-            print("[TOKEN] 输入: {} | 消息: {} | 模型: {}".format(
-                total_input_tokens, len(messages), model or "?"), file=sys.stderr)
+            print(f"[TOKEN] 输入: {total_input_tokens} | 消息: {len(messages)} | 模型: {model or '?'}", file=sys.stderr)
 
         record = {
             "type": "llm_request",

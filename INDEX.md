@@ -1,8 +1,8 @@
 # 虾宝自我进化系统 - 全局索引
 
-**版本：** v4.2
+**版本：** v4.3
 **日期：** 2026-04-17
-**版本迭代：** 12次重大更新
+**版本迭代：** 13次重大更新
 **用途：** 作为所有任务的执行参照索引
 
 ---
@@ -140,184 +140,216 @@ self-evo-baby/                    # 项目根目录
 │
 ├── config/                      # 配置模块（统一配置入口）
 │   ├── __init__.py              # 主入口，导出所有配置类和函数
-│   ├── models.py                 # Pydantic 数据模型定义
+│   ├── models.py                # Pydantic 数据模型定义
 │   ├── providers.py             # LLM 模型预设注册表
-│   └── settings.py               # 配置加载与单例管理
+│   └── settings.py              # 配置加载与单例管理
 │
 ├── restarter.py                 # 自我重启守护进程
 │
-├── core/                         # 核心模块 (47个文件)
+├── core/                         # 核心模块 (按功能分类到子目录)
 │   │
-│   ├── ━━━ Phase 1-2: 基础设施 ━━━
-│   ├── tool_executor.py         # ✅ 完整 - 工具注册、超时、重试
-│   ├── state.py                 # ✅ 完整 - 单例、线程安全
-│   ├── event_bus.py             # ✅ 完整 - 发布订阅、通配符
-│   ├── security.py              # ✅ 完整 - 白名单+黑名单
-│   ├── model_discovery.py       # ✅ 完整 - 动态模型发现
+│   ├── infrastructure/          # ━━━ Phase 1-2: 基础设施 ━━━
+│   │   ├── __init__.py
+│   │   ├── tool_executor.py     # ✅ 完整 - 工具注册、超时、重试
+│   │   ├── tool_registry.py    # ✅ 完整 - 工具动态注册表
+│   │   ├── state.py            # ✅ 完整 - 单例、线程安全
+│   │   ├── event_bus.py        # ✅ 完整 - 发布订阅、通配符
+│   │   ├── security.py         # ✅ 完整 - 白名单+黑名单
+│   │   ├── model_discovery.py  # ✅ 完整 - 动态模型发现
+│   │   └── workspace_manager.py # ✅ 完整 - SQLite工作区
 │   │
-│   ├── ━━━ Phase 3: 进化能力 ━━━
-│   ├── evolution_engine.py       # ✅ 完整 - 8阶段进化引擎
-│   ├── self_analyzer.py         # ✅ 完整 - 10维度能力分析
-│   ├── refactoring_planner.py   # ✅ 完整 - 坏味道识别
-│   ├── code_generator.py       # ✅ 完整 - 模板生成
+│   ├── evolution/               # ━━━ Phase 3: 进化能力 ━━━
+│   │   ├── __init__.py
+│   │   ├── evolution_engine.py  # ✅ 完整 - 8阶段进化引擎
+│   │   ├── self_analyzer.py    # ✅ 完整 - 10维度能力分析
+│   │   ├── refactoring_planner.py # ✅ 完整 - 坏味道识别
+│   │   ├── code_generator.py   # ✅ 完整 - 模板生成
+│   │   └── self_refactoror.py  # ⚠️ 框架 - 自我重构器
 │   │
-│   ├── ━━━ Phase 4: 知识系统 ━━━
-│   ├── agent_core.py            # ⚠️ 框架 - 抽象基类，需子类实现
-│   ├── knowledge_graph.py        # ✅ 完整 - 代码实体关系
-│   ├── message_bus.py           # ✅ 完整 - 发布订阅通信
-│   ├── codebase_analyzer.py      # ✅ 完整 - AST分析
-│   ├── semantic_search.py       # ✅ 完整 - 语义搜索
+│   ├── knowledge/               # ━━━ Phase 4: 知识系统 ━━━
+│   │   ├── __init__.py
+│   │   ├── knowledge_graph.py   # ✅ 完整 - 代码实体关系
+│   │   ├── codebase_analyzer.py # ✅ 完整 - AST分析
+│   │   ├── semantic_search.py   # ✅ 完整 - 语义搜索
+│   │   └── message_bus.py      # ✅ 完整 - 发布订阅通信
 │   │
-│   ├── ━━━ Phase 5: 持续学习 ━━━
-│   ├── learning_engine.py        # ✅ 完整 - 模式提取学习
-│   ├── feedback_loop.py          # ✅ 完整 - 多源反馈聚合
-│   ├── insight_tracker.py         # ✅ 完整 - 洞察分类管理
-│   ├── strategy_learner.py       # ✅ 完整 - 策略学习
+│   ├── learning/                # ━━━ Phase 5: 持续学习 ━━━
+│   │   ├── __init__.py
+│   │   ├── learning_engine.py   # ✅ 完整 - 模式提取学习
+│   │   ├── feedback_loop.py     # ✅ 完整 - 多源反馈聚合
+│   │   ├── insight_tracker.py   # ✅ 完整 - 洞察分类管理
+│   │   ├── strategy_learner.py  # ✅ 完整 - 策略学习
+│   │   └── agent_core.py       # ⚠️ 框架 - 抽象基类，需子类实现
 │   │
-│   ├── ━━━ Phase 6: 自主决策 ━━━
-│   ├── decision_tree.py          # ✅ 完整 - 基于规则决策
-│   ├── priority_optimizer.py     # ✅ 完整 - 智能任务排序
-│   ├── strategy_selector.py       # ✅ 完整 - 策略切换优化
+│   ├── decision/               # ━━━ Phase 6: 自主决策 ━━━
+│   │   ├── __init__.py
+│   │   ├── decision_tree.py     # ✅ 完整 - 基于规则决策
+│   │   ├── priority_optimizer.py # ✅ 完整 - 智能任务排序
+│   │   └── strategy_selector.py  # ✅ 完整 - 策略切换优化
 │   │
-│   ├── ━━━ Phase 7: 模块化重构 ━━━
-│   ├── llm_orchestrator.py       # ✅ 完整 - LLM调用协调
-│   ├── tool_registry.py          # ✅ 完整 - 工具注册表
-│   ├── memory_manager.py         # ✅ 完整 - 三层记忆管理
-│   ├── task_planner.py           # ✅ 完整 - 智能任务规划
+│   ├── orchestration/          # ━━━ Phase 7: 模块化重构 ━━━
+│   │   ├── __init__.py
+│   │   ├── llm_orchestrator.py  # ✅ 完整 - LLM调用协调
+│   │   ├── memory_manager.py    # ✅ 完整 - 三层记忆管理
+│   │   ├── task_planner.py      # ✅ 完整 - 智能任务规划
+│   │   ├── compression_persister.py # ✅ 完整 - 压缩快照持久化
+│   │   ├── semantic_retriever.py # ✅ 完整 - 基于embedding搜索
+│   │   └── forgetting_engine.py  # ✅ 完整 - 选择性遗忘机制
 │   │
-│   ├── ━━━ Phase 8: 自主探索 ━━━
-│   ├── autonomous_mode.py        # ⚠️ 框架 - 自主模式入口
-│   ├── autonomous_explorer.py    # ⚠️ 框架 - 探索引擎
-│   ├── opportunity_finder.py     # ⚠️ 框架 - 机会发现
-│   ├── goal_generator.py         # ⚠️ 框架 - 目标生成
+│   ├── autonomous/             # ━━━ Phase 8: 自主探索 ━━━
+│   │   ├── __init__.py
+│   │   ├── autonomous_mode.py   # ⚠️ 框架 - 自主模式入口
+│   │   ├── autonomous_explorer.py # ⚠️ 框架 - 探索引擎
+│   │   ├── opportunity_finder.py # ⚠️ 框架 - 机会发现
+│   │   └── goal_generator.py   # ⚠️ 框架 - 目标生成
 │   │
-│   ├── ━━━ 工具与UI ━━━
-│   ├── ascii_art.py              # ✅ 完整 - 多角色ASCII Art
-│   ├── cli_ui.py                 # ✅ 完整 - CLI UI组件
-│   ├── interactive_cli.py        # ✅ 完整 - 交互式CLI
-│   ├── prompt_builder.py         # ✅ 完整 - 提示词构建
-│   ├── workspace_manager.py       # ✅ 完整 - SQLite工作区
-│   ├── task_manager.py           # ✅ 完整 - 任务管理
-│   ├── skills_profiler.py        # ✅ 完整 - 能力画像
-│   ├── tool_tracker.py           # ✅ 完整 - 工具追踪
-│   ├── logger.py                 # ✅ 完整 - 调试日志
-│   ├── unified_logger.py         # ✅ 完整 - 统一日志
-│   ├── transcript_logger.py       # ✅ 完整 - 转录日志
-│   ├── restarter.py              # ✅ 完整 - 重启管理
+│   ├── ui/                     # ━━━ 工具与UI ━━━
+│   │   ├── __init__.py
+│   │   ├── ascii_art.py        # ✅ 完整 - 多角色ASCII Art
+│   │   ├── cli_ui.py           # ✅ 完整 - CLI UI组件
+│   │   ├── interactive_cli.py  # ✅ 完整 - 交互式CLI
+│   │   └── theme.py            # ⚠️ 框架 - 主题系统
 │   │
-│   ├── ━━━ 宠物系统 (pet_system/) ━━━
-│   ├── pet_system/               # ✅ 完整 - 宠物系统模块目录
-│   │   ├── __init__.py          # 模块入口
-│   │   ├── models.py            # Pydantic 数据模型
-│   │   ├── pet_system.py        # PetSystem 核心类
-│   │   ├── subsystems/           # 子系统目录
-│   │   │   ├── base.py          # 子系统基类
-│   │   │   ├── gene_system.py   # ✅ 基因系统
-│   │   │   ├── heart_system.py  # ✅ 心跳系统
-│   │   │   ├── dream_system.py  # ✅ 梦境系统
-│   │   │   ├── personality_system.py  # ✅ 性格养成
+│   ├── logging/                # ━━━ 日志系统 ━━━
+│   │   ├── __init__.py
+│   │   ├── logger.py           # ✅ 完整 - 调试日志
+│   │   ├── unified_logger.py   # ✅ 完整 - 统一日志
+│   │   ├── transcript_logger.py # ✅ 完整 - 转录日志
+│   │   └── tool_tracker.py     # ✅ 完整 - 工具追踪
+│   │
+│   ├── capabilities/          # ━━━ 能力系统 ━━━
+│   │   ├── __init__.py
+│   │   ├── skills_profiler.py  # ✅ 完整 - 能力画像
+│   │   ├── task_analyzer.py    # ✅ 完整 - 任务分析器
+│   │   ├── task_manager.py     # ✅ 完整 - 任务管理
+│   │   ├── prompt_builder.py   # ✅ 完整 - 提示词构建
+│   │   └── pattern_library.py  # ⚠️ 框架 - 模式库
+│   │
+│   ├── ecosystem/             # ━━━ 工具生态 ━━━
+│   │   ├── __init__.py
+│   │   ├── tool_ecosystem.py   # ⚠️ 框架 - 工具生态系统
+│   │   └── restarter.py        # ✅ 完整 - 重启管理
+│   │
+│   ├── pet_system/            # ━━━ 宠物系统 ━━━
+│   │   ├── __init__.py         # ✅ 完整 - 宠物系统模块目录
+│   │   ├── models.py           # Pydantic 数据模型
+│   │   ├── pet_system.py       # PetSystem 核心类
+│   │   ├── subsystems/         # 子系统目录
+│   │   │   ├── base.py         # 子系统基类
+│   │   │   ├── gene_system.py  # ✅ 基因系统
+│   │   │   ├── heart_system.py # ✅ 心跳系统
+│   │   │   ├── dream_system.py # ✅ 梦境系统
+│   │   │   ├── personality_system.py # ✅ 性格养成
 │   │   │   ├── hunger_system.py # ✅ 饥饿系统
-│   │   │   ├── diary_system.py  # ✅ 成长日记
+│   │   │   ├── diary_system.py # ✅ 成长日记
 │   │   │   ├── social_system.py # ✅ 同伴社交
 │   │   │   ├── health_system.py # ✅ 健康体检
-│   │   │   ├── skin_system.py   # ✅ 装扮系统
-│   │   │   └── sound_system.py  # ✅ 声音系统
-│   │   └── utils/               # 工具目录
-│   │       ├── storage.py        # 数据存储
-│   │       └── formatters.py     # 格式化工具
+│   │   │   ├── skin_system.py  # ✅ 装扮系统
+│   │   │   └── sound_system.py # ✅ 声音系统
+│   │   └── utils/
+│   │       ├── storage.py      # 数据存储
+│   │       └── formatters.py   # 格式化工具
 │   │
-│   ├── self_refactoror.py        # ⚠️ 自我重构器
-│   ├── theme.py                  # ⚠️ 主题系统
-│   ├── tool_ecosystem.py         # ⚠️ 工具生态系统
-│   ├── pattern_library.py        # ⚠️ 模式库
+│   ├── backup/                # 备份文件
+│   │   └── agent_core_backup.py # 旧版Agent核心备份
 │   │
+│   ├── logger.py              # 遗留文件（为backup兼容保留）
+│   │
+│   └── __init__.py            # 版本标记 (v4.3, CORE_REORGANIZED=True)
+│
+├── tools/                      # 工具集 (12个文件)
+│   ├── shell_tools.py          # ✅ 完整 (12个工具)
+│   ├── memory_tools.py         # ✅ 完整 (15个工具)
+│   ├── code_analysis_tools.py  # ✅ 完整 (6个工具)
+│   ├── search_tools.py         # ✅ 完整 (5个工具)
+│   ├── rebirth_tools.py        # ✅ 完整 (6个工具)
+│   ├── token_manager.py        # ✅ 完整 (含压缩器)
+│   ├── key_info_extractor.py   # ✅ 完整 (Token优化)
+│   ├── compression_strategy.py # ✅ 完整 (4级压缩)
+│   ├── compression_quality.py  # ✅ 完整 (质量评估)
+│   ├── state_broadcaster.py     # ⚠️ 状态广播
+│   ├── Key_Tools.py            # ✅ 完整 (工具注册)
 │   └── __init__.py
 │
-├── tools/                        # 工具集 (12个文件)
-│   ├── shell_tools.py            # ✅ 完整 (12个工具)
-│   ├── memory_tools.py           # ✅ 完整 (15个工具)
-│   ├── code_analysis_tools.py    # ✅ 完整 (6个工具)
-│   ├── search_tools.py           # ✅ 完整 (5个工具)
-│   ├── rebirth_tools.py          # ✅ 完整 (6个工具)
-│   ├── token_manager.py          # ✅ 完整 (含压缩器)
-│   ├── key_info_extractor.py     # ✅ 完整 (Token优化)
-│   ├── compression_strategy.py    # ✅ 完整 (4级压缩)
-│   ├── compression_quality.py     # ✅ 完整 (质量评估)
-│   ├── state_broadcaster.py       # ⚠️ 状态广播
-│   ├── Key_Tools.py              # ✅ 完整 (工具注册)
-│   └── __init__.py
-│
-├── tests/                        # 测试套件 (46个文件)
-│   ├── conftest.py               # ✅ pytest配置
-│   ├── test_shell_tools.py       # ✅ 完整
-│   ├── test_memory_tools.py      # ✅ 完整
+├── tests/                      # 测试套件 (46个文件)
+│   ├── conftest.py             # ✅ pytest配置
+│   ├── test_shell_tools.py      # ✅ 完整
+│   ├── test_memory_tools.py    # ✅ 完整
 │   ├── test_code_analysis_tools.py # ✅ 完整
-│   ├── test_search_tools.py       # ✅ 完整
-│   ├── test_rebirth_tools.py     # ✅ 完整
-│   ├── test_token_manager.py     # ✅ 完整
-│   ├── test_security.py          # ✅ 完整
-│   ├── test_tool_executor.py     # ✅ 完整
-│   ├── test_evolution_engine.py  # ✅ 完整 (Phase 3)
-│   ├── test_self_analyzer.py     # ✅ 完整 (Phase 2)
-│   ├── test_agent_core.py        # ✅ 完整 (Phase 4)
-│   ├── test_message_bus.py       # ✅ 完整 (Phase 4)
-│   ├── test_knowledge_graph.py   # ✅ 完整 (Phase 4)
-│   ├── test_learning_engine.py   # ✅ 完整 (Phase 5)
-│   ├── test_feedback_loop.py     # ✅ 完整 (Phase 5)
-│   ├── test_insight_tracker.py   # ✅ 完整 (Phase 5)
-│   ├── test_decision_tree.py     # ✅ 完整 (Phase 6)
+│   ├── test_search_tools.py    # ✅ 完整
+│   ├── test_rebirth_tools.py   # ✅ 完整
+│   ├── test_token_manager.py   # ✅ 完整
+│   ├── test_security.py         # ✅ 完整
+│   ├── test_tool_executor.py   # ✅ 完整
+│   ├── test_evolution_engine.py # ✅ 完整 (Phase 3)
+│   ├── test_self_analyzer.py   # ✅ 完整 (Phase 2)
+│   ├── test_agent_core.py       # ✅ 完整 (Phase 4)
+│   ├── test_message_bus.py      # ✅ 完整 (Phase 4)
+│   ├── test_knowledge_graph.py  # ✅ 完整 (Phase 4)
+│   ├── test_learning_engine.py  # ✅ 完整 (Phase 5)
+│   ├── test_feedback_loop.py    # ✅ 完整 (Phase 5)
+│   ├── test_insight_tracker.py # ✅ 完整 (Phase 5)
+│   ├── test_decision_tree.py   # ✅ 完整 (Phase 6)
 │   ├── test_priority_optimizer.py # ✅ 完整 (Phase 6)
-│   ├── test_strategy_selector.py  # ✅ 完整 (Phase 6)
-│   ├── test_llm_orchestrator.py  # ✅ 完整 (Phase 7)
-│   ├── test_tool_registry.py     # ✅ 完整 (Phase 7)
-│   ├── test_memory_manager.py   # ✅ 完整 (Phase 7)
-│   ├── test_task_planner.py     # ✅ 完整 (Phase 7)
+│   ├── test_strategy_selector.py # ✅ 完整 (Phase 6)
+│   ├── test_llm_orchestrator.py # ✅ 完整 (Phase 7)
+│   ├── test_tool_registry.py   # ✅ 完整 (Phase 7)
+│   ├── test_memory_manager.py  # ✅ 完整 (Phase 7)
+│   ├── test_task_planner.py    # ✅ 完整 (Phase 7)
 │   ├── test_compression_strategy.py # ✅ 完整 (Token优化)
 │   ├── test_key_info_extractor.py # ✅ 完整 (Token优化)
 │   ├── test_compression_quality.py # ✅ 完整 (Token优化)
 │   ├── test_autonomous_explorer.py # ⚠️ (Phase 8)
-│   ├── test_tool_tracker.py     # ✅ 完整
-│   ├── test_task_analyzer.py     # ✅ 完整
+│   ├── test_tool_tracker.py    # ✅ 完整
+│   ├── test_task_analyzer.py   # ✅ 完整
 │   ├── test_refactoring_planner.py # ✅ 完整
 │   ├── test_codebase_analyzer.py # ✅ 完整
-│   ├── test_skills_profiler.py   # ✅ 完整
-│   ├── test_semantic_search.py   # ✅ 完整
-│   ├── test_strategy_learner.py  # ✅ 完整
-│   ├── test_self_refactoror.py  # ⚠️
-│   ├── test_tool_ecosystem.py    # ⚠️
-│   ├── test_pattern_library.py   # ⚠️
-│   ├── test_code_generator.py    # ✅ 完整
-│   ├── test_memory.py            # ⚠️
-│   ├── test_runner.py            # ⚠️ 测试运行器
-│   ├── run_tests.py              # ⚠️ 测试脚本
-│   ├── simulate_lifecycle.py     # ⚠️ 生命周期模拟
+│   ├── test_skills_profiler.py # ✅ 完整
+│   ├── test_semantic_search.py # ✅ 完整
+│   ├── test_strategy_learner.py # ✅ 完整
+│   ├── test_self_refactoror.py # ⚠️
+│   ├── test_tool_ecosystem.py  # ⚠️
+│   ├── test_pattern_library.py # ⚠️
+│   ├── test_code_generator.py  # ✅ 完整
+│   ├── test_memory.py          # ⚠️
+│   ├── test_runner.py          # ⚠️ 测试运行器
+│   ├── run_tests.py            # ⚠️ 测试脚本
+│   ├── simulate_lifecycle.py   # ⚠️ 生命周期模拟
 │   └── compression_benchmark.py # ⚠️ 压缩基准
 │
-├── requirement/                   # 规划文档
-│   └── cursor第一次规划/
-│       ├── 虾宝自我进化系统完整规划.md
-│       ├── 技术设计文档.md
-│       ├── API设计规范.md
-│       └── 单元测试规划.md
+├── requirement/                # 规划文档
+│   ├── cursor第一次规划/
+│   │   ├── 虾宝自我进化系统完整规划.md
+│   │   ├── 技术设计文档.md
+│   │   ├── API设计规范.md
+│   │   └── 单元测试规划.md
+│   ├── cursor第二次规划/
+│   │   └── Token压缩机制优化规划.md
+│   └── claude第一次规划/
+│       ├── Phase8自主探索模块实现方案.md
+│       ├── agent.py模块化拆分方案.md
+│       ├── core目录结构重组方案.md
+│       └── 记忆力机制优化方案.md
 │
-├── workspace/                    # 工作区
-│   ├── memory/                   # 记忆存储
-│   │   ├── archives/            # 压缩快照存储
-│   │   │   ├── snapshots/       # 压缩快照 JSON
-│   │   │   ├── decisions/       # 决策记录 JSONL
-│   │   │   └── tool_stats/      # 工具统计 JSON
-│   │   ├── semantic_index.json  # 语义检索索引
-│   │   ├── forgotten/           # 遗忘回收站
-│   │   └── pet_info.json        # 宠物投喂记录
-│   ├── prompts/                  # 提示词
-│   ├── logs/                     # 日志
-│   └── analytics/                # 分析结果
+├── workspace/                   # 工作区
+│   ├── memory/                 # 记忆存储
+│   │   ├── archives/          # 压缩快照存储
+│   │   │   ├── snapshots/     # 压缩快照 JSON
+│   │   │   ├── decisions/     # 决策记录 JSONL
+│   │   │   └── tool_stats/    # 工具统计 JSON
+│   │   ├── semantic_index.json # 语义检索索引
+│   │   ├── forgotten/         # 遗忘回收站
+│   │   └── pet_info.json      # 宠物投喂记录
+│   ├── prompts/                # 提示词
+│   ├── logs/                   # 日志
+│   └── analytics/              # 分析结果
 │
-├── report_history/               # 任务完成报告 (12个)
-│   ├── claude_report/           # Claude 任务报告
-│   └── cursor_report/            # Cursor 任务报告
-├── backups/                      # 备份
-└── logs/                         # 日志
+├── report_history/             # 任务完成报告 (12个)
+│   ├── claude_report/         # Claude 任务报告
+│   └── cursor_report/         # Cursor 任务报告
+│
+├── backups/                   # 备份
+└── logs/                      # 日志
 ```
 
 ---
@@ -353,7 +385,7 @@ self-evo-baby/                    # 项目根目录
    - 覆盖率 >= 80%
 
 ✅ 步骤 6: 更新报告
-   - 更新 cursor_report_history/
+   - 更新 report_history/
    - 诚实标注实现状态
 ```
 
@@ -370,7 +402,7 @@ self-evo-baby/                    # 项目根目录
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      虾宝进化路线图 v4.0                         │
+│                      虾宝进化路线图 v4.3                         │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                  │
 │  Phase 1: 基础工具整合 ✅ 完成                                    │
@@ -397,7 +429,7 @@ self-evo-baby/                    # 项目根目录
 │  ├── 语义搜索 ✅                                                  │
 │  └── Agent 核心框架 ✅                                            │
 │                                                                  │
-│  Phase 5: 持续学习 ✅ 完成                                        │
+│  Phase 5: 持续学习 ✅ 完成                                       │
 │  ├── 学习引擎 ✅                                                  │
 │  ├── 反馈循环 ✅                                                  │
 │  ├── 洞察追踪 ✅                                                  │
@@ -430,6 +462,19 @@ self-evo-baby/                    # 项目根目录
 │  ├── AvatarManager ✅                                            │
 │  └── /avatar 命令 ✅                                              │
 │                                                                  │
+│  核心目录重构 ✅ 完成 (2026-04-17)                                │
+│  ├── infrastructure/ ✅ 基础设施                                  │
+│  ├── evolution/ ✅ 进化引擎                                       │
+│  ├── knowledge/ ✅ 知识系统                                       │
+│  ├── learning/ ✅ 持续学习                                        │
+│  ├── decision/ ✅ 自主决策                                        │
+│  ├── orchestration/ ✅ 模块化重构                                │
+│  ├── autonomous/ ✅ 自主探索                                     │
+│  ├── ui/ ✅ 用户界面                                              │
+│  ├── logging/ ✅ 日志系统                                         │
+│  ├── capabilities/ ✅ 能力系统                                    │
+│  └── ecosystem/ ✅ 工具生态                                       │
+│                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -443,73 +488,73 @@ self-evo-baby/                    # 项目根目录
 
 | 类别 | 模块 | 文件 | 状态 | 说明 |
 |------|------|------|------|------|
-| 工具执行 | 工具执行器 | `core/tool_executor.py` | ✅ 完整 | 工具注册、超时、重试 |
-| 工具执行 | 工具注册表 | `core/tool_registry.py` | ✅ 完整 | 动态注册、分类、搜索 |
-| 状态管理 | 状态管理 | `core/state.py` | ✅ 完整 | 单例、线程安全 |
-| 事件系统 | 事件总线 | `core/event_bus.py` | ✅ 完整 | 发布订阅、通配符 |
-| 事件系统 | 消息总线 | `core/message_bus.py` | ✅ 完整 | 发布订阅通信 |
-| 安全 | 安全模块 | `core/security.py` | ✅ 完整 | 白名单+黑名单 |
-| 模型发现 | 模型动态发现 | `core/model_discovery.py` | ✅ 完整 | 运行时获取 max_model_len |
-| 工作区 | 工作区管理 | `core/workspace_manager.py` | ✅ 完整 | SQLite 数据库 |
+| 工具执行 | 工具执行器 | `core/infrastructure/tool_executor.py` | ✅ 完整 | 工具注册、超时、重试 |
+| 工具执行 | 工具注册表 | `core/infrastructure/tool_registry.py` | ✅ 完整 | 动态注册、分类、搜索 |
+| 状态管理 | 状态管理 | `core/infrastructure/state.py` | ✅ 完整 | 单例、线程安全 |
+| 事件系统 | 事件总线 | `core/infrastructure/event_bus.py` | ✅ 完整 | 发布订阅、通配符 |
+| 事件系统 | 消息总线 | `core/knowledge/message_bus.py` | ✅ 完整 | 发布订阅通信 |
+| 安全 | 安全模块 | `core/infrastructure/security.py` | ✅ 完整 | 白名单+黑名单 |
+| 模型发现 | 模型动态发现 | `core/infrastructure/model_discovery.py` | ✅ 完整 | 运行时获取 max_model_len |
+| 工作区 | 工作区管理 | `core/infrastructure/workspace_manager.py` | ✅ 完整 | SQLite 数据库 |
 
 #### Phase 3: 进化能力
 
 | 类别 | 模块 | 文件 | 状态 | 说明 |
 |------|------|------|------|------|
-| 进化引擎 | 进化引擎 | `core/evolution_engine.py` | ✅ 完整 | 8阶段进化流程 |
-| 进化引擎 | 自我分析器 | `core/self_analyzer.py` | ✅ 完整 | 10维度能力分析 |
-| 进化引擎 | 重构规划器 | `core/refactoring_planner.py` | ✅ 完整 | 坏味道识别 |
-| 进化引擎 | 代码生成器 | `core/code_generator.py` | ✅ 完整 | 模板生成 |
-| 进化引擎 | 自我重构器 | `core/self_refactoror.py` | ⚠️ 框架 | 待实现 |
+| 进化引擎 | 进化引擎 | `core/evolution/evolution_engine.py` | ✅ 完整 | 8阶段进化流程 |
+| 进化引擎 | 自我分析器 | `core/evolution/self_analyzer.py` | ✅ 完整 | 10维度能力分析 |
+| 进化引擎 | 重构规划器 | `core/evolution/refactoring_planner.py` | ✅ 完整 | 坏味道识别 |
+| 进化引擎 | 代码生成器 | `core/evolution/code_generator.py` | ✅ 完整 | 模板生成 |
+| 进化引擎 | 自我重构器 | `core/evolution/self_refactoror.py` | ⚠️ 框架 | 待实现 |
 
 #### Phase 4: 知识系统
 
 | 类别 | 模块 | 文件 | 状态 | 说明 |
 |------|------|------|------|------|
-| 知识 | 知识图谱 | `core/knowledge_graph.py` | ✅ 完整 | 代码实体关系 |
-| 知识 | 代码库分析 | `core/codebase_analyzer.py` | ✅ 完整 | AST 分析 |
-| 知识 | 语义搜索 | `core/semantic_search.py` | ✅ 完整 | 语义检索 |
-| Agent框架 | Agent 核心基类 | `core/agent_core.py` | ⚠️ 框架 | 抽象基类，需子类实现 |
+| 知识 | 知识图谱 | `core/knowledge/knowledge_graph.py` | ✅ 完整 | 代码实体关系 |
+| 知识 | 代码库分析 | `core/knowledge/codebase_analyzer.py` | ✅ 完整 | AST 分析 |
+| 知识 | 语义搜索 | `core/knowledge/semantic_search.py` | ✅ 完整 | 语义检索 |
+| Agent框架 | Agent 核心基类 | `core/learning/agent_core.py` | ⚠️ 框架 | 抽象基类，需子类实现 |
 
 #### Phase 5: 持续学习
 
 | 类别 | 模块 | 文件 | 状态 | 说明 |
 |------|------|------|------|------|
-| 学习 | 学习引擎 | `core/learning_engine.py` | ✅ 完整 | 模式提取学习 |
-| 学习 | 策略学习器 | `core/strategy_learner.py` | ✅ 完整 | 策略学习 |
-| 反馈 | 反馈循环 | `core/feedback_loop.py` | ✅ 完整 | 多源反馈聚合 |
-| 洞察 | 洞察追踪 | `core/insight_tracker.py` | ✅ 完整 | 洞察分类管理 |
-| 洞察 | 机会发现 | `core/opportunity_finder.py` | ⚠️ 框架 | Phase 8 相关 |
-| 记忆 | 压缩持久化 | `core/compression_persister.py` | ✅ 完整 | 压缩快照持久化 |
-| 记忆 | 语义检索 | `core/semantic_retriever.py` | ✅ 完整 | 基于 embedding 搜索 |
-| 记忆 | 遗忘引擎 | `core/forgetting_engine.py` | ✅ 完整 | 选择性遗忘机制 |
+| 学习 | 学习引擎 | `core/learning/learning_engine.py` | ✅ 完整 | 模式提取学习 |
+| 学习 | 策略学习器 | `core/learning/strategy_learner.py` | ✅ 完整 | 策略学习 |
+| 反馈 | 反馈循环 | `core/learning/feedback_loop.py` | ✅ 完整 | 多源反馈聚合 |
+| 洞察 | 洞察追踪 | `core/learning/insight_tracker.py` | ✅ 完整 | 洞察分类管理 |
+| 洞察 | 机会发现 | `core/autonomous/opportunity_finder.py` | ⚠️ 框架 | Phase 8 相关 |
+| 记忆 | 压缩持久化 | `core/orchestration/compression_persister.py` | ✅ 完整 | 压缩快照持久化 |
+| 记忆 | 语义检索 | `core/orchestration/semantic_retriever.py` | ✅ 完整 | 基于 embedding 搜索 |
+| 记忆 | 遗忘引擎 | `core/orchestration/forgetting_engine.py` | ✅ 完整 | 选择性遗忘机制 |
 
 #### Phase 6: 自主决策
 
 | 类别 | 模块 | 文件 | 状态 | 说明 |
 |------|------|------|------|------|
-| 决策 | 决策树 | `core/decision_tree.py` | ✅ 完整 | 基于规则决策系统 |
-| 决策 | 优先级优化器 | `core/priority_optimizer.py` | ✅ 完整 | 智能任务排序 |
-| 决策 | 策略选择器 | `core/strategy_selector.py` | ✅ 完整 | 策略切换优化 |
-| 决策 | 目标生成 | `core/goal_generator.py` | ⚠️ 框架 | Phase 8 相关 |
+| 决策 | 决策树 | `core/decision/decision_tree.py` | ✅ 完整 | 基于规则决策系统 |
+| 决策 | 优先级优化器 | `core/decision/priority_optimizer.py` | ✅ 完整 | 智能任务排序 |
+| 决策 | 策略选择器 | `core/decision/strategy_selector.py` | ✅ 完整 | 策略切换优化 |
+| 决策 | 目标生成 | `core/autonomous/goal_generator.py` | ⚠️ 框架 | Phase 8 相关 |
 
 #### Phase 7: 模块化重构
 
 | 类别 | 模块 | 文件 | 状态 | 测试数 |
 |------|------|------|------|--------|
-| LLM | LLM 协调器 | `core/llm_orchestrator.py` | ✅ 完整 | 12 |
-| 记忆 | 记忆管理器 | `core/memory_manager.py` | ✅ 完整 | 20 |
-| 规划 | 任务规划器 | `core/task_planner.py` | ✅ 完整 | 19 |
-| 工具 | 工具注册表 | `core/tool_registry.py` | ✅ 完整 | 20 |
+| LLM | LLM 协调器 | `core/orchestration/llm_orchestrator.py` | ✅ 完整 | 12 |
+| 记忆 | 记忆管理器 | `core/orchestration/memory_manager.py` | ✅ 完整 | 20 |
+| 规划 | 任务规划器 | `core/orchestration/task_planner.py` | ✅ 完整 | 19 |
+| 工具 | 工具注册表 | `core/infrastructure/tool_registry.py` | ✅ 完整 | 20 |
 
 #### Phase 8: 自主探索 ⚠️ 进行中
 
 | 类别 | 模块 | 文件 | 状态 | 说明 |
 |------|------|------|------|------|
-| 探索 | 自主模式入口 | `core/autonomous_mode.py` | ⚠️ 框架 | 入口点已存在 |
-| 探索 | 探索引擎 | `core/autonomous_explorer.py` | ⚠️ 框架 | 核心逻辑待实现 |
-| 探索 | 机会发现器 | `core/opportunity_finder.py` | ⚠️ 框架 | 优化点识别 |
-| 探索 | 目标生成器 | `core/goal_generator.py` | ⚠️ 框架 | 自主目标生成 |
+| 探索 | 自主模式入口 | `core/autonomous/autonomous_mode.py` | ⚠️ 框架 | 入口点已存在 |
+| 探索 | 探索引擎 | `core/autonomous/autonomous_explorer.py` | ⚠️ 框架 | 核心逻辑待实现 |
+| 探索 | 机会发现器 | `core/autonomous/opportunity_finder.py` | ⚠️ 框架 | 优化点识别 |
+| 探索 | 目标生成器 | `core/autonomous/goal_generator.py` | ⚠️ 框架 | 自主目标生成 |
 
 #### Token 优化模块
 
@@ -524,19 +569,38 @@ self-evo-baby/                    # 项目根目录
 
 | 类别 | 模块 | 文件 | 状态 | 说明 |
 |------|------|------|------|------|
-| 形象 | ASCII Art | `core/ascii_art.py` | ✅ 完整 | 5套角色 |
+| 形象 | ASCII Art | `core/ui/ascii_art.py` | ✅ 完整 | 5套角色 |
 | 形象 | Avatar 管理器 | (在ascii_art.py) | ✅ 完整 | 统一管理 |
-| UI | CLI UI | `core/cli_ui.py` | ✅ 完整 | UI组件 |
-| UI | 交互式 CLI | `core/interactive_cli.py` | ✅ 完整 | 用户交互 |
-| UI | 主题系统 | `core/theme.py` | ⚠️ 框架 | 待实现 |
+| UI | CLI UI | `core/ui/cli_ui.py` | ✅ 完整 | UI组件 |
+| UI | 交互式 CLI | `core/ui/interactive_cli.py` | ✅ 完整 | 用户交互 |
+| UI | 主题系统 | `core/ui/theme.py` | ⚠️ 框架 | 待实现 |
+
+#### 日志系统
+
+| 类别 | 模块 | 文件 | 状态 | 说明 |
+|------|------|------|------|------|
+| 日志 | 调试日志 | `core/logging/logger.py` | ✅ 完整 | DebugLogger |
+| 日志 | 统一日志 | `core/logging/unified_logger.py` | ✅ 完整 | UnifiedLogger |
+| 日志 | 转录日志 | `core/logging/transcript_logger.py` | ✅ 完整 | 对话记录 |
+| 日志 | 工具追踪 | `core/logging/tool_tracker.py` | ✅ 完整 | 工具使用追踪 |
+
+#### 能力系统
+
+| 类别 | 模块 | 文件 | 状态 | 说明 |
+|------|------|------|------|------|
+| 能力 | 能力画像 | `core/capabilities/skills_profiler.py` | ✅ 完整 | SkillsProfile |
+| 能力 | 任务分析器 | `core/capabilities/task_analyzer.py` | ✅ 完整 | TaskAnalysis |
+| 能力 | 任务管理 | `core/capabilities/task_manager.py` | ✅ 完整 | 任务管理 |
+| 能力 | 提示词构建 | `core/capabilities/prompt_builder.py` | ✅ 完整 | build_system_prompt |
+| 能力 | 模式库 | `core/capabilities/pattern_library.py` | ⚠️ 框架 | 待实现 |
 
 #### 待重构 ⚠️
 
 | 模块 | 文件 | 状态 | 说明 |
 |------|------|------|------|
 | Agent 主类 | `agent.py` | ⚠️ 重构中 | ~1000行，目标<500行，拆分8个模块 |
-| Agent 核心基类 | `core/agent_core.py` | ⚠️ 框架 | 抽象基类，需子类实现 |
-| Phase 8 自主探索 | `core/autonomous_*.py` | ⚠️ 框架 | 自主探索模块待完整实现 |
+| Agent 核心基类 | `core/learning/agent_core.py` | ⚠️ 框架 | 抽象基类，需子类实现 |
+| Phase 8 自主探索 | `core/autonomous/*.py` | ⚠️ 框架 | 自主探索模块待完整实现 |
 | 宠物系统 | `core/pet_system/` | ✅ 完整 | 10大子系统：基因/心跳/梦境/性格/饥饿/日记/社交/健康/装扮/声音 |
 
 ---
@@ -577,59 +641,11 @@ self-evo-baby/                    # 项目根目录
 
 **描述：** agent.py (~1000行) 拆分为 8 个独立模块的详细方案，目标降低到 <500行
 
-**核心架构（当前状态）：**
+### 6. core 目录结构重组方案.md
 
-```
-SelfEvolvingAgent (主控 - agent.py)
-    │
-    ├── Phase 1-2: 基础设施
-    │   ├── ToolExecutor ✅
-    │   ├── StateManager ✅
-    │   ├── EventBus ✅
-    │   ├── WorkspaceManager ✅
-    │   ├── Security ✅
-    │   └── ModelDiscovery ✅ (动态获取 max_model_len)
-    │
-    ├── Phase 3: 进化能力
-    │   ├── EvolutionEngine ✅
-    │   ├── SelfAnalyzer ✅
-    │   ├── RefactoringPlanner ✅
-    │   └── CodeGenerator ✅
-    │
-    ├── Phase 4: 知识系统
-    │   ├── KnowledgeGraph ✅
-    │   ├── CodebaseAnalyzer ✅
-    │   ├── SemanticSearch ✅
-    │   └── AgentCore ⚠️ 框架
-    │
-    ├── Phase 5: 持续学习
-    │   ├── LearningEngine ✅
-    │   ├── FeedbackLoop ✅
-    │   ├── InsightTracker ✅
-    │   └── StrategyLearner ✅
-    │
-    ├── Phase 6: 自主决策
-    │   ├── DecisionTree ✅
-    │   ├── PriorityOptimizer ✅
-    │   └── StrategySelector ✅
-    │
-    ├── Phase 7: 模块化重构 ✅
-    │   ├── LLMOrchestrator ✅
-    │   ├── ToolRegistry ✅
-    │   ├── MemoryManager ✅
-    │   └── TaskPlanner ✅
-    │
-    ├── Phase 8: 自主探索 ⚠️ 进行中
-    │   ├── AutonomousMode ⚠️ 框架
-    │   ├── AutonomousExplorer ⚠️ 框架
-    │   ├── OpportunityFinder ⚠️ 框架
-    │   └── GoalGenerator ⚠️ 框架
-    │
-    └── Token 优化 ✅
-        ├── CompressionStrategy ✅
-        ├── KeyInfoExtractor ✅
-        └── CompressionQuality ✅
-```
+**路径：** `requirement/claude第一次规划/core目录结构重组方案.md`
+
+**描述：** core/ 目录按功能分类重组方案，已于 2026-04-17 实施完成
 
 ---
 
@@ -716,17 +732,17 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 
 | 序号 | 报告名称 | 完成时间 | Phase |
 |------|----------|----------|-------|
-| 01 | [Phase 2 - 自我分析模块实现](cursor_report_history/task_20260416_01_Phase2自我分析模块实现.md) | 2026-04-16 15:30 | Phase 2 |
-| 02 | [Phase 3 - 进化引擎核心实现](cursor_report_history/task_20260416_02_Phase3进化引擎核心实现.md) | 2026-04-16 16:00 | Phase 3 |
-| 03 | [Phase 4 - 模块化Agent实现](cursor_report_history/task_20260416_03_Phase4模块化Agent实现.md) | 2026-04-16 16:30 | Phase 4 |
-| 04 | [Phase 5 - 持续学习机制实现](cursor_report_history/task_20260416_04_Phase5持续学习机制实现.md) | 2026-04-16 17:00 | Phase 5 |
-| 05 | [Phase 6 - 自主决策模块集成](cursor_report_history/task_20260416_05_Phase6自主决策模块集成.md) | 2026-04-16 19:00 | Phase 6 |
-| 06 | [Phase 7 - 模块化Agent架构第一阶段](cursor_report_history/task_20260416_06_Phase7模块化Agent架构第一阶段.md) | 2026-04-16 19:30 | Phase 7 |
-| 07 | [Phase 7 - 模块化Agent架构第二阶段](cursor_report_history/task_20260416_07_Phase7模块化Agent架构第二阶段.md) | 2026-04-16 20:30 | Phase 7 |
-| 08 | [Phase 7 - 模块化Agent架构完成](cursor_report_history/task_20260416_08_Phase7模块化Agent架构完成.md) | 2026-04-16 21:00 | Phase 7 |
-| 09 | [Token 压缩机制优化](cursor_report_history/task_20260416_09_Token压缩机制优化.md) | 2026-04-16 22:00 | Token |
-| 10 | [形象选择系统实现](cursor_report_history/task_20260416_10_形象选择系统实现.md) | 2026-04-16 21:30 | UI |
-| 11 | [Phase 11 宠物系统模块化实现](cursor_report_history/task_20260417_11_Phase11宠物系统模块化实现.md) | 2026-04-17 15:58 | Phase 11 |
+| 01 | [Phase 2 - 自我分析模块实现](report_history/cursor_report/task_20260416_01_Phase2自我分析模块实现.md) | 2026-04-16 15:30 | Phase 2 |
+| 02 | [Phase 3 - 进化引擎核心实现](report_history/cursor_report/task_20260416_02_Phase3进化引擎核心实现.md) | 2026-04-16 16:00 | Phase 3 |
+| 03 | [Phase 4 - 模块化Agent实现](report_history/cursor_report/task_20260416_03_Phase4模块化Agent实现.md) | 2026-04-16 16:30 | Phase 4 |
+| 04 | [Phase 5 - 持续学习机制实现](report_history/cursor_report/task_20260416_04_Phase5持续学习机制实现.md) | 2026-04-16 17:00 | Phase 5 |
+| 05 | [Phase 6 - 自主决策模块集成](report_history/cursor_report/task_20260416_05_Phase6自主决策模块集成.md) | 2026-04-16 19:00 | Phase 6 |
+| 06 | [Phase 7 - 模块化Agent架构第一阶段](report_history/cursor_report/task_20260416_06_Phase7模块化Agent架构第一阶段.md) | 2026-04-16 19:30 | Phase 7 |
+| 07 | [Phase 7 - 模块化Agent架构第二阶段](report_history/cursor_report/task_20260416_07_Phase7模块化Agent架构第二阶段.md) | 2026-04-16 20:30 | Phase 7 |
+| 08 | [Phase 7 - 模块化Agent架构完成](report_history/cursor_report/task_20260416_08_Phase7模块化Agent架构完成.md) | 2026-04-16 21:00 | Phase 7 |
+| 09 | [Token 压缩机制优化](report_history/cursor_report/task_20260416_09_Token压缩机制优化.md) | 2026-04-16 22:00 | Token |
+| 10 | [形象选择系统实现](report_history/cursor_report/task_20260416_10_形象选择系统实现.md) | 2026-04-16 21:30 | UI |
+| 11 | [Phase 11 宠物系统模块化实现](report_history/cursor_report/task_20260417_11_Phase11宠物系统模块化实现.md) | 2026-04-17 15:58 | Phase 11 |
 | 12 | [Phase 5 记忆力机制优化实现](report_history/claude_report/task_20260417_12_Phase5记忆力机制优化实现.md) | 2026-04-17 17:30 | Phase 5 |
 
 ---
@@ -741,6 +757,7 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 2026-04-17 | v4.0 | 全面重构：SPEC设计规范、Phase 8规划、Token优化、形象系统 |
 | 2026-04-17 | v4.1 | 配置系统重构：整合config.py和config/模块，新增local provider，添加配置系统说明 |
 | 2026-04-17 | v4.2 | Phase 8 规划文档新增，新增 agent.py 拆分方案，更新目录结构说明 |
+| 2026-04-17 | v4.3 | **core/ 目录结构重组**：按功能分类到 infrastructure/evolution/knowledge/learning/decision/orchestration/autonomous/ui/logging/capabilities/ecosystem 等子目录 |
 
 ---
 
@@ -760,6 +777,20 @@ A: 使用 4 级压缩策略（light/standard/deep/emergency），配置在 `conf
 
 **Q: 如何切换 ASCII 形象？**
 A: 修改 `config.toml` 的 `[avatar] preset = "lobster"` 或使用命令 `/avatar shrimp`。
+
+**Q: 新的 core/ 目录结构是怎样的？**
+A: 核心模块已按功能分类到子目录：
+- `core/infrastructure/` - 基础设施（工具执行、状态、事件、安全）
+- `core/evolution/` - 进化引擎
+- `core/knowledge/` - 知识系统
+- `core/learning/` - 持续学习
+- `core/decision/` - 自主决策
+- `core/orchestration/` - 模块化重构
+- `core/autonomous/` - 自主探索
+- `core/ui/` - 用户界面
+- `core/logging/` - 日志系统
+- `core/capabilities/` - 能力系统
+- `core/ecosystem/` - 工具生态
 
 ---
 
@@ -884,6 +915,6 @@ auto_detect_model = true             # 自动检测可用模型
 2. 根据任务类型，找到对应的规划文档
 3. 确认模块当前实现状态（✅/⚠️/❌）
 4. 参考相关章节执行具体实现
-5. 完成后更新 cursor_report_history/
+5. 完成后更新 report_history/
 6. 更新 INDEX.md 相关状态（如有变化）
 -->

@@ -27,27 +27,27 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import Config, get_config
 
 # 导入日志模块
-from core.logger import (
+from core.logging.logger import (
     DebugLogger,
     debug as _debug_logger,
 )
-from core.unified_logger import logger
+from core.logging.unified_logger import logger
 
 # 导入事件总线
-from core.event_bus import EventBus, get_event_bus, EventNames, Event
+from core.infrastructure.event_bus import EventBus, get_event_bus, EventNames, Event
 
 # 导入状态管理
-from core.state import AgentState, get_state_manager
+from core.infrastructure.state import AgentState, get_state_manager
 
 # 导入安全模块（新）
-from core.security import get_security_validator, SecurityValidator
+from core.infrastructure.security import get_security_validator, SecurityValidator
 
 # LangChain 核心组件
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 # 导入模型动态发现
-from core.model_discovery import ModelDiscovery, DiscoveryStatus
+from core.infrastructure.model_discovery import ModelDiscovery, DiscoveryStatus
 
 # 导入工具
 from tools import Key_Tools
@@ -62,10 +62,10 @@ from tools.memory_tools import (
 from tools.rebirth_tools import trigger_self_restart_tool
 
 # 导入 CLI UI
-from core.cli_ui import get_ui, ui_error
+from core.ui.cli_ui import get_ui, ui_error
 
 # 导入提示词构建器
-from core.prompt_builder import build_system_prompt
+from core.capabilities.prompt_builder import build_system_prompt
 
 # 导入宠物系统
 from core.pet_system import get_pet_system
@@ -74,20 +74,20 @@ from core.pet_system import get_pet_system
 # ============================================================================
 # 导入工具执行器（从核心模块解耦）
 # ============================================================================
-from core.tool_executor import get_tool_executor
+from core.infrastructure.tool_executor import get_tool_executor
 
 # ============================================================================
 # 导入 Phase 6 模块（自主决策优化）
 # ============================================================================
-from core.decision_tree import (
+from core.decision.decision_tree import (
     DecisionTree, DecisionContext, DecisionType,
     get_decision_tree, create_default_decision_tree,
 )
-from core.priority_optimizer import (
+from core.decision.priority_optimizer import (
     PriorityOptimizer, Task, PriorityScore,
     get_priority_optimizer,
 )
-from core.strategy_selector import (
+from core.decision.strategy_selector import (
     StrategySelector, Strategy, StrategyType,
     get_strategy_selector, create_default_selector,
 )
@@ -95,20 +95,20 @@ from core.strategy_selector import (
 # ============================================================================
 # 导入 Phase 7 模块（模块化重构）
 # ============================================================================
-from core.llm_orchestrator import (
+from core.orchestration.llm_orchestrator import (
     LLMOrchestrator, LLMConfig, LLMResponse, LLMCallOptions,
     get_llm_orchestrator,
 )
-from core.tool_registry import (
+from core.infrastructure.tool_registry import (
     ToolRegistry, ToolMetadata, ToolCategory, ToolRegistration,
     get_tool_registry,
 )
-from core.memory_manager import (
+from core.orchestration.memory_manager import (
     MemoryManager, ShortTermMemory, MidTermMemory, LongTermMemory,
     get_memory_manager, reset_memory_manager,
 )
-from core.task_planner import (
-    TaskPlanner, Task as PlannerTask, TaskStatus, TaskPriority, RiskLevel,
+from core.orchestration.task_planner import (
+    TaskPlanner, Task as PlannerTask, TaskStatus, TaskPriority,
     get_task_planner,
 )
 
@@ -436,6 +436,20 @@ class SelfEvolvingAgent:
                 if decision_result and hasattr(self, 'strategy_selector'):
                     self._apply_strategy_adjustments(decision_result)
 
+                # 打印当前输入 token 数
+                current_input_tokens = estimate_messages_tokens(messages)
+                try:
+                    from rich.console import Console
+                    Console(force_terminal=True).print(
+                        "[dim]\\[TOKEN] 输入: {} | 迭代: {}/{}[/dim]".format(
+                            current_input_tokens, iteration, max_iterations
+                        )
+                    )
+                except Exception:
+                    import sys
+                    print("[TOKEN] 输入: {} | 迭代: {}/{}".format(
+                        current_input_tokens, iteration, max_iterations), file=sys.stderr)
+
                 # 调用 LLM
                 response = self._invoke_llm(messages)
                 if response is None:
@@ -451,6 +465,19 @@ class SelfEvolvingAgent:
                     usage = response.usage_metadata
                     input_tokens = usage.get('input_tokens', 0)
                     output_tokens = usage.get('output_tokens', 0)
+
+                    # 打印输出 token 数
+                    try:
+                        from rich.console import Console
+                        Console(force_terminal=True).print(
+                            "[dim]\\[TOKEN] 输出: {} | 输入: {}[/dim]".format(
+                                output_tokens, input_tokens
+                            )
+                        )
+                    except Exception:
+                        import sys
+                        print("[TOKEN] 输出: {} | 输入: {}".format(
+                            output_tokens, input_tokens), file=sys.stderr)
 
                     # 记录到宠物系统
                     try:
@@ -669,7 +696,7 @@ class SelfEvolvingAgent:
             # 持久化压缩快照（利用新的记忆组件）
             if self.memory_manager is not None:
                 try:
-                    from core.compression_persister import get_compression_persister
+                    from core.orchestration.compression_persister import get_compression_persister
                     persister = get_compression_persister()
                     persister.save_snapshot(
                         generation=get_generation_tool(),
@@ -704,7 +731,7 @@ class SelfEvolvingAgent:
             # 持久化压缩快照（利用新的记忆组件）
             if self.memory_manager is not None:
                 try:
-                    from core.compression_persister import get_compression_persister
+                    from core.orchestration.compression_persister import get_compression_persister
                     persister = get_compression_persister()
                     persister.save_snapshot(
                         generation=get_generation_tool(),
@@ -770,7 +797,7 @@ class SelfEvolvingAgent:
 
         # Phase 6: 记录策略执行结果
         if strategy_selection and hasattr(self, 'strategy_selector'):
-            from core.strategy_selector import StrategyResult
+            from core.decision.strategy_selector import StrategyResult
             duration = (datetime.now() - start_time).total_seconds()
             success = result is not None and "error" not in str(result).lower()
             strategy_result = StrategyResult(
@@ -819,7 +846,7 @@ class SelfEvolvingAgent:
 
     def _build_decision_context(self, user_prompt: str) -> "DecisionContext":
         """构建决策上下文"""
-        from core.decision_tree import DecisionContext
+        from core.decision.decision_tree import DecisionContext
         state = {
             "user_prompt": user_prompt,
             "generation": get_generation_tool(),
@@ -1143,7 +1170,7 @@ def main(initial_prompt: str = None):
     ui.console.print("[bold cyan]+==============================================================+[/bold cyan]")
 
     # 打印 ASCII Art 宠物形象
-    from core.ascii_art import get_avatar_manager
+    from core.ui.ascii_art import get_avatar_manager
     avatar = get_avatar_manager()
     pet_art = avatar.get_art('happy')
     ui.console.print(f"[bright_cyan]{pet_art}[/bright_cyan]")

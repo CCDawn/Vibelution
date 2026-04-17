@@ -35,8 +35,8 @@ temperature = 0.2
 # 最大输出 tokens（会被运行时动态发现覆盖）
 max_tokens = 4096
 
-# API 超时时间（秒）
-api_timeout = 600
+# API 超时时间（秒）- 本地模型生成慢，建议120秒以上
+api_timeout = 120
 
 # 连接超时（秒）
 connect_timeout = 30

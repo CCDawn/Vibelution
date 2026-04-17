@@ -22,8 +22,8 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 # 导入统一工作区管理器
-from core.workspace_manager import get_workspace
-from core.task_manager import get_task_manager
+from core.infrastructure.workspace_manager import get_workspace
+from core.capabilities.task_manager import get_task_manager
 
 
 # ============================================================================

@@ -12,7 +12,18 @@
       "Bash(python -m py_compile tools/code_analysis_tools.py)",
       "Bash(python -m py_compile agent.py)",
       "Bash(python *)",
-      "Bash(git status *)"
+      "Bash(git status *)",
+      "Bash(mv tool_executor.py infrastructure/)",
+      "Bash(mv tool_registry.py infrastructure/)",
+      "Bash(mv state.py infrastructure/)",
+      "Bash(mv event_bus.py infrastructure/)",
+      "Bash(mv security.py infrastructure/)",
+      "Bash(mv learning_engine.py feedback_loop.py insight_tracker.py strategy_learner.py learning/)",
+      "Bash(mv agent_core.py learning/)",
+      "Bash(mv llm_orchestrator.py memory_manager.py task_planner.py orchestration/)",
+      "Bash(mv compression_persister.py semantic_retriever.py forgetting_engine.py orchestration/)",
+      "Bash(mv tool_ecosystem.py restarter.py ecosystem/)",
+      "Bash(mv agent_core_backup.py backup/)"
     ]
   }
 }
