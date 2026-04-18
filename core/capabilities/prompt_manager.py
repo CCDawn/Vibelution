@@ -92,10 +92,10 @@ class PromptManager:
     - 缓存失效机制
     """
 
-    # 核心静态文件（双轨加载：workspace 优先，回退 static）
-    _STATIC_FILES = {"SOUL.md", "AGENTS.md"}
+    # 核心只读文件（仅来自 static，不支持 workspace 覆盖）
+    _STATIC_ONLY_FILES = {"SOUL.md", "AGENTS.md"}
 
-    # 纯动态文件（仅来自 workspace/prompts/）
+    # 纯动态文件（仅来自 workspace，不存在时自动生成默认模板）
     _DYNAMIC_FILES = {"IDENTITY.md", "USER.md", "DYNAMIC.md", "COMPRESS_SUMMARY.md"}
 
     # 状态机增强：规则注册表 + 当前激活规则 + 状态记忆（在 __init__ 中初始化）
@@ -107,6 +107,10 @@ class PromptManager:
         self._static_root = _get_static_root()
         self._dynamic_root = _get_dynamic_root()
         self._dynamic_root.mkdir(parents=True, exist_ok=True)
+
+        # 初始化：确保所有动态文件存在（缺失则生成默认模板）
+        for fname in self._DYNAMIC_FILES:
+            self._ensure_dynamic_file(fname)
 
         # 组件注册表
         self._components: Dict[str, PromptComponent] = {}
@@ -338,6 +342,64 @@ class PromptManager:
     # build() - 参数驱动拼接
     # ------------------------------------------------------------------------
 
+    def build_with_index(
+        self,
+        include: Optional[List[str]] = None,
+        exclude: Optional[List[str]] = None,
+        generation: Optional[int] = None,
+        total_generations: Optional[int] = None,
+        core_context: Optional[str] = None,
+        current_goal: Optional[str] = None,
+        state_memory: Optional[str] = None,
+    ) -> tuple[str, List[Dict[str, Any]]]:
+        """
+        构建动态系统提示词，并返回拼接索引（用于调试）。
+
+        Returns:
+            (prompt_text, index_list)
+            index_list 每项格式：
+            {
+                "name": 组件名,
+                "source": "static" | "workspace",
+                "length": 字符数,
+                "enabled": bool,
+                "required": bool,
+            }
+        """
+        from dataclasses import asdict
+
+        if include is None:
+            include = ["SOUL", "AGENTS", "MEMORY", "current_rules"]
+        effective_state_memory = state_memory if state_memory is not None else self.state_memory
+        selected = self._select_components(include, exclude)
+
+        parts = []
+        index_list = []
+        for comp in selected:
+            try:
+                content = comp.load_fn()
+                if comp.name == "MEMORY":
+                    content = self._render_memory(
+                        generation=generation,
+                        total_generations=total_generations,
+                        core_context=core_context,
+                        current_goal=current_goal,
+                        state_memory=effective_state_memory,
+                    )
+                if content and content.strip():
+                    parts.append(content)
+                    index_list.append({
+                        "name": comp.name,
+                        "source": self._cache_sources.get(comp.name, "unknown"),
+                        "length": len(content),
+                        "enabled": comp.enabled,
+                        "required": comp.required,
+                    })
+            except Exception as e:
+                logger.warning(f"[PromptManager] 组件 {comp.name} 加载失败: {e}")
+
+        return "\n\n---\n\n".join(parts), index_list
+
     def build(
         self,
         include: Optional[List[str]] = None,
@@ -363,37 +425,16 @@ class PromptManager:
         Returns:
             组装完成的系统提示词字符串
         """
-        # 确定要拼接的组件列表（固定范围）
-        if include is None:
-            include = ["SOUL", "AGENTS", "MEMORY", "current_rules"]
-
-        # 确定要注入的 state_memory
-        effective_state_memory = state_memory if state_memory is not None else self.state_memory
-        # 确定要拼接的组件列表
-        selected = self._select_components(include, exclude)
-
-        # 加载每个组件的内容
-        parts = []
-        for comp in selected:
-            try:
-                content = comp.load_fn()
-
-                # 特殊处理：MEMORY 组件需要传入参数
-                if comp.name == "MEMORY":
-                    content = self._render_memory(
-                        generation=generation,
-                        total_generations=total_generations,
-                        core_context=core_context,
-                        current_goal=current_goal,
-                        state_memory=effective_state_memory,
-                    )
-
-                if content and content.strip():
-                    parts.append(content)
-            except Exception as e:
-                logger.warning(f"[PromptManager] 组件 {comp.name} 加载失败: {e}")
-
-        return "\n\n---\n\n".join(parts)
+        text, _ = self.build_with_index(
+            include=include,
+            exclude=exclude,
+            generation=generation,
+            total_generations=total_generations,
+            core_context=core_context,
+            current_goal=current_goal,
+            state_memory=state_memory,
+        )
+        return text
 
     def _select_components(
         self,
@@ -427,29 +468,78 @@ class PromptManager:
     # 组件加载函数
     # ------------------------------------------------------------------------
 
-    def _load_with_fallback(self, name: str) -> str:
-        """双轨加载：优先 dynamic（workspace），回退 static（core/core_prompt/）"""
-        dynamic_path = self._dynamic_root / name
+    def _load_static_only(self, name: str) -> str:
+        """只读加载：仅从 static（core/core_prompt/），不支持 workspace 覆盖"""
         static_path = self._static_root / name
-
-        if dynamic_path.exists():
-            try:
-                content = dynamic_path.read_text(encoding="utf-8").strip()
-                logger.info(f"[PromptManager] 动态加载 {name} from workspace")
-                self._cache_sources[name] = "workspace"
-                return content
-            except Exception as e:
-                logger.warning(f"[PromptManager] workspace/{name} 读取失败: {e}，回退到 static")
-
         return self._load_from_path(static_path, name)
+
+    def _ensure_dynamic_file(self, name: str) -> bool:
+        """
+        确保动态文件存在，不存在则生成默认模板。
+
+        Returns:
+            True 表示文件已存在（无需生成），False 表示新生成
+        """
+        path = self._dynamic_root / name
+        if path.exists():
+            return True
+
+        default_content = self._get_default_template(name)
+        if default_content is None:
+            return True  # 无默认模板，无需生成
+
+        try:
+            path.write_text(default_content, encoding="utf-8")
+            logger.info(f"[PromptManager] 自动生成默认模板: workspace/prompts/{name}")
+            return False
+        except Exception as e:
+            logger.warning(f"[PromptManager] 生成 {name} 失败: {e}")
+            return False
+
+    def _get_default_template(self, name: str) -> Optional[str]:
+        """获取动态文件的默认模板内容"""
+        templates = {
+            "IDENTITY.md": """# Agent 身份定义
+
+## 基本信息
+- **名称**：
+- **角色**：
+- **专长**：
+
+## 行为准则
+-
+""",
+            "USER.md": """# 用户信息
+
+## 用户基本信息
+- **用户名**：
+- **偏好设置**：
+
+## 当前任务背景
+
+""",
+            "DYNAMIC.md": """# 动态提示词区域
+
+*此区域由 Agent 在每个世代开始时动态生成，用于记录当前任务、进度和关键上下文。*
+
+---
+""",
+            "COMPRESS_SUMMARY.md": """# 上下文压缩摘要
+
+*此文件在上下文压缩时自动更新，记录历史对话中的关键信息和结论摘要。*
+
+---
+""",
+        }
+        return templates.get(name)
 
     def _load_from_path(self, path: Path, name: str) -> str:
         """从指定路径加载文件"""
         if path.exists():
             try:
                 content = path.read_text(encoding="utf-8").strip()
-                logger.info(f"[PromptManager] 静态加载 {name} from {path.parent.name}/")
-                self._cache_sources[name] = "static"
+                logger.info(f"[PromptManager] 加载 {name} from {path.parent.name}/")
+                self._cache_sources[name] = "workspace"
                 return content
             except Exception as e:
                 return f"[错误: 无法读取 {path}: {e}]"
@@ -457,12 +547,12 @@ class PromptManager:
             return f"[警告: 找不到 {path}]"
 
     def _load_soul(self) -> str:
-        """加载 SOUL.md（双轨）"""
-        return self._load_with_fallback("SOUL.md")
+        """加载 SOUL.md（仅 static，只读）"""
+        return self._load_static_only("SOUL.md")
 
     def _load_agents(self) -> str:
-        """加载 AGENTS.md（双轨）"""
-        return self._load_with_fallback("AGENTS.md")
+        """加载 AGENTS.md（仅 static，只读）"""
+        return self._load_static_only("AGENTS.md")
 
     def _load_identity(self) -> str:
         """加载 IDENTITY.md（仅 workspace）"""
@@ -555,8 +645,11 @@ class PromptManager:
             memory_data = self._load_memory_from_tools()
             generation = memory_data.get("generation", 1)
             total_generations = memory_data.get("total_generations", 1)
-            core_context = core_context or memory_data.get("core_context", "")
-            current_goal = current_goal or memory_data.get("current_goal", "")
+            # 兼容：新旧字段名；只有未显式传入时才 fallback 到 memory 数据
+            if core_context is None:
+                core_context = memory_data.get("core_context") or memory_data.get("core_wisdom") or ""
+            if current_goal is None:
+                current_goal = memory_data.get("current_goal") or ""
 
         # 优先使用传入的 state_memory，回退到内存缓存
         effective_memory = state_memory if state_memory else self.state_memory

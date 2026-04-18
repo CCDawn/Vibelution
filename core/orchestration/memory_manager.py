@@ -126,13 +126,6 @@ class MemoryManager:
             "tool_calls_recorded": 0,
             "insights_recorded": 0,
             "memory_saves": 0,
-        }._load_long_term()
-
-        # 统计
-        self._stats = {
-            "tool_calls_recorded": 0,
-            "insights_recorded": 0,
-            "memory_saves": 0,
         }
 
     def _generate_session_id(self) -> str:

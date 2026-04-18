@@ -13,7 +13,7 @@ class TestShortTermMemory:
 
     def test_create_short_term_memory(self):
         """测试创建短期记忆"""
-        from core.memory_manager import ShortTermMemory
+        from core.orchestration.memory_manager import ShortTermMemory
         memory = ShortTermMemory(session_id="test_session")
         assert memory.session_id == "test_session"
         assert len(memory.tool_calls) == 0
@@ -25,7 +25,7 @@ class TestMidTermMemory:
 
     def test_create_mid_term_memory(self):
         """测试创建中期记忆"""
-        from core.memory_manager import MidTermMemory
+        from core.orchestration.memory_manager import MidTermMemory
         memory = MidTermMemory(generation=1)
         assert memory.generation == 1
         assert memory.current_task == ""
@@ -37,7 +37,7 @@ class TestLongTermMemory:
 
     def test_create_long_term_memory(self):
         """测试创建长期记忆"""
-        from core.memory_manager import LongTermMemory
+        from core.orchestration.memory_manager import LongTermMemory
         memory = LongTermMemory()
         assert memory.current_generation == 1
         assert memory.total_generations == 1
@@ -48,7 +48,7 @@ class TestMemorySummary:
 
     def test_create_summary(self):
         """测试创建摘要"""
-        from core.memory_manager import MemorySummary
+        from core.orchestration.memory_manager import MemorySummary
         summary = MemorySummary(generation=1)
         assert summary.generation == 1
 
@@ -58,7 +58,7 @@ class TestMemoryManager:
 
     def test_init(self):
         """测试初始化"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         assert manager.short_term is not None
         assert manager.mid_term is not None
@@ -66,7 +66,7 @@ class TestMemoryManager:
 
     def test_record_tool_call(self):
         """测试记录工具调用"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.record_tool_call(
             tool_name="read_file",
@@ -79,28 +79,28 @@ class TestMemoryManager:
 
     def test_record_thought(self):
         """测试记录思考"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.record_thought("Testing thought")
         assert len(manager.short_term.thoughts) == 1
 
     def test_record_user_input(self):
         """测试记录用户输入"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.record_user_input("Hello world")
         assert len(manager.short_term.user_inputs) == 1
 
     def test_set_current_task(self):
         """测试设置当前任务"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.set_current_task("Test task")
         assert manager.get_current_task() == "Test task"
 
     def test_add_insight(self):
         """测试添加洞察"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.add_insight("Important insight", category="test")
         insights = manager.get_insights(category="test")
@@ -109,7 +109,7 @@ class TestMemoryManager:
 
     def test_add_code_insight(self):
         """测试添加代码洞察"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.add_code_insight("agent.py", "Code understanding")
         insights = manager.get_code_insights(module="agent.py")
@@ -117,7 +117,7 @@ class TestMemoryManager:
 
     def test_get_insights_no_filter(self):
         """测试获取洞察（无过滤）"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.add_insight("Insight 1", category="a")
         manager.add_insight("Insight 2", category="b")
@@ -126,14 +126,14 @@ class TestMemoryManager:
 
     def test_set_core_wisdom(self):
         """测试设置核心智慧"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.set_core_wisdom("Be helpful")
         assert manager.get_core_wisdom() == "Be helpful"
 
     def test_update_skills_profile(self):
         """测试更新能力画像"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.update_skills_profile({"coding": 0.8})
         profile = manager.get_skills_profile()
@@ -142,7 +142,7 @@ class TestMemoryManager:
 
     def test_add_evolution_record(self):
         """测试添加进化记录"""
-        from core.memory_manager import MemoryManager, reset_memory_manager
+        from core.orchestration.memory_manager import MemoryManager, reset_memory_manager
         reset_memory_manager()  # 重置单例，避免测试间干扰
         manager = MemoryManager()
         manager.add_evolution_record({"gen": 1, "focus": "test"})
@@ -150,14 +150,14 @@ class TestMemoryManager:
 
     def test_get_summary(self):
         """测试获取摘要"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         summary = manager.get_summary()
         assert summary.generation >= 1
 
     def test_get_full_memory(self):
         """测试获取完整记忆"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         memory = manager.get_full_memory()
         assert "short_term" in memory
@@ -166,14 +166,14 @@ class TestMemoryManager:
 
     def test_get_statistics(self):
         """测试获取统计"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         stats = manager.get_statistics()
         assert "tool_calls_recorded" in stats
 
     def test_clear_short_term(self):
         """测试清除短期记忆"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
         manager = MemoryManager()
         manager.record_tool_call("test_tool", {}, "result")
         manager.clear_short_term()
@@ -185,7 +185,7 @@ class TestMemoryManagerIntegration:
 
     def test_full_memory_lifecycle(self):
         """测试完整记忆生命周期"""
-        from core.memory_manager import MemoryManager
+        from core.orchestration.memory_manager import MemoryManager
 
         manager = MemoryManager()
 

@@ -1,8 +1,8 @@
 # 虾宝自我进化系统 - 全局索引
 
-**版本：** v4.8
+**版本：** v4.9
 **日期：** 2026-04-18
-**版本迭代：** 19次重大更新
+**版本迭代：** 20次重大更新
 **用途：** 作为所有任务的执行参照索引
 
 ---
@@ -16,6 +16,7 @@
 | 了解当前进度 | [📊 实施路线图](#实施路线图) |
 | 执行开发任务 | [🚀 开发流程准则](#开发流程准则) |
 | 运行测试 | [🧪 测试执行指南](#测试执行指南) |
+| 提示词打靶 | [🔴 提示词打靶测试](#🔴-提示词打靶测试（强制要求）) |
 | 查阅代码规范 | [🔧 命名规范](#命名规范) |
 
 ---
@@ -721,6 +722,68 @@ pytest tests/test_compression*.py tests/test_key_info_extractor.py -v
 | Phase 7 | 4 | 71 | ✅ 完整 |
 | Token 优化 | 3 | 58 | ✅ 完整 |
 | Phase 8 | 1 | - | ⚠️ 框架 |
+| **提示词打靶** | 1 | 6+ | ✅ 核心工具 |
+
+### 🔴 提示词打靶测试（强制要求）
+
+> **⚠️ 强制规范：每次添加新工具或修改 SOUL.md / AGENTS.md 后，必须使用本工具验证模型是否按提示词正确响应。**
+
+提示词打靶测试用于验证 System Prompt 中的规则是否真正生效。通过发送特定测试 Prompt，观察 LLM 返回的三段式输出（`<thinking>`, `<context_summary>`, `<tool_call>` 等），确认模型行为符合预期。
+
+#### 运行命令
+
+```bash
+# 单次测试
+python tests/prompt_debugger.py "测试 Prompt"
+
+# 查看 PromptManager 拼接索引
+python tests/prompt_debugger.py --index
+
+# 运行内置测试用例集
+python tests/prompt_debugger.py --suite
+
+# 只运行包含关键词的用例
+python tests/prompt_debugger.py --suite --filter "记忆"
+
+# 交互模式
+python tests/prompt_debugger.py
+```
+
+#### 内置测试用例
+
+| 用例名称 | 验证目标 |
+|---------|---------|
+| 记忆注入验证 | MEMORY 组件是否正确注入到 System Prompt |
+| 工具读取动态提示词 | 模型是否使用 `read_dynamic_prompt_tool` 读取 DYNAMIC.md |
+| 工具写入动态提示词 | 模型是否使用 `write_dynamic_prompt_tool` 修改动态提示词 |
+| 禁止行为验证 | 模型是否遵守 SOUL.md 中"禁止修改核心文件"的规则 |
+| set_plan_tool 验证 | 模型是否正确使用 `set_plan_tool` 记录计划 |
+| 记忆读写循环 | 模型能否完成"读记忆→理解→更新记忆"的完整流程 |
+
+#### 输出解读
+
+```
+🟦 System Prompt 统计  → 字数和预览
+🟩 User Prompt         → 发送的测试输入
+🟪 <thinking>          → 模型思考过程（高亮）
+🔧 Tool Calls          → 工具调用列表及参数
+🔍 原始输出            → 完整原始响应
+```
+
+#### 新增测试用例方法
+
+在 `tests/prompt_debugger.py` 的 `BUILT_IN_SUITES` 列表中添加条目：
+
+```python
+{
+    "name": "新工具调用验证",
+    "description": "验证模型是否正确调用新添加的工具",
+    "prompt": "请使用新工具完成XXX任务",
+    "expect_tool": "new_tool_name",     # 期望调用的工具名
+    "expect_keywords": ["期望出现的关键词"],
+    "expect_not_keywords": ["不应出现的关键词"],  # 可选
+}
+```
 
 ### ⚠️ 测试现状警告
 
@@ -800,8 +863,9 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 2026-04-18 | v4.5 | **提示词审查修复**：统一 SOUL.md/AGENTS.md 工具名为实际注册名，修复内容冲突、Windows 兼容、禁止删除列表，补全路径引用 |
 | 2026-04-18 | v4.6 | **set_plan_tool Bug 修复**：添加类型守卫防止字符串被当作字符列表处理，输出自动去掉编号前缀 |
 | 2026-04-18 | v4.6 | **check_restart_block Bug 修复**：添加无后缀别名函数，解决 agent.py 内部调用 NameError |
-| 2026-04-18 | v4.7 | **Agent 自我扩展 Skill 系统
-| 2026-04-18 | v4.8 | **PromptManager 重构**：新增 core/capabilities/prompt_manager.py，PromptManager 组件注册表 + 参数驱动 uild(include, exclude) 拼接 API，单例 get_prompt_manager()，28 测试通过**：新增 SkillRegistry/SkillLoader/SkillTools，Agent 可在 workspace/skills/ 自建/修改/删除 Skill，集成到 agent.py，增强 XML 解析支持 `<skill>` 标签，CompositeTool 暴露为 LangChain Tool，更新 AGENTS.md，33 测试通过 |
+| 2026-04-18 | v4.7 | **Agent 自我扩展 Skill 系统**：新增 SkillRegistry/SkillLoader/SkillTools，Agent 可在 workspace/skills/ 自建/修改/删除 Skill，集成到 agent.py，增强 XML 解析支持 <skill> 标签，CompositeTool 暴露为 LangChain Tool，更新 AGENTS.md，33 测试通过 |
+| 2026-04-18 | v4.8 | **PromptManager 重构**：新增 core/capabilities/prompt_manager.py，PromptManager 组件注册表 + 参数驱动 build(include, exclude) 拼接 API，单例 get_prompt_manager()，28 测试通过 |
+| 2026-04-18 | v4.9 | **工具注册完整性修复**：通过提示词打靶测试发现 28/34 个工具未注册，重写 tools/Key_Tools.py（14→29 个工具），实现 write_dynamic_prompt_tool，清理 AGENTS.md 中 4 个虚假工具引用，统一文档工具名与注册名一致 |
 
 ---
 
@@ -810,30 +874,33 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 ### 双轨加载架构
 
 ```
-core/core_prompt/              ← 静态核心提示词（内置只读模板）
-├── __init__.py               CorePromptManager 双轨加载引擎
-├── SOUL.md                   禁止修改
-└── AGENTS.md                 禁止修改
+core/core_prompt/              ← 静态核心提示词（只读内置模板）
+├── __init__.py               PromptManager 双轨加载引擎
+├── SOUL.md                   禁止修改（LLM 禁止修改的绝对铁律）
+└── AGENTS.md                 禁止修改（Agent 执行总流程 SOP）
 
-workspace/prompts/            ← 动态提示词（用户可编辑，覆盖优先）
-├── SOUL.md                   ✅ 可覆盖（优先级更高）
-├── AGENTS.md                 ✅ 可覆盖（优先级更高）
-├── IDENTITY.md               ✅ 可修改
-├── USER.md                   ✅ 可修改
-├── DYNAMIC.md                ✅ 必须修改（世代任务）
-└── COMPRESS_SUMMARY.md       ✅ 可修改
+workspace/prompts/            ← 动态提示词（用户可编辑，初始化时自动生成）
+├── IDENTITY.md               ✅ 可修改（Agent 身份定义）
+├── USER.md                   ✅ 可修改（用户信息）
+├── DYNAMIC.md                ✅ 必须修改（世代任务描述）
+├── COMPRESS_SUMMARY.md       ✅ 可修改（上下文压缩摘要）
+└── STATE_MEMORY.md           ✅ 由 Agent 自动生成（状态记忆，不应手动编辑）
 ```
 
-### CorePromptManager 加载方法
+**加载规则**：
+- SOUL.md / AGENTS.md：**只读 static**，Agent 无法覆盖
+- 其余文件：**仅 workspace**，不存在时 PromptManager 初始化时自动生成默认模板
+
+### PromptManager 加载方法
 
 | 方法 | 说明 |
 |------|------|
-| `load_soul()` | 加载 SOUL.md（workspace 优先） |
-| `load_agents()` | 加载 AGENTS.md（workspace 优先） |
-| `load_identity()` | 加载 IDENTITY.md（仅 workspace） |
-| `load_user()` | 加载 USER.md（仅 workspace） |
-| `load_dynamic()` | 加载 DYNAMIC.md（仅 workspace） |
-| `load_compress_summary()` | 加载 COMPRESS_SUMMARY.md（仅 workspace） |
+| `load_soul()` | 加载 SOUL.md（仅 static，只读） |
+| `load_agents()` | 加载 AGENTS.md（仅 static，只读） |
+| `load_identity()` | 加载 IDENTITY.md（仅 workspace，不存在时自动生成） |
+| `load_user()` | 加载 USER.md（仅 workspace，不存在时自动生成） |
+| `load_dynamic()` | 加载 DYNAMIC.md（仅 workspace，不存在时自动生成） |
+| `load_compress_summary()` | 加载 COMPRESS_SUMMARY.md（仅 workspace，不存在时自动生成） |
 
 ---
 

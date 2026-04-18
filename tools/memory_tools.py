@@ -532,6 +532,50 @@ def add_insight_to_dynamic_tool(insight: str) -> str:
         }, ensure_ascii=False)
 
 
+def write_dynamic_prompt_tool(content: str) -> str:
+    """
+    【完整写入动态提示词】用新内容完整替换 DYNAMIC.md 的正文内容。
+
+    与 add_insight_to_dynamic_tool 的"追加洞察"不同，本工具执行全量覆盖写入，
+    适用于重写整个动态提示词区域的场景。
+
+    Args:
+        content: 新的动态提示词完整内容
+
+    Returns:
+        JSON 格式结果
+    """
+    try:
+        import hashlib
+        current_gen = _load_memory().get("current_generation", 1)
+
+        new_content = f"""# 动态提示词区域
+
+{content}
+"""
+        path = _get_dynamic_prompt_path()
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(new_content)
+
+        size = len(content)
+        preview = content[:80] + "..." if len(content) > 80 else content
+
+        return json.dumps({
+            "status": "success",
+            "message": "动态提示词已更新",
+            "generation": current_gen,
+            "content_hash": hashlib.md5(content.encode()).hexdigest()[:8],
+            "size_bytes": size,
+            "preview": preview,
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"写入动态提示词失败: {str(e)}"
+        }, ensure_ascii=False)
+
+
 def clear_generation_task() -> str:
     """
     清除世代任务区域，为下一世代做准备。

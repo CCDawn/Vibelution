@@ -23,7 +23,11 @@
       "Bash(mv llm_orchestrator.py memory_manager.py task_planner.py orchestration/)",
       "Bash(mv compression_persister.py semantic_retriever.py forgetting_engine.py orchestration/)",
       "Bash(mv tool_ecosystem.py restarter.py ecosystem/)",
-      "Bash(mv agent_core_backup.py backup/)"
+      "Bash(mv agent_core_backup.py backup/)",
+      "Bash(grep -E \"logging|\\\\.py$\")",
+      "Bash(ls -d core/*/)",
+      "Bash(ls tools/*.py)",
+      "Bash(ls tests/test_*.py)"
     ]
   }
 }

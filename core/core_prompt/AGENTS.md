@@ -163,28 +163,25 @@ trigger_self_restart_tool(reason="已完成本世代任务")
 |------|------|------|
 | 鸟瞰文件结构 | `list_file_entities_tool` | 查看所有类/函数 + 行号 |
 | 提取函数/类 | `get_code_entity_tool` | AST 精准提取 |
-| 搜索 + 预览 | `search_and_read` | 一轮完成搜索 |
 | 全局搜索 | `grep_search_tool` | 正则表达式搜索 |
-| 查找定义 | `find_definitions` | 定位符号定义 |
-| 查找调用 | `find_function_calls` | 定位所有调用点 |
 
 ### 文件操作
 
 | 任务 | 工具 | 说明 |
 |------|------|------|
-| 浏览目录 | `list_directory` | 列出目录内容 |
-| 读取文件 | `read_file` | 按行号读取片段 |
-| 编辑文件 | `edit_file` | 定位行号编辑 |
-| 新建文件 | `create_file` | 创建新文件 |
+| 浏览目录 | `list_directory_tool` | 列出目录内容 |
+| 读取文件 | `read_file_tool` | 按行号读取片段 |
+| 编辑文件 | `edit_file_tool` | 定位行号编辑 |
+| 新建文件 | `create_file_tool` | 创建新文件 |
 
 ### 执行与检查
 
 | 任务 | 工具 | 说明 |
 |------|------|------|
 | 运行命令 | `cli_tool` | 执行 Shell 命令（万能 CLI） |
-| 语法检查 | `check_python_syntax` | 验证 Python 语法 |
-| 项目备份 | `backup_project` | 备份当前项目 |
-| 清理测试 | `cleanup_test_files` | 清理测试产物 |
+| 语法检查 | `check_python_syntax_tool` | 验证 Python 语法 |
+| 项目备份 | `backup_project_tool` | 备份当前项目 |
+| 清理测试 | `cleanup_test_files_tool` | 清理测试产物 |
 
 ### 记忆与状态
 
@@ -192,14 +189,9 @@ trigger_self_restart_tool(reason="已完成本世代任务")
 |------|------|------|
 | 读取记忆 | `read_memory_tool` | 查看当前世代状态 |
 | 保存记忆 | `commit_compressed_memory_tool` | **重启前必调用！** |
-| 查看状态 | `self_test` | 运行自检 |
-| 自我测试 | `self_test` | 运行自检 |
-
-### 搜索工具
-
-| 任务 | 工具 | 说明 |
-|------|------|------|
-| 搜索导入 | `search_imports` | 搜索 import 语句 |
+| 读取动态提示词 | `read_dynamic_prompt_tool` | 读取 DYNAMIC.md |
+| 添加洞察 | `add_insight_to_dynamic_tool` | 追加洞察到动态提示词 |
+| 查看状态 | `self_test_tool` | 运行自检 |
 
 ### 重启与休眠
 
