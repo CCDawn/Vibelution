@@ -341,6 +341,20 @@ MODEL_PRESETS: Dict[str, ModelPreset] = {
         max_tokens=4096,
         description="Groq 超快 Llama 模型",
     ),
+
+    # ========================================================================
+    # MiniMax
+    # ========================================================================
+    "minimax-m2": ModelPreset(
+        name="MiniMax M2",
+        provider="minimax",
+        model_name="MiniMax-M2.7",
+        api_base="https://api.minimaxi.com/v1",
+        api_key_env="MINIMAX_API_KEY",
+        default_temperature=1.0,
+        max_tokens=8192,
+        description="MiniMax M2 大模型，支持长上下文",
+    ),
 }
 
 
@@ -393,6 +407,11 @@ PROVIDER_METADATA: Dict[str, Dict[str, str]] = {
         "name": "Groq",
         "website": "https://groq.com",
         "docs": "https://console.groq.com/docs",
+    },
+    "minimax": {
+        "name": "MiniMax",
+        "website": "https://www.minimax.io",
+        "docs": "https://www.minimaxi.com/document",
     },
 }
 
@@ -543,6 +562,10 @@ MODEL_ALIASES: Dict[str, str] = {
     # Ollama 别名
     "ollama": "ollama-llama3",
     "local": "ollama-llama3",
+
+    # MiniMax 别名
+    "minimax": "minimax-m2",
+    "m2": "minimax-m2",
 }
 
 

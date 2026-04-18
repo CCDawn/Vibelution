@@ -1,8 +1,8 @@
 # 虾宝自我进化系统 - 全局索引
 
-**版本：** v4.3
-**日期：** 2026-04-17
-**版本迭代：** 13次重大更新
+**版本：** v4.5
+**日期：** 2026-04-18
+**版本迭代：** 15次重大更新
 **用途：** 作为所有任务的执行参照索引
 
 ---
@@ -250,6 +250,11 @@ self-evo-baby/                    # 项目根目录
 │   │       ├── storage.py      # 数据存储
 │   │       └── formatters.py   # 格式化工具
 │   │
+│   ├── core_prompt/          # ━━━ 核心提示词 ━━━
+│   │   ├── __init__.py        # CorePromptManager 双轨加载引擎
+│   │   ├── SOUL.md            # 静态核心使命（内置）
+│   │   └── AGENTS.md          # 静态操作规范（内置）
+│   │
 │   ├── backup/                # 备份文件
 │   │   └── agent_core_backup.py # 旧版Agent核心备份
 │   │
@@ -473,7 +478,8 @@ self-evo-baby/                    # 项目根目录
 │  ├── ui/ ✅ 用户界面                                              │
 │  ├── logging/ ✅ 日志系统                                         │
 │  ├── capabilities/ ✅ 能力系统                                    │
-│  └── ecosystem/ ✅ 工具生态                                       │
+│  ├── ecosystem/ ✅ 工具生态                                       │
+│  └── core_prompt/ ✅ 核心提示词 (2026-04-18)                      │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -591,7 +597,8 @@ self-evo-baby/                    # 项目根目录
 | 能力 | 能力画像 | `core/capabilities/skills_profiler.py` | ✅ 完整 | SkillsProfile |
 | 能力 | 任务分析器 | `core/capabilities/task_analyzer.py` | ✅ 完整 | TaskAnalysis |
 | 能力 | 任务管理 | `core/capabilities/task_manager.py` | ✅ 完整 | 任务管理 |
-| 能力 | 提示词构建 | `core/capabilities/prompt_builder.py` | ✅ 完整 | build_system_prompt |
+| 能力 | 提示词构建 | `core/capabilities/prompt_builder.py` | ✅ 完整 | 双轨加载（core_prompt + workspace） |
+| 能力 | 模式库 | `core/capabilities/pattern_library.py` | ⚠️ 框架 | 待实现 |
 | 能力 | 模式库 | `core/capabilities/pattern_library.py` | ⚠️ 框架 | 待实现 |
 
 #### 待重构 ⚠️
@@ -744,6 +751,8 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 10 | [形象选择系统实现](report_history/cursor_report/task_20260416_10_形象选择系统实现.md) | 2026-04-16 21:30 | UI |
 | 11 | [Phase 11 宠物系统模块化实现](report_history/cursor_report/task_20260417_11_Phase11宠物系统模块化实现.md) | 2026-04-17 15:58 | Phase 11 |
 | 12 | [Phase 5 记忆力机制优化实现](report_history/claude_report/task_20260417_12_Phase5记忆力机制优化实现.md) | 2026-04-17 17:30 | Phase 5 |
+|| 13 | [提示词系统双轨加载架构](report_history/claude_report/task_20260418_01_提示词系统双轨加载架构.md) | 2026-04-18 | 提示词系统 |
+|| 14 | [提示词审查修复](report_history/claude_report/task_20260418_02_提示词审查修复.md) | 2026-04-18 | 提示词系统 |
 
 ---
 
@@ -758,6 +767,38 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 2026-04-17 | v4.1 | 配置系统重构：整合config.py和config/模块，新增local provider，添加配置系统说明 |
 | 2026-04-17 | v4.2 | Phase 8 规划文档新增，新增 agent.py 拆分方案，更新目录结构说明 |
 | 2026-04-17 | v4.3 | **core/ 目录结构重组**：按功能分类到 infrastructure/evolution/knowledge/learning/decision/orchestration/autonomous/ui/logging/capabilities/ecosystem 等子目录 |
+
+---
+
+## 提示词系统架构说明
+
+### 双轨加载架构
+
+```
+core/core_prompt/              ← 静态核心提示词（内置只读模板）
+├── __init__.py               CorePromptManager 双轨加载引擎
+├── SOUL.md                   禁止修改
+└── AGENTS.md                 禁止修改
+
+workspace/prompts/            ← 动态提示词（用户可编辑，覆盖优先）
+├── SOUL.md                   ✅ 可覆盖（优先级更高）
+├── AGENTS.md                 ✅ 可覆盖（优先级更高）
+├── IDENTITY.md               ✅ 可修改
+├── USER.md                   ✅ 可修改
+├── DYNAMIC.md                ✅ 必须修改（世代任务）
+└── COMPRESS_SUMMARY.md       ✅ 可修改
+```
+
+### CorePromptManager 加载方法
+
+| 方法 | 说明 |
+|------|------|
+| `load_soul()` | 加载 SOUL.md（workspace 优先） |
+| `load_agents()` | 加载 AGENTS.md（workspace 优先） |
+| `load_identity()` | 加载 IDENTITY.md（仅 workspace） |
+| `load_user()` | 加载 USER.md（仅 workspace） |
+| `load_dynamic()` | 加载 DYNAMIC.md（仅 workspace） |
+| `load_compress_summary()` | 加载 COMPRESS_SUMMARY.md（仅 workspace） |
 
 ---
 
@@ -779,7 +820,13 @@ A: 使用 4 级压缩策略（light/standard/deep/emergency），配置在 `conf
 A: 修改 `config.toml` 的 `[avatar] preset = "lobster"` 或使用命令 `/avatar shrimp`。
 
 **Q: 新的 core/ 目录结构是怎样的？**
-A: 核心模块已按功能分类到子目录：
+A: 核心模块已按功能分类到子目录
+
+**Q: 提示词系统如何工作？**
+A: 使用 CorePromptManager 双轨加载：
+- `core/core_prompt/` 存放内置只读模板（SOUL.md、AGENTS.md）
+- `workspace/prompts/` 存放用户可编辑版本（优先加载，可覆盖内置版本）
+- 运行时优先读取 workspace 版本，不存在时回退到 core/core_prompt/：
 - `core/infrastructure/` - 基础设施（工具执行、状态、事件、安全）
 - `core/evolution/` - 进化引擎
 - `core/knowledge/` - 知识系统

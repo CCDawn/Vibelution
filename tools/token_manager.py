@@ -258,8 +258,22 @@ def estimate_messages_tokens(messages: list) -> int:
     """估算消息列表的总 Token"""
     total = 0
     for msg in messages:
-        if hasattr(msg, 'content'):
-            total += estimate_tokens_precise(str(msg.content))
+        if not hasattr(msg, 'content'):
+            continue
+        content = msg.content
+        # 兼容 LangChain 消息格式：content 可能是 str、list 或其他类型
+        if isinstance(content, str):
+            total += estimate_tokens_precise(content)
+        elif isinstance(content, list):
+            # LangChain content blocks 格式（如 [{"type": "text", "text": "..."}]）
+            for block in content:
+                if isinstance(block, dict) and "text" in block:
+                    total += estimate_tokens_precise(block["text"])
+                elif isinstance(block, str):
+                    total += estimate_tokens_precise(block)
+        else:
+            # 其他类型（尝试转为字符串估算）
+            total += estimate_tokens_precise(str(content)[:10000])
     return total
 
 

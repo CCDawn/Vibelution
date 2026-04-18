@@ -118,7 +118,7 @@ class ModelDiscovery:
         self,
         api_base: str,
         model_name: Optional[str] = None,
-        timeout: int = 30,
+        timeout: int = 5,  # vLLM 响应很快，5秒足够
         enabled: bool = True,
     ):
         """

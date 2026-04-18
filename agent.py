@@ -45,6 +45,243 @@ from core.infrastructure.security import get_security_validator, SecurityValidat
 # LangChain 核心组件
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_openai import ChatOpenAI
+from openai import OpenAI
+
+# MiniMax OpenAI 兼容适配器（当 provider=minimax 时使用）
+class MiniMaxOpenAIAdapter:
+    """
+    MiniMax OpenAI 兼容 API 适配器。
+    使用 OpenAI SDK 调用 MiniMax 的 OpenAI 兼容端点。
+    """
+
+    def __init__(
+        self,
+        model: str,
+        api_key: str,
+        base_url: str,
+        timeout: httpx.Timeout,
+        max_tokens: int = 8192,
+        temperature: float = 1.0,
+    ):
+        self.model = model
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self._tools = None
+        self._client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=httpx.Timeout(
+                timeout=timeout.read,
+                connect=timeout.connect,
+            ),
+            http_client=httpx.Client(),
+        )
+
+    def bind_tools(self, tools: list) -> "MiniMaxOpenAIAdapter":
+        """绑定工具，返回绑定后的实例副本"""
+        adapter = MiniMaxOpenAIAdapter(
+            model=self.model,
+            api_key=self._client.api_key,
+            base_url=str(self._client.base_url),
+            timeout=httpx.Timeout(
+                self._client.timeout.read or 600,
+                connect=self._client.timeout.connect or 30,
+            ),
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+        )
+        adapter._tools = [self._convert_tool(t) for t in tools]
+        return adapter
+
+    @staticmethod
+    def _convert_tool(tool: Any) -> dict:
+        """
+        将 LangChain BaseTool 转换为 OpenAI 工具格式。
+        """
+        name = getattr(tool, "name", str(tool))
+        description = getattr(tool, "description", "") or ""
+        schema = getattr(tool, "args_schema", None)
+        if schema is None:
+            input_schema = getattr(tool, "input_schema", None)
+            schema = input_schema
+
+        parameters = {}
+        if schema:
+            try:
+                if hasattr(schema, "model_fields") and hasattr(schema.model_fields, 'items'):
+                    for field_name, field in schema.model_fields.items():
+                        ftype = "string"
+                        if field.annotation:
+                            ann = field.annotation
+                            if ann == int or ann == "int":
+                                ftype = "integer"
+                            elif ann == float or ann == "number":
+                                ftype = "number"
+                            elif ann == bool:
+                                ftype = "boolean"
+                            elif ann == list or ann == List:
+                                ftype = "array"
+                            elif ann == dict or ann == Dict:
+                                ftype = "object"
+                        desc = ""
+                        if hasattr(field, "description") and field.description:
+                            desc = field.description
+                        parameters[field_name] = {"type": ftype, "description": desc}
+                elif hasattr(schema, "schema"):
+                    schema_result = schema.schema()
+                    props = schema_result.get("properties", {}) if isinstance(schema_result, dict) else {}
+                    for fname, fval in props.items():
+                        parameters[fname] = {
+                            "type": fval.get("type", "string"),
+                            "description": fval.get("description", ""),
+                        }
+            except Exception:
+                pass
+
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description,
+                "parameters": {"type": "object", "properties": parameters, "required": list(parameters.keys())},
+            },
+        }
+
+    def invoke(self, messages) -> "MiniMaxResponse":
+        """
+        调用 MiniMax API。
+        messages 可以是字符串（单次调用）或 List[HumanMessage|AIMessage|ToolMessage]。
+        返回一个带 .content 属性的对象，兼容 LangChain 的处理方式。
+        """
+        if isinstance(messages, str):
+            messages = [HumanMessage(content=messages)]
+
+        # 转换消息格式：提取 system，转换 role
+        openai_messages = []
+        for msg in messages:
+            role = getattr(msg, "type", "user") or "user"
+            content = getattr(msg, "content", "") or ""
+
+            if role == "system":
+                # system message 直接拼入第一个消息的 content 前面
+                continue
+            elif role == "human":
+                role = "user"
+            elif role == "ai":
+                role = "assistant"
+
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text_parts.append(block["text"])
+                    elif hasattr(block, "type") and block.type == "text":
+                        text_parts.append(getattr(block, "text", ""))
+                content = "\n".join(text_parts)
+
+            if not content and hasattr(msg, "tool_calls") and msg.tool_calls:
+                # assistant message 带 tool_calls 时，保留 tool_calls 但 content 可为空
+                pass
+
+            msg_dict = {"role": role, "content": content}
+
+            # 携带 tool_calls
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                tc_list = []
+                for tc in msg.tool_calls:
+                    if isinstance(tc, dict):
+                        tc_list.append({
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["name"],
+                                "arguments": tc["args"] if isinstance(tc["args"], str) else tc["args"],
+                            },
+                        })
+                    elif hasattr(tc, "id"):
+                        args = getattr(tc, "args", "{}")
+                        if isinstance(args, str):
+                            args = args
+                        else:
+                            import json
+                            args = json.dumps(args)
+                        tc_list.append({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": getattr(tc, "name", ""),
+                                "arguments": args,
+                            },
+                        })
+                if tc_list:
+                    msg_dict["tool_calls"] = tc_list
+
+            # 携带 tool_call_id（ToolMessage）
+            if hasattr(msg, "tool_call_id") and msg.tool_call_id:
+                msg_dict["tool_call_id"] = msg.tool_call_id
+
+            openai_messages.append(msg_dict)
+
+        # 提取 system prompt
+        system_prompt = ""
+        for msg in messages:
+            if getattr(msg, "type", None) == "system":
+                content = getattr(msg, "content", "") or ""
+                system_prompt = content
+                break
+
+        # 构建 API 参数
+        api_kwargs = {
+            "model": self.model,
+            "messages": openai_messages,
+            "extra_body": {"reasoning_split": True},
+        }
+        if system_prompt:
+            api_kwargs["messages"] = [{"role": "system", "content": system_prompt}] + openai_messages
+        if self.max_tokens:
+            api_kwargs["max_tokens"] = self.max_tokens
+        if self.temperature > 0:
+            api_kwargs["temperature"] = self.temperature
+        if self._tools:
+            api_kwargs["tools"] = self._tools
+
+        response = self._client.chat.completions.create(**api_kwargs)
+        return MiniMaxResponse(response)
+
+
+class MiniMaxResponse:
+    """
+    MiniMax OpenAI 响应包装器，提供与 LangChain AIMessage 兼容的接口。
+    """
+
+    def __init__(self, raw_response):
+        self.raw_response = raw_response
+        self.type = "ai"
+
+        choice = raw_response.choices[0]
+        message = choice.message
+
+        self.content = message.content or ""
+
+        # reasoning_details 字段（reasoning_split=True 时有）
+        self.reasoning_details = []
+        if hasattr(message, "reasoning_details") and message.reasoning_details:
+            self.reasoning_details = message.reasoning_details
+
+        # tool_calls
+        self.tool_calls = []
+        if message.tool_calls:
+            for tc in message.tool_calls:
+                self.tool_calls.append({
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "args": tc.function.arguments,
+                })
+
+        self.usage_metadata = {
+            "input_tokens": raw_response.usage.prompt_tokens if hasattr(raw_response.usage, "prompt_tokens") else 0,
+            "output_tokens": raw_response.usage.completion_tokens if hasattr(raw_response.usage, "completion_tokens") else 0,
+        }
 
 # 导入模型动态发现
 from core.infrastructure.model_discovery import ModelDiscovery, DiscoveryStatus
@@ -164,11 +401,11 @@ class SelfEvolvingAgent:
         # 模型动态发现（运行时获取 max_model_len）
         # =========================================================================
         self.model_info = None
-        if getattr(self.config.llm, 'discovery_auto_discover', True):
+        if getattr(self.config.llm_discovery, 'enabled', True):
             discovery = ModelDiscovery(
                 api_base=self.config.llm.api_base,
                 model_name=self.config.llm.model_name,
-                timeout=getattr(self.config.llm, 'discovery_timeout', 30),
+                timeout=getattr(self.config.llm_discovery, 'timeout', 5),
                 enabled=True,
             )
             # 设置 fallback 值
@@ -220,21 +457,43 @@ class SelfEvolvingAgent:
         # 保存 effective_max_token_limit 供 _check_and_compress 使用
         self._effective_max_token_limit = effective_max_token_limit
 
-        # 创建 LLM
-        llm_kwargs = {
-            "model": self.config.llm.model_name,
-            "temperature": self.config.llm.temperature,
-            "api_key": self.api_key,
-            "max_tokens": effective_max_tokens,  # 使用动态发现的值
-        }
-        if self.config.llm.api_base:
-            llm_kwargs["base_url"] = self.config.llm.api_base
-
-        # 超时设置：httpx.Timeout(total, connect)
+        # 创建 LLM（根据 provider 选择实现）
         api_timeout = getattr(self.config.llm, 'api_timeout', 600)
-        llm_kwargs["timeout"] = httpx.Timeout(api_timeout, connect=30)
+        provider = getattr(self.config.llm, 'provider', 'local')
 
-        self.llm = ChatOpenAI(**llm_kwargs)
+        if provider == "minimax":
+            # MiniMax 使用 OpenAI SDK 兼容接口
+            self.llm = MiniMaxOpenAIAdapter(
+                model=self.config.llm.model_name,
+                api_key=self.api_key or "",
+                base_url=self.config.llm.api_base or "https://api.minimaxi.com/v1",
+                timeout=httpx.Timeout(api_timeout, connect=30),
+                max_tokens=effective_max_tokens,
+                temperature=self.config.llm.temperature,
+            )
+            _debug_logger.info(
+                f"[LLM Config] MiniMax Anthropic 模式, model={self.config.llm.model_name}, "
+                f"max_tokens={effective_max_tokens}, temperature={self.config.llm.temperature}",
+                tag="LLM"
+            )
+        else:
+            # 标准 OpenAI 兼容接口（Ollama, vLLM, DeepSeek, OpenAI 等）
+            llm_kwargs = {
+                "model": self.config.llm.model_name,
+                "temperature": self.config.llm.temperature,
+                "api_key": self.api_key,
+                "max_tokens": effective_max_tokens,
+            }
+            if self.config.llm.api_base:
+                llm_kwargs["base_url"] = self.config.llm.api_base
+            llm_kwargs["timeout"] = httpx.Timeout(api_timeout, connect=30)
+            self.llm = ChatOpenAI(**llm_kwargs)
+            _debug_logger.info(
+                f"[LLM Config] OpenAI 兼容模式, model={self.config.llm.model_name}, "
+                f"max_tokens={effective_max_tokens}, base_url={self.config.llm.api_base}",
+                tag="LLM"
+            )
+
         self.model_name = self.config.llm.model_name
 
         # 调试日志：确认 max_tokens
@@ -394,7 +653,6 @@ class SelfEvolvingAgent:
 
         # 获取轮次编号
         if user_prompt:
-            logger.log_user_input(user_prompt)
             current_turn = logger._turn_count
         else:
             current_turn = logger._turn_count + 1
@@ -594,10 +852,15 @@ class SelfEvolvingAgent:
     def _check_and_compress(self, messages: list, iteration: int) -> list:
         """检查 Token 预算并在必要时压缩（增强版）"""
         current_tokens = estimate_messages_tokens(messages)
-        # 优先使用运行时动态发现的 max_token_limit，其次使用配置值
+
+        # 优先使用运行时动态发现的 max_token_limit（来自 model_info）
         max_budget = getattr(self, '_effective_max_token_limit', None)
         if max_budget is None:
-            max_budget = self.config.context_compression.max_token_limit
+            # fallback：从 model_info 或配置文件获取
+            if self.model_info and self.model_info.status == DiscoveryStatus.SUCCESS:
+                max_budget = self.model_info.compression_thresholds.max_token_limit
+            else:
+                max_budget = self.config.context_compression.max_token_limit
 
         # 安全阈值
         preemptive_threshold = int(max_budget * 0.6)
@@ -753,6 +1016,23 @@ class SelfEvolvingAgent:
         tool_name = tool_call.get('name', 'unknown')
         # 同时支持 args 和 arguments
         tool_args = tool_call.get('args') or tool_call.get('arguments') or {}
+        # MiniMax 2.7 可能返回 arguments 为 JSON 字符串或 dict，需要处理
+        if isinstance(tool_args, str):
+            try:
+                import json
+                tool_args = json.loads(tool_args)
+            except (json.JSONDecodeError, TypeError):
+                tool_args = {}
+        elif not isinstance(tool_args, dict):
+            # 如果既不是字符串也不是 dict，尝试转换
+            try:
+                import json
+                tool_args = json.loads(str(tool_args))
+            except (json.JSONDecodeError, TypeError):
+                tool_args = {}
+        # 确保 tool_args 是 dict 类型
+        if not isinstance(tool_args, dict):
+            tool_args = {}
 
         _debug_logger.tool_start(tool_name, tool_args)
         logger.log_tool_call(tool_name, tool_args, status="called")
@@ -905,16 +1185,32 @@ class SelfEvolvingAgent:
 
     def _handle_tool_result(self, tool_call: Dict, result, action, messages: list):
         """处理工具执行结果"""
+        # 工具结果截断：防止超长输出（如搜索 500 匹配）污染上下文
+        MAX_TOOL_RESULT_CHARS = 4000  # ~1000 tokens
+        result_str = str(result)
+        truncated = False
+        if len(result_str) > MAX_TOOL_RESULT_CHARS:
+            result_str = (
+                result_str[:MAX_TOOL_RESULT_CHARS]
+                + f"\n[...结果已截断，原长度 {len(result_str)} 字符...]"
+            )
+            truncated = True
+
         if action == "restart":
             logger.log_action("restart", {"tool": tool_call['name']})
         elif action == "skip":
             logger.log_action("skip", {"tool": tool_call['name']})
-            messages.append(ToolMessage(content=result, tool_call_id=tool_call['id']))
+            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call['id']))
         elif action == "hibernated":
             logger.log_action("hibernated", {"tool": tool_call['name']})
-            messages.append(ToolMessage(content=result, tool_call_id=tool_call['id']))
+            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call['id']))
         else:
-            messages.append(ToolMessage(content=result, tool_call_id=tool_call['id']))
+            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call['id']))
+
+        if truncated:
+            _debug_logger.warning(
+                f"[工具] {tool_call['name']} 结果过长，已截断至 {MAX_TOOL_RESULT_CHARS} 字符", tag="TOOL"
+            )
 
     def _handle_restart(self, tool_args: dict, messages: list) -> tuple:
         """处理重启请求"""

@@ -32,6 +32,44 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 
+# =============================================================================
+# 项目根目录定位辅助函数
+# =============================================================================
+
+def _resolve_project_root() -> Path:
+    """
+    动态获取项目根目录。
+
+    __file__ = core/infrastructure/workspace_manager.py
+    parent  = core/infrastructure/
+    parent.parent = core/
+    parent.parent.parent = 项目根 (self-evo-baby/)
+
+    如果 core/ 下没有 agent.py，说明算错了，回退到 sys.path 搜索。
+    """
+    p = Path(__file__).parent.parent.parent.resolve()
+    if (p / "agent.py").exists():
+        return p
+    # 回退：在 sys.path 中找 agent.py
+    for sp in sys_path_iter():
+        candidate = os.path.join(sp, "agent.py")
+        if os.path.exists(candidate):
+            return Path(sp).resolve()
+    return p
+
+
+def sys_path_iter():
+    """遍历 sys.path，跳过不存在的路径"""
+    import sys
+    for p in sys.path:
+        if p and os.path.isdir(p):
+            yield p
+
+
+# =============================================================================
+# WorkspaceManager 类
+# =============================================================================
+
 class WorkspaceManager:
     """
     工作区管理器 - 统一管理所有 Agent 数据
@@ -56,7 +94,7 @@ class WorkspaceManager:
         self._initialized = True
 
         # 动态获取项目根目录
-        self._project_root = Path(__file__).parent.parent.resolve()
+        self._project_root = _resolve_project_root()
         self._workspace = self._project_root / "workspace"
 
         # 确保目录结构存在
@@ -217,7 +255,7 @@ class WorkspaceManager:
 
     def get_archive_path(self, generation: int) -> Path:
         """获取世代档案路径"""
-        return self._archives_dir / f"gen_{generation}_history.json"
+        return self.archives_dir / f"gen_{generation}_history.json"
 
     # ==================== 数据库操作 ====================
 
@@ -311,17 +349,7 @@ class WorkspaceManager:
     # ==================== 代码库认知地图操作 ====================
 
     def record_codebase_insight(self, module_path: str, insight: str, generation: int) -> bool:
-        """
-        刻印代码库认知（UPSERT 逻辑）
-
-        Args:
-            module_path: 模块路径，如 'tools/ast_tools.py'
-            insight: 该模块的核心认知摘要
-            generation: 当前世代号
-
-        Returns:
-            是否成功
-        """
+        """刻印代码库认知（UPSERT 逻辑）"""
         now = datetime.now().isoformat()
         try:
             with self.get_db_connection() as conn:
@@ -349,29 +377,20 @@ class WorkspaceManager:
             return [dict(row) for row in cursor.fetchall()]
 
     def generate_codebase_map(self) -> str:
-        """
-        生成代码库认知地图（用于注入 System Prompt）
-
-        Returns:
-            Markdown 格式的认知地图文本
-        """
+        """生成代码库认知地图（用于注入 System Prompt）"""
         knowledge = self.get_all_codebase_knowledge()
-
         if not knowledge:
             return ""
-
         lines = []
         lines.append("## 🗺️ 你的天生代码库常识 (前代遗传记忆)")
         lines.append("")
         lines.append("> ⚠️ 如果上述地图已包含某个模块的信息，**禁止盲目重复探索**！")
         lines.append("")
-
         for item in knowledge:
             module = item['module_path']
             insight = item['insight_summary']
             gen = item['last_updated_gen']
             lines.append(f"- `{module}`: {insight} (G{gen})")
-
         return '\n'.join(lines)
 
     # ==================== 记忆索引文件操作 ====================
@@ -444,7 +463,10 @@ class WorkspaceManager:
         }
 
 
+# =============================================================================
 # 全局单例
+# =============================================================================
+
 _workspace: Optional[WorkspaceManager] = None
 
 
@@ -456,7 +478,6 @@ def get_workspace() -> WorkspaceManager:
     return _workspace
 
 
-# 便捷函数
 def workspace_root() -> Path:
     """获取工作区根目录"""
     return get_workspace().root

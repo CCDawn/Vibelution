@@ -91,7 +91,7 @@ class LLMConfig(BaseModel):
         """验证提供商名称"""
         valid_providers = [
             "openai", "anthropic", "deepseek", "aliyun",
-            "google", "zhipu", "ollama", "siliconflow", "groq", "local"
+            "google", "zhipu", "ollama", "siliconflow", "groq", "minimax", "local"
         ]
         if v.lower() not in valid_providers:
             pass
@@ -1243,6 +1243,7 @@ class AppConfig(BaseModel):
             "google": "GOOGLE_API_KEY",
             "siliconflow": "SILICONFLOW_API_KEY",
             "groq": "GROQ_API_KEY",
+            "minimax": "MINIMAX_API_KEY",
         }
 
         env_var = env_var_map.get(provider)

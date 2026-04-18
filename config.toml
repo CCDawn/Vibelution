@@ -16,26 +16,25 @@ preset = "lobster"
 # [核心] 大语言模型配置
 # ============================================================
 [llm]
-# 提供商：aliyun, openai, anthropic, deepseek, google, zhipu, ollama, siliconflow, groq, local
-provider = "local"
+# 提供商：aliyun, openai, anthropic, deepseek, google, zhipu, ollama, siliconflow, groq, minimax, local
+provider = "minimax"
 
-# 模型名称（阿里云百炼: qwen-plus, qwen-turbo, qwen-max, qwen-coder-plus）
-model_name = "qwen-32b-awq"
+# 模型名称
+model_name = "MiniMax-M2.7"
 
-# API Key（支持环境变量覆盖: DASHSCOPE_API_KEY, OPENAI_API_KEY 等）
-# api_key = "sk-your-api-key"
-api_key = "EMPTY"
+# API Key（支持环境变量覆盖）
+api_key = "sk-cp-ShC6ObKxYH3_5g7fGXTYlimU8Cn_TJhqVm8toc72iNQw0DSW3Zaf7tejKfroi7GulrtE-acQ9haO6Dici0EgzIvGa_MeKe_H6yHgA3d0aMKO_qvO3U16ib4"  # 设置 MINIMAX_API_KEY 环境变量
 
 # API 端点
-api_base = "http://[::1]:8000/v1"
+api_base = "https://api.minimaxi.com/v1"
 
-# 温度参数 (0.0-2.0)，越低越确定性，越高越有创意
-temperature = 0.2
+# 温度参数 (0.0, 1.0]，推荐 1.0，越高越有创意（MiniMax 不支持 0）
+temperature = 1.0
 
-# 最大输出 tokens（会被运行时动态发现覆盖）
-max_tokens = 4096
+# 最大输出 tokens
+max_tokens = 8192
 
-# API 超时时间（秒）- 本地模型生成慢，建议120秒以上
+# API 超时时间（秒）
 api_timeout = 120
 
 # 连接超时（秒）
@@ -74,14 +73,14 @@ model_refresh_interval = 300
 # 是否启用运行时模型发现
 enabled = true
 
-# 发现请求超时（秒）
-timeout = 30
+# 发现请求超时（秒）- vLLM 响应很快，5秒足够
+timeout = 5
 
 # 发现失败时使用的 max_tokens（空则使用配置文件的值）
 fallback_max_tokens = 4096
 
 # 发现失败时使用的 max_token_limit（空则使用 context_window * 0.5）
-fallback_max_token_limit = 16000
+fallback_max_token_limit = 32768
 
 # 是否自动调整压缩阈值
 auto_adjust = true
@@ -129,7 +128,7 @@ exploration_mode = false
 enabled = true
 
 # Token 阈值，超过此值触发压缩
-max_token_limit = 16000
+max_token_limit = 32768
 
 # 保留最近的工具调用次数
 keep_recent_steps = 2
@@ -243,8 +242,8 @@ max_file_size = 10485760
 # 每个文件最大匹配数
 max_matches_per_file = 100
 
-# 最大总结果数
-max_results = 500
+# 最大总结果数（控制单次搜索的返回量，避免上下文膨胀）
+max_results = 50
 
 # 上下文行数（前后各显示的行数）
 context_lines = 3

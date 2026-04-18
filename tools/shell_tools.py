@@ -39,6 +39,7 @@ import os
 import shutil
 import ast
 import traceback
+import json
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
@@ -513,11 +514,24 @@ read_local_file = read_file
 def list_directory(
     path: str = ".",
     show_hidden: bool = False,
-    recursive: bool = False
+    recursive: bool = False,
+    max_output_chars: int = 8000
 ) -> str:
-    """列出目录内容"""
+    """列出目录内容
+
+    Args:
+        path: 目录路径
+        show_hidden: 是否显示隐藏文件
+        recursive: 是否递归
+        max_output_chars: 最大输出字符数，默认8000，防止上下文爆炸
+
+    Returns:
+        JSON 格式的目录列表结果
+    """
+    import json
+
     if not path or not isinstance(path, str):
-        return "[目录列表] 错误: 目录路径不能为空"
+        return json.dumps({"status": "error", "code": "INVALID_PATH", "message": "目录路径不能为空"})
 
     path = path.strip()
     if not path:
@@ -526,19 +540,25 @@ def list_directory(
     try:
         abs_path = Path(path).resolve()
     except Exception as e:
-        return f"[目录列表] 错误: 无效的路径格式 - {path}"
+        return json.dumps({"status": "error", "code": "INVALID_PATH", "message": f"无效的路径格式 - {path}"})
 
     if not _is_path_allowed(str(abs_path)):
-        return f"[目录列表] 错误: 路径超出允许范围 - {abs_path}"
+        return json.dumps({"status": "error", "code": "PATH_NOT_ALLOWED", "message": f"路径超出允许范围 - {abs_path}"})
 
     if not abs_path.exists():
-        return f"[目录列表] 错误: 路径不存在 - {abs_path}"
+        return json.dumps({"status": "error", "code": "PATH_NOT_EXISTS", "message": f"路径不存在 - {abs_path}"})
 
     if not abs_path.is_dir():
-        return f"[目录列表] 错误: 路径不是目录 - {abs_path}"
+        return json.dumps({"status": "error", "code": "NOT_A_DIRECTORY", "message": f"路径不是目录 - {abs_path}"})
 
     try:
-        result_lines = [f"[目录] {abs_path}"]
+        result_data = {
+            "status": "success",
+            "path": str(abs_path),
+            "directories": [],
+            "files": [],
+            "total": 0
+        }
         items = list(abs_path.iterdir())
 
         dirs = []
@@ -551,53 +571,64 @@ def list_directory(
             else:
                 files.append(item)
 
-        total_items = len(dirs) + len(files)
-        result_lines.append(f"[总计] {total_items} 个项目 ({len(dirs)} 个目录, {len(files)} 个文件)")
-        result_lines.append("")
+        result_data["total"] = len(dirs) + len(files)
 
-        if dirs:
-            result_lines.append("[目录]")
-            for d in sorted(dirs):
-                try:
-                    mtime = os.path.getmtime(d)
-                    dt = datetime.fromtimestamp(mtime)
-                    time_str = dt.strftime("%Y-%m-%d %H:%M")
-                    result_lines.append(f"  drwxr-xr-x  {d.name}/        {time_str}")
-                except Exception:
-                    result_lines.append(f"  drwxr-xr-x  {d.name}/")
+        for d in sorted(dirs):
+            try:
+                mtime = os.path.getmtime(d)
+                dt = datetime.fromtimestamp(mtime)
+                time_str = dt.strftime("%Y-%m-%d %H:%M")
+                result_data["directories"].append({"name": d.name, "mtime": time_str})
+            except Exception:
+                result_data["directories"].append({"name": d.name})
 
-        if files:
-            result_lines.append("\n[文件]")
-            for f in sorted(files):
-                try:
-                    stat = f.stat()
-                    size = stat.st_size
-                    if size < 1024:
-                        size_str = f"{size} B"
-                    elif size < 1024 * 1024:
-                        size_str = f"{size / 1024:.1f} KB"
-                    else:
-                        size_str = f"{size / (1024 * 1024):.1f} MB"
-                    mtime = os.path.getmtime(f)
-                    dt = datetime.fromtimestamp(mtime)
-                    time_str = dt.strftime("%Y-%m-%d %H:%M")
-                    result_lines.append(f"  -rw-r--r--  {f.name:<25} {time_str}  {size_str:>10}")
-                except Exception:
-                    result_lines.append(f"  -rw-r--r--  {f.name}")
+        for f in sorted(files):
+            try:
+                stat = f.stat()
+                size = stat.st_size
+                mtime = os.path.getmtime(f)
+                dt = datetime.fromtimestamp(mtime)
+                time_str = dt.strftime("%Y-%m-%d %H:%M")
+                result_data["files"].append({"name": f.name, "size": size, "mtime": time_str})
+            except Exception:
+                result_data["files"].append({"name": f.name})
 
         if recursive and dirs:
-            result_lines.append("\n" + "=" * 60)
-            result_lines.append("[递归子目录内容]")
+            subdirs_data = []
             for d in sorted(dirs):
-                sub_result = list_directory(str(d), show_hidden, recursive)
-                result_lines.append(f"\n{sub_result}")
+                sub_result = list_directory(str(d), show_hidden, recursive, max_output_chars)
+                try:
+                    subdirs_data.append(json.loads(sub_result))
+                except (json.JSONDecodeError, TypeError):
+                    subdirs_data.append({"name": d.name, "error": "subdirectory_read_failed"})
+            result_data["subdirectories"] = subdirs_data
 
-        return '\n'.join(result_lines)
+        # 序列化结果
+        result_json = json.dumps(result_data, ensure_ascii=False)
+
+        # 如果超过最大输出长度，截断并添加提示
+        if len(result_json) > max_output_chars:
+            # 保留基本信息，截断文件列表
+            truncated_data = {
+                "status": "success",
+                "path": str(abs_path),
+                "directories": result_data["directories"],
+                "files": result_data["files"][:10],  # 只保留前10个文件
+                "total": result_data["total"],
+                "truncated": True,
+                "message": f"结果已截断，原有 {result_data['total']} 个项目，仅显示前 10 个文件"
+            }
+            if "subdirectories" in result_data:
+                truncated_data["subdirectories"] = result_data["subdirectories"][:3]
+                truncated_data["subdirectories_truncated"] = True
+            result_json = json.dumps(truncated_data, ensure_ascii=False)
+
+        return result_json
 
     except PermissionError:
-        return f"[目录列表] 错误: 权限不足 - {abs_path}"
+        return json.dumps({"status": "error", "code": "PERMISSION_DENIED", "message": f"权限不足 - {abs_path}"})
     except Exception as e:
-        return f"[目录列表] 错误: {str(e)}"
+        return json.dumps({"status": "error", "code": "UNKNOWN_ERROR", "message": str(e)})
 
 
 # 向后兼容别名

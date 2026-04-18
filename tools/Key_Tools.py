@@ -12,6 +12,8 @@ from tools.memory_tools import (
     add_task_tool as _add_task_impl,
     remove_task_tool as _remove_task_impl,
 )
+from tools.search_tools import grep_search_tool as _grep_search_impl
+from tools.shell_tools import list_directory as _list_directory_impl
 
 def create_key_tools() -> List[BaseTool]:
     """
@@ -60,7 +62,7 @@ def create_key_tools() -> List[BaseTool]:
         return trigger_self_restart(reason)
 
     @tool
-    def grep_search_tool(regex_pattern: str, include_ext: str = ".py",
+    def grep_search_tool(regex_pattern: str = "", include_ext: str = ".py",
                          search_dir: str = ".", case_sensitive: bool = True,
                          max_results: int = 500) -> str:
         """
@@ -82,9 +84,9 @@ def create_key_tools() -> List[BaseTool]:
             max_results: 最大返回结果数
 
         Returns:
-            格式化的搜索结果，包含文件路径、行号和匹配内容
+            JSON 格式的搜索结果，包含文件路径、行号和匹配内容
         """
-        return grep_search(
+        return _grep_search_impl(
             regex_pattern=regex_pattern,
             include_ext=include_ext,
             search_dir=search_dir,
@@ -192,7 +194,7 @@ def create_key_tools() -> List[BaseTool]:
             return f"[AST 工具错误] 导入失败: {type(e).__name__}: {e}"
 
     @tool
-    def cli_tool(command: str, timeout: int = 60) -> str:
+    def cli_tool(command: str = "", timeout: int = 60) -> str:
         """
         【万能 CLI 工具】执行任意 Shell 命令的终极工具。
 
@@ -213,6 +215,9 @@ def create_key_tools() -> List[BaseTool]:
         Returns:
             合并后的命令输出（stdout + stderr）
         """
+        if not command:
+            import json
+            return json.dumps({"status": "error", "code": "MISSING_COMMAND", "message": "cli_tool 需要提供 command 参数"})
         return execute_shell_command(command, timeout=timeout)
 
     @tool
@@ -228,9 +233,9 @@ def create_key_tools() -> List[BaseTool]:
             max_depth: 最大递归深度，默认为 3 层。
 
         Returns:
-            格式化的项目结构树字符串
+            JSON 格式的项目结构树字符串
         """
-        return list_directory(path=target_dir, recursive=max_depth > 0)
+        return _list_directory_impl(path=target_dir, recursive=max_depth > 0)
 
     # 任务清单工具 (task_tools.py)
     @tool

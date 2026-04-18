@@ -2,7 +2,8 @@
 """
 core/prompt_builder.py - 动态系统提示词组装器
 
-从 workspace/prompts/ 目录读取 Markdown 文件，动态组装系统提示词。
+从 core/core_prompt/ 和 workspace/prompts/ 目录读取 Markdown 文件，
+通过 CorePromptManager 双轨加载，动态组装系统提示词。
 支持模板变量替换和 docs/tools_manual.md 索引注入。
 """
 
@@ -10,60 +11,14 @@ import os
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-
-def _get_workspace_prompts_dir() -> str:
-    """获取工作区提示词目录"""
-    from core.infrastructure.workspace_manager import get_workspace
-    return str(get_workspace().prompts_dir)
-
-
-def _load_prompt_file(file_path: str) -> str:
-    """加载单个 Prompt 文件内容"""
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    except FileNotFoundError:
-        return f"[警告: 找不到 {file_path}]"
-    except Exception as e:
-        return f"[错误: 无法读取 {file_path}: {e}]"
-
-
-def _extract_tools_manual_index() -> str:
-    """从 tools_manual.md 提取精简索引"""
-    try:
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        tools_manual = os.path.join(project_root, "docs", "tools_manual.md")
-
-        if not os.path.exists(tools_manual):
-            return ""
-
-        with open(tools_manual, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # 提取工具列表部分（简化版）
-        lines = content.split("\n")
-        index_lines = ["\n## 工具手册索引 (docs/tools_manual.md)", ""]
-
-        for line in lines:
-            # 提取工具名称（格式：| `tool_name` |）
-            if "`" in line and "|" in line:
-                parts = line.split("`")
-                if len(parts) >= 2:
-                    tool_name = parts[1].strip()
-                    if tool_name and not tool_name.startswith("#"):
-                        index_lines.append(f"- `{tool_name}`")
-
-        return "\n".join(index_lines[:20])  # 最多显示 20 个工具
-
-    except Exception:
-        return ""
+from core.core_prompt import get_prompt_manager, CorePromptManager
 
 
 def _load_memory_context() -> Dict[str, Any]:
     """加载记忆上下文"""
     try:
         import sys
-        sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         from tools.memory_tools import read_memory_tool
 
         memory = read_memory_tool()
@@ -108,6 +63,35 @@ def _load_codebase_map() -> str:
         return f"[警告: 加载认知地图失败: {e}]"
 
 
+def _extract_tools_manual_index() -> str:
+    """从 tools_manual.md 提取精简索引"""
+    try:
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        tools_manual = os.path.join(project_root, "docs", "tools_manual.md")
+
+        if not os.path.exists(tools_manual):
+            return ""
+
+        with open(tools_manual, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        lines = content.split("\n")
+        index_lines = ["\n## 工具手册索引 (docs/tools_manual.md)", ""]
+
+        for line in lines:
+            if "`" in line and "|" in line:
+                parts = line.split("`")
+                if len(parts) >= 2:
+                    tool_name = parts[1].strip()
+                    if tool_name and not tool_name.startswith("#"):
+                        index_lines.append(f"- `{tool_name}`")
+
+        return "\n".join(index_lines[:20])
+
+    except Exception:
+        return ""
+
+
 def build_system_prompt(
     generation: Optional[int] = None,
     total_generations: Optional[int] = None,
@@ -116,6 +100,11 @@ def build_system_prompt(
 ) -> str:
     """
     构建动态系统提示词。
+
+    双轨加载策略：
+    - SOUL.md / AGENTS.md：优先从 workspace/prompts/ 加载，可被用户覆盖
+    - IDENTITY.md / USER.md / DYNAMIC.md：仅从 workspace/prompts/ 加载
+    - COMPRESS_SUMMARY.md：仅从 workspace/prompts/ 加载
 
     Args:
         generation: 当前世代数
@@ -126,11 +115,7 @@ def build_system_prompt(
     Returns:
         组装完成的系统提示词字符串
     """
-    # 获取工作区提示词目录
-    prompts_dir = _get_workspace_prompts_dir()
-
-    # 获取当前时间
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    pm = get_prompt_manager()
 
     # 如果没有传入记忆，则从 memory_tools 加载
     if generation is None:
@@ -140,17 +125,24 @@ def build_system_prompt(
         core_context = memory_data.get("core_context", "")
         current_goal = memory_data.get("current_goal", "")
 
-    # 加载各模块 Prompt（从 workspace/prompts/ 读取）
-    soul = _load_prompt_file(os.path.join(prompts_dir, "SOUL.md"))
-    dynamic = _load_prompt_file(os.path.join(prompts_dir, "DYNAMIC.md"))
-    identity = _load_prompt_file(os.path.join(prompts_dir, "IDENTITY.md"))
-    agents = _load_prompt_file(os.path.join(prompts_dir, "AGENTS.md"))
-    user = _load_prompt_file(os.path.join(prompts_dir, "USER.md"))
+    # 双轨加载所有提示词
+    soul = pm.load_soul()            # workspace 优先，回退 static
+    agents = pm.load_agents()         # workspace 优先，回退 static
+    identity = pm.load_identity()     # 仅 workspace
+    user = pm.load_user()             # 仅 workspace
+    dynamic = pm.load_dynamic()       # 仅 workspace
+    compress_summary = pm.load_compress_summary()  # 仅 workspace
+
+    # 加载其他辅助内容
     tools_index = _extract_tools_manual_index()
     codebase_map = _load_codebase_map()
-
-    # 加载任务清单（强目标驱动与打勾收网）
     task_checklist = _load_task_checklist()
+
+    # 获取当前时间
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 项目根目录
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     # 组装完整提示词
     prompt_parts = [
@@ -166,7 +158,7 @@ def build_system_prompt(
             "\n\n---\n\n",
         ])
 
-    # 插入代码库认知地图（放在任务清单之后）
+    # 插入代码库认知地图
     if codebase_map:
         prompt_parts.extend([
             codebase_map,
@@ -203,17 +195,16 @@ def build_system_prompt(
         prompt_parts.append(tools_index)
 
     # 添加环境信息
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env_section = [
         "\n---\n",
         "## 当前环境\n",
         f"- 当前时间: {current_time}\n",
         f"- 项目根目录: {project_root}\n",
-        f"- 工作区: {os.path.join(project_root, 'workspace')}\n",
+        f"- 静态提示词: core/core_prompt/\n",
+        f"- 动态提示词: workspace/prompts/\n",
     ]
     prompt_parts.extend(env_section)
 
-    # 拼接并返回
     return "".join(prompt_parts)
 
 
@@ -231,5 +222,4 @@ def build_simple_system_prompt() -> str:
 
 
 if __name__ == "__main__":
-    # 测试用
     print(build_system_prompt())

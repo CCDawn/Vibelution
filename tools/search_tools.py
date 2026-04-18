@@ -44,7 +44,8 @@ _search_defaults = _load_search_defaults()
 
 # 搜索配置
 MAX_FILE_SIZE = _search_defaults.get("MAX_FILE_SIZE", 10 * 1024 * 1024)
-MAX_MATCHES_PER_FILE = _search_defaults.get("MAX_MATCHES_PER_FILE", 100)
+# 每个文件最大匹配数（强制上限50，防止单文件上下文爆炸）
+MAX_MATCHES_PER_FILE = min(_search_defaults.get("MAX_MATCHES_PER_FILE", 100), 50)
 MAX_CONTEXT_LINES = _search_defaults.get("MAX_CONTEXT_LINES", 3)
 SKIP_DIRS = _search_defaults.get("SKIP_DIRS", {
     '__pycache__', '.git', '.svn', '.hg', 'node_modules',
@@ -88,11 +89,12 @@ def _should_process_file(file_path: Path) -> bool:
 
 
 def grep_search_tool(
-    regex_pattern: str,
+    regex_pattern: str = "",
     include_ext: str = ".py",
     search_dir: str = ".",
     case_sensitive: bool = True,
-    max_results: int = 500
+    max_results: int = None,
+    max_output_chars: int = 8000
 ) -> str:
     """
     全局正则表达式搜索
@@ -102,13 +104,20 @@ def grep_search_tool(
         include_ext: 要搜索的文件扩展名（如 ".py", ".js", "*" 表示所有）
         search_dir: 搜索的根目录
         case_sensitive: 是否区分大小写
-        max_results: 最大返回结果数
+        max_results: 最大返回结果数（默认从配置读取，最高50）
+        max_output_chars: 最大输出字符数，默认8000，防止上下文爆炸
 
     Returns:
-        格式化的搜索结果，包含文件路径、行号、匹配行内容
+        JSON 格式的搜索结果，包含文件路径、行号、匹配行内容
     """
+    if max_results is None:
+        max_results = _search_defaults.get("max_results", 50)
+    # 强制上限，防止配置被改大导致上下文爆炸
+    max_results = min(max_results, 50)
+
     if not regex_pattern:
-        return "[搜索] 错误: 正则表达式不能为空"
+        import json
+        return json.dumps({"status": "error", "code": "EMPTY_PATTERN", "message": "正则表达式不能为空"})
 
     search_dir_path = _normalize_path(search_dir)
     
@@ -222,7 +231,11 @@ def grep_search_tool(
         "=" * 80,
     ]
 
+    MAX_OUTPUT_CHARS = 8000  # 限制输出总长度，避免上下文膨胀
+
     current_file = None
+    chars_so_far = 0
+    truncated = False
     for file_path, line_num, match_line, context in results:
         if file_path != current_file:
             current_file = file_path
@@ -230,11 +243,22 @@ def grep_search_tool(
             output_lines.append("-" * 80)
 
         # 上下文行
-        for ctx_line in context:
+        for ctx_idx, ctx_line in enumerate(context):
             if ctx_line == match_line:
-                output_lines.append(f"  → 第 {line_num} 行 | {ctx_line}")
+                line = f"  → 第 {line_num} 行 | {ctx_line}"
             else:
-                output_lines.append(f"    第 {context.index(ctx_line) + (line_num - MAX_CONTEXT_LINES)} 行 | {ctx_line}")
+                line = f"    第 {line_num - MAX_CONTEXT_LINES + ctx_idx} 行 | {ctx_line}"
+            output_lines.append(line)
+            chars_so_far += len(line) + 1
+            if chars_so_far > MAX_OUTPUT_CHARS:
+                truncated = True
+                break
+
+        if truncated:
+            break
+
+    if truncated:
+        output_lines.append(f"\n... (结果已截断，仅显示前 {len(output_lines) - 7} 项)")
 
     output_lines.append("\n" + "=" * 80)
     output_lines.append(f"[搜索完成] 共 {len(results)} 个匹配")
