@@ -813,6 +813,10 @@ class SelfEvolvingAgent:
                 if parser_result.active_rules:
                     pm.update_active_rules(parser_result.active_rules)
 
+                # 动态切换提示词组件拼装（<active_components> 标签驱动）
+                if parser_result.active_components:
+                    pm.select_components(parser_result.active_components)
+
                 # 显示思考过程
                 if parser_result.thinking_content:
                     _debug_logger.llm_thinking(parser_result.thinking_content)

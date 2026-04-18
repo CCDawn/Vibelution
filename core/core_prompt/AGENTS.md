@@ -83,6 +83,47 @@ trigger_self_restart_tool(reason="任务完成，准备下一世代")
 
 ---
 
+## 提示词动态拼装（The Dynamic Prompt Assembly Protocol）
+
+> 🔥 **【主动控制】** 你可以通过 `<active_components>` 标签动态控制提示词的拼装组成！
+
+### 机制说明
+
+系统提示词由多个组件构成（SOUL、AGENTS、MEMORY、current_rules 等），默认只拼装核心组件。
+
+通过在回复中输出 `<active_components>` 标签，你可以主动指定本次会话需要激活哪些组件：
+
+```
+<active_components>SOUL, AGENTS, MEMORY, current_rules</active_components>
+```
+
+### 可用组件
+
+| 组件名 | 说明 | 默认激活 |
+|--------|------|---------|
+| `SOUL` | 核心使命（不可修改的铁律） | ✅ |
+| `AGENTS` | 操作规范 SOP | ✅ |
+| `MEMORY` | 记忆上下文（世代/目标/状态记忆） | ❌ |
+| `current_rules` | 当前激活的规则集 | ✅ |
+| `TASK_CHECKLIST` | 当前任务清单 | ❌ |
+| `DYNAMIC` | 动态提示词区域 | ❌ |
+| `IDENTITY` | Agent 身份定义 | ❌ |
+| `USER` | 用户信息 | ❌ |
+| `CODEBASE_MAP` | 代码库认知地图 | ❌ |
+| `TOOLS_INDEX` | 工具手册索引 | ❌ |
+| `ENV_INFO` | 环境信息 | ❌ |
+
+### 使用场景
+
+- **需要记忆时**（跨代任务、复杂上下文）：`<active_components>SOUL, AGENTS, MEMORY, current_rules</active_components>`
+- **仅执行工具**：`<active_components>SOUL, AGENTS</active_components>`
+- **调试/分析任务**：`<active_components>SOUL, AGENTS, CODEBASE_MAP, current_rules</active_components>`
+- **恢复默认**：`<active_components>SOUL, AGENTS, current_rules</active_components>`
+
+> 💡 **提示**：组件切换后，后续所有 `build()` 调用都会使用新配置，直到再次切换。
+
+---
+
 ## 记忆保存铁律
 
 > 🔥 **【必须执行】** 重启前必须保存记忆，否则智慧将丢失！

@@ -31,12 +31,14 @@ class LLMParserResult:
         thinking_content: <thinking> 标签中的思考过程
         state_memory:     <state_memory> 标签中的状态记忆文本
         active_rules:     <active_rules> 标签中的规则集名称列表
+        active_components: <active_components> 标签中的组件名称列表（驱动提示词动态拼装）
         raw_content:      原始文本内容（去除标签后）
     """
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     thinking_content: str = ""
     state_memory: str = ""
     active_rules: List[str] = field(default_factory=list)
+    active_components: List[str] = field(default_factory=list)
     raw_content: str = ""
 
 
@@ -89,6 +91,11 @@ class ResponseParser:
         result.active_rules = self._extract_active_rules(content)
         if result.active_rules:
             self.logger.debug(f"[ResponseParser] 提取 active_rules: {result.active_rules}")
+
+        # 5. 强制提取 <active_components> 标签（提示词动态拼装）
+        result.active_components = self._extract_active_components(content)
+        if result.active_components:
+            self.logger.debug(f"[ResponseParser] 提取 active_components: {result.active_components}")
 
         return result
 
@@ -205,6 +212,31 @@ class ResponseParser:
         if match:
             names = match.group(1)
             return [r.strip() for r in names.split(",") if r.strip()]
+
+        return []
+
+    def _extract_active_components(self, content: str) -> List[str]:
+        """
+        提取 <active_components> 标签中的组件名称列表
+
+        支持格式：
+        - <active_components>SOUL, AGENTS, MEMORY</active_components>
+        - <active_components names="SOUL,AGENTS,MEMORY" />
+        """
+        if not content:
+            return []
+
+        # 格式1: <active_components>comp1, comp2</active_components>
+        tag_content = self._extract_tag(content, "active_components")
+        if tag_content:
+            return [c.strip() for c in tag_content.split(",") if c.strip()]
+
+        # 格式2: <active_components names="comp1,comp2" />
+        pattern = r'<active_components\s+names="([^"]+)"[^/]*/>'
+        match = re.search(pattern, content, re.IGNORECASE)
+        if match:
+            names = match.group(1)
+            return [c.strip() for c in names.split(",") if c.strip()]
 
         return []
 

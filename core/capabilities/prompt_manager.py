@@ -126,6 +126,10 @@ class PromptManager:
         # 当前状态记忆（从 LLM <state_memory> 标签提取）
         self.state_memory: str = ""
 
+        # LLM 动态覆盖：<active_components> 标签驱动的组件切换
+        # 当非 None 时，build() 使用此列表而非默认 include
+        self._active_components_override: Optional[List[str]] = None
+
         logger.info(f"[PromptManager] 初始化 - 静态: {self._static_root}")
         logger.info(f"[PromptManager] 初始化 - 动态: {self._dynamic_root}")
 
@@ -361,9 +365,8 @@ class PromptManager:
             content_by_name: { "SOUL": "...", "AGENTS": "...", ... }
             index_list: 每项格式同 build_index
         """
-        if include is None:
-            include = ["SOUL", "AGENTS", "MEMORY", "current_rules"]
         effective_state_memory = state_memory if state_memory is not None else self.state_memory
+        # 传入 None 让 _select_components 内部处理 override 逻辑
         selected = self._select_components(include, exclude)
 
         content_by_name: Dict[str, str] = {}
@@ -408,7 +411,8 @@ class PromptManager:
         构建动态系统提示词。
 
         Args:
-            include:   只包含这些组件（None 表示固定 ["SOUL","AGENTS","MEMORY","current_rules"]）
+            include:   只包含这些组件（None 时由 _active_components_override 决定；
+                       override 也为 None 则默认 ["SOUL","AGENTS","current_rules"]，MEMORY 不默认注入）
             exclude:   排除这些组件（required=True 的组件无法被排除）
             generation:       当前世代数
             total_generations: 总世代数
@@ -469,25 +473,64 @@ class PromptManager:
         )
         return index_list
 
+    def select_components(self, components: List[str]):
+        """
+        由 LLM 通过 <active_components> 标签调用，动态切换提示词组件拼装。
+
+        用法：在回复中输出 <active_components>SOUL, AGENTS, MEMORY, current_rules</active_components>
+        Agent 即可主动控制本次会话的提示词组件组成。
+
+        Args:
+            components: 要激活的组件名称列表，如 ["SOUL", "AGENTS", "MEMORY"]
+        """
+        if not components:
+            logger.debug("[PromptManager] select_components 收到空列表，重置为默认")
+            self._active_components_override = None
+            return
+
+        # 只注册已知组件，未知组件名忽略
+        known = [c for c in components if c in self._components]
+        if known:
+            self._active_components_override = known
+            logger.info(f"[PromptManager] 动态切换组件: {known}")
+        else:
+            logger.warning(f"[PromptManager] 未知组件: {components}，保持当前组件不变")
+
+    # ------------------------------------------------------------------------
+    # _select_components() - 内部组件选择逻辑
+    # ------------------------------------------------------------------------
+
     def _select_components(
         self,
         include: Optional[List[str]],
         exclude: Optional[List[str]],
     ) -> List[PromptComponent]:
         """
-        根据 include/exclude 规则选择组件。
+        根据 include/exclude 规则 + _active_components_override 选择组件。
+
+        优先级：
+        1. 若 include 非空，直接使用 include（参数优先）
+        2. 若 _active_components_override 非空，使用 override（LLM 标签驱动）
+        3. 否则使用默认 include
 
         规则：
         - include 非空时，只选指定的组件
         - exclude 非空时，排除指定的组件（required=True 的无法排除）
         - 按 priority 升序排列
         """
+        # 确定最终 include 列表
+        if include is not None:
+            effective_include = include
+        elif self._active_components_override is not None:
+            effective_include = self._active_components_override
+        else:
+            effective_include = ["SOUL", "AGENTS", "current_rules"]  # 默认，不再包含 MEMORY
+
         all_comps = sorted(self._components.values(), key=lambda c: c.priority)
 
         # 应用 include 过滤
-        if include is not None:
-            names = set(include)
-            all_comps = [c for c in all_comps if c.name in names]
+        names = set(effective_include)
+        all_comps = [c for c in all_comps if c.name in names]
 
         # 应用 exclude 过滤（required 组件无法排除）
         if exclude is not None:
@@ -759,6 +802,7 @@ class PromptManager:
             "prompt_registry": list(self.prompt_registry.keys()),
             "current_active_prompts": list(self.current_active_prompts),
             "state_memory_length": len(self.state_memory) if self.state_memory else 0,
+            "active_components_override": self._active_components_override,
         }
 
     def list_components(self) -> List[Dict[str, Any]]:

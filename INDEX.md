@@ -1,8 +1,8 @@
 # 虾宝自我进化系统 - 全局索引
 
-**版本：** v4.9
+**版本：** v5.0
 **日期：** 2026-04-18
-**版本迭代：** 20次重大更新
+**版本迭代：** 21次重大更新
 **用途：** 作为所有任务的执行参照索引
 
 ---
@@ -845,6 +845,7 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 16 | [set_plan_tool 修复](report_history/claude_report/task_20260418_04_set_plan_tool修复.md) | 2026-04-18 | Bug 修复 |
 | 17 | [check_restart_block 修复](report_history/claude_report/task_20260418_05_check_restart_block修复.md) | 2026-04-18 | Bug 修复 |
 | 18 | [PromptManager 重构 - 提示词系统动态管理](report_history/claude_report/task_20260418_07_PromptManager重构.md) | 2026-04-18 | 核心重构 |
+| 19 | [提示词自主动态拼装](report_history/claude_report/task_20260418_08_提示词自主动态拼装.md) | 2026-04-18 | 功能增强 |
 
 ---
 
@@ -866,6 +867,7 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 2026-04-18 | v4.7 | **Agent 自我扩展 Skill 系统**：新增 SkillRegistry/SkillLoader/SkillTools，Agent 可在 workspace/skills/ 自建/修改/删除 Skill，集成到 agent.py，增强 XML 解析支持 <skill> 标签，CompositeTool 暴露为 LangChain Tool，更新 AGENTS.md，33 测试通过 |
 | 2026-04-18 | v4.8 | **PromptManager 重构**：新增 core/capabilities/prompt_manager.py，PromptManager 组件注册表 + 参数驱动 build(include, exclude) 拼接 API，单例 get_prompt_manager()，28 测试通过 |
 | 2026-04-18 | v4.9 | **工具注册完整性修复**：通过提示词打靶测试发现 28/34 个工具未注册，重写 tools/Key_Tools.py（14→29 个工具），实现 write_dynamic_prompt_tool，清理 AGENTS.md 中 4 个虚假工具引用，统一文档工具名与注册名一致，打靶测试 11/12 通过（92%） |
+| 2026-04-18 | v5.0 | **提示词自主动态拼装**：MEMORY 组件默认不注入，Agent 通过 `<active_components>` XML 标签动态控制提示词组件拼装；新增 `select_components()` 方法、`active_components` 标签解析（response_parser.py），更新 AGENTS.md，新增「提示词动态拼装协议」章节 |
 
 ---
 
