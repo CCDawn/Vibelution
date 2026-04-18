@@ -303,8 +303,9 @@ from tools.rebirth_tools import trigger_self_restart_tool
 # 导入 CLI UI
 from core.ui.cli_ui import get_ui, ui_error
 
-# 导入提示词构建器
-from core.capabilities.prompt_builder import build_system_prompt
+# 导入提示词管理器
+from core.capabilities.prompt_manager import get_prompt_manager
+from core.orchestration.response_parser import parse_llm_response
 
 # 导入宠物系统
 from core.pet_system import get_pet_system
@@ -663,14 +664,12 @@ class SelfEvolvingAgent:
 
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
-        # 始终让 Agent 自主生成任务
-        base_prompt = build_system_prompt(
+        pm = get_prompt_manager()
+        return pm.build(
             generation=get_generation_tool(),
             total_generations=_get_total_generations(),
             core_context=get_core_context(),
         )
-        
-        return base_prompt
 
     def think_and_act(self, user_prompt: str = None) -> bool:
         """
@@ -686,7 +685,8 @@ class SelfEvolvingAgent:
         Returns:
             True: 继续运行, False: 触发重启, "hibernated": 休眠后继续
         """
-        messages = [SystemMessage(content=self._build_system_prompt())]
+        pm = get_prompt_manager()
+        messages = [SystemMessage(content=pm.build())]
 
         # 自主进化模式：自动生成任务提示
         autonomous_user_prompt = (
@@ -709,7 +709,7 @@ class SelfEvolvingAgent:
 
         # 首次对话写入 System Prompt
         if not self._system_prompt_written:
-            logger.write_system_prompt(self._build_system_prompt())
+            logger.write_system_prompt(pm.build())
             self._system_prompt_written = True
 
         messages.append(HumanMessage(content=user_prompt))
@@ -731,6 +731,10 @@ class SelfEvolvingAgent:
                     )
 
             for iteration in range(1, max_iterations + 1):
+                # 状态机驱动：每轮迭代前动态重建 SystemMessage
+                # 包含 base_prompt + state_memory + 当前激活的 registry 规则
+                messages[0] = SystemMessage(content=pm.build())
+
                 # 自动 Token 检查与压缩
                 messages = self._check_and_compress(messages, iteration)
 
@@ -798,16 +802,24 @@ class SelfEvolvingAgent:
                         tag="LLM"
                     )
 
-                # 解析工具调用和思考内容
-                tool_calls, thinking_content = self._parse_tool_calls(response)
+                # 解析工具调用、状态记忆和规则切换
+                parser_result = parse_llm_response(response)
+
+                # 回写 state_memory（落盘 + 更新 PM 内存缓存）
+                if parser_result.state_memory:
+                    pm.update_state_memory(parser_result.state_memory)
+
+                # 更新激活规则集（兜底：空则保持不变）
+                if parser_result.active_rules:
+                    pm.update_active_rules(parser_result.active_rules)
 
                 # 显示思考过程
-                if thinking_content:
-                    _debug_logger.llm_thinking(thinking_content)
-                    logger.log_llm_intent("thinking", thinking_content[:300])
+                if parser_result.thinking_content:
+                    _debug_logger.llm_thinking(parser_result.thinking_content)
+                    logger.log_llm_intent("thinking", parser_result.thinking_content[:300])
 
                 # 无工具调用 = 结束
-                if not tool_calls:
+                if not parser_result.tool_calls:
                     if response.content:
                         _debug_logger.llm_response(response.content, "LLM 最终回复")
                         logger.log_llm_intent("final_response", response.content[:300])
@@ -815,7 +827,9 @@ class SelfEvolvingAgent:
 
                 # Phase 6: 使用优先级优化器排序工具
                 if hasattr(self, 'priority_optimizer'):
-                    tool_calls = self._optimize_tool_order(tool_calls)
+                    tool_calls = self._optimize_tool_order(parser_result.tool_calls)
+                else:
+                    tool_calls = parser_result.tool_calls
 
                 # 执行工具
                 for tool_call in tool_calls:

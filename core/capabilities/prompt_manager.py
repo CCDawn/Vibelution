@@ -1,0 +1,706 @@
+# -*- coding: utf-8 -*-
+"""
+core/capabilities/prompt_manager.py - 动态系统提示词管理器
+
+将 CorePromptManager + build_system_prompt() 重构为统一的 PromptManager 类，
+支持参数驱动的组件拼接，单例全局访问。
+
+设计原则：
+- 参数驱动拼接：build(include=[...], exclude=[...])
+- 单例全局访问：get_prompt_manager()
+- 核心组件硬编码顺序，扩展组件可插拔
+"""
+
+from __future__ import annotations
+
+import os
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Dict, Callable, Any
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# 路径解析（从 core/core_prompt/__init__.py 迁移）
+# ============================================================================
+
+def _get_static_root() -> Path:
+    """获取 core/core_prompt/ 静态路径（内置模板）"""
+    return Path(__file__).parent.parent / "core_prompt"
+
+
+def _get_dynamic_root() -> Path:
+    """获取 workspace/prompts/ 动态路径（用户覆盖层）"""
+    project_root = _resolve_project_root()
+    return project_root / "workspace" / "prompts"
+
+
+def _resolve_project_root() -> Path:
+    """推断项目根目录"""
+    import sys
+    for name, mod in list(sys.modules.items()):
+        if name == "agent" and mod and getattr(mod, '__file__', None):
+            return Path(mod.__file__).parent.resolve()
+
+    for sp in sys.path:
+        p = os.path.join(sp, "agent.py")
+        if os.path.exists(p):
+            return Path(sp).resolve()
+
+    return Path(__file__).parent.parent.parent.resolve()
+
+
+# ============================================================================
+# PromptComponent - 组件定义
+# ============================================================================
+
+@dataclass
+class PromptComponent:
+    """
+    单个提示词组件。
+
+    Attributes:
+        name:        唯一标识，如 "SOUL", "AGENTS", "TASK_CHECKLIST"
+        priority:    优先级（数字越小越靠前，default=50）
+        required:    是否必选（True 时 exclude 无法移除）
+        load_fn:     加载函数，返回文本内容
+        enabled:      是否启用（可动态开关）
+    """
+    name: str
+    priority: int = 50
+    required: bool = False
+    load_fn: Callable[[], str] = field(default_factory=lambda: lambda: "")
+    enabled: bool = True
+
+
+# ============================================================================
+# PromptManager - 核心类
+# ============================================================================
+
+class PromptManager:
+    """
+    动态系统提示词管理器。
+
+    职责：
+    - 管理提示词组件注册表（核心硬编码 + 扩展可配）
+    - 参数驱动的组件拼接：build(include, exclude, ...)
+    - 单例模式全局访问
+    - 双轨加载（workspace 优先，回退 static）
+    - 缓存失效机制
+    """
+
+    # 核心静态文件（双轨加载：workspace 优先，回退 static）
+    _STATIC_FILES = {"SOUL.md", "AGENTS.md"}
+
+    # 纯动态文件（仅来自 workspace/prompts/）
+    _DYNAMIC_FILES = {"IDENTITY.md", "USER.md", "DYNAMIC.md", "COMPRESS_SUMMARY.md"}
+
+    # 状态机增强：规则注册表 + 当前激活规则 + 状态记忆（在 __init__ 中初始化）
+    # prompt_registry: Dict[str, str] — 在 __init__ 中初始化为 {}
+    # current_active_prompts: List[str]   — 在 __init__ 中初始化为 []
+    # state_memory: str                   — 在 __init__ 中初始化为 ""
+
+    def __init__(self):
+        self._static_root = _get_static_root()
+        self._dynamic_root = _get_dynamic_root()
+        self._dynamic_root.mkdir(parents=True, exist_ok=True)
+
+        # 组件注册表
+        self._components: Dict[str, PromptComponent] = {}
+
+        # 缓存
+        self._cache: Dict[str, str] = {}
+        self._cache_sources: Dict[str, str] = {}
+
+        # 规则注册表（硬编码，非文件系统扫描）
+        self.prompt_registry: Dict[str, str] = {}
+        # 当前激活的规则集名称列表
+        self.current_active_prompts: List[str] = []
+        # 当前状态记忆（从 LLM <state_memory> 标签提取）
+        self.state_memory: str = ""
+
+        logger.info(f"[PromptManager] 初始化 - 静态: {self._static_root}")
+        logger.info(f"[PromptManager] 初始化 - 动态: {self._dynamic_root}")
+
+        # 注册所有组件
+        self._register_core_components()
+        self._register_default_rules()
+
+        # 加载上次会话遗留的 state_memory（如果有）
+        self._load_persisted_state_memory()
+
+    # ------------------------------------------------------------------------
+    # 组件注册
+    # ------------------------------------------------------------------------
+
+    def _register_core_components(self):
+        """注册核心组件（硬编码顺序）"""
+        self.register(PromptComponent(
+            name="SOUL",
+            priority=10,
+            required=True,
+            load_fn=self._load_soul,
+        ))
+        self.register(PromptComponent(
+            name="TASK_CHECKLIST",
+            priority=20,
+            required=False,
+            load_fn=self._load_task_checklist,
+        ))
+        self.register(PromptComponent(
+            name="CODEBASE_MAP",
+            priority=30,
+            required=False,
+            load_fn=self._load_codebase_map,
+        ))
+        self.register(PromptComponent(
+            name="DYNAMIC",
+            priority=40,
+            required=False,
+            load_fn=self._load_dynamic,
+        ))
+        self.register(PromptComponent(
+            name="IDENTITY",
+            priority=50,
+            required=False,
+            load_fn=self._load_identity,
+        ))
+        self.register(PromptComponent(
+            name="AGENTS",
+            priority=60,
+            required=True,
+            load_fn=self._load_agents,
+        ))
+        self.register(PromptComponent(
+            name="USER",
+            priority=70,
+            required=False,
+            load_fn=self._load_user,
+        ))
+        self.register(PromptComponent(
+            name="MEMORY",
+            priority=80,
+            required=False,
+            load_fn=self._load_memory_context,
+        ))
+        self.register(PromptComponent(
+            name="TOOLS_INDEX",
+            priority=90,
+            required=False,
+            load_fn=self._load_tools_index,
+        ))
+        self.register(PromptComponent(
+            name="ENV_INFO",
+            priority=100,
+            required=False,
+            load_fn=self._load_env_info,
+        ))
+        self.register(PromptComponent(
+            name="current_rules",
+            priority=85,
+            required=False,
+            load_fn=self._load_current_rules,
+        ))
+
+    def register(self, component: PromptComponent):
+        """注册或更新组件"""
+        self._components[component.name] = component
+        logger.debug(f"[PromptManager] 注册组件: {component.name} (priority={component.priority}, required={component.required})")
+
+    def unregister(self, name: str):
+        """取消注册组件"""
+        if name in self._components:
+            del self._components[name]
+            logger.debug(f"[PromptManager] 取消注册: {name}")
+
+    def set_enabled(self, name: str, enabled: bool):
+        """动态启用/禁用组件"""
+        if name in self._components:
+            self._components[name].enabled = enabled
+
+    # ------------------------------------------------------------------------
+    # 规则注册表（硬编码，非文件系统扫描）
+    # ------------------------------------------------------------------------
+
+    def _register_default_rules(self):
+        """注册默认规则集"""
+        self.register_rule("base", "")
+        self.register_rule("code_review", """## 当前规则：代码审查
+- 每次修改前先理解原有逻辑，不要破坏既有行为
+- 优先修复明显 bug，再优化性能
+- 改动必须有测试覆盖""")
+        self.register_rule("creative", """## 当前规则：创意发散
+- 不拘泥于现有方案，大胆提出新思路
+- 评估可行性时考虑长期维护成本
+- 鼓励渐进式创新而非激进重构""")
+        self.register_rule("debug", """## 当前规则：调试诊断
+- 先复现问题，确认触发条件
+- 用最小改动定位根因
+- 修改后验证问题确实解决""")
+        self.register_rule("planning", """## 当前规则：任务规划
+- 分解任务为可验证的子任务
+- 每个子任务完成后立即验证
+- 记录结论，避免重复探索""")
+        self.register_rule("refactor", """## 当前规则：重构优化
+- 重构不改变外部行为
+- 每次重构后运行测试
+- 优先清理技术债务最严重的地方""")
+        self.current_active_prompts = ["base"]
+
+    def register_rule(self, name: str, content: str):
+        """注册或更新规则"""
+        self.prompt_registry[name] = content
+        logger.debug(f"[PromptManager] 注册规则: {name}")
+
+    def update_active_rules(self, rules: List[str]):
+        """
+        更新当前激活的规则集（由 LLM 通过 <active_rules> 标签调用）
+
+        Args:
+            rules: 新的激活规则名称列表（如 ["code_review", "debug"]）
+        """
+        if not rules:
+            logger.debug("[PromptManager] active_rules 为空，保持当前规则不变")
+            return
+
+        # 只注册已知规则，未知规则名忽略
+        known_rules = [r for r in rules if r in self.prompt_registry]
+        if known_rules:
+            self.current_active_prompts = known_rules
+            logger.info(f"[PromptManager] 激活规则切换: {known_rules}")
+        else:
+            logger.warning(f"[PromptManager] 未知规则: {rules}，保持当前规则不变")
+
+    def _load_current_rules(self) -> str:
+        """
+        拼接当前激活规则集的文本内容
+
+        Returns:
+            拼接后的规则文本（无激活规则时返回空字符串）
+        """
+        if not self.current_active_prompts:
+            return ""
+
+        parts = []
+        for name in self.current_active_prompts:
+            content = self.prompt_registry.get(name, "")
+            if content:
+                parts.append(content)
+
+        if not parts:
+            return ""
+
+        return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------------
+    # 状态记忆持久化
+    # ------------------------------------------------------------------------
+
+    def _load_persisted_state_memory(self):
+        """从 workspace/prompts/STATE_MEMORY.md 恢复上次会话的状态记忆"""
+        try:
+            state_memory_path = self._dynamic_root / "STATE_MEMORY.md"
+            if state_memory_path.exists():
+                content = state_memory_path.read_text(encoding="utf-8").strip()
+                if content:
+                    self.state_memory = content
+                    logger.info(f"[PromptManager] 从会话恢复 state_memory，长度={len(content)}")
+        except Exception as e:
+            logger.warning(f"[PromptManager] 恢复 state_memory 失败: {e}")
+
+    def update_state_memory(self, memory_text: str):
+        """
+        更新状态记忆（内存缓存 + 落盘持久化）
+
+        Args:
+            memory_text: LLM 通过 <state_memory> 标签回写的状态文本
+        """
+        if not memory_text or not memory_text.strip():
+            return
+
+        self.state_memory = memory_text
+        self._persist_state_memory(memory_text)
+        logger.debug(f"[PromptManager] state_memory 更新，长度={len(memory_text)}")
+
+    def _persist_state_memory(self, memory_text: str):
+        """将 state_memory 落盘到 workspace/prompts/STATE_MEMORY.md"""
+        try:
+            state_memory_path = self._dynamic_root / "STATE_MEMORY.md"
+            state_memory_path.write_text(memory_text, encoding="utf-8")
+            logger.info(f"[PromptManager] state_memory 已落盘: {state_memory_path}")
+        except Exception as e:
+            logger.warning(f"[PromptManager] state_memory 落盘失败: {e}")
+
+    # ------------------------------------------------------------------------
+    # build() - 参数驱动拼接
+    # ------------------------------------------------------------------------
+
+    def build(
+        self,
+        include: Optional[List[str]] = None,
+        exclude: Optional[List[str]] = None,
+        generation: Optional[int] = None,
+        total_generations: Optional[int] = None,
+        core_context: Optional[str] = None,
+        current_goal: Optional[str] = None,
+        state_memory: Optional[str] = None,
+    ) -> str:
+        """
+        构建动态系统提示词。
+
+        Args:
+            include:   只包含这些组件（None 表示固定 ["SOUL","AGENTS","MEMORY","current_rules"]）
+            exclude:   排除这些组件（required=True 的组件无法被排除）
+            generation:       当前世代数
+            total_generations: 总世代数
+            core_context:     跨代核心记忆
+            current_goal:     本世代目标
+            state_memory:     状态记忆（注入 MEMORY 组件；若为 None 则使用 self.state_memory）
+
+        Returns:
+            组装完成的系统提示词字符串
+        """
+        # 确定要拼接的组件列表（固定范围）
+        if include is None:
+            include = ["SOUL", "AGENTS", "MEMORY", "current_rules"]
+
+        # 确定要注入的 state_memory
+        effective_state_memory = state_memory if state_memory is not None else self.state_memory
+        # 确定要拼接的组件列表
+        selected = self._select_components(include, exclude)
+
+        # 加载每个组件的内容
+        parts = []
+        for comp in selected:
+            try:
+                content = comp.load_fn()
+
+                # 特殊处理：MEMORY 组件需要传入参数
+                if comp.name == "MEMORY":
+                    content = self._render_memory(
+                        generation=generation,
+                        total_generations=total_generations,
+                        core_context=core_context,
+                        current_goal=current_goal,
+                        state_memory=effective_state_memory,
+                    )
+
+                if content and content.strip():
+                    parts.append(content)
+            except Exception as e:
+                logger.warning(f"[PromptManager] 组件 {comp.name} 加载失败: {e}")
+
+        return "\n\n---\n\n".join(parts)
+
+    def _select_components(
+        self,
+        include: Optional[List[str]],
+        exclude: Optional[List[str]],
+    ) -> List[PromptComponent]:
+        """
+        根据 include/exclude 规则选择组件。
+
+        规则：
+        - include 非空时，只选指定的组件
+        - exclude 非空时，排除指定的组件（required=True 的无法排除）
+        - 按 priority 升序排列
+        """
+        all_comps = sorted(self._components.values(), key=lambda c: c.priority)
+
+        # 应用 include 过滤
+        if include is not None:
+            names = set(include)
+            all_comps = [c for c in all_comps if c.name in names]
+
+        # 应用 exclude 过滤（required 组件无法排除）
+        if exclude is not None:
+            excluded = set(exclude)
+            all_comps = [c for c in all_comps if c.name not in excluded or c.required]
+
+        # 只返回启用状态的组件
+        return [c for c in all_comps if c.enabled]
+
+    # ------------------------------------------------------------------------
+    # 组件加载函数
+    # ------------------------------------------------------------------------
+
+    def _load_with_fallback(self, name: str) -> str:
+        """双轨加载：优先 dynamic（workspace），回退 static（core/core_prompt/）"""
+        dynamic_path = self._dynamic_root / name
+        static_path = self._static_root / name
+
+        if dynamic_path.exists():
+            try:
+                content = dynamic_path.read_text(encoding="utf-8").strip()
+                logger.info(f"[PromptManager] 动态加载 {name} from workspace")
+                self._cache_sources[name] = "workspace"
+                return content
+            except Exception as e:
+                logger.warning(f"[PromptManager] workspace/{name} 读取失败: {e}，回退到 static")
+
+        return self._load_from_path(static_path, name)
+
+    def _load_from_path(self, path: Path, name: str) -> str:
+        """从指定路径加载文件"""
+        if path.exists():
+            try:
+                content = path.read_text(encoding="utf-8").strip()
+                logger.info(f"[PromptManager] 静态加载 {name} from {path.parent.name}/")
+                self._cache_sources[name] = "static"
+                return content
+            except Exception as e:
+                return f"[错误: 无法读取 {path}: {e}]"
+        else:
+            return f"[警告: 找不到 {path}]"
+
+    def _load_soul(self) -> str:
+        """加载 SOUL.md（双轨）"""
+        return self._load_with_fallback("SOUL.md")
+
+    def _load_agents(self) -> str:
+        """加载 AGENTS.md（双轨）"""
+        return self._load_with_fallback("AGENTS.md")
+
+    def _load_identity(self) -> str:
+        """加载 IDENTITY.md（仅 workspace）"""
+        return self._load_from_path(self._dynamic_root / "IDENTITY.md", "IDENTITY.md")
+
+    def _load_user(self) -> str:
+        """加载 USER.md（仅 workspace）"""
+        return self._load_from_path(self._dynamic_root / "USER.md", "USER.md")
+
+    def _load_dynamic(self) -> str:
+        """加载 DYNAMIC.md（仅 workspace）"""
+        return self._load_from_path(self._dynamic_root / "DYNAMIC.md", "DYNAMIC.md")
+
+    def _load_compress_summary(self) -> str:
+        """加载 COMPRESS_SUMMARY.md（仅 workspace）"""
+        return self._load_from_path(self._dynamic_root / "COMPRESS_SUMMARY.md", "COMPRESS_SUMMARY.md")
+
+    def _load_task_checklist(self) -> str:
+        """加载任务清单"""
+        try:
+            from core.capabilities.task_manager import get_task_manager
+            tm = get_task_manager()
+            return tm.render_prompt_checklist()
+        except Exception:
+            return ""
+
+    def _load_codebase_map(self) -> str:
+        """加载代码库认知地图"""
+        try:
+            from core.infrastructure.workspace_manager import get_workspace
+            ws = get_workspace()
+            return ws.generate_codebase_map()
+        except Exception as e:
+            return f"[警告: 加载认知地图失败: {e}]"
+
+    def _load_tools_index(self) -> str:
+        """从 tools_manual.md 提取精简索引"""
+        try:
+            project_root = _resolve_project_root()
+            tools_manual = project_root / "docs" / "tools_manual.md"
+
+            if not tools_manual.exists():
+                return ""
+
+            content = tools_manual.read_text(encoding="utf-8")
+            lines = content.split("\n")
+            index_lines = ["\n## 工具手册索引 (docs/tools_manual.md)", ""]
+
+            for line in lines:
+                if "`" in line and "|" in line:
+                    parts = line.split("`")
+                    if len(parts) >= 2:
+                        tool_name = parts[1].strip()
+                        if tool_name and not tool_name.startswith("#"):
+                            index_lines.append(f"- `{tool_name}`")
+
+            return "\n".join(index_lines[:20])
+
+        except Exception:
+            return ""
+
+    def _load_env_info(self) -> str:
+        """加载环境信息"""
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        project_root = _resolve_project_root()
+
+        return "\n".join([
+            "## 当前环境",
+            f"- 当前时间: {current_time}",
+            f"- 项目根目录: {project_root}",
+            f"- 静态提示词: core/core_prompt/",
+            f"- 动态提示词: workspace/prompts/",
+        ])
+
+    def _load_memory_context(self) -> str:
+        """加载记忆上下文（占位，实际渲染在 _render_memory）"""
+        return ""  # 由 _render_memory 处理
+
+    def _render_memory(
+        self,
+        generation: Optional[int],
+        total_generations: Optional[int],
+        core_context: Optional[str],
+        current_goal: Optional[str],
+        state_memory: Optional[str] = None,
+    ) -> str:
+        """渲染记忆上下文"""
+        # 如果没有传入记忆，则从 memory_tools 加载
+        if generation is None:
+            memory_data = self._load_memory_from_tools()
+            generation = memory_data.get("generation", 1)
+            total_generations = memory_data.get("total_generations", 1)
+            core_context = core_context or memory_data.get("core_context", "")
+            current_goal = current_goal or memory_data.get("current_goal", "")
+
+        # 优先使用传入的 state_memory，回退到内存缓存
+        effective_memory = state_memory if state_memory else self.state_memory
+
+        if not core_context and not current_goal and not effective_memory:
+            return ""
+
+        lines = ["## 你的记忆与状态", f"- 当前世代: G{generation}（共{total_generations}代）"]
+        if core_context:
+            lines.append(f"- 核心智慧摘要: {core_context}")
+        if current_goal:
+            lines.append(f"- 本世代核心目标: {current_goal}")
+        if effective_memory:
+            lines.append(f"- 状态记忆:\n{effective_memory}")
+
+        return "\n".join(lines)
+
+    def _load_memory_from_tools(self) -> Dict[str, Any]:
+        """从 memory_tools 加载记忆（read_memory_tool 返回 JSON 字符串，需解析）"""
+        try:
+            from tools.memory_tools import read_memory_tool
+            import json as _json
+            raw = read_memory_tool()
+            # read_memory_tool 返回 JSON 字符串，需解析
+            if isinstance(raw, str):
+                data = _json.loads(raw)
+            else:
+                data = raw
+            # 兼容新旧字段名
+            return {
+                "generation": data.get("current_generation") or data.get("generation", 1),
+                "total_generations": data.get("total_generations", 1),
+                "core_context": data.get("core_wisdom") or data.get("core_context", ""),
+                "current_goal": data.get("current_goal", ""),
+            }
+        except Exception as e:
+            return {
+                "generation": 1,
+                "total_generations": 1,
+                "core_context": "",
+                "current_goal": "",
+                "error": str(e),
+            }
+
+    # ------------------------------------------------------------------------
+    # 缓存管理
+    # ------------------------------------------------------------------------
+
+    def invalidate_cache(self, name: Optional[str] = None):
+        """
+        清除缓存。
+
+        Args:
+            name: 指定清除某个文件的缓存，传 None 则清除全部
+        """
+        if name:
+            keys_to_delete = [k for k in self._cache if k.startswith(f"{name}:")]
+            for k in keys_to_delete:
+                del self._cache[k]
+                if k in self._cache_sources:
+                    del self._cache_sources[k]
+            logger.debug(f"[PromptManager] 清除缓存: {name}")
+        else:
+            self._cache.clear()
+            self._cache_sources.clear()
+            logger.debug("[PromptManager] 清除全部缓存")
+
+    def get_status(self) -> Dict[str, Any]:
+        """获取管理器状态（调试用）"""
+        return {
+            "static_root": str(self._static_root),
+            "dynamic_root": str(self._dynamic_root),
+            "registered_components": list(self._components.keys()),
+            "cached_sources": dict(self._cache_sources),
+            "prompt_registry": list(self.prompt_registry.keys()),
+            "current_active_prompts": list(self.current_active_prompts),
+            "state_memory_length": len(self.state_memory) if self.state_memory else 0,
+        }
+
+    def list_components(self) -> List[Dict[str, Any]]:
+        """列出所有已注册的组件"""
+        return [
+            {
+                "name": c.name,
+                "priority": c.priority,
+                "required": c.required,
+                "enabled": c.enabled,
+            }
+            for c in sorted(self._components.values(), key=lambda x: x.priority)
+        ]
+
+
+# ============================================================================
+# 全局单例
+# ============================================================================
+
+_prompt_manager: Optional[PromptManager] = None
+
+
+def get_prompt_manager() -> PromptManager:
+    """获取全局 PromptManager 单例"""
+    global _prompt_manager
+    if _prompt_manager is None:
+        _prompt_manager = PromptManager()
+    return _prompt_manager
+
+
+# ============================================================================
+# 便捷函数（与旧接口兼容）
+# ============================================================================
+
+def build_system_prompt(
+    generation: Optional[int] = None,
+    total_generations: Optional[int] = None,
+    core_context: Optional[str] = None,
+    current_goal: Optional[str] = None,
+) -> str:
+    """构建动态系统提示词（便捷函数，兼容旧接口）"""
+    return get_prompt_manager().build(
+        generation=generation,
+        total_generations=total_generations,
+        core_context=core_context,
+        current_goal=current_goal,
+    )
+
+
+def build_simple_system_prompt() -> str:
+    """简化版系统提示词（便捷函数，兼容旧接口）"""
+    return build_system_prompt(
+        generation=1,
+        total_generations=1,
+        core_context="",
+        current_goal="",
+    )
+
+
+# ============================================================================
+# 导出
+# ============================================================================
+
+__all__ = [
+    "PromptComponent",
+    "PromptManager",
+    "get_prompt_manager",
+    "build_system_prompt",
+    "build_simple_system_prompt",
+]

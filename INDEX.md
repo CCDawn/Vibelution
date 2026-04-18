@@ -1,8 +1,8 @@
 # 虾宝自我进化系统 - 全局索引
 
-**版本：** v4.6
+**版本：** v4.8
 **日期：** 2026-04-18
-**版本迭代：** 18次重大更新
+**版本迭代：** 19次重大更新
 **用途：** 作为所有任务的执行参照索引
 
 ---
@@ -781,6 +781,7 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 15 | [模型发现优化](report_history/claude_report/task_20260418_03_模型发现优化.md) | 2026-04-18 | 性能优化 |
 | 16 | [set_plan_tool 修复](report_history/claude_report/task_20260418_04_set_plan_tool修复.md) | 2026-04-18 | Bug 修复 |
 | 17 | [check_restart_block 修复](report_history/claude_report/task_20260418_05_check_restart_block修复.md) | 2026-04-18 | Bug 修复 |
+| 18 | [PromptManager 重构 - 提示词系统动态管理](report_history/claude_report/task_20260418_07_PromptManager重构.md) | 2026-04-18 | 核心重构 |
 
 ---
 
@@ -799,7 +800,8 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 2026-04-18 | v4.5 | **提示词审查修复**：统一 SOUL.md/AGENTS.md 工具名为实际注册名，修复内容冲突、Windows 兼容、禁止删除列表，补全路径引用 |
 | 2026-04-18 | v4.6 | **set_plan_tool Bug 修复**：添加类型守卫防止字符串被当作字符列表处理，输出自动去掉编号前缀 |
 | 2026-04-18 | v4.6 | **check_restart_block Bug 修复**：添加无后缀别名函数，解决 agent.py 内部调用 NameError |
-| 2026-04-18 | v4.7 | **Agent 自我扩展 Skill 系统**：新增 SkillRegistry/SkillLoader/SkillTools，Agent 可在 workspace/skills/ 自建/修改/删除 Skill，集成到 agent.py，增强 XML 解析支持 `<skill>` 标签，CompositeTool 暴露为 LangChain Tool，更新 AGENTS.md，33 测试通过 |
+| 2026-04-18 | v4.7 | **Agent 自我扩展 Skill 系统
+| 2026-04-18 | v4.8 | **PromptManager 重构**：新增 core/capabilities/prompt_manager.py，PromptManager 组件注册表 + 参数驱动 uild(include, exclude) 拼接 API，单例 get_prompt_manager()，28 测试通过**：新增 SkillRegistry/SkillLoader/SkillTools，Agent 可在 workspace/skills/ 自建/修改/删除 Skill，集成到 agent.py，增强 XML 解析支持 `<skill>` 标签，CompositeTool 暴露为 LangChain Tool，更新 AGENTS.md，33 测试通过 |
 
 ---
 

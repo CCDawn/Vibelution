@@ -56,8 +56,8 @@ from tools.rebirth_tools import trigger_self_restart_tool
 # 导入 CLI UI
 from core.cli_ui import get_ui, ui_error
 
-# 导入提示词构建器
-from core.prompt_builder import build_system_prompt
+# 导入提示词管理器
+from core.capabilities.prompt_manager import build_system_prompt
 
 
 # ============================================================================

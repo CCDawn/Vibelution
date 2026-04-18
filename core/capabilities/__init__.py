@@ -12,6 +12,12 @@ from core.capabilities.task_manager import (
 from core.capabilities.prompt_builder import (
     build_system_prompt, build_simple_system_prompt
 )
+from core.capabilities.prompt_manager import (
+    PromptComponent, PromptManager, get_prompt_manager
+)
 from core.capabilities.pattern_library import (
     PatternLibrary, ExperiencePattern, get_pattern_library
+)
+from core.orchestration.response_parser import (
+    ResponseParser, LLMParserResult, get_response_parser, parse_llm_response
 )
