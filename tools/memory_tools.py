@@ -416,7 +416,7 @@ def read_dynamic_prompt_tool() -> str:
         if os.path.exists(_get_dynamic_prompt_path()):
             with open(_get_dynamic_prompt_path(), 'r', encoding='utf-8') as f:
                 return f.read()
-        return ""
+        return "动态提示词为空"
     except Exception as e:
         return f"[错误: 无法读取动态提示词: {e}]"
 
@@ -654,6 +654,18 @@ def set_plan_tool(goal: str, tasks: List[str]) -> str:
     Returns:
         格式化的任务列表
     """
+    # 类型守卫：防止传入字符串被当作字符列表处理
+    if isinstance(tasks, str):
+        # 如果是单个任务字符串，包装成列表
+        tasks = [tasks]
+    elif not isinstance(tasks, list):
+        return "[❌ 错误] tasks 参数必须是字符串列表，而非 " + type(tasks).__name__
+
+    # 过滤空字符串
+    tasks = [t for t in tasks if t and t.strip()]
+    if not tasks:
+        return "[❌ 错误] tasks 列表不能为空"
+
     result = get_task_manager().set_plan(goal, tasks)
     
     lines = [
@@ -665,7 +677,10 @@ def set_plan_tool(goal: str, tasks: List[str]) -> str:
     ]
     
     for task in result.get("tasks", []):
-        lines.append(f"  ⏳ [ ] {task['id']}. {task['description']}")
+        desc = task['description']
+        # 去掉描述中已有的 "1. " / "1、" / "1)" 前缀，避免显示重复编号
+        desc = re.sub(r'^(\d+)[.、)]\s*', '', desc).strip()
+        lines.append(f"  ⏳ [ ] {task['id']}. {desc}")
     
     lines.append("")
     lines.append("请开始执行，完成后用 tick_subtask 逐个打勾！")
@@ -801,6 +816,11 @@ def check_restart_block_tool() -> tuple[bool, str]:
         return True, message
     
     return False, ""
+
+
+def check_restart_block() -> tuple[bool, str]:
+    """【内部别名】check_restart_block_tool 的无后缀版本，供 agent.py 调用"""
+    return check_restart_block_tool()
 
 
 def get_task_status_tool() -> str:

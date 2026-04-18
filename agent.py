@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 import logging
@@ -295,6 +296,7 @@ from tools.memory_tools import (
     archive_generation_history, advance_generation,
     _load_memory, clear_generation_task,
     read_dynamic_prompt_tool, update_generation_task_tool, add_insight_to_dynamic_tool,
+    check_restart_block,  # 重启拦截检查
 )
 from tools.rebirth_tools import trigger_self_restart_tool
 
@@ -399,9 +401,14 @@ class SelfEvolvingAgent:
 
         # =========================================================================
         # 模型动态发现（运行时获取 max_model_len）
+        # 仅本地模型需要动态发现，云端 API 提供商已有明确文档
         # =========================================================================
         self.model_info = None
-        if getattr(self.config.llm_discovery, 'enabled', True):
+        provider = getattr(self.config.llm, 'provider', '')
+        is_local_provider = provider in ('local', 'ollama')
+        discovery_enabled = getattr(self.config.llm_discovery, 'enabled', True) and is_local_provider
+
+        if discovery_enabled:
             discovery = ModelDiscovery(
                 api_base=self.config.llm.api_base,
                 model_name=self.config.llm.model_name,
@@ -605,6 +612,47 @@ class SelfEvolvingAgent:
         except Exception:
             self.task_planner = None
 
+        # =========================================================================
+        # 初始化 Skill 系统（Phase 8.5: Agent 自我扩展）
+        # =========================================================================
+        try:
+            from core.ecosystem.skill_registry import get_skill_registry
+            from core.ecosystem.skill_tools import (
+                install_skill_tool, update_skill_tool, optimize_skill_tool,
+                uninstall_skill_tool, list_skills_tool, get_skill_info_tool,
+                execute_skill_tool, search_skills_tool, render_skill_prompt_tool,
+            )
+            self.skill_registry = get_skill_registry()
+            self.skill_tools = [
+                install_skill_tool,
+                update_skill_tool,
+                optimize_skill_tool,
+                uninstall_skill_tool,
+                list_skills_tool,
+                get_skill_info_tool,
+                execute_skill_tool,
+                search_skills_tool,
+                render_skill_prompt_tool,
+            ]
+            # 绑定 Skill 工具到 LLM
+            if hasattr(self, 'llm_with_tools') and self.llm_with_tools:
+                self.llm_with_tools = self.llm_with_tools.bind_tools(self.skill_tools)
+
+            # 注册 Skill 工具到 tool_executor（支持 _execute_tool 调用）
+            for skill_tool in self.skill_tools:
+                tool_name = getattr(skill_tool, 'name', None) or getattr(skill_tool, '__name__', str(skill_tool))
+                self.tool_executor.register_tool(tool_name, skill_tool, timeout=60)
+
+            _debug_logger.info(
+                f"[Skill] 发现 {self.skill_registry.get_statistics()['total_skills']} 个 Skill，"
+                f"{len(self.skill_tools)} 个管理工具已就绪",
+                tag="SKILL"
+            )
+        except Exception as e:
+            self.skill_registry = None
+            self.skill_tools = []
+            _debug_logger.warning(f"[Skill] Skill 系统初始化失败: {e}", tag="SKILL")
+
         self._system_prompt_written = False
         self._setup_event_handlers()
 
@@ -806,6 +854,11 @@ class SelfEvolvingAgent:
         """
         解析 LLM 响应中的工具调用和思考内容
 
+        支持三种格式：
+        1. 标准 tool_calls (function calling)
+        2. <tool_call>{JSON}</tool_call> XML 格式
+        3. <skill name="xxx"><param name="yyy">zzz</param></skill> Skill 格式
+
         Returns:
             (tool_calls, thinking_content)
         """
@@ -827,25 +880,57 @@ class SelfEvolvingAgent:
 
         # 如果没有结构化的 tool_calls，尝试从文本内容中解析
         if not tool_calls and response.content:
+            # 格式1: <tool_call>{JSON}</tool_call>
             text_tool_calls = re.findall(
                 r'<tool_call>\s*(\{[\s\S]*?\})\s*</tool_call>',
                 response.content
             )
 
-            if text_tool_calls:
-                for tc_json in text_tool_calls:
-                    try:
-                        tc = json.loads(tc_json)
-                        # 统一参数格式：同时支持 args 和 arguments
-                        if 'arguments' in tc and 'args' not in tc:
-                            tc['args'] = tc.pop('arguments')
-                        if 'args' not in tc:
-                            tc['args'] = {}
-                        if 'id' not in tc:
-                            tc['id'] = f"call_{uuid.uuid4().hex[:8]}"
-                        tool_calls.append(tc)
-                    except json.JSONDecodeError:
-                        pass
+            for tc_json in text_tool_calls:
+                try:
+                    tc = json.loads(tc_json)
+                    if 'arguments' in tc and 'args' not in tc:
+                        tc['args'] = tc.pop('arguments')
+                    if 'args' not in tc:
+                        tc['args'] = {}
+                    if 'id' not in tc:
+                        tc['id'] = f"call_{uuid.uuid4().hex[:8]}"
+                    tool_calls.append(tc)
+                except json.JSONDecodeError:
+                    pass
+
+            # 格式2: <invoke name="xxx"> 或 <skill name="xxx">
+            # 支持 <invoke name="tool_name">...</invoke> 和 <skill name="xxx">...</skill>
+            skill_patterns = [
+                r'<invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)</invoke>',
+                r'<skill\s+name="([^"]+)"[^>]*>([\s\S]*?)</skill>',
+            ]
+
+            for pattern in skill_patterns:
+                for match in re.finditer(pattern, response.content):
+                    name = match.group(1)
+                    body = match.group(2)
+
+                    # 解析参数
+                    args = {}
+                    param_matches = re.findall(
+                        r'<param\s+name="([^"]+)"[^>]*>([\s\S]*?)</param>',
+                        body
+                    )
+                    for param_name, param_value in param_matches:
+                        # 尝试解析 JSON
+                        try:
+                            args[param_name] = json.loads(param_value.strip())
+                        except (json.JSONDecodeError, ValueError):
+                            args[param_name] = param_value.strip()
+
+                    # 构建 tool_call
+                    tc = {
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "name": name,
+                        "args": args,
+                    }
+                    tool_calls.append(tc)
 
         return tool_calls, thinking_content
 
@@ -1065,6 +1150,30 @@ class SelfEvolvingAgent:
             _debug_logger.info(f"Agent 主动休眠 {hibernate_duration} 秒", tag="HIBERNATE")
             time.sleep(hibernate_duration)
             return (f"休眠 {hibernate_duration} 秒完成", "hibernated")
+
+        # =========================================================================
+        # Skill 工具处理（Phase 8.5: Agent 自我扩展）
+        # =========================================================================
+        # 检查是否是 Skill 工具
+        if tool_name.startswith("skill_"):
+            skill_name = tool_name[6:]  # 去掉 "skill_" 前缀
+            # Skill 工具通过 skill_registry 执行
+            if hasattr(self, 'skill_registry') and self.skill_registry:
+                skill_result = self.skill_registry.execute_skill(skill_name, tool_args)
+                return (skill_result, None)
+            else:
+                return (f"[错误] Skill 系统未初始化", None)
+
+        # 检查是否是 Skill 管理工具（install_skill 等）
+        skill_management_tools = {
+            "install_skill", "update_skill", "optimize_skill",
+            "uninstall_skill", "list_skills", "get_skill_info",
+            "execute_skill", "search_skills", "render_skill_prompt",
+        }
+        if tool_name in skill_management_tools:
+            # Skill 管理工具通过 tool_executor 执行
+            # 这里直接执行，因为它们已经是 LangChain Tool
+            pass  # 继续到下面的 tool_executor.execute
 
         # 执行工具
         result, _ = self.tool_executor.execute(tool_name, tool_args)

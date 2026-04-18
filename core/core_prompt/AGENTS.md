@@ -27,7 +27,7 @@
 
 
 ### 执行流程
-
+参考流程，内容是你自己生成的不是我样例的内容:
 ```python
 # 1. 设定世代任务
 set_generation_task_tool(task="""本世代任务：
@@ -35,7 +35,7 @@ set_generation_task_tool(task="""本世代任务：
 2. 实现改进并验证
 """)
 
-# 2. 苏醒后第一件事：制定计划
+# 2. 苏醒后第一件事：根据世代任务制定计划
 set_plan_tool(
     goal="优化 Agent 的内存管理",
     tasks=[
@@ -68,7 +68,7 @@ trigger_self_restart_tool(reason="任务完成，准备下一世代")
 {"name": "工具名称", "arguments": {"参数名": "参数值"}}
 </tool_call>
 
-注意：一次回复只能包含一个 <tool_call>。如果你不需要调用工具（例如任务全部完成准备向人类汇报），请使用 <final_answer> 标签替代 <tool_call>。
+注意：如果你不需要调用工具（例如任务全部完成准备向人类汇报），请使用 <final_answer> 标签替代 <tool_call>。
 
 ### ⚠️ 重启拦截
 
@@ -210,6 +210,72 @@ trigger_self_restart_tool(reason="已完成本世代任务")
 
 ---
 
+## 工具拓展：Skill 系统
+
+### 概述
+
+Agent 可以通过 Skill 系统进行**自我扩展**，动态添加新能力。
+
+**存储位置**：`workspace/skills/` 目录
+
+### 工具调用格式
+
+#### 1. 核心工具（function calling）
+通过 LangChain function calling 调用，无需特殊格式。
+
+#### 2. 扩展 Skill（XML 格式）
+```xml
+<skill name="web_search">
+  <param name="query">搜索关键词</param>
+  <param name="max_results">5</param>
+</skill>
+```
+
+#### 3. 工具调用（XML 格式）
+```xml
+<invoke name="tool_name">
+  <param name="arg1">值1</param>
+  <param name="arg2">值2</param>
+</invoke>
+```
+
+### Agent 自我扩展能力
+
+Agent 可以通过以下工具自主管理 Skill：
+
+| 操作 | 工具 | 说明 |
+|------|------|------|
+| 安装新 Skill | `install_skill_tool` | 创建完整 Skill（SKILL.md + impl.py） |
+| 更新 Skill | `update_skill_tool` | 修改元数据或实现 |
+| 优化 Skill | `optimize_skill_tool` | 仅优化实现代码 |
+| 删除 Skill | `uninstall_skill_tool` | 删除 Skill（需 confirm=True） |
+| 列举 Skill | `list_skills_tool` | 查看所有可用 Skill |
+| 搜索 Skill | `search_skills_tool` | 按关键词搜索 |
+| 执行 Skill | `execute_skill_tool` | 直接执行 Skill |
+
+### Skill 结构
+
+每个 Skill 包含两个文件：
+- `SKILL.md` - 元数据（名称、描述、参数、触发词）
+- `impl.py` - Python 实现（必须包含 execute 函数）
+
+### 复合工具
+
+通过 `register_composite_tool` 注册工具流水线：
+
+```xml
+<invoke name="register_composite_tool">
+  <param name="name">code_review</param>
+  <param name="description">代码审查流程</param>
+  <param name="steps_json">[
+    {"tool_name": "grep_search", "parameters": {"pattern": "TODO"}},
+    {"tool_name": "read_file", "parameters": {"file_path": "$outputs.grep_search"}}
+  ]</param>
+</invoke>
+```
+
+---
+
 ## 反内耗传承法则
 
 > 🔥 **继承前代智慧，禁止重复探索！**
@@ -230,9 +296,19 @@ trigger_self_restart_tool(reason="已完成本世代任务")
 3. 在 `agent.py` 的 `tool_func_map` 中注册
 4. 调用 `trigger_self_restart_tool` 重启生效
 
+### Skill 自我扩展（推荐）
+
+通过 `install_skill_tool` 创建 Skill，无需重启即可使用：
+
+1. 调用 `install_skill_tool` 传入元数据 + 实现代码
+2. Skill 自动写入 `workspace/skills/{name}/`
+3. 通过 `list_skills_tool` 查看
+4. 通过 `execute_skill_tool` 测试
+
 ### 可修改的文件
 
 - `tools/*.py` - 工具实现
+- `workspace/skills/*` - Skill 目录（Agent 自我扩展）
 - `workspace/prompts/IDENTITY.md` - 身份定义
 - `workspace/prompts/USER.md` - 用户环境
 - `workspace/prompts/DYNAMIC.md` - 世代任务

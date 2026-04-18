@@ -1,8 +1,8 @@
 # 虾宝自我进化系统 - 全局索引
 
-**版本：** v4.5
+**版本：** v4.6
 **日期：** 2026-04-18
-**版本迭代：** 15次重大更新
+**版本迭代：** 18次重大更新
 **用途：** 作为所有任务的执行参照索引
 
 ---
@@ -227,7 +227,10 @@ self-evo-baby/                    # 项目根目录
 │   │
 │   ├── ecosystem/             # ━━━ 工具生态 ━━━
 │   │   ├── __init__.py
-│   │   ├── tool_ecosystem.py   # ⚠️ 框架 - 工具生态系统
+│   │   ├── tool_ecosystem.py   # ✅ 完整 - DynamicLoader/CompositeTool/PluginManager
+│   │   ├── skill_registry.py  # ✅ 完整 - SkillRegistry 核心类（Agent 自我扩展）
+│   │   ├── skill_loader.py    # ✅ 完整 - Skill 加载器
+│   │   ├── skill_tools.py    # ✅ 完整 - Skill 管理 LangChain Tool
 │   │   └── restarter.py        # ✅ 完整 - 重启管理
 │   │
 │   ├── pet_system/            # ━━━ 宠物系统 ━━━
@@ -346,6 +349,10 @@ self-evo-baby/                    # 项目根目录
 │   │   ├── forgotten/         # 遗忘回收站
 │   │   └── pet_info.json      # 宠物投喂记录
 │   ├── prompts/                # 提示词
+│   ├── skills/               # Skill 拓展目录（Agent 自我扩展）
+│   │   └── web_search/      # 示例 Skill
+│   │       ├── SKILL.md   # 元数据
+│   │       └── impl.py    # 实现
 │   ├── logs/                   # 日志
 │   └── analytics/              # 分析结果
 │
@@ -455,7 +462,12 @@ self-evo-baby/                    # 项目根目录
 │  ├── 自主模式入口 ⚠️ 框架                                        │
 │  ├── 探索引擎 ⚠️ 框架                                            │
 │  ├── 机会发现 ⚠️ 框架                                            │
-│  └── 目标生成 ⚠️ 框架                                            │
+│  ├── 目标生成 ⚠️ 框架                                            │
+│  └── Agent 自我扩展 ✅ Skill 系统 (2026-04-18)                     │
+│      ├── SkillRegistry 核心类                                      │
+│      ├── Skill 管理工具 (8个 LangChain Tool)                         │
+│      ├── CompositeTool 暴露                                        │
+│      └── 33 测试通过                                               │
 │                                                                  │
 │  Token 优化 ✅ 完成 (2026-04-16)                                  │
 │  ├── 4级压缩策略 ✅                                               │
@@ -600,6 +612,19 @@ self-evo-baby/                    # 项目根目录
 | 能力 | 提示词构建 | `core/capabilities/prompt_builder.py` | ✅ 完整 | 双轨加载（core_prompt + workspace） |
 | 能力 | 模式库 | `core/capabilities/pattern_library.py` | ⚠️ 框架 | 待实现 |
 | 能力 | 模式库 | `core/capabilities/pattern_library.py` | ⚠️ 框架 | 待实现 |
+
+#### 工具生态（Phase 8.5）
+
+| 类别 | 模块 | 文件 | 状态 | 测试数 |
+|------|------|------|------|--------|
+| 生态 | ToolEcosystem | `core/ecosystem/tool_ecosystem.py` | ✅ 完整 | 原有 |
+| 生态 | SkillRegistry | `core/ecosystem/skill_registry.py` | ✅ 完整 | 25 |
+| 生态 | SkillLoader | `core/ecosystem/skill_loader.py` | ✅ 完整 | 8 |
+| 生态 | Skill 管理工具 | `core/ecosystem/skill_tools.py` | ✅ 完整 | - |
+| 生态 | CompositeTool Tool | `core/ecosystem/tool_ecosystem.py` | ✅ 完整 | - |
+| 扩展 | 示例 Skill | `workspace/skills/web_search/` | ✅ 完整 | - |
+
+**Agent 自我扩展能力**：安装/更新/优化/卸载 Skill，存储在 `workspace/skills/`
 
 #### 待重构 ⚠️
 
@@ -753,6 +778,9 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 12 | [Phase 5 记忆力机制优化实现](report_history/claude_report/task_20260417_12_Phase5记忆力机制优化实现.md) | 2026-04-17 17:30 | Phase 5 |
 || 13 | [提示词系统双轨加载架构](report_history/claude_report/task_20260418_01_提示词系统双轨加载架构.md) | 2026-04-18 | 提示词系统 |
 || 14 | [提示词审查修复](report_history/claude_report/task_20260418_02_提示词审查修复.md) | 2026-04-18 | 提示词系统 |
+| 15 | [模型发现优化](report_history/claude_report/task_20260418_03_模型发现优化.md) | 2026-04-18 | 性能优化 |
+| 16 | [set_plan_tool 修复](report_history/claude_report/task_20260418_04_set_plan_tool修复.md) | 2026-04-18 | Bug 修复 |
+| 17 | [check_restart_block 修复](report_history/claude_report/task_20260418_05_check_restart_block修复.md) | 2026-04-18 | Bug 修复 |
 
 ---
 
@@ -767,6 +795,11 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 2026-04-17 | v4.1 | 配置系统重构：整合config.py和config/模块，新增local provider，添加配置系统说明 |
 | 2026-04-17 | v4.2 | Phase 8 规划文档新增，新增 agent.py 拆分方案，更新目录结构说明 |
 | 2026-04-17 | v4.3 | **core/ 目录结构重组**：按功能分类到 infrastructure/evolution/knowledge/learning/decision/orchestration/autonomous/ui/logging/capabilities/ecosystem 等子目录 |
+| 2026-04-18 | v4.4 | **提示词系统重构**：新增 core/core_prompt/ 双轨加载（静态 SOUL/AGENTS + 动态 workspace 覆盖），CorePromptManager 实现 |
+| 2026-04-18 | v4.5 | **提示词审查修复**：统一 SOUL.md/AGENTS.md 工具名为实际注册名，修复内容冲突、Windows 兼容、禁止删除列表，补全路径引用 |
+| 2026-04-18 | v4.6 | **set_plan_tool Bug 修复**：添加类型守卫防止字符串被当作字符列表处理，输出自动去掉编号前缀 |
+| 2026-04-18 | v4.6 | **check_restart_block Bug 修复**：添加无后缀别名函数，解决 agent.py 内部调用 NameError |
+| 2026-04-18 | v4.7 | **Agent 自我扩展 Skill 系统**：新增 SkillRegistry/SkillLoader/SkillTools，Agent 可在 workspace/skills/ 自建/修改/删除 Skill，集成到 agent.py，增强 XML 解析支持 `<skill>` 标签，CompositeTool 暴露为 LangChain Tool，更新 AGENTS.md，33 测试通过 |
 
 ---
 

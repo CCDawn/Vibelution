@@ -54,6 +54,7 @@ from tools.memory_tools import (
     remove_task_tool,
     get_task_status_tool,
     check_restart_block_tool,
+    check_restart_block,
 )
 
 # ============================================================================
@@ -140,6 +141,7 @@ __all__ = [
     "remove_task_tool",
     "get_task_status_tool",
     "check_restart_block_tool",
+    "check_restart_block",
     # 重生工具
     "trigger_self_restart_tool",
     "enter_hibernation_tool",

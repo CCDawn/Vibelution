@@ -668,3 +668,146 @@ def get_tool_statistics() -> Dict[str, Any]:
     """快捷函数：获取工具统计"""
     ecosystem = get_tool_ecosystem()
     return ecosystem.get_statistics()
+
+
+# ============================================================================
+# CompositeTool LangChain Tool 包装（Phase 8.5）
+# ============================================================================
+
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
+import json
+
+
+class RegisterCompositeInput(BaseModel):
+    """注册复合工具输入"""
+    name: str = Field(description="复合工具名称")
+    description: str = Field(description="复合工具描述")
+    steps_json: str = Field(
+        description='步骤列表，JSON 数组格式，每步包含 tool_name 和 parameters'
+    )
+
+
+class ExecuteCompositeInput(BaseModel):
+    """执行复合工具输入"""
+    name: str = Field(description="复合工具名称")
+    params_json: str = Field(
+        default="{}",
+        description="执行参数，JSON 字符串格式"
+    )
+
+
+@tool(args_schema=RegisterCompositeInput)
+def register_composite_tool(
+    name: str,
+    description: str,
+    steps_json: str,
+) -> str:
+    """
+    注册复合工具（流水线）
+
+    将多个基础工具按步骤组合成一个复合工具。
+
+    **steps_json 格式**：
+    ```json
+    [
+        {
+            "tool_name": "grep_search",
+            "parameters": {"pattern": "$params.query"},
+            "input_mapping": {},
+            "retry_on_failure": false
+        },
+        {
+            "tool_name": "read_file",
+            "parameters": {"file_path": "$outputs.grep_search.result"},
+            "input_mapping": {}
+        }
+    ]
+    ```
+
+    **参数引用**：
+    - `$params.xxx` - 引用输入参数
+    - `$outputs.step_name.xxx` - 引用前一步骤的输出
+    """
+    try:
+        steps = json.loads(steps_json)
+    except (json.JSONDecodeError, ValueError) as e:
+        return json.dumps({
+            "success": False,
+            "message": f"steps_json 格式错误: {e}"
+        }, ensure_ascii=False, indent=2)
+
+    try:
+        from core.ecosystem.tool_ecosystem import (
+            ToolStep, CompositeToolSpec, get_tool_ecosystem
+        )
+
+        tool_steps = []
+        for s in steps:
+            step = ToolStep(
+                tool_name=s.get("tool_name", ""),
+                parameters=s.get("parameters", {}),
+                input_mapping=s.get("input_mapping", {}),
+                condition=s.get("condition"),
+                retry_on_failure=s.get("retry_on_failure", False),
+                max_retries=s.get("max_retries", 3),
+            )
+            tool_steps.append(step)
+
+        spec = CompositeToolSpec(
+            name=name,
+            description=description,
+            steps=tool_steps,
+        )
+
+        ecosystem = get_tool_ecosystem()
+        ecosystem.composite_manager.register_composite(spec)
+
+        return json.dumps({
+            "success": True,
+            "message": f"复合工具 '{name}' 注册成功",
+            "steps_count": len(tool_steps),
+        }, ensure_ascii=False, indent=2)
+
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "message": f"注册失败: {type(e).__name__}: {e}"
+        }, ensure_ascii=False, indent=2)
+
+
+@tool(args_schema=ExecuteCompositeInput)
+def execute_composite_tool_wrapper(
+    name: str,
+    params_json: str = "{}",
+) -> str:
+    """
+    执行复合工具
+
+    **使用场景**：
+    - 批量执行多个工具的流水线
+    - 自动化复杂工作流
+
+    **params_json 示例**：
+    ```
+    {"query": "Python", "limit": 10}
+    ```
+    """
+    try:
+        params = json.loads(params_json)
+    except (json.JSONDecodeError, ValueError) as e:
+        return json.dumps({
+            "success": False,
+            "message": f"params_json 格式错误: {e}"
+        }, ensure_ascii=False, indent=2)
+
+    try:
+        from core.ecosystem.tool_ecosystem import get_tool_ecosystem
+        ecosystem = get_tool_ecosystem()
+        result = ecosystem.execute_composite(name, params)
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({
+            "success": False,
+            "message": f"执行失败: {type(e).__name__}: {e}"
+        }, ensure_ascii=False, indent=2)

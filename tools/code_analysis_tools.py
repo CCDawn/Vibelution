@@ -662,7 +662,7 @@ def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -
                 f"[编辑] 错误: 在文件中找不到匹配的代码块\n\n"
                 f"[搜索块内容 - 前200字符]:\n{search_display[:200]}...\n\n"
                 f"{similar}\n\n"
-                f"提示: 请确保 SEARCH 块���的代码与文件中的完全一致（包括缩进）"
+                f"提示: 请确保 SEARCH 块的代码与文件中的完全一致（包括缩进）"
             )
 
         start_pos, end_pos = match_pos
