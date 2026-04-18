@@ -646,6 +646,12 @@ def record_codebase_insight_tool(module_path: str, insight: str) -> str:
     """
     刻印代码库认知到数据库
 
+    .. deprecated::
+        此工具已废弃。请通过 PromptManager 的 CODEBASE_MAP 组件
+        自动注入动态 AST 扫描结果，无需手动刻印。
+        若需强制刷新地图，可调用：
+        ``from core.capabilities.codebase_map_builder import get_codebase_map; get_codebase_map(force_refresh=True)``
+
     Args:
         module_path: 模块路径，如 'tools/ast_tools.py' 或 '整体架构'
         insight: 该模块的核心作用、已知问题或最佳调用方式
@@ -653,6 +659,13 @@ def record_codebase_insight_tool(module_path: str, insight: str) -> str:
     Returns:
         操作结果
     """
+    import warnings
+    warnings.warn(
+        "record_codebase_insight_tool is deprecated. "
+        "Use core.capabilities.codebase_map_builder.get_codebase_map() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     try:
         ws = get_workspace()
         current_gen = get_generation_tool()
@@ -672,9 +685,22 @@ def get_global_codebase_map_tool() -> str:
     """
     获取全局代码库认知地图
 
+    .. deprecated::
+        此工具已废弃。请通过 PromptManager 的 CODEBASE_MAP 组件
+        自动注入动态 AST 扫描结果，无需手动调用。
+        若需强制刷新地图，可调用：
+        ``from core.capabilities.codebase_map_builder import get_codebase_map; get_codebase_map(force_refresh=True)``
+
     Returns:
         Markdown 格式的认知地图
     """
+    import warnings
+    warnings.warn(
+        "get_global_codebase_map_tool is deprecated. "
+        "Use core.capabilities.codebase_map_builder.get_codebase_map() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     try:
         ws = get_workspace()
         return ws.generate_codebase_map()

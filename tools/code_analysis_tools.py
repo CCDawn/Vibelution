@@ -425,16 +425,6 @@ list_file_entities_tool = list_file_entities
 # Diff Block 编辑器
 # ============================================================================
 
-def _normalize_whitespace(text: str) -> str:
-    """规范化空白符，用于比较"""
-    lines = text.split('\n')
-    normalized = []
-    for line in lines:
-        normalized.append(line.rstrip())
-    while normalized and not normalized[-1]:
-        normalized.pop()
-    return '\n'.join(normalized)
-
 
 def _find_match_position(content: str, search_block: str, allow_fuzzy: bool = False) -> Optional[Tuple[int, int]]:
     """

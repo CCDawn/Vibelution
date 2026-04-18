@@ -42,7 +42,7 @@ except ImportError:
     HAS_RICH = False
     print("[WARNING] rich 库未安装，输出将为纯文本模式。pip install rich")
 
-console = Console()
+console = Console(legacy_windows=False, force_terminal=False)
 
 
 # --------------------------------------------------------------------------
@@ -182,6 +182,14 @@ def _parse_response(content: str) -> tuple[str, str, list]:
 # --------------------------------------------------------------------------
 
 def _render_result(result: DebugResult):
+    """用 rich 美化输出，失败则降级到纯文本"""
+    try:
+        _render_result_rich(result)
+    except Exception:
+        _render_result_text(result)
+
+
+def _render_result_rich(result: DebugResult):
     """用 rich 美化输出"""
     score = result.score()
     status_icon = "✅" if score["total"] >= 80 else ("⚠️" if score["total"] >= 50 else "❌")
@@ -422,47 +430,54 @@ def run_suite(agent, system_prompt: str, suites: list) -> list[DebugResult]:
     """运行全套测试"""
     results = []
     for i, entry in enumerate(suites):
-        console.rule(f"[bold]测试 {i+1}/{len(suites)}: {entry['name']}[/bold]")
-        console.print(f"[dim]{entry['description']}[/dim]\n")
+        try:
+            console.rule(f"[bold]测试 {i+1}/{len(suites)}: {entry['name']}[/bold]")
+            console.print(f"[dim]{entry['description']}[/dim]\n")
+        except Exception:
+            print(f"\n========== 测试 {i+1}/{len(suites)}: {entry['name']} ==========")
+            print(f"说明: {entry['description']}")
         result = run_single_test(agent, system_prompt, entry["prompt"], entry)
-        if HAS_RICH:
+        try:
             _render_result(result)
-        else:
+        except Exception:
             _render_result_text(result)
         results.append(result)
-        time.sleep(1)  # 避免频率限制
+        time.sleep(1)
     return results
 
 
 def print_suite_summary(results: list[DebugResult], suites: list):
     """打印测试套件汇总"""
-    console.print()
-    console.rule("[bold cyan]📊 测试套件汇总[/bold cyan]")
-
-    table = Table(box=box.ROUNDED)
-    table.add_column("#", style="dim", width=3)
-    table.add_column("测试名称", style="cyan")
-    table.add_column("状态", style="bold")
-    table.add_column("工具命中", style="yellow")
-    table.add_column("耗时", style="dim")
-
+    table_rows = []
     for i, (result, entry) in enumerate(zip(results, suites)):
         score = result.score()
-        status = "✅ PASS" if score["total"] >= 60 else ("⚠️ WARN" if score["total"] >= 30 else "❌ FAIL")
+        status = "PASS" if score["total"] >= 60 else ("WARN" if score["total"] >= 30 else "FAIL")
         tc_count = len(result.tool_calls)
-        table.add_row(
-            str(i + 1),
-            entry["name"],
-            status,
-            f"{tc_count} 个",
-            f"{result.duration_ms:.0f}ms",
-        )
+        table_rows.append((str(i + 1), entry["name"], status, f"{tc_count} 个", f"{result.duration_ms:.0f}ms"))
 
-    console.print(table)
-
-    # 全局通过率
-    passed = sum(1 for r in results if r.score()["total"] >= 60)
-    console.print(f"\n[bold]通过率: {passed}/{len(results)} ({100*passed/len(results):.0f}%)[/bold]")
+    try:
+        console.print()
+        console.rule("[bold cyan]测试套件汇总[/bold cyan]")
+        table = Table(box=box.ROUNDED)
+        table.add_column("#", style="dim", width=3)
+        table.add_column("测试名称", style="cyan")
+        table.add_column("状态", style="bold")
+        table.add_column("工具命中", style="yellow")
+        table.add_column("耗时", style="dim")
+        for row in table_rows:
+            table.add_row(*row)
+        console.print(table)
+        passed = sum(1 for r in results if r.score()["total"] >= 60)
+        console.print(f"\n[bold]通过率: {passed}/{len(results)} ({100*passed/len(results):.0f}%)[/bold]")
+    except Exception:
+        print("\n========== 测试套件汇总 ==========")
+        print(f"{'#':<3} {'测试名称':<20} {'状态':<6} {'工具命中':<10} {'耗时':<10}")
+        print("-" * 55)
+        for row in table_rows:
+            print(f"{row[0]:<3} {row[1]:<20} {row[2]:<6} {row[3]:<10} {row[4]:<10}")
+        print("-" * 55)
+        passed = sum(1 for r in results if r.score()["total"] >= 60)
+        print(f"通过率: {passed}/{len(results)} ({100*passed/len(results):.0f}%)")
 
 
 # --------------------------------------------------------------------------
@@ -491,11 +506,14 @@ def main():
     # --------------------------------------------------------------------------
     # 初始化 Agent 组件（不启动完整 Agent，只复用其 LLM client 和 PromptManager）
     # --------------------------------------------------------------------------
-    console.print("[cyan]🔧 初始化提示词打靶环境...[/cyan]")
+    try:
+        console.print("[cyan]初始化提示词打靶环境...[/cyan]")
+    except Exception:
+        print("初始化提示词打靶环境...")
 
     try:
         from core.capabilities.prompt_manager import get_prompt_manager
-        from tools.llm_parser import parse_llm_response
+        from core.orchestration.response_parser import parse_llm_response
     except ImportError as e:
         console.print(f"[red]❌ 导入失败: {e}[/red]")
         sys.exit(1)
@@ -506,7 +524,7 @@ def main():
 
     # 打印索引
     if args.index:
-        _, idx = pm.build_with_index()
+        _, idx = pm.build_index()
         console.print("\n[bold cyan]📋 PromptManager 拼接索引[/bold cyan]")
         idx_table = Table(box=box.ROUNDED, show_header=False)
         idx_table.add_column("组件", style="yellow bold", width=20)
@@ -610,7 +628,7 @@ def main():
                 continue
 
             if user_input.strip() == "!index":
-                _, idx = pm.build_with_index()
+                _, idx = pm.build_index()
                 for item in idx:
                     console.print(f"  [yellow]{item['name']:20s}[/yellow] source={item['source']:10s} len={item['length']}")
                 continue

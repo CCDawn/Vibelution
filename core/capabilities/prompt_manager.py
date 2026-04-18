@@ -88,7 +88,7 @@ class PromptManager:
     - 管理提示词组件注册表（核心硬编码 + 扩展可配）
     - 参数驱动的组件拼接：build(include, exclude, ...)
     - 单例模式全局访问
-    - 双轨加载（workspace 优先，回退 static）
+    - 双轨加载
     - 缓存失效机制
     """
 
@@ -342,7 +342,8 @@ class PromptManager:
     # build() - 参数驱动拼接
     # ------------------------------------------------------------------------
 
-    def build_with_index(
+
+    def _load_components(
         self,
         include: Optional[List[str]] = None,
         exclude: Optional[List[str]] = None,
@@ -351,30 +352,23 @@ class PromptManager:
         core_context: Optional[str] = None,
         current_goal: Optional[str] = None,
         state_memory: Optional[str] = None,
-    ) -> tuple[str, List[Dict[str, Any]]]:
+    ) -> tuple[Dict[str, str], List[Dict[str, Any]]]:
         """
-        构建动态系统提示词，并返回拼接索引（用于调试）。
+        加载并渲染所有组件，返回内容字典和索引列表。
 
         Returns:
-            (prompt_text, index_list)
-            index_list 每项格式：
-            {
-                "name": 组件名,
-                "source": "static" | "workspace",
-                "length": 字符数,
-                "enabled": bool,
-                "required": bool,
-            }
+            (content_by_name, index_list)
+            content_by_name: { "SOUL": "...", "AGENTS": "...", ... }
+            index_list: 每项格式同 build_index
         """
-        from dataclasses import asdict
-
         if include is None:
             include = ["SOUL", "AGENTS", "MEMORY", "current_rules"]
         effective_state_memory = state_memory if state_memory is not None else self.state_memory
         selected = self._select_components(include, exclude)
 
-        parts = []
-        index_list = []
+        content_by_name: Dict[str, str] = {}
+        index_list: List[Dict[str, Any]] = []
+
         for comp in selected:
             try:
                 content = comp.load_fn()
@@ -387,7 +381,7 @@ class PromptManager:
                         state_memory=effective_state_memory,
                     )
                 if content and content.strip():
-                    parts.append(content)
+                    content_by_name[comp.name] = content
                     index_list.append({
                         "name": comp.name,
                         "source": self._cache_sources.get(comp.name, "unknown"),
@@ -398,7 +392,7 @@ class PromptManager:
             except Exception as e:
                 logger.warning(f"[PromptManager] 组件 {comp.name} 加载失败: {e}")
 
-        return "\n\n---\n\n".join(parts), index_list
+        return content_by_name, index_list
 
     def build(
         self,
@@ -425,7 +419,7 @@ class PromptManager:
         Returns:
             组装完成的系统提示词字符串
         """
-        text, _ = self.build_with_index(
+        content_by_name, _ = self._load_components(
             include=include,
             exclude=exclude,
             generation=generation,
@@ -434,7 +428,46 @@ class PromptManager:
             current_goal=current_goal,
             state_memory=state_memory,
         )
-        return text
+        selected = self._select_components(include, exclude)
+        parts = [content_by_name[c.name] for c in selected if c.name in content_by_name]
+        return "\n\n---\n\n".join(parts)
+
+    def build_index(
+        self,
+        include: Optional[List[str]] = None,
+        exclude: Optional[List[str]] = None,
+        generation: Optional[int] = None,
+        total_generations: Optional[int] = None,
+        core_context: Optional[str] = None,
+        current_goal: Optional[str] = None,
+        state_memory: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        构建动态系统提示词并返回拼接索引（用于调试）。
+
+        Args:
+            同 build()
+
+        Returns:
+            index_list，每项格式：
+            {
+                "name": 组件名,
+                "source": "static" | "workspace",
+                "length": 字符数,
+                "enabled": bool,
+                "required": bool,
+            }
+        """
+        _, index_list = self._load_components(
+            include=include,
+            exclude=exclude,
+            generation=generation,
+            total_generations=total_generations,
+            core_context=core_context,
+            current_goal=current_goal,
+            state_memory=state_memory,
+        )
+        return index_list
 
     def _select_components(
         self,
@@ -580,11 +613,10 @@ class PromptManager:
             return ""
 
     def _load_codebase_map(self) -> str:
-        """加载代码库认知地图"""
+        """加载代码库认知地图（AST 动态扫描）"""
         try:
-            from core.infrastructure.workspace_manager import get_workspace
-            ws = get_workspace()
-            return ws.generate_codebase_map()
+            from core.capabilities.codebase_map_builder import get_codebase_map
+            return get_codebase_map()
         except Exception as e:
             return f"[警告: 加载认知地图失败: {e}]"
 

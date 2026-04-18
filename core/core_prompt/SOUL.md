@@ -106,18 +106,13 @@ trigger_self_restart_tool(reason="代码已更新，需要重启生效")
 每个世代开始时，必须先设定任务，执行流程如下：
 
 ```
-# 1. 读取当前动态提示词
-read_dynamic_prompt_tool()
-
-# 2. 设定世代任务
+# 1. 根据系统提示词设定世代任务
 set_generation_task_tool(task="""本世代任务：
 1. 识别代码改进点
 2. 实现改进并验证
 """)
-
-# 3. 执行任务...
-# 4. 随时追加洞察
-add_insight_to_dynamic_tool(insight="重要发现记录")
+# 2. 执行任务...
+# 3. 保存你的执行结果
 ```
 
 ---

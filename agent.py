@@ -682,7 +682,8 @@ class SelfEvolvingAgent:
             True: 继续运行, False: 触发重启, "hibernated": 休眠后继续
         """
         pm = get_prompt_manager()
-        content_system_prompt,content_system_prompt_index = pm.build_with_index()
+        content_system_prompt = pm.build()
+        content_system_prompt_index = pm.build_index()
         print(content_system_prompt_index)
         messages = [SystemMessage(content=content_system_prompt)]
 
@@ -696,7 +697,7 @@ class SelfEvolvingAgent:
             "所有计划完成后调用 commit_compressed_memory(task=\"...\") 保存记忆\n"
             "最后调用 trigger_self_restart_tool(task=\"...\") 结束本轮\n"
         )
-        debug_user_prompt=("最高指令现在把你所有能够调用的工具名字列举出来,不要调用工具，根据你的系统提示词推理出你能使用的工具名，和世代任务进行排查，我要检查一下是否有工具没有被使用")
+        # autonomous_user_prompt=("最高指令现在把你所有能够调用的工具名字列举出来,不要调用工具，根据你的系统提示词推理出你能使用的工具名，和世代任务进行排查，我要检查一下是否有工具没有被使用")
         # 获取轮次编号
         if user_prompt:
             current_turn = logger._turn_count
@@ -761,6 +762,7 @@ class SelfEvolvingAgent:
                 # 调用 LLM
                 response = self._invoke_llm(messages)
                 if response is None:
+                    print("LLM 调用失败")
                     continue
 
                 messages.append(response)
@@ -1490,12 +1492,6 @@ class SelfEvolvingAgent:
 # ============================================================================
 # 辅助函数
 # ============================================================================
-
-def _get_total_generations() -> int:
-    """获取总世代数"""
-    memory = _load_memory()
-    return memory.get("total_generations", 1)
-
 
 def print_evolution_time():
     """打印当前系统时间"""

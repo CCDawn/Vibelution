@@ -65,48 +65,48 @@ def create_key_tools() -> List[BaseTool]:
         """
         return _commit_compressed_impl(new_core_context=new_core_context, next_goal=next_goal)
 
-    @tool
-    def read_dynamic_prompt_tool() -> str:
-        """
-        【世代开始时必调】读取 workspace/prompts/DYNAMIC.md 的当前内容。
+    # @tool
+    # def read_dynamic_prompt_tool() -> str:
+    #     """
+    #     【世代开始时必调】读取 workspace/prompts/DYNAMIC.md 的当前内容。
 
-        用于了解当前世代的任务目标、历史积累的洞察。
+    #     用于了解当前世代的任务目标、历史积累的洞察。
 
-        Returns:
-            DYNAMIC.md 完整内容
-        """
-        return _read_dynamic_prompt_impl()
+    #     Returns:
+    #         DYNAMIC.md 完整内容
+    #     """
+    #     return _read_dynamic_prompt_impl()
 
-    @tool
-    def add_insight_to_dynamic_tool(insight: str) -> str:
-        """
-        【随时追加】将重要发现追加到 DYNAMIC.md 的洞察积累区域。
+    # @tool
+    # def add_insight_to_dynamic_tool(insight: str) -> str:
+    #     """
+    #     【随时追加】将重要发现追加到 DYNAMIC.md 的洞察积累区域。
 
-        适用于在执行任务过程中发现关键技术点，需要记录下来供后续世代参考。
+    #     适用于在执行任务过程中发现关键技术点，需要记录下来供后续世代参考。
 
-        Args:
-            insight: 要追加的洞察内容
+    #     Args:
+    #         insight: 要追加的洞察内容
 
-        Returns:
-            更新结果
-        """
-        return _add_insight_impl(insight=insight)
+    #     Returns:
+    #         更新结果
+    #     """
+    #     return _add_insight_impl(insight=insight)
 
-    @tool
-    def write_dynamic_prompt_tool(content: str) -> str:
-        """
-        【完整写入】用新内容全量替换 DYNAMIC.md 的正文。
+    # @tool
+    # def write_dynamic_prompt_tool(content: str) -> str:
+    #     """
+    #     【完整写入】用新内容全量替换 DYNAMIC.md 的正文。
 
-        与 add_insight_to_dynamic_tool 的"追加"不同，本工具执行全量覆盖写入，
-        适用于重写整个动态提示词区域。
+    #     与 add_insight_to_dynamic_tool 的"追加"不同，本工具执行全量覆盖写入，
+    #     适用于重写整个动态提示词区域。
 
-        Args:
-            content: 新的动态提示词完整内容
+    #     Args:
+    #         content: 新的动态提示词完整内容
 
-        Returns:
-            更新结果
-        """
-        return _write_dynamic_prompt_impl(content=content)
+    #     Returns:
+    #         更新结果
+    #     """
+    #     return _write_dynamic_prompt_impl(content=content)
 
     # ── 记忆系统工具 ──────────────────────────────────────────────────────
 
@@ -120,17 +120,17 @@ def create_key_tools() -> List[BaseTool]:
         """
         return _read_memory_impl()
 
-    @tool
-    def get_memory_summary_tool() -> str:
-        """
-        【人类可读摘要】获取当前记忆的人类可读摘要。
+    # @tool
+    # def get_memory_summary_tool() -> str:
+    #     """
+    #     【人类可读摘要】获取当前记忆的人类可读摘要。
 
-        用于快速了解 Agent 的当前状态。
+    #     用于快速了解 Agent 的当前状态。
 
-        Returns:
-            格式化的记忆摘要字符串
-        """
-        return _get_memory_summary_impl()
+    #     Returns:
+    #         格式化的记忆摘要字符串
+    #     """
+    #     return _get_memory_summary_impl()
 
     # ── 世代与任务工具 ─────────────────────────────────────────────────────
 
@@ -529,12 +529,8 @@ def create_key_tools() -> List[BaseTool]:
     return [
         # SOUL.md 核心
         commit_compressed_memory_tool,
-        read_dynamic_prompt_tool,
-        add_insight_to_dynamic_tool,
-        write_dynamic_prompt_tool,
         # 记忆系统
         read_memory_tool,
-        get_memory_summary_tool,
         # 世代与重启
         set_generation_task_tool,
         trigger_self_restart_tool,

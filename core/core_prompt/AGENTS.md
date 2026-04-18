@@ -189,8 +189,6 @@ trigger_self_restart_tool(reason="已完成本世代任务")
 |------|------|------|
 | 读取记忆 | `read_memory_tool` | 查看当前世代状态 |
 | 保存记忆 | `commit_compressed_memory_tool` | **重启前必调用！** |
-| 读取动态提示词 | `read_dynamic_prompt_tool` | 读取 DYNAMIC.md |
-| 添加洞察 | `add_insight_to_dynamic_tool` | 追加洞察到动态提示词 |
 | 查看状态 | `self_test_tool` | 运行自检 |
 
 ### 重启与休眠

@@ -722,7 +722,7 @@ pytest tests/test_compression*.py tests/test_key_info_extractor.py -v
 | Phase 7 | 4 | 71 | ✅ 完整 |
 | Token 优化 | 3 | 58 | ✅ 完整 |
 | Phase 8 | 1 | - | ⚠️ 框架 |
-| **提示词打靶** | 1 | 6+ | ✅ 核心工具 |
+| **提示词打靶** | 2 | 12+ | ✅ 92% (11/12) |
 
 ### 🔴 提示词打靶测试（强制要求）
 
@@ -865,7 +865,7 @@ SCREAMING_SNAKE_CASE (e.g., MAX_RETRY = 3)
 | 2026-04-18 | v4.6 | **check_restart_block Bug 修复**：添加无后缀别名函数，解决 agent.py 内部调用 NameError |
 | 2026-04-18 | v4.7 | **Agent 自我扩展 Skill 系统**：新增 SkillRegistry/SkillLoader/SkillTools，Agent 可在 workspace/skills/ 自建/修改/删除 Skill，集成到 agent.py，增强 XML 解析支持 <skill> 标签，CompositeTool 暴露为 LangChain Tool，更新 AGENTS.md，33 测试通过 |
 | 2026-04-18 | v4.8 | **PromptManager 重构**：新增 core/capabilities/prompt_manager.py，PromptManager 组件注册表 + 参数驱动 build(include, exclude) 拼接 API，单例 get_prompt_manager()，28 测试通过 |
-| 2026-04-18 | v4.9 | **工具注册完整性修复**：通过提示词打靶测试发现 28/34 个工具未注册，重写 tools/Key_Tools.py（14→29 个工具），实现 write_dynamic_prompt_tool，清理 AGENTS.md 中 4 个虚假工具引用，统一文档工具名与注册名一致 |
+| 2026-04-18 | v4.9 | **工具注册完整性修复**：通过提示词打靶测试发现 28/34 个工具未注册，重写 tools/Key_Tools.py（14→29 个工具），实现 write_dynamic_prompt_tool，清理 AGENTS.md 中 4 个虚假工具引用，统一文档工具名与注册名一致，打靶测试 11/12 通过（92%） |
 
 ---
 
