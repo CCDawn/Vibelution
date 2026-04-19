@@ -67,6 +67,22 @@ except ImportError:
 
 
 # ============================================================================
+# 共享的 Token Console（延迟初始化）
+# ============================================================================
+
+_token_console = None
+
+
+def _get_token_console():
+    """获取共享的 Token Console"""
+    global _token_console
+    if _token_console is None:
+        from rich.console import Console
+        _token_console = Console(force_terminal=True)
+    return _token_console
+
+
+# ============================================================================
 # DebugLogger - 统一调试日志系统
 # ============================================================================
 
@@ -372,9 +388,7 @@ class ConversationLogger:
 
         # 直接打印 token 数到终端（不走 Live 刷新机制，确保实时可见）
         try:
-            from rich.console import Console
-            _token_console = Console(force_terminal=True)
-            _token_console.print(
+            _get_token_console().print(
                 f"[dim]\\[TOKEN] 输入: {total_input_tokens} | 消息: {len(messages)} | 模型: {model or '?'}[/dim]"
             )
         except Exception:

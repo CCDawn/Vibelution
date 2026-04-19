@@ -804,7 +804,6 @@ def main(initial_prompt: str = None):
         ui.add_content("[dim]─" * 60 + "[/dim]")
 
         if args.auto or initial_prompt:
-            ui.stop_live()  # 停止 Live 显示以便正常运行循环
             agent.run_loop(initial_prompt=initial_prompt)
         else:
             ui.add_content("[bold yellow]交互模式[/bold yellow] - 输入指令或按 Enter 进入自动模式")

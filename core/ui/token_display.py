@@ -16,6 +16,18 @@ from __future__ import annotations
 from typing import Optional
 
 
+_token_console = None
+
+
+def _get_token_console():
+    """获取共享的 Token 显示 Console（延迟初始化）"""
+    global _token_console
+    if _token_console is None:
+        from rich.console import Console
+        _token_console = Console(force_terminal=True, stderr=False)
+    return _token_console
+
+
 def print_tokens(
     input_tokens: int,
     output_tokens: Optional[int] = None,
@@ -32,8 +44,7 @@ def print_tokens(
         max_iterations: 最大迭代数（可选）
     """
     try:
-        from rich.console import Console
-        console = Console(force_terminal=True)
+        console = _get_token_console()
 
         if output_tokens is not None:
             console.print(

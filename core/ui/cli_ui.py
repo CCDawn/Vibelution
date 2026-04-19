@@ -312,6 +312,8 @@ class UIManager:
         if self._live:
             self._live.stop()
             self._live = None
+            # 清除控制台缓冲，防止后续输出与 Live 显示残留混合
+            self.console.print("\n", end="")
 
     def refresh(self):
         """刷新显示"""
