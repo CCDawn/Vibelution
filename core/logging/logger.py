@@ -226,15 +226,12 @@ class DebugLogger:
         _ui_log_fn(f"{msg} {details}", "LLM")
 
     def llm_response(self, content: str, prefix: str = "LLM 回复"):
-        """打印完整的 LLM 输出内容"""
+        """打印 LLM 响应摘要到日志面板"""
         ui = _get_ui()
         if ui is None:
             return
-        ui.console.print()
-        ui.console.print(f"[bold magenta]🦞 --- {prefix} ---[/bold magenta]")
-        ui.console.print(content[:500], style="dim")
-        ui.console.print(f"[bold magenta]🦞 ---[/bold magenta]")
-        ui.console.print()
+        preview = content[:80] if content else ""
+        ui.add_log(f"🦞 {prefix}: {preview}...", "LLM")
 
     def llm_thinking(self, content: str):
         """打印 LLM 的思考过程"""

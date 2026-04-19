@@ -378,6 +378,12 @@ def execute_shell_command(
     try:
         system_encoding = locale.getpreferredencoding(False) or 'utf-8'
 
+        # 强制转换为 int，防止 string/float 类型传入 subprocess 导致 TypeError（Python 3.14+）
+        try:
+            timeout_int = int(timeout)
+        except (TypeError, ValueError):
+            timeout_int = 60
+
         result = subprocess.run(
             final_command,
             shell=True,
@@ -386,7 +392,7 @@ def execute_shell_command(
             text=True,
             encoding=system_encoding,
             errors='replace',
-            timeout=timeout
+            timeout=timeout_int
         )
 
         output_parts = []

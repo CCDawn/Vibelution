@@ -92,7 +92,8 @@ class UIManager:
         self._content_lines: List[str] = []  # 中间可滚动内容区
         self._max_content = 100  # 最大保留行数
         self._header_height = 8   # 顶部状态栏高度
-        self._footer_height = 6   # 底部日志栏高度
+        self._footer_height = 18  # 底部日志栏高度（显示行数）
+        self._max_visible_logs = 20  # 日志面板最多显示多少条日志
 
         # 龙虾主题
         self.theme = get_theme()
@@ -203,8 +204,8 @@ class UIManager:
                 height=self._footer_height,
             )
 
-        # 只显示最近的 _footer_height 行
-        recent_logs = self._logs[-self._footer_height:] if len(self._logs) > self._footer_height else self._logs
+        # 只显示最近的 _max_visible_logs 条日志
+        recent_logs = self._logs[-self._max_visible_logs:] if len(self._logs) > self._max_visible_logs else self._logs
         log_text = "\n".join(recent_logs)
 
         return Panel(
@@ -473,16 +474,36 @@ class UIManager:
         self.add_content("")  # 空行分隔
         self.add_content(f"[bold magenta]🔧 {tool_icon} {tool_name}[/bold magenta]" + (f"({', '.join([f'{k}={str(v)[:30]}' for k, v in args.items()][:3])})" if args else ""))
 
+        # 同时写入日志面板
+        if args:
+            args_preview = ", ".join([f"{k}={str(v)[:20]}" for k, v in list(args.items())[:3]])
+            self.add_log(f"{tool_icon} {tool_name}({args_preview})", "TOOL")
+        else:
+            self.add_log(f"{tool_icon} {tool_name}", "TOOL")
+
     def print_tool_result(self, tool_name: str, result: str, success: bool = True):
         """打印工具执行结果 - 输出到内容区"""
         status_icon = "✅" if success else "❌"
         color = self.theme.LOBSTER_GREEN if success else self.theme.LOBSTER_RED
+
+        # 安全转换 result 为字符串
+        if not isinstance(result, str):
+            try:
+                result = str(result)
+            except Exception:
+                result = f"<非字符串类型: {type(result).__name__}>"
 
         self.add_content(f"  {status_icon} [{color}]{tool_name}[/{color}]")
         if result:
             preview = result[:300] + "..." if len(result) > 300 else result
             self.add_content(f"     {preview}")
         self.add_content("")  # 空行分隔
+
+        # 同时写入日志面板（成功/失败状态）
+        if success:
+            self.add_log(f"✅ {tool_name} 完成", "TOOL")
+        else:
+            self.add_log(f"❌ {tool_name} 失败", "ERROR")
 
     def print_warning(self, message: str):
         """打印警告 - 龙虾主题"""
