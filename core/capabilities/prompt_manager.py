@@ -2,7 +2,6 @@
 """
 core/capabilities/prompt_manager.py - 动态系统提示词管理器
 
-将 CorePromptManager + build_system_prompt() 重构为统一的 PromptManager 类，
 支持参数驱动的组件拼接，单例全局访问。
 
 设计原则：
@@ -22,10 +21,6 @@ from typing import Optional, List, Dict, Callable, Any
 
 logger = logging.getLogger(__name__)
 
-
-# ============================================================================
-# 路径解析（从 core/core_prompt/__init__.py 迁移）
-# ============================================================================
 
 def _get_static_root() -> Path:
     """获取 core/core_prompt/ 静态路径（内置模板）"""
@@ -406,9 +401,9 @@ class PromptManager:
         core_context: Optional[str] = None,
         current_goal: Optional[str] = None,
         state_memory: Optional[str] = None,
-    ) -> str:
+    ) -> tuple[str, List[Dict[str, Any]]]:
         """
-        构建动态系统提示词。
+        构建动态系统提示词，同时返回拼接索引。
 
         Args:
             include:   只包含这些组件（None 时由 _active_components_override 决定；
@@ -421,9 +416,17 @@ class PromptManager:
             state_memory:     状态记忆（注入 MEMORY 组件；若为 None 则使用 self.state_memory）
 
         Returns:
-            组装完成的系统提示词字符串
+            (组装完成的系统提示词字符串, index_list)
+            index_list 每项格式：
+            {
+                "name": 组件名,
+                "source": "static" | "workspace",
+                "length": 字符数,
+                "enabled": bool,
+                "required": bool,
+            }
         """
-        content_by_name, _ = self._load_components(
+        content_by_name, index_list = self._load_components(
             include=include,
             exclude=exclude,
             generation=generation,
@@ -434,44 +437,9 @@ class PromptManager:
         )
         selected = self._select_components(include, exclude)
         parts = [content_by_name[c.name] for c in selected if c.name in content_by_name]
-        return "\n\n---\n\n".join(parts)
+        prompt = "\n\n---\n\n".join(parts)
+        return prompt, index_list
 
-    def build_index(
-        self,
-        include: Optional[List[str]] = None,
-        exclude: Optional[List[str]] = None,
-        generation: Optional[int] = None,
-        total_generations: Optional[int] = None,
-        core_context: Optional[str] = None,
-        current_goal: Optional[str] = None,
-        state_memory: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        构建动态系统提示词并返回拼接索引（用于调试）。
-
-        Args:
-            同 build()
-
-        Returns:
-            index_list，每项格式：
-            {
-                "name": 组件名,
-                "source": "static" | "workspace",
-                "length": 字符数,
-                "enabled": bool,
-                "required": bool,
-            }
-        """
-        _, index_list = self._load_components(
-            include=include,
-            exclude=exclude,
-            generation=generation,
-            total_generations=total_generations,
-            core_context=core_context,
-            current_goal=current_goal,
-            state_memory=state_memory,
-        )
-        return index_list
 
     def select_components(self, components: List[str]):
         """
@@ -524,7 +492,7 @@ class PromptManager:
         elif self._active_components_override is not None:
             effective_include = self._active_components_override
         else:
-            effective_include = ["SOUL", "AGENTS", "current_rules"]  # 默认，不再包含 MEMORY
+            effective_include = ["SOUL", "AGENTS", "ENV_INFO", "current_rules"]  # 默认，不再包含 MEMORY
 
         all_comps = sorted(self._components.values(), key=lambda c: c.priority)
 
@@ -693,13 +661,18 @@ class PromptManager:
         """加载环境信息"""
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         project_root = _resolve_project_root()
+        import platform
+        os_name = {"win32": "Windows", "darwin": "macOS", "linux": "Linux"}.get(platform.system(), platform.system())
+        os_version = platform.version()
+        os_arch = platform.machine()
 
         return "\n".join([
             "## 当前环境",
             f"- 当前时间: {current_time}",
+            f"- 操作系统: {os_name} ({os_version}) [{os_arch}]",
             f"- 项目根目录: {project_root}",
-            f"- 静态提示词: core/core_prompt/",
-            f"- 动态提示词: workspace/prompts/",
+            f"- 静态提示词位置: core/core_prompt/",
+            f"- 动态提示词位置: workspace/prompts/",
         ])
 
     def _load_memory_context(self) -> str:

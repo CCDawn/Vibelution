@@ -278,18 +278,28 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def cli_tool(command: str = "", timeout: int = 60) -> str:
         """
-        【万能 CLI 工具】执行任意 Shell 命令。
+        【万能 CLI 工具】执行任意 Shell 命令，支持跨平台自动适配。
+
+        底层自动检测当前操作系统并选择正确的 shell 执行：
+        - Windows: cmd（PowerShell 风格） | Linux 命令 → Git Bash
+        - Linux/macOS: /bin/bash | Windows 命令 → 拒绝并提示替代方案
 
         Args:
-            command: 要执行的 Shell 命令
-            timeout: 超时时间（秒），默认 60 秒
+            command: 要执行的 Shell 命令（根据当前系统自动适配）
+            timeout: 超时时间（秒），默认 60 秒；长时间命令建议设为 120
 
         Returns:
             合并后的命令输出（stdout + stderr）
+            如果检测到跨平台问题，会在输出中说明
         """
         from tools.shell_tools import execute_shell_command
         if not command:
             return '{"status": "error", "code": "MISSING_COMMAND", "message": "cli_tool 需要提供 command 参数"}'
+        # 确保 timeout 是整数，防止 float/int 类型不一致导致错误
+        try:
+            timeout = int(timeout)
+        except (TypeError, ValueError):
+            timeout = 60
         return execute_shell_command(command, timeout=timeout)
 
     @tool
@@ -377,13 +387,13 @@ def create_key_tools() -> List[BaseTool]:
         return _enter_hibernation_impl(duration=duration)
 
     @tool
-    def list_directory_tool(path: str = ".", show_hidden: bool = False,
+    def list_directory_tool(target_dir: str = ".", show_hidden: bool = False,
                              recursive: bool = False) -> str:
         """
         列出目录内容。
 
         Args:
-            path: 目录路径，默认当前目录
+            target_dir: 目录路径，默认当前目录
             show_hidden: 是否显示隐藏文件
             recursive: 是否递归子目录
 
@@ -391,7 +401,7 @@ def create_key_tools() -> List[BaseTool]:
             目录列表结果
         """
         return _list_directory_impl(
-            path=path,
+            path=target_dir,
             show_hidden=show_hidden,
             recursive=recursive
         )

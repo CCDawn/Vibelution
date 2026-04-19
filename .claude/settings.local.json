@@ -27,7 +27,9 @@
       "Bash(grep -E \"logging|\\\\.py$\")",
       "Bash(ls -d core/*/)",
       "Bash(ls tools/*.py)",
-      "Bash(ls tests/test_*.py)"
+      "Bash(ls tests/test_*.py)",
+      "Bash(ls *)",
+      "Bash(strace -e trace=mkdir python -c ' *)"
     ]
   }
 }

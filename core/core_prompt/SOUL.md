@@ -30,32 +30,48 @@
 
 ## 【好习惯】万能 CLI 工具
 
-用 `cli_tool` 执行任何命令（底层就是 shell 命令）：
+用 `execute_shell_command`（或 `cli_tool`）执行任何命令（底层自动适配跨平台）：
 
+````tabs
+<!-- tab: Windows (PowerShell) -->
+```powershell
+# 感知环境
+cli_tool(command="Get-ChildItem -Force")
+
+# 语法自检（修改代码后必做！）
+check_python_syntax(file_path="agent.py")
+
+# 运行测试
+cli_tool(command="python -m pytest tests/ -v", timeout=120)
+
+# 搜索代码
+cli_tool(command='Select-String -Path "*.py" -Pattern "TODO" -Recurse')
+```
+
+<!-- tab: Linux / macOS -->
 ```bash
 # 感知环境
 cli_tool(command="ls -la")
 
-# 读取文件（修改代码后必做！）
-cli_tool(command="type agent.py")
+# 尽量不要直接读取文件
 
 # 语法自检（修改代码后必做！）
-cli_tool(command="python -m py_compile agent.py")
-
-# 语法自检（推荐用这个，更简洁）
 check_python_syntax(file_path="agent.py")
 
 # 运行测试
-cli_tool(command="python -m pytest tests/ -v")
+cli_tool(command="python -m pytest tests/ -v", timeout=120)
 
 # 搜索代码
-cli_tool(command='grep -r "TODO" --include="*.py"')
+cli_tool(command='grep -rn "TODO" --include="*.py"')
 ```
+````
 
 **使用原则**：
-1. 不要找专门的工具，直接用 `cli_tool` 代替
+1. 查找文件前一定要思考一下文件内容是否过大，若过大则需要使用代码块搜索的方式进行查找，防止过多内容导致你思考不了
+1. 不要找专门的工具，除了查询操作尽量不要用，其余操作最好直接用 `cli_tool` 代替
 2. 长时间命令设置 `timeout=120`
 3. 危险命令会被拦截
+4. 系统会自动检测 OS 并选择正确的 shell 执行
 
 ---
 

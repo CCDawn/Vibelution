@@ -47,6 +47,99 @@ import locale
 import platform
 
 # ============================================================================
+# 平台检测
+# ============================================================================
+
+CURRENT_SYSTEM = platform.system().lower()  # "windows" | "linux" | "darwin"
+IS_WINDOWS = CURRENT_SYSTEM == "windows"
+IS_UNIX = CURRENT_SYSTEM in ("linux", "darwin")
+
+# Linux/macOS 特有命令集合（在 Windows 上需要特殊处理）
+LINUX_COMMANDS = {
+    'grep', 'egrep', 'fgrep', 'awk', 'sed', 'find', 'xargs',
+    'sort', 'uniq', 'cut', 'tr', 'tee', 'which', 'type', 'command',
+    'ls', 'rm', 'cp', 'mv', 'mkdir', 'chmod', 'chown', 'ln', 'readlink',
+    'realpath', 'dirname', 'basename', 'wc', 'head', 'tail', 'cat',
+    'less', 'more', 'tar', 'gzip', 'gunzip', 'zip', 'unzip',
+    'curl', 'wget', 'ssh', 'scp', 'rsync', 'diff', 'patch',
+    'env', 'export', 'source', 'alias', 'echo', 'printf',
+    'kill', 'pkill', 'pgrep', 'ps', 'top', 'htop',
+    'df', 'du', 'free', 'mount', 'umount', 'lsof', 'netstat',
+    'git', 'svn', 'hg', 'make', 'cmake', 'gcc', 'g++', 'clang',
+    'pip3', 'python3', 'node', 'npm', 'yarn', 'cargo',
+}
+
+# Windows cmd 特有命令集合（在 Linux/macOS 上需要特殊处理）
+WINDOWS_COMMANDS = {
+    'dir', 'copy', 'move', 'del', 'rd', 'md', 'mkdir', 'type', 'more',
+    'ren', 'replace', 'attrib', 'compact', 'cipher', 'chkdsk', 'sc',
+    'net', 'netstat', 'ping', 'tracert', 'pathping', 'nslookup',
+    'reg', 'diskpart', 'bcdedit', 'diskutil', 'format',
+    'cmd', 'where', 'color', 'cls', 'echo', 'set', 'cd', 'pushd', 'popd',
+    'find', 'sort', 'fc', 'comp', 'convert', 'diskcomp',
+}
+
+# PowerShell cmdlet 特征：Verb-Noun 形式（含连字符）
+# 这类命令走 powershell.exe，不走 cmd
+POWERSHELL_CMDLET_PREFIXES = {
+    'Get-', 'Set-', 'New-', 'Remove-', 'Invoke-', 'Select-', 'Where-',
+    'ForEach-', 'Start-', 'Stop-', 'Write-', 'Read-', 'Add-', 'Clear-',
+    'Compare-', 'Convert-', 'Copy-', 'Enter-', 'Exit-', 'Find-', 'Group-',
+    'Import-', 'Export-', 'Install-', 'Join-', 'Measure-', 'Move-',
+    'Out-', 'Pop-', 'Push-', 'Rename-', 'Reset-', 'Restart-', 'Resume-',
+    'Save-', 'Send-', 'Show-', 'Skip-', 'Split-', 'Suspend-', 'Trace-',
+    'Undo-', 'Unlock-', 'Update-', 'Wait-', 'Watch-', 'Test-', 'Trace-',
+    'Enable-', 'Disable-', 'Publish-', 'Unpublish-', 'Register-',
+    'Unregister-', 'Connect-', 'Disconnect-', 'Format-', 'Initialize-',
+    'Invoke-', 'Optimize-', 'Protect-', 'Unprotect-', 'Repair-', 'Use-',
+}
+
+
+def _get_system_prefix() -> str:
+    """
+    获取系统特定的命令前缀。
+    - Windows: powershell -NoProfile -ExecutionPolicy Bypass -Command
+    - Unix: /bin/bash -c
+    """
+    if IS_WINDOWS:
+        return 'powershell -NoProfile -ExecutionPolicy Bypass -Command'
+    return '/bin/bash -c'
+
+
+def _is_linux_command(command: str) -> bool:
+    """检测命令是否为 Linux/macOS 特有命令"""
+    parts = command.strip().split()
+    if not parts:
+        return False
+    base = parts[0].lower()
+    while base in ('sudo', 'env', '/usr/bin/env', '/bin/env'):
+        if len(parts) > 1:
+            parts = parts[1:]
+            base = parts[0].lower()
+        else:
+            break
+    return base in LINUX_COMMANDS
+
+
+def _is_powershell_command(command: str) -> bool:
+    """检测命令是否为 PowerShell cmdlet（Verb-Noun 形式）"""
+    parts = command.strip().split()
+    if not parts:
+        return False
+    base = parts[0]
+    return any(base.startswith(prefix) for prefix in POWERSHELL_CMDLET_PREFIXES)
+
+
+def _is_windows_command(command: str) -> bool:
+    """检测命令是否为 Windows cmd 特有命令"""
+    parts = command.strip().split()
+    if not parts:
+        return False
+    base = parts[0].lower()
+    return base in WINDOWS_COMMANDS
+
+
+# ============================================================================
 # 配置常量 - 从配置文件加载
 # ============================================================================
 
@@ -219,7 +312,7 @@ def execute_shell_command(
     check_safety: bool = False  # ⚠️ 已临时禁用安全检查
 ) -> str:
     """
-    执行 Shell 命令的万能工具
+    执行 Shell 命令的万能工具（跨平台支持）
 
     Args:
         command: 要执行的 Shell 命令
@@ -244,12 +337,52 @@ def execute_shell_command(
     if not os.path.exists(cwd):
         return f"[错误] 工作目录不存在: {cwd}"
 
+    # -------------------------------------------------------------------------
+    # 跨平台命令适配
+    # -------------------------------------------------------------------------
+    final_command = command.strip()
+
+    if IS_WINDOWS:
+        # Windows 上执行 Linux 特有命令 → 尝试用 Git Bash 包装
+        if _is_linux_command(command):
+            git_bash_paths = [
+                "C:\\Program Files\\Git\\bin\\bash.exe",
+                "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+                os.path.expanduser("~\\AppData\\Local\\Programs\\Git\\bin\\bash.exe"),
+            ]
+            bash_path = None
+            for p in git_bash_paths:
+                if os.path.exists(p):
+                    bash_path = p
+                    break
+            if bash_path:
+                final_command = f'"{bash_path}" -c {json.dumps(command)}'
+            else:
+                return (
+                    f"[跨平台警告] 在 Windows 上检测到 Linux 命令 '{command}'，"
+                    "但未找到 Git Bash。请安装 Git 或使用 Windows 原生命令。"
+                )
+        # PowerShell cmdlet → powershell.exe
+        elif _is_powershell_command(command):
+            final_command = f'powershell -NoProfile -ExecutionPolicy Bypass -Command {json.dumps(command)}'
+        # Windows cmd 原生命令 → cmd.exe
+        else:
+            final_command = f'cmd /c {command}'
+    else:
+        # Unix 上执行 Windows 特有命令 → 拒绝执行
+        if _is_windows_command(command):
+            return (
+                f"[跨平台警告] 在 {CURRENT_SYSTEM} 上检测到 Windows 特有命令 '{command}'。"
+                f"请使用等效的 Unix 命令（如用 'ls' 替代 'dir'，用 'rm' 替代 'del'）。"
+            )
+        # Unix 统一用 /bin/bash 执行
+        final_command = f'/bin/bash -c {json.dumps(command)}'
+
     try:
-        # 获取系统编码
         system_encoding = locale.getpreferredencoding(False) or 'utf-8'
 
         result = subprocess.run(
-            command,
+            final_command,
             shell=True,
             cwd=cwd,
             capture_output=True,
@@ -259,7 +392,6 @@ def execute_shell_command(
             timeout=timeout
         )
 
-        # 合并 stdout 和 stderr
         output_parts = []
 
         if result.stdout:
@@ -273,7 +405,6 @@ def execute_shell_command(
 
         output = "\n\n".join(output_parts)
 
-        # 如果命令返回非零状态码，必须明确标记
         if result.returncode != 0:
             has_error_keywords = any(kw in output.lower() for kw in
                 ["error", "exception", "failed", "fail", "traceback", "syntaxerror", "indentationerror"])
@@ -309,17 +440,17 @@ def run_powershell(command: str, timeout: int = DEFAULT_TIMEOUT, cwd: Optional[s
 
 
 def run_batch(commands: List[str], timeout: int = DEFAULT_TIMEOUT, cwd: Optional[str] = None) -> str:
-    """批量执行多个命令"""
+    """批量执行多个命令（跨平台）"""
     if not commands:
         return "[错误] 命令列表为空"
-    combined_command = " && ".join(commands)
+    sep = " && " if not IS_WINDOWS else " ; "
+    combined_command = sep.join(commands)
     return execute_shell_command(combined_command, timeout=timeout, cwd=cwd)
 
 
 def quick_ping(host: str = "8.8.8.8", count: int = 1) -> str:
-    """快速网络连通性检测"""
-    system = platform.system().lower()
-    if system == "windows":
+    """快速网络连通性检测（跨平台）"""
+    if IS_WINDOWS:
         cmd = f"ping -n {count} {host}"
     else:
         cmd = f"ping -c {count} {host}"

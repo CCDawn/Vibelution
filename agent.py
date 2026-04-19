@@ -614,7 +614,7 @@ class SelfEvolvingAgent:
             self.task_planner = None
 
         # =========================================================================
-        # 初始化 Skill 系统（Phase 8.5: Agent 自我扩展）
+        # 初始化 Skill 系统
         # =========================================================================
         try:
             from core.ecosystem.skill_registry import get_skill_registry
@@ -1209,9 +1209,6 @@ class SelfEvolvingAgent:
             time.sleep(hibernate_duration)
             return (f"休眠 {hibernate_duration} 秒完成", "hibernated")
 
-        # =========================================================================
-        # Skill 工具处理（Phase 8.5: Agent 自我扩展）
-        # =========================================================================
         # 检查是否是 Skill 工具
         if tool_name.startswith("skill_"):
             skill_name = tool_name[6:]  # 去掉 "skill_" 前缀
