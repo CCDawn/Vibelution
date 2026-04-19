@@ -85,6 +85,12 @@ class UIManager:
         self._tool_count = 0
         self._iterations = 0
 
+        # ========== Claude Code 风格三段式布局 ==========
+        self._content_lines: List[str] = []  # 中间可滚动内容区
+        self._max_content = 100  # 最大保留行数
+        self._header_height = 8   # 顶部状态栏高度
+        self._footer_height = 6   # 底部日志栏高度
+
         # 龙虾主题
         self.theme = get_theme()
         self.style = get_style()
@@ -164,7 +170,6 @@ class UIManager:
             title=self.style.status_title,
             border_style=self.theme.LOBSTER_CYAN,
             box=ASCII2,
-            width=70,
         )
 
     def _create_task_board(self) -> Optional[Panel]:
@@ -181,45 +186,94 @@ class UIManager:
         )
 
     def _create_log_panel(self) -> Panel:
-        """创建日志面板"""
+        """创建底部日志面板 - 固定显示最近日志"""
         if not self._logs:
             return Panel(
-                f"[dim]{self.avatar.get_art('happy')} 等待日志...[/dim]",
-                title=f"[bold {self.theme.LOBSTER_GREEN}]📝 执行日志[/bold {self.theme.LOBSTER_GREEN}]",
+                f"[dim]等待日志...[/dim]",
+                title=f"[bold {self.theme.LOBSTER_GREEN}]📝 日志[/bold {self.theme.LOBSTER_GREEN}]",
                 border_style=self.theme.LOBSTER_GREEN,
                 box=ASCII2,
+                height=self._footer_height,
             )
 
-        # 只显示最近的日志
-        recent_logs = self._logs[-20:] if len(self._logs) > 20 else self._logs
+        # 只显示最近的 _footer_height 行
+        recent_logs = self._logs[-self._footer_height:] if len(self._logs) > self._footer_height else self._logs
         log_text = "\n".join(recent_logs)
 
         return Panel(
             log_text,
-            title=f"[bold {self.theme.LOBSTER_GREEN}]📝 执行日志[/bold {self.theme.LOBSTER_GREEN}] ({len(self._logs)} entries)",
+            title=f"[bold {self.theme.LOBSTER_GREEN}]📝 日志 ({len(self._logs)})[/]",
             border_style=self.theme.LOBSTER_GREEN,
             box=ASCII2,
+            height=self._footer_height,
         )
 
     def _create_full_renderable(self) -> Table:
-        """创建完整的渲染布局"""
-        layout = Table(box=None, show_header=False, padding=0)
+        """创建完整的渲染布局 - Claude Code 风格三段式
 
-        left_panel = self._create_header()
-        task_panel = self._create_task_board()
+        布局结构:
+        ┌──────────────────────────────────────────────┐
+        │  [顶部状态栏: Baby Claw 状态 - 固定]         │  ← _header_height 行
+        ├──────────────────────────────────────────────┤
+        │  [中间可滚动内容区: 工具输出、思考过程]        │  ← 可滚动
+        ├──────────────────────────────────────────────┤
+        │  [底部日志栏: 最近日志 - 固定]                │  ← _footer_height 行
+        └──────────────────────────────────────────────┘
+        """
+        # 使用 Table 实现垂直布局（无边框，自动扩展宽度）
+        table = Table(box=None, show_header=False, padding=0)
+
+        # 设置表格宽度为控制台宽度
+        table.width = self.console.width
+
+        # 创建各面板（不指定宽度，让 Panel 自动适应表格宽度）
+        header_panel = self._create_header()
+        content_panel = self._create_content_area()
         log_panel = self._create_log_panel()
 
-        # 创建主表格
-        main = Table(box=None, show_header=False, padding=0)
-        main.add_column(justify="left", ratio=1)
-        main.add_column(justify="left", ratio=1)
+        # 垂直堆叠: header | content | footer
+        table.add_column(justify="left")
+        table.add_row(header_panel, end_section=True)
+        table.add_row(content_panel, end_section=True)
+        table.add_row(log_panel, end_section=True)
 
-        if task_panel:
-            main.add_row(left_panel, task_panel)
+        return table
+
+    def _create_content_area(self) -> Panel:
+        """创建中间可滚动内容区"""
+        if not self._content_lines:
+            content = f"[dim]{self.avatar.get_art('happy')}\n等待任务...[/dim]"
         else:
-            main.add_row(left_panel, "")
+            # 只保留最近的 _max_content 行
+            recent = self._content_lines[-self._max_content:] if len(self._content_lines) > self._max_content else self._content_lines
+            content = "\n".join(recent)
 
-        return main
+        return Panel(
+            content,
+            title=f"[bold cyan]📤 内容输出[/bold cyan] ({len(self._content_lines)} 条)",
+            border_style="cyan",
+            box=ASCII2,
+            padding=0,
+        )
+
+    # ========== 内容区操作 ==========
+
+    def add_content(self, text: str):
+        """添加内容到中间可滚动区"""
+        self._content_lines.append(text)
+        if len(self._content_lines) > self._max_content * 2:  # 超过2倍上限时清理
+            self._content_lines = self._content_lines[-self._max_content:]
+        self.refresh()
+
+    def add_content_block(self, lines: List[str]):
+        """添加多行内容块"""
+        for line in lines:
+            self.add_content(line)
+
+    def clear_content(self):
+        """清空内容区"""
+        self._content_lines = []
+        self.refresh()
 
     @contextmanager
     def live_display(self, refresh_per_second: int = 4):
@@ -368,31 +422,24 @@ class UIManager:
             yield status
 
     def print_tool_start(self, tool_name: str, args: Dict[str, Any] = None):
-        """打印工具调用开始 - 龙虾主题"""
+        """打印工具调用开始 - 输出到内容区"""
         self.increment_tool_count()
         tool_icon = self.theme.get_tool_icon(tool_name)
 
-        self.console.print()
-        self.console.print(f"[bold magenta]🔧 {tool_icon} {tool_name}[/bold magenta]", end="")
-
-        if args:
-            args_str = ", ".join([f"{k}={str(v)[:30]}" for k, v in args.items()][:3])
-            self.console.print(f"({args_str})", style="dim")
-
-        self.console.print()
+        # 输出到内容区（保持 Live 刷新）
+        self.add_content("")  # 空行分隔
+        self.add_content(f"[bold magenta]🔧 {tool_icon} {tool_name}[/bold magenta]" + (f"({', '.join([f'{k}={str(v)[:30]}' for k, v in args.items()][:3])})" if args else ""))
 
     def print_tool_result(self, tool_name: str, result: str, success: bool = True):
-        """打印工具执行结果 - 龙虾主题"""
+        """打印工具执行结果 - 输出到内容区"""
         status_icon = "✅" if success else "❌"
         color = self.theme.LOBSTER_GREEN if success else self.theme.LOBSTER_RED
 
-        self.console.print(f"  {status_icon} ", end="", style=color)
-        self.console.print(tool_name, style="bold")
-
+        self.add_content(f"  {status_icon} [{color}]{tool_name}[/{color}]")
         if result:
-            preview = result[:500] + "..." if len(result) > 500 else result
-            self.console.print(f"     {preview}", style="dim")
-        self.console.print()
+            preview = result[:300] + "..." if len(result) > 300 else result
+            self.add_content(f"     {preview}")
+        self.add_content("")  # 空行分隔
 
     def print_warning(self, message: str):
         """打印警告 - 龙虾主题"""
@@ -413,9 +460,14 @@ class UIManager:
         self.add_log(message, "SUCCESS")
 
     def print_section(self, title: str):
-        """打印分节标题"""
-        self.console.print()
-        self.console.print(f"[bold cyan]--- {title} ---[/bold cyan]")
+        """打印分节标题 - 输出到内容区"""
+        self.add_content("")
+        self.add_content(f"[bold cyan]--- {title} ---[/bold cyan]")
+
+    def print_markdown(self, markdown_text: str):
+        """打印 Markdown 内容 - 输出到内容区"""
+        md = Markdown(markdown_text)
+        self.add_content(str(md))
 
     def print_markdown(self, markdown_text: str):
         """打印 Markdown 内容"""

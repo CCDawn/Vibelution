@@ -662,12 +662,7 @@ class SelfEvolvingAgent:
         # 可以在这里注册额外的事件处理器
         pass
 
-    def _build_system_prompt(self) -> str:
-        """构建系统提示词（委托给 PromptManager）"""
-        pm = get_prompt_manager()
-        return pm.build()
-
-    def think_and_act(self, user_prompt: str = None) -> bool:
+    def think_and_act(self, user_prompt: str = None, system_prompt: str = None) -> bool:
         """
         苏醒时执行一次思考和行动
 
@@ -678,14 +673,17 @@ class SelfEvolvingAgent:
         4. 返回结果给 LLM 继续推理
         5. 直到 Agent 认为任务完成
 
+        Args:
+            user_prompt: 用户输入的提示词（可选，无则使用自主进化提示）
+            system_prompt: 预计算的系统提示词（由 run_loop 传入，避免重复构建）
+
         Returns:
             True: 继续运行, False: 触发重启, "hibernated": 休眠后继续
         """
         pm = get_prompt_manager()
-        content_system_prompt = pm.build()
-        content_system_prompt_index = pm.build_index()
-        print(content_system_prompt_index)
-        messages = [SystemMessage(content=content_system_prompt)]
+        if system_prompt is None:
+            system_prompt, _ = pm.build()
+        messages = [SystemMessage(content=system_prompt)]
 
         # 自主进化模式：自动生成任务提示
         autonomous_user_prompt = (
@@ -708,7 +706,7 @@ class SelfEvolvingAgent:
 
         # 首次对话写入 System Prompt
         if not self._system_prompt_written:
-            logger.write_system_prompt(pm.build())
+            logger.write_system_prompt(system_prompt)
             self._system_prompt_written = True
 
         messages.append(HumanMessage(content=user_prompt))
@@ -730,9 +728,10 @@ class SelfEvolvingAgent:
                     )
 
             for iteration in range(1, max_iterations + 1):
-                # 状态机驱动：每轮迭代前动态重建 SystemMessage
+                # 状态机驱动：每轮迭代前重建 SystemMessage
                 # 包含 base_prompt + state_memory + 当前激活的 registry 规则
-                messages[0] = SystemMessage(content=pm.build())
+                current_prompt, _ = pm.build()
+                messages[0] = SystemMessage(content=current_prompt)
 
                 # 自动 Token 检查与压缩
                 messages = self._check_and_compress(messages, iteration)
@@ -835,10 +834,51 @@ class SelfEvolvingAgent:
                 else:
                     tool_calls = parser_result.tool_calls
 
-                # 执行工具
-                for tool_call in tool_calls:
-                    result, action = self._execute_tool(tool_call, messages)
-                    self._handle_tool_result(tool_call, result, action, messages)
+                # 执行工具（并行执行多个独立调用）
+                if len(tool_calls) > 1:
+                    # 并行执行：用 ThreadPoolExecutor 批量执行所有工具
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                    def _exec_one(tc):
+                        return tc, self._execute_tool(tc, messages)
+
+                    combined_results = []
+                    with ThreadPoolExecutor(max_workers=len(tool_calls)) as pool:
+                        futures = {pool.submit(_exec_one, tc): tc for tc in tool_calls}
+                        for future in as_completed(futures):
+                            try:
+                                tc, (result, action) = future.result()
+                            except Exception as e:
+                                tc = futures[future]
+                                result = f"[并行执行异常] {type(e).__name__}: {str(e)}"
+                                action = None
+                            combined_results.append((tc, result, action))
+
+                    # 按原顺序拼接结果（保持确定性）
+                    combined_results.sort(key=lambda x: tool_calls.index(x[0]))
+
+                    # 按拼接顺序逐条追加到 messages
+                    sep = "\n" + "━" * 20 + " [%s] " + "━" * 20
+                    messages_parts = []
+                    for tc, result, action in combined_results:
+                        self._handle_tool_result(tc, result, action, messages)
+                        tool_name = tc.get('name', 'unknown')
+                        result_str = str(result) if result else ''
+                        messages_parts.append(f"{sep % tool_name}\n{result_str}")
+                    combined_str = "\n".join(messages_parts)
+
+                    # 将拼接结果追加为一条 ToolMessage，避免多条 ToolMessage 稀释上下文
+                    from langchain_core.messages import ToolMessage
+                    combined_tc_id = tool_calls[0].get('id') or 'parallel_combined'
+                    # 已在 _handle_tool_result 中逐条追加，combined_str 仅用于日志/调试
+                    _debug_logger.info(
+                        f"[并行] {len(tool_calls)} 个工具执行完成，结果已拼接",
+                        tag="PARALLEL"
+                    )
+                else:
+                    # 单工具：保持原有行为
+                    result, action = self._execute_tool(tool_calls[0], messages)
+                    self._handle_tool_result(tool_calls[0], result, action, messages)
 
             _debug_logger.turn_end(current_turn, tool_count=len(tool_calls) if tool_calls else 0)
             return True
@@ -1323,16 +1363,19 @@ class SelfEvolvingAgent:
             )
             truncated = True
 
+        # 安全获取 tool_call_id，强制转为字符串，防止类型错误
+        tool_call_id = str(tool_call.get('id', '')) if tool_call.get('id') is not None else ''
+
         if action == "restart":
             logger.log_action("restart", {"tool": tool_call['name']})
         elif action == "skip":
             logger.log_action("skip", {"tool": tool_call['name']})
-            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call['id']))
+            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
         elif action == "hibernated":
             logger.log_action("hibernated", {"tool": tool_call['name']})
-            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call['id']))
+            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
         else:
-            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call['id']))
+            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
 
         if truncated:
             _debug_logger.warning(
@@ -1439,7 +1482,8 @@ class SelfEvolvingAgent:
         bc.set_state(AgentState.AWAKENING, action="系统初始化中...", generation=get_generation_tool(), current_goal=get_current_goal())
 
         generation = get_generation_tool()
-        logger.start_generation(generation, self._build_system_prompt())
+        system_prompt, _ = get_prompt_manager().build()
+        logger.start_generation(generation, system_prompt)
         logger.log_action("会话开始", f"世代: G{generation}, 模型: {self.model_name}")
 
         last_backup_time = time.time()
@@ -1457,6 +1501,9 @@ class SelfEvolvingAgent:
             while True:
                 bc.set_state(AgentState.THINKING, action="思考并执行任务...")
 
+                # 计算系统提示词（每个思考会话仅一次）
+                system_prompt, _ = get_prompt_manager().build()
+
                 # 自动备份
                 if self.config.agent.auto_backup:
                     current_time = time.time()
@@ -1465,7 +1512,7 @@ class SelfEvolvingAgent:
                         backup_project(f"自动备份 - {datetime.now().strftime('%Y-%m-%d %H:%M')}")
                         last_backup_time = current_time
 
-                should_continue = self.think_and_act(user_prompt=user_input)
+                should_continue = self.think_and_act(user_prompt=user_input, system_prompt=system_prompt)
                 user_input = None
 
                 if not should_continue:
@@ -1578,21 +1625,13 @@ def main(initial_prompt: str = None):
     """Agent 主入口函数"""
     ui = get_ui()
 
+    # 清除控制台并启动 Live 显示（Claude Code 风格三段式布局）
     ui.console.clear()
-    ui.console.print()
-    ui.console.print("[bold cyan]+==============================================================+[/bold cyan]")
-    ui.console.print("[bold cyan]|                                                              |[/bold cyan]")
-    ui.console.print("[bold cyan]|[bold white] Self-Evolving Agent[/bold white] - Terminal Edition             |[/bold cyan]")
-    ui.console.print("[bold cyan]|                                                              |[/bold cyan]")
-    ui.console.print("[bold cyan]+==============================================================+[/bold cyan]")
 
-    # 打印 ASCII Art 宠物形象
-    from core.ui.ascii_art import get_avatar_manager
-    avatar = get_avatar_manager()
-    pet_art = avatar.get_art('happy')
-    ui.console.print(f"[bright_cyan]{pet_art}[/bright_cyan]")
-    ui.console.print()
+    # 启动 Live 显示 - 三段式布局（顶部状态栏 + 中间内容区 + 底部日志栏）
+    ui.start_live()
 
+    # 初始化配置
     args = parse_args()
 
     # 构建配置参数（支持下划线格式 kwargs）
@@ -1612,47 +1651,62 @@ def main(initial_prompt: str = None):
 
     setup_logging(level=config.log.level)
 
-    ui.console.print(f"[bold]启动 {config.agent.name}[/bold]")
-    ui.console.print(f"  [cyan]Model:[/cyan]   {config.llm.model_name}")
-    ui.console.print(f"  [cyan]Awake:[/cyan]   {config.agent.awake_interval}s")
-    ui.console.print(f"  [cyan]Backup:[/cyan]   {config.agent.auto_backup}")
-    ui.console.print()
+    # 打印 ASCII Art 宠物形象到内容区
+    from core.ui.ascii_art import get_avatar_manager
+    avatar = get_avatar_manager()
+    pet_art = avatar.get_art('happy')
+
+    # 通过 add_content 输出初始信息到内容区
+    ui.add_content("[bold cyan]+==============================================================+[/bold cyan]")
+    ui.add_content("[bold cyan]|[bold white] Self-Evolving Agent[/bold white] - Terminal Edition             |[/bold cyan]")
+    ui.add_content("[bold cyan]+==============================================================+[/bold cyan]")
+    ui.add_content(f"[bright_cyan]{pet_art}[/bright_cyan]")
+    ui.add_content("")
+    ui.add_content(f"[bold]启动 {config.agent.name}[/bold]")
+    ui.add_content(f"  [cyan]Model:[/cyan]   {config.llm.model_name}")
+    ui.add_content(f"  [cyan]Awake:[/cyan]   {config.agent.awake_interval}s")
+    ui.add_content(f"  [cyan]Backup:[/cyan]   {config.agent.auto_backup}")
 
     try:
         api_key = config.get_api_key()
         if not api_key:
             ui_error("API Key 未设置!", None)
+            ui.stop_live()
             sys.exit(1)
 
         agent = SelfEvolvingAgent(config=config)
-        ui.console.print(f"  [green]Key Tools:[/green]   {len(agent.key_tools)} loaded")
-        ui.console.print("[dim]─" * 60 + "[/dim]")
-        ui.console.print()
+        ui.add_content(f"  [green]Key Tools:[/green]   {len(agent.key_tools)} loaded")
+        ui.add_content("[dim]─" * 60 + "[/dim]")
 
         if args.auto or initial_prompt:
+            ui.stop_live()  # 停止 Live 显示以便正常运行循环
             agent.run_loop(initial_prompt=initial_prompt)
         else:
-            ui.console.print("[bold yellow]交互模式[/bold yellow] - 输入指令或按 Enter 进入自动模式")
-            ui.console.print("[dim]提示: 输入 /help 查看命令，/auto 进入自动模式，/quit 退出[/dim]")
-            ui.console.print()
+            ui.add_content("[bold yellow]交互模式[/bold yellow] - 输入指令或按 Enter 进入自动模式")
+            ui.add_content("[dim]提示: 输入 /help 查看命令，/auto 进入自动模式，/quit 退出[/dim]")
+            ui.stop_live()  # 停止 Live 显示以便 input() 可以正常工作
 
             while True:
                 try:
                     user_input = input("[bold cyan]Agent[/bold cyan] > ").strip()
 
                     if not user_input:
-                        ui.console.print("[dim]进入自动模式...[/dim]")
+                        print("[dim]进入自动模式...[/dim]")
+                        ui.start_live()  # 重新启动 Live 显示
                         agent.run_loop()
+                        ui.stop_live()
                         break
                     elif user_input.lower() in ['/quit', '/exit', '/q']:
-                        ui.console.print("[yellow]再见![/yellow]")
+                        print("[yellow]再见![/yellow]")
                         break
                     elif user_input.lower() in ['/auto', '/a']:
-                        ui.console.print("[dim]进入自动模式...[/dim]")
+                        print("[dim]进入自动模式...[/dim]")
+                        ui.start_live()
                         agent.run_loop()
+                        ui.stop_live()
                         break
                     elif user_input.lower() in ['/help', '/h', '/?']:
-                        ui.console.print("""
+                        print("""
 [bold cyan]可用命令:[/bold cyan]
   /auto, /a     - 进入自动模式
   /quit, /q     - 退出程序
@@ -1661,20 +1715,24 @@ def main(initial_prompt: str = None):
 """)
                         continue
                     else:
+                        ui.start_live()
                         agent.run_loop(initial_prompt=user_input)
-                        ui.console.print()
-                        ui.console.print("[dim]─" * 60 + "[/dim]")
-                        ui.console.print("[yellow]返回交互模式[/yellow]")
-                        ui.console.print()
+                        ui.stop_live()
+                        ui.add_content("")
+                        ui.add_content("[dim]─" * 60 + "[/dim]")
+                        ui.add_content("[yellow]返回交互模式[/yellow]")
+                        ui.add_content("")
+                        ui.stop_live()
 
                 except KeyboardInterrupt:
-                    ui.console.print("\n[yellow]中断，退出...[/yellow]")
+                    print("\n[yellow]中断，退出...[/yellow]")
                     break
                 except EOFError:
                     break
 
     except Exception as e:
         ui_error(f"启动异常: {type(e).__name__}: {e}", traceback.format_exc())
+        ui.stop_live()
         sys.exit(1)
 
 
