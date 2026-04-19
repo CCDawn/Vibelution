@@ -24,6 +24,15 @@ from core.orchestration.forgetting_engine import (
     ForgettingEngine, ForgettingRecord, get_forgetting_engine,
     reset_forgetting_engine
 )
+from core.orchestration.llm_factory import (
+    create_llm, test_llm_connection, get_llm_info
+)
+from core.orchestration.agent_lifecycle import (
+    AgentLifecycle, AUTONOMOUS_USER_PROMPT
+)
+from core.orchestration.context_compressor import (
+    ContextCompressor, CompressionThresholds
+)
 
 # 向后兼容别名
 Task = PlannerTask  # Task 是 PlannerTask 的别名，方便直接导入

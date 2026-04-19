@@ -13,13 +13,10 @@ core/capabilities/prompt_manager.py - 动态系统提示词管理器
 from __future__ import annotations
 
 import os
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Callable, Any
-
-logger = logging.getLogger(__name__)
 
 
 def _get_static_root() -> Path:
@@ -125,8 +122,8 @@ class PromptManager:
         # 当非 None 时，build() 使用此列表而非默认 include
         self._active_components_override: Optional[List[str]] = None
 
-        logger.info(f"[PromptManager] 初始化 - 静态: {self._static_root}")
-        logger.info(f"[PromptManager] 初始化 - 动态: {self._dynamic_root}")
+        from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 初始化 - 静态: {self._static_root}")
+        from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 初始化 - 动态: {self._dynamic_root}")
 
         # 注册所有组件
         self._register_core_components()
@@ -211,13 +208,13 @@ class PromptManager:
     def register(self, component: PromptComponent):
         """注册或更新组件"""
         self._components[component.name] = component
-        logger.debug(f"[PromptManager] 注册组件: {component.name} (priority={component.priority}, required={component.required})")
+        from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] 注册组件: {component.name} (priority={component.priority}, required={component.required})")
 
     def unregister(self, name: str):
         """取消注册组件"""
         if name in self._components:
             del self._components[name]
-            logger.debug(f"[PromptManager] 取消注册: {name}")
+            from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] 取消注册: {name}")
 
     def set_enabled(self, name: str, enabled: bool):
         """动态启用/禁用组件"""
@@ -256,7 +253,7 @@ class PromptManager:
     def register_rule(self, name: str, content: str):
         """注册或更新规则"""
         self.prompt_registry[name] = content
-        logger.debug(f"[PromptManager] 注册规则: {name}")
+        from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] 注册规则: {name}")
 
     def update_active_rules(self, rules: List[str]):
         """
@@ -266,16 +263,16 @@ class PromptManager:
             rules: 新的激活规则名称列表（如 ["code_review", "debug"]）
         """
         if not rules:
-            logger.debug("[PromptManager] active_rules 为空，保持当前规则不变")
+            from core.logging import debug_logger; debug_logger.debug("[PromptManager] active_rules 为空，保持当前规则不变")
             return
 
         # 只注册已知规则，未知规则名忽略
         known_rules = [r for r in rules if r in self.prompt_registry]
         if known_rules:
             self.current_active_prompts = known_rules
-            logger.info(f"[PromptManager] 激活规则切换: {known_rules}")
+            from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 激活规则切换: {known_rules}")
         else:
-            logger.warning(f"[PromptManager] 未知规则: {rules}，保持当前规则不变")
+            from core.logging import debug_logger; debug_logger.warning(f"[PromptManager] 未知规则: {rules}，保持当前规则不变")
 
     def _load_current_rules(self) -> str:
         """
@@ -310,9 +307,9 @@ class PromptManager:
                 content = state_memory_path.read_text(encoding="utf-8").strip()
                 if content:
                     self.state_memory = content
-                    logger.info(f"[PromptManager] 从会话恢复 state_memory，长度={len(content)}")
+                    from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 从会话恢复 state_memory，长度={len(content)}")
         except Exception as e:
-            logger.warning(f"[PromptManager] 恢复 state_memory 失败: {e}")
+            from core.logging import debug_logger; debug_logger.warning(f"[PromptManager] 恢复 state_memory 失败: {e}")
 
     def update_state_memory(self, memory_text: str):
         """
@@ -326,16 +323,16 @@ class PromptManager:
 
         self.state_memory = memory_text
         self._persist_state_memory(memory_text)
-        logger.debug(f"[PromptManager] state_memory 更新，长度={len(memory_text)}")
+        from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] state_memory 更新，长度={len(memory_text)}")
 
     def _persist_state_memory(self, memory_text: str):
         """将 state_memory 落盘到 workspace/prompts/STATE_MEMORY.md"""
         try:
             state_memory_path = self._dynamic_root / "STATE_MEMORY.md"
             state_memory_path.write_text(memory_text, encoding="utf-8")
-            logger.info(f"[PromptManager] state_memory 已落盘: {state_memory_path}")
+            from core.logging import debug_logger; debug_logger.info(f"[PromptManager] state_memory 已落盘: {state_memory_path}")
         except Exception as e:
-            logger.warning(f"[PromptManager] state_memory 落盘失败: {e}")
+            from core.logging import debug_logger; debug_logger.warning(f"[PromptManager] state_memory 落盘失败: {e}")
 
     # ------------------------------------------------------------------------
     # build() - 参数驱动拼接
@@ -388,7 +385,7 @@ class PromptManager:
                         "required": comp.required,
                     })
             except Exception as e:
-                logger.warning(f"[PromptManager] 组件 {comp.name} 加载失败: {e}")
+                from core.logging import debug_logger; debug_logger.warning(f"[PromptManager] 组件 {comp.name} 加载失败: {e}")
 
         return content_by_name, index_list
 
@@ -452,7 +449,7 @@ class PromptManager:
             components: 要激活的组件名称列表，如 ["SOUL", "AGENTS", "MEMORY"]
         """
         if not components:
-            logger.debug("[PromptManager] select_components 收到空列表，重置为默认")
+            from core.logging import debug_logger; debug_logger.debug("[PromptManager] select_components 收到空列表，重置为默认")
             self._active_components_override = None
             return
 
@@ -460,9 +457,9 @@ class PromptManager:
         known = [c for c in components if c in self._components]
         if known:
             self._active_components_override = known
-            logger.info(f"[PromptManager] 动态切换组件: {known}")
+            from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 动态切换组件: {known}")
         else:
-            logger.warning(f"[PromptManager] 未知组件: {components}，保持当前组件不变")
+            from core.logging import debug_logger; debug_logger.warning(f"[PromptManager] 未知组件: {components}，保持当前组件不变")
 
     # ------------------------------------------------------------------------
     # _select_components() - 内部组件选择逻辑
@@ -534,10 +531,10 @@ class PromptManager:
 
         try:
             path.write_text(default_content, encoding="utf-8")
-            logger.info(f"[PromptManager] 自动生成默认模板: workspace/prompts/{name}")
+            from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 自动生成默认模板: workspace/prompts/{name}")
             return False
         except Exception as e:
-            logger.warning(f"[PromptManager] 生成 {name} 失败: {e}")
+            from core.logging import debug_logger; debug_logger.warning(f"[PromptManager] 生成 {name} 失败: {e}")
             return False
 
     def _get_default_template(self, name: str) -> Optional[str]:
@@ -582,7 +579,7 @@ class PromptManager:
         if path.exists():
             try:
                 content = path.read_text(encoding="utf-8").strip()
-                logger.info(f"[PromptManager] 加载 {name} from {path.parent.name}/")
+                from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 加载 {name} from {path.parent.name}/")
                 self._cache_sources[name] = "workspace"
                 return content
             except Exception as e:
@@ -759,11 +756,11 @@ class PromptManager:
                 del self._cache[k]
                 if k in self._cache_sources:
                     del self._cache_sources[k]
-            logger.debug(f"[PromptManager] 清除缓存: {name}")
+            from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] 清除缓存: {name}")
         else:
             self._cache.clear()
             self._cache_sources.clear()
-            logger.debug("[PromptManager] 清除全部缓存")
+            from core.logging import debug_logger; debug_logger.debug("[PromptManager] 清除全部缓存")
 
     def get_status(self) -> Dict[str, Any]:
         """获取管理器状态（调试用）"""

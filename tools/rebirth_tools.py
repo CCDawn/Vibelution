@@ -22,19 +22,16 @@
     - pathlib: 内置模块
 """
 
-import logging
 import os
 import sys
 from pathlib import Path
 from typing import Optional
+from core.logging import debug_logger
 
 
 # ============================================================================
 # 配置常量
 # ============================================================================
-
-# 日志记录器
-logger = logging.getLogger(__name__)
 
 # Restarter 脚本路径
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -151,11 +148,11 @@ def spawn_detached_process_windows(command: list, env: Optional[dict] = None) ->
             start_new_session=False
         )
         
-        logger.info(f"Windows: 已启动脱离进程, PID: {process.pid}")
+        debug_logger.info(f"Windows: 已启动脱离进程, PID: {process.pid}")
         return process.pid
         
     except Exception as e:
-        logger.error(f"Windows: 启动脱离进程失败 - {e}")
+        debug_logger.error(f"Windows: 启动脱离进程失败 - {e}")
         return None
 
 
@@ -208,16 +205,16 @@ def spawn_detached_process_unix(command: list, env: Optional[dict] = None) -> Op
                     os._exit(0)
                     
             except OSError as e:
-                logger.error(f"Unix fork error: {e}")
+                debug_logger.error(f"Unix fork error: {e}")
                 os._exit(1)
         else:
             # 父进程：等待子进程退出
             os.waitpid(pid, 0)
-            logger.info(f"Unix: 已启动脱离进程, 中间 PID: {pid}")
+            debug_logger.info(f"Unix: 已启动脱离进程, 中间 PID: {pid}")
             return pid
             
     except Exception as e:
-        logger.error(f"Unix: 启动脱离进程失败 - {e}")
+        debug_logger.error(f"Unix: 启动脱离进程失败 - {e}")
         return None
 
 
@@ -326,9 +323,9 @@ def trigger_self_restart_tool(reason: str = "") -> str:
         - 重启是异步的，新 Agent 可能在几秒后启动
         - 可以通过 --verbose 参数查看详细日志
     """
-    logger.info("=" * 60)
-    logger.info("触发自我重启")
-    logger.info("=" * 60)
+    debug_logger.info("=" * 60)
+    debug_logger.info("触发自我重启")
+    debug_logger.info("=" * 60)
 
     # 0. 【强制记忆快照】在重启前自动保存状态
     # 这是最后一道防线，确保即使 Agent 没有主动保存记忆，系统也会自动保存
@@ -353,29 +350,29 @@ def trigger_self_restart_tool(reason: str = "") -> str:
             next_goal=current_goal,
             generation=current_gen
         )
-        logger.info(f"[强制快照] {snapshot_result}")
+        debug_logger.info(f"[强制快照] {snapshot_result}")
     except Exception as e:
-        logger.error(f"[ERROR] 强制记忆快照失败: {e}")
+        debug_logger.error(f"[ERROR] 强制记忆快照失败: {e}")
 
     # 1. 获取必要信息
     current_pid = get_current_pid()
     script_path = get_script_path()
     
-    logger.info(f"当前 PID: {current_pid}")
-    logger.info(f"脚本路径: {script_path}")
-    logger.info(f"重启原因: {reason}")
+    debug_logger.info(f"当前 PID: {current_pid}")
+    debug_logger.info(f"脚本路径: {script_path}")
+    debug_logger.info(f"重启原因: {reason}")
     
     # 2. 验证 restarter 可用性
     is_available, error_msg = validate_restarter_available()
     if not is_available:
-        logger.error(f"Restarter 不可用: {error_msg}")
+        debug_logger.error(f"Restarter 不可用: {error_msg}")
         return f"错误: {error_msg}"
     
-    logger.info(f"Restarter 脚本: {RESTARTER_SCRIPT}")
+    debug_logger.info(f"Restarter 脚本: {RESTARTER_SCRIPT}")
     
     # 3. 分类重启原因
     reason_category = classify_restart_reason(reason)
-    logger.info(f"原因分类: {reason_category}")
+    debug_logger.info(f"原因分类: {reason_category}")
     
     # 4. 构建环境变量
     env = os.environ.copy()
@@ -394,7 +391,7 @@ def trigger_self_restart_tool(reason: str = "") -> str:
     # 添加详细日志参数（可选）
     # command.append('--verbose')
     
-    logger.info(f"执行命令: {' '.join(command)}")
+    debug_logger.info(f"执行命令: {' '.join(command)}")
     
     # 6. 启动脱离进程
     new_pid = spawn_detached_process(command, env)
@@ -414,15 +411,15 @@ def trigger_self_restart_tool(reason: str = "") -> str:
         
         result = "\n".join(result_lines)
         
-        logger.info("=" * 60)
-        logger.info("重启触发成功")
-        logger.info("当前 Agent 进程即将退出")
-        logger.info("=" * 60)
+        debug_logger.info("=" * 60)
+        debug_logger.info("重启触发成功")
+        debug_logger.info("当前 Agent 进程即将退出")
+        debug_logger.info("=" * 60)
         
         return result
     else:
         error_msg = "错误: 启动重启进程失败"
-        logger.error(error_msg)
+        debug_logger.error(error_msg)
         return error_msg
 
 
@@ -488,7 +485,7 @@ def enter_hibernation_tool(duration: int = 300) -> str:
         return "错误: 休眠时长不能超过 7200 秒（2 小时）"
 
     wake_time = datetime.now() + timedelta(seconds=duration)
-    logger.info(f"[休眠] 进入休眠状态，时长: {duration} 秒，预计苏醒: {wake_time.strftime('%H:%M:%S')}")
+    debug_logger.info(f"[休眠] 进入休眠状态，时长: {duration} 秒，预计苏醒: {wake_time.strftime('%H:%M:%S')}")
 
     time.sleep(duration)
 

@@ -8,6 +8,3 @@ from core.knowledge.codebase_analyzer import (
 from core.knowledge.semantic_search import (
     SemanticSearchService, SearchResult, get_semantic_search
 )
-from core.knowledge.message_bus import (
-    MessageBus, Message, get_message_bus, reset_message_bus
-)

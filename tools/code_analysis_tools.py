@@ -32,7 +32,6 @@ AST 分析：
 import ast
 import re
 import os
-import logging
 from pathlib import Path
 from typing import Tuple, Optional, List, Dict, Any
 
@@ -40,9 +39,6 @@ from typing import Tuple, Optional, List, Dict, Any
 # ============================================================================
 # 配置
 # ============================================================================
-
-logger = logging.getLogger(__name__)
-
 
 # ============================================================================
 # AST 实体提取器
@@ -136,7 +132,7 @@ def parse_file_ast(file_path: str) -> Optional[ast.Module]:
             source = f.read()
         return ast.parse(source, filename=str(path))
     except (SyntaxError, UnicodeDecodeError) as e:
-        logger.error(f"Failed to parse {file_path}: {e}")
+        from core.logging import debug_logger; debug_logger.error(f"Failed to parse {file_path}: {e}")
         return None
 
 

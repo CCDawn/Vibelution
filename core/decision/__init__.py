@@ -11,3 +11,8 @@ from core.decision.strategy_selector import (
     StrategySelector, Strategy, StrategyType, StrategySelection,
     get_strategy_selector, create_default_selector
 )
+from core.decision.task_classifier import (
+    classify_task_type,
+    get_task_category_tools,
+    is_task_type,
+)

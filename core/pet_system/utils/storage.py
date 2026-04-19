@@ -39,7 +39,8 @@ class Storage:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            print(f"保存宠物数据失败: {e}")
+            from core.logging import debug_logger
+            debug_logger.error(f"保存宠物数据失败: {e}")
             return False
 
     def load(self) -> Optional[Dict[str, Any]]:
@@ -56,7 +57,8 @@ class Storage:
             with open(self.save_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"加载宠物数据失败: {e}")
+            from core.logging import debug_logger
+            debug_logger.error(f"加载宠物数据失败: {e}")
             return None
 
     def exists(self) -> bool:

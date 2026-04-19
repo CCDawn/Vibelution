@@ -113,7 +113,8 @@ class StateBroadcaster:
                 with open(self.state_file, 'w', encoding='utf-8') as f:
                     json.dump(state, f, ensure_ascii=False, indent=2)
             except Exception as e:
-                print(f"[StateBroadcaster] 写入状态文件失败: {e}")
+                from core.logging import debug_logger
+                debug_logger.error(f"[StateBroadcaster] 写入状态文件失败: {e}")
 
     def _open_log_file(self):
         """打开日志文件（延迟打开）"""
@@ -121,7 +122,8 @@ class StateBroadcaster:
             try:
                 self._log_handle = open(self.log_file, 'a', encoding='utf-8', buffering=1)
             except Exception as e:
-                print(f"[StateBroadcaster] 打开日志文件失败: {e}")
+                from core.logging import debug_logger
+                debug_logger.error(f"[StateBroadcaster] 打开日志文件失败: {e}")
 
     def update_status(
         self,
@@ -195,7 +197,8 @@ class StateBroadcaster:
                 self._log_handle.write(log_line)
                 self._log_handle.flush()
             except Exception as e:
-                print(f"[StateBroadcaster] 写入日志失败: {e}")
+                from core.logging import debug_logger
+                debug_logger.error(f"[StateBroadcaster] 写入日志失败: {e}")
 
     def log_tool_call(self, tool_name: str, status: str = "called"):
         """记录工具调用"""

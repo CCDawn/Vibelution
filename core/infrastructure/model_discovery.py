@@ -17,13 +17,12 @@
 from __future__ import annotations
 
 import httpx
-import logging
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 from enum import Enum
 
 
-logger = logging.getLogger(__name__)
+from core.logging import debug_logger
 
 
 class DiscoveryStatus(Enum):
@@ -162,7 +161,7 @@ class ModelDiscovery:
             ModelInfo: 模型信息
         """
         if not self.enabled:
-            logger.info("模型动态发现已禁用，使用配置文件中的值")
+            debug_logger.info("模型动态发现已禁用，使用配置文件中的值")
             return self._create_skipped_info()
 
         # 尝试各个端点
@@ -172,11 +171,11 @@ class ModelDiscovery:
                 if result.status == DiscoveryStatus.SUCCESS:
                     return result
             except Exception as e:
-                logger.debug(f"尝试端点 {endpoint} 失败: {e}")
+                debug_logger.debug(f"尝试端点 {endpoint} 失败: {e}")
                 continue
 
         # 所有端点都失败，返回 fallback
-        logger.warning(f"模型发现失败，使用 fallback 值")
+        debug_logger.warning(f"模型发现失败，使用 fallback 值")
         return self._create_fallback_info()
 
     async def _try_endpoint(self, endpoint: str) -> ModelInfo:
@@ -195,14 +194,14 @@ class ModelDiscovery:
         if endpoint.startswith("v1/"):
             endpoint = endpoint[3:]  # 去掉 "v1/"
         url = f"{self.api_base}/{endpoint}"
-        logger.info(f"尝试模型发现: {url}")
+        debug_logger.info(f"尝试模型发现: {url}")
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(url)
             response.raise_for_status()
 
             data = response.json()
-            logger.debug(f"收到响应: {data}")
+            debug_logger.debug(f"收到响应: {data}")
 
             return self._parse_response(data, endpoint)
 
@@ -283,7 +282,7 @@ class ModelDiscovery:
                     return result
 
         # 返回默认值
-        logger.warning(f"未找到 context_window，使用默认值 32768")
+        debug_logger.warning(f"未找到 context_window，使用默认值 32768")
         return 32768
 
     def _calculate_suggestions(
@@ -334,7 +333,7 @@ class ModelDiscovery:
             emergency_summary_chars=emergency_summary,
         )
 
-        logger.info(
+        debug_logger.info(
             f"模型发现成功: {model_name}\n"
             f"  - context_window: {context_window}\n"
             f"  - suggested_max_tokens: {suggested_max_tokens}\n"

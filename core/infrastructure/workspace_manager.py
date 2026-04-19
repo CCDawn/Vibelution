@@ -22,14 +22,12 @@ Workspace Manager - 统一工作区管理
 import os
 import json
 import sqlite3
-import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
 
 # 日志
-logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -117,7 +115,7 @@ class WorkspaceManager:
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
-            logger.info(f"[Workspace] 确保目录: {d}")
+            from core.logging import debug_logger; debug_logger.info(f"[Workspace] 确保目录: {d}")
 
     def _init_database(self):
         """初始化 SQLite 数据库"""
@@ -197,7 +195,7 @@ class WorkspaceManager:
         conn.commit()
         conn.close()
 
-        logger.info(f"[Workspace] 数据库初始化: {self._db_path}")
+        from core.logging import debug_logger; debug_logger.info(f"[Workspace] 数据库初始化: {self._db_path}")
 
     @contextmanager
     def get_db_connection(self):
@@ -364,7 +362,7 @@ class WorkspaceManager:
                 """, (module_path, insight, generation, now, now))
             return True
         except Exception as e:
-            logger.error(f"[Workspace] 刻印代码库认知失败: {e}")
+            from core.logging import debug_logger; debug_logger.error(f"[Workspace] 刻印代码库认知失败: {e}")
             return False
 
     def get_all_codebase_knowledge(self) -> List[Dict]:
@@ -419,7 +417,7 @@ class WorkspaceManager:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
-            logger.error(f"[Workspace] 写入记忆索引失败: {e}")
+            from core.logging import debug_logger; debug_logger.error(f"[Workspace] 写入记忆索引失败: {e}")
             return False
 
     # ==================== 提示词文件操作 ====================
@@ -440,7 +438,7 @@ class WorkspaceManager:
                 f.write(content)
             return True
         except Exception as e:
-            logger.error(f"[Workspace] 写入提示词失败: {e}")
+            from core.logging import debug_logger; debug_logger.error(f"[Workspace] 写入提示词失败: {e}")
             return False
 
     # ==================== 状态报告 ====================

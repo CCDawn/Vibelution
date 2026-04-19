@@ -13,7 +13,6 @@
 | `security.py` | 安全验证模块 |
 | `model_discovery.py` | 模型发现与服务 |
 | `workspace_manager.py` | 工作区管理 |
-| `exception_handler.py` | 异常处理器 |
 
 ## Usage
 

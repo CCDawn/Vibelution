@@ -1,6 +1,6 @@
 # Capabilities Module
 
-**能力系统模块** - 技能画像与任务管理
+**能力系统模块** - 提示词管理与任务管理
 
 ## Modules
 
@@ -10,8 +10,7 @@
 | `prompt_builder.py` | 提示词构建器 |
 | `task_analyzer.py` | 任务分析器 |
 | `task_manager.py` | 任务管理器 |
-| `skills_profiler.py` | 技能画像 |
-| `pattern_library.py` | 模式库 |
+| `codebase_map_builder.py` | 代码库地图构建 |
 
 ## Usage
 
@@ -26,13 +25,11 @@ from core.capabilities.task_analyzer import TaskAnalyzer
 - `PromptBuilder` - 构建系统提示词
 - `TaskAnalyzer` - 分析用户任务
 - `TaskManager` - 管理任务状态
-- `SkillsProfiler` - 技能能力画像
-- `PatternLibrary` - 常用模式库
+- `CodebaseMapBuilder` - 代码库结构地图
 
 ## 功能
 
 - 提示词双轨加载 (core_prompt + workspace/prompts)
 - 动态提示词组件拼装
 - 任务分析与分解
-- 技能能力评估
-- 模式复用库
+- 代码库结构理解

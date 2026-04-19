@@ -248,6 +248,11 @@ class DebugLogger:
 # 全局 DebugLogger 实例
 debug = DebugLogger()
 
+# 统一导出：from core.logging import logger
+# 等价于 from core.logging.logger import debug
+# 方便所有模块统一导入：logger.info(...) / logger.debug(...) / logger.error(...)
+logger = debug
+
 
 # ============================================================================
 # ConversationLogger - 实时对话记录器
@@ -370,7 +375,7 @@ class ConversationLogger:
             from rich.console import Console
             _token_console = Console(force_terminal=True)
             _token_console.print(
-                f"[dim]\[TOKEN] 输入: {total_input_tokens} | 消息: {len(messages)} | 模型: {model or '?'}[/dim]"
+                f"[dim]\\[TOKEN] 输入: {total_input_tokens} | 消息: {len(messages)} | 模型: {model or '?'}[/dim]"
             )
         except Exception:
             import sys

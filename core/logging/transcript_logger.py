@@ -408,7 +408,8 @@ generation: {generation}
                 pass
 
         if deleted_count > 0:
-            print(f"[TranscriptLogger] 已清理 {deleted_count} 个旧 transcript 文件")
+            from core.logging import debug_logger
+            debug_logger.info(f"[TranscriptLogger] 已清理 {deleted_count} 个旧 transcript 文件")
 
         return deleted_count
 

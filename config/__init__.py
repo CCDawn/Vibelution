@@ -136,6 +136,15 @@ from .settings import (
     get_pet_sound_config,
 )
 
+# ============================================================================
+# 导出 LLM Provider 适配器
+# ============================================================================
+
+from .adapters import (
+    MiniMaxOpenAIAdapter,
+    MiniMaxResponse,
+)
+
 
 # ============================================================================
 # 向后兼容：保持 MODEL_REGISTRY 名称（原代码中的名称）
@@ -502,4 +511,7 @@ __all__ = [
     "get_provider_models",
     "show_model_info",
     "resolve_model_alias",
+    # LLM Provider 适配器
+    "MiniMaxOpenAIAdapter",
+    "MiniMaxResponse",
 ]

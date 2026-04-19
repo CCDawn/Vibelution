@@ -33,7 +33,6 @@ check_python_syntax("agent.py")
 ```
 """
 
-import logging
 import subprocess
 import os
 import shutil
@@ -143,8 +142,6 @@ def _is_windows_command(command: str) -> bool:
 # 配置常量 - 从配置文件加载
 # ============================================================================
 
-logger = logging.getLogger(__name__)
-
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 
@@ -240,7 +237,7 @@ def _is_command_dangerous(command: str) -> tuple[bool, str]:
         if not is_safe:
             return True, f"[Whitelist Block] {error_msg}"
     except Exception as e:
-        logger.warning(f"Security module load failed: {e}")
+        from core.logging import debug_logger; debug_logger.warning(f"Security module load failed: {e}")
     return False, ""
 
 

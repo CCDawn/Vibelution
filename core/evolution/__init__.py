@@ -16,3 +16,7 @@ from core.evolution.code_generator import (
 from core.evolution.self_refactoror import (
     SelfRefactoror, get_refactoror
 )
+from core.evolution.evolution_gate import (
+    run_evolution_gate,
+    check_evolution_gate,
+)

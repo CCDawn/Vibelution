@@ -14,11 +14,8 @@ from __future__ import annotations
 import re
 import json
 import uuid
-import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass

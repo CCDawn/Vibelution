@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import os
-from typing import Dict, Callable, Any, Optional
+from typing import Dict, Callable, Any, Optional, List
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 # 核心模块导入
@@ -266,6 +266,73 @@ class ToolExecutor:
                 "error": error_msg,
             })
             return (error_msg, None)
+
+    def execute_parallel(
+        self,
+        tool_calls: List[Dict],
+        handle_tool_result_callback: Callable = None,
+    ) -> List[tuple]:
+        """
+        并行执行多个工具调用
+
+        Args:
+            tool_calls: 工具调用列表，每个元素包含 'name' 和 'args'
+            handle_tool_result_callback: 处理结果的回调函数 (可选)
+
+        Returns:
+            [(tool_call, result, action), ...] 结果列表
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from core.logging.logger import debug as _debug_logger
+
+        def _execute_single(tc):
+            """执行单个工具调用"""
+            tool_name = tc.get('name', 'unknown')
+            tool_args = tc.get('args') or tc.get('arguments') or {}
+
+            # 解析 JSON 字符串
+            if isinstance(tool_args, str):
+                try:
+                    import json
+                    tool_args = json.loads(tool_args)
+                except (json.JSONDecodeError, TypeError):
+                    tool_args = {}
+            elif not isinstance(tool_args, dict):
+                try:
+                    import json
+                    tool_args = json.loads(str(tool_args))
+                except (json.JSONDecodeError, TypeError):
+                    tool_args = {}
+
+            return self.execute(tool_name, tool_args)
+
+        results = []
+        with ThreadPoolExecutor(max_workers=len(tool_calls)) as pool:
+            futures = {
+                pool.submit(_execute_single, tc): tc
+                for tc in tool_calls
+            }
+            for future in as_completed(futures):
+                tc = futures[future]
+                try:
+                    result, action = future.result()
+                    results.append((tc, result, action))
+                    if handle_tool_result_callback:
+                        handle_tool_result_callback(tc, result, action)
+                except Exception as e:
+                    result = f"[并行执行异常] {type(e).__name__}: {str(e)}"
+                    results.append((tc, result, None))
+                    if handle_tool_result_callback:
+                        handle_tool_result_callback(tc, result, None)
+
+        # 按原顺序排序（保持确定性）
+        results.sort(key=lambda x: tool_calls.index(x[0]))
+
+        _debug_logger.info(
+            f"[并行] {len(tool_calls)} 个工具执行完成",
+            tag="PARALLEL"
+        )
+        return results
 
 
 # 全局工具执行器单例

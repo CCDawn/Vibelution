@@ -97,23 +97,22 @@ def _load_memory() -> dict:
 
 def _save_memory(memory: dict) -> bool:
     """保存记忆到文件"""
-    import logging
-    logger = logging.getLogger(__name__)
+    from core.logging import debug_logger
 
     memory_file = _get_memory_index_path()
     try:
         with open(memory_file, 'w', encoding='utf-8') as f:
             json.dump(memory, f, ensure_ascii=False, indent=2)
-        logger.info(f"[记忆保存] 成功: {memory_file}")
+        debug_logger.info(f"[记忆保存] 成功: {memory_file}")
         return True
     except IOError as e:
-        logger.error(f"[ERROR] 记忆保存失败 (IOError): {e}")
+        debug_logger.error(f"[ERROR] 记忆保存失败 (IOError): {e}")
         return False
     except TypeError as e:
-        logger.error(f"[ERROR] 记忆保存失败 (序列化错误): {e}")
+        debug_logger.error(f"[ERROR] 记忆保存失败 (序列化错误): {e}")
         return False
     except Exception as e:
-        logger.error(f"[ERROR] 记忆保存失败 (未知错误): {e}")
+        debug_logger.error(f"[ERROR] 记忆保存失败 (未知错误): {e}")
         return False
 
 
@@ -342,8 +341,7 @@ def force_save_current_state(core_wisdom: str = "", next_goal: str = "", generat
     Returns:
         保存结果
     """
-    import logging
-    logger = logging.getLogger(__name__)
+    from core.logging import debug_logger
 
     try:
         memory = _load_memory()
@@ -364,7 +362,7 @@ def force_save_current_state(core_wisdom: str = "", next_goal: str = "", generat
         memory["last_archive_time"] = datetime.now().isoformat()
 
         if _save_memory(memory):
-            logger.warning(f"[强制快照] 记忆已保存: G{generation}")
+            debug_logger.warning(f"[强制快照] 记忆已保存: G{generation}")
             return json.dumps({
                 "status": "success",
                 "message": f"强制记忆快照完成: G{generation}",
@@ -372,14 +370,14 @@ def force_save_current_state(core_wisdom: str = "", next_goal: str = "", generat
                 "next_goal": next_goal
             }, ensure_ascii=False)
         else:
-            logger.error("[ERROR] 强制记忆快照失败")
+            debug_logger.error("[ERROR] 强制记忆快照失败")
             return json.dumps({
                 "status": "error",
                 "message": "强制记忆快照失败"
             }, ensure_ascii=False)
 
     except Exception as e:
-        logger.error(f"[ERROR] 强制记忆快照异常: {e}")
+        debug_logger.error(f"[ERROR] 强制记忆快照异常: {e}")
         return json.dumps({
             "status": "error",
             "message": f"强制记忆快照异常: {str(e)}"

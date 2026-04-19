@@ -18,12 +18,11 @@ from __future__ import annotations
 
 import os
 import hashlib
-import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Set
 
-logger = logging.getLogger(__name__)
+from core.logging import debug_logger
 
 # 扫描范围：相对项目根目录的子目录
 _SCAN_DIRS = ["tools", "core", "tests"]
@@ -230,9 +229,9 @@ def scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool
     # 写入文件
     try:
         map_path.write_text(content, encoding="utf-8")
-        logger.info(f"[CodebaseMapBuilder] 地图已写入: {map_path}")
+        debug_logger.info(f"[CodebaseMapBuilder] 地图已写入: {map_path}")
     except Exception as e:
-        logger.warning(f"[CodebaseMapBuilder] 写入失败: {e}")
+        debug_logger.warning(f"[CodebaseMapBuilder] 写入失败: {e}")
 
     # 写入 .meta 文件记录扫描时间戳和文件列表哈希
     try:
@@ -270,7 +269,7 @@ def should_rescan(project_root: Optional[Path] = None) -> bool:
         import time
         age_seconds = time.time() - map_path.stat().st_mtime
         if age_seconds > _CACHE_TTL_HOURS * 3600:
-            logger.debug("[CodebaseMapBuilder] 缓存已过期，需要重新扫描")
+            debug_logger.debug("[CodebaseMapBuilder] 缓存已过期，需要重新扫描")
             return True
     except Exception:
         return True
@@ -288,7 +287,7 @@ def should_rescan(project_root: Optional[Path] = None) -> bool:
                 if line.startswith("file_hash="):
                     cached_hash = line.split("=", 1)[1].strip()
                     if current_hash != cached_hash:
-                        logger.debug("[CodebaseMapBuilder] 代码文件有变更，需要重新扫描")
+                        debug_logger.debug("[CodebaseMapBuilder] 代码文件有变更，需要重新扫描")
                         return True
                     break
     except Exception:

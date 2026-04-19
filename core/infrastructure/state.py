@@ -370,7 +370,8 @@ class StateManager:
 
             return True
         except Exception as e:
-            print(f"[StateManager] 加载状态失败: {e}")
+            from core.logging import debug_logger
+            debug_logger.error(f"[StateManager] 加载状态失败: {e}")
             return False
 
     # =========================================================================

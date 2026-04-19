@@ -10,7 +10,6 @@
 | `feedback_loop.py` | 反馈循环处理 |
 | `insight_tracker.py` | 洞察追踪记录 |
 | `strategy_learner.py` | 策略学习器 |
-| `agent_core.py` | Agent 抽象基类 |
 
 ## Usage
 
@@ -25,7 +24,6 @@ from core.learning.feedback_loop import FeedbackLoop
 - `FeedbackLoop` - 处理执行反馈，优化策略
 - `InsightTracker` - 追踪重要洞察和发现
 - `StrategyLearner` - 从历史经验学习策略
-- `AgentCore` - Agent 抽象基类
 
 ## 功能
 

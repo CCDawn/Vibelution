@@ -69,7 +69,8 @@ class TaskManager:
             with open(self._state_file, 'w', encoding='utf-8') as f:
                 json.dump(self._state, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[TaskManager] 保存失败: {e}")
+            from core.logging import debug_logger
+            debug_logger.error(f"[TaskManager] 保存失败: {e}")
     
     @property
     def generation_goal(self) -> str:

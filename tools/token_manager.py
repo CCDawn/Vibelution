@@ -21,21 +21,16 @@
 import json
 import os
 import time
-import logging
 from typing import Optional, List, Dict, Any, Tuple, Callable
 from dataclasses import dataclass, field
 from collections import deque
 from datetime import datetime
 from enum import IntEnum
 
-logger = logging.getLogger(__name__)
-
 
 # ============================================================================
 # 配置常量 - 从配置文件加载
 # ============================================================================
-
-logger = logging.getLogger(__name__)
 
 
 def _load_token_defaults() -> dict:

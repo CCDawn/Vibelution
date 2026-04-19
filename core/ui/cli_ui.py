@@ -677,3 +677,62 @@ def ui_welcome():
 def ui_print_welcome():
     """打印欢迎面板（别名）"""
     get_ui().print_welcome_panel()
+
+
+def run_interactive_mode(agent) -> bool:
+    """
+    运行交互模式
+
+    Args:
+        agent: SelfEvolvingAgent 实例
+
+    Returns:
+        True: 正常退出, False: 中断退出
+    """
+    ui = get_ui()
+
+    while True:
+        try:
+            user_input = input("[bold cyan]Agent[/bold cyan] > ").strip()
+
+            if not user_input:
+                print("[dim]进入自动模式...[/dim]")
+                ui.start_live()
+                agent.run_loop()
+                ui.stop_live()
+                break
+            elif user_input.lower() in ['/quit', '/exit', '/q']:
+                print("[yellow]再见![/yellow]")
+                return True
+            elif user_input.lower() in ['/auto', '/a']:
+                print("[dim]进入自动模式...[/dim]")
+                ui.start_live()
+                agent.run_loop()
+                ui.stop_live()
+                break
+            elif user_input.lower() in ['/help', '/h', '/?']:
+                print("""
+[bold cyan]可用命令:[/bold cyan]
+  /auto, /a     - 进入自动模式
+  /quit, /q     - 退出程序
+  /help, /h     - 显示此帮助
+  <任意文本>     - 将文本作为任务发送给 Agent
+""")
+                continue
+            else:
+                ui.start_live()
+                agent.run_loop(initial_prompt=user_input)
+                ui.stop_live()
+                ui.add_content("")
+                ui.add_content("[dim]─" * 60 + "[/dim]")
+                ui.add_content("[yellow]返回交互模式[/yellow]")
+                ui.add_content("")
+                ui.stop_live()
+
+        except KeyboardInterrupt:
+            print("\n[yellow]中断，退出...[/yellow]")
+            return False
+        except EOFError:
+            return False
+
+    return True

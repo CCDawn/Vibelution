@@ -18,7 +18,6 @@ from __future__ import annotations
 import os
 import sys
 import time
-import logging
 import httpx
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
@@ -128,7 +127,6 @@ class LLMOrchestrator:
         self.project_root = Path(project_root)
 
         self.config = config or self._load_default_config()
-        self.logger = logging.getLogger("LLMOrchestrator")
 
         # 创建 LLM 实例
         self._llm: Optional[ChatOpenAI] = None
@@ -195,7 +193,8 @@ class LLMOrchestrator:
 
         self._compression_llm = ChatOpenAI(**compression_kwargs)
 
-        self.logger.info(f"LLM Orchestrator 初始化完成，模型: {self.config.model_name}")
+        from core.logging import debug_logger
+        debug_logger.info(f"LLM Orchestrator 初始化完成，模型: {self.config.model_name}")
 
     def invoke(
         self,
@@ -264,7 +263,8 @@ class LLMOrchestrator:
 
         except Exception as e:
             self._stats["errors"] += 1
-            self.logger.error(f"LLM 调用失败: {type(e).__name__}: {e}")
+            from core.logging import debug_logger
+            debug_logger.error(f"LLM 调用失败: {type(e).__name__}: {e}")
             raise
 
     def invoke_with_retry(
@@ -296,12 +296,14 @@ class LLMOrchestrator:
             except Exception as e:
                 last_error = e
                 if attempt < max_retries - 1:
-                    self.logger.warning(
+                    from core.logging import debug_logger
+                    debug_logger.warning(
                         f"LLM 调用失败 (尝试 {attempt + 1}/{max_retries}): {e}"
                     )
                     time.sleep(retry_delay * (attempt + 1))
                 else:
-                    self.logger.error(f"LLM 调用最终失败: {e}")
+                    from core.logging import debug_logger
+                    debug_logger.error(f"LLM 调用最终失败: {e}")
 
         raise last_error or RuntimeError("LLM 调用失败")
 
@@ -335,11 +337,13 @@ class LLMOrchestrator:
             try:
                 return future.result(timeout=timeout)
             except FuturesTimeoutError:
-                self.logger.error(f"LLM 调用超时 ({timeout}秒)")
+                from core.logging import debug_logger
+                debug_logger.error(f"LLM 调用超时 ({timeout}秒)")
                 self._stats["errors"] += 1
                 return None
             except Exception as e:
-                self.logger.error(f"LLM 调用异常: {type(e).__name__}: {e}")
+                from core.logging import debug_logger
+                debug_logger.error(f"LLM 调用异常: {type(e).__name__}: {e}")
                 return None
 
     def get_compression_llm(self) -> ChatOpenAI:
