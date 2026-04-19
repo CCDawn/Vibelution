@@ -16,7 +16,10 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
+from core.logging.setup import setup_logging
+import logging
 
+setup_logging()
 
 @dataclass
 class LLMParserResult:

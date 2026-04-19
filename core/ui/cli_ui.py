@@ -42,6 +42,7 @@ from core.pet_system import get_pet_system as get_pet
 
 # 全局 Console 实例
 _console = Console(stderr=False, force_terminal=True)
+_stderr_console = Console(stderr=True, force_terminal=True)  # 专用 stderr 控制台
 
 
 class UIManager:
@@ -73,9 +74,11 @@ class UIManager:
 
         self._initialized = True
         self.console = _console
+        self._stderr_console = _stderr_console  # 专用 stderr 控制台
         self._live: Optional[Live] = None
         self._current_renderable = None
         self._logs: List[str] = []
+        self._log_buffer: List[str] = []  # 启动前的日志缓冲
         self._max_logs = self._load_max_logs()
         self._generation = 1
         self._current_goal = ""
@@ -115,17 +118,21 @@ class UIManager:
         # 龙虾 ASCII Art
         lobster_art = self.avatar.get_art(self._status.lower())
 
-        # 宠物属性
-        pet_attrs = self.pet.data.attributes
-        pet_age = pet_attrs.level - 1
-        pet_level = pet_attrs.level
-        pet_mood = pet_attrs.mood
-        pet_hunger = pet_attrs.hunger
-        pet_energy = int(pet_attrs.energy)
-        pet_health = pet_attrs.health
-        pet_love = pet_attrs.love
-        pet_exp = pet_attrs.exp
-        pet_exp_to_next = pet_attrs.exp_to_next
+        # 宠物属性（安全获取，防止宠物系统未初始化时崩溃）
+        try:
+            pet_attrs = self.pet.data.attributes
+        except Exception:
+            pet_attrs = None
+
+        pet_age = pet_attrs.level - 1 if pet_attrs else 0
+        pet_level = pet_attrs.level if pet_attrs else 1
+        pet_mood = pet_attrs.mood if pet_attrs else 100
+        pet_hunger = pet_attrs.hunger if pet_attrs else 100
+        pet_energy = int(pet_attrs.energy) if pet_attrs else 100
+        pet_health = pet_attrs.health if pet_attrs else 100
+        pet_love = pet_attrs.love if pet_attrs else 50
+        pet_exp = pet_attrs.exp if pet_attrs else 0
+        pet_exp_to_next = pet_attrs.exp_to_next if pet_attrs else 100
 
         # Emoji 映射
         mood_emoji = "😊" if pet_mood > 70 else "😐" if pet_mood > 40 else "😢"
@@ -289,6 +296,15 @@ class UIManager:
     def start_live(self):
         """启动 Live 刷新"""
         if self._live is None:
+            # 刷新 logger 的函数引用，确保在 Live 启动时使用最新的 UI 实例
+            try:
+                from core.logging.logger import _refresh_ui_fns
+                _refresh_ui_fns()
+                from core.logging.logger import reset_token_console
+                reset_token_console()
+            except ImportError:
+                pass
+
             refresh_rate = self._load_refresh_rate()
             self._live = Live(
                 self._create_full_renderable(),
@@ -296,8 +312,18 @@ class UIManager:
                 refresh_per_second=refresh_rate,
                 transient=False,
                 auto_refresh=False,
+                redirect_stdout=True,
+                redirect_stderr=True,
             )
             self._live.start()
+
+            # 将启动前缓冲的日志一次性刷新到面板
+            if self._log_buffer:
+                self._logs.extend(self._log_buffer)
+                self._log_buffer.clear()
+                if len(self._logs) > self._max_logs:
+                    self._logs = self._logs[-self._max_logs:]
+                self.refresh()
 
     def _load_refresh_rate(self) -> int:
         """从配置加载刷新频率"""
@@ -318,7 +344,11 @@ class UIManager:
     def refresh(self):
         """刷新显示"""
         if self._live:
-            self._live.update(self._create_full_renderable(), refresh=True)
+            try:
+                self._live.update(self._create_full_renderable(), refresh=True)
+            except Exception:
+                pass  # 静默忽略刷新错误，避免日志刷屏
+        # 启动前不打印，等待 Live 启动后一次性刷新
 
     # ==================== 状态更新 ====================
 
@@ -362,10 +392,21 @@ class UIManager:
         添加日志条目 - 龙虾宝宝主题版
         """
         timestamp = datetime.now().strftime("%H:%M:%S")
-        icon = self.theme.get_log_icon(level.upper())
-        color = self.theme.get_log_color(level.upper())
+
+        # 安全获取 theme（可能在某些边界情况下为 None）
+        try:
+            icon = self.theme.get_log_icon(level.upper()) if self.theme else "📋"
+            color = self.theme.get_log_color(level.upper()) if self.theme else "white"
+        except Exception:
+            icon = "📋"
+            color = "white"
 
         log_entry = f"[dim]{timestamp}[/dim] {icon} [{color}]{level}[/{color}] {message}"
+
+        # 启动前：缓冲日志，不直接打印
+        if self._live is None:
+            self._log_buffer.append(log_entry)
+            return
 
         self._logs.append(log_entry)
         if len(self._logs) > self._max_logs:
@@ -450,15 +491,14 @@ class UIManager:
 
     def print_error(self, message: str, exc_info: str = None):
         """打印错误 - 龙虾主题"""
-        self.console.print(f"[bold red]❌ 错误[/bold red] {message}")
+        _stderr_console.print(f"[bold red]❌ 错误[/bold red] {message}")
         self.add_log(message, "ERROR")
 
         if exc_info:
-            self.console.print(exc_info, style="red dim")
+            _stderr_console.print(exc_info, style="red dim")
 
     def print_success(self, message: str):
-        """打印成功消息 - 龙虾主题"""
-        self.console.print(f"[bold green]✅ 成功[/bold green] {message}")
+        """打印成功消息 - 龙虾主题（仅添加到日志，不直接打印）"""
         self.add_log(message, "SUCCESS")
 
     def print_section(self, title: str):
@@ -609,6 +649,16 @@ def get_ui() -> UIManager:
     if _ui is None:
         _ui = UIManager()
     return _ui
+
+
+# 当 cli_ui 模块加载完成后，立即刷新 logger 的函数引用
+# 这样 logger.py 在模块级别持有 noop 函数后，一旦 cli_ui 加载完成，
+# logger 的所有输出就会正确路由到 Live 界面
+try:
+    from core.logging.logger import _refresh_ui_fns
+    _refresh_ui_fns()
+except ImportError:
+    pass
 
 
 # 便捷函数

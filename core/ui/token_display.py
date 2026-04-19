@@ -35,7 +35,7 @@ def print_tokens(
     max_iterations: Optional[int] = None,
 ) -> None:
     """
-    打印 Token 使用信息
+    打印 Token 使用信息（路由到 Live 日志面板）
 
     Args:
         input_tokens: 输入 Token 数
@@ -43,14 +43,21 @@ def print_tokens(
         iteration: 当前迭代数（可选）
         max_iterations: 最大迭代数（可选）
     """
+    # 通过 UI 日志系统路由，Token 信息显示在日志面板中
     try:
+        from core.ui.cli_ui import ui_log
+        if output_tokens is not None:
+            ui_log(f"TOKEN 输出: {output_tokens} | 输入: {input_tokens}", "TOKEN")
+        elif iteration is not None and max_iterations is not None:
+            ui_log(f"TOKEN 输入: {input_tokens} | 迭代: {iteration}/{max_iterations}", "TOKEN")
+        else:
+            ui_log(f"TOKEN 输入: {input_tokens}", "TOKEN")
+    except ImportError:
+        # UI 模块未加载时直接打印
         console = _get_token_console()
-
         if output_tokens is not None:
             console.print(
-                "[dim]\\[TOKEN] 输出: {} | 输入: {}[/dim]".format(
-                    output_tokens, input_tokens
-                )
+                "[dim]\\[TOKEN] 输出: {} | 输入: {}[/dim]".format(output_tokens, input_tokens)
             )
         elif iteration is not None and max_iterations is not None:
             console.print(
@@ -60,22 +67,6 @@ def print_tokens(
             )
         else:
             console.print(f"[dim]\\[TOKEN] 输入: {input_tokens}[/dim]")
-    except Exception:
-        import sys
-        if output_tokens is not None:
-            print(
-                "[TOKEN] 输出: {} | 输入: {}".format(output_tokens, input_tokens),
-                file=sys.stderr
-            )
-        elif iteration is not None and max_iterations is not None:
-            print(
-                "[TOKEN] 输入: {} | 迭代: {}/{}".format(
-                    input_tokens, iteration, max_iterations
-                ),
-                file=sys.stderr
-            )
-        else:
-            print(f"[TOKEN] 输入: {input_tokens}", file=sys.stderr)
 
 
 def print_input_tokens(input_tokens: int, iteration: int, max_iterations: int) -> None:
