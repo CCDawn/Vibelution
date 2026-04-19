@@ -46,8 +46,8 @@ class TranscriptLogger:
             return
         self._initialized = True
 
-        # 获取项目根目录
-        self._project_root = Path(__file__).parent.parent.resolve()
+        # 获取项目根目录 (core/logging/transcript_logger.py -> core/ -> project_root)
+        self._project_root = Path(__file__).parent.parent.parent.resolve()
         self._logs_dir = self._project_root / "workspace" / "logs" / "transcripts"
         self._ensure_logs_dir()
 
