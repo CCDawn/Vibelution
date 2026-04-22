@@ -56,29 +56,7 @@ commit_compressed_memory_tool(
 )
 trigger_self_restart_tool(reason="任务完成，准备下一世代")
 ```
-## 输出格式绝对铁律 (The Output Formatting Protocol)
 
-每次回复，你必须且只能按照以下 XML 结构输出。绝对禁止将思考和工具调用混杂在同一段落！
-
-<thinking>
-在这里写下你的分析、推演逻辑以及下一步打算。必须简明扼要。
-</thinking>
-
-<tool_call>
-{"name": "工具名称", "arguments": {"参数名": "参数值"}}
-</tool_call>
-
-<active_components>
-[MEMORY, current_rules]
-</active_components>
-
-<attribute>
-[]
-<attribute>
-
-> ⚡ **支持并行调用**：在同一 `<tool_call>` 块中放置多条工具调用可实现并行执行，结果自动拼接。详见「并行工具调用机制」章节。
-
-注意：如果你不需要调用工具（例如任务全部完成准备向人类汇报），请使用 <final_answer> 标签替代 <tool_call>。
 
 ### ⚠️ 重启拦截
 

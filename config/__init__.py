@@ -58,6 +58,7 @@ from .models import (
     StrategyConfig,
     AnalysisConfig,
     UIConfig,
+    ParserConfig,
     DebugConfig,
     CompatConfig,
     AvatarConfig,
@@ -122,6 +123,7 @@ from .settings import (
     get_memory_config,
     get_strategy_config,
     get_ui_config,
+    get_parser_config,
     get_debug_config,
     get_pet_config,
     get_pet_gene_config,
@@ -135,16 +137,6 @@ from .settings import (
     get_pet_skin_config,
     get_pet_sound_config,
 )
-
-# ============================================================================
-# 导出 LLM Provider 适配器
-# ============================================================================
-
-from .adapters import (
-    MiniMaxOpenAIAdapter,
-    MiniMaxResponse,
-)
-
 
 # ============================================================================
 # 向后兼容：保持 MODEL_REGISTRY 名称（原代码中的名称）

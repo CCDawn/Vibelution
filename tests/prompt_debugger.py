@@ -361,6 +361,7 @@ def run_single_test(
             raw_output="",
             thinking="",
             tool_calls=[],
+            context_summary="",
             error=f"{type(e).__name__}: {e}",
             duration_ms=duration,
         )
@@ -545,7 +546,7 @@ def main():
     # 获取 Agent 实例（用于 LLM 调用）
     try:
         from agent import SelfEvolvingAgent
-        from core.infrastructure.config import get_config
+        from config import get_config
 
         config = get_config()
         agent = SelfEvolvingAgent(config=config)
@@ -557,7 +558,7 @@ def main():
         console.print(f"[red]❌ 无法初始化 Agent: {e}[/red]")
         console.print("[yellow]尝试直接构建 LLM client...[/yellow]")
         try:
-            from core.infrastructure.config import get_config
+            from config import get_config
             cfg = get_config()
             client, model = _build_llm_client(
                 model=cfg.llm.model_name,

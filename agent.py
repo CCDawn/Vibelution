@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 import sys
 import time
+import asyncio
 import traceback
 import httpx
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Tuple
-
 # Windows 控制台编码修复
 if sys.platform == 'win32':
     import io
@@ -42,11 +42,11 @@ from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.tool_executor import get_tool_executor
 
 # LangChain 核心组件
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 
 # 模型发现
-from core.infrastructure.model_discovery import ModelDiscovery, DiscoveryStatus
+from config.providers import init_model_discovery
 
 # 导入工具
 from tools import Key_Tools
@@ -56,9 +56,8 @@ from tools.memory_tools import (
     get_core_context, get_current_goal,
     archive_generation_history, advance_generation,
     clear_generation_task,
-    check_restart_block,
 )
-from tools.rebirth_tools import trigger_self_restart_tool
+from tools.rebirth_tools import trigger_self_restart_tool, handle_restart_request
 
 # 导入 CLI UI
 from core.ui.cli_ui import get_ui, ui_error
@@ -68,18 +67,16 @@ from core.ui.token_display import print_tokens
 from core.orchestration.agent_lifecycle import AgentLifecycle, AUTONOMOUS_USER_PROMPT
 from core.orchestration.context_compressor import ContextCompressor
 from core.orchestration.llm_factory import create_llm, test_llm_connection
+from config.providers import init_model_discovery
 from core.capabilities.prompt_manager import get_prompt_manager
 from core.orchestration.response_parser import parse_llm_response
 
-# MiniMax OpenAI 兼容适配器
-from config.adapters import MiniMaxOpenAIAdapter
 
 # 导入决策模块
 from core.decision.decision_tree import DecisionContext, get_decision_tree, create_default_decision_tree
 from core.decision.priority_optimizer import Task, get_priority_optimizer
 from core.decision.strategy_selector import get_strategy_selector, create_default_selector
 from core.decision.task_classifier import classify_task_type
-from core.evolution.evolution_gate import run_evolution_gate
 
 # 导入宠物系统
 from core.pet_system import get_pet_system
@@ -141,6 +138,8 @@ class SelfEvolvingAgent:
         self._init_llm()
         # Token 压缩器
         self._init_token_compressor()
+        # Prompt 管理器
+        self.prompt_manager = get_prompt_manager()
 
         # 全局状态
         self.global_recent_actions = []
@@ -160,7 +159,7 @@ class SelfEvolvingAgent:
         self.tool_executor = get_tool_executor()
         self.security_validator = get_security_validator(project_root)
 
-        # Phase 6 模块（决策树、优先级优化、策略选择）
+        # （决策树、优先级优化、策略选择）
         self.decision_tree = get_decision_tree(project_root)
         self.priority_optimizer = get_priority_optimizer(project_root)
         self.strategy_selector = get_strategy_selector(project_root)
@@ -225,50 +224,12 @@ class SelfEvolvingAgent:
     def _init_model_discovery(self):
         """模型动态发现，返回 effective_max_token_limit"""
         self.model_info = None
-        provider = getattr(self.config.llm, 'provider', '')
-        is_local_provider = provider in ('local', 'ollama')
-        discovery_enabled = getattr(self.config.llm_discovery, 'enabled', True) and is_local_provider
-
-        if not discovery_enabled:
-            return getattr(self.config.context_compression, 'max_token_limit', 16000)
-
-        discovery = ModelDiscovery(
-            api_base=self.config.llm.api_base,
-            model_name=self.config.llm.model_name,
-            timeout=getattr(self.config.llm_discovery, 'timeout', 5),
-            enabled=True,
+        self._effective_max_token_limit = init_model_discovery(
+            self.config,
+            debug_logger=_debug_logger,
         )
-        discovery.set_fallback(
-            max_tokens=self.config.llm.max_tokens,
-            max_token_limit=getattr(self.config.context_compression, 'max_token_limit', 16000),
-        )
-        try:
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            self.model_info = loop.run_until_complete(discovery.discover())
-
-            if self.model_info.status == DiscoveryStatus.SUCCESS:
-                _debug_logger.success(
-                    f"模型发现成功: {self.model_info.model_name}\n"
-                    f"  context_window: {self.model_info.max_model_len}\n"
-                    f"  建议 max_tokens: {self.model_info.suggested_max_tokens}\n"
-                    f"  压缩阈值 max_token_limit: {self.model_info.compression_thresholds.max_token_limit}",
-                    tag="MODEL_DISCOVERY"
-                )
-                return self.model_info.compression_thresholds.max_token_limit
-            else:
-                _debug_logger.warning(
-                    f"模型发现失败: {self.model_info.error_message or '未知错误'}，使用配置文件的值",
-                    tag="MODEL_DISCOVERY"
-                )
-        except Exception as e:
-            _debug_logger.warning(f"模型发现异常: {e}，使用配置文件的值", tag="MODEL_DISCOVERY")
-
-        return getattr(self.config.context_compression, 'max_token_limit', 16000)
+        self.config.context_compression.max_token_limit = self._effective_max_token_limit
+        return self._effective_max_token_limit
 
     def _init_llm(self):
         """初始化 LLM（使用工厂）"""
@@ -306,7 +267,7 @@ class SelfEvolvingAgent:
             effective_max_token_limit=self._effective_max_token_limit,
         )
 
-    def think_and_act(self, user_prompt: str = None, system_prompt: str = None) -> bool:
+    def think_and_act(self, user_prompt: str = None) -> bool:
         """
         苏醒时执行一次思考和行动
 
@@ -324,9 +285,8 @@ class SelfEvolvingAgent:
         Returns:
             True: 继续运行, False: 触发重启, "hibernated": 休眠后继续
         """
-        pm = get_prompt_manager()
-        if system_prompt is None:
-            system_prompt, _ = pm.build()
+        ui = get_ui()
+        system_prompt, _ = self.prompt_manager.build()
         messages = [SystemMessage(content=system_prompt)]
 
         # 获取轮次编号
@@ -373,7 +333,7 @@ class SelfEvolvingAgent:
             for iteration in range(1, max_iterations + 1):
                 # 状态机驱动：每轮迭代前重建 SystemMessage
                 # 包含 base_prompt + state_memory + 当前激活的 registry 规则
-                current_prompt, _ = pm.build()
+                current_prompt, _ = self.prompt_manager.build()
                 messages[0] = SystemMessage(content=current_prompt)
 
                 # 自动 Token 检查与压缩
@@ -382,6 +342,7 @@ class SelfEvolvingAgent:
                 # 第一次循环打印会话开始
                 if iteration == 1:
                     _debug_logger.session_start(self.model_name, get_generation_tool())
+                    _debug_logger.session_start_log(self.model_name, get_generation_tool())
 
                 # 动态调整迭代策略
                 if decision_result and hasattr(self, 'strategy_selector'):
@@ -393,22 +354,20 @@ class SelfEvolvingAgent:
                         if hasattr(self.strategy_selector, '_config'):
                             self.strategy_selector._config["exploration_rate"] = 0.1
 
-                # 打印当前输入 token 数
-                current_input_tokens = estimate_messages_tokens(messages)
-                print_tokens(current_input_tokens, iteration=iteration, max_iterations=max_iterations)
-
                 # 调用 LLM
                 response = self._invoke_llm(messages)
                 if response is None:
                     _debug_logger.error("LLM 调用失败", tag="LLM")
                     continue
 
-                messages.append(response)
+                # 调试：打印原始 content 长度和前 200 字符
+                raw_content = response.content or ""
+                _debug_logger.debug(f"[DEBUG] content 长度={len(raw_content)} | 内容预览: {raw_content[:200]}", tag="RAW")
 
                 # 记录 LLM 响应
-                logger.log_llm_response(response.content or "")
+                logger.log_llm_response(raw_content)
 
-                # Token 使用
+                # Token 使用统计
                 if hasattr(response, 'usage_metadata') and response.usage_metadata:
                     usage = response.usage_metadata
                     input_tokens = usage.get('input_tokens', 0)
@@ -425,37 +384,27 @@ class SelfEvolvingAgent:
                     except Exception:
                         pass
 
-                    _debug_logger.debug(
-                        f"Token: {input_tokens} + {output_tokens}",
-                        tag="LLM"
-                    )
-
                 # 解析工具调用、状态记忆和规则切换
                 parser_result = parse_llm_response(response)
+                ui.add_content(parser_result.thinking_content)
+                messages.append(AIMessage(content=parser_result.clean_content))
 
-                # 回写 state_memory（落盘 + 更新 PM 内存缓存）
-                if parser_result.state_memory:
-                    pm.update_state_memory(parser_result.state_memory)
+                # # 回写 state_memory（落盘 + 更新 PM 内存缓存）
+                # if parser_result.state_memory:
+                #     self.prompt_manager.update_state_memory(parser_result.state_memory)
 
-                # 更新激活规则集（兜底：空则保持不变）
-                if parser_result.active_rules:
-                    pm.update_active_rules(parser_result.active_rules)
+                # # 更新激活规则集（兜底：空则保持不变）
+                # if parser_result.active_rules:
+                #     self.prompt_manager.update_active_rules(parser_result.active_rules)
 
                 # 动态切换提示词组件拼装（<active_components> 标签驱动）
                 if parser_result.active_components:
-                    pm.select_components(parser_result.active_components)
+                    self.prompt_manager.select_components(parser_result.active_components)
 
                 # 显示思考过程
                 if parser_result.thinking_content:
                     _debug_logger.llm_thinking(parser_result.thinking_content)
                     logger.log_llm_intent("thinking", parser_result.thinking_content[:300])
-
-                # 无工具调用 = 结束
-                if not parser_result.tool_calls:
-                    if response.content:
-                        _debug_logger.llm_response(response.content, "LLM 最终回复")
-                        logger.log_llm_intent("final_response", response.content[:300])
-                    return True
 
                 # 使用优先级优化器排序工具
                 if hasattr(self, 'priority_optimizer'):
@@ -464,11 +413,7 @@ class SelfEvolvingAgent:
                     tool_calls = parser_result.tool_calls
 
                 # 执行工具（并行或单工具）
-                if len(tool_calls) > 1:
-                    self._execute_tools_parallel(tool_calls, messages)
-                else:
-                    result, action = self._execute_tool(tool_calls[0], messages)
-                    self._handle_tool_result(tool_calls[0], result, action, messages)
+                self._execute_tools_parallel(tool_calls, messages)
 
             _debug_logger.turn_end(current_turn, tool_count=len(tool_calls) if tool_calls else 0)
             return True
@@ -479,27 +424,25 @@ class SelfEvolvingAgent:
 
     def _invoke_llm(self, messages: list) -> Optional[Any]:
         """调用 LLM（带超时）"""
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-
-        def invoke():
-            return self.llm_with_tools.invoke(messages)
-
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(invoke)
+        ui = get_ui()
+        clean_messages = []
+        for msg in messages:
+            if isinstance(msg, AIMessage):
+                clean_msg = AIMessage(content=msg.content or "")
+                clean_messages.append(clean_msg)
+            else:
+                clean_messages.append(msg)
+        with ui.thinking("🤔 思考中..."):
             try:
-                llm_timeout = getattr(self.config.llm, 'api_timeout', 300)
-                return future.result(timeout=llm_timeout)
-            except FuturesTimeoutError:
-                _debug_logger.error(f"LLM 调用超时 ({llm_timeout}秒)", tag="LLM")
-                logger.log_error("llm_timeout", f"LLM 调用超时 ({llm_timeout}秒)")
-                return None
+                return self.llm_with_tools.invoke(clean_messages)
             except Exception as e:
                 _debug_logger.error(f"LLM 调用异常: {type(e).__name__}: {e}", tag="LLM")
                 logger.log_error("llm_error", f"{type(e).__name__}: {e}")
                 return None
 
-    def _parse_tool_args(self, tool_call: Dict) -> Dict:
-        """解析工具参数，支持多种格式"""
+    def _execute_tool(self, tool_call: Dict, messages: list) -> tuple:
+        """执行工具调用"""
+        tool_name = tool_call.get('name', 'unknown')
         tool_args = tool_call.get('args') or tool_call.get('arguments') or {}
         if isinstance(tool_args, str):
             try:
@@ -513,15 +456,9 @@ class SelfEvolvingAgent:
                 tool_args = json.loads(str(tool_args))
             except (json.JSONDecodeError, TypeError):
                 tool_args = {}
-        return tool_args if isinstance(tool_args, dict) else {}
-
-    def _execute_tool(self, tool_call: Dict, messages: list) -> tuple:
-        """执行工具调用"""
-        tool_name = tool_call.get('name', 'unknown')
-        tool_args = self._parse_tool_args(tool_call)
+        tool_args = tool_args if isinstance(tool_args, dict) else {}
 
         _debug_logger.tool_start(tool_name, tool_args)
-        logger.log_tool_call(tool_name, tool_args, status="called")
 
         # 策略选择
         if hasattr(self, 'strategy_selector'):
@@ -543,7 +480,11 @@ class SelfEvolvingAgent:
             return (f"上下文压缩完成: 节省{old_tokens - new_tokens} Token", None), None
 
         if tool_name == "trigger_self_restart_tool":
-            return self._handle_restart(tool_args, messages)
+            return handle_restart_request(
+                tool_args=tool_args,
+                messages=messages,
+                self_modified=self._self_modified,
+            )
 
         if tool_name == "enter_hibernation":
             import re
@@ -565,7 +506,6 @@ class SelfEvolvingAgent:
 
         if result is not None:
             _debug_logger.tool_result(tool_name, str(result), success=True)
-            logger.log_tool_call(tool_name, tool_args, str(result), status="completed")
         else:
             _debug_logger.warning(f"[警告] {tool_name} 返回 None", tag="TOOL")
 
@@ -606,18 +546,17 @@ class SelfEvolvingAgent:
     def _handle_tool_result(self, tool_call: Dict, result, action, messages: list):
         """处理工具执行结果"""
         result_str, truncated = truncate_result(result)
-        tool_call_id = str(tool_call.get('id', '')) if tool_call.get('id') is not None else ''
 
         if action == "restart":
             logger.log_action("restart", {"tool": tool_call['name']})
         elif action == "skip":
             logger.log_action("skip", {"tool": tool_call['name']})
-            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
+            messages.append(AIMessage(content=result_str))
         elif action == "hibernated":
             logger.log_action("hibernated", {"tool": tool_call['name']})
-            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
+            messages.append(AIMessage(content=result_str))
         else:
-            messages.append(ToolMessage(content=result_str, tool_call_id=tool_call_id))
+            messages.append(AIMessage(content=result_str))
 
         if truncated:
             _debug_logger.warning(
@@ -626,53 +565,13 @@ class SelfEvolvingAgent:
 
     def _execute_tools_parallel(self, tool_calls: List[Dict], messages: list):
         """并行执行多个工具调用"""
+        if not tool_calls:
+            return
         # 使用 tool_executor 的并行执行
         results = self.tool_executor.execute_parallel(tool_calls)
         # 逐条追加到 messages
         for tc, result, action in results:
             self._handle_tool_result(tc, result, action, messages)
-
-    def _handle_restart(self, tool_args: dict, messages: list) -> tuple:
-        """处理重启请求"""
-        # 任务清单拦截检查
-        is_blocked, block_msg = check_restart_block()
-        if is_blocked:
-            _debug_logger.warning("任务清单未完成，禁止重启", tag="TASK_BLOCK")
-            return (block_msg, None)
-
-        # 测试门控
-        if self._self_modified:
-            test_result = run_evolution_gate()
-            if not test_result["passed"]:
-                error_msg = (
-                    f"[TEST GATE FAILED] 测试未通过，禁止进化！\n"
-                    f"失败模块: {', '.join(test_result['failed_modules'])}\n"
-                    f"通过: {test_result['passed_count']}/{test_result['total_count']}"
-                )
-                _debug_logger.error("测试门控失败，禁止重启", tag="GATE")
-                return (error_msg, None)
-
-        # 世代归档
-        current_gen = get_generation_tool()
-        intermediate_steps = []
-        for msg in messages:
-            if hasattr(msg, 'content') and isinstance(msg.content, str):
-                if msg.type == "ai" and msg.content:
-                    intermediate_steps.append({"type": "thought", "content": msg.content[:500]})
-                elif msg.type == "tool":
-                    intermediate_steps.append({"type": "tool_call", "name": getattr(msg, 'name', 'unknown'), "content": msg.content[:200]})
-
-        core_wisdom = get_core_context() or "无"
-        current_goal = get_current_goal() or "待定"
-        archive_generation_history(generation=current_gen, history_data=intermediate_steps, core_wisdom=core_wisdom, next_goal=current_goal)
-        new_gen = advance_generation()
-        clear_generation_task()
-
-        tool_result = trigger_self_restart_tool(**tool_args)
-        tool_result_with_archive = f"{tool_result}\n[世代归档] G{current_gen} -> G{new_gen}"
-
-        self._self_modified = False
-        return (tool_result_with_archive, "restart")
 
     def run_loop(self, initial_prompt: str = None) -> None:
         """运行 Agent 主循环"""
@@ -683,8 +582,6 @@ class SelfEvolvingAgent:
         lifecycle.transition_state(AgentState.AWAKENING, action="系统初始化中...")
 
         generation = get_generation_tool()
-        system_prompt, _ = get_prompt_manager().build()
-        logger.start_generation(generation, system_prompt)
         logger.log_action("会话开始", f"世代: G{generation}, 模型: {self.model_name}")
 
         try:
@@ -696,14 +593,11 @@ class SelfEvolvingAgent:
             while True:
                 lifecycle.transition_state(AgentState.THINKING, action="思考并执行任务...")
 
-                # 计算系统提示词
-                system_prompt, _ = get_prompt_manager().build()
-
                 # 自动备份检查
                 lifecycle.check_auto_backup()
 
                 # 执行思考-行动
-                result = self.think_and_act(user_prompt=user_input, system_prompt=system_prompt)
+                result = self.think_and_act(user_prompt=user_input)
                 user_input = None
 
                 if not lifecycle.should_continue(result):
@@ -793,12 +687,6 @@ def main(initial_prompt: str = None):
     ui.add_content(f"  [cyan]Backup:[/cyan]   {config.agent.auto_backup}")
 
     try:
-        api_key = config.get_api_key()
-        if not api_key:
-            ui_error("API Key 未设置!", None)
-            ui.stop_live()
-            sys.exit(1)
-
         agent = SelfEvolvingAgent(config=config)
         ui.add_content(f"  [green]Key Tools:[/green]   {len(agent.key_tools)} loaded")
         ui.add_content("[dim]─" * 60 + "[/dim]")
@@ -822,7 +710,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     if args.test:
-        _debug_logger.section("首次进化测试模式")
+        _debug_logger.section("测试模式")
         main(initial_prompt=EVOLUTION_TEST_PROMPT)
     elif args.prompt:
         main(initial_prompt=args.prompt)

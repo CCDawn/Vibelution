@@ -20,6 +20,7 @@ from contextlib import contextmanager
 # rich 组件
 from rich.console import Console
 from rich.live import Live
+from rich.layout import Layout
 from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
@@ -90,10 +91,11 @@ class UIManager:
 
         # ========== Claude Code 风格三段式布局 ==========
         self._content_lines: List[str] = []  # 中间可滚动内容区
-        self._max_content = 100  # 最大保留行数
-        self._header_height = 8   # 顶部状态栏高度
-        self._footer_height = 18  # 底部日志栏高度（显示行数）
-        self._max_visible_logs = 20  # 日志面板最多显示多少条日志
+        self._max_content = 16  # 最大保留行数
+        self._header_height = 7  # 顶部状态栏高度（Art 5行 + 状态4行 + 边框2行 = 11）
+        self.content_height=18
+        self._footer_height = 7  # 底部日志栏高度（10条日志 + 边框2行 = 12）
+        self._max_visible_logs = 10  # 日志面板最多显示多少条日志
 
         # 龙虾主题
         self.theme = get_theme()
@@ -216,43 +218,39 @@ class UIManager:
             height=self._footer_height,
         )
 
-    def _create_full_renderable(self) -> Table:
+    def _create_full_renderable(self) -> Layout:
         """创建完整的渲染布局 - Claude Code 风格三段式
 
         布局结构:
         ┌──────────────────────────────────────────────┐
-        │  [顶部状态栏: Baby Claw 状态 - 固定]         │  ← _header_height 行
+        │  [顶部状态栏: Baby Claw 状态 - 固定高度]      │
         ├──────────────────────────────────────────────┤
-        │  [中间可滚动内容区: 工具输出、思考过程]        │  ← 可滚动
+        │  [中间可滚动内容区: 工具输出、思考过程]        │  ← flex 填充剩余空间
         ├──────────────────────────────────────────────┤
-        │  [底部日志栏: 最近日志 - 固定]                │  ← _footer_height 行
+        │  [底部日志栏: 最近日志 - 固定高度]             │
         └──────────────────────────────────────────────┘
         """
-        # 使用 Table 实现垂直布局（无边框，自动扩展宽度）
-        table = Table(box=None, show_header=False, padding=0)
+        layout = Layout()
 
-        # 设置表格宽度为控制台宽度
-        table.width = self.console.width
+        # 顶部: 固定高度（根据状态行数自动计算）
+        layout.split_column(
+            Layout(name="header", size=self._header_height),
+            Layout(name="content", size=self.content_height),
+            Layout(name="log", size=self._footer_height, minimum_size=10),
+        )
 
-        # 创建各面板（不指定宽度，让 Panel 自动适应表格宽度）
-        header_panel = self._create_header()
-        content_panel = self._create_content_area()
-        log_panel = self._create_log_panel()
+        # 填充各区域
+        layout["header"].update(self._create_header())
+        layout["content"].update(self._create_content_area())
+        layout["log"].update(self._create_log_panel())
 
-        # 垂直堆叠: header | content | footer
-        table.add_column(justify="left")
-        table.add_row(header_panel, end_section=True)
-        table.add_row(content_panel, end_section=True)
-        table.add_row(log_panel, end_section=True)
-
-        return table
+        return layout
 
     def _create_content_area(self) -> Panel:
         """创建中间可滚动内容区"""
         if not self._content_lines:
-            content = f"[dim]{self.avatar.get_art('happy')}\n等待任务...[/dim]"
+            content = "[dim]等待任务...[/dim]"
         else:
-            # 只保留最近的 _max_content 行
             recent = self._content_lines[-self._max_content:] if len(self._content_lines) > self._max_content else self._content_lines
             content = "\n".join(recent)
 
@@ -466,23 +464,22 @@ class UIManager:
             yield status
 
     def print_tool_start(self, tool_name: str, args: Dict[str, Any] = None):
-        """打印工具调用开始 - 输出到内容区"""
+        """打印工具调用开始 - 仅输出到内容区"""
         self.increment_tool_count()
         tool_icon = self.theme.get_tool_icon(tool_name)
-
-        # 输出到内容区（保持 Live 刷新）
-        self.add_content("")  # 空行分隔
+        self.add_content("")
         self.add_content(f"[bold magenta]🔧 {tool_icon} {tool_name}[/bold magenta]" + (f"({', '.join([f'{k}={str(v)[:30]}' for k, v in args.items()][:3])})" if args else ""))
 
-        # 同时写入日志面板
+    def print_tool_start_log(self, tool_name: str, args: Dict[str, Any] = None):
+        """打印工具调用开始 - 仅写入日志面板"""
         if args:
             args_preview = ", ".join([f"{k}={str(v)[:20]}" for k, v in list(args.items())[:3]])
-            self.add_log(f"{tool_icon} {tool_name}({args_preview})", "TOOL")
+            self.add_log(f"{self.theme.get_tool_icon(tool_name)} {tool_name}({args_preview})", "TOOL")
         else:
-            self.add_log(f"{tool_icon} {tool_name}", "TOOL")
+            self.add_log(f"{self.theme.get_tool_icon(tool_name)} {tool_name}", "TOOL")
 
     def print_tool_result(self, tool_name: str, result: str, success: bool = True):
-        """打印工具执行结果 - 输出到内容区"""
+        """打印工具执行结果 - 仅输出到内容区"""
         status_icon = "✅" if success else "❌"
         color = self.theme.LOBSTER_GREEN if success else self.theme.LOBSTER_RED
 
@@ -497,9 +494,10 @@ class UIManager:
         if result:
             preview = result[:300] + "..." if len(result) > 300 else result
             self.add_content(f"     {preview}")
-        self.add_content("")  # 空行分隔
+        self.add_content("")
 
-        # 同时写入日志面板（成功/失败状态）
+    def print_tool_result_log(self, tool_name: str, success: bool = True):
+        """打印工具执行结果 - 仅写入日志面板"""
         if success:
             self.add_log(f"✅ {tool_name} 完成", "TOOL")
         else:
@@ -531,11 +529,6 @@ class UIManager:
         """打印 Markdown 内容 - 输出到内容区"""
         md = Markdown(markdown_text)
         self.add_content(str(md))
-
-    def print_markdown(self, markdown_text: str):
-        """打印 Markdown 内容"""
-        md = Markdown(markdown_text)
-        self.console.print(md)
 
     def print_code(self, code: str, language: str = "python"):
         """打印代码块"""
@@ -796,11 +789,9 @@ def run_interactive_mode(agent) -> bool:
                 ui.start_live()
                 agent.run_loop(initial_prompt=user_input)
                 ui.stop_live()
-                ui.add_content("")
-                ui.add_content("[dim]─" * 60 + "[/dim]")
-                ui.add_content("[yellow]返回交互模式[/yellow]")
-                ui.add_content("")
-                ui.stop_live()
+                print("[dim]" + "─" * 60 + "[/dim]")
+                print("[yellow]返回交互模式[/yellow]")
+                print()
 
         except KeyboardInterrupt:
             print("\n[yellow]中断，退出...[/yellow]")

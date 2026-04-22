@@ -858,6 +858,11 @@ def get_ui_config() -> UIConfig:
     return get_config().ui
 
 
+def get_parser_config() -> "ParserConfig":
+    """获取响应解析器配置"""
+    return get_config().parser
+
+
 def get_debug_config() -> DebugConfig:
     """获取调试配置"""
     return get_config().debug

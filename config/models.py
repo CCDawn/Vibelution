@@ -961,6 +961,29 @@ class UIConfig(BaseModel):
 
 
 # ============================================================================
+# 响应解析器配置
+# ============================================================================
+
+class ParserConfig(BaseModel):
+    """响应解析器配置"""
+    model_config = ConfigDict(extra="ignore")
+
+    strip_tags: List[str] = Field(
+        default_factory=lambda: [
+            "<think>",  # 必须放最前面：先去除 <think>...</think>，再去除 <thinking>（顺序重要）
+            "tool_call", "invoke", "skill",
+            "thinking", "state_memory",
+            "active_rules", "active_components",
+        ],
+        description="解析时需要去除的 XML 标签名列表"
+    )
+    strip_thinking_alias: bool = Field(
+        default=True,
+        description="是否去除 <think>...</think> 格式的思考标签"
+    )
+
+
+# ============================================================================
 # 调试配置
 # ============================================================================
 
@@ -1159,6 +1182,7 @@ class AppConfig(BaseModel):
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
+    parser: ParserConfig = Field(default_factory=ParserConfig)
     debug: DebugConfig = Field(default_factory=DebugConfig)
     compat: CompatConfig = Field(default_factory=CompatConfig)
 
@@ -1310,6 +1334,7 @@ __all__ = [
     "AnalysisConfig",
     # UI 配置
     "UIConfig",
+    "ParserConfig",
     # 调试配置
     "DebugConfig",
     # 兼容性配置

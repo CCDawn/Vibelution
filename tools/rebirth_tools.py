@@ -454,6 +454,101 @@ def write_restart_log(pid: int, reason: str, success: bool) -> None:
         f.write(f"{timestamp} | PID:{pid} | {status} | {reason}\n")
 
 
+# ============================================================================
+# 重启请求处理（与 Agent 逻辑解耦）
+# ============================================================================
+
+def handle_restart_request(
+    tool_args: dict,
+    messages: list,
+    self_modified: bool,
+) -> tuple:
+    """
+    统一处理 Agent 重启请求，整合任务清单检查、测试门控、世代归档。
+
+    此函数将 agent.py 中 _handle_restart 的全部逻辑迁移至此，
+    实现重启处理逻辑与 Agent 主类的解耦。
+
+    Args:
+        tool_args: 传递给 trigger_self_restart_tool 的参数，期望包含 `reason` 字段
+        messages: 当前对话消息列表，用于提取中间步骤进行世代归档
+        self_modified: 标记 Agent 是否自修改过，True 时会触发测试门控
+
+    Returns:
+        (result_message, action) 元组：
+        - result_message: 操作结果或错误信息
+        - action: "restart" 表示重启，None 表示被拦截
+    """
+    # 任务清单拦截检查
+    try:
+        from tools.memory_tools import check_restart_block
+        is_blocked, block_msg = check_restart_block()
+        if is_blocked:
+            debug_logger.warning("任务清单未完成，禁止重启", tag="TASK_BLOCK")
+            return (block_msg, None)
+    except Exception as e:
+        debug_logger.error(f"任务清单检查失败: {e}", tag="TASK_BLOCK")
+
+    # 测试门控（仅当 Agent 产生过自我修改时触发）
+    if self_modified:
+        try:
+            from core.decision.evolution_gate import run_evolution_gate
+            test_result = run_evolution_gate()
+            if not test_result["passed"]:
+                error_msg = (
+                    f"[TEST GATE FAILED] 测试未通过，禁止进化！\n"
+                    f"失败模块: {', '.join(test_result['failed_modules'])}\n"
+                    f"通过: {test_result['passed_count']}/{test_result['total_count']}"
+                )
+                debug_logger.error("测试门控失败，禁止重启", tag="GATE")
+                return (error_msg, None)
+        except Exception as e:
+            debug_logger.error(f"测试门控执行失败: {e}", tag="GATE")
+
+    # 世代归档
+    current_gen = None
+    new_gen = None
+    try:
+        from tools.memory_tools import (
+            get_generation_tool,
+            get_core_context, get_current_goal,
+            archive_generation_history, advance_generation,
+            clear_generation_task,
+        )
+        current_gen = get_generation_tool()
+        intermediate_steps = []
+        for msg in messages:
+            if hasattr(msg, 'content') and isinstance(msg.content, str):
+                if msg.type == "ai" and msg.content:
+                    intermediate_steps.append({"type": "thought", "content": msg.content[:500]})
+                elif msg.type == "tool":
+                    intermediate_steps.append({
+                        "type": "tool_call",
+                        "name": getattr(msg, 'name', 'unknown'),
+                        "content": msg.content[:200]
+                    })
+
+        core_wisdom = get_core_context() or "无"
+        current_goal = get_current_goal() or "待定"
+        archive_generation_history(
+            generation=current_gen,
+            history_data=intermediate_steps,
+            core_wisdom=core_wisdom,
+            next_goal=current_goal
+        )
+        new_gen = advance_generation()
+        clear_generation_task()
+    except Exception as e:
+        debug_logger.error(f"世代归档失败: {e}", tag="ARCHIVE")
+
+    # 触发实际重启
+    tool_result = trigger_self_restart_tool(**tool_args)
+    archive_msg = f"\n[世代归档] G{current_gen} -> G{new_gen}" if current_gen is not None and new_gen is not None else ""
+    tool_result_with_archive = f"{tool_result}{archive_msg}"
+
+    return (tool_result_with_archive, "restart")
+
+
 def enter_hibernation_tool(duration: int = 300) -> str:
     """
     让 Agent 进入休眠状态一段时间。

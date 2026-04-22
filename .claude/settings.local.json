@@ -35,7 +35,9 @@
       "Bash(awk '/    def _/ {name=$0; next} /^[0-9]+/ {if\\(name\\) {gsub\\(/^[ \\\\t]+/, \"\", name\\); gsub\\(/[ \\\\t]+/, \" \", name\\); split\\(name, a, \"\\(\"\\); print a[1], $0}}' agent.py)",
       "Bash(awk '/    def [a-z_]+\\\\\\(self/ {f=$0} /^[0-9]+/ {print NR, f}' agent.py)",
       "Bash(wc -l agent.py core/infrastructure/*.py)",
-      "Bash(dir \"C:\\\\Users\\\\17533\\\\Desktop\\\\self-evo-baby\\\\core\")"
+      "Bash(dir \"C:\\\\Users\\\\17533\\\\Desktop\\\\self-evo-baby\\\\core\")",
+      "Bash(PYTHONIOENCODING=utf-8 python *)",
+      "Bash(PYTHONPATH=/c/Users/17533/Desktop/self-evo-baby PYTHONIOENCODING=utf-8 python *)"
     ]
   }
 }
