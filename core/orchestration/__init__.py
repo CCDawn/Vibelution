@@ -31,7 +31,7 @@ from core.orchestration.plan_orchestrator import (
     PlanOrchestrator, get_plan_orchestrator, reset_plan_orchestrator
 )
 from core.orchestration.agent_lifecycle import (
-    AgentLifecycle, AUTONOMOUS_USER_PROMPT
+    AgentLifecycle
 )
 from core.orchestration.context_compressor import (
     ContextCompressor, CompressionThresholds

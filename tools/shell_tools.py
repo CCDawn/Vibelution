@@ -1208,7 +1208,7 @@ def self_test() -> str:
     results.append("=" * 50)
 
     try:
-        from tools import web_tools, memory_tools
+        from tools import web_search_tool, memory_tools
         results.append("[OK] 核心模块导入成功")
     except Exception as e:
         results.append(f"[FAIL] 核心模块导入失败: {e}")

@@ -5,15 +5,13 @@ core/orchestration/response_parser.py - LLM 响应解析器
 功能：
 - 强制提取 <state_memory> XML 标签
 - 强制提取 <active_rules> XML 标签
-- 保留原有 tool_calls 解析能力
+- 仅依赖 LangChain 原生 tool_calls 属性
 - 异常时返回空字符串，保证主循环健壮
 """
 
 from __future__ import annotations
 
 import re
-import json
-import uuid
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from core.logging.setup import setup_logging
@@ -104,59 +102,7 @@ class ResponseParser:
     # ------------------------------------------------------------------------
 
     def _extract_tool_calls(self, response: Any, content: str) -> List[Dict[str, Any]]:
-        tool_calls = getattr(response, 'tool_calls', None) or []
-
-        if not tool_calls and content:
-            text_tcs = re.findall(
-                r'<tool_call>\s*(\{[\s\S]*?\})\s*</tool_call>',
-                content
-            )
-            for tc_json in text_tcs:
-                try:
-                    tc = json.loads(tc_json)
-                    self._normalize_tool_call(tc)
-                    tool_calls.append(tc)
-                except json.JSONDecodeError:
-                    pass
-
-            skill_patterns = [
-                r'<invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)</invoke>',
-                r'<skill\s+name="([^"]+)"[^>]*>([\s\S]*?)</skill>',
-            ]
-            for pattern in skill_patterns:
-                for match in re.finditer(pattern, content):
-                    name = match.group(1)
-                    body = match.group(2)
-                    args = self._parse_skill_params(body)
-                    tc = {
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "name": name,
-                        "args": args,
-                    }
-                    tool_calls.append(tc)
-
-        return tool_calls
-
-    def _normalize_tool_call(self, tc: Dict[str, Any]):
-        if 'arguments' in tc and 'args' not in tc:
-            tc['args'] = tc.pop('arguments')
-        if 'args' not in tc:
-            tc['args'] = {}
-        if 'id' not in tc:
-            tc['id'] = f"call_{uuid.uuid4().hex[:8]}"
-
-    def _parse_skill_params(self, body: str) -> Dict[str, Any]:
-        args = {}
-        param_matches = re.findall(
-            r'<param\s+name="([^"]+)"[^>]*>([\s\S]*?)</param>',
-            body
-        )
-        for param_name, param_value in param_matches:
-            try:
-                args[param_name] = json.loads(param_value.strip())
-            except (json.JSONDecodeError, ValueError):
-                args[param_name] = param_value.strip()
-        return args
+        return getattr(response, 'tool_calls', None) or []
 
     # ------------------------------------------------------------------------
     # XML 标签提取

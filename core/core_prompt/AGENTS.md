@@ -1,3 +1,10 @@
+---
+name: AGENTS
+priority: 60
+required: true
+description: Agent 标准操作流 SOP，包含任务规划与执行流程规范
+---
+
 # AGENTS.md - 标准操作流 SOP
 
 *Agent 标准操作流 SOP，包含任务规划与执行流程规范。*
@@ -81,82 +88,9 @@ trigger_self_restart_tool(reason="任务完成，准备下一世代")
 
 ---
 
-## 并行工具调用机制（The Parallel Tool Call Protocol）
+## 工具调用
 
-> ⚡ **【效率核心】** 支持在单次回复中同时发起多个工具调用，实现并行执行与结果拼接！
-
-### 机制说明
-
-模型可以在 `<tool_call>` 中一次性输出多个工具调用，系统会**并行执行**它们，最后将所有结果拼接返回。适用于：
-- **相互独立**的操作（如同时读取多个文件、同时搜索多处代码）
-- **需要聚合信息**的场景（如同时获取项目结构和代码实体）
-- **减少轮次**，显著提升效率
-
-### 输出格式
-
-在单个 `<tool_call>` 块中放置多条工具调用，结果自动拼接：
-
-```xml
-<tool_call>
-{"name": "工具A", "arguments": {"参数": "值"}}
-{"name": "工具B", "arguments": {"参数": "值"}}
-{"name": "工具C", "arguments": {"参数": "值"}}
-</tool_call>
-```
-
-### 结果拼接格式
-
-所有工具返回结果按调用顺序拼接，每个结果前有清晰的**分隔线**：
-
-```
-━━━━━━━━━━ [工具A] ━━━━━━━━━━
-[工具A 的返回内容]
-━━━━━━━━━━ [工具B] ━━━━━━━━━━
-[工具B 的返回内容]
-━━━━━━━━━━ [工具C] ━━━━━━━━━━
-[工具C 的返回内容]
-```
-
-### 使用场景
-
-#### 场景 1：同时读取多个文件
-
-```xml
-<tool_call>
-{"name": "read_file_tool", "arguments": {"file_path": "agent.py", "max_lines": 50}}
-{"name": "read_file_tool", "arguments": {"file_path": "config.py", "max_lines": 50}}
-</tool_call>
-```
-
-#### 场景 2：同时执行多个独立 CLI 命令
-
-```xml
-<tool_call>
-{"name": "cli_tool", "arguments": {"command": "Get-ChildItem . -Name", "timeout": 30}}
-{"name": "cli_tool", "arguments": {"command": "git status", "timeout": 30}}
-</tool_call>
-```
-
-#### 场景 3：先并行读取，拿到内容后编辑
-
-```
-第一步：并行获取多个文件内容
-<tool_call>
-{"name": "list_file_entities_tool", "arguments": {"file_path": "tools/shell_tools.py"}}
-{"name": "list_file_entities_tool", "arguments": {"file_path": "tools/memory_tools.py"}}
-</tool_call>
-
-第二步：基于返回结果，用 apply_diff_edit_tool 修改
-<tool_call>
-{"name": "apply_diff_edit_tool", "arguments": {"file_path": "tools/shell_tools.py", "diff_text": "<<<< SEARCH ... ===== REPLACE ... >>>> REPLACE"}}
-</tool_call>
-```
-
-### 注意事项
-
-- **仅当工具之间无依赖时才并行**。如果 B 需要 A 的结果，则必须先调用 A，等待结果后再调用 B
-- **每个 `<tool_call>` 块内的所有调用并行执行**，块与块之间按顺序执行
-- **结果拼接后模型需自行解析**，根据拼接结果决定下一步操作
+模型通过 Function Calling 原生输出工具调用，无需手动构造标签。系统会自动解析 `tool_calls` 属性中的调用请求，并行执行无依赖关系的多个调用。
 
 ---
 

@@ -56,14 +56,18 @@ class PromptComponent:
 
     Attributes:
         name:        唯一标识，如 "SOUL", "AGENTS", "TASK_CHECKLIST"
+        description: 组件描述（来自 md 文件 front matter）
         priority:    优先级（数字越小越靠前，default=50）
         required:    是否必选（True 时 exclude 无法移除）
+        empty:       内容是否为空（无实际内容时为 True）
         load_fn:     加载函数，返回文本内容
-        enabled:      是否启用（可动态开关）
+        enabled:     是否启用（可动态开关）
     """
     name: str
+    description: str = ""
     priority: int = 50
     required: bool = False
+    empty: bool = False
     load_fn: Callable[[], str] = field(default_factory=lambda: lambda: "")
     enabled: bool = True
 
@@ -90,9 +94,7 @@ class PromptManager:
     # 纯动态文件（仅来自 workspace，不存在时自动生成默认模板）
     _DYNAMIC_FILES = {"IDENTITY.md", "USER.md", "DYNAMIC.md", "COMPRESS_SUMMARY.md"}
 
-    # 状态机增强：规则注册表 + 当前激活规则 + 状态记忆（在 __init__ 中初始化）
-    # prompt_registry: Dict[str, str] — 在 __init__ 中初始化为 {}
-    # current_active_prompts: List[str]   — 在 __init__ 中初始化为 []
+    # 状态机增强：状态记忆（在 __init__ 中初始化）
     # state_memory: str                   — 在 __init__ 中初始化为 ""
 
     def __init__(self):
@@ -111,10 +113,6 @@ class PromptManager:
         self._cache: Dict[str, str] = {}
         self._cache_sources: Dict[str, str] = {}
 
-        # 规则注册表（硬编码，非文件系统扫描）
-        self.prompt_registry: Dict[str, str] = {}
-        # 当前激活的规则集名称列表
-        self.current_active_prompts: List[str] = []
         # 当前状态记忆（从 LLM <state_memory> 标签提取）
         self.state_memory: str = ""
 
@@ -126,8 +124,6 @@ class PromptManager:
         from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 初始化 - 动态: {self._dynamic_root}")
 
         # 注册所有组件
-        self._register_core_components()
-        self._register_default_rules()
         self._scan_workspace_prompts()
 
         # 加载上次会话遗留的 state_memory（如果有）
@@ -136,81 +132,6 @@ class PromptManager:
     # ------------------------------------------------------------------------
     # 组件注册
     # ------------------------------------------------------------------------
-
-    def _register_core_components(self):
-        """注册核心组件（硬编码顺序）"""
-        self.register(PromptComponent(
-            name="SOUL",
-            priority=10,
-            required=True,
-            load_fn=self._load_soul,
-        ))
-        self.register(PromptComponent(
-            name="TASK_CHECKLIST",
-            priority=20,
-            required=False,
-            load_fn=self._load_task_checklist,
-        ))
-        self.register(PromptComponent(
-            name="CODEBASE_MAP",
-            priority=30,
-            required=False,
-            load_fn=self._load_codebase_map,
-        ))
-        self.register(PromptComponent(
-            name="DYNAMIC",
-            priority=40,
-            required=False,
-            load_fn=self._load_dynamic,
-        ))
-        self.register(PromptComponent(
-            name="IDENTITY",
-            priority=50,
-            required=False,
-            load_fn=self._load_identity,
-        ))
-        self.register(PromptComponent(
-            name="AGENTS",
-            priority=60,
-            required=True,
-            load_fn=self._load_agents,
-        ))
-        self.register(PromptComponent(
-            name="SPEC",
-            priority=65,
-            required=False,
-            load_fn=self._load_spec,
-        ))
-        self.register(PromptComponent(
-            name="USER",
-            priority=70,
-            required=False,
-            load_fn=self._load_user,
-        ))
-        self.register(PromptComponent(
-            name="MEMORY",
-            priority=80,
-            required=False,
-            load_fn=self._load_memory_context,
-        ))
-        self.register(PromptComponent(
-            name="TOOLS_INDEX",
-            priority=90,
-            required=False,
-            load_fn=self._load_tools_index,
-        ))
-        self.register(PromptComponent(
-            name="ENV_INFO",
-            priority=100,
-            required=False,
-            load_fn=self._load_env_info,
-        ))
-        self.register(PromptComponent(
-            name="current_rules",
-            priority=85,
-            required=False,
-            load_fn=self._load_current_rules,
-        ))
 
     def register(self, component: PromptComponent):
         """注册或更新组件"""
@@ -230,105 +151,99 @@ class PromptManager:
 
     def _scan_workspace_prompts(self):
         """
-        动态扫描 workspace/prompts/ 目录，自动将所有 .md 文件注册为组件。
-        文件名去掉 .md 作为组件名；已有硬编码组件覆盖同名文件（大小写不敏感）。
+        扫描 static 和 workspace 目录，从 md 文件头部的 YAML front matter 解析元数据并注册组件。
+
+        扫描顺序：先 static（core/core_prompt/），后 workspace（workspace/prompts/）。
+        workspace 中的同名文件覆盖 static 中的文件（大小写不敏感）。
+        无对应 md 文件的组件（TASK_CHECKLIST、SPEC、TOOLS_INDEX、ENV_INFO）单独注册。
         """
-        if not self._dynamic_root.exists():
-            return
-        # 已注册组件名的大写集合，用于去重
-        existing_upper = {k.upper() for k in self._components}
-        for md_file in sorted(self._dynamic_root.glob("*.md")):
-            name = md_file.stem  # e.g. "DYNAMIC", "IDENTITY", "USER"
-            if name.upper() in existing_upper:
-                continue  # 已有硬编码组件覆盖（大小写不敏感），跳过
-            path = md_file
+        # 1. 扫描 static 目录（SOUL.md、AGENTS.md 等）
+        if self._static_root.exists():
+            for md_file in sorted(self._static_root.glob("*.md")):
+                if md_file.stem.upper() in {"README"}:
+                    continue  # 跳过非组件文件
+                self._register_from_md_file(md_file, "static")
 
-            def make_load(p=path):
-                def load():
-                    return self._load_from_path(p, p.stem)
-                return load
+        # 2. 扫描 workspace 目录（覆盖 static）
+        if self._dynamic_root.exists():
+            for md_file in sorted(self._dynamic_root.glob("*.md")):
+                self._register_from_md_file(md_file, "workspace")
 
-            self.register(PromptComponent(
-                name=name,
-                priority=50,
-                required=False,
-                load_fn=make_load(),
-            ))
-            from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] 动态扫描注册组件: {name} -> {md_file}")
+        # 3. 补充无 md 文件的组件
+        self._register_no_file_components()
 
-    # ------------------------------------------------------------------------
-    # 规则注册表（硬编码，非文件系统扫描）
-    # ------------------------------------------------------------------------
-
-    def _register_default_rules(self):
-        """注册默认规则集"""
-        self.register_rule("base", "")
-        self.register_rule("code_review", """## 当前规则：代码审查
-- 每次修改前先理解原有逻辑，不要破坏既有行为
-- 优先修复明显 bug，再优化性能
-- 改动必须有测试覆盖""")
-        self.register_rule("creative", """## 当前规则：创意发散
-- 不拘泥于现有方案，大胆提出新思路
-- 评估可行性时考虑长期维护成本
-- 鼓励渐进式创新而非激进重构""")
-        self.register_rule("debug", """## 当前规则：调试诊断
-- 先复现问题，确认触发条件
-- 用最小改动定位根因
-- 修改后验证问题确实解决""")
-        self.register_rule("planning", """## 当前规则：任务规划
-- 分解任务为可验证的子任务
-- 每个子任务完成后立即验证
-- 记录结论，避免重复探索""")
-        self.register_rule("refactor", """## 当前规则：重构优化
-- 重构不改变外部行为
-- 每次重构后运行测试
-- 优先清理技术债务最严重的地方""")
-        self.current_active_prompts = ["base"]
-
-    def register_rule(self, name: str, content: str):
-        """注册或更新规则"""
-        self.prompt_registry[name] = content
-        from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] 注册规则: {name}")
-
-    def update_active_rules(self, rules: List[str]):
-        """
-        更新当前激活的规则集（由 LLM 通过 <active_rules> 标签调用）
-
-        Args:
-            rules: 新的激活规则名称列表（如 ["code_review", "debug"]）
-        """
-        if not rules:
-            from core.logging import debug_logger; debug_logger.debug("[PromptManager] active_rules 为空，保持当前规则不变")
+    def _register_from_md_file(self, md_file, source: str):
+        """解析 md 文件头部的 YAML front matter，提取元数据并注册组件"""
+        import re
+        try:
+            content = md_file.read_text(encoding="utf-8")
+        except Exception:
             return
 
-        # 只注册已知规则，未知规则名忽略
-        known_rules = [r for r in rules if r in self.prompt_registry]
-        if known_rules:
-            self.current_active_prompts = known_rules
-            from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 激活规则切换: {known_rules}")
+        # 解析 YAML front matter（--- ... ---）
+        front_matter = {}
+        match = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
+        if match:
+            for line in match.group(1).splitlines():
+                if ':' in line:
+                    key, _, val = line.partition(':')
+                    front_matter[key.strip()] = val.strip()
+
+        # 解析 YAML front matter 的 name，标准化为 PascalCase
+        front_name = front_matter.get('name', '')
+        if front_name:
+            name = front_name.strip()
         else:
-            from core.logging import debug_logger; debug_logger.warning(f"[PromptManager] 未知规则: {rules}，保持当前规则不变")
+            name = md_file.stem
 
-    def _load_current_rules(self) -> str:
-        """
-        拼接当前激活规则集的文本内容
+        priority = int(front_matter.get('priority', 50))
+        required = front_matter.get('required', 'false').lower() == 'true'
+        description = front_matter.get('description', '')
 
-        Returns:
-            拼接后的规则文本（无激活规则时返回空字符串）
-        """
-        if not self.current_active_prompts:
-            return ""
+        # 检测实际内容是否为空（front matter 之后无任何文字内容）
+        body = content[match.end():].strip() if match else content.strip()
+        is_empty = not bool(body)
 
-        parts = []
-        for name in self.current_active_prompts:
-            content = self.prompt_registry.get(name, "")
-            if content:
-                parts.append(content)
+        # static 扫描：只注册尚不存在的组件
+        # workspace 扫描：覆盖已存在的组件（用 workspace 内容替换）
+        if source == "static":
+            if name.upper() in {k.upper() for k in self._components}:
+                return
 
-        if not parts:
-            return ""
+        path = md_file
 
-        return "\n\n".join(parts)
+        def make_load(p=path, src=source):
+            def load():
+                return self._load_from_path(p, name, source=src)
+            return load
+
+        self.register(PromptComponent(
+            name=name,
+            description=description,
+            priority=priority,
+            required=required,
+            empty=is_empty,
+            load_fn=make_load(),
+        ))
+        from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] 扫描注册组件: {name} (source={source}, empty={is_empty}) -> {md_file}")
+
+    def _register_no_file_components(self):
+        """注册无对应 md 文件的组件（TASK_CHECKLIST、SPEC、TOOLS_INDEX、ENV_INFO）"""
+        no_file_components = [
+            ("TASK_CHECKLIST", 20, False, self._load_task_checklist, "从 TaskPlanner 内存动态加载任务清单"),
+            ("SPEC",           65, False, self._load_spec, "开发规范与编码约束（来自 requirement/SPEC/）"),
+            ("TOOLS_INDEX",    90, False, self._load_tools_index, "从 docs/tools_manual.md 提取工具索引"),
+            ("ENV_INFO",      100, False, self._load_env_info, "自动探测系统环境信息"),
+        ]
+        for name, priority, required, load_fn, description in no_file_components:
+            if name.upper() not in {k.upper() for k in self._components}:
+                self.register(PromptComponent(
+                    name=name,
+                    description=description,
+                    priority=priority,
+                    required=required,
+                    load_fn=load_fn,
+                ))
 
     # ------------------------------------------------------------------------
     # 状态记忆持久化
@@ -336,10 +251,15 @@ class PromptManager:
 
     def _load_persisted_state_memory(self):
         """从 workspace/prompts/STATE_MEMORY.md 恢复上次会话的状态记忆"""
+        import re
         try:
             state_memory_path = self._dynamic_root / "STATE_MEMORY.md"
             if state_memory_path.exists():
                 content = state_memory_path.read_text(encoding="utf-8").strip()
+                # 跳过 YAML front matter
+                match = re.match(r'^---\s*\n.*?\n---(\n)?', content, re.DOTALL)
+                if match:
+                    content = content[match.end():].strip()
                 if content:
                     self.state_memory = content
                     from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 从会话恢复 state_memory，长度={len(content)}")
@@ -439,7 +359,7 @@ class PromptManager:
 
         Args:
             include:   只包含这些组件（None 时由 _active_components_override 决定；
-                       override 也为 None 则默认 ["SOUL","AGENTS","current_rules"]，MEMORY 不默认注入）
+                       override 也为 None 则默认 ["SOUL","AGENTS","SPEC","ENV_INFO"]，MEMORY 不默认注入）
             exclude:   排除这些组件（required=True 的组件无法被排除）
             generation:       当前世代数
             total_generations: 总世代数
@@ -478,7 +398,7 @@ class PromptManager:
         """
         由 LLM 通过 <active_components> 标签调用，动态切换提示词组件拼装。
 
-        用法：在回复中输出 <active_components>SOUL, AGENTS, MEMORY, current_rules</active_components>
+        用法：在回复中输出 <active_components>SOUL, AGENTS, MEMORY</active_components>
         Agent 即可主动控制本次会话的提示词组件组成。
 
         Args:
@@ -525,7 +445,7 @@ class PromptManager:
         elif self._active_components_override is not None:
             effective_include = self._active_components_override
         else:
-            effective_include = ["SOUL", "AGENTS", "SPEC", "ENV_INFO", "current_rules"]  # 默认，不再包含 MEMORY
+            effective_include = ["SOUL", "AGENTS", "SPEC", "ENV_INFO"]  # 默认，不再包含 MEMORY 和 current_rules
 
         all_comps = sorted(self._components.values(), key=lambda c: c.priority)
 
@@ -574,52 +494,38 @@ class PromptManager:
             return False
 
     def _get_default_template(self, name: str) -> Optional[str]:
-        """获取动态文件的默认模板内容"""
+        """获取动态文件的默认模板内容（仅含 front matter，正文由 Agent 自行填充）"""
         templates = {
-            "IDENTITY.md": """# Agent 身份定义
-
-*定义 Agent 的身份名称、角色定位和专长领域。*
-
-## 基本信息
-- **名称**：
-- **角色**：
-- **专长**：
-
-## 行为准则
--
-""",
-            "USER.md": """# 用户信息
-
-*记录当前用户的基本信息和任务背景上下文。*
-
-## 用户基本信息
-- **用户名**：
-- **偏好设置**：
-
-## 当前任务背景
-
-""",
-            "DYNAMIC.md": """# 动态提示词区域
-
-*此区域由 Agent 在每个世代开始时动态生成，用于记录当前任务、进度和关键上下文。*
-
+            "DYNAMIC.md": """\
+---
+name: DYNAMIC
+priority: 40
+required: false
+description: 动态提示词区域，由 Agent 在每个世代开始时动态生成
 ---
 """,
-            "COMPRESS_SUMMARY.md": """# 上下文压缩摘要
-
-*此文件在上下文压缩时自动更新，记录历史对话中的关键信息和结论摘要。*
-
+            "COMPRESS_SUMMARY.md": """\
+---
+name: MEMORY
+priority: 80
+required: false
+description: 上下文压缩摘要，记录历史对话中的关键信息和结论
 ---
 """,
         }
         return templates.get(name)
 
-    def _load_from_path(self, path: Path, name: str) -> str:
-        """从指定路径加载文件"""
+    def _load_from_path(self, path: Path, name: str, source: str = "workspace"):
+        """从指定路径加载文件，自动跳过 YAML front matter"""
         if path.exists():
             try:
                 content = path.read_text(encoding="utf-8").strip()
-                self._cache_sources[name] = "workspace"
+                # 跳过 YAML front matter（--- ... ---）
+                import re
+                match = re.match(r'^---\s*\n.*?\n---(\n)?', content, re.DOTALL)
+                if match:
+                    content = content[match.end():].strip()
+                self._cache_sources[name] = source
                 return content
             except Exception as e:
                 return f"[错误: 无法读取 {path}: {e}]"
@@ -753,44 +659,15 @@ class PromptManager:
     def _build_component_index(self) -> str:
         """
         生成组件索引文本，每次 build 调用时动态扫描生成。
-        遍历所有 enabled 组件，自动从对应文件头部解析描述。
+        遍历所有 enabled 组件，使用注册时从 md 文件 front matter 解析的 description。
         """
-        # 硬编码特殊组件的文件路径（无法从 name 推断的）
-        CORE_PATH_MAP = {
-            "SOUL":           self._static_root / "SOUL.md",
-            "AGENTS":         self._static_root / "AGENTS.md",
-            "SPEC":           self._static_root.parent / "requirement" / "SPEC" / "SPEC_Agent.md",
-            "MEMORY":         self._dynamic_root / "COMPRESS_SUMMARY.md",
-        }
-
-        def get_description(comp) -> str:
-            if comp.name in CORE_PATH_MAP and CORE_PATH_MAP[comp.name]:
-                desc = self._extract_component_description(CORE_PATH_MAP[comp.name])
-                if desc:
-                    return desc
-            # 动态组件：尝试从 workspace/prompts/{name}.md 解析
-            dyn_path = self._dynamic_root / f"{comp.name}.md"
-            desc = self._extract_component_description(dyn_path)
-            if desc:
-                return desc
-            # 无文件组件 fallback
-            fallbacks = {
-                "TASK_CHECKLIST": "从 TaskPlanner 内存动态加载",
-                "CODEBASE_MAP":   "基于 AST 扫描代码库结构",
-                "TOOLS_INDEX":    "从 KeyTools 动态加载",
-                "ENV_INFO":       "自动探测系统环境",
-                "current_rules":  f"当前激活规则: {', '.join(self.current_active_prompts) or '无'}",
-                "STATE_MEMORY":   "跨世代状态记忆，记录上一次会话的进度与结论",
-                "SPEC":           "开发规范与编码约束（来自 requirement/SPEC/）",
-            }
-            return fallbacks.get(comp.name, comp.name)
-
         enabled = [c for c in self._components.values() if c.enabled]
         lines = ["\n\n---\n\n## 提示词组件索引\n"]
         for i, comp in enumerate(sorted(enabled, key=lambda c: c.priority), 1):
-            desc = get_description(comp)
+            desc = comp.description or comp.name
             marker = "（必选）" if comp.required else ""
-            lines.append(f"{i}. [{comp.name}] {desc}{marker}\n")
+            empty_tag = " [空]" if comp.empty else ""
+            lines.append(f"{i}. [{comp.name}] {desc}{empty_tag}{marker}\n")
         return "".join(lines)
 
     def _render_memory(
@@ -886,8 +763,6 @@ class PromptManager:
             "dynamic_root": str(self._dynamic_root),
             "registered_components": list(self._components.keys()),
             "cached_sources": dict(self._cache_sources),
-            "prompt_registry": list(self.prompt_registry.keys()),
-            "current_active_prompts": list(self.current_active_prompts),
             "state_memory_length": len(self.state_memory) if self.state_memory else 0,
             "active_components_override": self._active_components_override,
         }
@@ -897,6 +772,8 @@ class PromptManager:
         return [
             {
                 "name": c.name,
+                "description": c.description,
+                "empty": c.empty,
                 "priority": c.priority,
                 "required": c.required,
                 "enabled": c.enabled,
