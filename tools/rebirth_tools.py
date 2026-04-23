@@ -4,15 +4,15 @@
 提供 Agent 自我重启的核心功能，通过独立守护进程实现安全的进程重启。
 
 本模块是实现"自我进化"能力的关键组件：
-1. 触发自我重启 - 启动独立的 restarter.py 进程
+1. 触发自我重启 - 启动独立的 restarter 进程
 2. 脱离父进程 - 确保重启过程不影响原 Agent
 3. 跨平台兼容 - 同时支持 Windows 和 Unix 系统
 
 架构说明：
 - 当 Agent 需要重启时，调用 trigger_self_restart()
-- 该函数使用 subprocess 启动 restarter.py 作为独立进程
-- restarter.py 监控原 Agent 进程，等待其结束
-- 原进程结束后，restarter.py 拉起新的 Agent 进程
+- 该函数使用 subprocess 启动 restarter 作为独立进程
+- restarter 监控原 Agent 进程，等待其结束
+- 原进程结束后，restarter 拉起新的 Agent 进程
 - 当前 Agent 在启动 restarter 后执行 sys.exit(0) 自我了结
 
 依赖：
@@ -33,9 +33,9 @@ from core.logging import debug_logger
 # 配置常量
 # ============================================================================
 
-# Restarter 脚本路径
+# Restarter 模块路径（使用 -m 方式调用）
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-RESTARTER_SCRIPT = PROJECT_ROOT / "restarter.py"
+RESTARTER_MODULE = "core.restarter_manager.restarter"
 
 # 重启原因分类
 RESTART_REASONS = {
@@ -93,18 +93,17 @@ def classify_restart_reason(reason: str) -> str:
 
 def validate_restarter_available() -> tuple[bool, str]:
     """
-    验证 restarter.py 是否可用。
-    
+    验证 restarter_manager 模块是否可用。
+
     Returns:
         (是否可用, 错误消息) 元组
     """
-    if not RESTARTER_SCRIPT.exists():
-        return False, f"Restarter 脚本不存在: {RESTARTER_SCRIPT}"
-    
-    if not os.access(RESTARTER_SCRIPT, os.R_OK):
-        return False, f"Restarter 脚本不可读: {RESTARTER_SCRIPT}"
-    
-    return True, ""
+    try:
+        import importlib
+        importlib.import_module(RESTARTER_MODULE)
+        return True, ""
+    except ImportError as e:
+        return False, f"Restarter 模块不可用: {e}"
 
 
 # ============================================================================
@@ -248,8 +247,8 @@ def trigger_self_restart_tool(reason: str = "") -> str:
     触发 Agent 自我重启。
     
     此函数是实现 Agent 自我进化能力的核心。它会：
-    1. 验证 restarter.py 是否可用
-    2. 启动 restarter.py 作为独立进程
+    1. 验证 restarter 模块是否可用
+    2. 启动 restarter 作为独立进程
     3. 记录重启日志
     4. 返回后调用方应该执行 sys.exit(0)
     
@@ -257,7 +256,7 @@ def trigger_self_restart_tool(reason: str = "") -> str:
     ```
     Agent 进程                    Restarter 进程
         |                               |
-        | --- 启动 restarter.py ------> |
+        | --- 启动 restarter --------> |
         |                               |
         | --- 执行 sys.exit(0) -----> X  |
         |                               |
@@ -286,7 +285,7 @@ def trigger_self_restart_tool(reason: str = "") -> str:
         ✓ 重启进程已触发
         PID: 12345
         原因: threshold_reached: 迭代次数达到 100
-        Restarter: /path/to/restarter.py
+        Restarter: core.restarter_manager.restarter
         状态: 已脱离，正在启动守护进程
         
         当前进程将退出，请等待自动重启...
@@ -368,41 +367,41 @@ def trigger_self_restart_tool(reason: str = "") -> str:
         debug_logger.error(f"Restarter 不可用: {error_msg}")
         return f"错误: {error_msg}"
     
-    debug_logger.info(f"Restarter 脚本: {RESTARTER_SCRIPT}")
-    
+    debug_logger.info(f"Restarter 模块: {RESTARTER_MODULE}")
+
     # 3. 分类重启原因
     reason_category = classify_restart_reason(reason)
     debug_logger.info(f"原因分类: {reason_category}")
-    
+
     # 4. 构建环境变量
     env = os.environ.copy()
     env['AGENT_RESTART_REASON'] = reason
     env['AGENT_RESTART_CATEGORY'] = reason_category
     env['AGENT_ORIGINAL_PID'] = str(current_pid)
-    
-    # 5. 构建命令
+
+    # 5. 构建命令（使用 -m 方式调用）
     command = [
-        sys.executable,  # Python 解释器路径
-        str(RESTARTER_SCRIPT),
+        sys.executable,
+        '-m', RESTARTER_MODULE,
         '--pid', str(current_pid),
         '--script', script_path,
     ]
-    
+
     # 添加详细日志参数（可选）
     # command.append('--verbose')
-    
+
     debug_logger.info(f"执行命令: {' '.join(command)}")
-    
+
     # 6. 启动脱离进程
     new_pid = spawn_detached_process(command, env)
-    
+
     if new_pid:
         # 构建成功消息
         result_lines = [
             "✓ 重启进程已触发",
             f"PID: {current_pid}",
             f"原因: {reason}",
-            f"Restarter: {RESTARTER_SCRIPT}",
+            f"Restarter: {RESTARTER_MODULE}",
             "",
             "状态: 已脱离父进程，正在启动守护进程",
             "",

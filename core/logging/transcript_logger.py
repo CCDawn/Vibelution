@@ -445,7 +445,7 @@ def generate_sample_transcript() -> str:
 
 ### 铁律（违反即死）
 
-1. **绝对不碰 restarter.py** - 这是生命线，修改等于自杀
+1. **绝对不修改 core/restarter_manager/restarter.py** - 这是生命线，修改等于自杀
 2. **修改代码后必须立刻检查语法** - 不允许带着 SyntaxError 重启
 3. **绝不带伤重启** - 任何错误必须在重启前修复
 

@@ -17,7 +17,6 @@ from tools.memory_tools import (
     get_memory_summary_tool as _get_memory_summary_impl,
 )
 from tools.memory_tools import (
-    set_plan_tool as _set_plan_impl,
     tick_subtask_tool as _tick_subtask_impl,
     modify_task_tool as _modify_task_impl,
     add_task_tool as _add_task_impl,
@@ -36,6 +35,9 @@ from tools.shell_tools import (
 )
 from tools.rebirth_tools import (
     enter_hibernation_tool as _enter_hibernation_impl,
+)
+from tools.web_search_tool import (
+    web_search_tool as _web_search_impl,
 )
 
 
@@ -273,6 +275,22 @@ def create_key_tools() -> List[BaseTool]:
         from tools.code_analysis_tools import get_code_entity
         return get_code_entity(file_path, entity_name)
 
+    @tool
+    def web_search_tool(query: str, max_results: int = 10) -> str:
+        """
+        网络搜索工具 - 基于 AutoGLM Web Search API。
+
+        当需要获取实时信息、最新资讯、网络资料时使用此工具。
+
+        Args:
+            query: 搜索关键词（必填），尽量具体以获得更准确的结果
+            max_results: 最大返回结果数，默认 10，建议 5-20
+
+        Returns:
+            包含搜索摘要和参考来源链接的格式化字符串
+        """
+        return _web_search_impl(query=query, max_results=max_results)
+
     # ── 文件操作工具 ────────────────────────────────────────────────────────
 
     @tool
@@ -350,7 +368,7 @@ def create_key_tools() -> List[BaseTool]:
         """
         扫描并清理测试产生的临时文件。
 
-        完成任务后必须清理测试产物。禁止删除 agent.py, restarter.py, SOUL.md, AGENTS.md。
+        完成任务后必须清理测试产物。禁止删除 agent.py, core/restarter_manager/restarter.py, SOUL.md, AGENTS.md。
 
         Args:
             directory: 要扫描的目录，默认当前目录
@@ -477,22 +495,6 @@ def create_key_tools() -> List[BaseTool]:
     # ── 任务清单工具 ───────────────────────────────────────────────────────
 
     @tool
-    def set_plan_tool(goal: str, tasks: List[str]) -> str:
-        """
-        【计划制定工具】设置本轮任务清单
-
-        每次苏醒确定本轮目标后，第一步必须调用此工具将大目标拆解为具体小任务。
-
-        Args:
-            goal: 本轮的总目标描述
-            tasks: 子任务列表（3-5个），每个任务描述要具体可执行
-
-        Returns:
-            JSON 格式的执行结果
-        """
-        return _set_plan_impl(goal=goal, tasks=tasks)
-
-    @tool
     def tick_subtask_tool(task_id: int, summary: str) -> str:
         """
         【任务打勾工具】标记任务完成并记录结论
@@ -550,6 +552,7 @@ def create_key_tools() -> List[BaseTool]:
         validate_diff_format_tool,
         list_file_entities_tool,
         get_code_entity_tool,
+        web_search_tool,
         # 文件操作
         cli_tool,
         get_project_structure_tool,
@@ -563,7 +566,6 @@ def create_key_tools() -> List[BaseTool]:
         edit_file_tool,
         create_file_tool,
         # 任务清单
-        set_plan_tool,
         tick_subtask_tool,
         modify_task_tool,
         add_task_tool,

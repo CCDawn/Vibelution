@@ -240,14 +240,16 @@ class TaskPlanner:
         task_id: str,
         result_summary: str = "",
     ) -> bool:
-        """完成任务"""
+        """完成任务（允许从 PENDING 或 IN_PROGRESS 直接完成）"""
         task = self._tasks.get(task_id)
-        if not task or task.status != TaskStatus.IN_PROGRESS:
+        if not task or task.status not in (TaskStatus.PENDING, TaskStatus.IN_PROGRESS):
             return False
 
         task.status = TaskStatus.COMPLETED
         task.completed_at = datetime.now()
         task.result_summary = result_summary
+        if not task.started_at:
+            task.started_at = task.completed_at
 
         if task.started_at:
             task.actual_hours = (
@@ -542,25 +544,161 @@ class TaskPlanner:
             "tasks_by_priority": dict(priority_counts),
         }
 
-    def suggest_next_tasks(self, limit: int = 5) -> List[Task]:
-        """建议下一个任务"""
-        candidates = [
-            t for t in self._tasks.values()
-            if t.status == TaskStatus.PENDING
-            and self._dependencies_satisfied(t.task_id)
-        ]
+    # =========================================================================
+    # 持久化
+    # =========================================================================
 
-        # 按优先级和紧迫性排序
-        candidates.sort(
-            key=lambda t: (
-                t.priority.value,
-                -((t.deadline - datetime.now()).total_seconds() / 3600)
-                if t.deadline else 0
-            ),
-            reverse=True,
-        )
+    def save_current_plan(self, plan_dir: Path) -> None:
+        """
+        将当前计划保存到 JSON 文件。
 
-        return candidates[:limit]
+        Args:
+            plan_dir: 计划文件存储目录（如 workspace/memory/plans/）
+        """
+        plan_dir.mkdir(parents=True, exist_ok=True)
+        if not self._current_plan_id:
+            return
+
+        plan = self._plans.get(self._current_plan_id)
+        if not plan:
+            return
+
+        tasks_data = {}
+        for tid, task in plan.tasks.items():
+            tasks_data[tid] = {
+                "task_id": tid,
+                "name": task.name,
+                "description": task.description,
+                "status": task.status.value,
+                "priority": task.priority.value,
+                "estimated_hours": task.estimated_hours,
+                "actual_hours": task.actual_hours,
+                "created_at": task.created_at.isoformat() if task.created_at else "",
+                "started_at": task.started_at.isoformat() if task.started_at else "",
+                "completed_at": task.completed_at.isoformat() if task.completed_at else "",
+                "result_summary": task.result_summary,
+            }
+
+        data = {
+            "plan_id": plan.plan_id,
+            "goal": plan.goal,
+            "created_at": plan.created_at.isoformat() if plan.created_at else "",
+            "completed_at": plan.completed_at.isoformat() if plan.completed_at else "",
+            "tasks": tasks_data,
+            "stats": self._stats,
+        }
+
+        out_file = plan_dir / f"{plan.plan_id}.json"
+        import json
+        with open(out_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def load_latest_plan(self, plan_dir: Path) -> bool:
+        """
+        从 plan_dir 加载最新的计划文件。
+
+        Returns:
+            是否成功加载
+        """
+        if not plan_dir.exists():
+            return False
+
+        files = sorted(plan_dir.glob("plan_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not files:
+            return False
+
+        import json
+        try:
+            with open(files[0], 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            self._tasks.clear()
+            self._plans.clear()
+            self._current_plan_id = None
+
+            plan_id = data["plan_id"]
+            plan = TaskPlan(
+                plan_id=plan_id,
+                goal=data.get("goal", ""),
+                created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(),
+            )
+            self._plans[plan_id] = plan
+
+            for tid, tdata in data.get("tasks", {}).items():
+                task = Task(
+                    task_id=tid,
+                    name=tdata["name"],
+                    description=tdata.get("description", ""),
+                    status=TaskStatus(tdata.get("status", "pending")),
+                    priority=TaskPriority(tdata.get("priority", 3)),
+                    estimated_hours=tdata.get("estimated_hours", 1.0),
+                    actual_hours=tdata.get("actual_hours", 0.0),
+                    created_at=datetime.fromisoformat(tdata["created_at"]) if tdata.get("created_at") else datetime.now(),
+                    started_at=datetime.fromisoformat(tdata["started_at"]) if tdata.get("started_at") else None,
+                    completed_at=datetime.fromisoformat(tdata["completed_at"]) if tdata.get("completed_at") else None,
+                    result_summary=tdata.get("result_summary", ""),
+                )
+                self._tasks[tid] = task
+                plan.tasks[tid] = task
+
+            self._current_plan_id = plan_id
+            self._stats = data.get("stats", self._stats.copy())
+            return True
+        except Exception:
+            return False
+
+    def get_current_checklist_markdown(self) -> str:
+        """
+        将当前计划渲染为 Markdown 清单（用于注入到系统提示词）。
+
+        Returns:
+            Markdown 格式的清单，如果无计划则返回空字符串
+        """
+        plan = self.get_current_plan()
+        if not plan:
+            return ""
+
+        lines = []
+        lines.append("")
+        lines.append("=" * 60)
+        lines.append("## 当前任务清单")
+        lines.append("")
+        lines.append(f"**目标**: {plan.goal}")
+        lines.append("")
+
+        if not plan.tasks:
+            lines.append("*（暂无任务）*")
+            lines.append("")
+            return "\n".join(lines)
+
+        completed = 0
+        total = len(plan.tasks)
+        for task in plan.tasks.values():
+            if task.status == TaskStatus.COMPLETED:
+                completed += 1
+                icon = "[√]"
+                status_label = "**已完成**"
+            elif task.status == TaskStatus.IN_PROGRESS:
+                icon = "[→]"
+                status_label = "进行中"
+            elif task.status == TaskStatus.BLOCKED:
+                icon = "[⊘]"
+                status_label = "阻塞"
+            else:
+                icon = "[ ]"
+                status_label = ""
+
+            task_num = list(plan.tasks.keys()).index(task.task_id) + 1
+            if status_label:
+                lines.append(f"{icon} **{task_num}.** {task.description} — {status_label}")
+            else:
+                lines.append(f"{icon} **{task_num}.** {task.description}")
+
+        lines.append("")
+        lines.append(f"**进度**: {completed}/{total} ({completed*100//total if total else 0}%)")
+        lines.append("=" * 60)
+        lines.append("")
+        return "\n".join(lines)
 
 
 # ============================================================================

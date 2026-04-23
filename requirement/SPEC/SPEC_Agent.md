@@ -173,6 +173,59 @@
 | **Phase 完成** | 1. "实施路线图"<br>2. "Phase 状态参考"<br>3. "修改日志" | Phase 状态改为 ✅ 完成 |
 | **提示词变更** | 1. "提示词系统架构说明"（如有） | 更新说明 |
 
+### 提示词系统架构（2026-04-21 更新）
+
+> 本节描述当前提示词组件体系，所有开发任务必须遵循。
+
+**核心文件职责划分：**
+
+| 文件 | 职责 | 行数目标 |
+|------|------|---------|
+| `core/core_prompt/SOUL.md` | 身份定义、核心铁律、思维格式、禁止行为 | <120 行 |
+| `core/core_prompt/AGENTS.md` | 完整 SOP 操作流程、协议、工具速查 | <500 行 |
+| `requirement/SPEC/SPEC_Agent.md` | 开发规范与质量门控（本文件） | 模板性质 |
+| `workspace/prompts/DYNAMIC.md` | 本世代动态任务描述（Agent 自行维护） | 动态 |
+| `workspace/prompts/IDENTITY.md` | Agent 身份定义 | 动态 |
+| `workspace/prompts/USER.md` | 用户信息与环境 | 动态 |
+
+**组件优先级（数字越小越靠前）：**
+
+```
+SOUL(10) → TASK_CHECKLIST(20) → CODEBASE_MAP(30) → DYNAMIC(40) →
+IDENTITY(50) → AGENTS(60) → SPEC(65) → USER(70) →
+MEMORY(80) → current_rules(85) → TOOLS_INDEX(90) → ENV_INFO(100)
+```
+
+**任务编排流程（<plan> 标签驱动）：**
+
+```
+模型输出 <plan> 文本块
+    ↓
+agent.py: PlanOrchestrator.extract_plan_tag()  提取
+    ↓
+agent.py: PlanOrchestrator.parse_and_store()  解析并存储
+    ↓
+TaskPlanner (core/orchestration/task_planner.py)  持久化
+    ↓
+PromptManager: TASK_CHECKLIST 组件  渲染 Markdown 清单
+    ↓
+注入系统提示词 → 引导模型逐任务执行
+```
+
+**响应解析标签（ResponseParser 支持）：**
+
+| 标签 | 提取内容 | 应用位置 |
+|------|---------|---------|
+| `<think>...</think>` | 思考过程 | UI 显示、日志 |
+| `<plan>...</plan>` | 任务计划 | TaskPlanner 存储 |
+| `<active_components>...</active_components>` | 组件切换 | PromptManager |
+| `<tool_call>...</tool_call>` | 工具调用 | 工具执行 |
+
+**开发约束：**
+- ❌ 禁止将 SOP 操作流程写入 SOUL.md（保持 SOUL 精简）
+- ❌ 禁止将身份/使命信息写入 AGENTS.md（保持 AGENTS 为流程参考）
+- ✅ 提示词变更后必须运行 `python tests/prompt_debugger.py --suite` 验证
+
 ### INDEX.md 版本号更新规则
 
 | 场景 | 版本号变更 | 示例 |

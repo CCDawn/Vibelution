@@ -22,22 +22,24 @@ import time
 from typing import Optional, Callable, Any
 
 from core.infrastructure.state import get_state_manager, AgentState
-from core.capabilities.prompt_manager import get_prompt_manager
+from core.prompt_manager import get_prompt_manager
 from core.logging.logger import debug as _debug_logger
 from core.logging.unified_logger import logger
 
 
 # 自主进化模式提示词
+# AUTONOMOUS_USER_PROMPT = (
+#     "【自主进化】你是完全自主的进化体，请根据 SOUL.md 的使命指示，"
+#     "**要求**：每次仅生成一个主要任务。\n\n"
+#     "首先调用 set_generation_task(task=\"...\") 设定你的任务\n"
+#     "然后调用 set_plan(task=\"...\") 制定计划并执行\n"
+#     "每完成一个计划调用 tick_subtask(task=\"...\") 打勾并记录结论摘要\n"
+#     "所有计划完成后调用 commit_compressed_memory(task=\"...\") 保存记忆\n"
+#     "最后调用 trigger_self_restart_tool(task=\"...\") 结束本轮\n"
+# )
 AUTONOMOUS_USER_PROMPT = (
     "【自主进化】你是完全自主的进化体，请根据 SOUL.md 的使命指示，"
-    "**要求**：每次仅生成一个主要任务。\n\n"
-    "首先调用 set_generation_task(task=\"...\") 设定你的任务\n"
-    "然后调用 set_plan(task=\"...\") 制定计划并执行\n"
-    "每完成一个计划调用 tick_subtask(task=\"...\") 打勾并记录结论摘要\n"
-    "所有计划完成后调用 commit_compressed_memory(task=\"...\") 保存记忆\n"
-    "最后调用 trigger_self_restart_tool(task=\"...\") 结束本轮\n"
 )
-
 
 class AgentLifecycle:
     """Agent 生命周期管理器"""

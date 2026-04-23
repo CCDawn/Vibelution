@@ -96,7 +96,7 @@ def run_test(client, model, system_prompt, prompt, expect_tool, description):
 
 def main():
     print("初始化...")
-    from core.capabilities.prompt_manager import get_prompt_manager
+    from core.prompt_manager.prompt_manager import get_prompt_manager
 
     # 加载配置
     from config import get_config

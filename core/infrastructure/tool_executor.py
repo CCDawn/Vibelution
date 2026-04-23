@@ -58,6 +58,9 @@ class ToolExecutor:
             add_task_tool, remove_task_tool, get_task_status_tool, check_restart_block_tool,
             # 重生工具
             trigger_self_restart_tool, enter_hibernation_tool,
+            # 网络搜索工具
+            web_search_tool,
+            web_search_impl,
             # 额外的工具别名 (LangChain @tool 装饰器会使用完整函数名)
             update_generation_task_tool,
             clear_generation_task,
@@ -175,6 +178,10 @@ class ToolExecutor:
             "cli_tool": execute_shell_command_tool,
             # 项目结构工具
             "get_project_structure_tool": list_directory_tool,
+            # 网络搜索工具
+            "web_search": web_search_impl,
+            "web_search_tool": web_search_impl,
+            "web_search_impl": web_search_impl,
             # 任务工具
             "set_plan": set_plan_tool,
             "tick_subtask": tick_subtask_tool,
@@ -200,6 +207,8 @@ class ToolExecutor:
             "find_definitions": 30,
             "search_and_read": 30,
             "backup_project": 60,
+            "web_search": 30,
+            "web_search_tool": 30,
         }
         self._retryable_tools = {"grep_search", "search_and_read"}
 

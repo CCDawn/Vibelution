@@ -1,5 +1,5 @@
 """
-进程重启守护进程 - core/restarter.py
+进程重启守护进程 - core/restarter_manager/restarter.py
 
 此模块作为独立进程运行，负责管理 Agent 的重启生命周期。
 
@@ -77,8 +77,8 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python -m core.restarter --pid 12345 --script ./agent.py
-  python -m core.restarter 12345 ./agent.py --verbose
+  python -m core.restarter_manager.restarter --pid 12345 --script ./agent.py
+  python -m core.restarter_manager.restarter 12345 ./agent.py --verbose
         """
     )
 
@@ -208,7 +208,7 @@ def spawn_new_process(
         if env:
             process_env.update(env)
 
-        log_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logs')
+        log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
         os.makedirs(log_dir, exist_ok=True)
         log_file = os.path.join(log_dir, 'agent_realtime.log')
 

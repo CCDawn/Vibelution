@@ -15,8 +15,8 @@
 ## Usage
 
 ```python
-from core.capabilities.prompt_manager import get_prompt_manager
-from core.capabilities.task_analyzer import TaskAnalyzer
+from core.prompt_manager import get_prompt_manager
+from core.prompt_manager.task_analyzer import TaskAnalyzer
 ```
 
 ## Key Classes

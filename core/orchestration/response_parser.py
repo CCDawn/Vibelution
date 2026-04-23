@@ -31,7 +31,9 @@ _THINK_CLOSE = "\u300a\u5c0f\u8bb1"
 class LLMParserResult:
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     thinking_content: str = ""
+    mood_content: str = ""
     state_memory: str = ""
+    plan_content: str = ""
     active_rules: List[str] = field(default_factory=list)
     active_components: List[str] = field(default_factory=list)
     raw_content: str = ""
@@ -59,6 +61,7 @@ class ResponseParser:
                 "tool_call", "invoke", "skill",
                 "thinking", "state_memory",
                 "active_rules", "active_components",
+                "plan",
             ]
             self._strip_thinking_alias = True
 
@@ -75,10 +78,15 @@ class ResponseParser:
 
         result.tool_calls = self._extract_tool_calls(response, content)
         result.thinking_content = self._extract_tag(content, "think")
+        result.mood_content = self._extract_tag(content, "mood")
 
         result.state_memory = self._extract_tag(content, "state_memory")
         if result.state_memory:
             self.logger.debug(f"[ResponseParser] 提取 state_memory，长度={len(result.state_memory)}")
+
+        result.plan_content = self._extract_tag(content, "plan")
+        if result.plan_content:
+            self.logger.debug(f"[ResponseParser] 提取 plan，长度={len(result.plan_content)}")
 
         result.active_rules = self._extract_active_rules(content)
         if result.active_rules:
@@ -88,6 +96,7 @@ class ResponseParser:
         if result.active_components:
             self.logger.debug(f"[ResponseParser] 提取 active_components: {result.active_components}")
 
+        result.clean_content = self._strip_all_tags(content)
         return result
 
     # ------------------------------------------------------------------------

@@ -128,6 +128,7 @@ class PromptManager:
         # 注册所有组件
         self._register_core_components()
         self._register_default_rules()
+        self._scan_workspace_prompts()
 
         # 加载上次会话遗留的 state_memory（如果有）
         self._load_persisted_state_memory()
@@ -175,6 +176,12 @@ class PromptManager:
             load_fn=self._load_agents,
         ))
         self.register(PromptComponent(
+            name="SPEC",
+            priority=65,
+            required=False,
+            load_fn=self._load_spec,
+        ))
+        self.register(PromptComponent(
             name="USER",
             priority=70,
             required=False,
@@ -220,6 +227,34 @@ class PromptManager:
         """动态启用/禁用组件"""
         if name in self._components:
             self._components[name].enabled = enabled
+
+    def _scan_workspace_prompts(self):
+        """
+        动态扫描 workspace/prompts/ 目录，自动将所有 .md 文件注册为组件。
+        文件名去掉 .md 作为组件名；已有硬编码组件覆盖同名文件（大小写不敏感）。
+        """
+        if not self._dynamic_root.exists():
+            return
+        # 已注册组件名的大写集合，用于去重
+        existing_upper = {k.upper() for k in self._components}
+        for md_file in sorted(self._dynamic_root.glob("*.md")):
+            name = md_file.stem  # e.g. "DYNAMIC", "IDENTITY", "USER"
+            if name.upper() in existing_upper:
+                continue  # 已有硬编码组件覆盖（大小写不敏感），跳过
+            path = md_file
+
+            def make_load(p=path):
+                def load():
+                    return self._load_from_path(p, p.stem)
+                return load
+
+            self.register(PromptComponent(
+                name=name,
+                priority=50,
+                required=False,
+                load_fn=make_load(),
+            ))
+            from core.logging import debug_logger; debug_logger.debug(f"[PromptManager] 动态扫描注册组件: {name} -> {md_file}")
 
     # ------------------------------------------------------------------------
     # 规则注册表（硬编码，非文件系统扫描）
@@ -434,7 +469,8 @@ class PromptManager:
         )
         selected = self._select_components(include, exclude)
         parts = [content_by_name[c.name] for c in selected if c.name in content_by_name]
-        prompt = "\n\n---\n\n".join(parts)
+        component_index = self._build_component_index()
+        prompt = component_index + "\n\n".join(parts)
         return prompt, index_list
 
 
@@ -489,7 +525,7 @@ class PromptManager:
         elif self._active_components_override is not None:
             effective_include = self._active_components_override
         else:
-            effective_include = ["SOUL", "AGENTS", "ENV_INFO", "current_rules"]  # 默认，不再包含 MEMORY
+            effective_include = ["SOUL", "AGENTS", "SPEC", "ENV_INFO", "current_rules"]  # 默认，不再包含 MEMORY
 
         all_comps = sorted(self._components.values(), key=lambda c: c.priority)
 
@@ -542,6 +578,8 @@ class PromptManager:
         templates = {
             "IDENTITY.md": """# Agent 身份定义
 
+*定义 Agent 的身份名称、角色定位和专长领域。*
+
 ## 基本信息
 - **名称**：
 - **角色**：
@@ -551,6 +589,8 @@ class PromptManager:
 -
 """,
             "USER.md": """# 用户信息
+
+*记录当前用户的基本信息和任务背景上下文。*
 
 ## 用户基本信息
 - **用户名**：
@@ -579,7 +619,6 @@ class PromptManager:
         if path.exists():
             try:
                 content = path.read_text(encoding="utf-8").strip()
-                from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 加载 {name} from {path.parent.name}/")
                 self._cache_sources[name] = "workspace"
                 return content
             except Exception as e:
@@ -594,6 +633,18 @@ class PromptManager:
     def _load_agents(self) -> str:
         """加载 AGENTS.md（仅 static，只读）"""
         return self._load_static_only("AGENTS.md")
+
+    def _load_spec(self) -> str:
+        """加载 SPEC_Agent.md（开发规范，优先级低于 AGENTS）"""
+        spec_path = self._static_root.parent / "requirement" / "SPEC" / "SPEC_Agent.md"
+        if spec_path.exists():
+            try:
+                content = spec_path.read_text(encoding="utf-8").strip()
+                from core.logging import debug_logger; debug_logger.info(f"[PromptManager] 加载 SPEC from requirement/SPEC/")
+                return content
+            except Exception as e:
+                return f"[警告: 无法读取 {spec_path}: {e}]"
+        return ""
 
     def _load_identity(self) -> str:
         """加载 IDENTITY.md（仅 workspace）"""
@@ -612,18 +663,18 @@ class PromptManager:
         return self._load_from_path(self._dynamic_root / "COMPRESS_SUMMARY.md", "COMPRESS_SUMMARY.md")
 
     def _load_task_checklist(self) -> str:
-        """加载任务清单"""
+        """加载任务清单（基于 TaskPlanner）"""
         try:
-            from core.capabilities.task_manager import get_task_manager
-            tm = get_task_manager()
-            return tm.render_prompt_checklist()
+            from core.orchestration.task_planner import get_task_planner
+            planner = get_task_planner()
+            return planner.get_current_checklist_markdown()
         except Exception:
             return ""
 
     def _load_codebase_map(self) -> str:
         """加载代码库认知地图（AST 动态扫描）"""
         try:
-            from core.capabilities.codebase_map_builder import get_codebase_map
+            from core.prompt_manager.codebase_map_builder import get_codebase_map
             return get_codebase_map()
         except Exception as e:
             return f"[警告: 加载认知地图失败: {e}]"
@@ -675,6 +726,72 @@ class PromptManager:
     def _load_memory_context(self) -> str:
         """加载记忆上下文（占位，实际渲染在 _render_memory）"""
         return ""  # 由 _render_memory 处理
+
+    def _extract_component_description(self, path: Path) -> str:
+        """
+        从文件头部解析组件描述。
+        规则：扫描第一条 --- 分隔符之前的所有行，
+        找到第一个以 *text* 或 **text** 包裹的非空段落，
+        并去掉首尾星号后返回。
+        """
+        if not path.exists():
+            return ""
+        try:
+            content = path.read_text(encoding="utf-8")
+            header = content.split("---", 1)[0]
+            import re
+            for line in header.splitlines():
+                stripped = line.strip()
+                for pattern in [r'^\*\*(.+?)\*\*$', r'^\*(.+?)\*$']:
+                    m = re.match(pattern, stripped)
+                    if m:
+                        return m.group(1).strip()
+            return ""
+        except Exception:
+            return ""
+
+    def _build_component_index(self) -> str:
+        """
+        生成组件索引文本，每次 build 调用时动态扫描生成。
+        遍历所有 enabled 组件，自动从对应文件头部解析描述。
+        """
+        # 硬编码特殊组件的文件路径（无法从 name 推断的）
+        CORE_PATH_MAP = {
+            "SOUL":           self._static_root / "SOUL.md",
+            "AGENTS":         self._static_root / "AGENTS.md",
+            "SPEC":           self._static_root.parent / "requirement" / "SPEC" / "SPEC_Agent.md",
+            "MEMORY":         self._dynamic_root / "COMPRESS_SUMMARY.md",
+        }
+
+        def get_description(comp) -> str:
+            if comp.name in CORE_PATH_MAP and CORE_PATH_MAP[comp.name]:
+                desc = self._extract_component_description(CORE_PATH_MAP[comp.name])
+                if desc:
+                    return desc
+            # 动态组件：尝试从 workspace/prompts/{name}.md 解析
+            dyn_path = self._dynamic_root / f"{comp.name}.md"
+            desc = self._extract_component_description(dyn_path)
+            if desc:
+                return desc
+            # 无文件组件 fallback
+            fallbacks = {
+                "TASK_CHECKLIST": "从 TaskPlanner 内存动态加载",
+                "CODEBASE_MAP":   "基于 AST 扫描代码库结构",
+                "TOOLS_INDEX":    "从 KeyTools 动态加载",
+                "ENV_INFO":       "自动探测系统环境",
+                "current_rules":  f"当前激活规则: {', '.join(self.current_active_prompts) or '无'}",
+                "STATE_MEMORY":   "跨世代状态记忆，记录上一次会话的进度与结论",
+                "SPEC":           "开发规范与编码约束（来自 requirement/SPEC/）",
+            }
+            return fallbacks.get(comp.name, comp.name)
+
+        enabled = [c for c in self._components.values() if c.enabled]
+        lines = ["\n\n---\n\n## 提示词组件索引\n"]
+        for i, comp in enumerate(sorted(enabled, key=lambda c: c.priority), 1):
+            desc = get_description(comp)
+            marker = "（必选）" if comp.required else ""
+            lines.append(f"{i}. [{comp.name}] {desc}{marker}\n")
+        return "".join(lines)
 
     def _render_memory(
         self,

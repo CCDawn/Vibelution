@@ -391,7 +391,7 @@ class ConversationLogger:
         self._initialized = True
         self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._log_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "log_info"
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "log_info"
         )
         self._ensure_log_dir()
         self._current_session_file = None

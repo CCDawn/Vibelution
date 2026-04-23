@@ -9,7 +9,7 @@
 - 世代档案 (archives/gen_{N}_history.json) - 完整保留每一世代的对话记录和思考过程
 
 【任务管理】
-- set_plan / tick_subtask - 任务清单驱动执行
+- set_plan / tick_subtask - 基于 TaskPlanner 驱动执行
 - 重启前强制检查任务完成度
 
 设计原则：详细档案只在 Agent 主动读取时才加载，不增加常规运行的 Token 负担。
@@ -23,7 +23,7 @@ from typing import Optional, List, Dict, Any
 
 # 导入统一工作区管理器
 from core.infrastructure.workspace_manager import get_workspace
-from core.capabilities.task_manager import get_task_manager
+from core.orchestration.task_planner import get_task_planner, TaskStatus
 
 
 # ============================================================================
@@ -648,7 +648,7 @@ def record_codebase_insight_tool(module_path: str, insight: str) -> str:
         此工具已废弃。请通过 PromptManager 的 CODEBASE_MAP 组件
         自动注入动态 AST 扫描结果，无需手动刻印。
         若需强制刷新地图，可调用：
-        ``from core.capabilities.codebase_map_builder import get_codebase_map; get_codebase_map(force_refresh=True)``
+        ``from core.prompt_manager.codebase_map_builder import get_codebase_map; get_codebase_map(force_refresh=True)``
 
     Args:
         module_path: 模块路径，如 'tools/ast_tools.py' 或 '整体架构'
@@ -660,7 +660,7 @@ def record_codebase_insight_tool(module_path: str, insight: str) -> str:
     import warnings
     warnings.warn(
         "record_codebase_insight_tool is deprecated. "
-        "Use core.capabilities.codebase_map_builder.get_codebase_map() instead.",
+        "Use core.prompt_manager.codebase_map_builder.get_codebase_map() instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -687,7 +687,7 @@ def get_global_codebase_map_tool() -> str:
         此工具已废弃。请通过 PromptManager 的 CODEBASE_MAP 组件
         自动注入动态 AST 扫描结果，无需手动调用。
         若需强制刷新地图，可调用：
-        ``from core.capabilities.codebase_map_builder import get_codebase_map; get_codebase_map(force_refresh=True)``
+        ``from core.prompt_manager.codebase_map_builder import get_codebase_map; get_codebase_map(force_refresh=True)``
 
     Returns:
         Markdown 格式的认知地图
@@ -695,7 +695,7 @@ def get_global_codebase_map_tool() -> str:
     import warnings
     warnings.warn(
         "get_global_codebase_map_tool is deprecated. "
-        "Use core.capabilities.codebase_map_builder.get_codebase_map() instead.",
+        "Use core.prompt_manager.codebase_map_builder.get_codebase_map() instead.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -708,8 +708,33 @@ def get_global_codebase_map_tool() -> str:
 
 
 # ============================================================================
-# 任务管理工具
+# 任务管理工具（基于 TaskPlanner）
 # ============================================================================
+
+def _render_task_list_from_planner(planner) -> str:
+    """从 TaskPlanner 渲染任务清单供工具返回"""
+    plan = planner.get_current_plan()
+    if not plan:
+        return "📋 当前无活动计划"
+
+    lines = []
+    completed = 0
+    total = len(plan.tasks)
+    for i, task in enumerate(plan.tasks.values(), 1):
+        if task.status == TaskStatus.COMPLETED:
+            completed += 1
+            icon = "[√]"
+        elif task.status == TaskStatus.IN_PROGRESS:
+            icon = "[→]"
+        elif task.status == TaskStatus.BLOCKED:
+            icon = "[⊘]"
+        else:
+            icon = "[ ]"
+        lines.append(f"  {icon} {i}. {task.description}")
+    lines.append("")
+    lines.append(f"📊 进度: {completed}/{total}")
+    return "\n".join(lines)
+
 
 def set_plan_tool(goal: str, tasks: List[str]) -> str:
     """
@@ -724,35 +749,33 @@ def set_plan_tool(goal: str, tasks: List[str]) -> str:
     """
     # 类型守卫：防止传入字符串被当作字符列表处理
     if isinstance(tasks, str):
-        # 如果是单个任务字符串，包装成列表
         tasks = [tasks]
     elif not isinstance(tasks, list):
         return "[❌ 错误] tasks 参数必须是字符串列表，而非 " + type(tasks).__name__
 
-    # 过滤空字符串
     tasks = [t for t in tasks if t and t.strip()]
     if not tasks:
         return "[❌ 错误] tasks 列表不能为空"
 
-    result = get_task_manager().set_plan(goal, tasks)
-    
+    planner = get_task_planner()
+    planner.create_plan(
+        goal=goal,
+        tasks=[{"name": d, "description": d} for d in tasks],
+    )
+
     lines = [
-        f"[✅ 任务清单已设置]",
-        f"",
-        f"🎯 目标: {result['goal']}",
-        f"",
-        f"📋 子任务 ({result['pending_count']} 项):",
+        "[✅ 任务清单已设置]",
+        "",
+        f"🎯 目标: {goal}",
+        "",
+        f"📋 子任务 ({len(tasks)} 项):",
     ]
-    
-    for task in result.get("tasks", []):
-        desc = task['description']
-        # 去掉描述中已有的 "1. " / "1、" / "1)" 前缀，避免显示重复编号
+    for i, desc in enumerate(tasks, 1):
         desc = re.sub(r'^(\d+)[.、)]\s*', '', desc).strip()
-        lines.append(f"  ⏳ [ ] {task['id']}. {desc}")
-    
+        lines.append(f"  ⏳ [ ] {i}. {desc}")
+
     lines.append("")
     lines.append("请开始执行，完成后用 tick_subtask 逐个打勾！")
-    
     return "\n".join(lines)
 
 
@@ -761,31 +784,41 @@ def tick_subtask_tool(task_id: int, summary: str) -> str:
     【任务打勾工具】标记任务完成并记录结论
 
     Args:
-        task_id: 任务编号
+        task_id: 任务编号（1-based）
         summary: 该任务完成后的核心结论/成果
 
     Returns:
         完成进度信息
     """
-    result = get_task_manager().tick_subtask(task_id, summary)
-    
-    if result["status"] != "success":
-        return f"[❌ 错误] {result.get('message', '未知错误')}"
-    
-    completed = result["completed_count"]
-    total = result["total"]
-    remaining = result["remaining"]
-    all_done = result.get("all_done", False)
-    
+    planner = get_task_planner()
+    plan = planner.get_current_plan()
+
+    if not plan:
+        return "[❌ 错误] 当前没有活动计划"
+
+    ordered_ids = list(plan.tasks.keys())
+    if task_id < 1 or task_id > len(ordered_ids):
+        return f"[❌ 错误] 无效的任务编号 {task_id}，有效范围 1-{len(ordered_ids)}"
+
+    target_id = ordered_ids[task_id - 1]
+    ok = planner.complete_task(target_id, summary)
+    if not ok:
+        return f"[❌ 错误] 任务 {task_id} 无法标记为完成"
+
+    # 重新渲染清单
+    completed = sum(1 for t in plan.tasks.values() if t.status == TaskStatus.COMPLETED)
+    total = len(plan.tasks)
+    remaining = total - completed
+
     lines = [
         f"[✅ 任务 #{task_id} 已完成]",
-        f"",
+        "",
         f"📝 结论: {summary}",
-        f"",
+        "",
         f"📊 进度: {completed}/{total}",
     ]
-    
-    if all_done:
+
+    if completed == total:
         lines.extend([
             "",
             "🎉 【全部任务完成！】",
@@ -796,7 +829,7 @@ def tick_subtask_tool(task_id: int, summary: str) -> str:
             "",
             f"⏳ 还剩 {remaining} 个任务，继续加油！",
         ])
-    
+
     return "\n".join(lines)
 
 
@@ -805,17 +838,27 @@ def modify_task_tool(task_id: int, new_description: str) -> str:
     【任务修改工具】修改任务描述
 
     Args:
-        task_id: 任务编号
+        task_id: 任务编号（1-based）
         new_description: 新的任务描述
 
     Returns:
         修改结果
     """
-    result = get_task_manager().modify_task(task_id, new_description)
-    
-    if result["status"] == "success":
+    planner = get_task_planner()
+    plan = planner.get_current_plan()
+
+    if not plan:
+        return "[❌ 错误] 当前没有活动计划"
+
+    ordered_ids = list(plan.tasks.keys())
+    if task_id < 1 or task_id > len(ordered_ids):
+        return f"[❌ 错误] 无效的任务编号 {task_id}"
+
+    target_id = ordered_ids[task_id - 1]
+    ok = planner.update_task(target_id, description=new_description)
+    if ok:
         return f"[✅ 任务 #{task_id} 已修改]: {new_description}"
-    return f"[❌ 错误] {result.get('message', '未知错误')}"
+    return f"[❌ 错误] 任务 {task_id} 修改失败"
 
 
 def add_task_tool(description: str) -> str:
@@ -828,11 +871,21 @@ def add_task_tool(description: str) -> str:
     Returns:
         添加结果
     """
-    result = get_task_manager().add_task(description)
-    
-    if result["status"] == "success":
-        return f"[✅ 新任务已添加] #{result['task_id']}: {description}"
-    return f"[❌ 错误] {result.get('message', '未知错误')}"
+    planner = get_task_planner()
+    plan = planner.get_current_plan()
+
+    if not plan:
+        return "[❌ 错误] 当前没有活动计划，请先制定计划"
+
+    # 查找最大整数后缀以确定新 ID
+    max_num = 0
+    for i, tid in enumerate(plan.tasks.keys(), 1):
+        if i > max_num:
+            max_num = i
+    new_id = planner.create_task(name=description, description=description)
+    # 将新任务加入当前计划
+    plan.tasks[new_id] = planner.get_task(new_id)
+    return f"[✅ 新任务已添加] #{max_num + 1}: {description}"
 
 
 def remove_task_tool(task_id: int) -> str:
@@ -840,16 +893,27 @@ def remove_task_tool(task_id: int) -> str:
     【任务删除工具】删除不需要的任务
 
     Args:
-        task_id: 要删除的任务编号
+        task_id: 要删除的任务编号（1-based）
 
     Returns:
         删除结果
     """
-    result = get_task_manager().remove_task(task_id)
-    
-    if result["status"] == "success":
-        return f"[✅ 任务 #{task_id} 已删除]，剩余 {result['remaining']} 个任务"
-    return f"[❌ 错误] {result.get('message', '未知错误')}"
+    planner = get_task_planner()
+    plan = planner.get_current_plan()
+
+    if not plan:
+        return "[❌ 错误] 当前没有活动计划"
+
+    ordered_ids = list(plan.tasks.keys())
+    if task_id < 1 or task_id > len(ordered_ids):
+        return f"[❌ 错误] 无效的任务编号 {task_id}"
+
+    target_id = ordered_ids[task_id - 1]
+    if target_id in plan.tasks:
+        del plan.tasks[target_id]
+    if target_id in planner._tasks:
+        del planner._tasks[target_id]
+    return f"[✅ 任务 #{task_id} 已删除]，剩余 {len(plan.tasks)} 个任务"
 
 
 def check_restart_block_tool() -> tuple[bool, str]:
@@ -859,31 +923,36 @@ def check_restart_block_tool() -> tuple[bool, str]:
     Returns:
         (is_blocked: bool, message: str)
     """
-    tm = get_task_manager()
-    
-    if not tm.subtasks:
+    planner = get_task_planner()
+    plan = planner.get_current_plan()
+
+    if not plan or not plan.tasks:
         return False, ""
-    
-    if not tm.is_all_completed:
-        pending_tasks = [t for t in tm.subtasks if not t["is_completed"]]
-        pending_list = "\n".join([
-            f"  ⏳ [ ] {t['id']}. {t['description']}"
-            for t in pending_tasks
-        ])
-        
-        message = (
-            f"\n"
-            f"[系统拦截] 你的任务清单中还有未完成的项目，禁止重启！\n"
-            f"\n"
-            f"📋 未完成任务 ({len(pending_tasks)} 项):\n"
-            f"{pending_list}\n"
-            f"\n"
-            f"请继续执行剩余任务，或使用 modify_task / remove_task 调整计划。\n"
-            f"禁止调用 trigger_self_restart 直到所有任务都打勾！\n"
-        )
-        return True, message
-    
-    return False, ""
+
+    pending = [
+        (i, t) for i, t in enumerate(plan.tasks.values(), 1)
+        if t.status != TaskStatus.COMPLETED
+    ]
+
+    if not pending:
+        return False, ""
+
+    pending_list = "\n".join([
+        f"  ⏳ [ ] {i}. {t.description}"
+        for i, t in pending
+    ])
+
+    message = (
+        f"\n"
+        f"[系统拦截] 你的任务清单中还有未完成的项目，禁止重启！\n"
+        f"\n"
+        f"📋 未完成任务 ({len(pending)} 项):\n"
+        f"{pending_list}\n"
+        f"\n"
+        f"请继续执行剩余任务，或使用 modify_task / remove_task 调整计划。\n"
+        f"禁止调用 trigger_self_restart 直到所有任务都打勾！\n"
+    )
+    return True, message
 
 
 def check_restart_block() -> tuple[bool, str]:
@@ -898,19 +967,24 @@ def get_task_status_tool() -> str:
     Returns:
         当前任务清单的状态摘要
     """
-    tm = get_task_manager()
-    
+    planner = get_task_planner()
+    plan = planner.get_current_plan()
+
     lines = [
         "[任务状态]",
         "",
-        f"🎯 目标: {tm.generation_goal or '(未设置)'}",
-        f"📊 进度: {tm.completion_rate:.0%}",
+        f"🎯 目标: {plan.goal if plan else '(未设置)'}",
     ]
-    
-    if tm.subtasks:
-        completed = sum(1 for t in tm.subtasks if t["is_completed"])
-        lines.append(f"📋 任务: {completed}/{len(tm.subtasks)} 完成")
+
+    if plan and plan.tasks:
+        completed = sum(1 for t in plan.tasks.values() if t.status == TaskStatus.COMPLETED)
+        total = len(plan.tasks)
+        pct = f"{completed * 100 // total}%" if total else "0%"
+        lines.append(f"📊 进度: {completed}/{total} ({pct})")
+        lines.append(f"📋 任务: {completed}/{total} 完成")
+        lines.append("")
+        lines.append(_render_task_list_from_planner(planner))
     else:
         lines.append("📋 任务: (空)")
-    
+
     return "\n".join(lines)

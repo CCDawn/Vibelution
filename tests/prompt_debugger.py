@@ -513,7 +513,7 @@ def main():
         print("初始化提示词打靶环境...")
 
     try:
-        from core.capabilities.prompt_manager import get_prompt_manager
+        from core.prompt_manager import get_prompt_manager
         from core.orchestration.response_parser import parse_llm_response
     except ImportError as e:
         console.print(f"[red]❌ 导入失败: {e}[/red]")

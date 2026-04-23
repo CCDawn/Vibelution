@@ -216,7 +216,7 @@ EDITABLE_EXTENSIONS = _config_defaults.get("EDITABLE_EXTENSIONS", {
 # 禁止删除的文件/目录模式
 FORBIDDEN_DELETE_PATTERNS = _config_defaults.get("FORBIDDEN_DELETE_PATTERNS", [
     '.env', '.password', '.secret', '.key', 'id_rsa', 'credentials.json',
-    'config.py', 'config.toml', '.git', 'restarter.py', 'agent.py',
+    'config.py', 'config.toml', '.git', 'core/restarter_manager/restarter.py', 'agent.py',
     '__pycache__', '.pytest_cache', '.gitignore',
 ])
 
@@ -1131,7 +1131,7 @@ def cleanup_test_files(directory: str = ".", dry_run: bool = False) -> str:
                     protected_files.append(str(item))
                     continue
 
-                if item.name in ['agent.py', 'config.py', 'restarter.py']:
+                if item.name in ['agent.py', 'config.py', 'restarter_manager']:
                     protected_files.append(str(item))
                     continue
 
@@ -1239,16 +1239,15 @@ def self_test() -> str:
         results.append(f"[FAIL] 记忆系统失败: {e}")
         all_passed = False
 
+    # 检查 core.restarter_manager 模块
     try:
-        restarter_path = PROJECT_ROOT / "restarter.py"
-        if restarter_path.exists():
-            results.append("[OK] restarter.py 存在")
-        else:
-            results.append("[FAIL] restarter.py 不存在 (危险!)")
-            all_passed = False
-    except Exception as e:
-        results.append(f"[FAIL] restarter 检查失败: {e}")
+        import core.restarter_manager
+        results.append("[OK] core.restarter_manager 存在")
+    except ImportError:
+        results.append("[FAIL] core.restarter_manager 不存在 (危险!)")
         all_passed = False
+
+    results.append("")
 
     results.append("=" * 50)
     if all_passed:

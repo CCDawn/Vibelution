@@ -27,6 +27,9 @@ from core.orchestration.forgetting_engine import (
 from core.orchestration.llm_factory import (
     create_llm, test_llm_connection, get_llm_info
 )
+from core.orchestration.plan_orchestrator import (
+    PlanOrchestrator, get_plan_orchestrator, reset_plan_orchestrator
+)
 from core.orchestration.agent_lifecycle import (
     AgentLifecycle, AUTONOMOUS_USER_PROMPT
 )

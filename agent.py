@@ -68,7 +68,7 @@ from core.orchestration.agent_lifecycle import AgentLifecycle, AUTONOMOUS_USER_P
 from core.orchestration.context_compressor import ContextCompressor
 from core.orchestration.llm_factory import create_llm, test_llm_connection
 from config.providers import init_model_discovery
-from core.capabilities.prompt_manager import get_prompt_manager
+from core.prompt_manager import get_prompt_manager
 from core.orchestration.response_parser import parse_llm_response
 
 
@@ -77,7 +77,8 @@ from core.decision.decision_tree import DecisionContext, get_decision_tree, crea
 from core.decision.priority_optimizer import Task, get_priority_optimizer
 from core.decision.strategy_selector import get_strategy_selector, create_default_selector
 from core.decision.task_classifier import classify_task_type
-
+# 导入编排系统
+from core.orchestration.plan_orchestrator import get_plan_orchestrator
 # 导入宠物系统
 from core.pet_system import get_pet_system
 
@@ -188,36 +189,10 @@ class SelfEvolvingAgent:
         except Exception:
             self.task_planner = None
 
-        # Skill 系统
-        try:
-            from core.ecosystem.skill_registry import get_skill_registry
-            from core.ecosystem.skill_tools import (
-                install_skill_tool, update_skill_tool, optimize_skill_tool,
-                uninstall_skill_tool, list_skills_tool, get_skill_info_tool,
-                execute_skill_tool, search_skills_tool, render_skill_prompt_tool,
-            )
-            self.skill_registry = get_skill_registry()
-            self.skill_tools = [
-                install_skill_tool, update_skill_tool, optimize_skill_tool,
-                uninstall_skill_tool, list_skills_tool, get_skill_info_tool,
-                execute_skill_tool, search_skills_tool, render_skill_prompt_tool,
-            ]
-            if hasattr(self, 'llm_with_tools') and self.llm_with_tools:
-                self.llm_with_tools = self.llm_with_tools.bind_tools(self.skill_tools)
-
-            for skill_tool in self.skill_tools:
-                tool_name = getattr(skill_tool, 'name', None) or getattr(skill_tool, '__name__', str(skill_tool))
-                self.tool_executor.register_tool(tool_name, skill_tool, timeout=60)
-
-            _debug_logger.info(
-                f"[Skill] 发现 {self.skill_registry.get_statistics()['total_skills']} 个 Skill，"
-                f"{len(self.skill_tools)} 个管理工具已就绪",
-                tag="SKILL"
-            )
-        except Exception as e:
-            self.skill_registry = None
-            self.skill_tools = []
-            _debug_logger.warning(f"[Skill] Skill 系统初始化失败: {e}", tag="SKILL")
+        # Skill 系统（相关模块已从 ecosystem 移除）
+        self.skill_registry = None
+        self.skill_tools = []
+        _debug_logger.info("[Skill] Skill 系统已移除", tag="SKILL")
 
         self._system_prompt_written = False
 
@@ -387,6 +362,34 @@ class SelfEvolvingAgent:
                 # 解析工具调用、状态记忆和规则切换
                 parser_result = parse_llm_response(response)
                 ui.add_content(parser_result.thinking_content)
+
+                # 解析 <mood> 标签，同步到 pet_system
+                if parser_result.mood_content:
+                    try:
+                        pet = get_pet_system()
+                        mood_str = parser_result.mood_content.strip()
+                        import re
+                        mood_match = re.search(r'"心情"\s*:\s*(\d+)', mood_str)
+                        energy_match = re.search(r'"活力"\s*:\s*(\d+)', mood_str)
+                        hunger_match = re.search(r'"饱食"\s*:\s*(\d+)', mood_str)
+                        if mood_match:
+                            pet.data.attributes.mood = int(mood_match.group(1))
+                        if energy_match:
+                            pet.data.attributes.energy = int(energy_match.group(1))
+                        if hunger_match:
+                            pet.data.attributes.hunger = int(hunger_match.group(1))
+                    except Exception:
+                        pass
+
+                # 自动解析 <plan> 标签，存入 TaskPlanner，渲染清单注入提示词
+                try:
+                    raw_plan = get_plan_orchestrator().extract_plan_tag(parser_result.raw_content or "")
+                    if raw_plan:
+                        checklist = get_plan_orchestrator().parse_and_store(raw_plan)
+                        ui.add_content(f"[系统] 任务清单已生成：\n{checklist}")
+                except Exception:
+                    pass  # PlanOrchestrator 尚未初始化，静默跳过
+
                 messages.append(AIMessage(content=parser_result.clean_content))
 
                 # # 回写 state_memory（落盘 + 更新 PM 内存缓存）

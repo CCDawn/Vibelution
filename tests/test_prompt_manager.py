@@ -18,7 +18,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.capabilities.prompt_manager import (
+from core.prompt_manager import (
     PromptComponent,
     PromptManager,
     get_prompt_manager,

@@ -689,7 +689,7 @@ class SecurityConfig(BaseModel):
     forbidden_delete_patterns: List[str] = Field(
         default_factory=lambda: [
             ".env", ".password", ".secret", ".key", "id_rsa", "credentials.json",
-            "config.py", "config.toml", ".git", "restarter.py", "agent.py"
+            "config.py", "config.toml", ".git", "core/restarter_manager/restarter.py", "agent.py"
         ],
         description="禁止删除的文件/目录"
     )
