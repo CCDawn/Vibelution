@@ -90,7 +90,7 @@ trigger_self_restart_tool(reason="任务完成，准备下一世代")
 
 ## 工具调用
 
-模型通过 Function Calling 原生输出工具调用，无需手动构造标签。系统会自动解析 `tool_calls` 属性中的调用请求，并行执行无依赖关系的多个调用。
+模型通过 Function Calling 原生输出工具调用，无需手动构造标签。系统会自动解析 `tool_calls` 属性中的调用请求，并行执行无依赖关系的多个调用，因此尽量在一次对话中并行调用多个工具。
 
 ---
 
@@ -120,8 +120,6 @@ trigger_self_restart_tool(reason="任务完成，准备下一世代")
 | `MEMORY` | 世代记忆、核心智慧摘要、当前目标 | 跨代任务、复杂上下文、需要了解前代积累时 | ❌ |
 | `TASK_CHECKLIST` | 当前任务清单（已打勾/未打勾状态） | 需要查看本世代任务进度时 | ❌ |
 | `DYNAMIC` | `workspace/prompts/DYNAMIC.md` — 本世代动态任务描述 | 明确有本世代目标时 | ❌ |
-| `IDENTITY` | `workspace/prompts/IDENTITY.md` — Agent 身份定义 | 需要明确角色定位时 | ❌ |
-| `USER` | `workspace/prompts/USER.md` — 用户信息与环境 | 需要了解用户背景时 | ❌ |
 | `CODEBASE_MAP` | 代码库认知地图（AST 动态扫描，类/函数结构） | 分析陌生代码、制定重构计划时 | ❌ |
 | `TOOLS_INDEX` | `docs/tools_manual.md` 精简索引 | 查阅工具用法、不知道该用什么工具时 | ❌ |
 

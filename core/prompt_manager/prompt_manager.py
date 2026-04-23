@@ -390,7 +390,8 @@ class PromptManager:
         selected = self._select_components(include, exclude)
         parts = [content_by_name[c.name] for c in selected if c.name in content_by_name]
         component_index = self._build_component_index()
-        prompt = component_index + "\n\n".join(parts)
+        component_guide = self._build_component_guide()
+        prompt = component_index + "\n\n".join(parts) + "\n\n" + component_guide
         return prompt, index_list
 
 
@@ -668,6 +669,25 @@ description: 上下文压缩摘要，记录历史对话中的关键信息和结�
             marker = "（必选）" if comp.required else ""
             empty_tag = " [空]" if comp.empty else ""
             lines.append(f"{i}. [{comp.name}] {desc}{empty_tag}{marker}\n")
+        return "".join(lines)
+
+    def _build_component_guide(self) -> str:
+        """
+        生成组件说明指南，列出所有可选组件的描述与使用场景，
+        帮助 LLM 在输出 <active_components> 标签时做出合理选择。
+        """
+        optional = [c for c in self._components.values() if c.enabled and not c.required]
+        if not optional:
+            return ""
+        lines = [
+            "\n\n---\n\n## 可选组件说明（供 <active_components> 参考）\n",
+            "| 组件名 | 描述 | 为空 |\n",
+            "|--------|------|------|\n",
+        ]
+        for c in sorted(optional, key=lambda x: x.priority):
+            desc = c.description or "—"
+            empty_tag = "是" if c.empty else "否"
+            lines.append(f"| `{c.name}` | {desc} | {empty_tag} |\n")
         return "".join(lines)
 
     def _render_memory(
