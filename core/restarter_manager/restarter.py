@@ -245,7 +245,7 @@ def spawn_new_process(
                     else:
                         os._exit(0)
                 except OSError as e:
-                    os._exit(f"Fork failed: {e}")
+                    os._exit(1)  # Fork failed, exit with error code 1
             else:
                 os.waitpid(pid, 0)
                 return None
