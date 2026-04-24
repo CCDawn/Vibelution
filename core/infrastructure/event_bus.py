@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import threading
 import traceback
+from collections import deque
 from typing import Callable, Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -173,8 +174,7 @@ class EventBus:
         self._global_handlers: List[Subscription] = []  # 处理所有事件
         self._sub_lock = threading.Lock()
         self._event_counter = 0
-        self._events_history: List[Event] = []
-        self._max_history = 100  # 保留最近 100 个事件
+        self._events_history: deque[Event] = deque(maxlen=100)  # 使用 deque 自动管理历史记录
 
     def subscribe(
         self,
@@ -397,12 +397,10 @@ class EventBus:
             所有处理器的返回值列表
         """
         event = Event(name=event_name, data=data, source=source)
-        self._event_counter += 1
 
-        # 记录历史
-        self._events_history.append(event)
-        if len(self._events_history) > self._max_history:
-            self._events_history.pop(0)
+        with self._sub_lock:
+            self._event_counter += 1
+            self._events_history.append(event)
 
         results = []
 
