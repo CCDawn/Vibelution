@@ -60,6 +60,8 @@ class UIManager:
 
     _instance = None
     _lock = threading.Lock()
+    # Test 模式：跳过 Live UI，直接打印到 stdout
+    _test_mode = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -267,6 +269,11 @@ class UIManager:
     def add_content(self, text: str):
         """添加内容到中间可滚动区"""
         self._content_lines.append(text)
+        if UIManager._test_mode:
+            import sys
+            sys.__stdout__.write(str(text) + "\n")
+            sys.__stdout__.flush()
+            return
         if len(self._content_lines) > self._max_content * 2:  # 超过2倍上限时清理
             self._content_lines = self._content_lines[-self._max_content:]
         self.refresh()
@@ -294,6 +301,8 @@ class UIManager:
 
     def start_live(self):
         """启动 Live 刷新"""
+        if UIManager._test_mode:
+            return
         if self._live is None:
             # 刷新 logger 的函数引用，确保在 Live 启动时使用最新的 UI 实例
             try:
@@ -334,6 +343,8 @@ class UIManager:
 
     def stop_live(self):
         """停止 Live 刷新"""
+        if UIManager._test_mode:
+            return
         if self._live:
             self._live.stop()
             self._live = None
@@ -342,6 +353,8 @@ class UIManager:
 
     def refresh(self):
         """刷新显示"""
+        if UIManager._test_mode:
+            return
         if self._live:
             try:
                 self._live.update(self._create_full_renderable(), refresh=True)
@@ -402,6 +415,13 @@ class UIManager:
 
         log_entry = f"[dim]{timestamp}[/dim] {icon} [{color}]{level}[/{color}] {message}"
 
+        if UIManager._test_mode:
+            import re, sys
+            plain = re.sub(r'\[/?\w+\]', '', log_entry)
+            sys.__stdout__.write(plain + "\n")
+            sys.__stdout__.flush()
+            return
+
         # 启动前：缓冲日志，不直接打印
         if self._live is None:
             self._log_buffer.append(log_entry)
@@ -426,6 +446,17 @@ class UIManager:
         original_status = self._status
         self._status = "THINKING"
         self.refresh()
+
+        if UIManager._test_mode:
+            import sys
+            sys.__stdout__.write(f"[THINKING] {message}\n")
+            sys.__stdout__.flush()
+            try:
+                yield
+            finally:
+                self._thinking = False
+                self._status = original_status
+            return
 
         try:
             yield

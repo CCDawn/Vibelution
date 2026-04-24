@@ -45,6 +45,20 @@ def print_tokens(
     """
     # 通过 UI 日志系统路由，Token 信息显示在日志面板中
     try:
+        from core.ui.cli_ui import UIManager
+        if UIManager._test_mode:
+            import sys
+            if output_tokens is not None:
+                sys.__stdout__.write(f"[TOKEN] 输出: {output_tokens} | 输入: {input_tokens}\n")
+            elif iteration is not None and max_iterations is not None:
+                sys.__stdout__.write(f"[TOKEN] 输入: {input_tokens} | 迭代: {iteration}/{max_iterations}\n")
+            else:
+                sys.__stdout__.write(f"[TOKEN] 输入: {input_tokens}\n")
+            sys.__stdout__.flush()
+            return
+    except ImportError:
+        pass
+    try:
         from core.ui.cli_ui import ui_log
         if output_tokens is not None:
             ui_log(f"TOKEN 输出: {output_tokens} | 输入: {input_tokens}", "TOKEN")

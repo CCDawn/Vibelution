@@ -132,21 +132,21 @@ def spawn_detached_process_windows(command: list, env: Optional[dict] = None) ->
         os.makedirs(log_dir, exist_ok=True)
         restarter_log = os.path.join(log_dir, 'restarter_realtime.log')
         
-        # Windows: 使用 CREATE_NO_WINDOW 避免弹出控制台窗口
-        # 使用 CREATE_NEW_PROCESS_GROUP 使进程独立
-        creation_flags = 0x08000000  # CREATE_NO_WINDOW
-        # 在某些情况下可能需要 0x00000200 (CREATE_NEW_PROCESS_GROUP)
-        
-        process = subprocess.Popen(
-            command,
-            env=env,
-            creationflags=creation_flags,
-            stdout=open(restarter_log, 'a', encoding='utf-8'),
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=False
-        )
-        
+        # DETACHED_PROCESS 分离控制台关联
+        # CREATE_NEW_PROCESS_GROUP 使进程完全脱离父进程组
+        creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+
+        with open(restarter_log, 'a', encoding='utf-8') as log_file:
+            process = subprocess.Popen(
+                command,
+                env=env,
+                creationflags=creation_flags,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=False
+            )
+
         debug_logger.info(f"Windows: 已启动脱离进程, PID: {process.pid}")
         return process.pid
         

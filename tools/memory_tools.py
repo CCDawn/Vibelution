@@ -9,7 +9,7 @@
 - 世代档案 (archives/gen_{N}_history.json) - 完整保留每一世代的对话记录和思考过程
 
 【任务管理】
-- set_plan / tick_subtask - 基于 TaskPlanner 驱动执行
+- set_plan / tick_subtask - 基于统一 TaskManager 驱动执行
 - 重启前强制检查任务完成度
 
 设计原则：详细档案只在 Agent 主动读取时才加载，不增加常规运行的 Token 负担。
@@ -23,7 +23,7 @@ from typing import Optional, List, Dict, Any
 
 # 导入统一工作区管理器
 from core.infrastructure.workspace_manager import get_workspace
-from core.orchestration.task_planner import get_task_planner, TaskStatus
+from core.orchestration.task_planner import get_task_manager, TaskStatus
 
 
 # ============================================================================
@@ -757,8 +757,8 @@ def set_plan_tool(goal: str, tasks: List[str]) -> str:
     if not tasks:
         return "[❌ 错误] tasks 列表不能为空"
 
-    planner = get_task_planner()
-    planner.create_plan(
+    tm = get_task_manager()
+    tm.create_plan(
         goal=goal,
         tasks=[{"name": d, "description": d} for d in tasks],
     )
@@ -790,8 +790,8 @@ def tick_subtask_tool(task_id: int, summary: str) -> str:
     Returns:
         完成进度信息
     """
-    planner = get_task_planner()
-    plan = planner.get_current_plan()
+    tm = get_task_manager()
+    plan = tm.get_current_plan()
 
     if not plan:
         return "[❌ 错误] 当前没有活动计划"
@@ -801,7 +801,7 @@ def tick_subtask_tool(task_id: int, summary: str) -> str:
         return f"[❌ 错误] 无效的任务编号 {task_id}，有效范围 1-{len(ordered_ids)}"
 
     target_id = ordered_ids[task_id - 1]
-    ok = planner.complete_task(target_id, summary)
+    ok = tm.complete_task(target_id, summary)
     if not ok:
         return f"[❌ 错误] 任务 {task_id} 无法标记为完成"
 
@@ -844,8 +844,8 @@ def modify_task_tool(task_id: int, new_description: str) -> str:
     Returns:
         修改结果
     """
-    planner = get_task_planner()
-    plan = planner.get_current_plan()
+    tm = get_task_manager()
+    plan = tm.get_current_plan()
 
     if not plan:
         return "[❌ 错误] 当前没有活动计划"
@@ -855,7 +855,7 @@ def modify_task_tool(task_id: int, new_description: str) -> str:
         return f"[❌ 错误] 无效的任务编号 {task_id}"
 
     target_id = ordered_ids[task_id - 1]
-    ok = planner.update_task(target_id, description=new_description)
+    ok = tm.update_task(target_id, description=new_description)
     if ok:
         return f"[✅ 任务 #{task_id} 已修改]: {new_description}"
     return f"[❌ 错误] 任务 {task_id} 修改失败"
@@ -871,8 +871,8 @@ def add_task_tool(description: str) -> str:
     Returns:
         添加结果
     """
-    planner = get_task_planner()
-    plan = planner.get_current_plan()
+    tm = get_task_manager()
+    plan = tm.get_current_plan()
 
     if not plan:
         return "[❌ 错误] 当前没有活动计划，请先制定计划"
@@ -882,9 +882,9 @@ def add_task_tool(description: str) -> str:
     for i, tid in enumerate(plan.tasks.keys(), 1):
         if i > max_num:
             max_num = i
-    new_id = planner.create_task(name=description, description=description)
+    new_id = tm.create_task(name=description, description=description)
     # 将新任务加入当前计划
-    plan.tasks[new_id] = planner.get_task(new_id)
+    plan.tasks[new_id] = tm.get_task(new_id)
     return f"[✅ 新任务已添加] #{max_num + 1}: {description}"
 
 
@@ -898,8 +898,8 @@ def remove_task_tool(task_id: int) -> str:
     Returns:
         删除结果
     """
-    planner = get_task_planner()
-    plan = planner.get_current_plan()
+    tm = get_task_manager()
+    plan = tm.get_current_plan()
 
     if not plan:
         return "[❌ 错误] 当前没有活动计划"
@@ -911,8 +911,8 @@ def remove_task_tool(task_id: int) -> str:
     target_id = ordered_ids[task_id - 1]
     if target_id in plan.tasks:
         del plan.tasks[target_id]
-    if target_id in planner._tasks:
-        del planner._tasks[target_id]
+    if target_id in tm._tasks:
+        del tm._tasks[target_id]
     return f"[✅ 任务 #{task_id} 已删除]，剩余 {len(plan.tasks)} 个任务"
 
 
@@ -923,8 +923,8 @@ def check_restart_block_tool() -> tuple[bool, str]:
     Returns:
         (is_blocked: bool, message: str)
     """
-    planner = get_task_planner()
-    plan = planner.get_current_plan()
+    tm = get_task_manager()
+    plan = tm.get_current_plan()
 
     if not plan or not plan.tasks:
         return False, ""
@@ -967,8 +967,8 @@ def get_task_status_tool() -> str:
     Returns:
         当前任务清单的状态摘要
     """
-    planner = get_task_planner()
-    plan = planner.get_current_plan()
+    tm = get_task_manager()
+    plan = tm.get_current_plan()
 
     lines = [
         "[任务状态]",
@@ -988,3 +988,109 @@ def get_task_status_tool() -> str:
         lines.append("📋 任务: (空)")
 
     return "\n".join(lines)
+
+
+# ============================================================================
+# TaskManager 工具（基于 tasks.json，与 TaskPlanner 的 set_plan_tool 并存）
+# ============================================================================
+
+def _get_task_manager_impl():
+    from core.orchestration.task_planner import get_task_manager
+    return get_task_manager()
+
+
+def task_create_tool(task_list: List[Dict], generation_goal: str = "") -> str:
+    """
+    【初始化任务清单】将子任务列表注册到系统内存并持久化。
+
+    Args:
+        task_list: [{"description": "子任务描述"}, ...]
+        generation_goal: 当前世代的核心目标（可选）
+
+    Returns:
+        成功创建的任务数量摘要
+    """
+    tm = _get_task_manager_impl()
+    return tm.task_create(task_list, generation_goal)
+
+
+def task_update_tool(task_id: int, is_completed: bool = None, result_summary: str = None, description: str = None) -> str:
+    """
+    【更新任务】可修改任务内容、标记完成状态或追加结果摘要。
+
+    Args:
+        task_id: 任务编号（来自 task_create 的返回值或 task_list 的 # 列）
+        is_completed: True=标记完成，False=标记进行中（可选）
+        result_summary: 操作结果摘要（可选）
+        description: 修改任务描述（可选，用于替换不合适的内容）
+
+    Returns:
+        更新结果描述
+    """
+    tm = _get_task_manager_impl()
+    return tm.task_update(task_id, is_completed, result_summary, description)
+
+
+def task_list_tool() -> str:
+    """
+    【检索任务进度】获取当前所有任务的详细进度，防止长对话中的任务漂移。
+
+    Returns:
+        格式化 Markdown 表格
+    """
+    tm = _get_task_manager_impl()
+    tasks = tm.task_list()
+    if not tasks:
+        return "📋 当前无任务。"
+    lines = ["| # | 描述 | 状态 | 结果摘要 |", "|---|------|------|----------|"]
+    for t in tasks:
+        status = "✅ 完成" if t.get("is_completed") else "⏳ 进行中"
+        lines.append(
+            f"| {t['id']} | {t['description']} | {status} | {t.get('result_summary') or '—'} |"
+        )
+    return "\n".join(lines)
+
+
+def task_breakdown_tool(task_id: int) -> str:
+    """【任务拆分工具】将一个任务拆分为具体可执行的子步骤。
+
+    Args:
+        task_id: 要拆分的任务编号（来自 task_list 的 # 列）
+
+    Returns:
+        拆分后的子步骤列表（格式化文本）
+    """
+    tm = _get_task_manager_impl()
+    result = tm.task_breakdown(task_id)
+    if not result:
+        return f"[❌ 错误] 任务 #{task_id} 不存在"
+    lines = [f"[✅ 任务 #{task_id} 已拆分为 {len(result)} 个子步骤]"]
+    for r in result:
+        lines.append(f"  {r['step']}. {r['description']}")
+    return "\n".join(lines)
+
+
+def task_prioritize_tool(task_ids: List[int]) -> str:
+    """【任务排序工具】对指定任务进行优先级排序。
+
+    Args:
+        task_ids: 任务 ID 列表，如 [3, 1, 2]
+
+    Returns:
+        排序后的任务顺序摘要
+    """
+    tm = _get_task_manager_impl()
+    ordered = tm.task_prioritize(task_ids)
+    if not ordered:
+        return "[❌ 错误] 没有找到指定的任务"
+    task_map = {t["id"]: t["description"] for t in tm.task_list()}
+    lines = ["[✅ 任务已按优先级排序]"]
+    for i, tid in enumerate(ordered, 1):
+        desc = task_map.get(tid, f"任务 #{tid}")
+        lines.append(f"  {i}. {desc} (#{tid})")
+    return "\n".join(lines)
+
+
+# ============================================================================
+# 重启前检查
+# ============================================================================

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Task Planner (任务规划器)
+Task Manager (统一任务管理器)
 
-功能：
+功能（合并自原 TaskPlanner + TaskManager）：
 - 智能任务分解
 - 依赖关系管理
 - 优先级排序
 - 风险评估
 - 执行进度跟踪
+- tasks.json 持久化
 """
 
 from __future__ import annotations
@@ -103,10 +104,18 @@ class PlanningResult:
 
 
 # ============================================================================
-# Task Planner
+# TaskManager — 统一任务管理器（合并自 TaskPlanner + 轻量 TaskManager）
 # ============================================================================
+# 功能：
+#   - 完整任务状态机（Pending/Blocked/InProgress/Completed/Failed/Cancelled）
+#   - 依赖管理、优先级排序、风险评估
+#   - create_plan / topological sort / critical path
+#   - tasks.json 持久化（统一数据源）
+#   - task_create / task_update / task_list CRUD
+#   - get_active_tasks / get_completion_stats Prompt 导出
 
-class TaskPlanner:
+
+class TaskManager:
     """
     任务规划器
 
@@ -125,7 +134,7 @@ class TaskPlanner:
 
     def __init__(self, project_root: Optional[str] = None):
         """
-        初始化任务规划器
+        初始化统一任务管理器。
 
         Args:
             project_root: 项目根目录
@@ -134,18 +143,27 @@ class TaskPlanner:
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         self.project_root = Path(project_root)
 
-        # 任务存储
+        # ── 复杂任务存储（来自原 TaskPlanner）───────────────────────────────
         self._tasks: Dict[str, Task] = {}
         self._plans: Dict[str, TaskPlan] = {}
         self._current_plan_id: Optional[str] = None
 
-        # 统计
+        # ── 轻量任务存储（来自原 TaskManager）─────────────────────────────
+        self._TASKS_FILE = "workspace/memory/tasks.json"
+        self._light_tasks: List[Dict[str, Any]] = []   # 扁平 list，持久化到 tasks.json
+        self._generation_goal: str = ""
+        self._next_light_id: int = 1
+
+        # ── 统计 ────────────────────────────────────────────────────────
         self._stats = {
             "plans_created": 0,
             "tasks_created": 0,
             "tasks_completed": 0,
             "tasks_failed": 0,
         }
+
+        # 加载 tasks.json
+        self._load_light_tasks()
 
     def _generate_id(self, prefix: str = "task") -> str:
         """生成唯一 ID"""
@@ -645,13 +663,130 @@ class TaskPlanner:
         except Exception:
             return False
 
-    def get_current_checklist_markdown(self) -> str:
-        """
-        将当前计划渲染为 Markdown 清单（用于注入到系统提示词）。
+    # =========================================================================
+    # tasks.json 持久化（来自原 TaskManager）
+    # =========================================================================
 
-        Returns:
-            Markdown 格式的清单，如果无计划则返回空字符串
-        """
+    def _resolve_project_root(self) -> Path:
+        import sys
+        for name, mod in list(sys.modules.items()):
+            if name == "agent" and mod and getattr(mod, "__file__", None):
+                return Path(mod.__file__).parent.resolve()
+        for sp in sys.path:
+            p = os.path.join(sp, "agent.py")
+            if os.path.exists(p):
+                return Path(sp).resolve()
+        return Path(__file__).parent.parent.parent.resolve()
+
+    def _load_light_tasks(self):
+        fpath = self.project_root / self._TASKS_FILE if self.project_root else None
+        if fpath and fpath.exists():
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._generation_goal = data.get("generation_goal", "")
+                raw = data.get("subtasks", [])
+                self._light_tasks = list(raw) if raw else []
+                self._next_light_id = max([t["id"] for t in self._light_tasks], default=0) + 1
+            except (json.JSONDecodeError, IOError):
+                self._light_tasks = []
+                self._next_light_id = 1
+        else:
+            self._light_tasks = []
+            self._next_light_id = 1
+
+    def _save_light_tasks(self):
+        fpath = self.project_root / self._TASKS_FILE
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        with open(fpath, "w", encoding="utf-8") as f:
+            json.dump({
+                "generation_goal": self._generation_goal,
+                "subtasks": self._light_tasks,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+            }, f, ensure_ascii=False, indent=2)
+
+    def task_create(self, tasks: List[Dict[str, Any]], generation_goal: str = "") -> str:
+        """创建任务清单（清空旧清单），返回摘要。"""
+        self._generation_goal = generation_goal
+        self._light_tasks = []
+        self._next_light_id = 1
+        for t in tasks:
+            st: Dict[str, Any] = {
+                "id": self._next_light_id,
+                "description": t["description"],
+                "is_completed": False,
+                "result_summary": "",
+                "created_at": datetime.now().isoformat(),
+                "completed_at": None,
+            }
+            self._light_tasks.append(st)
+            self._next_light_id += 1
+        self._save_light_tasks()
+        return f"已创建 {len(tasks)} 个任务，当前共 {len(self._light_tasks)} 个子任务。"
+
+    def task_update(self, task_id: int, is_completed: bool = None, result_summary: str = None, description: str = None) -> str:
+        """更新任务状态/摘要/描述。"""
+        for t in self._light_tasks:
+            if t["id"] == task_id:
+                if is_completed is not None:
+                    t["is_completed"] = is_completed
+                    if is_completed:
+                        t["completed_at"] = datetime.now().isoformat()
+                if result_summary is not None:
+                    t["result_summary"] = result_summary
+                if description is not None:
+                    t["description"] = description
+                self._save_light_tasks()
+                return f"任务 {task_id} 已更新: completed={t['is_completed']}"
+        return f"任务 {task_id} 未找到。"
+
+    def task_list(self) -> List[Dict[str, Any]]:
+        """返回所有任务的扁平列表。"""
+        return list(self._light_tasks)
+
+    def get_active_tasks(self) -> str:
+        """渲染 Prompt 友好的 Markdown 进度表。"""
+        if not self._light_tasks:
+            return ""
+        lines = ["\n\n---\n\n## 当前任务进度\n"]
+        if self._generation_goal:
+            lines.append(f"**目标**: {self._generation_goal}\n")
+        lines.append("| # | 描述 | 状态 | 结果摘要 |\n")
+        lines.append("|---|------|------|----------|\n")
+        for t in self._light_tasks:
+            status = "✅ 完成" if t.get("is_completed") else "⏳ 进行中"
+            summary = t.get("result_summary") or "—"
+            lines.append(f"| {t['id']} | {t['description']} | {status} | {summary} |\n")
+        pending = [t for t in self._light_tasks if not t.get("is_completed")]
+        if pending:
+            lines.append(f"\n**未完成任务 {len(pending)} 个**，请继续执行下一个待办事项。\n")
+        return "".join(lines)
+
+    def get_completion_stats(self) -> Dict[str, int]:
+        total = len(self._light_tasks)
+        completed = sum(1 for t in self._light_tasks if t.get("is_completed"))
+        return {"total": total, "completed": completed, "pending": total - completed}
+
+    def task_breakdown(self, task_id: int) -> List[Dict[str, Any]]:
+        """将指定任务拆分为子步骤。"""
+        task = next((t for t in self._light_tasks if t["id"] == task_id), None)
+        if not task:
+            return []
+        description = task.get("description", "")
+        import re as _re
+        steps = [s.strip() for s in _re.split(r"[。\n；;,、]", description) if s.strip()]
+        if len(steps) <= 1:
+            steps = [description] if description else []
+        return [{"step": i + 1, "description": s} for i, s in enumerate(steps)]
+
+    def task_prioritize(self, task_ids: List[int]) -> List[int]:
+        """对指定任务 ID 列表按优先级排序（过滤无效 ID）。"""
+        valid_ids = {t["id"] for t in self._light_tasks}
+        return [tid for tid in task_ids if tid in valid_ids]
+
+    def get_current_checklist_markdown(self) -> str:
+        """将当前计划渲染为 Markdown 清单（PlanOrchestrator / PromptManager 专用）。"""
         plan = self.get_current_plan()
         if not plan:
             return ""
@@ -700,21 +835,61 @@ class TaskPlanner:
 
 
 # ============================================================================
-# 全局单例
+# 向后兼容别名（在函数定义之后赋值，避免 NameError）
 # ============================================================================
 
-_task_planner: Optional[TaskPlanner] = None
+
+# ============================================================================
+# 全局单例（统一 TaskManager）
+# ============================================================================
+
+_task_manager_instance: Optional[TaskManager] = None
+_task_manager_root: Optional[Path] = None
 
 
-def get_task_planner(project_root: Optional[str] = None) -> TaskPlanner:
-    """获取任务规划器单例"""
-    global _task_planner
-    if _task_planner is None:
-        _task_planner = TaskPlanner(project_root)
-    return _task_planner
+def get_task_manager(project_root: Optional[str] = None) -> TaskManager:
+    """获取统一 TaskManager 单例，支持 project_root 校验。"""
+    global _task_manager_instance, _task_manager_root
+    if _task_manager_instance is None:
+        if project_root:
+            root = Path(project_root).resolve()
+        else:
+            root = _resolve_root()
+        _task_manager_root = root
+        _task_manager_instance = TaskManager(root)
+    elif project_root is not None:
+        incoming = Path(project_root).resolve()
+        if incoming != _task_manager_root:
+            import warnings
+            warnings.warn(
+                f"TaskManager 已在 {_task_manager_root} 初始化，忽略传入路径 {incoming}"
+            )
+    return _task_manager_instance
 
 
-def reset_task_planner() -> None:
-    """重置任务规划器"""
-    global _task_planner
-    _task_planner = None
+def _resolve_root() -> Path:
+    """解析项目根目录（供单例初始化用）。"""
+    import sys
+    for name, mod in list(sys.modules.items()):
+        if name == "agent" and mod and getattr(mod, "__file__", None):
+            return Path(mod.__file__).parent.resolve()
+    for sp in sys.path:
+        p = os.path.join(sp, "agent.py")
+        if os.path.exists(p):
+            return Path(sp).resolve()
+    return Path(__file__).parent.parent.parent.resolve()
+
+
+def reset_task_manager() -> None:
+    """重置 TaskManager 单例"""
+    global _task_manager_instance, _task_manager_root
+    _task_manager_instance = None
+    _task_manager_root = None
+
+
+# ============================================================================
+# 向后兼容别名（必须放在函数定义之后）
+# ============================================================================
+TaskPlanner = TaskManager           # 旧类名 → 新类名
+get_task_planner = get_task_manager  # 旧函数名 → 新函数名
+reset_task_planner = reset_task_manager

@@ -3,8 +3,9 @@
 core/orchestration/response_parser.py - LLM 响应解析器
 
 功能：
-- 强制提取 <state_memory> XML 标签
-- 强制提取 <active_rules> XML 标签
+- 提取 <state> XML 标签（状态记忆）
+- 提取 <active_rules> XML 标签（激活规则）
+- 提取 <active_components> XML 标签（激活组件）
 - 仅依赖 LangChain 原生 tool_calls 属性
 - 异常时返回空字符串，保证主循环健壮
 """
@@ -29,9 +30,7 @@ _THINK_CLOSE = "\u300a\u5c0f\u8bb1"
 class LLMParserResult:
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     thinking_content: str = ""
-    mood_content: str = ""
-    state_memory: str = ""
-    plan_content: str = ""
+    state: str = ""
     active_rules: List[str] = field(default_factory=list)
     active_components: List[str] = field(default_factory=list)
     raw_content: str = ""
@@ -75,24 +74,9 @@ class ResponseParser:
         result.raw_content = content
 
         result.tool_calls = self._extract_tool_calls(response, content)
-        result.thinking_content = self._extract_tag(content, "think")
-        result.mood_content = self._extract_tag(content, "mood")
-
-        result.state_memory = self._extract_tag(content, "state_memory")
-        if result.state_memory:
-            self.logger.debug(f"[ResponseParser] 提取 state_memory，长度={len(result.state_memory)}")
-
-        result.plan_content = self._extract_tag(content, "plan")
-        if result.plan_content:
-            self.logger.debug(f"[ResponseParser] 提取 plan，长度={len(result.plan_content)}")
-
+        result.state = self._extract_tag(content, "state")
         result.active_rules = self._extract_active_rules(content)
-        if result.active_rules:
-            self.logger.debug(f"[ResponseParser] 提取 active_rules: {result.active_rules}")
-
         result.active_components = self._extract_active_components(content)
-        if result.active_components:
-            self.logger.debug(f"[ResponseParser] 提取 active_components: {result.active_components}")
 
         result.clean_content = self._strip_all_tags(content)
         return result
@@ -130,19 +114,6 @@ class ResponseParser:
             match = re.search(pattern, content, re.IGNORECASE | re.DOTALL)
             if match:
                 return match.group(1).strip()
-
-        # thinking 专用：支持 Unicode 认真学习 和 ASCII 认真学习 两种格式
-        if tag == "thinking":
-            open_esc = re.escape(_THINK_OPEN)
-            close_esc = re.escape(_THINK_CLOSE)
-            for p in [
-                open_esc + r'\s*([\s\S]*?)\s*' + close_esc,
-                r'认真学习\s*([\s\S]*?)\s*认真学习',
-            ]:
-                m = re.search(p, content, re.IGNORECASE | re.DOTALL)
-                if m:
-                    return m.group(1).strip()
-
         return ""
 
     def _extract_active_rules(self, content: str) -> List[str]:

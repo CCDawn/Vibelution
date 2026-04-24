@@ -9,10 +9,7 @@
 # Shell 工具
 # ============================================================================
 from tools.shell_tools import (
-    read_file as read_file_tool,
     list_directory as list_directory_tool,
-    edit_file as edit_file_tool,
-    create_file as create_file_tool,
     check_python_syntax as check_python_syntax_tool,
     extract_symbols as extract_symbols_tool,
     backup_project as backup_project_tool,
@@ -47,15 +44,12 @@ from tools.memory_tools import (
     force_save_current_state,
     advance_generation,
     clear_generation_task,
-    # 任务工具
-    set_plan_tool,
-    tick_subtask_tool,
-    modify_task_tool,
-    add_task_tool,
-    remove_task_tool,
-    get_task_status_tool,
-    check_restart_block_tool,
-    check_restart_block,
+    # 任务工具（TaskManager 体系）
+    task_create_tool,
+    task_update_tool,
+    task_list_tool,
+    task_breakdown_tool,
+    task_prioritize_tool,
 )
 
 # ============================================================================
@@ -109,10 +103,7 @@ from tools.web_search_tool import web_search as web_search_impl
 
 __all__ = [
     # Shell 工具
-    "read_file_tool",
     "list_directory_tool",
-    "edit_file_tool",
-    "create_file_tool",
     "check_python_syntax_tool",
     "extract_symbols_tool",
     "backup_project_tool",
@@ -141,15 +132,12 @@ __all__ = [
     "force_save_current_state",
     "advance_generation",
     "clear_generation_task",
-    # 任务工具
-    "set_plan_tool",
-    "tick_subtask_tool",
-    "modify_task_tool",
-    "add_task_tool",
-    "remove_task_tool",
-    "get_task_status_tool",
-    "check_restart_block_tool",
-    "check_restart_block",
+    # 任务工具（TaskManager 体系）
+    "task_create_tool",
+    "task_update_tool",
+    "task_list_tool",
+    "task_breakdown_tool",
+    "task_prioritize_tool",
     # 重生工具
     "trigger_self_restart_tool",
     "enter_hibernation_tool",

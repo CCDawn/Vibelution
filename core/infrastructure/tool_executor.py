@@ -37,7 +37,7 @@ class ToolExecutor:
         """注册默认工具映射"""
         from tools import (
             # Shell 工具
-            read_file_tool, list_directory_tool, edit_file_tool, create_file_tool,
+            list_directory_tool,
             check_python_syntax_tool, extract_symbols_tool, backup_project_tool,
             cleanup_test_files_tool, execute_shell_command_tool, run_powershell_tool,
             run_batch_tool, self_test_tool, get_agent_status_tool,
@@ -53,9 +53,9 @@ class ToolExecutor:
             # 代码分析工具
             apply_diff_edit_tool, validate_diff_format_tool, preview_diff_tool,
             get_code_entity_tool, list_file_entities_tool, get_file_entities_tool,
-            # 任务工具
-            set_plan_tool, tick_subtask_tool, modify_task_tool,
-            add_task_tool, remove_task_tool, get_task_status_tool, check_restart_block_tool,
+            # 任务工具（TaskManager 体系）
+            task_create_tool, task_update_tool, task_list_tool,
+            task_breakdown_tool, task_prioritize_tool,
             # 重生工具
             trigger_self_restart_tool, enter_hibernation_tool,
             # 网络搜索工具
@@ -70,14 +70,8 @@ class ToolExecutor:
         # 构建工具映射
         self._tool_map = {
             # Shell 工具
-            "read_file": read_file_tool,
-            "read_file_tool": read_file_tool,
             "list_directory": list_directory_tool,
             "list_directory_tool": list_directory_tool,
-            "edit_file": edit_file_tool,
-            "edit_file_tool": edit_file_tool,
-            "create_file": create_file_tool,
-            "create_file_tool": create_file_tool,
             "check_python_syntax": check_python_syntax_tool,
             "check_python_syntax_tool": check_python_syntax_tool,
             "extract_symbols": extract_symbols_tool,
@@ -90,21 +84,17 @@ class ToolExecutor:
             "execute_shell_command_tool": execute_shell_command_tool,
             "run_powershell": run_powershell_tool,
             "run_powershell_tool": run_powershell_tool,
-            # 任务工具 (别名映射)
-            "set_plan": set_plan_tool,
-            "set_plan_tool": set_plan_tool,
-            "tick_subtask": tick_subtask_tool,
-            "tick_subtask_tool": tick_subtask_tool,
-            "modify_task": modify_task_tool,
-            "modify_task_tool": modify_task_tool,
-            "add_task": add_task_tool,
-            "add_task_tool": add_task_tool,
-            "remove_task": remove_task_tool,
-            "remove_task_tool": remove_task_tool,
-            "get_task_status": get_task_status_tool,
-            "get_task_status_tool": get_task_status_tool,
-            "check_restart_block": check_restart_block_tool,
-            "check_restart_block_tool": check_restart_block_tool,
+            # 任务工具（TaskManager 体系）
+            "task_create": task_create_tool,
+            "task_create_tool": task_create_tool,
+            "task_update": task_update_tool,
+            "task_update_tool": task_update_tool,
+            "task_list": task_list_tool,
+            "task_list_tool": task_list_tool,
+            "task_breakdown": task_breakdown_tool,
+            "task_breakdown_tool": task_breakdown_tool,
+            "task_prioritize": task_prioritize_tool,
+            "task_prioritize_tool": task_prioritize_tool,
             # 更新后的工具名
             "set_generation_task_tool": update_generation_task_tool,
             "update_generation_task_tool": update_generation_task_tool,
@@ -176,20 +166,21 @@ class ToolExecutor:
             "get_file_entities_tool": get_file_entities_tool,
             # CLI 工具
             "cli_tool": execute_shell_command_tool,
-            # 项目结构工具
-            "get_project_structure_tool": list_directory_tool,
             # 网络搜索工具
             "web_search": web_search_impl,
             "web_search_tool": web_search_impl,
             "web_search_impl": web_search_impl,
-            # 任务工具
-            "set_plan": set_plan_tool,
-            "tick_subtask": tick_subtask_tool,
-            "modify_task": modify_task_tool,
-            "add_task": add_task_tool,
-            "remove_task": remove_task_tool,
-            "get_task_status": get_task_status_tool,
-            "check_restart_block": check_restart_block_tool,
+            # 任务工具（TaskManager 体系）
+            "task_create": task_create_tool,
+            "task_create_tool": task_create_tool,
+            "task_update": task_update_tool,
+            "task_update_tool": task_update_tool,
+            "task_list": task_list_tool,
+            "task_list_tool": task_list_tool,
+            "task_breakdown": task_breakdown_tool,
+            "task_breakdown_tool": task_breakdown_tool,
+            "task_prioritize": task_prioritize_tool,
+            "task_prioritize_tool": task_prioritize_tool,
             # 重生工具
             "trigger_self_restart": trigger_self_restart_tool,
             "enter_hibernation": enter_hibernation_tool,

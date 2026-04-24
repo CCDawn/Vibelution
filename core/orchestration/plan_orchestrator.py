@@ -29,8 +29,8 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from core.orchestration.task_planner import (
-    get_task_planner,
-    TaskPlanner,
+    get_task_manager,
+    TaskManager,
     TaskPriority,
 )
 
@@ -66,13 +66,13 @@ class PlanOrchestrator:
         re.MULTILINE,
     )
 
-    def __init__(self, planner: Optional[TaskPlanner] = None):
+    def __init__(self, planner: Optional[TaskManager] = None):
         self._planner = planner
 
     @property
-    def planner(self) -> TaskPlanner:
+    def planner(self) -> TaskManager:
         if self._planner is None:
-            self._planner = get_task_planner()
+            self._planner = get_task_manager()
         return self._planner
 
     def extract_plan_tag(self, text: str) -> Optional[str]:

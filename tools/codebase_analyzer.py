@@ -114,28 +114,10 @@ class CodebaseAnalyzer:
         return {
             "agent.py": "Agent 主程序，协调各模块工作",
             "config.py": "配置文件管理",
-            "core/restarter_manager/restarter.py": "自我重启守护进程",
-            "core/agent_core.py": "Agent 核心循环逻辑",
-            "core/tool_executor.py": "工具执行器，管理工具注册和执行",
-            "core/event_bus.py": "事件总线，发布订阅机制",
-            "core/security.py": "安全验证，白名单和路径沙箱",
-            "core/state.py": "状态管理，Agent 运行时状态",
-            "core/logger.py": "日志系统",
-            "core/orchestration/task_planner.py": "任务规划器，依赖管理与拓扑排序",
-            "core/workspace_manager.py": "工作区管理，文件存储",
-            "core/prompt_builder.py": "提示词构建",
-            "core/cli_ui.py": "CLI 用户界面",
-            "core/prompt_manager/restarter.py": "重启管理器",
-            "core/self_analyzer.py": "自我分析器，能力评估",
-            "core/codebase_analyzer.py": "代码库分析器，认知地图",
-            "tools/shell_tools.py": "Shell 工具集，文件操作",
-            "tools/memory_tools.py": "记忆工具，世代管理",
-            "tools/search_tools.py": "搜索工具，代码搜索",
-            "tools/code_analysis_tools.py": "代码分析工具",
-            "tools/rebirth_tools.py": "重生工具，自我重启",
-            "tools/token_manager.py": "Token 管理器",
-            "tests/": "测试套件",
-            "workspace/": "工作区存储",
+            "core": "核心功能模块（orchestration, infrastructure, learning, pet_system, ui, logging 等）",
+            "tools": "工具模块（shell, memory, search, code_analysis, rebirth, token 等）",
+            "tests": "测试套件",
+            "workspace": "工作区存储（prompts, memory, logs, transcripts 等）",
         }
 
     # =========================================================================
@@ -339,9 +321,9 @@ class CodebaseAnalyzer:
                 last_modified=datetime.fromtimestamp(stat.st_mtime).isoformat(),
             )
 
-        # 统计
-        functions = len([n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)])
-        classes = len([n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)])
+        # 统计（只取顶层定义，避免 ast.walk() 重复计入嵌套函数/类）
+        functions = len([n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))])
+        classes = len([n for n in tree.body if isinstance(n, ast.ClassDef)])
 
         # 计算复杂度
         complexity = self._calculate_complexity(tree)
@@ -398,14 +380,18 @@ class CodebaseAnalyzer:
         for node in ast.walk(tree):
             if isinstance(node, ast.If):
                 complexity += 1
-            elif isinstance(node, ast.While):
-                complexity += 1
-            elif isinstance(node, ast.For):
+            elif isinstance(node, (ast.While, ast.For, ast.AsyncFor)):
                 complexity += 1
             elif isinstance(node, ast.ExceptHandler):
                 complexity += 1
             elif isinstance(node, ast.BoolOp):  # and, or
                 complexity += len(node.values) - 1
+            elif isinstance(node, ast.Try):     # try / except / finally
+                complexity += len(node.handlers) + 1
+            elif isinstance(node, ast.With):
+                complexity += len(node.items)
+            elif isinstance(node, ast.Match):
+                complexity += len(node.cases)
 
         return complexity
 
@@ -531,12 +517,14 @@ class CodebaseAnalyzer:
                 if imp.startswith("."):
                     continue
 
-                # 映射到实际模块
-                if imp.startswith("tools."):
-                    self._import_graph[entity.path].add("tools")
-                elif imp.startswith("core."):
-                    self._import_graph[entity.path].add("core")
-                elif imp in ["os", "sys", "json", "datetime", "typing"]:
+                # 映射到实际模块（精确到子模块）
+                if imp.startswith("tools.") or imp == "tools":
+                    parts = imp.split(".")
+                    self._import_graph[entity.path].add(parts[0] + "." + parts[1] if len(parts) > 1 else imp)
+                elif imp.startswith("core.") or imp == "core":
+                    parts = imp.split(".")
+                    self._import_graph[entity.path].add(parts[0] + "." + parts[1] if len(parts) > 1 else imp)
+                elif imp in {"os", "sys", "json", "datetime", "typing", "pathlib", "re", "collections"}:
                     self._import_graph[entity.path].add("stdlib")
 
     # =========================================================================
@@ -701,7 +689,7 @@ class CodebaseAnalyzer:
 
         for module in codebase_map.modules:
             lines.append(f"### {module.name}")
-            lines.append(f"- **路径**: `` {module.path} ``")
+            lines.append(f"- **路径**: `{module.path}`")
             lines.append(f"- **用途**: {module.purpose}")
             lines.append(f"- **复杂度**: {module.complexity}")
             lines.append(f"- **健康度**: {module.health_score:.0%}")
@@ -721,7 +709,7 @@ class CodebaseAnalyzer:
             ])
 
             for hotspot in codebase_map.hotspots[:10]:  # 限制显示前 10 个
-                lines.append(f"###  {hotspot.file_path} ")
+                lines.append(f"### `{hotspot.file_path}`")
                 lines.append(f"- **原因**: {hotspot.reason}")
 
                 metrics_str = ", ".join(

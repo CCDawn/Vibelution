@@ -601,3 +601,16 @@ enabled = true
 volume = 0.5
 mood_sounds = true
 action_sounds = true
+
+# ============================================================
+# [提示词] 提示词管理器配置
+# ============================================================
+[prompt]
+# 默认拼装的组件列表（可按需调整，空列表使用内置默认值 ["SOUL","AGENTS","SPEC","ENV_INFO"]）
+# 可通过 LLM <active_components> 标签或 tool 动态覆盖
+default_components = [
+    "SOUL",
+    "AGENTS",
+    "SPEC",
+    "ENV_INFO",
+]

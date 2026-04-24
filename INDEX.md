@@ -134,7 +134,8 @@ self-evo-baby/
 │   ├── token_manager.py      # ✅ Token管理
 │   ├── compression_*.py     # ✅ 压缩相关
 │   └── code_analysis_tools.py # ✅ 代码分析
-├── tests/                     # 测试套件（46个文件）
+├── tests/                     # 测试套件（27个活跃测试文件 + 17个已归档到backups/）
+│   ├── README.md              # 测试使用说明（2026-04-24更新）
 ├── workspace/                  # 工作区
 │   ├── prompts/              # 动态提示词
 │   ├── memory/archives/      # 记忆存档
@@ -285,6 +286,8 @@ python tests/prompt_debugger.py --suite
 | Token优化 | 58+ | ✅ |
 | Phase 8 | - | ⚠️ 框架 |
 | **提示词打靶** | 12 | ✅ 92% |
+| **活跃测试文件** | 27 | ✅ |
+| **已归档测试** | 17 | 📦 backups/ |
 
 ### 🔴 提示词打靶（强制）
 
@@ -438,6 +441,8 @@ Skill:    自扩展   ✅ Agent可自建Skill
 
 | 版本 | 日期 | 变更 |
 |------|------|------|
+| v6.3 | 2026-04-24 | **任务管理工具化**：TaskManager 新增 task_breakdown/prioritize 方法；tool_executor 统一注册 TaskManager 工具集，移除 TaskPlanner 废弃工具；AGENTS.md 重写任务管理章节 |
+| v6.2 | 2026-04-24 | **测试整理**：清理17个孤立测试到backups/，更新tests/README.md使用说明 |
 | v6.1 | 2026-04-20 | **UI修复**：cli_ui.py print_markdown重复定义、工具日志三重写入、Token信息重复写入、交互模式Live管理混乱 |
 | v6.0 | 2026-04-19 | **全面精简**：重构为6大章节（结构/Phase/模块/流程/测试/配置），消除重复表格，精简至600行 |
 | v5.1 | 2026-04-19 | Core First架构、SPEC_Agent.md升级 |

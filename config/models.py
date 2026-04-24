@@ -903,6 +903,20 @@ class StrategyConfig(BaseModel):
 
 
 # ============================================================================
+# 提示词管理器配置
+# ============================================================================
+
+class PromptConfig(BaseModel):
+    """提示词管理器配置"""
+    model_config = ConfigDict(extra="ignore")
+
+    default_components: List[str] = Field(
+        default=["SOUL", "AGENTS", "SPEC", "ENV_INFO"],
+        description="默认拼装的组件列表（可按需调整）"
+    )
+
+
+# ============================================================================
 # 代码分析配置
 # ============================================================================
 
@@ -1183,6 +1197,7 @@ class AppConfig(BaseModel):
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     parser: ParserConfig = Field(default_factory=ParserConfig)
+    prompt: PromptConfig = Field(default_factory=PromptConfig)
     debug: DebugConfig = Field(default_factory=DebugConfig)
     compat: CompatConfig = Field(default_factory=CompatConfig)
 

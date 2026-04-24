@@ -8,8 +8,8 @@ from core.orchestration.memory_manager import (
     get_memory_manager, reset_memory_manager
 )
 from core.orchestration.task_planner import (
-    TaskPlanner, Task as PlannerTask, TaskStatus, TaskPriority,
-    get_task_planner, reset_task_planner
+    TaskManager, Task as PlannerTask, TaskStatus, TaskPriority,
+    get_task_manager, reset_task_manager,
 )
 from core.orchestration.response_parser import ResponseParser
 from core.orchestration.compression_persister import (

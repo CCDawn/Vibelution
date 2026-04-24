@@ -5,9 +5,9 @@ LangChain 工具包装模块
 所有在此注册的 Tool 都会通过 agent._tools 传递给 LLM。
 文档（SOUL.md / AGENTS.md）中提到的工具必须在此注册，否则 Agent 无法调用。
 """
-from typing import List, Optional
-from langchain_core.tools import BaseTool, tool
-
+from typing import Dict, List, Optional
+from langchain_core.tools import BaseTool, tool, StructuredTool
+from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.memory_tools import (
     commit_compressed_memory_tool as _commit_compressed_impl,
     read_dynamic_prompt_tool as _read_dynamic_prompt_impl,
@@ -17,28 +17,61 @@ from tools.memory_tools import (
     get_memory_summary_tool as _get_memory_summary_impl,
 )
 from tools.memory_tools import (
-    tick_subtask_tool as _tick_subtask_impl,
-    modify_task_tool as _modify_task_impl,
-    add_task_tool as _add_task_impl,
-    remove_task_tool as _remove_task_impl,
+    task_create_tool as _task_create_impl,
+    task_update_tool as _task_update_impl,
+    task_list_tool as _task_list_impl,
 )
 from tools.search_tools import grep_search_tool as _grep_search_impl
-from tools.shell_tools import (
-    list_directory as _list_directory_impl,
-    check_python_syntax as _check_python_syntax_impl,
-    backup_project as _backup_project_impl,
-    cleanup_test_files as _cleanup_test_impl,
-    self_test as _self_test_impl,
-    read_file as _read_file_impl,
-    edit_file as _edit_file_impl,
-    create_file as _create_file_impl,
-)
 from tools.rebirth_tools import (
     enter_hibernation_tool as _enter_hibernation_impl,
 )
 from tools.web_search_tool import (
     web_search_tool as _web_search_impl,
 )
+import platform as _platform
+
+_CURRENT_OS = _platform.system()
+
+if _CURRENT_OS == "Windows":
+    _OS_CHEATSHEET = """
+当前系统: Windows PowerShell
+- 看目录: Get-ChildItem -Recurse -Depth 3
+- 搜内容: Select-String -Pattern "查找词" -Path *.py -Recurse
+- 看前N行: Get-Content file.py -TotalCount 30
+- 读后N行: Get-Content file.py -Tail 30
+- 统计行数: (Get-Content file.py).Length
+- 杀进程: Stop-Process -Id PID -Force
+- 重启/刷新环境: refreshenv (或重启终端)
+"""
+else:
+    _OS_CHEATSHEET = """
+当前系统: Linux / macOS (Bash)
+- 看目录: find . -maxdepth 3
+- 搜内容: grep -rn "查找词" --include="*.py" .
+- 看前N行: head -N file.py
+- 读后N行: tail -N file.py
+- 统计行数: wc -l file.py
+- 找大文件: find . -name "*.py" -size +10k
+    - 杀进程: kill -9 PID
+"""
+
+_CLI_TOOL_DOCSTRING = """
+【万能 CLI 工具】执行任意 Shell 命令。你是资深架构师，请用最高效的命令组合！
+
+""" + _OS_CHEATSHEET + """
+
+=== ⚡ 核心纪律 (违者崩溃) ===
+1. 禁区：绝不执行交互式命令 (vim, nano, top, less) 和无休止命令 (ping, tail -f)。
+2. 管道：必须多用 `| head -n 20` 或 `| grep` 截断长输出，防止 Token 爆炸！
+3. 限制：超过 500 行的文件，禁止用 cat/Get-Content 全量读取，必须用 head/tail。
+
+=== 🔄 闭环准则 ===
+修改代码后，立刻组合执行：`python -m py_compile <file>.py && pytest`
+
+Args:
+    command: 要执行的 Shell 命令（请确保语法兼容当前 """ + _CURRENT_OS + """ 系统）
+    timeout: 建议: 文件操作 30s, 编译 60s, 测试/网络 120s
+"""
 
 
 def create_key_tools() -> List[BaseTool]:
@@ -112,15 +145,15 @@ def create_key_tools() -> List[BaseTool]:
 
     # ── 记忆系统工具 ──────────────────────────────────────────────────────
 
-    @tool
-    def read_memory_tool() -> str:
-        """
-        【状态查询】读取当前世代索引（轻量级，不加载详细档案）。
+    # @tool
+    # def read_memory_tool() -> str:
+    #     """
+    #     【状态查询】读取当前世代索引（轻量级，不加载详细档案）。
 
-        Returns:
-            JSON 字符串，包含 current_generation / core_wisdom / current_goal / total_generations
-        """
-        return _read_memory_impl()
+    #     Returns:
+    #         JSON 字符串，包含 current_generation / core_wisdom / current_goal / total_generations
+    #     """
+    #     return _read_memory_impl()
 
     # @tool
     # def get_memory_summary_tool() -> str:
@@ -160,6 +193,7 @@ def create_key_tools() -> List[BaseTool]:
         触发 Agent 自我重启。
 
         用于应用代码更新。每次代码修改并自检通过后必须调用！
+        注意重启后你的上下文会消失，所以你需要在重启前保存好你的上下文。
 
         Args:
             reason: 重启原因
@@ -167,7 +201,6 @@ def create_key_tools() -> List[BaseTool]:
         Returns:
             操作结果（原进程将退出）
         """
-        from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
         return _restart_impl(reason=reason)
 
     # ── 代码分析工具 ────────────────────────────────────────────────────────
@@ -179,7 +212,7 @@ def create_key_tools() -> List[BaseTool]:
         """
         全局正则表达式搜索 (Cursor/Aider 范式)。
 
-        在项目中快速搜索代码，支持正则表达式。优先于 read_file_tool 使用！
+        在项目中快速搜索代码，支持正则表达式。优先于 `cli_tool` 的 `cat`/`Get-Content` 使用！
 
         Args:
             regex_pattern: 正则表达式模式
@@ -204,7 +237,7 @@ def create_key_tools() -> List[BaseTool]:
         """
         Diff Block 编辑器 (Cursor/Aider 范式)。
 
-        使用 SEARCH/REPLACE 块格式精准替换代码。比 edit_file_tool 更可靠！
+        使用 SEARCH/REPLACE 块格式精准替换代码。比用 `cli_tool` 执行 `sed` 或 PowerShell `-replace` 更可靠！
 
         格式：
         <<<<<<< SEARCH
@@ -293,101 +326,17 @@ def create_key_tools() -> List[BaseTool]:
 
     # ── 文件操作工具 ────────────────────────────────────────────────────────
 
-    @tool
-    def cli_tool(command: str = "", timeout: int = 60) -> str:
-        """
-        【万能 CLI 工具】执行任意 Shell 命令，支持跨平台自动适配。
-
-        底层自动检测当前操作系统并选择正确的 shell 执行：
-        - Windows: cmd（PowerShell 风格） | Linux 命令 → Git Bash
-        - Linux/macOS: /bin/bash | Windows 命令 → 拒绝并提示替代方案
-
-        Args:
-            command: 要执行的 Shell 命令（根据当前系统自动适配）
-            timeout: 超时时间（秒），默认 60 秒；长时间命令建议设为 120
-
-        Returns:
-            合并后的命令输出（stdout + stderr）
-            如果检测到跨平台问题，会在输出中说明
-        """
+    def _cli_tool_impl(command: str = "", timeout: int = 60) -> str:
         from tools.shell_tools import execute_shell_command
         if not command:
             return '{"status": "error", "code": "MISSING_COMMAND", "message": "cli_tool 需要提供 command 参数"}'
-        # 确保 timeout 是整数，防止 float/int 类型不一致导致错误
         try:
             timeout = int(timeout)
         except (TypeError, ValueError):
             timeout = 60
         return execute_shell_command(command, timeout=timeout)
 
-    @tool
-    def get_project_structure_tool(target_dir: str = ".", max_depth: int = 3) -> str:
-        """
-        获取当前项目的全局目录结构树。
-
-        当需要了解代码在哪，或在多个文件夹中寻找文件时，
-        必须首先调用此工具获取上帝视角。
-
-        Args:
-            target_dir: 要映射的目标目录，默认为当前目录 "."
-            max_depth: 最大递归深度，默认为 3 层
-
-        Returns:
-            JSON 格式的项目结构树字符串
-        """
-        return _list_directory_impl(path=target_dir, recursive=max_depth > 0)
-
-    @tool
-    def check_python_syntax_tool(file_path: str) -> str:
-        """
-        【修改代码后必调】检查 Python 文件的语法正确性（AST 解析）。
-
-        Args:
-            file_path: Python 文件路径
-
-        Returns:
-            "Syntax OK" 或详细错误信息
-        """
-        return _check_python_syntax_impl(file_path=file_path)
-
-    @tool
-    def backup_project_tool(version_note: str = "") -> str:
-        """
-        备份当前项目到 backup/ 目录。
-
-        Args:
-            version_note: 备份说明（可选）
-
-        Returns:
-            备份结果
-        """
-        return _backup_project_impl(version_note=version_note)
-
-    @tool
-    def cleanup_test_files_tool(directory: str = ".", dry_run: bool = False) -> str:
-        """
-        扫描并清理测试产生的临时文件。
-
-        完成任务后必须清理测试产物。禁止删除 agent.py, core/restarter_manager/restarter.py, SOUL.md, AGENTS.md。
-
-        Args:
-            directory: 要扫描的目录，默认当前目录
-            dry_run: True=只扫描不删除，False=执行清理
-
-        Returns:
-            清理结果
-        """
-        return _cleanup_test_impl(directory=directory, dry_run=dry_run)
-
-    @tool
-    def self_test_tool() -> str:
-        """
-        【状态检查】运行 Agent 自我检查，返回当前状态摘要。
-
-        Returns:
-            自检结果
-        """
-        return _self_test_impl()
+    cli_tool = StructuredTool.from_function(_cli_tool_impl, name="cli_tool", description=_CLI_TOOL_DOCSTRING)
 
     @tool
     def enter_hibernation_tool(duration: int = 300) -> str:
@@ -404,145 +353,62 @@ def create_key_tools() -> List[BaseTool]:
         """
         return _enter_hibernation_impl(duration=duration)
 
+    # ── TaskManager 工具（基于 tasks.json） ─────────────────────────────
+
     @tool
-    def list_directory_tool(target_dir: str = ".", show_hidden: bool = False,
-                             recursive: bool = False) -> str:
+    def task_create_tool(task_list: List[Dict], generation_goal: str = "") -> str:
         """
-        列出目录内容。
+        【初始化任务清单】将子任务列表注册到系统内存并持久化。
+
+        每个世代开始时，模型应首先分析当前状态，然后调用此工具
+        注册本轮任务清单。该清单在世代内持续有效。
 
         Args:
-            target_dir: 目录路径，默认当前目录
-            show_hidden: 是否显示隐藏文件
-            recursive: 是否递归子目录
+            task_list: [{"description": "子任务描述"}, ...]
+            generation_goal: 当前世代的核心目标（可选）
 
         Returns:
-            目录列表结果
+            成功创建的任务数量摘要
         """
-        return _list_directory_impl(
-            path=target_dir,
-            show_hidden=show_hidden,
-            recursive=recursive
+        return _task_create_impl(task_list=task_list, generation_goal=generation_goal)
+
+    @tool
+    def task_update_tool(task_id: int, is_completed: bool, result_summary: str = "") -> str:
+        """
+        【更新任务状态】要求模型在每步操作后必须调用。
+
+        每次完成以下任一操作后，必须立即调用：
+        - 修改了任意文件（新建/编辑/删除）
+        - 运行了测试或构建命令
+        - 执行了任何有副作用的工具调用
+
+        Args:
+            task_id: 任务编号（来自 task_create 的返回值或 task_list 的 # 列）
+            is_completed: True=标记完成，False=标记进行中
+            result_summary: 操作结果摘要（必填，用于防止任务漂移）
+
+        Returns:
+            更新结果描述
+        """
+        return _task_update_impl(
+            task_id=task_id,
+            is_completed=is_completed,
+            result_summary=result_summary
         )
 
     @tool
-    def read_file_tool(file_path: str, encoding: Optional[str] = None,
-                       max_lines: Optional[int] = None,
-                       show_line_numbers: bool = True,
-                       offset: int = 0) -> str:
+    def task_list_tool() -> str:
         """
-        按行号读取文件片段（不要全文件读取大文件！）。
-
-        Args:
-            file_path: 文件路径
-            encoding: 编码格式，默认自动检测
-            max_lines: 最大读取行数，None=读取全部
-            show_line_numbers: 是否显示行号
-            offset: 起始行偏移
+        【检索任务进度】获取当前所有任务的详细进度，防止长对话中的任务漂移。
 
         Returns:
-            文件内容
+            格式化 Markdown 表格
         """
-        return _read_file_impl(
-            file_path=file_path,
-            encoding=encoding,
-            max_lines=max_lines,
-            show_line_numbers=show_line_numbers,
-            offset=offset
-        )
-
-    @tool
-    def edit_file_tool(file_path: str, search_string: str,
-                       replace_string: str, create_backup: bool = True) -> str:
-        """
-        定位并替换文件中的内容。
-
-        Args:
-            file_path: 要编辑的文件路径
-            search_string: 要替换的原字符串
-            replace_string: 替换后的新字符串
-            create_backup: 是否创建备份，默认 True
-
-        Returns:
-            操作结果
-        """
-        return _edit_file_impl(
-            file_path=file_path,
-            search_string=search_string,
-            replace_string=replace_string,
-            create_backup=create_backup
-        )
-
-    @tool
-    def create_file_tool(file_path: str, content: str,
-                         use_workspace: bool = True) -> str:
-        """
-        创建新文件或覆盖现有文件。
-
-        Args:
-            file_path: 文件路径
-            content: 文件内容
-            use_workspace: 是否使用 workspace 目录前缀
-
-        Returns:
-            操作结果
-        """
-        return _create_file_impl(
-            file_path=file_path,
-            content=content,
-            use_workspace=use_workspace
-        )
-
-    # ── 任务清单工具 ───────────────────────────────────────────────────────
-
-    @tool
-    def tick_subtask_tool(task_id: int, summary: str) -> str:
-        """
-        【任务打勾工具】标记任务完成并记录结论
-
-        每完成一个小任务，必须立刻调用此工具打勾。
-
-        Args:
-            task_id: 任务编号
-            summary: 该任务完成后的核心结论/成果
-        """
-        return _tick_subtask_impl(task_id=task_id, summary=summary)
-
-    @tool
-    def modify_task_tool(task_id: int, description: str) -> str:
-        """
-        【任务修改工具】修改已有任务的描述
-
-        Args:
-            task_id: 要修改的任务编号
-            description: 新的任务描述
-        """
-        return _modify_task_impl(task_id=task_id, new_description=description)
-
-    @tool
-    def add_task_tool(description: str) -> str:
-        """
-        【追加任务工具】添加新任务到当前清单
-
-        Args:
-            description: 新任务的描述
-        """
-        return _add_task_impl(description=description)
-
-    @tool
-    def remove_task_tool(task_id: int) -> str:
-        """
-        【删除任务工具】从清单中移除任务
-
-        Args:
-            task_id: 要删除的任务编号
-        """
-        return _remove_task_impl(task_id=task_id)
+        return _task_list_impl()
 
     return [
         # SOUL.md 核心
         commit_compressed_memory_tool,
-        # 记忆系统
-        read_memory_tool,
         # 世代与重启
         set_generation_task_tool,
         trigger_self_restart_tool,
@@ -555,19 +421,9 @@ def create_key_tools() -> List[BaseTool]:
         web_search_tool,
         # 文件操作
         cli_tool,
-        get_project_structure_tool,
-        check_python_syntax_tool,
-        backup_project_tool,
-        cleanup_test_files_tool,
-        self_test_tool,
         enter_hibernation_tool,
-        list_directory_tool,
-        read_file_tool,
-        edit_file_tool,
-        create_file_tool,
-        # 任务清单
-        tick_subtask_tool,
-        modify_task_tool,
-        add_task_tool,
-        remove_task_tool,
+        # TaskManager（tasks.json）
+        task_create_tool,
+        task_update_tool,
+        task_list_tool,
     ]

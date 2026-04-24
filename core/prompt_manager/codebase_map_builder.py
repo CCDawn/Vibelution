@@ -17,6 +17,7 @@ core/capabilities/codebase_map_builder.py - AST 扫描 + 代码库地图生成
 from __future__ import annotations
 
 import os
+import re
 import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -226,10 +227,24 @@ def scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool
     content = "\n".join(lines).strip()
     map_path = _get_codebase_map_path()
 
-    # 写入文件
+    # 写入文件（保留已有的 YAML front matter）
+    front_matter = ""
+    if map_path.exists():
+        try:
+            existing = map_path.read_text(encoding="utf-8")
+            match = re.match(r'^---\s*\n.*?\n---(\n)?', existing, re.DOTALL)
+            if match:
+                front_matter = match.group(0)
+        except Exception:
+            pass
+
+    final_content = (front_matter + content).strip()
+    if front_matter:
+        final_content += "\n"
+
     try:
-        map_path.write_text(content, encoding="utf-8")
-        debug_logger.info(f"[CodebaseMapBuilder] 地图已写入: {map_path}")
+        map_path.write_text(final_content, encoding="utf-8")
+        debug_logger.info(f"[CodebaseMapBuilder] 地图已写入（保留 front matter）: {map_path}")
     except Exception as e:
         debug_logger.warning(f"[CodebaseMapBuilder] 写入失败: {e}")
 

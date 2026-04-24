@@ -39,6 +39,13 @@ from core.logging.unified_logger import logger
 # )
 AUTONOMOUS_USER_PROMPT = (
     "【自主进化】你是完全自主的进化体，请根据 SOUL.md 的使命指示，"
+    "**要求**：每次仅生成一个主要任务。\n\n"
+    "1. 首先调用 set_generation_task(task=\"...\") 设定你的任务\n"
+    "2. 调用 task_create_tool 创建任务清单\n"
+    "3. 每完成一个任务调用 task_update_tool(task_id=ID, is_completed=True, result_summary=\"...\")\n"
+    "4. 所有任务完成后调用 commit_compressed_memory(core_context=\"...\", next_goal=\"...\")\n"
+    "5. 最后调用 trigger_self_restart_tool(reason=\"...\") 结束本轮\n"
+    "当前世代请专注于：分析自身代码，找到一个可以改进的地方并执行它。"
 )
 
 class AgentLifecycle:
@@ -159,7 +166,6 @@ class AgentLifecycle:
                 # 执行思考-行动循环
                 result = self.agent.think_and_act(
                     user_prompt=user_input,
-                    system_prompt=system_prompt
                 )
                 user_input = None  # 首次之后为None
 

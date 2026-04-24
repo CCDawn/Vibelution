@@ -215,15 +215,22 @@ def spawn_new_process(
         import subprocess
 
         if IS_WINDOWS:
-            creation_flags = 0x08000000  # CREATE_NO_WINDOW
-            process = subprocess.Popen(
-                [sys.executable, script_abs],
-                env=process_env,
-                creationflags=creation_flags,
-                stdout=open(log_file, 'a', encoding='utf-8'),
-                stderr=subprocess.STDOUT
-            )
+            # DETACHED_PROCESS 分离控制台关联
+            # CREATE_NEW_PROCESS_GROUP 使进程完全脱离父进程组
+            creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            with open(log_file, 'a', encoding='utf-8') as f:
+                process = subprocess.Popen(
+                    [sys.executable, script_abs],
+                    env=process_env,
+                    creationflags=creation_flags,
+                    stdout=f,
+                    stderr=subprocess.STDOUT
+                )
+            new_pid = process.pid
+            logger.info(f"新进程已启动，PID: {new_pid}") if logger else print(f"新进程已启动，PID: {new_pid}")
+            return new_pid
         else:
+            # Unix: double-fork 守护进程化，完全脱离父进程
             pid = os.fork()
             if pid == 0:
                 try:
@@ -242,32 +249,6 @@ def spawn_new_process(
             else:
                 os.waitpid(pid, 0)
                 return None
-
-        if IS_WINDOWS:
-            new_pid = process.pid
-            msg = f"新进程已启动，PID: {new_pid}"
-            if logger:
-                logger.info(msg)
-            else:
-                print(msg)
-            return new_pid
-
-        process = subprocess.Popen(
-            [sys.executable, script_abs],
-            env=process_env,
-            stdout=open(log_file, 'a', encoding='utf-8'),
-            stderr=subprocess.STDOUT,
-            start_new_session=True
-        )
-        new_pid = process.pid
-
-        msg = f"新进程已启动，PID: {new_pid}"
-        if logger:
-            logger.info(msg)
-        else:
-            print(msg)
-
-        return new_pid
 
     except Exception as e:
         msg = f"启动新进程失败: {e}"

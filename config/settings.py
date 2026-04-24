@@ -50,6 +50,7 @@ from .models import (
     HealthConfig,
     SkinConfig,
     SoundConfig,
+    PromptConfig,
 )
 from .providers import (
     MODEL_PRESETS,
