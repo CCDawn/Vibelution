@@ -274,7 +274,8 @@ class StateManager:
 
     def set_generation(self, generation: int) -> None:
         """设置当前世代"""
-        self._generation = generation
+        with self._state_lock:
+            self._generation = generation
 
     def get_generation(self) -> int:
         """获取当前世代"""
@@ -282,7 +283,8 @@ class StateManager:
 
     def set_current_goal(self, goal: str) -> None:
         """设置当前目标"""
-        self._current_goal = goal
+        with self._state_lock:
+            self._current_goal = goal
 
     def get_current_goal(self) -> Optional[str]:
         """获取当前目标"""
@@ -294,16 +296,19 @@ class StateManager:
 
     def increment_iteration(self) -> None:
         """增加迭代计数"""
-        self._iteration_count += 1
+        with self._state_lock:
+            self._iteration_count += 1
 
     def increment_tools_executed(self) -> None:
         """增加工具执行计数"""
-        self._tools_executed += 1
+        with self._state_lock:
+            self._tools_executed += 1
 
     def reset_counters(self) -> None:
         """重置计数器"""
-        self._iteration_count = 0
-        self._tools_executed = 0
+        with self._state_lock:
+            self._iteration_count = 0
+            self._tools_executed = 0
 
     # =========================================================================
     # 状态持久化
