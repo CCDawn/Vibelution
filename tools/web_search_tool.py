@@ -13,6 +13,7 @@ API 协议（参考 C:\\Users\\17533\\.agents\\skills\\autoglm-websearch\\SKILL.
 
 from __future__ import annotations
 
+import os
 import json
 import time
 import hashlib
@@ -22,11 +23,11 @@ import httpx
 
 
 # ============================================================================
-# API 常量
+# API 常量 — 从环境变量读取，避免硬编码凭据
 # ============================================================================
 
-_APP_ID = "100003"
-_APP_KEY = "38d2391985e2369a5fb8227d8e6cd5e5"
+_APP_ID = os.environ.get("AUTOGLM_APP_ID", "")
+_APP_KEY = os.environ.get("AUTOGLM_APP_KEY", "")
 _API_URL = "https://autoglm-api.zhipuai.cn/agentdr/v1/assistant/skills/web-search"
 _TOKEN_URL = "http://127.0.0.1:53699/get_token"
 _REQUEST_TIMEOUT = 30.0  # 秒

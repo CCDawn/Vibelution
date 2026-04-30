@@ -63,22 +63,8 @@ from tools.rebirth_tools import trigger_self_restart_tool, handle_restart_reques
 from core.ui.cli_ui import get_ui, ui_error
 from core.ui.token_display import print_tokens
 
-# 导入编排模块（Core First）
-from core.orchestration.agent_lifecycle import AgentLifecycle, AUTONOMOUS_USER_PROMPT
-from core.orchestration.context_compressor import ContextCompressor
-from core.orchestration.llm_factory import create_llm, test_llm_connection
 from core.prompt_manager import get_prompt_manager
-from core.orchestration.response_parser import parse_llm_response
 
-
-# 导入决策模块
-from core.decision.decision_tree import DecisionContext, get_decision_tree, create_default_decision_tree
-from core.decision.priority_optimizer import Task, get_priority_optimizer
-from core.decision.strategy_selector import get_strategy_selector, create_default_selector
-from core.decision.task_classifier import classify_task_type
-# 导入编排系统
-from core.orchestration.plan_orchestrator import get_plan_orchestrator
-from core.orchestration.task_planner import get_task_manager
 # 导入宠物系统
 from core.pet_system import get_pet_system
 
@@ -131,11 +117,7 @@ def _classify_llm_error(e: Exception) -> tuple[str, bool, str]:
     return ("unknown_error", False, f"未知错误：{exc_type}: {exc_msg[:60]}")
 
 
-# 进化测试提示词
-# EVOLUTION_TEST_PROMPT = """你的第一次进化测试任务开始：不需要管历史任务，只需要完成测试流程，不需要保存记忆。
-# 1. 请使用 `read_local_file` 读取你当前的 `agent.py` 代码。
-# 2. 修改完成后，使用 `check_syntax` 检查 `agent.py` 的语法。
-# 3. 确认语法无误后，调用 `trigger_self_restart_tool` 重启你自己。"""
+
 
 EVOLUTION_TEST_PROMPT = """你的第一次进化测试任务开始：制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"""
 
@@ -210,21 +192,6 @@ class SelfEvolvingAgent:
         self.tool_executor = get_tool_executor()
         self.security_validator = get_security_validator(project_root)
 
-        # 任务管理器
-        self.task_manager = get_task_manager(project_root)
-
-        # （决策树、优先级优化、策略选择）
-        self.decision_tree = get_decision_tree(project_root)
-        self.priority_optimizer = get_priority_optimizer(project_root)
-        self.strategy_selector = get_strategy_selector(project_root)
-        if not self.decision_tree._nodes:
-            self.decision_tree.load_from_config(create_default_decision_tree().to_config())
-        if not self.strategy_selector._strategies:
-            default_selector = create_default_selector()
-            for s in default_selector._strategies.values():
-                self.strategy_selector.add_strategy(s)
-
-
         # Skill 系统（相关模块已从 ecosystem 移除）
         self.skill_registry = None
         self.skill_tools = []
@@ -241,42 +208,6 @@ class SelfEvolvingAgent:
         )
         self.config.context_compression.max_token_limit = self._effective_max_token_limit
         return self._effective_max_token_limit
-
-    def _init_llm(self):
-        """初始化 LLM（使用工厂）"""
-        # 本地 Provider 自动切换已在前面完成
-        # 使用工厂创建 LLM
-        self.llm, self.compression_llm = create_llm(self.config)
-        self.model_name = self.config.llm.model_name
-        self.llm_with_tools = self.llm.bind_tools(self.key_tools)
-
-        # 测试 LLM 连接
-        if not test_llm_connection(self.llm, self.model_name):
-            raise RuntimeError("LLM 连接失败，请检查 API 配置")
-
-    def _init_token_compressor(self):
-        """初始化 Token 压缩器和上下文压缩管理"""
-        import os
-        summary_prompt_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "workspace", "prompts", "COMPRESS_SUMMARY.md"
-        )
-        # compression_llm 已在 _init_llm 中通过 create_llm 创建
-        self.token_compressor = EnhancedTokenCompressor(
-            token_budget=self._effective_max_token_limit,
-            max_history_pairs=self.config.context_compression.keep_recent_steps,
-            compression_llm=self.compression_llm,
-            enable_preemptive=True,
-            summary_prompt_path=summary_prompt_path,
-        )
-
-        # 使用 ContextCompressor 管理上下文压缩
-        self.context_compressor = ContextCompressor(
-            token_compressor=self.token_compressor,
-            config=self.config,
-            model_info=getattr(self, 'model_info', None),
-            effective_max_token_limit=self._effective_max_token_limit,
-        )
 
     def think_and_act(self, user_prompt: str = None) -> bool:
         """
@@ -298,9 +229,6 @@ class SelfEvolvingAgent:
         """
         ui = get_ui()
         system_prompt, _ = self.prompt_manager.build()
-        task_progress = self.task_manager.get_active_tasks() if self.task_manager else ""
-        if task_progress:
-            system_prompt += task_progress
         messages = [SystemMessage(content=system_prompt)]
 
         # 获取轮次编号
@@ -308,8 +236,9 @@ class SelfEvolvingAgent:
             current_turn = logger._turn_count
         else:
             current_turn = logger._turn_count + 1
-            # 无外部输入时使用自主进化提示
-            user_prompt = AUTONOMOUS_USER_PROMPT
+            # 无外部输入时使用默认提示
+            if user_prompt is None:
+                user_prompt = "请执行当前世代的开发任务。"
 
         # 首次对话写入 System Prompt
         if not self._system_prompt_written:
@@ -320,59 +249,16 @@ class SelfEvolvingAgent:
         logger.start_turn(current_turn)
         logger.log_user_input(user_prompt)
 
-        logger.log_llm_request(messages, model=self.model_name)
+        logger.log_llm_request(messages, model=getattr(self.config.llm, 'model_name', 'unknown'))
         max_iterations = self.config.agent.max_iterations
 
         try:
-            # 在开始循环前进行决策
-            from core.decision.decision_tree import DecisionContext
-            decision_context = DecisionContext(
-                state={
-                    "user_prompt": user_prompt,
-                    "generation": get_generation_tool(),
-                    "has_task": bool(get_current_goal()),
-                    "iteration": 1,
-                    "exploration_mode": getattr(self.config.agent, 'exploration_mode', False),
-                },
-                history=self.global_recent_actions[-10:] if hasattr(self, 'global_recent_actions') else [],
-            )
-            decision_result = None
-            if hasattr(self, 'decision_tree'):
-                decision_result = self.decision_tree.make_decision(decision_context)
-                if decision_result and decision_result.selected_action != "no_decision":
-                    _debug_logger.debug(
-                        f"[决策] {decision_result.selected_action}: {decision_result.reasoning}", tag="DECISION"
-                    )
-
             consecutive_failures = 0
             for iteration in range(1, max_iterations + 1):
-                # 状态机驱动：每轮迭代前重建 SystemMessage
-                # 包含 base_prompt + state_memory + 当前激活的 registry 规则
                 current_prompt, _ = self.prompt_manager.build()
-                task_progress = self.task_manager.get_active_tasks() if self.task_manager else ""
-                if task_progress:
-                    current_prompt += task_progress
                 messages[0] = SystemMessage(content=current_prompt)
 
-                # 自动 Token 检查与压缩
-                messages = self.context_compressor.check_and_compress(messages, iteration)
-
-                # 第一次循环打印会话开始
                 if iteration == 1:
-                    _debug_logger.session_start(self.model_name, get_generation_tool())
-                    _debug_logger.session_start_log(self.model_name, get_generation_tool())
-
-                # 动态调整迭代策略
-                if decision_result and hasattr(self, 'strategy_selector'):
-                    action = decision_result.selected_action
-                    if "探索" in action or "explore" in action.lower():
-                        if hasattr(self.strategy_selector, '_config'):
-                            self.strategy_selector._config["exploration_rate"] = 0.4
-                    elif "利用" in action or "exploit" in action.lower():
-                        if hasattr(self.strategy_selector, '_config'):
-                            self.strategy_selector._config["exploration_rate"] = 0.1
-
-                # 调用 LLM
                 response = self._invoke_llm(messages)
                 if response is None:
                     consecutive_failures += 1
@@ -413,57 +299,10 @@ class SelfEvolvingAgent:
                     except Exception:
                         pass
 
-                # 解析工具调用、状态和规则切换
-                parser_result = parse_llm_response(response)
+                messages.append(AIMessage(content=raw_content))
 
-                messages.append(AIMessage(content=parser_result.clean_content))
-
-                # # 回写 state_memory（落盘 + 更新 PM 内存缓存）
-                # if parser_result.state_memory:
-                #     self.prompt_manager.update_state_memory(parser_result.state_memory)
-
-                # # 更新激活规则集（兜底：空则保持不变）
-                # if parser_result.active_rules:
-                #     self.prompt_manager.update_active_rules(parser_result.active_rules)
-
-                # 动态切换提示词组件拼装（<active_components> 标签驱动）
-                if parser_result.active_components:
-                    self.prompt_manager.select_components(parser_result.active_components)
-
-                # 使用优先级优化器排序工具
-                if hasattr(self, 'priority_optimizer'):
-                    tool_calls = self._optimize_tool_order(parser_result.tool_calls)
-                else:
-                    tool_calls = parser_result.tool_calls
-
-                # 执行工具（并行或单工具）
+                tool_calls = []
                 self._execute_tools_parallel(tool_calls, messages)
-
-                # ── 提示性反馈：检测到文件修改后建议审视任务进度 ─────────────────
-                # 仅提示，不强制；model 可自行判断修改是否与某个任务相关
-                if self.task_manager:
-                    modification_tools = {
-                        "cli_tool",
-                        "apply_diff_edit_tool",
-                    }
-                    modified = any(tc.get("name") in modification_tools for tc in tool_calls)
-                    if modified:
-                        stats = self.task_manager.get_completion_stats()
-                        if stats["pending"] > 0:
-                            pending = [t for t in self.task_manager.task_list()
-                                       if not t.get("is_completed")]
-                            if pending:
-                                task_list_hint = "\n".join(
-                                    f"  - #{t['id']} {t.get('description', '(无描述)')}"
-                                    for t in pending
-                                )
-                                hint_msg = (
-                                    f"\n\n[系统提示] 你刚刚对文件进行了修改。"
-                                    f"请回顾当前任务清单，如有任务因本次修改而完成，"
-                                    f"请调用 task_update_tool 更新进度（不需要全部更新，只更新相关的）。\n"
-                                    f"当前待完成的任务：\n{task_list_hint}"
-                                )
-                                messages.append(HumanMessage(content=hint_msg))
 
             _debug_logger.turn_end(current_turn, tool_count=len(tool_calls) if tool_calls else 0)
             return True
@@ -491,7 +330,7 @@ class SelfEvolvingAgent:
             attempt = 0
             while attempt < MAX_CONSECUTIVE_FAILURES:
                 try:
-                    return self.llm_with_tools.invoke(clean_messages[:-1])
+                    return self.llm_with_tools.invoke(clean_messages)
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
@@ -541,25 +380,6 @@ class SelfEvolvingAgent:
 
         _debug_logger.tool_start(tool_name, tool_args)
 
-        # 策略选择
-        if hasattr(self, 'strategy_selector'):
-            context = {
-                "tool_name": tool_name,
-                "task_type": classify_task_type(tool_name),
-                "exploration_mode": getattr(self.config.agent, 'exploration_mode', False),
-                "generation": get_generation_tool(),
-            }
-            strategy_selection = self.strategy_selector.select(context)
-            if strategy_selection and strategy_selection.selected_strategy:
-                _debug_logger.debug(f"[策略] 选择策略: {strategy_selection.selected_strategy.name}", tag="STRATEGY")
-
-        # 特殊工具处理
-        if tool_name == "compress_context":
-            old_tokens = estimate_messages_tokens(messages)
-            messages[:] = self.context_compressor._compress_context(messages)
-            new_tokens = estimate_messages_tokens(messages)
-            return (f"上下文压缩完成: 节省{old_tokens - new_tokens} Token", None), None
-
         if tool_name == "trigger_self_restart_tool":
             return handle_restart_request(
                 tool_args=tool_args,
@@ -575,14 +395,7 @@ class SelfEvolvingAgent:
             time.sleep(hibernate_duration)
             return (f"休眠 {hibernate_duration} 秒完成", "hibernated")
 
-        # Skill 工具
-        if tool_name.startswith("skill_"):
-            skill_name = tool_name[6:]
-            if hasattr(self, 'skill_registry') and self.skill_registry:
-                return (self.skill_registry.execute_skill(skill_name, tool_args), None)
-            return (f"[错误] Skill 系统未初始化", None)
 
-        # Skill 管理工具通过 tool_executor 执行
         result, _ = self.tool_executor.execute(tool_name, tool_args)
 
         if result is not None:
@@ -598,31 +411,6 @@ class SelfEvolvingAgent:
                 _debug_logger.success("agent.py 已修改，将触发重启", tag="MODIFY")
 
         return (result, None)
-
-    def _optimize_tool_order(self, tool_calls: List[Dict]) -> List[Dict]:
-        """使用优先级优化器调整工具执行顺序"""
-        if not tool_calls or not hasattr(self, 'priority_optimizer'):
-            return tool_calls
-
-        # 添加任务到优化器
-        task_map = {}
-        for i, tc in enumerate(tool_calls):
-            tool_name = tc.get('name', 'unknown')
-            task_id = f"tool_{i}_{tool_name}"
-            task = Task(
-                task_id=task_id,
-                name=f"{tool_name}",
-                description=f"工具调用: {tool_name}",
-                priority=0.5,
-                estimated_time=0.1,
-                metadata={"type": classify_task_type(tool_name)},
-            )
-            self.priority_optimizer.add_task(task)
-            task_map[task_id] = tc
-
-        # 优化顺序
-        result = self.priority_optimizer.optimize(context={"tool_count": len(tool_calls)})
-        return [task_map[tid] for tid in result.task_order if tid in task_map]
 
     def _handle_tool_result(self, tool_call: Dict, result, action, messages: list):
         """处理工具执行结果"""
@@ -645,47 +433,35 @@ class SelfEvolvingAgent:
             )
 
     def _execute_tools_parallel(self, tool_calls: List[Dict], messages: list):
-        """并行执行多个工具调用"""
+        """串行执行工具（依次通过 _execute_tool 以便统一处理特殊工具）"""
         if not tool_calls:
             return
-        # 使用 tool_executor 的并行执行
-        results = self.tool_executor.execute_parallel(tool_calls)
-        # 逐条追加到 messages
-        for tc, result, action in results:
+        for tc in tool_calls:
+            result, action = self._execute_tool(tc, messages)
             self._handle_tool_result(tc, result, action, messages)
 
     def run_loop(self, initial_prompt: str = None) -> None:
-        """运行 Agent 主循环"""
-        lifecycle = AgentLifecycle(self, self.config)
-
-        _debug_logger.system(f"主循环开始 (awake_interval={self.config.agent.awake_interval}s)", tag=self.name)
-
-        lifecycle.transition_state(AgentState.AWAKENING, action="系统初始化中...")
+        """运行 Agent 主循环（简化版，Phase 7 待重建）"""
+        _debug_logger.system("主循环开始", tag=self.name)
 
         generation = get_generation_tool()
-        logger.log_action("会话开始", f"世代: G{generation}, 模型: {self.model_name}")
+        model_name = getattr(self.config.llm, 'model_name', 'unknown')
+        logger.log_action("会话开始", f"世代: G{generation}, 模型: {model_name}")
 
         try:
             _debug_logger.kv("记忆状态", f"G{get_generation_tool()} | {get_current_goal()[:50]}")
             print_evolution_time()
 
-            user_input = lifecycle.get_next_prompt(initial_prompt)
+            user_input = initial_prompt
 
             while True:
-                lifecycle.transition_state(AgentState.THINKING, action="思考并执行任务...")
-
-                # 自动备份检查
-                lifecycle.check_auto_backup()
-
-                # 执行思考-行动
                 result = self.think_and_act(user_prompt=user_input)
                 user_input = None
 
-                if not lifecycle.should_continue(result):
+                if not result:
                     break
 
-                _debug_logger.system("执行完成，模型自主决策下一轮进化...", tag="EVOLVE")
-                user_input = lifecycle.get_autonomous_prompt()
+                _debug_logger.system("执行完成，准备下一轮...", tag="AGENT")
                 time.sleep(2)
 
         except KeyboardInterrupt:

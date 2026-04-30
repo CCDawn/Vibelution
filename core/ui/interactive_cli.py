@@ -453,38 +453,6 @@ class XuebaInteractiveCLI:
         self.console.print()
         self.console.print(mode_panel)
 
-        # 如果开启自主模式，启动自主循环
-        if self.xueba_status['autonomous_mode']:
-            self._start_real_autonomous_loop()
-
-    def _start_real_autonomous_loop(self):
-        """启动真实的自主学习循环"""
-        self.console.print()
-        self.console.print("[bold cyan]🔄 正在启动虾宝自主学习 Agent...[/bold cyan]\n")
-
-        try:
-            from core.autonomous.autonomous_mode import XuebaAutonomousAgent
-
-            # 创建自主 Agent
-            agent = XuebaAutonomousAgent(config=self.config)
-
-            # 初始化
-            if agent.initialize_agent():
-                self.console.print("[green]✅ Agent 初始化成功[/green]\n")
-            else:
-                self.console.print("[yellow]⚠️ 使用简化模式[/yellow]\n")
-
-            # 运行自主学习会话（最多 2 个任务）
-            agent.run_autonomous_session(max_tasks=2)
-
-            # 更新状态
-            self.xueba_status['state'] = "SUCCESS"
-            self.xueba_status['last_action'] = "完成自主学习会话"
-
-        except Exception as e:
-            self.console.print(f"[bold red]❌ 启动失败：{e}[/bold red]")
-            self.xueba_status['autonomous_mode'] = False
-
     def send_task(self, task: str):
         """发送任务给虾宝"""
         self.console.print()
