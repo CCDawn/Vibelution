@@ -140,9 +140,9 @@ class XuebaInteractiveCLI:
 
         panel = Panel(
             content,
-            title="[bold bright_red]🦞 Baby Claw[/bold bright_red]",
+            title="[bold cyan]Vibelution[/bold cyan]",
             border_style="bright_cyan",
-            box=ASCII2,
+            box=ROUNDED,
             width=80,
         )
         self.console.print(panel)
@@ -165,7 +165,7 @@ class XuebaInteractiveCLI:
         welcome = Panel(
             f"""{art}
 
-[bold bright_red]🦞 欢迎回来，龙虾爸爸！🦞[/bold bright_red]
+[bold cyan]Vibelution Interactive Mode[/bold cyan]
 
 [green]我是你的小虾宝，已经准备好为你服务啦~[/green]
 
@@ -187,9 +187,9 @@ class XuebaInteractiveCLI:
 
 [dim]💡 提示：按 Ctrl+C 可以随时中断当前任务[/dim]
 """,
-            title="[bold bright_red]🦞 Baby Claw[/bold bright_red]",
+            title="[bold cyan]Vibelution[/bold cyan]",
             border_style="bright_cyan",
-            box=ASCII2,
+            box=ROUNDED,
         )
         self.console.print(welcome)
 
@@ -242,7 +242,7 @@ class XuebaInteractiveCLI:
             """,
             title=f"[bold bright_red]🦞 {status_emoji} Baby Claw[/bold bright_red]",
             border_style="cyan",
-            box=ASCII2,
+            box=ROUNDED,
         )
         self.console.print()
         self.console.print(status_panel)
@@ -257,7 +257,7 @@ class XuebaInteractiveCLI:
             f"{art}\n\n{status_text}",
             title="[bold magenta]🦞 龙虾宝宝状态[/bold magenta]",
             border_style="bright_magenta",
-            box=ASCII2,
+            box=ROUNDED,
         )
         self.console.print()
         self.console.print(panel)
@@ -292,7 +292,7 @@ class XuebaInteractiveCLI:
 """,
                 title="[bold bright_green]🦞 切换形象[/bold bright_green]",
                 border_style="bright_green",
-                box=ASCII2,
+                box=ROUNDED,
             ))
 
             # 显示所有可选形象
@@ -329,7 +329,7 @@ class XuebaInteractiveCLI:
             """,
                 title=f"[bold bright_green]🦞 {info['icon']} {info['name']}[/bold bright_green]",
                 border_style="bright_green",
-                box=ASCII2,
+                box=ROUNDED,
             ))
 
     def print_help(self):
@@ -340,7 +340,7 @@ class XuebaInteractiveCLI:
         help_table = Table(
             title="[bold bright_red]🦞 可用命令列表[/bold bright_red]",
             border_style="bright_cyan",
-            box=ASCII2,
+            box=ROUNDED,
         )
 
         help_table.add_column("命令", style="bright_cyan", width=15)
@@ -382,7 +382,7 @@ class XuebaInteractiveCLI:
             """,
             title="[bold bright_red]💕 爱的鼓励[/bold bright_red]",
             border_style="bright_red",
-            box=ASCII2,
+            box=ROUNDED,
         )
         self.console.print()
         self.console.print(love_panel)
@@ -431,7 +431,7 @@ class XuebaInteractiveCLI:
             """,
                 title=f"[bold bright_green]🦞 {status_emoji} 模式切换[/bold bright_green]",
                 border_style="bright_green",
-                box=ASCII2,
+                box=ROUNDED,
             )
         else:
             status_emoji = "⏳"
@@ -447,7 +447,7 @@ class XuebaInteractiveCLI:
             """,
                 title=f"[bold dim]🦞 {status_emoji} 模式切换[/bold dim]",
                 border_style="dim",
-                box=ASCII2,
+                box=ROUNDED,
             )
 
         self.console.print()
@@ -482,7 +482,7 @@ class XuebaInteractiveCLI:
             """,
             title="[bold bright_green]📨 任务提交成功[/bold bright_green]",
             border_style="bright_green",
-            box=ASCII2,
+            box=ROUNDED,
         ))
 
     def run_interactive_loop(self):
@@ -492,7 +492,7 @@ class XuebaInteractiveCLI:
         while self.running:
             try:
                 user_input = Prompt.ask(
-                    "[bold bright_red]🦞 龙虾爸爸[/bold bright_red] > ",
+                    "Agent > ",
                     default=""
                 ).strip()
 
@@ -573,11 +573,11 @@ class XuebaInteractiveCLI:
 [bold bright_cyan]🦞 感谢使用虾宝互动命令行！[/bold bright_cyan]
 
 [dim]虾宝会继续在后台运行，随时准备为你服务。[/dim]
-[bold bright_red]🦞 龙虾爸爸，记得常回来看看哦！🦞[/bold bright_red]
+[dim]Session ended.[/dim]
                 """,
                 title="[bold]👋 再见啦[/bold]",
                 border_style="bright_cyan",
-                box=ASCII2,
+                box=ROUNDED,
             ))
 
         except Exception as e:

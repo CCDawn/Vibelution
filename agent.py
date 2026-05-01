@@ -319,8 +319,9 @@ class SelfEvolvingAgent:
 
                 # 输出思考内容到 UI
                 if raw_content.strip():
-                    ui.add_content("[bold yellow]🤔 思考过程:[/bold yellow]")
-                    ui.add_content(raw_content[:500] + ("..." if len(raw_content) > 500 else ""))
+                    ui.add_content("[dim]... thinking ...[/dim]")
+                    preview = raw_content[:200] + ("..." if len(raw_content) > 200 else "")
+                    ui.add_content(f"[dim]{preview}[/dim]")
 
                 messages.append(AIMessage(content=raw_content))
 
@@ -469,6 +470,21 @@ class SelfEvolvingAgent:
                     break
 
                 _debug_logger.system("执行完成，准备下一轮...", tag="AGENT")
+
+                # 检查 Cron 到期任务
+                try:
+                    from core.infrastructure.cron_scheduler import get_cron_scheduler
+                    from core.infrastructure.background_tasks import get_background_task_manager
+                    sched = get_cron_scheduler()
+                    due_jobs = sched.get_due_jobs()
+                    if due_jobs:
+                        mgr = get_background_task_manager()
+                        for job in due_jobs:
+                            mgr.start_task(command=job["command"], timeout=300)
+                            _debug_logger.info(f"Cron 触发: {job['name']} ({job['id']})", tag="CRON")
+                except Exception:
+                    pass
+
                 time.sleep(2)
 
         except KeyboardInterrupt:
@@ -533,26 +549,13 @@ def main(initial_prompt: str = None):
 
     setup_logging(level=config.log.level)
 
-    # 打印 ASCII Art 宠物形象到内容区
-    from core.ui.ascii_art import get_avatar_manager
-    avatar = get_avatar_manager()
-    pet_art = avatar.get_art('happy')
-
-    # 通过 add_content 输出初始信息到内容区
-    ui.add_content("[bold cyan]+==============================================================+[/bold cyan]")
-    ui.add_content("[bold cyan]|[bold white] Self-Evolving Agent[/bold white] - Terminal Edition             |[/bold cyan]")
-    ui.add_content("[bold cyan]+==============================================================+[/bold cyan]")
-    ui.add_content(f"[bright_cyan]{pet_art}[/bright_cyan]")
-    ui.add_content("")
-    ui.add_content(f"[bold]启动 {config.agent.name}[/bold]")
-    ui.add_content(f"  [cyan]Model:[/cyan]   {config.llm.model_name}")
-    ui.add_content(f"  [cyan]Awake:[/cyan]   {config.agent.awake_interval}s")
-    ui.add_content(f"  [cyan]Backup:[/cyan]   {config.agent.auto_backup}")
+    # 启动信息
+    ui.print_header(config.llm.model_name)
 
     try:
         agent = SelfEvolvingAgent(config=config)
-        ui.add_content(f"  [green]Key Tools:[/green]   {len(agent.key_tools)} loaded")
-        ui.add_content("[dim]─" * 60 + "[/dim]")
+        ui.add_content(f"[dim]Tools:[/dim] {len(agent.key_tools)} loaded  [dim]Awake:[/dim] {config.agent.awake_interval}s")
+        ui.add_content("")
 
         if args.auto or initial_prompt:
             agent.run_loop(initial_prompt=initial_prompt)

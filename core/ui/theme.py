@@ -1,187 +1,161 @@
 # -*- coding: utf-8 -*-
 """
-龙虾宝宝主题配置
+Vibelution 终端主题配置
 
-提供统一的颜色、图标、样式配置。
+精简颜色方案：5 种语义色，最小化 emoji 依赖。
+保持向后兼容：所有 classmethod 签名不变。
 """
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict
 from dataclasses import dataclass
 
 
 class LobsterTheme:
-    """
-    龙虾宝宝终端主题配置
+    """终端主题配置"""
 
-    统一管理所有终端显示的样式、颜色和图标。
-    """
-
-    # 主色调
-    LOBSTER_RED = "bright_red"
-    LOBSTER_ORANGE = "bright_yellow"
-    LOBSTER_PINK = "bright_magenta"
-    LOBSTER_CYAN = "bright_cyan"
-    LOBSTER_GREEN = "bright_green"
-    LOBSTER_BLUE = "bright_blue"
-
-    # 基础色
-    WHITE = "white"
+    # 语义色（5 种）
+    SUCCESS = "green"
+    ERROR = "red"
+    WARN = "yellow"
+    INFO = "cyan"
     DIM = "dim"
+
+    # 兼容旧代码的颜色别名
+    LOBSTER_RED = "red"
+    LOBSTER_ORANGE = "yellow"
+    LOBSTER_PINK = "magenta"
+    LOBSTER_CYAN = "cyan"
+    LOBSTER_GREEN = "green"
+    LOBSTER_BLUE = "blue"
+    WHITE = "white"
+    DIM_CONST = "dim"
     BOLD = "bold"
 
-    # 状态颜色映射
+    # 状态颜色
     STATUS_COLORS: Dict[str, str] = {
-        "IDLE": "cyan",
-        "THINKING": "bright_magenta",
-        "SEARCHING": "bright_blue",
-        "CODING": "bright_green",
-        "TESTING": "bright_yellow",
-        "COMPRESSING": "bright_magenta",
-        "RESTARTING": "bright_red",
-        "HIBERNATING": "bright_black",
-        "SUCCESS": "bright_green",
-        "ERROR": "bright_red",
-        "WARNING": "bright_yellow",
+        "IDLE": "dim",
+        "THINKING": "magenta",
+        "ACTING": "cyan",
+        "SUCCESS": "green",
+        "ERROR": "red",
+        "WARNING": "yellow",
     }
 
     # 日志级别颜色
     LOG_COLORS: Dict[str, str] = {
-        "INFO": "bright_cyan",
-        "WARN": "bright_yellow",
-        "WARNING": "bright_yellow",
-        "ERROR": "bright_red",
-        "CRITICAL": "bright_red",
-        "SUCCESS": "bright_green",
-        "TOOL": "bright_magenta",
-        "LLM": "bright_magenta",
+        "INFO": "cyan",
+        "WARN": "yellow",
+        "WARNING": "yellow",
+        "ERROR": "red",
+        "CRITICAL": "red",
+        "SUCCESS": "green",
+        "TOOL": "cyan",
+        "LLM": "magenta",
         "DEBUG": "dim",
     }
 
-    # 状态图标（带备选）
+    # 状态标记（简洁文本）
     STATUS_ICONS: Dict[str, str] = {
-        "IDLE": "🦞",
-        "THINKING": "🤔",
-        "SEARCHING": "🔍",
-        "CODING": "💻",
-        "TESTING": "🧪",
-        "COMPRESSING": "📦",
-        "RESTARTING": "🔄",
-        "HIBERNATING": "😴",
-        "SUCCESS": "✅",
-        "ERROR": "❌",
-        "WARNING": "⚠️",
-        "DONE": "🏁",
-        "RUNNING": "🔧",
+        "IDLE": "-",
+        "THINKING": "...",
+        "ACTING": ">",
+        "SUCCESS": "+",
+        "ERROR": "!",
+        "WARNING": "~",
     }
 
-    # 日志图标
+    # 日志前缀标记
     LOG_ICONS: Dict[str, str] = {
-        "INFO": "💡",
-        "WARN": "⚠️",
-        "WARNING": "⚠️",
-        "ERROR": "❌",
-        "CRITICAL": "💥",
-        "SUCCESS": "✅",
-        "TOOL": "🔧",
-        "LLM": "🧠",
-        "DEBUG": "🔍",
-        "SEARCH": "🔍",
-        "CODING": "💻",
-        "TESTING": "🧪",
+        "INFO": "--",
+        "WARN": "!!",
+        "WARNING": "!!",
+        "ERROR": "!!",
+        "CRITICAL": "!!",
+        "SUCCESS": "++",
+        "TOOL": ">>",
+        "LLM": "##",
+        "DEBUG": "..",
     }
 
-    # 工具图标
+    # 工具图标（文本前缀，非 emoji）
     TOOL_ICONS: Dict[str, str] = {
-        "grep_search": "🔍",
-        "read_file": "📖",
-        "write_file": "✏️",
-        "edit_file": "📝",
-        "execute_shell": "💻",
-        "apply_diff_edit": "🔧",
-        "trigger_self_restart": "🔄",
-        "search_and_replace": "🔄",
-        "list_directory": "📁",
-        "create_file": "🆕",
-        "delete_file": "🗑️",
-        "web_search": "🌐",
-        "browser_automation": "🌐",
+        "grep_search": "[grep]",
+        "read_file": "[read]",
+        "write_file": "[write]",
+        "edit_file": "[edit]",
+        "execute_shell": "[exec]",
+        "apply_diff_edit": "[diff]",
+        "trigger_self_restart": "[restart]",
+        "search_and_replace": "[s/r]",
+        "list_directory": "[ls]",
+        "create_file": "[new]",
+        "delete_file": "[del]",
+        "web_search": "[web]",
+        "browser_automation": "[browser]",
     }
 
-    # 面板边框样式
+    # 面板边框颜色
     PANEL_BORDER_COLORS: Dict[str, str] = {
         "info": "cyan",
         "success": "green",
         "warning": "yellow",
         "error": "red",
         "thinking": "magenta",
-        "tool": "magenta",
-        "default": "cyan",
+        "tool": "cyan",
+        "default": "dim",
     }
 
     @classmethod
     def get_status_color(cls, status: str) -> str:
-        """获取状态对应的颜色"""
         return cls.STATUS_COLORS.get(status.upper(), "white")
 
     @classmethod
     def get_status_icon(cls, status: str) -> str:
-        """获取状态对应的图标（带备选）"""
-        return cls.STATUS_ICONS.get(status.upper(), "🦞")
+        return cls.STATUS_ICONS.get(status.upper(), "-")
 
     @classmethod
     def get_log_color(cls, level: str) -> str:
-        """获取日志级别对应的颜色"""
         return cls.LOG_COLORS.get(level.upper(), "white")
 
     @classmethod
     def get_log_icon(cls, level: str) -> str:
-        """获取日志级别对应的图标"""
-        return cls.LOG_ICONS.get(level.upper(), "💬")
+        return cls.LOG_ICONS.get(level.upper(), "--")
 
     @classmethod
     def get_tool_icon(cls, tool_name: str) -> str:
-        """获取工具对应的图标"""
-        return cls.TOOL_ICONS.get(tool_name, "🔧")
+        return cls.TOOL_ICONS.get(tool_name, ">>")
 
     @classmethod
     def get_panel_border(cls, style: str = "default") -> str:
-        """获取面板边框颜色"""
-        return cls.PANEL_BORDER_COLORS.get(style.lower(), "cyan")
+        return cls.PANEL_BORDER_COLORS.get(style.lower(), "dim")
 
 
 @dataclass
 class LobsterStyle:
-    """龙虾宝宝样式预设"""
+    """样式预设 — 简洁文本版本"""
 
-    # 欢迎面板
-    welcome_title: str = "[bold bright_red]🦞 虾宝已就绪[/bold bright_red]"
-    welcome_border: str = "bright_cyan"
+    welcome_title: str = "Vibelution"
+    welcome_border: str = "cyan"
 
-    # 状态面板
-    status_title: str = "[bold bright_red]🦞 虾宝状态[/bold bright_red]"
-    status_border: str = "cyan"
+    status_title: str = "Status"
+    status_border: str = "dim"
 
-    # 成功面板
-    success_title: str = "[bold bright_green]✅ 成功[/bold bright_green]"
+    success_title: str = "+ OK"
     success_border: str = "green"
 
-    # 错误面板
-    error_title: str = "[bold bright_red]❌ 错误[/bold bright_red]"
+    error_title: str = "! Error"
     error_border: str = "red"
 
-    # 警告面板
-    warning_title: str = "[bold bright_yellow]⚠️ 警告[/bold bright_yellow]"
+    warning_title: str = "~ Warning"
     warning_border: str = "yellow"
 
-    # 思考面板
-    thinking_title: str = "[bold bright_magenta]🤔 思考中[/bold bright_magenta]"
+    thinking_title: str = "... Thinking"
     thinking_border: str = "magenta"
 
-    # 工具面板
-    tool_title: str = "[bold bright_magenta]🔧 执行工具[/bold bright_magenta]"
-    tool_border: str = "magenta"
+    tool_title: str = ">> Tool"
+    tool_border: str = "cyan"
 
 
 # 全局实例
@@ -190,10 +164,8 @@ DEFAULT_STYLE = LobsterStyle()
 
 
 def get_theme() -> LobsterTheme:
-    """获取主题配置"""
     return DEFAULT_THEME
 
 
 def get_style() -> LobsterStyle:
-    """获取样式预设"""
     return DEFAULT_STYLE

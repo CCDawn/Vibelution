@@ -33,99 +33,20 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 
 # ============================================================================
-# 导入 UI 模块（用于 DebugLogger 的输出）
+# UI 桥接 — 延迟获取 UIManager（打破循环导入）
 # ============================================================================
-
-_ui_ref = None  # 延迟持有，每次调用时重新解析
-
 
 def _get_ui():
-    """获取 UI 实例（每次调用时重新解析，确保拿到最新的 singleton）"""
-    global _ui_ref
-    if _ui_ref is None:
-        try:
-            from core.ui.cli_ui import get_ui as _get_ui_fn
-            _ui_ref = _get_ui_fn
-        except ImportError:
-            _ui_ref = None
-    if _ui_ref is not None:
-        try:
-            return _ui_ref()
-        except Exception:
-            return None
-    return None
-
-
-# 当 UI 模块导入失败时，兜底的 noop 函数
-def _ui_noop(*args, **kwargs):
-    pass
-
-
-def _console_fallback(msg: str, *args, **kwargs):
-    """fallback: 当 UI 不可用时静默"""
-    pass
-
-
-# 在 UI 未解析出来之前，所有 UI 函数都是 noop
-_ui_log_fn = _console_fallback
-_ui_print_header_fn = _console_fallback
-_ui_thinking_fn = _console_fallback
-_ui_print_tool_fn = _console_fallback
-_ui_print_tool_start_log_fn = _console_fallback
-_ui_print_tool_result_log_fn = _console_fallback
-_ui_warning_fn = _console_fallback
-_ui_error_fn = _console_fallback
-_ui_success_fn = _console_fallback
-_ui_update_status_fn = _console_fallback
-
-
-def _refresh_ui_fns():
-    """重新解析所有 UI 函数（在 UI 模块加载后调用）"""
-    global _ui_log_fn, _ui_print_header_fn, _ui_thinking_fn
-    global _ui_print_tool_fn, _ui_print_tool_start_log_fn, _ui_print_tool_result_log_fn
-    global _ui_warning_fn, _ui_error_fn
-    global _ui_success_fn, _ui_update_status_fn, _ui_ref
-
+    """获取 UI 实例（每次调用时解析，打破循环导入）"""
     try:
-        from core.ui.cli_ui import (
-            get_ui,
-            ui_log,
-            ui_print_header,
-            ui_thinking,
-            ui_print_tool,
-            ui_warning,
-            ui_error,
-            ui_success,
-            ui_update_status,
-        )
-        _ui_ref = get_ui
-        _ui_log_fn = ui_log
-        _ui_print_header_fn = ui_print_header
-        _ui_thinking_fn = ui_thinking
-        _ui_print_tool_fn = ui_print_tool
-        _ui_warning_fn = ui_warning
-        _ui_error_fn = ui_error
-        _ui_success_fn = ui_success
-        _ui_update_status_fn = ui_update_status
-
-        # 延迟获取新增的 log-only 方法（避免循环导入时 cli_ui 尚未完全加载）
-        try:
-            ui = _ui_ref()
-            _ui_print_tool_start_log_fn = ui.print_tool_start_log
-            _ui_print_tool_result_log_fn = ui.print_tool_result_log
-        except Exception:
-            _ui_print_tool_start_log_fn = _console_fallback
-            _ui_print_tool_result_log_fn = _console_fallback
+        from core.ui.cli_ui import get_ui
+        return get_ui()
     except ImportError:
-        pass
-
-
-# 立即尝试解析 UI 函数（此时 cli_ui.py 还未完全加载，解析会失败）
-_refresh_ui_fns()
+        return None
 
 
 # ============================================================================
-# 共享的 Token Console（延迟初始化，引用自 UIManager 的 console）
+# 共享的 Token Console
 # ============================================================================
 
 _token_console = None
@@ -204,38 +125,49 @@ class DebugLogger:
         parts.append(f"{self._indent()}{msg}")
         return " ".join(parts)
 
+    def _ui_or_none(self):
+        """获取 UI 实例，未就绪时返回 None"""
+        return _get_ui()
+
     def debug(self, msg: str, tag: str = "DEBUG"):
         """调试信息"""
-        if self.verbose:
-            _ui_log_fn(msg, "DEBUG")
+        if self.verbose and (ui := self._ui_or_none()):
+            ui.add_log(msg, "DEBUG")
 
     def info(self, msg: str, tag: str = "INFO"):
         """一般信息"""
-        _ui_log_fn(msg, "INFO")
+        if ui := self._ui_or_none():
+            ui.add_log(msg, "INFO")
 
     def success(self, msg: str, tag: str = "OK"):
         """成功信息"""
-        _ui_success_fn(msg)
+        if ui := self._ui_or_none():
+            ui.add_log(msg, "SUCCESS")
 
     def warning(self, msg: str, tag: str = "WARN"):
         """警告信息"""
-        _ui_warning_fn(msg)
+        if ui := self._ui_or_none():
+            ui.print_warning(msg)
 
     def error(self, msg: str, tag: str = "ERROR", exc_info: Optional[str] = None):
         """错误信息"""
-        _ui_error_fn(msg, exc_info)
+        if ui := self._ui_or_none():
+            ui.print_error(msg, exc_info)
 
     def system(self, msg: str, tag: str = "SYS"):
         """系统信息"""
-        _ui_log_fn(msg, "SYS")
+        if ui := self._ui_or_none():
+            ui.add_log(msg, "SYS")
 
     def tool(self, name: str, status: str, details: str = ""):
         """工具执行日志"""
-        _ui_log_fn(f"Tool: {name} {status} {details}", "TOOL")
+        if ui := self._ui_or_none():
+            ui.add_log(f"Tool: {name} {status} {details}", "TOOL")
 
     def llm(self, msg: str, details: str = ""):
         """LLM 调用日志"""
-        _ui_log_fn(f"{msg} {details}", "LLM")
+        if ui := self._ui_or_none():
+            ui.add_log(f"{msg} {details}", "LLM")
 
     def llm_response(self, content: str, prefix: str = "LLM 回复"):
         """打印 LLM 响应摘要到日志面板"""
@@ -243,7 +175,7 @@ class DebugLogger:
         if ui is None:
             return
         preview = content[:80] if content else ""
-        ui.add_log(f"🦞 {prefix}: {preview}...", "LLM")
+        ui.add_log(f"{prefix}: {preview}...", "LLM")
 
     def llm_thinking(self, content: str):
         """打印 LLM 的思考过程 — 完整写入内容区"""
@@ -252,16 +184,14 @@ class DebugLogger:
             return
 
         ui.add_content("")
-        ui.add_content("[bold magenta]🤔 --- Thinking ---[/bold magenta]")
+        ui.add_content("[dim]--- Thinking ---[/dim]")
 
-        # 去掉 <thinking>...</thinking> 标签并显示全部内容
         import re
         cleaned = re.sub(r'</?thinking[^>]*>', '', content, flags=re.IGNORECASE).strip()
         for line in cleaned.split('\n'):
             stripped = line.strip()
             if not stripped:
                 continue
-            # 每行截到 120 字符，保证不被截断的完整性
             ui.add_content(f"  {stripped[:120]}" + ("..." if len(stripped) > 120 else ""))
 
         ui.add_content("")
@@ -271,37 +201,48 @@ class DebugLogger:
         ui = _get_ui()
         if ui is None:
             return
-        ui.add_log(f"🤔 Thinking: {content[:60]}...", "THINK")
+        ui.add_log(f"Thinking: {content[:60]}...", "THINK")
 
     def tool_start(self, tool_name: str, args: dict):
         """打印工具开始调用 — 内容区 + 日志区"""
-        _ui_print_tool_fn(tool_name, args)
-        _ui_print_tool_start_log_fn(tool_name, args)
+        ui = _get_ui()
+        if ui is None:
+            return
+        ui.print_tool_start(tool_name, args)
+        ui.print_tool_start_log(tool_name, args)
 
     def tool_result(self, tool_name: str, result: str, success: bool = True):
         """打印工具执行结果 — 内容区 + 日志区"""
-        _ui_print_tool_fn(tool_name, result=result, success=success)
-        _ui_print_tool_result_log_fn(tool_name, success)
+        ui = _get_ui()
+        if ui is None:
+            return
+        ui.print_tool_result(tool_name, result, success)
+        ui.print_tool_result_log(tool_name, success)
 
     def session_start(self, model: str, generation: int = 1):
         """开始会话 — 打印头部信息到控制台"""
-        _ui_print_header_fn(model, generation)
+        ui = _get_ui()
+        if ui:
+            ui.print_header(model, generation)
 
     def session_start_log(self, model: str, generation: int = 1):
         """开始会话 — 仅写入日志面板"""
-        _ui_update_status_fn("AWAKENING", generation=generation)
+        ui = _get_ui()
+        if ui:
+            ui.update_status("AWAKENING", generation=generation)
 
     def turn_end(self, turn_num: int, tool_count: int = 0):
         """结束一轮对话"""
-        _ui_log_fn(f"Turn {turn_num} complete | Tools: {tool_count}", "TURN")
+        ui = _get_ui()
+        if ui:
+            ui.add_log(f"Turn {turn_num} complete | Tools: {tool_count}", "TURN")
 
     def section(self, title: str):
         """分节标题"""
         ui = _get_ui()
         if ui is None:
             return
-        ui.add_content("")
-        ui.add_content(f"[bold cyan]=== {title} ===[/bold cyan]")
+        ui.add_content(f"\n[dim]--- {title} ---[/dim]")
 
     def divider(self, char: str = "-", length: int = 60):
         """分隔线"""
@@ -315,18 +256,16 @@ class DebugLogger:
         ui = _get_ui()
         if ui is None:
             return
-        ui.add_content(f"  [cyan]{key}[/cyan]: {value}")
+        ui.add_content(f"  [dim]{key}[/dim]: {value}")
 
     def banner(self, title: str):
         """横幅"""
         ui = _get_ui()
         if ui is None:
             return
-        ui.add_content("")
-        ui.add_content(f"[bold cyan]{'='*60}[/bold cyan]")
-        ui.add_content(f"[bold cyan]  {title}[/bold cyan]")
-        ui.add_content(f"[bold cyan]{'='*60}[/bold cyan]")
-        ui.add_content("")
+        ui.add_content(f"\n[dim]{chr(9472) * 50}[/dim]")
+        ui.add_content(f"[bold]  {title}[/bold]")
+        ui.add_content(f"[dim]{chr(9472) * 50}[/dim]\n")
 
     def indent(self):
         """增加缩进"""
@@ -341,12 +280,9 @@ class DebugLogger:
         ui = _get_ui()
         if ui is None:
             return
-        ui.add_content("")
-        ui.add_content(f"[bold cyan]{'═'*70}[/bold cyan]")
-        ui.add_content(f"[bold cyan]  Turn {turn_num}[/bold cyan]")
+        ui.add_content(f"\n[dim]-- Turn {turn_num} --[/dim]")
         if context:
             ui.add_content(f"  {context}")
-        ui.add_content(f"[bold cyan]{'═'*70}[/bold cyan]")
         ui.add_content("")
 
 
@@ -475,8 +411,10 @@ class ConversationLogger:
                 "content_length": len(content) if isinstance(content, str) else 0,
             })
 
-        # 通过 Log 面板显示 token 数（保持与 Live 界面同步）
-        _ui_log_fn(f"TOKEN 输入: {total_input_tokens} | 消息: {len(messages)} | 模型: {model or '?'}", "TOKEN")
+        # 通过 UI 显示 token 数
+        ui = _get_ui()
+        if ui:
+            ui.add_log(f"TOKEN 输入: {total_input_tokens} | 消息: {len(messages)} | 模型: {model or '?'}", "TOKEN")
 
         record = {
             "type": "llm_request",
