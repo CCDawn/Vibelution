@@ -37,7 +37,19 @@
       "Bash(wc -l agent.py core/infrastructure/*.py)",
       "Bash(dir \"C:\\\\Users\\\\17533\\\\Desktop\\\\self-evo-baby\\\\core\")",
       "Bash(PYTHONIOENCODING=utf-8 python *)",
-      "Bash(PYTHONPATH=/c/Users/17533/Desktop/self-evo-baby PYTHONIOENCODING=utf-8 python *)"
+      "Bash(PYTHONPATH=/c/Users/17533/Desktop/self-evo-baby PYTHONIOENCODING=utf-8 python *)",
+      "Bash(ls -la core/infrastructure/)",
+      "Bash(ls -la core/capabilities/)",
+      "Bash(ls -la core/logging/)",
+      "Bash(wc *)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(grep -l \"^class Test\" tests/test_*.py)",
+      "Bash(xargs -I{} grep \"^class Test\" {})",
+      "Bash(pytest tests/ -v -x --tb=short)",
+      "Bash(pytest tests/test_code_analysis_tools.py::TestGetCodeEntity::test_extract_with_include_imports tests/test_code_analysis_tools.py::TestGetCodeEntity::test_extract_without_imports -v --tb=short)",
+      "Read(//c/Users/17533/Desktop/self-evo-baby/tools/**)",
+      "Bash(rm -rf tools/__pycache__/code_analysis_tools*)",
+      "Bash(pytest tests/test_code_analysis_tools.py::TestGetCodeEntity::test_extract_with_include_imports -v --tb=long)"
     ]
   }
 }

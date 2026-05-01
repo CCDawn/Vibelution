@@ -1,0 +1,21 @@
+[run]
+source = core, tools, config
+omit =
+    */tests/*
+    */backups/*
+    */.venv/*
+    */__pycache__/*
+    */site-packages/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    pass
+    if TYPE_CHECKING:
+    @abstractmethod
+fail_under = 0
+
+[html]
+directory = htmlcov
