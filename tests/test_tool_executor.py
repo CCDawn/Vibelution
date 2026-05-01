@@ -18,7 +18,7 @@ from pathlib import Path
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.tool_executor import ToolExecutor, get_tool_executor
+from core.infrastructure.tool_executor import ToolExecutor, get_tool_executor
 
 
 class TestToolExecutorInit:
@@ -44,9 +44,10 @@ class TestToolExecutorInit:
         
         # 检查关键工具是否已注册
         expected_tools = [
-            "read_file", "list_directory", "edit_file", "create_file",
-            "execute_shell_command", "run_powershell", "check_python_syntax",
-            "grep_search", "get_generation", "set_plan", "trigger_self_restart",
+            "list_directory", "execute_shell_command", "run_powershell", "check_python_syntax",
+            "get_generation", "trigger_self_restart_tool", "grep_search_tool",
+            "task_create_tool", "task_update_tool", "task_list_tool",
+            "cli_tool",
         ]
         
         for tool_name in expected_tools:

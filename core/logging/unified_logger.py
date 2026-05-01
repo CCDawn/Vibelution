@@ -31,9 +31,6 @@ from .transcript_logger import TranscriptLogger
 class UnifiedLogger:
     """
     统一日志管理器
-
-    同时调用 ConversationLogger 和 TranscriptLogger，提供统一的日志接口。
-    这样可以减少 agent.py 中的重复调用，同时保持两个日志系统的独立功能。
     """
 
     _instance = None

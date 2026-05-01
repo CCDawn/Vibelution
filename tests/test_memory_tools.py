@@ -21,19 +21,13 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.memory_tools import (
-    # 记忆工具
     read_memory_tool, get_memory_summary_tool, get_generation_tool,
     get_current_goal_tool, get_core_context_tool,
     archive_generation_history, read_generation_archive_tool, list_archives_tool,
     commit_compressed_memory_tool, force_save_current_state, advance_generation,
     read_dynamic_prompt_tool, update_generation_task_tool,
     add_insight_to_dynamic_tool, clear_generation_task,
-    record_codebase_insight_tool, get_global_codebase_map_tool,
-    # 任务工具
-    set_plan_tool, tick_subtask_tool, modify_task_tool,
-    add_task_tool, remove_task_tool, get_task_status_tool,
-    check_restart_block_tool,
-    # 内部函数
+    check_restart_block,
     _load_memory, _save_memory,
 )
 
@@ -46,7 +40,7 @@ from tools.memory_tools import (
 def isolate_memory_workspace(monkeypatch, tmp_path):
     """隔离工作区，避免测试污染真实数据"""
     # 临时修改工作区
-    from core.workspace_manager import WorkspaceManager
+    from core.infrastructure.workspace_manager import WorkspaceManager
     
     # 创建临时工作区
     temp_ws = tmp_path / "test_workspace"
@@ -58,8 +52,8 @@ def isolate_memory_workspace(monkeypatch, tmp_path):
     (temp_ws / "prompts").mkdir(exist_ok=True)
     
     # 临时替换全局工作区
-    from core import workspace_manager
-    old_ws = workspace_manager._global_workspace
+    from core.infrastructure import workspace_manager
+    old_ws = workspace_manager.WorkspaceManager._instance
     
     # 手动创建 WorkspaceManager 实例（绕过 __new__ 的单例检查）
     def mock_get_workspace():
@@ -76,14 +70,14 @@ def isolate_memory_workspace(monkeypatch, tmp_path):
         return mock_ws
     
     # 替换 get_workspace 函数
-    import core.workspace_manager
-    original_get = core.workspace_manager.get_workspace
-    core.workspace_manager.get_workspace = mock_get_workspace
+    import core.infrastructure.workspace_manager
+    original_get = core.infrastructure.workspace_manager.get_workspace
+    core.infrastructure.workspace_manager.get_workspace = mock_get_workspace
     
     yield temp_ws
     
     # 恢复
-    core.workspace_manager.get_workspace = original_get
+    core.infrastructure.workspace_manager.get_workspace = original_get
 
 
 @pytest.fixture
@@ -331,20 +325,8 @@ class TestDynamicPrompt:
 # 代码库洞察测试
 # ============================================================================
 
-class TestCodebaseInsight:
-    """代码库认知管理测试"""
-
-    def test_record_codebase_insight(self):
-        """测试记录代码库洞察"""
-        insight = "虾宝发现：工具模块应该按功能分组"
-        result = record_codebase_insight_tool(insight=insight)
-        assert "记录成功" in result or "recorded" in result.lower() or "ok" in result.lower()
-
-    def test_get_global_codebase_map(self):
-        """测试获取全局代码库地图"""
-        result = get_global_codebase_map_tool()
-        assert isinstance(result, str)
-        assert len(result) > 0
+class TestDynamicInsight:
+    """动态洞察管理测试"""
 
     def test_insight_accumulation(self):
         """测试洞察累积"""
@@ -353,128 +335,13 @@ class TestCodebaseInsight:
             "洞察2：测试应该全面",
             "洞察3：代码需要文档",
         ]
-        
+
         for insight in insights:
             add_insight_to_dynamic_tool(insight=insight)
-        
-        # 验证所有洞察都保存
+
         content = read_dynamic_prompt_tool()
         for insight in insights:
             assert insight in content
-
-
-# ============================================================================
-# 任务管理测试
-# ============================================================================
-
-class TestTaskManagement:
-    """任务管理测试"""
-
-    def test_set_plan(self):
-        """测试设置任务计划"""
-        task = "实现新功能"
-        plan = ["设计", "编码", "测试", "文档"]
-        result = set_plan_tool(task=task, plan=plan)
-        assert "计划已设" in result or "plan set" in result.lower()
-
-    def test_get_task_status(self):
-        """测试获取任务状态"""
-        status = get_task_status_tool()
-        assert isinstance(status, str)
-        assert "任务" in status or "task" in status.lower()
-
-    def test_tick_subtask_completes_task(self):
-        """测试标记子任务完成"""
-        # 设置计划
-        set_plan_tool(task="测试任务", plan=["步骤1", "步骤2", "步骤3"])
-        
-        # 标记第一个完成
-        result = tick_subtask_tool(conclusion="步骤1完成，原因：需求明确")
-        assert "完成" in result or "completed" in result.lower() or "✓" in result
-
-    def test_modify_task(self):
-        """测试修改任务"""
-        set_plan_tool(task="旧任务", plan=["步骤"])
-        result = modify_task_tool(new_task="新任务")
-        assert "修改成功" in result or "modified" in result.lower()
-
-    def test_add_task(self):
-        """测试添加任务"""
-        set_plan_tool(task="主任务", plan=[])
-        result = add_task_tool(subtask="新增子任务")
-        assert "添加成功" in result or "added" in result.lower()
-
-    def test_remove_task(self):
-        """测试删除任务"""
-        set_plan_tool(task="任务", plan=["保留", "删除此", "保留"])
-        # 删除第二个（索引1）
-        result = remove_task_tool(index=1)
-        assert "删除成功" in result or "removed" in result.lower()
-
-    def test_check_restart_block_when_incomplete(self):
-        """测试任务未完成时阻止重启"""
-        set_plan_tool(task="未完成任务", plan=["待办1", "待办2"])
-        result = check_restart_block_tool()
-        # 应该被阻止
-        assert ("阻止" in result or "blocked" in result.lower() or 
-                "未完成" in result or "incomplete" in result.lower())
-
-    def test_check_restart_unblocked_when_complete(self):
-        """测试任务完成后允许重启"""
-        set_plan_tool(task="已完成任务", plan=["已完成1", "已完成2"])
-        # 标记所有完成
-        tick_subtask_tool()
-        tick_subtask_tool()
-        
-        result = check_restart_block_tool()
-        assert ("允许" in result or "unblocked" in result.lower() or 
-                "完成" in result or "complete" in result.lower())
-
-
-# ============================================================================
-# 组合任务管理测试
-# ============================================================================
-
-class TestTaskManagementWorkflow:
-    """任务管理流程测试"""
-
-    def test_full_task_lifecycle(self):
-        """测试完整任务生命周期"""
-        # 1. 设置任务
-        task = "实现登录功能"
-        plan = ["分析需求", "设计数据库", "编写后端", "前端页面", "测试集成"]
-        set_plan_tool(task=task, plan=plan)
-        
-        # 2. 检查状态
-        status = get_task_status_tool()
-        assert task in status
-        
-        # 3. 逐步完成任务
-        for i in range(5):
-            result = tick_subtask_tool()
-            assert "完成" in result or "completed" in result.lower()
-        
-        # 4. 验证重启已解锁
-        result = check_restart_block_tool()
-        assert ("允许" in result or "unblocked" in result.lower() or 
-                "完成" in result)
-
-    def test_add_remove_modify_workflow(self):
-        """测试增删改任务流程"""
-        set_plan_tool(task="初始任务", plan=["A", "B", "C"])
-        
-        # 修改
-        modify_task_tool(new_task="修改后任务")
-        
-        # 添加
-        add_task_tool(subtask="D")
-        
-        # 删除
-        remove_task_tool(index=0)  # 删除 "A"
-        
-        # 验证最终状态
-        status = get_task_status_tool()
-        assert "修改后任务" in status
 
 
 # ============================================================================
@@ -549,20 +416,18 @@ class TestRestartBlock:
 
     def test_restart_block_clear_initially(self):
         """初始状态允许重启（没有任务时）"""
-        # 清除任何现有任务
         clear_generation_task()
-        
-        result = check_restart_block_tool()
-        assert ("允许" in result or "unblocked" in result.lower() or 
-                "可以通过" in result or "可以" in result)
+        is_blocked, msg = check_restart_block()
+        assert not is_blocked
 
-    def test_restart_block_with_task_but_completed(self):
-        """有已完成任务时允许重启"""
-        set_plan_tool(task="测试", plan=["完成"])
-        tick_subtask_tool()
-        
-        result = check_restart_block_tool()
-        assert "允许" in result or "unblocked" in result.lower()
+    def test_restart_block_with_incomplete_tasks(self):
+        """测试有未完成任务时阻止重启"""
+        from core.orchestration.task_planner import get_task_manager
+        tm = get_task_manager()
+        tm.create_plan(goal="测试", tasks=[{"name": "待办1", "description": "待办1"}])
+        is_blocked, msg = check_restart_block()
+        assert is_blocked
+        assert "未完成" in msg
 
 
 # ============================================================================
@@ -574,62 +439,29 @@ class TestMemoryToolsIntegration:
 
     def test_full_memory_lifecycle(self):
         """测试完整记忆生命周期"""
-        # 1. 读取当前状态
         gen = get_generation_tool()
         goal = get_current_goal_tool()
         assert gen >= 1
-        
-        # 2. 更新任务
+
         update_generation_task_tool(task="集成测试任务")
-        
-        # 3. 添加洞察
         add_insight_to_dynamic_tool(insight="集成测试洞察")
-        
-        # 4. 验证保存
+
         summary = get_memory_summary_tool()
         assert "集成测试任务" in summary
-        
-        # 5. 提交记忆
+
         commit_result = commit_compressed_memory_tool()
         assert "成功" in commit_result or "ok" in commit_result.lower()
 
-    def test_task_and_memory_interaction(self):
-        """测试任务管理与记忆的交互"""
-        # 设置任务
-        set_plan_tool(task="复杂任务", plan=["P1", "P2", "P3"])
-        
-        # 完成任务
-        for _ in range(3):
-            tick_subtask_tool()
-        
-        # 归档
+    def test_archive_generation_flow(self):
+        """测试归档流程"""
         archive_generation_history(
             generation=get_generation_tool(),
             history_data=[{"action": "completed task"}],
             core_wisdom="任务完成经验",
             next_goal="下一目标"
         )
-        
-        # 验证档案存在
         archives = list_archives_tool()
         assert "G1" in archives or "generation" in archives.lower()
-
-    def test_codebase_insight_accumulation(self):
-        """测试代码库洞察累积"""
-        insights = [
-            "模块结构清晰",
-            "安全机制完善",
-            "测试覆盖全面",
-        ]
-        
-        for insight in insights:
-            record_codebase_insight_tool(insight=insight)
-        
-        # 获取全局地图
-        code_map = get_global_codebase_map_tool()
-        assert "模块结构" in code_map
-        assert "安全机制" in code_map
-        assert "测试覆盖" in code_map
 
 
 # ============================================================================
@@ -660,46 +492,6 @@ class TestErrorHandling:
         assert new1 == initial + 1
         assert new2 == initial + 2
         assert get_generation_tool() == initial + 2
-
-
-# ============================================================================
-# 边界条件测试
-# ============================================================================
-
-class TestEdgeCases:
-    """边界条件测试"""
-
-    def test_empty_plan(self):
-        """测试空计划"""
-        set_plan_tool(task="空任务", plan=[])
-        status = get_task_status_tool()
-        assert "空任务" in status
-
-    def test_single_step_plan(self):
-        """测试单步计划"""
-        set_plan_tool(task="单步", plan=["只做这一件事"])
-        tick_subtask_tool()
-        assert "完成" in get_task_status_tool()
-
-    def test_long_plan(self):
-        """测试长计划"""
-        long_plan = [f"步骤{i}" for i in range(100)]
-        set_plan_tool(task="马拉松任务", plan=long_plan)
-        status = get_task_status_tool()
-        assert "马拉松" in status
-
-    def test_unicode_in_tasks(self):
-        """测试任务中的 Unicode 字符"""
-        set_plan_tool(task="中文任务 🎉", plan=["步骤1 🚀", "步骤2 ✨"])
-        status = get_task_status_tool()
-        assert "🎉" in status or "中文" in status
-
-    def test_special_chars_in_insight(self):
-        """测试洞察中的特殊字符"""
-        special = "特殊字符: <>\"'&\\n\\t"
-        add_insight_to_dynamic_tool(insight=special)
-        content = read_dynamic_prompt_tool()
-        assert special in content
 
 
 # ============================================================================

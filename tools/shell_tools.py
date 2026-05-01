@@ -431,11 +431,6 @@ def execute_shell_command(
         return f"[执行错误] {type(e).__name__}: {str(e)}"
 
 
-# 向后兼容别名
-execute_cli_command = execute_shell_command
-run_cmd = execute_shell_command
-
-
 def run_powershell(command: str, timeout: int = DEFAULT_TIMEOUT, cwd: Optional[str] = None) -> str:
     """通过 PowerShell 执行命令"""
     ps_command = f'powershell -NoProfile -ExecutionPolicy Bypass -Command "{command}"'
@@ -449,15 +444,6 @@ def run_batch(commands: List[str], timeout: int = DEFAULT_TIMEOUT, cwd: Optional
     sep = " && " if not IS_WINDOWS else " ; "
     combined_command = sep.join(commands)
     return execute_shell_command(combined_command, timeout=timeout, cwd=cwd)
-
-
-def quick_ping(host: str = "8.8.8.8", count: int = 1) -> str:
-    """快速网络连通性检测（跨平台）"""
-    if IS_WINDOWS:
-        cmd = f"ping -n {count} {host}"
-    else:
-        cmd = f"ping -c {count} {host}"
-    return execute_shell_command(cmd, timeout=10)
 
 
 # ============================================================================
@@ -515,15 +501,6 @@ def check_python_syntax(file_path: str) -> str:
 
     except Exception as e:
         return f"[语法检查] 错误: {str(e)}"
-
-
-def run_pytest(test_path: str = "tests/", verbose: bool = True, timeout: int = 120) -> str:
-    """运行 pytest 测试"""
-    v_flag = "-v" if verbose else ""
-    return execute_shell_command(
-        f"pytest {test_path} {v_flag}",
-        timeout=timeout
-    )
 
 
 # ============================================================================
@@ -635,10 +612,6 @@ def read_file(
         return f"[文件读取] 错误: 编码错误 - {e}"
     except Exception as e:
         return f"[文件读取] 错误: {str(e)}"
-
-
-# 向后兼容别名
-read_local_file = read_file
 
 
 # ============================================================================
@@ -765,10 +738,6 @@ def list_directory(
         return json.dumps({"status": "error", "code": "UNKNOWN_ERROR", "message": str(e)})
 
 
-# 向后兼容别名
-list_dir = list_directory
-
-
 # ============================================================================
 # 文件创建操作
 # ============================================================================
@@ -815,10 +784,6 @@ def create_file(
 
     except Exception as e:
         return f"[创建文件] [ERROR] {type(e).__name__}: {str(e)}"
-
-
-# 向后兼容别名
-create_file_tool = create_file
 
 
 # ============================================================================
@@ -910,10 +875,6 @@ def edit_file(
         return "[文件编辑] 错误: 权限不足"
     except Exception as e:
         return f"[文件编辑] 错误: {str(e)}"
-
-
-# 向后兼容别名
-edit_local_file = edit_file
 
 
 # ============================================================================
@@ -1020,10 +981,6 @@ def extract_symbols(file_path: str) -> str:
         return f"[符号提取] 错误: {str(e)}"
 
 
-# 向后兼容别名
-list_symbols_in_file = extract_symbols
-
-
 # ============================================================================
 # 项目备份
 # ============================================================================
@@ -1069,10 +1026,6 @@ def backup_project(version_note: str = "") -> str:
 
     except Exception as e:
         return f"[备份] 错误: {str(e)}"
-
-
-# 向后兼容别名
-backup_project_tool = backup_project
 
 
 # ============================================================================
@@ -1299,58 +1252,6 @@ def get_agent_status() -> str:
 
 
 # ============================================================================
-# 工具注册函数
-# ============================================================================
-
-def get_shell_tools():
-    """
-    获取所有 Shell 工具的字典映射
-
-    Returns:
-        工具名称到函数的映射字典
-    """
-    return {
-        # 命令执行
-        'execute_shell_command': execute_shell_command,
-        'run_powershell': run_powershell,
-        'run_batch': run_batch,
-        'quick_ping': quick_ping,
-        # Python 检查
-        'check_python_syntax': check_python_syntax,
-        'run_pytest': run_pytest,
-        # 文件操作
-        'read_file': read_file,
-        'list_directory': list_directory,
-        'create_file': create_file,
-        'edit_file': edit_file,
-        'extract_symbols': extract_symbols,
-        # 项目管理
-        'backup_project': backup_project,
-        'cleanup_test_files': cleanup_test_files,
-        # Agent 状态
-        'self_test': self_test,
-        'get_agent_status': get_agent_status,
-    }
-
-
-# 向后兼容：保留旧函数名
-def create_cli_tools():
-    """创建 CLI 工具集（向后兼容）"""
-    return get_shell_tools()
-
-
-# ============================================================================
-# 更多向后兼容别名（在 __all__ 之前定义）
-# ============================================================================
-
-# create_new_file 别名
-create_new_file = create_file
-
-# check_syntax 别名
-check_syntax = check_python_syntax
-
-
-# ============================================================================
 # 模块初始化
 # ============================================================================
 
@@ -1358,33 +1259,20 @@ check_syntax = check_python_syntax
 __all__ = [
     # 命令执行
     'execute_shell_command',
-    'execute_cli_command',
-    'run_cmd',
     'run_powershell',
     'run_batch',
-    'quick_ping',
     # Python 检查
     'check_python_syntax',
-    'run_pytest',
     # 文件操作
     'read_file',
-    'read_local_file',
     'list_directory',
-    'list_dir',
     'create_file',
-    'create_file_tool',
     'edit_file',
-    'edit_local_file',
     'extract_symbols',
-    'list_symbols_in_file',
     # 项目管理
     'backup_project',
-    'backup_project_tool',
     'cleanup_test_files',
     # Agent 状态
     'self_test',
     'get_agent_status',
-    # 工具注册
-    'get_shell_tools',
-    'create_cli_tools',
 ]

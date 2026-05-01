@@ -192,11 +192,6 @@ class SelfEvolvingAgent:
         self.tool_executor = get_tool_executor()
         self.security_validator = get_security_validator(project_root)
 
-        # Skill 系统（相关模块已从 ecosystem 移除）
-        self.skill_registry = None
-        self.skill_tools = []
-        _debug_logger.info("[Skill] Skill 系统已移除", tag="SKILL")
-
         self._system_prompt_written = False
 
     def _init_model_discovery(self):
@@ -208,6 +203,31 @@ class SelfEvolvingAgent:
         )
         self.config.context_compression.max_token_limit = self._effective_max_token_limit
         return self._effective_max_token_limit
+
+    def _init_llm(self):
+        """初始化 LLM（ChatOpenAI 绑定工具）"""
+        llm = ChatOpenAI(
+            model=self.config.llm.model_name,
+            temperature=self.config.llm.temperature,
+            openai_api_key=self.config.llm.api_key,
+            openai_api_base=self.config.llm.api_base,
+            max_tokens=self.config.llm.max_tokens,
+            timeout=self.config.llm.api_timeout,
+        )
+        self.llm_with_tools = llm.bind_tools(self.key_tools)
+
+    def _init_token_compressor(self):
+        """初始化 Token 压缩器"""
+        self.token_compressor = EnhancedTokenCompressor(
+            token_budget=self._effective_max_token_limit,
+            compression_llm=ChatOpenAI(
+                model=self.config.llm.model_name,
+                temperature=self.config.llm.temperature,
+                openai_api_key=self.config.llm.api_key,
+                openai_api_base=self.config.llm.api_base,
+                timeout=self.config.llm.api_timeout,
+            ),
+        )
 
     def think_and_act(self, user_prompt: str = None) -> bool:
         """
@@ -257,8 +277,6 @@ class SelfEvolvingAgent:
             for iteration in range(1, max_iterations + 1):
                 current_prompt, _ = self.prompt_manager.build()
                 messages[0] = SystemMessage(content=current_prompt)
-
-                if iteration == 1:
                 response = self._invoke_llm(messages)
                 if response is None:
                     consecutive_failures += 1
@@ -299,9 +317,14 @@ class SelfEvolvingAgent:
                     except Exception:
                         pass
 
+                # 输出思考内容到 UI
+                if raw_content.strip():
+                    ui.add_content("[bold yellow]🤔 思考过程:[/bold yellow]")
+                    ui.add_content(raw_content[:500] + ("..." if len(raw_content) > 500 else ""))
+
                 messages.append(AIMessage(content=raw_content))
 
-                tool_calls = []
+                tool_calls = getattr(response, 'tool_calls', []) or []
                 self._execute_tools_parallel(tool_calls, messages)
 
             _debug_logger.turn_end(current_turn, tool_count=len(tool_calls) if tool_calls else 0)
@@ -387,28 +410,12 @@ class SelfEvolvingAgent:
                 self_modified=self._self_modified,
             )
 
-        if tool_name == "enter_hibernation":
-            import re
-            duration_match = re.search(r'休眠时长[:：]\s*(\d+)\s*秒', tool_args.get('reason', ''))
-            hibernate_duration = int(duration_match.group(1)) if duration_match else self.config.agent.awake_interval
-            _debug_logger.info(f"Agent 主动休眠 {hibernate_duration} 秒", tag="HIBERNATE")
-            time.sleep(hibernate_duration)
-            return (f"休眠 {hibernate_duration} 秒完成", "hibernated")
-
-
         result, _ = self.tool_executor.execute(tool_name, tool_args)
 
         if result is not None:
             _debug_logger.tool_result(tool_name, str(result), success=True)
         else:
             _debug_logger.warning(f"[警告] {tool_name} 返回 None", tag="TOOL")
-
-        # 标记自修改
-        if tool_name in ("edit_local_file", "create_new_file"):
-            file_path = tool_args.get("file_path", "")
-            if "agent.py" in file_path:
-                self._self_modified = True
-                _debug_logger.success("agent.py 已修改，将触发重启", tag="MODIFY")
 
         return (result, None)
 
@@ -441,12 +448,12 @@ class SelfEvolvingAgent:
             self._handle_tool_result(tc, result, action, messages)
 
     def run_loop(self, initial_prompt: str = None) -> None:
-        """运行 Agent 主循环（简化版，Phase 7 待重建）"""
         _debug_logger.system("主循环开始", tag=self.name)
 
         generation = get_generation_tool()
         model_name = getattr(self.config.llm, 'model_name', 'unknown')
         logger.log_action("会话开始", f"世代: G{generation}, 模型: {model_name}")
+        get_state_manager().set_state(AgentState.AWAKENING, action="主循环启动")
 
         try:
             _debug_logger.kv("记忆状态", f"G{get_generation_tool()} | {get_current_goal()[:50]}")
@@ -466,14 +473,13 @@ class SelfEvolvingAgent:
 
         except KeyboardInterrupt:
             _debug_logger.info("收到中断，退出", tag="AGENT")
-            logger.end_session({"reason": "keyboard_interrupt"})
         except Exception as e:
             _debug_logger.error(f"主循环异常: {type(e).__name__}: {e}", exc_info=True)
             logger.log_error("main_loop_exception", str(e), traceback.format_exc())
         finally:
             uptime = datetime.now() - self.start_time
             _debug_logger.info(f"运行结束 (运行时长: {uptime})", tag=self.name)
-            lifecycle.transition_state(AgentState.IDLE, action="系统已关闭")
+            get_state_manager().set_state(AgentState.IDLE, action="系统已关闭")
             logger.end_session({"uptime_seconds": uptime.total_seconds()})
 
 
@@ -552,7 +558,6 @@ def main(initial_prompt: str = None):
             agent.run_loop(initial_prompt=initial_prompt)
         else:
             ui.add_content("[bold yellow]自动模式[/bold yellow] - 无外部输入，进入自主进化")
-            ui.stop_live()
             agent.run_loop(initial_prompt=None)
 
     except Exception as e:
@@ -562,11 +567,13 @@ def main(initial_prompt: str = None):
 def print_evolution_time():
     """打印进化时间标记 - Agent 自我进化测试"""
     from datetime import datetime
-    print(f"\n{'='*60}")
-    print(f"🧬 Evolution Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*60}\n")
+    from core.ui.cli_ui import get_ui
+    ui = get_ui()
+    ui.add_content("=" * 60)
+    ui.add_content(f"🧬 Evolution Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    ui.add_content("=" * 60)
     # 🧪 进化测试标记 - Agent 代码修改验证
-    print("[TEST] Agent.py modified successfully - Evolution test passed!")
+    ui.add_content("[TEST] Agent.py modified successfully - Evolution test passed!")
 
 if __name__ == "__main__":
     print_evolution_time()

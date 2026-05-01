@@ -237,6 +237,16 @@ def get_code_entity(file_path: str, entity_name: str, include_imports: bool = Fa
     if target_entity.get('docstring'):
         result.append(f"[AST] 文档:\n\"\"\"{target_entity['docstring']}\"\"\"")
 
+    if include_imports:
+        import_lines = [
+            line for line in lines
+            if line.strip().startswith('import ') or line.strip().startswith('from ')
+        ]
+        if import_lines:
+            result.append(f"\n[AST] 导入:\n```python")
+            result.append(''.join(import_lines).rstrip())
+            result.append("```")
+
     result.append(f"\n[AST] 代码:\n```python")
     result.append(code.rstrip())
     result.append("```")
@@ -411,15 +421,6 @@ def list_file_entities(file_path: str, entity_type: str = "all") -> str:
 def extract_method_from_class(file_path: str, class_name: str, method_name: str) -> str:
     """从类中提取特定方法"""
     return get_code_entity(file_path, f"{class_name}.{method_name}")
-
-
-# 向后兼容别名
-list_file_entities_tool = list_file_entities
-
-
-# ============================================================================
-# Diff Block 编辑器
-# ============================================================================
 
 
 def _find_match_position(content: str, search_block: str, allow_fuzzy: bool = False) -> Optional[Tuple[int, int]]:
@@ -730,49 +731,6 @@ def preview_diff(file_path: str, diff_text: str) -> str:
         result.append("")
 
     return '\n'.join(result)
-
-
-# 向后兼容别名
-apply_diff_edit_tool = apply_diff_edit
-validate_diff_format_tool = validate_diff_format
-
-
-# ============================================================================
-# 工具注册
-# ============================================================================
-
-def get_code_analysis_tools():
-    """获取所有代码分析工具"""
-    return {
-        # AST 工具
-        'get_code_entity': get_code_entity,
-        'list_file_entities': list_file_entities,
-        'get_file_entities': get_file_entities,
-        'extract_method_from_class': extract_method_from_class,
-        # Diff 工具
-        'apply_diff_edit': apply_diff_edit,
-        'validate_diff_format': validate_diff_format,
-        'preview_diff': preview_diff,
-    }
-
-
-# 向后兼容：保留旧函数名
-def create_ast_tools():
-    """创建 AST 工具集（向后兼容）"""
-    return {
-        'get_code_entity': get_code_entity,
-        'list_file_entities': list_file_entities,
-        'get_file_entities': get_file_entities,
-    }
-
-
-def create_code_tools():
-    """创建代码工具集（向后兼容）"""
-    return {
-        'apply_diff_edit': apply_diff_edit,
-        'validate_diff_format': validate_diff_format,
-        'preview_diff': preview_diff,
-    }
 
 
 # ============================================================================

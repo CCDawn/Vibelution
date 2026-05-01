@@ -37,8 +37,6 @@ from tools.memory_tools import (
     update_generation_task_tool,
     add_insight_to_dynamic_tool,
     write_dynamic_prompt_tool,
-    record_codebase_insight_tool,
-    get_global_codebase_map_tool,
     get_memory_summary_tool,
     archive_generation_history,
     force_save_current_state,
@@ -48,8 +46,6 @@ from tools.memory_tools import (
     task_create_tool,
     task_update_tool,
     task_list_tool,
-    task_breakdown_tool,
-    task_prioritize_tool,
 )
 
 # ============================================================================
@@ -125,8 +121,6 @@ __all__ = [
     "update_generation_task_tool",
     "add_insight_to_dynamic_tool",
     "write_dynamic_prompt_tool",
-    "record_codebase_insight_tool",
-    "get_global_codebase_map_tool",
     "get_memory_summary_tool",
     "archive_generation_history",
     "force_save_current_state",
@@ -136,8 +130,6 @@ __all__ = [
     "task_create_tool",
     "task_update_tool",
     "task_list_tool",
-    "task_breakdown_tool",
-    "task_prioritize_tool",
     # 重生工具
     "trigger_self_restart_tool",
     "enter_hibernation_tool",

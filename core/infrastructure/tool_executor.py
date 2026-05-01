@@ -36,24 +36,18 @@ class ToolExecutor:
     def _register_default_tools(self):
         """注册默认工具映射 — Key_Tools 工具自动推导，程序化工具手动注册"""
         from tools import (
-            # Shell 工具 (非 LLM，程序化调用)
             list_directory_tool,
             check_python_syntax_tool, extract_symbols_tool, backup_project_tool,
             cleanup_test_files_tool, execute_shell_command_tool, run_powershell_tool,
             run_batch_tool, self_test_tool, get_agent_status_tool,
-            # 记忆工具 (部分在 Key_Tools 中, 其余程序化)
             read_memory_tool, get_generation_tool,
             get_current_goal_tool, get_core_context_tool, read_generation_archive_tool,
             list_archives_tool, read_dynamic_prompt_tool,
-            add_insight_to_dynamic_tool, record_codebase_insight_tool, get_global_codebase_map_tool,
+            add_insight_to_dynamic_tool,
             get_memory_summary_tool, clear_generation_task, write_dynamic_prompt_tool,
-            # 搜索工具 (非 Key_Tools)
             find_function_calls_tool, find_definitions_tool,
             search_imports_tool, search_and_read_tool,
-            # 代码分析工具 (非 Key_Tools)
             preview_diff_tool, get_file_entities_tool,
-            # 任务工具 (非 Key_Tools)
-            task_breakdown_tool, task_prioritize_tool,
         )
 
         # ── 从 Key_Tools 自动推导工具映射 ──────────────────────────────
@@ -81,8 +75,6 @@ class ToolExecutor:
             "list_archives": list_archives_tool,
             "read_dynamic_prompt": read_dynamic_prompt_tool,
             "add_insight_to_dynamic": add_insight_to_dynamic_tool,
-            "record_codebase_insight": record_codebase_insight_tool,
-            "get_global_codebase_map": get_global_codebase_map_tool,
             "get_memory_summary": get_memory_summary_tool,
             "clear_generation_task": clear_generation_task,
             "write_dynamic_prompt": write_dynamic_prompt_tool,
@@ -92,8 +84,6 @@ class ToolExecutor:
             "search_and_read": search_and_read_tool,
             "preview_diff": preview_diff_tool,
             "get_file_entities": get_file_entities_tool,
-            "task_breakdown": task_breakdown_tool,
-            "task_prioritize": task_prioritize_tool,
         })
 
         self._timeout_map = {

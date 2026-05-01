@@ -132,8 +132,8 @@ def is_process_alive(pid: int) -> bool:
         else:
             import subprocess
             try:
-                subprocess.run(['kill', '-0', str(pid)], capture_output=True, check=False)
-                return True
+                result = subprocess.run(['kill', '-0', str(pid)], capture_output=True, check=False)
+                return result.returncode == 0
             except Exception:
                 return False
 

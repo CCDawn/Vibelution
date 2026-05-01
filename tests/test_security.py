@@ -17,7 +17,7 @@ from pathlib import Path
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.security import (
+from core.infrastructure.security import (
     SecurityValidator,
     PathSandbox,
     get_security_validator,
@@ -26,6 +26,9 @@ from core.security import (
     SAFE_POWERSHELL_COMMANDS,
     FORBIDDEN_COMMANDS,
 )
+
+# 动态获取项目根目录（避免硬编码路径）
+_PROJECT_ROOT = str(Path(__file__).parent.parent)
 
 
 # ============================================================================
@@ -38,7 +41,7 @@ class TestPathSandbox:
     @pytest.fixture
     def sandbox(self):
         """创建测试用的沙箱实例"""
-        project_root = "C:\\Users\\17533\\Desktop\\self-evo-baby"
+        project_root = _PROJECT_ROOT
         return PathSandbox(project_root)
 
     def test_init(self, sandbox):
@@ -49,10 +52,10 @@ class TestPathSandbox:
     def test_is_within_project_valid(self, sandbox):
         """测试合法路径"""
         valid_paths = [
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\agent.py",
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\core\\security.py",
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\tools\\shell_tools.py",
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\workspace\\memory\\test.json",
+            _PROJECT_ROOT + "\\agent.py",
+            _PROJECT_ROOT + "\\core\\security.py",
+            _PROJECT_ROOT + "\\tools\\shell_tools.py",
+            _PROJECT_ROOT + "\\workspace\\memory\\test.json",
         ]
         for path in valid_paths:
             assert sandbox.is_within_project(path) is True, f"路径应该在项目内：{path}"
@@ -62,7 +65,7 @@ class TestPathSandbox:
         invalid_paths = [
             "C:\\Windows\\System32\\cmd.exe",
             "C:\\Program Files\\Python\\python.exe",
-            "C:\\Users\\17533\\Documents\\other_project\\file.txt",
+            "C:\\Users\\Public\\Documents\\other_project\\file.txt",
             "D:\\Some\\Other\\Drive\\file.txt",
         ]
         for path in invalid_paths:
@@ -71,8 +74,8 @@ class TestPathSandbox:
     def test_path_traversal_attack(self, sandbox):
         """测试路径遍历攻击防护"""
         attack_paths = [
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\..\\..\\Windows\\system32",
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\..\\..\\..\\..\\Windows",
+            _PROJECT_ROOT + "\\..\\..\\Windows\\system32",
+            _PROJECT_ROOT + "\\..\\..\\..\\..\\Windows",
             "..\\..\\Windows\\system32",
         ]
         for path in attack_paths:
@@ -88,7 +91,7 @@ class TestPathSandbox:
 
     def test_safe_join(self, sandbox):
         """测试安全路径连接"""
-        base = "C:\\Users\\17533\\Desktop\\self-evo-baby"
+        base = _PROJECT_ROOT
         
         # 合法连接
         safe_path, error = sandbox.safe_join(base, "core", "security.py")
@@ -112,7 +115,7 @@ class TestSecurityValidator:
     @pytest.fixture
     def validator(self):
         """创建测试用的验证器实例"""
-        project_root = "C:\\Users\\17533\\Desktop\\self-evo-baby"
+        project_root = _PROJECT_ROOT
         return SecurityValidator(project_root)
 
     def test_init(self, validator):
@@ -152,10 +155,10 @@ class TestSecurityValidator:
     def test_validate_command_whitelist_allowed(self, validator):
         """测试白名单允许的命令"""
         allowed_commands = [
-            "Get-Content C:\\Users\\17533\\Desktop\\self-evo-baby\\agent.py",
-            "Set-Content C:\\Users\\17533\\Desktop\\self-evo-baby\\test.txt -Value 'hello'",
-            "Get-ChildItem C:\\Users\\17533\\Desktop\\self-evo-baby",
-            "python C:\\Users\\17533\\Desktop\\self-evo-baby\\agent.py",
+            f"Get-Content {_PROJECT_ROOT}\\agent.py",
+            f"Set-Content {_PROJECT_ROOT}\\test.txt -Value 'hello'",
+            f"Get-ChildItem {_PROJECT_ROOT}",
+            f"python {_PROJECT_ROOT}\\agent.py",
             "git status",
             "pytest tests/",
             "Select-String -Pattern 'test' -Path file.txt",
@@ -186,23 +189,23 @@ class TestFileOperationSecurity:
 
     @pytest.fixture
     def validator(self):
-        project_root = "C:\\Users\\17533\\Desktop\\self-evo-baby"
+        project_root = _PROJECT_ROOT
         return SecurityValidator(project_root)
 
     def test_validate_file_read(self, validator):
         """测试文件读取"""
         is_safe, error = validator.validate_file_operation(
             "read",
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\agent.py"
+            _PROJECT_ROOT + "\\agent.py"
         )
         assert is_safe is True
 
     def test_validate_file_write_forbidden_ext(self, validator):
         """测试禁止的文件扩展名"""
         forbidden_extensions = [
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\malware.exe",
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\script.bat",
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\payload.dll",
+            _PROJECT_ROOT + "\\malware.exe",
+            _PROJECT_ROOT + "\\script.bat",
+            _PROJECT_ROOT + "\\payload.dll",
         ]
         for path in forbidden_extensions:
             is_safe, error = validator.validate_file_operation("write", path)
@@ -221,7 +224,7 @@ class TestFileOperationSecurity:
         for content in dangerous_contents:
             is_safe, error = validator.validate_file_operation(
                 "write",
-                "C:\\Users\\17533\\Desktop\\self-evo-baby\\test.py",
+                _PROJECT_ROOT + "\\test.py",
                 content
             )
             assert is_safe is False, f"应该阻止危险内容：{content}"
@@ -239,7 +242,7 @@ class TestConvenienceFunctions:
         """测试 validate_shell_command 函数"""
         # 合法命令（需要完整路径）
         is_safe, error = validate_shell_command(
-            "Get-ChildItem C:\\Users\\17533\\Desktop\\self-evo-baby"
+            f"Get-ChildItem {_PROJECT_ROOT}"
         )
         assert is_safe is True, f"应该允许 Get-ChildItem: {error}"
 
@@ -251,7 +254,7 @@ class TestConvenienceFunctions:
         """测试 validate_file_path 函数"""
         # 合法路径
         is_valid, error = validate_file_path(
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\agent.py"
+            _PROJECT_ROOT + "\\agent.py"
         )
         assert is_valid is True
 
@@ -271,25 +274,25 @@ class TestIntegration:
         """测试完整工作流程"""
         # 1. 创建验证器
         validator = get_security_validator(
-            "C:\\Users\\17533\\Desktop\\self-evo-baby"
+            _PROJECT_ROOT
         )
 
         # 2. 验证命令
         is_safe, error = validator.validate_command(
-            "Get-Content C:\\Users\\17533\\Desktop\\self-evo-baby\\agent.py"
+            f"Get-Content {_PROJECT_ROOT}\\agent.py"
         )
         assert is_safe is True
 
         # 3. 验证路径
         is_valid, error = validator.path_sandbox.validate_path(
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\core\\security.py"
+            _PROJECT_ROOT + "\\core\\security.py"
         )
         assert is_valid is True
 
         # 4. 验证文件操作
         is_safe, error = validator.validate_file_operation(
             "read",
-            "C:\\Users\\17533\\Desktop\\self-evo-baby\\README.md"
+            _PROJECT_ROOT + "\\README.md"
         )
         assert is_safe is True
 

@@ -418,13 +418,3 @@ def get_state_manager() -> StateManager:
 def get_current_state() -> AgentState:
     """获取当前状态"""
     return get_state_manager().get_state()
-
-
-def set_current_state(state: AgentState, **kwargs) -> None:
-    """设置当前状态"""
-    get_state_manager().set_state(state, **kwargs)
-
-
-def is_state(state: AgentState) -> bool:
-    """检查是否是指定状态"""
-    return get_state_manager().is_state(state)

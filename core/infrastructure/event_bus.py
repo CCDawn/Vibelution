@@ -483,7 +483,8 @@ class EventBus:
 
     def get_history(self, limit: int = 10) -> List[Event]:
         """获取最近的事件历史"""
-        return self._events_history[-limit:]
+        items = list(self._events_history)
+        return items[-limit:]
 
     @property
     def event_count(self) -> int:
@@ -504,40 +505,3 @@ def get_event_bus() -> EventBus:
     if _event_bus is None:
         _event_bus = EventBus()
     return _event_bus
-
-
-# ============================================================================
-# 便捷函数
-# ============================================================================
-
-def emit(event_name: str, data: Any = None, source: Optional[str] = None) -> List[Any]:
-    """
-    发布事件的便捷函数
-
-    Example:
-        emit("tool:call", {"name": "read_file", "args": {"path": "test.py"}})
-    """
-    return get_event_bus().publish(event_name, data, source)
-
-
-def on(event_name: str, handler: Callable[[Event], Any], **kwargs) -> str:
-    """
-    订阅事件的便捷函数
-
-    Example:
-        def handle_tool_call(event):
-            print(f"Tool called: {event.data}")
-
-        on("tool:call", handle_tool_call)
-    """
-    return get_event_bus().subscribe(event_name, handler, **kwargs)
-
-
-def once(event_name: str, handler: Callable[[Event], Any]) -> str:
-    """订阅一次性事件的便捷函数"""
-    return get_event_bus().subscribe_once(event_name, handler)
-
-
-def off(event_name: str, handler: Callable[[Event], Any]) -> bool:
-    """取消订阅的便捷函数"""
-    return get_event_bus().unsubscribe(event_name, handler)

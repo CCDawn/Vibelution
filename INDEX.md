@@ -1,4 +1,4 @@
-# 虾宝自我进化系统 - 全局索引
+# Vibelution - 全局索引
 
 **版本：** v7.0
 **日期：** 2026-04-30
@@ -82,11 +82,6 @@ self-evo-baby/
 |-------|------|------|------|
 | Phase 1-2 | 基础设施 | ✅ 完成 | core/infrastructure/、core/logging/、core/ui/、工具集 |
 | Phase 3 | 进化能力 | ❌ 待开发 | 下一开发目标 |
-| Phase 4 | 知识系统 | ❌ 待开发 | - |
-| Phase 5 | 持续学习 | ❌ 待开发 | core/learning/ 已删除 |
-| Phase 6 | 自主决策 | ❌ 待开发 | core/decision/ 已删除 |
-| Phase 7 | 模块化重构 | ❌ 待开发 | core/orchestration/ 已删除 |
-| Phase 8 | 自主探索 | ❌ 待开发 | - |
 
 > 下一开发目标：**Phase 3 进化引擎**
 

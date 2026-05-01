@@ -91,15 +91,7 @@ def get_session_state() -> AgentSessionState:
     return _agent_session
 
 
-def reset_session():
-    """重置 Session 状态（用于测试）"""
-    global _agent_session
-    with _session_lock:
-        _agent_session = AgentSessionState()
-
-
 __all__ = [
     "AgentSessionState",
     "get_session_state",
-    "reset_session",
 ]

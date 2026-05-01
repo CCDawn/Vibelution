@@ -22,20 +22,60 @@ from datetime import datetime
 
 # 导入被测模块
 from tools.memory_tools import (
-    read_memory,
-    commit_compressed_memory,
-    get_generation,
-    get_current_goal,
-    get_core_context,
+    read_memory_tool,
+    commit_compressed_memory_tool,
+    get_generation_tool,
+    get_current_goal_tool,
+    get_core_context_tool,
     archive_generation_history,
     advance_generation,
-    list_archives,
-    read_generation_archive,
+    list_archives_tool,
+    read_generation_archive_tool,
     _load_memory,
     _save_memory,
     _get_memory_index_path,
     _get_archives_path,
 )
+
+
+# ============================================================================
+# Fixtures — 隔离工作空间
+# ============================================================================
+
+@pytest.fixture(autouse=True)
+def isolate_memory_workspace(monkeypatch, tmp_path):
+    """
+    将记忆系统的读写路径重定向到临时目录，避免污染真实 workspace。
+    每个测试自动生效（autouse）。
+    """
+    memory_dir = tmp_path / "workspace" / "memory"
+    archives_dir = memory_dir / "archives"
+    memory_dir.mkdir(parents=True, exist_ok=True)
+    archives_dir.mkdir(parents=True, exist_ok=True)
+
+    memory_file = memory_dir / "memory.json"
+
+    # 初始化一个干净的 memory.json
+    import json
+    default_memory = {
+        "current_generation": 1,
+        "core_wisdom": "",
+        "current_goal": "Initial test goal",
+        "total_generations": 1,
+    }
+    memory_file.write_text(json.dumps(default_memory, ensure_ascii=False), encoding="utf-8")
+
+    # Monkeypatch 路径函数
+    monkeypatch.setattr(
+        "tools.memory_tools._get_memory_index_path",
+        lambda: str(memory_file),
+    )
+    monkeypatch.setattr(
+        "tools.memory_tools._get_archives_path",
+        lambda: str(archives_dir),
+    )
+
+    yield tmp_path
 
 
 class TestMemoryBasics:
@@ -60,18 +100,18 @@ class TestMemoryBasics:
 
     def test_generation_is_positive_int(self):
         """测试世代号是正整数"""
-        gen = get_generation()
+        gen = get_generation_tool()
         assert isinstance(gen, int), "世代号应该是整数"
         assert gen >= 1, "世代号应该 >= 1"
 
     def test_get_current_goal_returns_string(self):
         """测试获取目标返回字符串"""
-        goal = get_current_goal()
+        goal = get_current_goal_tool()
         assert isinstance(goal, str), "目标应该是字符串"
 
     def test_get_core_context_returns_string(self):
         """测试获取核心上下文返回字符串"""
-        context = get_core_context()
+        context = get_core_context_tool()
         assert isinstance(context, str), "上下文应该是字符串"
 
 
@@ -83,7 +123,7 @@ class TestMemoryWrite:
         new_context = "测试：这是新的核心智慧"
         new_goal = "测试：完成记忆写入测试"
 
-        result = commit_compressed_memory(new_context, new_goal)
+        result = commit_compressed_memory_tool(new_context, new_goal)
         result_dict = json.loads(result)
 
         assert result_dict["status"] == "success", "提交应该成功"
@@ -92,7 +132,7 @@ class TestMemoryWrite:
     def test_commit_compressed_memory_truncates_long_context(self):
         """测试长上下文被截断"""
         long_context = "A" * 500  # 超过 300 字符
-        result = commit_compressed_memory(long_context, "测试目标")
+        result = commit_compressed_memory_tool(long_context, "测试目标")
         result_dict = json.loads(result)
 
         assert result_dict["status"] == "success"
@@ -101,7 +141,7 @@ class TestMemoryWrite:
 
     def test_advance_generation_increments_count(self):
         """测试推进世代递增计数"""
-        before = get_generation()
+        before = get_generation_tool()
         new_gen = advance_generation()
 
         assert new_gen == before + 1, "世代号应该递增"
@@ -142,7 +182,7 @@ class TestArchiveSystem:
 
     def test_list_archives_returns_list(self):
         """测试列出档案返回列表"""
-        result = list_archives()
+        result = list_archives_tool()
         result_dict = json.loads(result)
 
         assert result_dict["status"] == "success"
@@ -151,7 +191,7 @@ class TestArchiveSystem:
 
     def test_read_generation_archive_nonexistent_returns_error(self):
         """测试读取不存在的档案返回错误"""
-        result = read_generation_archive(generation=999999)
+        result = read_generation_archive_tool(generation=999999)
         result_dict = json.loads(result)
 
         assert result_dict["status"] == "error", "不存在的档案应返回错误"
@@ -163,13 +203,13 @@ class TestMemoryIntegration:
     def test_full_memory_lifecycle(self):
         """测试完整记忆生命周期"""
         # 1. 读取初始状态
-        gen_before = get_generation()
-        goal_before = get_current_goal()
+        gen_before = get_generation_tool()
+        goal_before = get_current_goal_tool()
 
         # 2. 更新记忆
         new_wisdom = "集成测试：完整生命周期测试"
         new_goal = "集成测试：目标"
-        commit_compressed_memory(new_wisdom, new_goal)
+        commit_compressed_memory_tool(new_wisdom, new_goal)
 
         # 3. 验证更新
         memory = _load_memory()

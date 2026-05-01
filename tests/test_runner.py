@@ -31,11 +31,19 @@ sys.path.insert(0, str(PROJECT_ROOT))
 class TestRunner:
     """统一测试运行器"""
 
-    TEST_MODULES = [
-        ("test_memory.py", "记忆系统"),
-        ("test_tools.py", "工具模块"),
-        ("test_compression.py", "Token压缩"),
-    ]
+    TEST_MODULES = None  # Auto-discovered if None
+
+    def _discover_test_modules(self) -> List[Tuple[str, str]]:
+        """Auto-discover test files, excluding backups, runners, and utilities."""
+        test_dir = PROJECT_ROOT / "tests"
+        test_files = sorted(
+            f for f in test_dir.glob("test_*.py")
+            if f.name not in ("test_runner.py",)
+        )
+        return [
+            (f.name, f.stem.replace("test_", "").replace("_", " ").title())
+            for f in test_files
+        ]
 
     def __init__(self, verbose: bool = False, fast: bool = False):
         self.verbose = verbose
@@ -129,9 +137,10 @@ class TestRunner:
         print(f"开始时间: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"模式: {'详细' if self.verbose else '简洁'}{' (快速)' if self.fast else ''}")
 
+        modules = self.TEST_MODULES or self._discover_test_modules()
         all_passed = True
 
-        for test_file, description in self.TEST_MODULES:
+        for test_file, description in modules:
             success, result = self.run_module_tests(test_file, description)
             self.results.append(result)
 

@@ -345,7 +345,7 @@ def validate_shell_command(command: str, shell_type: str = "powershell") -> Tupl
     return validator.validate_command(command, shell_type)
 
 
-def validate_file_path(path: str) -> Tuple[bool, str]:
-    """便捷函数：验证文件路径"""
+def validate_file_path(file_path: str) -> Tuple[bool, str]:
+    """便捷函数：验证文件路径是否在允许范围内"""
     validator = get_security_validator()
-    return validator.path_sandbox.validate_path(path)
+    return validator.validate_path(file_path)

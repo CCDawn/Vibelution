@@ -520,14 +520,14 @@ class TestRunBatch:
 # check_python_syntax 别名测试
 # ============================================================================
 
-class TestCheckSyntaxAlias:
-    """check_syntax 别名兼容性测试"""
+class TestCheckSyntax:
+    """check_python_syntax 测试"""
 
-    def test_check_syntax_alias_works(self, sample_py_file):
-        """验证 check_syntax 别名是否可用"""
-        from tools.shell_tools import check_syntax
-        result = check_syntax(file_path=sample_py_file)
-        assert "正确" in result or "OK" in result or "通过" in result
+    def test_check_python_syntax_works(self, sample_py_file):
+        """验证 check_python_syntax 是否可用"""
+        from tools.shell_tools import check_python_syntax
+        result = check_python_syntax(file_path=sample_py_file)
+        assert "正确" in result or "OK" in result or "通过" in result or "Syntax OK" in result
 
 
 # ============================================================================

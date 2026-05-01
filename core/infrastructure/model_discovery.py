@@ -387,46 +387,6 @@ class ModelDiscovery:
 
 
 # ============================================================================
-# 同步封装（用于非异步场景）
-# ============================================================================
-
-def discover_model_sync(
-    api_base: str,
-    model_name: Optional[str] = None,
-    timeout: int = 30,
-    enabled: bool = True,
-) -> ModelInfo:
-    """
-    同步版本的模型发现
-
-    Args:
-        api_base: API 基础 URL
-        model_name: 模型名称
-        timeout: 超时时间
-        enabled: 是否启用
-
-    Returns:
-        ModelInfo: 模型信息
-    """
-    import asyncio
-
-    discovery = ModelDiscovery(
-        api_base=api_base,
-        model_name=model_name,
-        timeout=timeout,
-        enabled=enabled,
-    )
-
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
-    return loop.run_until_complete(discovery.discover())
-
-
-# ============================================================================
 # 便捷函数
 # ============================================================================
 

@@ -30,7 +30,7 @@ def test_1_cli_error_detection():
     from tools.shell_tools import execute_shell_command
 
     # 测试失败的命令
-    result = execute_cli_command("python -c 'raise ValueError(\"test error\")'")
+    result = execute_shell_command("python -c 'raise ValueError(\"test error\")'")
 
     has_failure_marker = "[EXEC FAILURE" in result
     print(f"  输入: python -c 'raise ValueError(\"test error\")'")
@@ -38,7 +38,7 @@ def test_1_cli_error_detection():
     print(f"  [EXEC FAILURE] 标记: {'PASS' if has_failure_marker else 'FAIL'}")
 
     # 测试成功的命令
-    result_ok = execute_cli_command("echo hello")
+    result_ok = execute_shell_command("echo hello")
     has_warning = "[WARNING" in result_ok or "[EXEC FAILURE" in result_ok
     print(f"\n  输入: echo hello")
     print(f"  输出: {result_ok}")
@@ -126,7 +126,7 @@ def test_4_database_write():
     print("测试4: 数据库写入")
     print("=" * 60)
 
-    from core.workspace_manager import get_workspace
+    from core.infrastructure.workspace_manager import get_workspace
 
     ws = get_workspace()
 
@@ -169,7 +169,7 @@ def test_5_workspace_structure():
     print("测试5: workspace 结构完整性")
     print("=" * 60)
 
-    from core.workspace_manager import get_workspace
+    from core.infrastructure.workspace_manager import get_workspace
 
     ws = get_workspace()
 

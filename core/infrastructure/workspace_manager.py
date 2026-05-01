@@ -170,7 +170,8 @@ class WorkspaceManager:
                 solution TEXT,
                 occurrence_count INTEGER DEFAULT 1,
                 first_seen TEXT NOT NULL,
-                last_seen TEXT NOT NULL
+                last_seen TEXT NOT NULL,
+                UNIQUE(error_type, error_msg)
             )
         """)
 
@@ -329,7 +330,7 @@ class WorkspaceManager:
             cursor.execute("""
                 INSERT INTO ErrorArchive (error_type, error_msg, solution, last_seen, first_seen)
                 VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(error_type || error_msg) DO UPDATE SET
+                ON CONFLICT(error_type, error_msg) DO UPDATE SET
                     solution = COALESCE(excluded.solution, solution),
                     occurrence_count = occurrence_count + 1,
                     last_seen = excluded.last_seen
@@ -474,13 +475,3 @@ def get_workspace() -> WorkspaceManager:
     if _workspace is None:
         _workspace = WorkspaceManager()
     return _workspace
-
-
-def workspace_root() -> Path:
-    """获取工作区根目录"""
-    return get_workspace().root
-
-
-def workspace_db() -> Path:
-    """获取数据库路径"""
-    return get_workspace().db_path

@@ -3,92 +3,133 @@
 pytest 配置和共享 fixtures
 
 提供测试所需的共享资源：
-- workspace 临时目录
-- mock LLM
-- 测试配置
+- 单例重置（防止测试间状态泄漏）
+- 隔离工作空间
+- 可复用 mock 对象
 """
 
 import pytest
 import os
 import sys
-import tempfile
-import shutil
 from pathlib import Path
-from unittest.mock import MagicMock
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 
-@pytest.fixture(scope="session")
-def project_root():
-    """返回项目根目录"""
-    return PROJECT_ROOT
-
-
-@pytest.fixture(scope="session")
-def workspace_dir():
-    """创建临时工作空间目录"""
-    temp_dir = tempfile.mkdtemp(prefix="agent_test_")
-    yield temp_dir
-    # 清理
-    if os.path.exists(temp_dir):
-        shutil.rmtree(temp_dir, ignore_errors=True)
-
-
-@pytest.fixture
-def mock_llm():
-    """创建 Mock LLM"""
-    mock = MagicMock()
-    mock.invoke.return_value = MagicMock(
-        content="这是一个测试响应。测试完成。"
-    )
-    return mock
-
-
-@pytest.fixture
-def test_config():
-    """创建测试配置"""
-    class MockLLMConfig:
-        model_name = "gpt-4o-mini"
-        api_key = "test-key"
-        api_base = None
-        temperature = 0.7
-
-    class MockCompressionConfig:
-        max_token_limit = 4000
-        keep_recent_steps = 3
-        summary_max_chars = 300
-        compression_model = "gpt-4o-mini"
-
-    class MockAgentConfig:
-        name = "TestAgent"
-        awake_interval = 60
-        auto_backup = False
-        backup_interval = 3600
-        max_iterations = 10
-
-    class MockConfig:
-        llm = MockLLMConfig()
-        context_compression = MockCompressionConfig()
-        agent = MockAgentConfig()
-
-        def get_api_key(self):
-            return "test-key"
-
-    return MockConfig()
-
+# ============================================================================
+# 单例重置 — 最关键的熵增防护机制
+# ============================================================================
 
 @pytest.fixture(autouse=True)
-def reset_workspace_state():
-    """每个测试前后重置工作空间状态"""
+def reset_singletons():
+    """
+    每个测试前后重置所有模块级单例变量，防止测试间状态泄漏。
+
+    覆盖：
+    - StateManager (state.py)
+    - EventBus (event_bus.py)
+    - TaskManager (task_planner.py)
+    - ToolExecutor (tool_executor.py)
+    - PromptManager (prompt_manager.py)
+    """
+    # 保存并重置 state.py 单例
+    import core.infrastructure.state as _state_mod
+    _orig_state = _state_mod._state_manager
+    _state_mod._state_manager = None
+
+    # 保存并重置 event_bus.py 单例
+    import core.infrastructure.event_bus as _eb_mod
+    _orig_bus = _eb_mod._event_bus
+    _eb_mod._event_bus = None
+
+    # 保存并重置 task_planner.py 单例
+    try:
+        import core.orchestration.task_planner as _tp_mod
+        _orig_tp = _tp_mod._task_manager_instance
+        _tp_mod._task_manager_instance = None
+        _orig_tp_root = _tp_mod._task_manager_root
+        _tp_mod._task_manager_root = None
+    except ImportError:
+        pass
+
+    # 保存并重置 tool_executor.py 单例
+    try:
+        import core.infrastructure.tool_executor as _te_mod
+        _orig_te = _te_mod._tool_executor
+        _te_mod._tool_executor = None
+    except ImportError:
+        pass
+
+    # 保存并重置 prompt_manager.py 单例
+    try:
+        import core.prompt_manager.prompt_manager as _pm_mod
+        _orig_pm = _pm_mod._prompt_manager
+        _pm_mod._prompt_manager = None
+    except ImportError:
+        pass
+
     yield
-    # 测试后清理
-    import glob
-    test_files = glob.glob(os.path.join(str(PROJECT_ROOT / "workspace"), "test_*.json"))
-    for f in test_files:
-        try:
-            os.remove(f)
-        except Exception:
-            pass
+
+    # 测试后恢复原始单例（或保持 None）
+    _state_mod._state_manager = _orig_state
+    _eb_mod._event_bus = _orig_bus
+    try:
+        _tp_mod._task_manager_instance = _orig_tp
+        _tp_mod._task_manager_root = _orig_tp_root
+    except (NameError, AttributeError):
+        pass
+    try:
+        _te_mod._tool_executor = _orig_te
+    except (NameError, AttributeError):
+        pass
+    try:
+        _pm_mod._prompt_manager = _orig_pm
+    except (NameError, AttributeError):
+        pass
+
+
+# ============================================================================
+# 隔离工作空间
+# ============================================================================
+
+@pytest.fixture
+def isolated_workspace(tmp_path):
+    """
+    提供隔离的 workspace 目录结构，确保测试不触碰真实 workspace/。
+
+    目录结构：
+        tmp_path/
+        └── workspace/
+            ├── memory/
+            │   └── archives/
+            └── prompts/
+    """
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "memory").mkdir()
+    (ws / "memory" / "archives").mkdir()
+    (ws / "prompts").mkdir()
+    return ws
+
+
+# ============================================================================
+# 可复用 Mock 对象
+# ============================================================================
+
+@pytest.fixture
+def mock_llm_response():
+    """返回可自定义的 mock LLM 响应。"""
+    from unittest.mock import MagicMock
+    resp = MagicMock()
+    resp.content = "This is a test response."
+    resp.tool_calls = []
+    resp.usage_metadata = {"input_tokens": 100, "output_tokens": 50}
+    return resp
+
+
+@pytest.fixture
+def project_root():
+    """返回项目根目录（Path 对象）。"""
+    return PROJECT_ROOT

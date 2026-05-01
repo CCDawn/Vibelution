@@ -6,12 +6,11 @@
 
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from core.model_discovery import (
+from core.infrastructure.model_discovery import (
     ModelDiscovery,
     ModelInfo,
     CompressionThresholds,
     DiscoveryStatus,
-    discover_model_sync,
     get_dynamic_model_config,
 )
 
