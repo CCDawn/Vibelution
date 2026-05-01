@@ -250,6 +250,24 @@ def create_key_tools() -> List[BaseTool]:
         """
         return _web_search_impl(query=query, max_results=max_results)
 
+    @tool
+    def web_fetch_tool(url: str, max_chars: int = 8000) -> str:
+        """
+        【网页抓取】获取指定 URL 的网页内容并提取纯文本。
+
+        与 web_search_tool 的区别：search 是关键词搜索，fetch 是直接抓取 URL 内容。
+        适用于阅读文档、查看 API 响应、分析网页文章等场景。
+
+        Args:
+            url: 要抓取的完整 URL（必须以 http:// 或 https:// 开头）
+            max_chars: 最大返回字符数，默认 8000
+
+        Returns:
+            去除 HTML 标签后的纯文本内容
+        """
+        from tools.web_search_tool import web_fetch as _web_fetch
+        return _web_fetch(url=url, max_chars=max_chars)
+
     # ── 文件操作工具 ────────────────────────────────────────────────────────
 
     def _cli_tool_impl(command: str = "", timeout: int = 60) -> str:
@@ -278,6 +296,61 @@ def create_key_tools() -> List[BaseTool]:
             操作结果描述
         """
         return _enter_hibernation_impl(duration=duration)
+
+    # ── 文件读写工具 ──────────────────────────────────────────────────────
+
+    @tool
+    def read_file_tool(file_path: str, max_lines: int = 0, offset: int = 0) -> str:
+        """
+        【读取文件】读取本地文件的全部或部分内容。
+
+        比 cli_tool 更高效，支持编码自动检测、行号显示、分页读取。
+        遇到未知文件时优先使用此工具而非 cli_tool。
+
+        Args:
+            file_path: 文件路径（相对或绝对）
+            max_lines: 最大读取行数，0 表示读取全部
+            offset: 从第几行开始读取，0 表示从头开始
+
+        Returns:
+            带行号的文件内容
+        """
+        from tools.shell_tools import read_file
+        return read_file(file_path=file_path, max_lines=max_lines or None, offset=offset)
+
+    @tool
+    def write_file_tool(file_path: str, content: str) -> str:
+        """
+        【写入文件】创建或覆盖文件。
+
+        自动创建父目录，以 UTF-8 编码写入。
+
+        Args:
+            file_path: 文件路径（相对路径自动前缀 workspace/）
+            content: 文件内容
+
+        Returns:
+            写入结果（文件大小、行数）
+        """
+        from tools.shell_tools import create_file
+        return create_file(file_path=file_path, content=content)
+
+    @tool
+    def glob_tool(pattern: str, search_dir: str = ".") -> str:
+        """
+        【文件模式匹配】按 glob 模式查找文件。
+
+        支持标准 glob 模式：*.py、**/*.ts、src/**/*.md 等。
+
+        Args:
+            pattern: Glob 模式（如 "*.py", "**/*.py"）
+            search_dir: 搜索起始目录，默认当前目录
+
+        Returns:
+            JSON 格式的匹配文件列表
+        """
+        from tools.shell_tools import glob_files
+        return glob_files(pattern=pattern, search_dir=search_dir)
 
     # ── TaskManager 工具（基于 tasks.json） ─────────────────────────────
 
@@ -332,6 +405,128 @@ def create_key_tools() -> List[BaseTool]:
         """
         return _task_list_impl()
 
+    # ── 后台任务工具 ──────────────────────────────────────────────────────
+
+    @tool
+    def task_start_tool(command: str, timeout: int = 300) -> str:
+        """
+        【启动后台任务】在后台线程中执行 Shell 命令，立即返回任务 ID。
+
+        适用于长时间运行的命令（构建、安装依赖、批量测试等），
+        避免阻塞主 Agent 循环。使用 task_output_tool 获取结果。
+
+        Args:
+            command: 要执行的 Shell 命令
+            timeout: 超时时间（秒），默认 300 秒（5 分钟）
+
+        Returns:
+            包含 task_id 的 JSON，用于后续查询
+        """
+        from core.infrastructure.background_tasks import get_background_task_manager
+        mgr = get_background_task_manager()
+        return mgr.start_task(command=command, timeout=timeout)
+
+    @tool
+    def task_output_tool(task_id: str) -> str:
+        """
+        【获取后台任务输出】查询后台任务的执行状态和输出。
+
+        Args:
+            task_id: 任务 ID（来自 task_start_tool 的返回值）
+
+        Returns:
+            JSON 格式的任务状态、输出和耗时
+        """
+        from core.infrastructure.background_tasks import get_background_task_manager
+        mgr = get_background_task_manager()
+        return mgr.get_task_output(task_id=task_id)
+
+    @tool
+    def task_stop_tool(task_id: str) -> str:
+        """
+        【停止后台任务】取消正在运行的后台任务。
+
+        Args:
+            task_id: 任务 ID（来自 task_start_tool 的返回值）
+
+        Returns:
+            操作结果
+        """
+        from core.infrastructure.background_tasks import get_background_task_manager
+        mgr = get_background_task_manager()
+        return mgr.stop_task(task_id=task_id)
+
+    # ── 子代理工具 ────────────────────────────────────────────────────────
+
+    @tool
+    def agent_tool(task: str, timeout: int = 120) -> str:
+        """
+        【子代理】启动一个子 Agent 进程执行指定任务。
+
+        子 Agent 以 --auto 模式运行，完成后返回结果。
+        适用于将复杂任务分解给独立 Agent 执行的场景。
+        注意：最多嵌套 2 层，防止无限递归。
+
+        Args:
+            task: 要委托给子 Agent 的任务描述
+            timeout: 超时时间（秒），默认 120
+
+        Returns:
+            JSON 格式的子 Agent 执行结果
+        """
+        from tools.agent_tools import spawn_agent
+        return spawn_agent(task=task, timeout=timeout)
+
+    # ── Cron 定时任务工具 ──────────────────────────────────────────────────
+
+    @tool
+    def cron_create_tool(name: str, command: str, schedule: str) -> str:
+        """
+        【创建定时任务】安排命令在指定时间或间隔执行。
+
+        调度表达式：
+        - "interval:N" — 每 N 秒执行一次
+        - "*/5 * * * *" — 标准 5 字段 cron (分 时 日 月 周)
+
+        Args:
+            name: 任务名称
+            command: 要执行的 Shell 命令
+            schedule: 调度表达式（interval 或 cron）
+
+        Returns:
+            包含 job_id 的 JSON
+        """
+        from core.infrastructure.cron_scheduler import get_cron_scheduler
+        sched = get_cron_scheduler()
+        return sched.create_job(name=name, command=command, schedule=schedule)
+
+    @tool
+    def cron_list_tool() -> str:
+        """
+        【列出定时任务】查看所有已创建的定时任务及其运行状态。
+
+        Returns:
+            JSON 格式的任务列表
+        """
+        from core.infrastructure.cron_scheduler import get_cron_scheduler
+        sched = get_cron_scheduler()
+        return sched.list_jobs()
+
+    @tool
+    def cron_delete_tool(job_id: str) -> str:
+        """
+        【删除定时任务】删除指定 ID 的定时任务。
+
+        Args:
+            job_id: 任务 ID（来自 cron_create 的返回值或 cron_list 的 id 列）
+
+        Returns:
+            操作结果
+        """
+        from core.infrastructure.cron_scheduler import get_cron_scheduler
+        sched = get_cron_scheduler()
+        return sched.delete_job(job_id=job_id)
+
     return [
         # SOUL.md 核心
         commit_compressed_memory_tool,
@@ -345,11 +540,25 @@ def create_key_tools() -> List[BaseTool]:
         list_file_entities_tool,
         get_code_entity_tool,
         web_search_tool,
+        web_fetch_tool,
         # 文件操作
         cli_tool,
         enter_hibernation_tool,
+        read_file_tool,
+        write_file_tool,
+        glob_tool,
         # TaskManager（tasks.json）
         task_create_tool,
         task_update_tool,
         task_list_tool,
+        # 后台任务
+        task_start_tool,
+        task_output_tool,
+        task_stop_tool,
+        # Cron 定时
+        cron_create_tool,
+        cron_list_tool,
+        cron_delete_tool,
+        # 子代理
+        agent_tool,
     ]

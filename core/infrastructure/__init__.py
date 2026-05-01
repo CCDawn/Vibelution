@@ -23,3 +23,9 @@ from core.infrastructure.tool_result import (
 from core.infrastructure.agent_session import (
     AgentSessionState, get_session_state,
 )
+from core.infrastructure.background_tasks import (
+    BackgroundTaskManager, get_background_task_manager,
+)
+from core.infrastructure.cron_scheduler import (
+    CronScheduler, get_cron_scheduler,
+)

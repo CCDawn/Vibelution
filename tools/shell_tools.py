@@ -739,6 +739,59 @@ def list_directory(
 
 
 # ============================================================================
+# Glob 文件匹配
+# ============================================================================
+
+def glob_files(
+    pattern: str,
+    search_dir: str = ".",
+    max_results: int = 500
+) -> str:
+    """Glob 模式匹配文件路径
+
+    Args:
+        pattern: Glob 模式 (如 "*.py", "**/*.py", "src/**/*.ts")
+        search_dir: 搜索目录，默认当前目录
+        max_results: 最大返回结果数
+
+    Returns:
+        JSON 格式的匹配文件列表
+    """
+    import json
+
+    if not pattern:
+        return json.dumps({"status": "error", "code": "MISSING_PATTERN", "message": "glob pattern 不能为空"})
+
+    try:
+        base = Path(search_dir).resolve()
+        if not base.exists():
+            return json.dumps({"status": "error", "code": "DIR_NOT_FOUND", "message": f"目录不存在: {search_dir}"})
+
+        matches = []
+        for p in base.glob(pattern):
+            if p.is_file():
+                matches.append({
+                    "path": str(p),
+                    "name": p.name,
+                    "size": p.stat().st_size,
+                })
+            if len(matches) >= max_results:
+                break
+
+        return json.dumps({
+            "status": "success",
+            "pattern": pattern,
+            "search_dir": str(base),
+            "count": len(matches),
+            "truncated": len(matches) >= max_results,
+            "files": matches,
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"status": "error", "code": "GLOB_ERROR", "message": str(e)})
+
+
+# ============================================================================
 # 文件创建操作
 # ============================================================================
 
@@ -1268,6 +1321,7 @@ __all__ = [
     'list_directory',
     'create_file',
     'edit_file',
+    'glob_files',
     'extract_symbols',
     # 项目管理
     'backup_project',

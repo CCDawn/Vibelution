@@ -19,6 +19,9 @@ from tools.shell_tools import (
     run_batch as run_batch_tool,
     self_test as self_test_tool,
     get_agent_status as get_agent_status_tool,
+    read_file as read_file_tool,
+    create_file as create_file_tool,
+    glob_files as glob_files_tool,
 )
 
 # ============================================================================
@@ -92,10 +95,16 @@ from tools.token_manager import (
 )
 
 # ============================================================================
+# Agent 工具
+# ============================================================================
+from tools.agent_tools import spawn_agent as spawn_agent_tool
+
+# ============================================================================
 # 网络搜索工具
 # ============================================================================
 from tools.web_search_tool import web_search_tool as web_search_tool
 from tools.web_search_tool import web_search as web_search_impl
+from tools.web_search_tool import web_fetch as web_fetch_tool
 
 __all__ = [
     # Shell 工具
@@ -109,6 +118,9 @@ __all__ = [
     "run_batch_tool",
     "self_test_tool",
     "get_agent_status_tool",
+    "read_file_tool",
+    "create_file_tool",
+    "glob_files_tool",
     # 记忆工具
     "read_memory_tool",
     "commit_compressed_memory_tool",
@@ -153,7 +165,10 @@ __all__ = [
     "estimate_messages_tokens_tool",
     "MessagePriority",
     "format_compression_report_tool",
+    # Agent 工具
+    "spawn_agent_tool",
     # 网络搜索工具
     "web_search_tool",
     "web_search_impl",
+    "web_fetch_tool",
 ]

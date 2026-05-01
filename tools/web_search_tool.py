@@ -197,6 +197,70 @@ def web_search(query: str, max_results: int = 10) -> str:
 
 
 # ============================================================================
+# 网页内容抓取
+# ============================================================================
+
+def web_fetch(url: str, max_chars: int = 8000) -> str:
+    """
+    获取网页内容并返回纯文本
+
+    Args:
+        url: 要抓取的网页 URL
+        max_chars: 最大返回字符数，默认 8000
+
+    Returns:
+        网页文本内容（已去除 HTML 标签）
+    """
+    import re
+
+    if not url or not url.strip():
+        return "[错误] URL 不能为空"
+
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        return f"[错误] URL 必须以 http:// 或 https:// 开头: {url}"
+
+    try:
+        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            response = client.get(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; Vibelution/1.0; +https://github.com/Vibelution)"
+                },
+            )
+            response.raise_for_status()
+            html = response.text
+    except httpx.ConnectError:
+        return f"[错误] 无法连接到服务器: {url}"
+    except httpx.TimeoutException:
+        return f"[错误] 请求超时 (30s): {url}"
+    except httpx.HTTPStatusError as e:
+        return f"[错误] HTTP {e.response.status_code}: {url}"
+    except Exception as e:
+        return f"[错误] 请求失败: {type(e).__name__}: {e}"
+
+    # 去除 HTML 标签
+    text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'&nbsp;', ' ', text)
+    text = re.sub(r'&amp;', '&', text)
+    text = re.sub(r'&lt;', '<', text)
+    text = re.sub(r'&gt;', '>', text)
+    text = re.sub(r'&quot;', '"', text)
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    text = text.strip()
+
+    if len(text) > max_chars:
+        text = text[:max_chars] + f"\n\n... [截断，原内容 {len(text)} 字符]"
+
+    if not text:
+        return f"[网页抓取] URL 内容为空: {url}"
+
+    return f"[网页内容] {url}\n\n{text}"
+
+
+# ============================================================================
 # LangChain @tool 装饰器接口（供 Key_Tools.py 使用）
 # ============================================================================
 
