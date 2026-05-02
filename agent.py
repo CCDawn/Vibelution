@@ -63,7 +63,7 @@ from tools.rebirth_tools import trigger_self_restart_tool, handle_restart_reques
 from core.ui.cli_ui import get_ui, ui_error
 from core.ui.token_display import print_tokens
 
-from core.prompt_manager import get_prompt_manager
+from core.prompt_manager import get_prompt_manager, to_string
 
 # 导入宠物系统
 from core.pet_system import get_pet_system
@@ -248,8 +248,10 @@ class SelfEvolvingAgent:
             True: 继续运行, False: 触发重启, "hibernated": 休眠后继续
         """
         ui = get_ui()
-        system_prompt, _ = self.prompt_manager.build()
+        sp = self.prompt_manager.build()
+        system_prompt = to_string(sp)
         messages = [SystemMessage(content=system_prompt)]
+        self._cached_system_prompt = system_prompt
 
         # 获取轮次编号
         if user_prompt:
@@ -258,7 +260,7 @@ class SelfEvolvingAgent:
             current_turn = logger._turn_count + 1
             # 无外部输入时使用默认提示
             if user_prompt is None:
-                user_prompt = "请执行当前世代的开发任务。"
+                user_prompt = "开始进化吧"
 
         # 首次对话写入 System Prompt
         if not self._system_prompt_written:
@@ -275,8 +277,12 @@ class SelfEvolvingAgent:
         try:
             consecutive_failures = 0
             for iteration in range(1, max_iterations + 1):
-                current_prompt, _ = self.prompt_manager.build()
-                messages[0] = SystemMessage(content=current_prompt)
+                # 仅在组件/状态变化时重建系统提示词（由缓存自动判断命中/失效）
+                current_sp = self.prompt_manager.build()
+                current_prompt = to_string(current_sp)
+                if current_prompt != self._cached_system_prompt:
+                    messages[0] = SystemMessage(content=current_prompt)
+                    self._cached_system_prompt = current_prompt
                 response = self._invoke_llm(messages)
                 if response is None:
                     consecutive_failures += 1
