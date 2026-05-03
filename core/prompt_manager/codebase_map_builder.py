@@ -1,17 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-core/capabilities/codebase_map_builder.py - AST 扫描 + 代码库地图生成
+代码库结构地图 — AST 扫描 + 增量更新 + 变更日志
 
 职责：
-- 扫描 tools/、core/、tests/ 目录下的 .py 文件
-- 对每个文件调用 AST 工具获取类/函数骨架
-- 组装 Markdown 树，写入 workspace/prompts/codebase_map.md
-- 提供缓存失效机制（TTL=24h + 文件变更检测）
-
-导出函数：
-- scan_and_build_codebase_map(project_root, force=False) -> str
-- should_rescan(project_root) -> bool
-- get_codebase_map() -> str
+- 扫描 tools/、core/、tests/、config/ 及根目录 .py 文件
+- 对每个文件调用 AST 获取类/函数骨架
+- 写入 workspace/prompts/CODEBASE_MAP.md 供提示词章节读取
+- 支持增量更新：单文件变更时只更新对应条目
+- 维护最近变更日志（最多 10 条）
 """
 
 from __future__ import annotations
@@ -19,33 +15,56 @@ from __future__ import annotations
 import os
 import re
 import hashlib
+import threading
+import time
+from collections import defaultdict
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Optional, Set
+from datetime import datetime
+from typing import Optional, List, Dict
 
 from core.logging import debug_logger
 
-# 扫描范围：相对项目根目录的子目录
-_SCAN_DIRS = ["tools", "core", "tests"]
+_SCAN_DIRS = ["tools", "core", "tests", "config"]
 
-# 排除的文件（不扫描）
 _EXCLUDE_FILES = {
     "__pycache__",
-    "__init__.py",          # 空 __init__ 不值得在地图中单独列
+    "__init__.py",
     "conftest.py",
     "__init__.cpython",
 }
 
-# 缓存 TTL = 24 小时
 _CACHE_TTL_HOURS = 24
 
+# ── 变更日志（内存中，最多保留 10 条）──────────────────────────────
+_change_log: List[Dict[str, str]] = []
+_change_log_lock = threading.Lock()
 
-# =============================================================================
-# 路径解析（与 workspace_manager.py 保持一致）
-# =============================================================================
+
+def _record_change(filepath: str, action: str = "modified"):
+    """记录一次文件变更（线程安全）。"""
+    global _change_log
+    with _change_log_lock:
+        _change_log.insert(0, {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "file": filepath,
+            "action": action,
+        })
+        if len(_change_log) > 10:
+            _change_log.pop()
+
+
+def _get_change_log_entries() -> List[Dict[str, str]]:
+    """获取变更日志快照。"""
+    with _change_log_lock:
+        return list(_change_log)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 路径解析
+# ═══════════════════════════════════════════════════════════════════════════════
+
 
 def _resolve_project_root() -> Path:
-    """推断项目根目录"""
     p = Path(__file__).parent.parent.parent.resolve()
     if (p / "agent.py").exists():
         return p
@@ -58,7 +77,6 @@ def _resolve_project_root() -> Path:
 
 
 def _get_prompts_dir() -> Path:
-    """获取 workspace/prompts/ 路径"""
     project_root = _resolve_project_root()
     prompts_dir = project_root / "workspace" / "prompts"
     prompts_dir.mkdir(parents=True, exist_ok=True)
@@ -66,58 +84,66 @@ def _get_prompts_dir() -> Path:
 
 
 def _get_codebase_map_path() -> Path:
-    """获取 codebase_map.md 路径"""
-    return _get_prompts_dir() / "codebase_map.md"
+    return _get_prompts_dir() / "CODEBASE_MAP.md"
 
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
 # AST 扫描
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def _list_file_entities_fast(file_path: Path) -> Optional[dict]:
-    """
-    快速获取文件实体骨架（绕过工具层，直接调 AST）。
 
-    Returns:
-        dict with keys: classes (list), functions (list)
-        每个元素: {"name": str, "lineno": int}
-        返回 None 表示解析失败
-    """
+def _scan_file(file_path: Path) -> Optional[dict]:
+    """Parse a .py file: docstring, project-internal imports, line count, test counts."""
     try:
         import ast
         with open(file_path, "r", encoding="utf-8") as f:
             source = f.read()
         tree = ast.parse(source, filename=str(file_path))
 
-        classes = []
-        functions = []
+        doc = ast.get_docstring(tree)
+        docstring = doc.split("\n")[0].strip() if doc else ""
 
-        for node in ast.walk(tree):
+        _INTERNAL = ("core", "tools", "config")
+        imports: List[str] = []
+        n_classes = 0
+        n_functions = 0
+        n_methods = 0
+        for node in ast.iter_child_nodes(tree):
             if isinstance(node, ast.ClassDef):
-                methods = [
-                    n.name for n in node.body
-                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                ]
-                classes.append({
-                    "name": node.name,
-                    "lineno": node.lineno,
-                    "methods": methods,
-                })
+                n_classes += 1
+                n_methods += sum(1 for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)))
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                # 忽略嵌套在类/函数内部的定义（只取顶层）
-                functions.append({
-                    "name": node.name,
-                    "lineno": node.lineno,
-                })
+                n_functions += 1
+            # Collect imports (same pass)
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if any(alias.name.startswith(p) for p in _INTERNAL):
+                        imports.append(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module and any(node.module.startswith(p) for p in _INTERNAL):
+                    imports.append(node.module)
 
-        return {"classes": classes, "functions": functions}
+        return {
+            "line_count": len(source.splitlines()),
+            "docstring": docstring,
+            "imports": list(dict.fromkeys(imports)),
+            "n_classes": n_classes,
+            "n_tests": n_methods + n_functions,
+        }
     except Exception:
         return None
 
 
-def _collect_python_files(project_root: Path) -> list[Path]:
-    """收集所有需要扫描的 .py 文件"""
-    files: list[Path] = []
+def _collect_python_files(project_root: Path) -> List[Path]:
+    """收集所有需要扫描的 .py 文件（含根目录）。"""
+    files: List[Path] = []
+
+    # 根目录 .py 文件
+    for fpath in project_root.glob("*.py"):
+        if fpath.name not in _EXCLUDE_FILES:
+            files.append(fpath)
+
+    # 子目录
     for scan_dir in _SCAN_DIRS:
         dir_path = project_root / scan_dir
         if not dir_path.is_dir():
@@ -129,7 +155,6 @@ def _collect_python_files(project_root: Path) -> list[Path]:
                 if fname in _EXCLUDE_FILES:
                     continue
                 fpath = Path(root) / fname
-                # 排除 __pycache__ 目录
                 if "__pycache__" in str(fpath):
                     continue
                 files.append(fpath)
@@ -137,46 +162,196 @@ def _collect_python_files(project_root: Path) -> list[Path]:
 
 
 def _build_file_entry(fpath: Path, rel_root: Path) -> str:
-    """为单个文件构建地图条目"""
-    entities = _list_file_entities_fast(fpath)
+    """Build a single file's map entry — description and imports only (no class/function listing)."""
+    info = _scan_file(fpath)
     rel_path = fpath.relative_to(rel_root).as_posix()
-    lines = [f"**`{rel_path}`**"]
+    if info is None:
+        return f"**`{rel_path}`**  _(parse failed)_"
 
-    if entities is None:
-        lines.append("  _(解析失败)_")
-        return "\n".join(lines)
+    lc = info["line_count"]
+    doc = info["docstring"]
+    desc = f" — {doc}" if doc else " — _(无描述)_"
+    lines = [f"**`{rel_path}`** ({lc}行){desc}"]
 
-    parts: list[str] = []
+    imps = info["imports"]
+    if imps:
+        shown = imps[:5]
+        imp_str = "  imports: " + ", ".join(shown)
+        if len(imps) > 5:
+            imp_str += f" +{len(imps) - 5}more"
+        lines.append(imp_str)
 
-    for cls in entities.get("classes", []):
-        methods = cls.get("methods", [])
-        method_str = ""
-        if methods:
-            method_str = f" [{', '.join(methods)}]"
-        parts.append(f"  class {cls['name']}{method_str}")
-
-    for fn in entities.get("functions", []):
-        parts.append(f"  def {fn['name']}")
-
-    if parts:
-        lines.append("\n".join(parts))
-    else:
-        lines.append("  _(空模块)_")
+    # Test files: show class/test count
+    if "tests/" in rel_path or rel_path.startswith("test_"):
+        lines.append(f"  {info['n_classes']} test classes, {info['n_tests']} tests")
 
     return "\n".join(lines)
 
 
-# =============================================================================
-# 核心函数
-# =============================================================================
+def _get_agent_py_lines(project_root: Path) -> int:
+    """获取 agent.py 当前行数。"""
+    agent_py = project_root / "agent.py"
+    if agent_py.exists():
+        try:
+            return len(agent_py.read_text(encoding="utf-8").splitlines())
+        except Exception:
+            pass
+    return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 子系统概览（自动发现，非硬编码——新增目录自动出现）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Risk level heuristics — matches path prefix; first match wins. New dirs default to "safe".
+_RISK_RULES = [
+    ("core/infrastructure",   "core"),
+    ("core/prompt_manager",   "core"),
+    ("core/orchestration",    "core"),
+    ("core/restarter_manager","core"),
+    ("config",                "careful"),
+    ("tools",                 "modifiable"),
+]
+
+# Human-readable labels for known directories. Unknown dirs show their relative path.
+_SUBSYSTEM_LABELS = {
+    "core/infrastructure":    "基础设施 (状态/事件/安全)",
+    "core/prompt_manager":    "提示词引擎 (组装/缓存/代码地图)",
+    "core/orchestration":     "任务编排 (TaskPlanner)",
+    "core/restarter_manager": "自我重启守护进程",
+    "core/logging":           "日志系统",
+    "core/ui":                "CLI 交互界面",
+    "core/pet_system":        "宠物系统 (10 大子系统)",
+    "tools":                  "Agent 工具集",
+    "config":                 "配置系统 (Pydantic+TOML)",
+    "tests":                  "测试套件",
+}
+
+
+def _classify_risk(rel_path: str) -> str:
+    for prefix, risk in _RISK_RULES:
+        if rel_path.startswith(prefix):
+            return risk
+    return "safe"
+
+
+def _build_overview(project_root: Path, by_parent, root_files) -> str:
+    """Auto-discover subsystems from actual directory structure (not hardcoded)."""
+    # Aggregate all parent dirs we know about
+    all_by_parent = dict(by_parent)
+    all_by_parent[project_root] = root_files
+
+    # Build (rel_prefix, count, risk) from what actually exists on disk
+    seen: Dict[str, tuple] = {}  # rel_prefix -> (count, risk)
+    for parent, flist in all_by_parent.items():
+        try:
+            rel = parent.relative_to(project_root).as_posix()
+        except ValueError:
+            continue
+        if rel == ".":
+            continue  # root files handled separately in the map
+        if "/" not in rel:
+            # Top-level scan dir (tools, tests, config, core)
+            prefix = rel
+        else:
+            # Subdirectory under a scan dir (core/infrastructure, core/pet_system/subsystems, etc.)
+            # Roll up into the first-level subdir for the overview
+            prefix = "/".join(rel.split("/")[:2]) if rel.startswith("core/") else rel.split("/")[0]
+
+        if prefix not in seen:
+            seen[prefix] = (0, _classify_risk(rel))
+        count, risk = seen[prefix]
+        seen[prefix] = (count + len(flist), risk)
+
+    lines = ["## 子系统概览", "", "| 子系统 | 路径 | 文件 | 风险 |", "|--------|------|------|------|"]
+    # Sort: core dirs first, then by risk level, then alphabetically
+    _risk_order = {"core": 0, "careful": 1, "modifiable": 2, "safe": 3}
+    for prefix, (count, risk) in sorted(seen.items(), key=lambda x: (_risk_order.get(x[1][1], 4), x[0])):
+        label = _SUBSYSTEM_LABELS.get(prefix, prefix)
+        lines.append(f"| {label} | `{prefix}/` | {count} | `{risk}` |")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _build_reverse_deps(files: List[Path], project_root: Path) -> str:
+    """Compute reverse dependency ranking: which project modules are imported by the most files."""
+    imported_by: Dict[str, List[str]] = defaultdict(list)
+    for fpath in files:
+        info = _scan_file(fpath)
+        if info is None:
+            continue
+        rel = fpath.relative_to(project_root).as_posix()
+        for imp in info["imports"]:
+            imported_by[imp].append(rel)
+
+    ranked = sorted(imported_by.items(), key=lambda x: -len(x[1]))[:10]
+    if not ranked:
+        return ""
+
+    lines = ["## 核心依赖 (被依赖最多的模块 Top-10)", ""]
+    for module, deps in ranked:
+        n = len(deps)
+        # Resolve module name to real path (handle packages vs modules)
+        parts = module.split(".")
+        as_file = project_root / (module.replace(".", "/") + ".py")
+        as_pkg = project_root / (module.replace(".", "/"))
+        if as_file.exists():
+            target = module.replace(".", "/") + ".py"
+        elif as_pkg.is_dir():
+            target = module.replace(".", "/") + "/"
+        else:
+            target = module  # fallback: show as dotted name
+        dep_sample = ", ".join(deps[:3])
+        if len(deps) > 3:
+            dep_sample += " …"
+        lines.append(f"- `{target}` ← {n} 文件 ({dep_sample})")
+
+    return "\n".join(lines) + "\n"
+
+
+def _build_test_coverage(files: List[Path], project_root: Path) -> str:
+    """Check which source files have corresponding test files. Show uncovered ones."""
+    tests_dir = project_root / "tests"
+    if not tests_dir.is_dir():
+        return ""
+
+    uncovered: List[str] = []
+    for fpath in files:
+        rel = fpath.relative_to(project_root).as_posix()
+        if rel.startswith("tests/") or rel.endswith("/__init__.py"):
+            continue
+        stem = Path(rel).stem
+        test_file = tests_dir / f"test_{stem}.py"
+        if not test_file.exists():
+            # Check for alternative naming patterns
+            alt_names = [
+                tests_dir / f"test_{stem.replace('_', '')}.py",
+                tests_dir / f"test_{stem.rsplit('_', 1)[-1]}.py",
+            ]
+            if not any(alt.exists() for alt in alt_names):
+                uncovered.append(rel)
+
+    if not uncovered:
+        return "## 测试覆盖 ✓ — 所有源文件均有对应测试\n"
+
+    lines = ["## 无测试覆盖", ""]
+    for rel in uncovered:
+        lines.append(f"- `{rel}`")
+    return "\n".join(lines) + "\n"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 核心：全量构建
+# ═══════════════════════════════════════════════════════════════════════════════
+
 
 def scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool = False) -> str:
-    """
-    扫描代码库，生成 codebase_map.md。
+    """扫描代码库，生成/更新 CODEBASE_MAP.md。
 
     Args:
         project_root: 项目根目录（默认自动推断）
-        force: True 时强制重新扫描，忽略缓存
+        force: True 时强制重新扫描
 
     Returns:
         生成的地图内容（Markdown 字符串）
@@ -185,70 +360,134 @@ def scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool
         project_root = _resolve_project_root()
 
     files = _collect_python_files(project_root)
+    total_files = len(files)
 
     # 按目录分组，目录内按文件名排序
-    from collections import defaultdict
-    by_dir: defaultdict[Path, list[Path]] = defaultdict(list)
+    by_parent: defaultdict[Path, List[Path]] = defaultdict(list)
+    root_files: List[Path] = []
+
     for f in files:
-        by_dir[f.parent].append(f)
-    for d in by_dir:
-        by_dir[d].sort(key=lambda p: p.name)
+        parent = f.parent
+        if parent == project_root:
+            root_files.append(f)
+        else:
+            by_parent[parent].append(f)
+    for d in by_parent:
+        by_parent[d].sort(key=lambda p: p.name)
+    root_files.sort(key=lambda p: p.name)
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    lines: list[str] = [
+    agent_lines = _get_agent_py_lines(project_root)
+    changes = _get_change_log_entries()
+
+    lines: List[str] = [
+        "---",
+        "name: CODEBASE_MAP",
+        "priority: 30",
+        "description: 代码库结构地图，文件修改后自动更新",
+        f"last_updated: {timestamp}",
+        f"agent_py_lines: {agent_lines}",
+        f"total_files: {total_files}",
+        "---",
+        "",
         "# 代码库结构地图",
         "",
-        f"_自动生成于 {timestamp}，TTL=24h 或代码变更时自动刷新_",
-        "",
-        "---",
+        f"_更新: {timestamp} | agent.py: {agent_lines}行 | {total_files}文件_",
         "",
     ]
 
-    # 按扫描目录顺序输出
-    scan_root_map = {project_root / d: d for d in _SCAN_DIRS}
+    # ── 最近变更 ──
+    if changes:
+        lines.append("## 最近变更")
+        lines.append("")
+        for c in changes[:8]:
+            lines.append(f"- `{c['time']}` {c['action']}: `{c['file']}`")
+        lines.append("")
 
+    # ── 子系统概览 ──
+    lines.append(_build_overview(project_root, by_parent, root_files))
+
+    # ── 核心依赖 ──
+    rev_deps = _build_reverse_deps(files, project_root)
+    if rev_deps:
+        lines.append(rev_deps)
+
+    # ── 测试覆盖 ──
+    coverage = _build_test_coverage(files, project_root)
+    if coverage:
+        lines.append(coverage)
+
+    lines.append("---")
+    lines.append("")
+
+    # ── 根目录文件 ──
+    if root_files:
+        lines.append("## 📄 根目录")
+        lines.append("")
+        for fpath in root_files:
+            lines.append(_build_file_entry(fpath, project_root))
+            lines.append("")
+        lines.append("---")
+        lines.append("")
+
+    # ── 按扫描目录顺序输出（支持嵌套子目录）──
     for scan_dir in _SCAN_DIRS:
         dir_path = project_root / scan_dir
-        if dir_path not in by_dir:
+        if not dir_path.is_dir():
+            continue
+
+        # 收集该扫描目录下所有 by_parent 条目
+        sub_groups: Dict[str, List[Path]] = {}
+        for parent, flist in by_parent.items():
+            try:
+                parent_rel = parent.relative_to(dir_path)
+            except ValueError:
+                continue
+            key = "" if parent_rel == Path(".") else parent_rel.as_posix()
+            sub_groups.setdefault(key, []).extend(flist)
+
+        if not sub_groups:
             continue
 
         label = scan_dir.upper()
         lines.append(f"## 📁 {label}/")
         lines.append("")
 
-        for fpath in by_dir[dir_path]:
-            entry = _build_file_entry(fpath, project_root)
-            lines.append(entry)
+        # 直接在该目录下的文件（无子目录）
+        for fpath in sorted(sub_groups.pop("", []), key=lambda p: p.name):
+            lines.append(_build_file_entry(fpath, project_root))
             lines.append("")
+
+        # 子目录按名称排序
+        for subdir in sorted(sub_groups.keys()):
+            sub_label = f"{scan_dir}/{subdir}"
+            lines.append(f"### 📂 {sub_label}/")
+            lines.append("")
+            for fpath in sorted(sub_groups[subdir], key=lambda p: p.name):
+                lines.append(_build_file_entry(fpath, project_root))
+                lines.append("")
 
         lines.append("---")
         lines.append("")
 
     content = "\n".join(lines).strip()
+
+    # 写入文件
     map_path = _get_codebase_map_path()
-
-    # 写入文件（保留已有的 YAML front matter）
-    front_matter = ""
-    if map_path.exists():
-        try:
-            existing = map_path.read_text(encoding="utf-8")
-            match = re.match(r'^---\s*\n.*?\n---(\n)?', existing, re.DOTALL)
-            if match:
-                front_matter = match.group(0)
-        except Exception:
-            pass
-
-    final_content = (front_matter + content).strip()
-    if front_matter:
-        final_content += "\n"
-
     try:
-        map_path.write_text(final_content, encoding="utf-8")
-        debug_logger.info(f"[CodebaseMapBuilder] 地图已写入（保留 front matter）: {map_path}")
+        map_path.write_text(content, encoding="utf-8")
+        debug_logger.info(f"[CodebaseMap] 地图已写入: {map_path}")
     except Exception as e:
-        debug_logger.warning(f"[CodebaseMapBuilder] 写入失败: {e}")
+        debug_logger.warning(f"[CodebaseMap] 写入失败: {e}")
 
-    # 写入 .meta 文件记录扫描时间戳和文件列表哈希
+    # 写入 .meta 文件
+    _write_meta(map_path, files, timestamp)
+
+    return content
+
+
+def _write_meta(map_path: Path, files: List[Path], timestamp: str):
+    """写入 .meta 缓存文件。"""
     try:
         meta_path = map_path.with_suffix(".meta")
         file_list_hash = hashlib.md5(
@@ -261,16 +500,198 @@ def scan_and_build_codebase_map(project_root: Optional[Path] = None, force: bool
     except Exception:
         pass
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 增量更新
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def incremental_update_file(filepath: str) -> bool:
+    """增量更新单个文件的条目。
+
+    当文件被修改时调用。重新扫描该文件并替换 CODEBASE_MAP.md 中对应条目。
+    若文件不存在（已删除），则移除对应条目。
+
+    Args:
+        filepath: 相对于项目根目录的文件路径
+
+    Returns:
+        True 表示更新成功
+    """
+    project_root = _resolve_project_root()
+    abs_path = project_root / filepath
+
+    _record_change(filepath, "modified")
+
+    # 只处理 .py 文件
+    if not filepath.endswith(".py"):
+        # 非 .py 文件变更可能导致目录结构变化，触发全量重建
+        return _schedule_rebuild()
+
+    map_path = _get_codebase_map_path()
+    if not map_path.exists():
+        return _schedule_rebuild()
+
+    try:
+        existing = map_path.read_text(encoding="utf-8")
+    except Exception:
+        return _schedule_rebuild()
+
+    # 文件被删除 → 移除条目
+    if not abs_path.exists():
+        _record_change(filepath, "deleted")
+        new_content = _remove_file_entry_from_map(existing, filepath)
+        if new_content != existing:
+            _update_map_file(map_path, new_content, project_root)
+            return True
+        return _schedule_rebuild()
+
+    # 文件被修改 → 重建该条目并替换
+    new_entry = _build_file_entry(abs_path, project_root)
+    new_content = _replace_file_entry_in_map(existing, filepath, new_entry)
+    if new_content != existing:
+        existing = new_content
+    # 始终更新时间戳和变更日志
+    _update_map_file(map_path, existing, project_root)
+    return True
+
+
+def incremental_add_file(filepath: str) -> bool:
+    """新增文件时更新地图。
+
+    Args:
+        filepath: 相对于项目根目录的文件路径
+    """
+    _record_change(filepath, "added")
+
+    map_path = _get_codebase_map_path()
+    if not map_path.exists():
+        return _schedule_rebuild()
+
+    # 新文件 → 全量重建以正确处理目录结构
+    return _schedule_rebuild()
+
+
+def _update_map_file(map_path: Path, new_content: str, project_root: Path):
+    """更新地图文件内容（同步 front matter 中的元数据）。"""
+    agent_lines = _get_agent_py_lines(project_root)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # 更新 front matter 中的时间戳和行数
+    new_content = re.sub(
+        r'last_updated: .*',
+        f'last_updated: {timestamp}',
+        new_content
+    )
+    new_content = re.sub(
+        r'agent_py_lines: \d+',
+        f'agent_py_lines: {agent_lines}',
+        new_content
+    )
+    # 更新下方摘要行
+    new_content = re.sub(
+        r'_更新: .*_',
+        f'_更新: {timestamp} | agent.py: {agent_lines}行_',
+        new_content
+    )
+
+    # 更新变更日志部分
+    new_content = _update_change_log_section(new_content)
+
+    try:
+        map_path.write_text(new_content, encoding="utf-8")
+        debug_logger.info(f"[CodebaseMap] 增量更新完成")
+    except Exception as e:
+        debug_logger.warning(f"[CodebaseMap] 增量写入失败: {e}")
+
+
+def _replace_file_entry_in_map(content: str, filepath: str, new_entry: str) -> str:
+    """在地图内容中替换单个文件的条目。"""
+    escaped = re.escape(filepath)
+    # 匹配 `filepath` (NNN行) 开头的行，到下一个空行或 **` 或 ##
+    pattern = rf'\*\*`{escaped}`\*\*.*?(?=\n\n|\n\*\*`|\n##|\n---|\Z)'
+    replacement = new_entry
+    if re.search(pattern, content, re.DOTALL):
+        return re.sub(pattern, replacement, content, flags=re.DOTALL)
+    # 未找到精确匹配，尝试只匹配文件名
+    fname = Path(filepath).name
+    pattern2 = rf'\*\*`[^`]*{re.escape(fname)}`\*\*.*?(?=\n\n|\n\*\*`|\n##|\n---|\Z)'
+    if re.search(pattern2, content, re.DOTALL):
+        return re.sub(pattern2, replacement, content, flags=re.DOTALL)
     return content
 
 
+def _remove_file_entry_from_map(content: str, filepath: str) -> str:
+    """从地图内容中移除文件条目。"""
+    escaped = re.escape(filepath)
+    pattern = rf'\*\*`{escaped}`\*\*.*?(?=\n\n|\n\*\*`|\n##|\n---|\Z)\n*'
+    return re.sub(pattern, '', content, flags=re.DOTALL)
+
+
+def _update_change_log_section(content: str) -> str:
+    """更新地图中的变更日志部分。"""
+    changes = _get_change_log_entries()
+    if not changes:
+        return content
+
+    change_lines = ["## 最近变更", ""]
+    for c in changes[:8]:
+        change_lines.append(f"- `{c['time']}` {c['action']}: `{c['file']}`")
+
+    new_section = "\n".join(change_lines)
+
+    # 替换现有的变更日志部分
+    pattern = r'## 最近变更\n\n(?:- .*\n)*'
+    if re.search(pattern, content):
+        return re.sub(pattern, new_section + "\n", content)
+    # 没有变更日志部分，插入到标题后
+    return content.replace(
+        "---\n\n",
+        "---\n\n" + new_section + "\n\n---\n\n",
+        1,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 调度重建
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_rebuild_scheduled = False
+_rebuild_lock = threading.Lock()
+_rebuild_timer: Optional[threading.Timer] = None
+
+
+def _schedule_rebuild(delay: float = 2.0) -> bool:
+    """延迟调度全量重建（防抖：多次调用只触发一次）。"""
+    global _rebuild_scheduled, _rebuild_timer
+    with _rebuild_lock:
+        if _rebuild_timer is not None:
+            _rebuild_timer.cancel()
+        _rebuild_timer = threading.Timer(delay, _do_rebuild)
+        _rebuild_timer.daemon = True
+        _rebuild_timer.start()
+        _rebuild_scheduled = True
+    return True
+
+
+def _do_rebuild():
+    """执行后台全量重建。"""
+    try:
+        scan_and_build_codebase_map()
+    except Exception:
+        pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 缓存验证
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
 def should_rescan(project_root: Optional[Path] = None) -> bool:
-    """
-    检查是否需要重新扫描。
+    """检查是否需要重新扫描。
 
     Returns:
         True = 需要扫描（文件不存在 / 已过期 / 代码有变更）
-        False = 缓存有效，跳过扫描
     """
     if project_root is None:
         project_root = _resolve_project_root()
@@ -281,15 +702,13 @@ def should_rescan(project_root: Optional[Path] = None) -> bool:
 
     # 检查 TTL
     try:
-        import time
         age_seconds = time.time() - map_path.stat().st_mtime
         if age_seconds > _CACHE_TTL_HOURS * 3600:
-            debug_logger.debug("[CodebaseMapBuilder] 缓存已过期，需要重新扫描")
             return True
     except Exception:
         return True
 
-    # 检查代码文件是否变更（与 meta 中的文件列表哈希对比）
+    # 检查代码文件是否变更
     try:
         meta_path = map_path.with_suffix(".meta")
         if meta_path.exists():
@@ -302,7 +721,6 @@ def should_rescan(project_root: Optional[Path] = None) -> bool:
                 if line.startswith("file_hash="):
                     cached_hash = line.split("=", 1)[1].strip()
                     if current_hash != cached_hash:
-                        debug_logger.debug("[CodebaseMapBuilder] 代码文件有变更，需要重新扫描")
                         return True
                     break
     except Exception:
@@ -311,34 +729,109 @@ def should_rescan(project_root: Optional[Path] = None) -> bool:
     return False
 
 
+def _strip_front_matter(content: str) -> str:
+    """剥离 YAML front matter（--- ... ---），保留正文供提示词使用。"""
+    if content.startswith("---\n"):
+        idx = content.find("\n---\n", 4)
+        if idx != -1:
+            return content[idx + 5:].lstrip()
+    return content
+
+
 def get_codebase_map(force_refresh: bool = False) -> str:
-    """
-    获取代码库地图（优先读取缓存）。
+    """获取代码库地图（优先读取缓存，不含 YAML front matter）。
 
     Args:
         force_refresh: True 时强制重新扫描
 
     Returns:
-        地图内容字符串
+        地图内容字符串（已剥离 front matter）
     """
     if force_refresh or should_rescan():
-        return scan_and_build_codebase_map()
+        content = scan_and_build_codebase_map()
     else:
         map_path = _get_codebase_map_path()
         if map_path.exists():
             try:
-                return map_path.read_text(encoding="utf-8")
+                content = map_path.read_text(encoding="utf-8")
             except Exception:
-                pass
-        return scan_and_build_codebase_map()
+                content = scan_and_build_codebase_map()
+        else:
+            content = scan_and_build_codebase_map()
+    return _strip_front_matter(content)
 
 
-# =============================================================================
-# 便捷入口
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# 工具入口（供 ToolExecutor 钩子调用）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_FILE_MODIFYING_TOOLS = {
+    "write_file_tool",
+    "write_file",
+    "edit_file",
+    "replace_in_file",
+    "create_file",
+}
+
+
+def is_file_modifying_tool(tool_name: str) -> bool:
+    """判断工具是否会修改文件。"""
+    return tool_name in _FILE_MODIFYING_TOOLS
+
+
+def extract_file_path(tool_name: str, tool_args: dict) -> Optional[str]:
+    """从工具参数中提取被修改的文件路径。
+
+    Args:
+        tool_name: 工具名称
+        tool_args: 工具参数字典
+
+    Returns:
+        相对文件路径，或 None
+    """
+    filepath = tool_args.get("file_path") or tool_args.get("path") or ""
+    if not filepath:
+        return None
+
+    # 标准化为相对路径
+    project_root = _resolve_project_root()
+    try:
+        abs_path = Path(filepath).resolve()
+        rel_path = abs_path.relative_to(project_root).as_posix()
+        return rel_path
+    except (ValueError, OSError):
+        return filepath
+
+
+def on_file_modified(filepath: str):
+    """文件修改后的回调（由 ToolExecutor 钩子调用）。
+
+    在后台线程中执行增量更新，不阻塞主循环。
+    """
+    if not filepath.endswith(".py"):
+        return
+    # 只追踪项目内的 Python 文件
+    if any(part.startswith(".") for part in Path(filepath).parts):
+        return
+    if "workspace" in filepath or "log_info" in filepath or "__pycache__" in filepath:
+        return
+
+    # 后台线程执行增量更新
+    t = threading.Thread(
+        target=lambda: incremental_update_file(filepath),
+        daemon=True,
+        name="map-updater",
+    )
+    t.start()
+
 
 __all__ = [
     "scan_and_build_codebase_map",
     "should_rescan",
     "get_codebase_map",
+    "incremental_update_file",
+    "incremental_add_file",
+    "on_file_modified",
+    "is_file_modifying_tool",
+    "extract_file_path",
 ]

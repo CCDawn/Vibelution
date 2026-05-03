@@ -16,8 +16,6 @@ import pytest
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from core.prompt_manager import (
     SystemPrompt,
     SystemPromptSection,
@@ -179,9 +177,9 @@ class TestPromptManager:
 
     def test_required_sections_cannot_be_excluded(self):
         pm = PromptManager()
-        sp = pm.build(exclude=["SOUL", "AGENTS"])
+        sp = pm.build(exclude=["SOUL", "SPEC"])
         result = to_string(sp)
-        # SOUL 和 AGENTS 是 required=True，即使在 exclude 列表中也会保留
+        # SOUL 和 SPEC 是 required=True，即使在 exclude 列表中也会保留
         assert isinstance(result, str)
         assert len(result) > 0
 
@@ -200,19 +198,17 @@ class TestBuildAPI:
     def test_build_with_memory_params(self):
         pm = PromptManager()
         sp = pm.build(
-            include=["SOUL", "AGENTS", "MEMORY"],
-            generation=3,
-            total_generations=10,
+            include=["SOUL", "SPEC", "MEMORY"],
             core_context="学会了优化代码",
             current_goal="改进性能",
         )
         result = to_string(sp)
         assert isinstance(result, str)
-        assert "G3" in result or "世代" in result
+        assert "优化代码" in result
 
     def test_build_include_filter(self):
         pm = PromptManager()
-        sp = pm.build(include=["SOUL", "AGENTS"])
+        sp = pm.build(include=["SOUL", "SPEC"])
         result = to_string(sp)
         assert isinstance(result, str)
         assert len(result) > 0
@@ -230,10 +226,8 @@ class TestBuildAPI:
     def test_build_include_and_exclude(self):
         pm = PromptManager()
         sp = pm.build(
-            include=["SOUL", "TASK_CHECKLIST", "AGENTS"],
+            include=["SOUL", "TASK_CHECKLIST", "SPEC"],
             exclude=["MEMORY"],
-            generation=1,
-            total_generations=1,
         )
         result = to_string(sp)
         assert isinstance(result, str)
@@ -268,7 +262,7 @@ class TestCompatibilityFunctions:
     """向后兼容函数测试"""
 
     def test_build_system_prompt(self):
-        result = build_system_prompt(generation=1, total_generations=1)
+        result = build_system_prompt()
         assert isinstance(result, str)
         assert len(result) > 0
 
@@ -279,7 +273,7 @@ class TestCompatibilityFunctions:
 
     def test_to_string_on_system_prompt(self):
         pm = PromptManager()
-        sp = pm.build(include=["SOUL", "AGENTS"])
+        sp = pm.build(include=["SOUL", "SPEC"])
         result = to_string(sp)
         assert isinstance(result, str)
         assert len(result) > 0
@@ -296,13 +290,13 @@ class TestCache:
 
     def test_invalidate_all_cache(self):
         pm = PromptManager()
-        pm.build(include=["SOUL", "AGENTS"])
+        pm.build(include=["SOUL", "SPEC"])
         pm.invalidate_cache()
         assert len(pm._section_cache.stats["cached_sections"]) == 0
 
     def test_cache_hit(self):
         pm = PromptManager()
-        pm.build(include=["SOUL", "AGENTS"])
+        pm.build(include=["SOUL", "SPEC"])
         stats = pm.get_cache_stats()
         # 静态章节应在缓存中
         assert "SOUL" in stats["cached_sections"]
@@ -347,6 +341,56 @@ class TestLoadFunctions:
         assert section.compute() is None
 
 
+class TestCurrentGoal:
+    """current_goal 内存持有测试"""
+
+    def test_current_goal_default_empty(self):
+        pm = PromptManager()
+        assert pm.get_current_goal() == ""
+
+    def test_update_current_goal(self):
+        pm = PromptManager()
+        pm.update_current_goal("完成单元测试")
+        assert pm.get_current_goal() == "完成单元测试"
+
+    def test_current_goal_in_build(self):
+        pm = PromptManager()
+        pm.update_current_goal("探索代码库")
+        sp = pm.build(include=["SOUL", "MEMORY"])
+        result = to_string(sp)
+        assert "探索代码库" in result
+
+    def test_current_goal_no_file_fallback(self):
+        pm = PromptManager()
+        # 不设置 current_goal，build 不应从文件读取
+        sp = pm.build(include=["SOUL", "MEMORY"])
+        result = to_string(sp)
+        # 没有 goal 时 MEMORY section 不渲染 goal 行
+        assert "本世代核心目标" not in result or "待定" not in result
+
+    def test_current_goal_cache_invalidation(self):
+        pm = PromptManager()
+        pm.update_current_goal("目标A")
+        pm.build(include=["SOUL", "MEMORY"])
+        pm.update_current_goal("目标B")
+        sp = pm.build(include=["SOUL", "MEMORY"])
+        result = to_string(sp)
+        assert "目标B" in result
+
+    def test_current_goal_param_overrides_memory(self):
+        pm = PromptManager()
+        pm.update_current_goal("内存目标")
+        sp = pm.build(include=["SOUL", "MEMORY"], current_goal="参数目标")
+        result = to_string(sp)
+        assert "参数目标" in result
+
+    def test_current_goal_empty_string_not_updated(self):
+        pm = PromptManager()
+        pm.update_current_goal("有效目标")
+        pm.update_current_goal("")  # 空字符串不应覆盖
+        assert pm.get_current_goal() == "有效目标"
+
+
 class TestSectionPriority:
     """章节优先级排序测试"""
 
@@ -366,3 +410,111 @@ class TestSectionPriority:
 
         if soul_pos != -1 and spec_pos != -1:
             assert soul_pos < spec_pos, "SOUL (p10) 应在 SPEC (p65) 之前"
+
+
+class TestConfigDrivenSections:
+    """配置驱动的静态章节测试"""
+
+    @staticmethod
+    def _make_config(name, path, priority=50, required=False, cache_break=False, description=""):
+        """创建模拟 SectionConfig 对象（Pydantic 模型 duck-type）。"""
+        class MockCfg:
+            def __init__(self):
+                self.name = name
+                self.path = path
+                self.priority = priority
+                self.required = required
+                self.cache_break = cache_break
+                self.description = description
+        return MockCfg()
+
+    def test_create_sections_from_config_objects(self):
+        """通过 create_default_sections 传入 config 列表创建静态章节。"""
+        from core.prompt_manager.sections import create_default_sections
+        from pathlib import Path
+
+        project_root = Path(__file__).parent.parent
+        static_root = project_root / "core" / "core_prompt"
+        dynamic_root = project_root / "workspace" / "prompts"
+
+        configs = [
+            self._make_config("SOUL", "core/core_prompt/SOUL.md", priority=10, required=True, description="铁律"),
+            self._make_config("SPEC", "core/core_prompt/SPEC.md", priority=65, description="规范"),
+        ]
+
+        sections = create_default_sections(
+            static_root, dynamic_root, project_root,
+            section_configs=configs,
+        )
+        names = {s.name for s in sections}
+        assert "SOUL" in names
+        assert "SPEC" in names
+        # 动态章节仍应存在
+        assert "TASK_CHECKLIST" in names
+        assert "CODEBASE_MAP" in names
+        assert "ENV_INFO" in names
+
+    def test_missing_file_not_registered(self):
+        """配置指向不存在的文件时不注册该章节。"""
+        from core.prompt_manager.sections import create_default_sections
+        from pathlib import Path
+
+        project_root = Path(__file__).parent.parent
+        static_root = project_root / "core" / "core_prompt"
+        dynamic_root = project_root / "workspace" / "prompts"
+
+        configs = [
+            self._make_config("GHOST", "core/core_prompt/NOT_EXISTS.md"),
+        ]
+
+        sections = create_default_sections(
+            static_root, dynamic_root, project_root,
+            section_configs=configs,
+        )
+        names = {s.name for s in sections}
+        assert "GHOST" not in names, "不存在的文件不应注册章节"
+
+    def test_empty_configs_falls_back_to_dynamic_only(self):
+        """section_configs 为 None 或空列表时只注册动态章节。"""
+        from core.prompt_manager.sections import create_default_sections
+        from pathlib import Path
+
+        project_root = Path(__file__).parent.parent
+        static_root = project_root / "core" / "core_prompt"
+        dynamic_root = project_root / "workspace" / "prompts"
+
+        sections = create_default_sections(
+            static_root, dynamic_root, project_root,
+            section_configs=[],
+        )
+        names = {s.name for s in sections}
+        # 没有静态章节
+        assert "SOUL" not in names
+        assert "SPEC" not in names
+        # 动态章节存在
+        assert "TASK_CHECKLIST" in names
+        assert "ENV_INFO" in names
+
+    def test_config_priority_and_required_preserved(self):
+        """config 中的 priority 和 required 属性被正确传递到章节。"""
+        from core.prompt_manager.sections import create_default_sections
+        from pathlib import Path
+
+        project_root = Path(__file__).parent.parent
+        static_root = project_root / "core" / "core_prompt"
+        dynamic_root = project_root / "workspace" / "prompts"
+
+        configs = [
+            self._make_config("SOUL", "core/core_prompt/SOUL.md",
+                              priority=99, required=True, description="自定义"),
+        ]
+
+        sections = create_default_sections(
+            static_root, dynamic_root, project_root,
+            section_configs=configs,
+        )
+        soul = next((s for s in sections if s.name == "SOUL"), None)
+        assert soul is not None
+        assert soul.priority == 99, "priority 应来自 config 而非硬编码"
+        assert soul.required is True
+        assert soul.description == "自定义"

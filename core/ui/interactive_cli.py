@@ -32,7 +32,7 @@ from core.ui.cli_ui import get_ui as get_cli_ui
 from core.ui.ascii_art import AvatarManager, get_avatar_manager
 from core.ui.theme import LobsterTheme
 from core.pet_system import get_pet_system as get_pet
-from tools.memory_tools import get_generation_tool, get_current_goal_tool
+from tools.memory_tools import get_current_goal_tool
 
 
 class XuebaInteractiveCLI:
@@ -57,7 +57,6 @@ class XuebaInteractiveCLI:
 
         # 虾宝状态
         self.xueba_status = {
-            "generation": 1,
             "current_goal": "等待任务...",
             "state": "IDLE",
             "last_action": "尚未行动",
@@ -212,7 +211,6 @@ class XuebaInteractiveCLI:
         """打印虾宝状态 - 龙虾宝宝主题版"""
         # 更新状态
         try:
-            self.xueba_status["generation"] = get_generation_tool()
             self.xueba_status["current_goal"] = get_current_goal_tool() or "暂无目标"
         except:
             pass

@@ -7,12 +7,13 @@
 - 醒目的标题和引用块区分不同角色
 - 代码块自动高亮语言标签
 - 工具调用以列表形式优雅呈现
-- 自动清理旧世代文件（保留最近 5 个）
+- 自动清理旧会话文件（保留最近 5 个）
 """
 
 import os
 import re
 import glob
+import queue
 import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -51,11 +52,38 @@ class TranscriptLogger:
         self._logs_dir = self._project_root / "workspace" / "logs" / "transcripts"
         self._ensure_logs_dir()
 
-        # 当前世代和对话轮次
-        self._current_generation = 0
+        # 当前会话和对话轮次
+        self._session_id = None
         self._current_turn = 0
         self._is_first_message = True
         self._system_prompt_written = False
+
+        # 后台写入线程，避免磁盘 I/O 阻塞主循环
+        self._write_queue = queue.Queue()
+        self._writer_thread = threading.Thread(
+            target=self._writer_loop, daemon=True, name="transcript-writer"
+        )
+        self._writer_thread.start()
+
+    def _writer_loop(self):
+        """后台线程：从队列中取出内容并写入文件"""
+        while True:
+            try:
+                filepath, content = self._write_queue.get()
+                if filepath is None:
+                    break
+                with open(filepath, 'a', encoding='utf-8') as f:
+                    f.write(content)
+            except Exception:
+                pass
+
+    def _enqueue_write(self, content: str):
+        """将写入内容放入队列，由后台线程异步写入"""
+        self._write_queue.put((self._get_transcript_file(), content))
+
+    def _flush_pending_writes(self):
+        """等待所有待处理的写入完成"""
+        self._write_queue.join()
 
     def _ensure_logs_dir(self):
         """确保日志目录存在"""
@@ -65,19 +93,21 @@ class TranscriptLogger:
         """获取格式化的时间戳"""
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    def _get_transcript_file(self, generation: int) -> Path:
-        """获取指定世代的 Markdown 记录文件路径"""
-        return self._logs_dir / f"transcript_gen_{generation}.md"
+    def _get_transcript_file(self) -> Path:
+        """获取当前会话的 Markdown 记录文件路径"""
+        if self._session_id is None:
+            self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return self._logs_dir / f"transcript_{self._session_id}.md"
 
-    def _generate_header(self, generation: int) -> str:
+    def _generate_header(self) -> str:
         """生成 Markdown 文件头部"""
         header = f"""---
-title: "进化世代 G{generation} - 对话实录"
+title: "对话实录"
 date: "{datetime.now().isoformat()}"
-generation: {generation}
+session: {self._session_id}
 ---
 
-# 🌱 进化世代 G{generation} - 对话实录
+# 📝 对话实录
 
 > _自动生成于 {self._timestamp()}_
 
@@ -171,17 +201,17 @@ generation: {generation}
 
     # ==================== 主要 API ====================
 
-    def start_generation(self, generation: int, system_prompt: str = None):
-        """开始新的世代记录"""
-        self._current_generation = generation
+    def start_session(self, system_prompt: str = None):
+        """开始新的会话记录"""
+        self._session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self._current_turn = 0
         self._is_first_message = True
         self._system_prompt_written = False
 
         # 写入文件头
-        transcript_file = self._get_transcript_file(generation)
+        transcript_file = self._get_transcript_file()
         with open(transcript_file, 'w', encoding='utf-8') as f:
-            f.write(self._generate_header(generation))
+            f.write(self._generate_header())
 
         # 如果有 System Prompt，写入折叠版本
         if system_prompt:
@@ -196,7 +226,6 @@ generation: {generation}
             return
 
         self._system_prompt_written = True
-        transcript_file = self._get_transcript_file(self._current_generation)
 
         # 转义并截断内容
         escaped_content = self._escape_markdown(system_prompt)
@@ -214,19 +243,15 @@ generation: {generation}
 </details>
 
 """
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(content)
+        self._enqueue_write(content)
 
     def start_turn(self, turn: int, timestamp: str = None):
         """开始新的对话轮次"""
         self._current_turn = turn
-        transcript_file = self._get_transcript_file(self._current_generation)
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(self._generate_turn_header(turn, timestamp))
+        self._enqueue_write(self._generate_turn_header(turn, timestamp))
 
     def write_user_input(self, content: str, timestamp: str = None):
         """写入用户/宿主指令"""
-        transcript_file = self._get_transcript_file(self._current_generation)
         ts = timestamp or self._timestamp()
         escaped_content = self._escape_markdown(content)
 
@@ -235,13 +260,10 @@ generation: {generation}
 > [{ts}] {escaped_content}
 
 """
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(content_md)
+        self._enqueue_write(content_md)
 
     def write_llm_response(self, content: str, thinking: str = None):
-        """写入 LLM 回复"""
-        transcript_file = self._get_transcript_file(self._current_generation)
-
+        """写入 LLM 回复（异步写入，不阻塞主循环）"""
         # 处理思考过程（如果有）
         thinking_section = ""
         if thinking:
@@ -266,7 +288,6 @@ generation: {generation}
         for line in lines:
             if line.startswith('```') and not in_code_block:
                 in_code_block = True
-                # 检测是否缺少语言标签
                 if not line.strip().endswith('```') and len(line.strip()) == 3:
                     line = line + "python"
             elif line.startswith('```'):
@@ -280,13 +301,10 @@ generation: {generation}
 {escaped_content}
 
 """
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(content_md)
+        self._enqueue_write(content_md)
 
     def write_tool_call(self, tool_name: str, args: Dict[str, Any], result: str = None, status: str = "success"):
-        """写入工具调用"""
-        transcript_file = self._get_transcript_file(self._current_generation)
-
+        """写入工具调用（异步写入，不阻塞主循环）"""
         # 状态图标
         status_icon = {
             "success": "✅",
@@ -323,12 +341,10 @@ generation: {generation}
 ```{result_str}
 
 """
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(content_md)
+        self._enqueue_write(content_md)
 
     def write_compression(self, before_tokens: int, after_tokens: int, saved_tokens: int):
         """写入上下文压缩记录"""
-        transcript_file = self._get_transcript_file(self._current_generation)
         ratio = (saved_tokens / before_tokens * 100) if before_tokens > 0 else 0
 
         content_md = f"""
@@ -340,13 +356,10 @@ generation: {generation}
 | {before_tokens} | {after_tokens} | {ratio:.1f}% ({saved_tokens} tokens) |
 
 """
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(content_md)
+        self._enqueue_write(content_md)
 
     def write_error(self, error_type: str, error_msg: str):
         """写入错误记录"""
-        transcript_file = self._get_transcript_file(self._current_generation)
-
         content_md = f"""
 
 ### ⚠️ 错误: {error_type}
@@ -356,13 +369,10 @@ generation: {generation}
 ```
 
 """
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(content_md)
+        self._enqueue_write(content_md)
 
     def write_action(self, action: str, details: str = None):
         """写入特殊动作"""
-        transcript_file = self._get_transcript_file(self._current_generation)
-
         details_str = f"\n\n**详情**: {details}" if details else ""
 
         content_md = f"""
@@ -370,32 +380,31 @@ generation: {generation}
 ### ⚡ 动作: {action}{details_str}
 
 """
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(content_md)
+        self._enqueue_write(content_md)
 
-    def end_generation(self, summary: str = None):
-        """结束世代记录"""
-        transcript_file = self._get_transcript_file(self._current_generation)
+    def end_session(self, summary: str = None):
+        """结束会话记录（等待所有待处理写入完成后写入结束标记）"""
+        self._flush_pending_writes()
 
-        summary_str = f"\n\n## 📋 世代总结\n\n{summary}" if summary else ""
+        summary_str = f"\n\n## 📋 会话总结\n\n{summary}" if summary else ""
 
         content = f"""
 
 ---
 
-## 🏁 世代结束
+## 🏁 会话结束
 
 > 生成时间: {self._timestamp()}
 > 对话轮次: {self._current_turn}{summary_str}
 
 """
-        with open(transcript_file, 'a', encoding='utf-8') as f:
-            f.write(content)
+        self._enqueue_write(content)
+        self._flush_pending_writes()
 
     def cleanup_old_transcripts(self, keep_recent: int = 5):
-        """清理旧的 transcript 文件，只保留最近 N 个世代"""
+        """清理旧的 transcript 文件，只保留最近 N 个会话"""
         # 查找所有 transcript 文件
-        pattern = str(self._logs_dir / "transcript_gen_*.md")
+        pattern = str(self._logs_dir / "transcript_*.md")
         files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
 
         # 删除超出保留数量的文件
@@ -503,7 +512,7 @@ transcript_logger.write_user_input(content)
     }
 
     # 生成示例
-    logger.start_generation(999, system_prompt)
+    logger.start_session(system_prompt)
     logger.start_turn(1)
     logger.write_user_input(user_input)
     logger.write_llm_response(llm_response, thinking)
@@ -513,10 +522,10 @@ transcript_logger.write_user_input(content)
         tool_call["result"],
         "success"
     )
-    logger.end_generation("优雅日志系统开发完成！")
+    logger.end_session("优雅日志系统开发完成！")
 
     # 返回生成的 Markdown 内容
-    sample_file = logger._logs_dir / "transcript_gen_999.md"
+    sample_file = logger._get_transcript_file()
     with open(sample_file, 'r', encoding='utf-8') as f:
         return f.read()
 

@@ -22,8 +22,6 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from core.infrastructure.event_bus import (
     Event,
     EventNames,
@@ -121,10 +119,6 @@ class TestEventNames:
         """Agent 事件常量存在"""
         assert EventNames.AGENT_START == "agent:start"
         assert EventNames.AGENT_STOP == "agent:stop"
-
-    def test_generation_events_exist(self):
-        """世代事件常量存在"""
-        assert EventNames.GENERATION_ADVANCE == "generation:advance"
 
     def test_restart_events_exist(self):
         """重启事件常量存在"""

@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+心智模型 - 元认知引擎
+
+Agent 的「自我感知」系统，负责：
+- Layer 1: 实时采集运行时信号（通过 EventBus 全局订阅）
+- Layer 2: 基于规则的状态诊断（5 种认知状态）
+- Layer 3: 生成元认知干预文本，注入 prompt
+
+设计原则：
+- 系统做客观（采集指标 + 规则诊断），LLM 做主观（基于数据调整策略）
+- 干预最小化：正常状态不注入任何文本
+- 全部数据源复用现有基础设施（EventBus、StateManager）
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Dict, Any, List
+
+from core.infrastructure.event_bus import get_event_bus, EventNames, Event
+from core.infrastructure.state import get_state_manager
+
+
+# ============================================================================
+# 诊断状态枚举
+# ============================================================================
+
+class CognitiveState:
+    """认知状态标签"""
+    NORMAL = "normal"
+    LOOPING = "looping"           # 连续重复同一操作
+    THRASHING = "thrashing"       # 工具持续失败
+    TUNNEL_VISION = "tunnel_vision"  # 只聚焦单一文件
+    PRODUCTIVE = "productive"     # 高效状态
+    DISORIENTED = "disoriented"   # 工具使用杂乱无章
+
+
+# ============================================================================
+# 干预文本模板
+# ============================================================================
+
+INTERVENTION_TEMPLATES: Dict[str, str] = {
+    CognitiveState.LOOPING: (
+        "\n\n"
+        "---\n"
+        "## ⚠️ 元认知警报: 死循环检测\n\n"
+        "**症状**: 已连续 {repetition_count} 次调用相同或高度相似的操作，无实质进展。\n\n"
+        "**建议**: 立即暂停当前操作路径。回到 SOUL 阶段 1 重新评估——你可能遗漏了关键的前提条件，"
+        "或者当前方案的隐性假设不成立。考虑：\n"
+        "1. 你缺什么信息？用搜索工具探路，不要继续重复\n"
+        "2. 有没有完全不同的解法路径？\n"
+        "3. 你的心智模型（对当前问题的理解）是否有根本错误？\n"
+    ),
+    CognitiveState.THRASHING: (
+        "\n\n"
+        "---\n"
+        "## ⚠️ 元认知警报: 方案失效\n\n"
+        "**症状**: 最近 {window_size} 次工具调用成功率仅 {success_rate:.0%}。"
+        "你当前的工具使用方式或方案假设可能有系统性偏差。\n\n"
+        "**建议**: 不要继续试错。回到 SOUL 阶段 2 推翻当前心智模型，寻找底层原因。\n"
+        "失败最多的工具: {top_failing_tool}\n"
+    ),
+    CognitiveState.TUNNEL_VISION: (
+        "\n\n"
+        "---\n"
+        "## ⚠️ 元认知警报: 隧道视野\n\n"
+        "**症状**: 最近 {window_size} 次文件操作全部聚焦于 `{focused_file}`。"
+        "你可能忽略了这个修改在其他模块中的连锁影响。\n\n"
+        "**建议**: 暂停编辑，运行相关测试验证当前修改是否破坏其他模块。"
+        "如果这是一个大重构，先将改动范围扩展到所有受影响的文件，再逐个验证。\n"
+    ),
+    CognitiveState.DISORIENTED: (
+        "\n\n"
+        "---\n"
+        "## ⚠️ 元认知警报: 方向迷失\n\n"
+        "**症状**: 最近 {window_size} 次工具调用分散在 {tool_count} 种不同类型的工具上，"
+        "缺乏聚焦，成功率 {success_rate:.0%}。\n\n"
+        "**建议**: 你可能忘了最初的目标。请重新阅读当前目标（`current_goal`），"
+        "明确下一步需要做什么，而不是在各种工具间跳转。\n"
+    ),
+}
+
+
+# ============================================================================
+# 默认诊断规则
+# ============================================================================
+
+def _default_rules() -> Dict[str, Any]:
+    return {
+        "looping": {
+            "metric": "repetition_count",
+            "threshold": 4,
+            "window_size": 10,
+            "description": "连续重复同一操作超过阈值次",
+        },
+        "thrashing": {
+            "metric": "success_rate",
+            "threshold": 0.4,
+            "window_size": 8,
+            "description": "滑动窗口内工具成功率低于阈值",
+        },
+        "tunnel_vision": {
+            "metric": "file_focus_ratio",
+            "threshold": 0.8,
+            "window_size": 8,
+            "description": "文件操作集中在单一文件",
+        },
+        "disoriented": {
+            "metric": "tool_diversity",
+            "threshold": 0.7,
+            "window_size": 8,
+            "description": "工具使用过于分散且成功率低",
+        },
+    }
+
+
+# ============================================================================
+# 心智模型数据类
+# ============================================================================
+
+@dataclass
+class ToolRecord:
+    """单次工具调用记录"""
+    tool_name: str
+    success: bool
+    args_summary: str
+    timestamp: str
+    file_target: Optional[str] = None
+
+
+@dataclass
+class Diagnosis:
+    """诊断结果"""
+    state: str
+    metrics: Dict[str, Any]
+    intervention: str
+    timestamp: str
+    confidence: float
+
+
+# ============================================================================
+# MentalModel 主类
+# ============================================================================
+
+class MentalModel:
+    """
+    元认知引擎
+
+    单例模式，在 SelfEvolvingAgent 初始化时创建，通过 EventBus 全局订阅
+    自动采集信号，在每个 prompt 构建周期提供诊断和干预。
+
+    用法:
+        mm = MentalModel(workspace_root="workspace")
+        # 自动监听 EventBus，无需手动调用采集方法
+        diagnosis = mm.diagnose()  # 在 prompt 构建时调用
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, workspace_root: str = "workspace"):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    obj = super().__new__(cls)
+                    obj._initialized = False
+                    cls._instance = obj
+        return cls._instance
+
+    def __init__(self, workspace_root: str = "workspace"):
+        if getattr(self, '_initialized', False):
+            return
+        self._initialized = True
+
+        self._workspace_root = Path(workspace_root) if workspace_root else Path("workspace")
+        self._rules_path = self._workspace_root / "mental_model" / "rules.json"
+        self._self_model_path = self._workspace_root / "mental_model" / "self_model.json"
+
+        # 确保目录存在
+        self._ensure_dirs()
+
+        # 加载诊断规则（支持从 JSON 文件加载，回退到默认规则）
+        self._rules = self._load_rules()
+
+        # 事件总线和状态管理器引用
+        self._event_bus = get_event_bus()
+        self._state_manager = get_state_manager()
+
+        # 滑动窗口：最近工具调用记录
+        self._tool_history: deque[ToolRecord] = deque(maxlen=50)
+
+        # 文件聚焦追踪
+        self._touched_files: Dict[str, int] = {}  # filepath -> touch count
+
+        # 元认知统计
+        self._diagnosis_history: deque[Diagnosis] = deque(maxlen=20)
+        self._intervention_count: int = 0
+        self._last_intervention_turn: int = 0
+
+        # 检查点计数（每次 prompt 构建为一个 tick）
+        self._tick: int = 0
+
+        # 注册全局事件监听
+        self._register_listeners()
+
+    def _ensure_dirs(self):
+        """确保心智模型工作目录存在"""
+        mm_dir = self._workspace_root / "mental_model"
+        mm_dir.mkdir(parents=True, exist_ok=True)
+
+    def _rules_file_exists(self) -> bool:
+        """检查规则配置文件是否存在"""
+        project_root = self._find_project_root()
+        full_path = project_root / self._rules_path
+        return full_path.exists()
+
+    def _find_project_root(self) -> Path:
+        """查找项目根目录"""
+        current = Path(__file__).parent.parent.parent
+        if (current / "agent.py").exists():
+            return current
+        return current
+
+    def _load_rules(self) -> Dict[str, Any]:
+        """加载诊断规则，优先从 JSON 文件读取，回退默认规则"""
+        project_root = self._find_project_root()
+        full_path = project_root / self._rules_path
+
+        if full_path.exists():
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    custom_rules = json.load(f)
+                # 合并：用自定义规则覆盖默认规则的对应项
+                rules = _default_rules()
+                rules.update(custom_rules)
+                return rules
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        return _default_rules()
+
+    def reload_rules(self) -> bool:
+        """重新加载规则配置（Agent 修改 rules.json 后调用）"""
+        self._rules = self._load_rules()
+        return True
+
+    def get_rules(self) -> Dict[str, Any]:
+        """获取当前规则（只读副本，供 Agent 查看）"""
+        import copy
+        return copy.deepcopy(self._rules)
+
+    def update_rules(self, new_rules: Dict[str, Any]) -> bool:
+        """
+        更新诊断规则并持久化到 JSON 文件。
+        Agent 可以通过工具调用此方法修改自己的诊断规则。
+        """
+        # 合并
+        self._rules.update(new_rules)
+
+        project_root = self._find_project_root()
+        full_path = project_root / self._rules_path
+
+        try:
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                json.dump(self._rules, f, ensure_ascii=False, indent=2)
+            return True
+        except IOError:
+            return False
+
+    def _register_listeners(self):
+        """注册 EventBus 全局监听器"""
+        self._event_bus.subscribe_global(self._on_event)
+
+    def _on_event(self, event: Event):
+        """全局事件处理 - 采集运行时信号"""
+        try:
+            if event.name == EventNames.TOOL_START:
+                self._on_tool_start(event)
+            elif event.name == EventNames.TOOL_SUCCESS:
+                self._on_tool_result(event, success=True)
+            elif event.name == EventNames.TOOL_ERROR:
+                self._on_tool_result(event, success=False)
+            elif event.name == "state:change":
+                pass  # 保留用于未来扩展
+        except Exception:
+            pass  # 监听器静默失败，不干扰主流程
+
+    def _on_tool_start(self, event: Event):
+        """工具开始执行"""
+        data = event.data or {}
+        tool_name = data.get('name', 'unknown')
+        args = data.get('args', {})
+
+        # 提取文件目标
+        file_target = self._extract_file_target(tool_name, args)
+
+        if file_target:
+            self._touched_files[file_target] = self._touched_files.get(file_target, 0) + 1
+
+    def _on_tool_result(self, event: Event, success: bool):
+        """工具执行结果"""
+        data = event.data or {}
+        tool_name = data.get('name', 'unknown')
+        result_preview = str(data.get('result', ''))[:100]
+
+        record = ToolRecord(
+            tool_name=tool_name,
+            success=success,
+            args_summary=result_preview,
+            timestamp=datetime.now().isoformat(),
+            file_target=self._extract_file_target(tool_name, {}),
+        )
+        self._tool_history.append(record)
+
+    def _extract_file_target(self, tool_name: str, args: dict) -> Optional[str]:
+        """从工具名称和参数中提取目标文件路径"""
+        file_modifying_tools = {
+            'apply_diff_edit_tool', 'write_file_tool',
+            'read_file_tool', 'replace_in_file_tool',
+        }
+
+        if tool_name not in file_modifying_tools:
+            return None
+
+        # 尝试从参数中提取文件路径
+        for key in ('file_path', 'filepath', 'path', 'target_file'):
+            if key in args and isinstance(args[key], str):
+                return args[key]
+
+        return None
+
+    # =========================================================================
+    # 诊断引擎
+    # =========================================================================
+
+    def tick(self) -> None:
+        """标记一个 prompt 构建周期"""
+        self._tick += 1
+
+    def diagnose(self) -> Diagnosis:
+        """
+        基于采集的信号运行规则诊断。
+
+        Returns:
+            Diagnosis 对象，包含状态标签、指标、干预文本
+        """
+        self._tick += 1
+
+        recent = list(self._tool_history)
+        if len(recent) < 3:
+            # 数据不足，无法诊断
+            return Diagnosis(
+                state=CognitiveState.NORMAL,
+                metrics={"reason": "insufficient_data", "sample_size": len(recent)},
+                intervention="",
+                timestamp=datetime.now().isoformat(),
+                confidence=0.0,
+            )
+
+        # ── 计算指标 ──
+        window_size = min(10, len(recent))
+        window = recent[-window_size:]
+
+        success_count = sum(1 for r in window if r.success)
+        success_rate = success_count / len(window) if window else 1.0
+
+        tool_names = [r.tool_name for r in window]
+        unique_tools = len(set(tool_names))
+        tool_diversity = unique_tools / len(window) if window else 0
+
+        repetition_count = self._state_manager.get_consecutive_count()
+
+        # 文件聚焦度
+        file_ops = [r for r in window if r.file_target]
+        if file_ops:
+            file_counts: Dict[str, int] = {}
+            for r in file_ops:
+                f = r.file_target or ''
+                file_counts[f] = file_counts.get(f, 0) + 1
+            top_file_count = max(file_counts.values())
+            file_focus_ratio = top_file_count / len(file_ops)
+            top_file = max(file_counts, key=file_counts.get)  # type: ignore
+        else:
+            file_focus_ratio = 0
+            top_file = ""
+
+        # 高频失败工具
+        failing_tools: Dict[str, int] = {}
+        for r in window:
+            if not r.success:
+                failing_tools[r.tool_name] = failing_tools.get(r.tool_name, 0) + 1
+        top_failing_tool = max(failing_tools, key=failing_tools.get) if failing_tools else "无"
+
+        metrics = {
+            "sample_size": len(recent),
+            "window_size": window_size,
+            "success_rate": success_rate,
+            "tool_diversity": tool_diversity,
+            "unique_tools": unique_tools,
+            "repetition_count": repetition_count,
+            "file_focus_ratio": file_focus_ratio,
+            "focused_file": top_file,
+            "top_failing_tool": top_failing_tool,
+            "files_touched_total": len(self._touched_files),
+            "intervention_count": self._intervention_count,
+        }
+
+        # ── 规则诊断 ──
+        diagnosis_state = CognitiveState.NORMAL
+        confidence = 0.0
+
+        # 规则优先级: looping > thrashing > tunnel_vision > disoriented > normal
+
+        # 1. 死循环检测
+        loop_rule = self._rules.get("looping", {})
+        loop_threshold = loop_rule.get("threshold", 4)
+        if repetition_count >= loop_threshold:
+            diagnosis_state = CognitiveState.LOOPING
+            confidence = min(0.95, 0.5 + 0.1 * (repetition_count - loop_threshold))
+
+        # 2. 方案失效检测
+        elif success_rate <= self._rules.get("thrashing", {}).get("threshold", 0.4):
+            thrash_window = self._rules.get("thrashing", {}).get("window_size", 8)
+            if len(window) >= min(thrash_window, len(window)):
+                diagnosis_state = CognitiveState.THRASHING
+                confidence = 0.7 + (0.4 - success_rate) * 1.5
+
+        # 3. 隧道视野检测
+        elif file_focus_ratio >= self._rules.get("tunnel_vision", {}).get("threshold", 0.8):
+            tv_window = self._rules.get("tunnel_vision", {}).get("window_size", 8)
+            if len(file_ops) >= min(tv_window, len(file_ops)):
+                diagnosis_state = CognitiveState.TUNNEL_VISION
+                confidence = file_focus_ratio
+
+        # 4. 方向迷失检测
+        elif tool_diversity >= self._rules.get("disoriented", {}).get("threshold", 0.7):
+            if success_rate < 0.6:
+                diagnosis_state = CognitiveState.DISORIENTED
+                confidence = tool_diversity * (1 - success_rate)
+
+        # 5. 高效状态
+        elif success_rate > 0.8 and tool_diversity > 0.3:
+            diagnosis_state = CognitiveState.PRODUCTIVE
+            confidence = success_rate
+
+        # ── 生成干预文本 ──
+        intervention = ""
+        if diagnosis_state not in (CognitiveState.NORMAL, CognitiveState.PRODUCTIVE):
+            template = INTERVENTION_TEMPLATES.get(diagnosis_state, "")
+            if template:
+                intervention = template.format(
+                    repetition_count=repetition_count,
+                    window_size=window_size,
+                    success_rate=success_rate,
+                    focused_file=top_file,
+                    top_failing_tool=top_failing_tool,
+                    tool_count=unique_tools,
+                )
+                self._intervention_count += 1
+
+        diagnosis = Diagnosis(
+            state=diagnosis_state,
+            metrics=metrics,
+            intervention=intervention,
+            timestamp=datetime.now().isoformat(),
+            confidence=confidence,
+        )
+
+        self._diagnosis_history.append(diagnosis)
+        return diagnosis
+
+    def get_intervention_for_prompt(self) -> str:
+        """
+        获取要注入 prompt 的干预文本。
+        只在异常状态时返回非空字符串。
+        """
+        diagnosis = self.diagnose()
+        return diagnosis.intervention
+
+    def get_state_for_soul(self) -> Dict[str, Any]:
+        """
+        生成 SOUL.md 所需的 <state> JSON 数据。
+        用真实指标替代 LLM 的猜测。
+        """
+        diagnosis = self.diagnose()
+        m = diagnosis.metrics
+
+        return {
+            "元认知": {
+                "系统诊断": diagnosis.state,
+                "诊断置信度": round(diagnosis.confidence, 2),
+                "工具成功率": round(m["success_rate"], 2),
+                "重复次数": m["repetition_count"],
+                "文件聚焦度": round(m["file_focus_ratio"], 2),
+                "聚焦文件": m["focused_file"] or "无",
+            },
+            "干预历史": {
+                "累计干预次数": self._intervention_count,
+                "采集样本数": m["sample_size"],
+            },
+        }
+
+    def get_self_model(self) -> Dict[str, Any]:
+        """
+        获取自我模型（Agent 对自己的认知）。
+        优先从 self_model.json 读取，回退到默认模型。
+        """
+        project_root = self._find_project_root()
+        full_path = project_root / self._self_model_path
+
+        if full_path.exists():
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
+
+        return {
+            "strengths": [],
+            "weaknesses": [],
+            "tendencies": [],
+            "evolution_history": [],
+            "last_updated": None,
+        }
+
+    def update_self_model(self, updates: Dict[str, Any]) -> bool:
+        """
+        更新自我模型。Agent 通过此方法将自我认知持久化。
+        这是递归自我建模的入口点。
+        """
+        current = self.get_self_model()
+        current.update(updates)
+        current["last_updated"] = datetime.now().isoformat()
+
+        project_root = self._find_project_root()
+        full_path = project_root / self._self_model_path
+
+        try:
+            full_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                json.dump(current, f, ensure_ascii=False, indent=2)
+            return True
+        except IOError:
+            return False
+
+    def add_evolution_entry(self, change: str, result: str):
+        """向自我模型中追加一条进化记录"""
+        model = self.get_self_model()
+        history = model.get("evolution_history", [])
+        history.append({
+            "generation": len(history) + 1,
+            "change": change,
+            "result": result,
+            "timestamp": datetime.now().isoformat(),
+        })
+        # 只保留最近 50 条
+        if len(history) > 50:
+            history = history[-50:]
+        model["evolution_history"] = history
+        self.update_self_model({"evolution_history": history})
+
+    def get_diagnosis_history(self, limit: int = 10) -> List[Diagnosis]:
+        """获取最近的诊断历史"""
+        return list(self._diagnosis_history)[-limit:]
+
+    def reset(self):
+        """重置所有运行时状态（用于测试）"""
+        self._tool_history.clear()
+        self._touched_files.clear()
+        self._diagnosis_history.clear()
+        self._tick = 0
+        self._intervention_count = 0
+
+
+# ============================================================================
+# 全局单例
+# ============================================================================
+
+_mental_model: Optional[MentalModel] = None
+
+
+def get_mental_model(workspace_root: str = "workspace") -> MentalModel:
+    """获取心智模型单例"""
+    global _mental_model
+    if _mental_model is None:
+        _mental_model = MentalModel(workspace_root=workspace_root)
+    return _mental_model
+
+
+def reset_mental_model():
+    """重置心智模型单例（用于测试）"""
+    global _mental_model
+    _mental_model = None

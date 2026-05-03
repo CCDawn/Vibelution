@@ -101,8 +101,11 @@ class PromptManager:
         # 构建上下文（每轮 build 前更新，MEMORY 章节的 compute 从中读取）
         self._build_context = BuildContext()
 
-        # 状态记忆
+        # 状态记忆（内存持有，非文件加载）
         self.state_memory: str = ""
+
+        # 当前目标（内存持有，每次动态生成，不从文件加载）
+        self.current_goal: str = ""
 
         # LLM 动态覆盖
         self._active_sections_override: Optional[List[str]] = None
@@ -130,12 +133,24 @@ class PromptManager:
     # ------------------------------------------------------------------------
 
     def _register_default_sections(self):
-        """注册所有默认章节。"""
+        """注册所有默认章节。
+
+        静态章节由 config.toml [[prompt.sections]] 驱动；
+        动态章节（TASK_CHECKLIST、CODEBASE_MAP、ENV_INFO 等）由代码内置注册。
+        """
+        # 从 config 读取静态章节定义
+        try:
+            from config import get_config
+            section_configs = get_config().prompt.sections
+        except Exception:
+            section_configs = []
+
         sections = create_default_sections(
             self._static_root,
             self._dynamic_root,
             self._project_root,
             enable_workspace=self._workspace_enabled,
+            section_configs=section_configs,
         )
         for s in sections:
             self._sections[s.name] = s
@@ -172,8 +187,6 @@ class PromptManager:
         self,
         include: Optional[List[str]] = None,
         exclude: Optional[List[str]] = None,
-        generation: Optional[int] = None,
-        total_generations: Optional[int] = None,
         core_context: Optional[str] = None,
         current_goal: Optional[str] = None,
         state_memory: Optional[str] = None,
@@ -183,10 +196,8 @@ class PromptManager:
         Args:
             include: 只包含这些章节（None 时使用默认列表或 override）。
             exclude: 排除这些章节（required=True 的无法排除）。
-            generation: 当前世代数。
-            total_generations: 总世代数。
-            core_context: 跨代核心记忆。
-            current_goal: 本世代目标。
+            core_context: 核心记忆。
+            current_goal: 当前目标。
             state_memory: 状态记忆（None 时使用 self.state_memory）。
 
         Returns:
@@ -196,10 +207,11 @@ class PromptManager:
         effective_state_memory = (
             state_memory if state_memory is not None else self.state_memory
         )
-        self._build_context.generation = generation
-        self._build_context.total_generations = total_generations
+        effective_current_goal = (
+            current_goal if current_goal is not None else self.current_goal
+        )
         self._build_context.core_context = core_context
-        self._build_context.current_goal = current_goal
+        self._build_context.current_goal = effective_current_goal
         self._build_context.state_memory = effective_state_memory
 
         # 筛选章节
@@ -270,7 +282,7 @@ class PromptManager:
         """由 LLM 通过 <active_components> 标签调用，动态切换章节。
 
         Args:
-            components: 要激活的章节名称列表，如 ["SOUL", "AGENTS", "MEMORY"]
+            components: 要激活的章节名称列表，如 ["SOUL", "SPEC", "MEMORY"]
         """
         if not components:
             from core.logging import debug_logger
@@ -292,6 +304,26 @@ class PromptManager:
     # ------------------------------------------------------------------------
     # 状态记忆
     # ------------------------------------------------------------------------
+
+    def update_current_goal(self, goal: str):
+        """更新当前目标（仅内存，不落盘），触发缓存失效。
+
+        与 state_memory 不同，current_goal 不持久化到文件——
+        每次 Agent 苏醒时由 LLM 动态决定，仅存于内存中。
+        """
+        if not goal or not goal.strip():
+            return
+
+        self.current_goal = goal
+        self._section_cache.invalidate("MEMORY")
+        from core.logging import debug_logger
+        debug_logger.debug(
+            f"[PromptManager] current_goal 更新: {goal[:80]}"
+        )
+
+    def get_current_goal(self) -> str:
+        """获取当前目标（内存值）。"""
+        return self.current_goal
 
     def update_state_memory(self, memory_text: str):
         """更新状态记忆（内存 + 落盘），触发缓存失效。"""
@@ -348,7 +380,7 @@ class PromptManager:
                 return components
         except Exception:
             pass
-        return ["SOUL", "AGENTS", "SPEC", "ENV_INFO"]
+        return ["SOUL", "SPEC", "ENV_INFO"]
 
     # ------------------------------------------------------------------------
     # Workspace 文件管理
@@ -419,6 +451,7 @@ class PromptManager:
             "dynamic_root": str(self._dynamic_root),
             "registered_sections": list(self._sections.keys()),
             "state_memory_length": len(self.state_memory) if self.state_memory else 0,
+            "current_goal": self.current_goal,
             "active_sections_override": self._active_sections_override,
             "section_cache": self._section_cache.stats,
             "last_index": self._last_index,
@@ -462,15 +495,11 @@ def get_prompt_manager() -> PromptManager:
 
 
 def build_system_prompt(
-    generation: Optional[int] = None,
-    total_generations: Optional[int] = None,
     core_context: Optional[str] = None,
     current_goal: Optional[str] = None,
 ) -> str:
     """构建系统提示词字符串（向后兼容）。"""
     sp = get_prompt_manager().build(
-        generation=generation,
-        total_generations=total_generations,
         core_context=core_context,
         current_goal=current_goal,
     )
@@ -480,8 +509,6 @@ def build_system_prompt(
 def build_simple_system_prompt() -> str:
     """简化版系统提示词（向后兼容）。"""
     return build_system_prompt(
-        generation=1,
-        total_generations=1,
         core_context="",
         current_goal="",
     )

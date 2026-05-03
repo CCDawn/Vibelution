@@ -40,11 +40,11 @@ class ToolExecutor:
             check_python_syntax_tool, extract_symbols_tool, backup_project_tool,
             cleanup_test_files_tool, execute_shell_command_tool, run_powershell_tool,
             run_batch_tool, self_test_tool, get_agent_status_tool,
-            read_memory_tool, get_generation_tool,
-            get_current_goal_tool, get_core_context_tool, read_generation_archive_tool,
-            list_archives_tool, read_dynamic_prompt_tool,
+            read_memory_tool,
+            get_current_goal_tool, get_core_context_tool,
+            read_dynamic_prompt_tool,
             add_insight_to_dynamic_tool,
-            get_memory_summary_tool, clear_generation_task, write_dynamic_prompt_tool,
+            get_memory_summary_tool, write_dynamic_prompt_tool,
             find_function_calls_tool, find_definitions_tool,
             search_imports_tool, search_and_read_tool,
             preview_diff_tool, get_file_entities_tool,
@@ -68,15 +68,11 @@ class ToolExecutor:
             "self_test": self_test_tool,
             "get_agent_status": get_agent_status_tool,
             "read_memory": read_memory_tool,
-            "get_generation": get_generation_tool,
             "get_current_goal": get_current_goal_tool,
             "get_core_context": get_core_context_tool,
-            "read_generation_archive": read_generation_archive_tool,
-            "list_archives": list_archives_tool,
             "read_dynamic_prompt": read_dynamic_prompt_tool,
             "add_insight_to_dynamic": add_insight_to_dynamic_tool,
             "get_memory_summary": get_memory_summary_tool,
-            "clear_generation_task": clear_generation_task,
             "write_dynamic_prompt": write_dynamic_prompt_tool,
             "find_function_calls": find_function_calls_tool,
             "find_definitions": find_definitions_tool,
@@ -147,6 +143,9 @@ class ToolExecutor:
                 "result": str(result)[:200],
             })
 
+            # ── 自动更新代码库地图（检测文件修改工具）──
+            self._try_auto_update_map(tool_name, tool_args)
+
             return (result, None)
 
         except TimeoutError:
@@ -165,6 +164,20 @@ class ToolExecutor:
             })
             return (error_msg, None)
 
+    def _try_auto_update_map(self, tool_name: str, tool_args: dict):
+        """文件修改工具执行成功后，自动触发代码库地图增量更新。"""
+        try:
+            from core.prompt_manager.codebase_map_builder import (
+                is_file_modifying_tool,
+                extract_file_path,
+                on_file_modified,
+            )
+            if is_file_modifying_tool(tool_name):
+                filepath = extract_file_path(tool_name, tool_args)
+                if filepath:
+                    on_file_modified(filepath)
+        except Exception:
+            pass
 
 
 # 全局工具执行器单例

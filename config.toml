@@ -395,6 +395,20 @@ test_gate_timeout = 120
 # 测试命令
 test_command = "pytest tests/ -v --tb=short -q"
 
+# ── 熵减进化流程 ──
+
+# 进化提案存储目录
+proposals_dir = "workspace/evolution/proposals"
+
+# 进化审计日志路径（JSONL 格式）
+audit_log_path = "workspace/evolution/audit.jsonl"
+
+# Agent 苏醒时是否自动检查已审批提案
+auto_check_approved = true
+
+# 允许进化修改的目录白名单
+allowed_target_dirs = ["workspace/prompts/"]
+
 # ============================================================
 # [记忆] 记忆系统配置
 # ============================================================
@@ -606,11 +620,29 @@ action_sounds = true
 # [提示词] 提示词管理器配置
 # ============================================================
 [prompt]
-# 默认拼装的组件列表（可按需调整，空列表使用内置默认值 ["SOUL","AGENTS","SPEC","ENV_INFO"]）
-# 可通过 LLM <active_components> 标签或 tool 动态覆盖
-default_components = [
-    "SOUL",
-    "AGENTS",
-    "SPEC",
-    "ENV_INFO",
-]
+# 默认拼装的组件列表
+# 静态章节名对应下方 [[prompt.sections]] 定义
+# 内置动态章节（无需定义）: TASK_CHECKLIST, CODEBASE_MAP, MEMORY, ENV_INFO
+#   - TASK_CHECKLIST / CODEBASE_MAP: 重，建议通过 <active_components> 按需激活
+#   - ENV_INFO / MEMORY: 轻量且必要，建议常驻
+default_components = ["SOUL", "SPEC", "CODEBASE_MAP", "ENV_INFO"]
+
+# ═══════════════════════════════════════════════
+# 静态章节定义（从 Markdown 文件加载）
+# 增删改都在这里操作，不需要改 Python 代码
+# ═══════════════════════════════════════════════
+
+[[prompt.sections]]
+name = "SOUL"
+path = "core/core_prompt/SOUL.md"
+priority = 10
+required = true
+description = "身份使命与铁律"
+
+[[prompt.sections]]
+name = "SPEC"
+path = "core/core_prompt/SPEC.md"
+priority = 65
+description = "开发规范与编码约束"
+
+

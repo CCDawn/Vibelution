@@ -25,7 +25,6 @@ from typing import Dict, List, Tuple
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
 
 class TestRunner:
@@ -92,13 +91,24 @@ class TestRunner:
 
             output = result.stdout + result.stderr
 
-            # 解析结果
-            passed = output.count(" PASSED")
-            failed = output.count(" FAILED")
-            skipped = output.count(" SKIPPED")
+            # 解析结果 — 从 pytest 标准摘要行提取计数
+            import re
+            summary_match = re.search(
+                r'(\d+)\s+passed,\s*(\d+)\s+failed(?:,\s*(\d+)\s+skipped)?',
+                output
+            )
+            if summary_match:
+                passed = int(summary_match.group(1))
+                failed = int(summary_match.group(2))
+                skipped = int(summary_match.group(3) or 0)
+            else:
+                # Fallback: use return code
+                passed = 0 if result.returncode != 0 else 1
+                failed = 1 if result.returncode != 0 else 0
+                skipped = 0
             total = passed + failed + skipped
 
-            success = failed == 0
+            success = result.returncode == 0
 
             print(output)
 

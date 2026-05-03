@@ -355,7 +355,6 @@ class ConversationLogger:
             with open(self._get_session_file(), "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 f.flush()
-                os.fsync(f.fileno())
         except Exception as e:
             print(f"[ConversationLogger] 写入失败: {e}")
 

@@ -15,9 +15,6 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-# 添加项目根目录到路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from tools.shell_tools import (
     read_file, list_directory, create_file, edit_file,
     check_python_syntax, execute_shell_command, run_powershell,
@@ -667,13 +664,7 @@ class TestGetAgentStatus:
         result = get_agent_status()
         assert isinstance(result, str)
         # 状态应包含关键信息
-        assert ("世代" in result or "generation" in result.lower() or 
-                "状态" in result or "status" in result.lower())
-
-    def test_status_shows_generation(self):
-        """测试显示世代信息"""
-        result = get_agent_status()
-        assert "G" in result or "generation" in result.lower()
+        assert ("状态" in result or "status" in result.lower())
 
 
 # ============================================================================

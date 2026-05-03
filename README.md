@@ -78,7 +78,7 @@ Vibelution/                     # 项目根目录
 │   │
 │   ├── core_prompt/           # 核心提示词 (静态只读)
 │   │   ├── SOUL.md           # 使命铁律
-│   │   └── AGENTS.md         # 操作规范 (已归档)
+│   │   └── SPEC.md          # 开发流程规范
 │   │
 │   ├── logging/               # 日志系统
 │   │   ├── logger.py         # 调试日志
@@ -221,7 +221,7 @@ python agent.py
 ```
 core/core_prompt/              ← 静态核心提示词（只读模板）
 ├── SOUL.md                   ← 使命铁律（禁止修改）
-└── AGENTS.md                 ← 操作规范（禁止修改）
+└── SPEC.md                   ← 开发流程规范（禁止修改）
 
 workspace/prompts/            ← 动态提示词（Agent 运行时可编辑）
 ├── IDENTITY.md               ✅ 可修改
@@ -232,7 +232,7 @@ workspace/prompts/            ← 动态提示词（Agent 运行时可编辑）
 
 **PromptManager 特性：**
 - 双轨加载：workspace 优先，回退 static
-- 优先级组件拼装：SOUL(10) → DYNAMIC(40) → AGENTS(60) → MEMORY(80)
+- 优先级组件拼装：SOUL(10) → DYNAMIC(40) → SPEC(65) → MEMORY(80)
 - 状态记忆持久化
 
 ---
@@ -277,7 +277,7 @@ pytest tests/ -v
 pytest tests/test_tool_executor.py -v
 
 # 提示词打靶测试
-python tests/prompt_shooting.py
+python tests/prompt_debugger.py
 ```
 
 ### 质量门控
@@ -296,11 +296,10 @@ git diff --stat
 
 | 文档 | 路径 | 用途 |
 |------|------|------|
-| 全局索引 | `INDEX.md` | 任务执行参照索引 |
+| 代码库地图 | `workspace/prompts/CODEBASE_MAP.md` | 自动生成的项目结构地图 |
 | 开发规范 | `CLAUDE.md` | Claude Code 协作文档 |
-| 项目规范 | `SPEC.md` | 项目开发规范 |
 | 核心使命 | `core/core_prompt/SOUL.md` | Agent 身份与铁律 |
-| 操作规范 | `core/core_prompt/AGENTS.md` | Agent 操作 SOP |
+| 操作规范 | `core/core_prompt/SPEC.md` | Agent 开发流程规范 |
 
 ---
 

@@ -22,8 +22,6 @@ import threading
 import pytest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from core.infrastructure.state import (
     AgentState,
     StateRecord,
@@ -155,13 +153,6 @@ class TestStateTransitions:
         info = sm.get_state_info()
         assert info["tools_executed"] == 10
 
-    def test_set_state_updates_generation(self):
-        """set_state 更新世代"""
-        sm = get_state_manager()
-        sm.set_state(AgentState.THINKING, generation=5)
-        info = sm.get_state_info()
-        assert info["generation"] == 5
-
     def test_set_state_updates_current_goal(self):
         """set_state 更新当前目标"""
         sm = get_state_manager()
@@ -194,11 +185,11 @@ class TestStateTransitions:
     def test_optional_params_not_set_keep_old_values(self):
         """未传入的参数不覆盖旧值"""
         sm = get_state_manager()
-        sm.set_state(AgentState.THINKING, action="第一次", generation=3)
+        sm.set_state(AgentState.THINKING, action="第一次", current_goal="目标A")
         sm.set_state(AgentState.CODING, action="第二次")
         info = sm.get_state_info()
         assert info["action"] == "第二次"
-        assert info["generation"] == 3  # 未传入，保留旧值
+        assert info["current_goal"] == "目标A"  # 未传入，保留旧值
 
 
 # ============================================================================
@@ -366,40 +357,6 @@ class TestRecentActions:
 
 
 # ============================================================================
-# 世代管理测试
-# ============================================================================
-
-class TestGenerationManagement:
-    """世代管理测试"""
-
-    @pytest.fixture(autouse=True)
-    def setup(self):
-        sm = get_state_manager()
-        sm.reset()
-        yield
-        sm.reset()
-
-    def test_generation_persists_after_reset(self):
-        """reset 后世代保留原值（世代跨会话持久化）"""
-        sm = get_state_manager()
-        sm.set_generation(5)
-        sm.reset()
-        assert sm.get_generation() == 5
-
-    def test_set_generation_updates_value(self):
-        """set_generation 更新世代"""
-        sm = get_state_manager()
-        sm.set_generation(5)
-        assert sm.get_generation() == 5
-
-    def test_set_generation_negative(self):
-        """允许设置负世代（不验证输入）"""
-        sm = get_state_manager()
-        sm.set_generation(-1)
-        assert sm.get_generation() == -1
-
-
-# ============================================================================
 # 目标管理测试
 # ============================================================================
 
@@ -499,7 +456,7 @@ class TestStatePersistence:
         """save_state 创建文件"""
         sm = get_state_manager()
         sm.set_state(AgentState.THINKING)
-        sm.set_generation(3)
+        sm.set_current_goal("测试目标")
 
         filepath = tmp_path / "test_state.json"
         result = sm.save_state(str(filepath))
@@ -509,7 +466,6 @@ class TestStatePersistence:
         """save_state 写入正确的状态数据"""
         sm = get_state_manager()
         sm.set_state(AgentState.CODING)
-        sm.set_generation(7)
         sm.set_current_goal("持久化测试")
 
         filepath = tmp_path / "test_state.json"
@@ -519,7 +475,6 @@ class TestStatePersistence:
             data = json.load(f)
 
         assert data["state"] == "coding"
-        assert data["generation"] == 7
         assert data["current_goal"] == "持久化测试"
 
     def test_save_state_includes_recent_actions(self, tmp_path):
@@ -540,7 +495,6 @@ class TestStatePersistence:
         """load_state 恢复状态"""
         sm = get_state_manager()
         sm.set_state(AgentState.SEARCHING)
-        sm.set_generation(4)
         sm.set_current_goal("恢复测试")
 
         filepath = tmp_path / "test_state.json"
@@ -551,7 +505,6 @@ class TestStatePersistence:
 
         assert result is True
         assert sm.state == AgentState.SEARCHING
-        assert sm.get_generation() == 4
         assert sm.get_current_goal() == "恢复测试"
 
     def test_load_state_nonexistent_file_returns_false(self):
@@ -564,7 +517,6 @@ class TestStatePersistence:
         """保存后加载往返一致"""
         sm = get_state_manager()
         sm.set_state(AgentState.TESTING)
-        sm.set_generation(42)
         sm.set_current_goal("往返测试")
         sm.increment_iteration()
         sm.increment_iteration()
@@ -580,7 +532,6 @@ class TestStatePersistence:
         sm2.load_state(str(filepath))
 
         assert sm2.state == AgentState.TESTING
-        assert sm2.get_generation() == 42
         assert sm2.get_current_goal() == "往返测试"
 
 
@@ -668,7 +619,7 @@ class TestConvenienceFunctions:
         expected_keys = {
             "state", "previous_state", "action",
             "iteration_count", "tools_executed",
-            "generation", "current_goal",
+            "current_goal",
         }
         assert set(info.keys()) == expected_keys
 

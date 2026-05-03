@@ -24,8 +24,6 @@ import time
 from pathlib import Path
 from unittest.mock import patch, MagicMock, call
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
 
 

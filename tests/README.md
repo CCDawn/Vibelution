@@ -11,7 +11,7 @@ tests/
 ├── __init__.py                    # 测试包标识
 ├── conftest.py                    # pytest 配置和共享 fixtures
 ├── test_runner.py                 # 统一测试运行器（pytest 封装）
-├── prompt_shooting.py             # 提示词打靶测试（工具变更时必用）
+├── prompt_debugger.py             # 提示词打靶测试（工具变更时必用）
 ├── simulate_lifecycle.py          # 沙盘生命周期独立验证脚本
 │
 ├── [pytest 测试文件]              # 23 个，对应实际模块
@@ -99,19 +99,19 @@ python tests/test_runner.py --verbose
 python tests/test_runner.py --fast
 ```
 
-### 3.3 使用 prompt_shooting.py（工具变更时必用）
+### 3.3 使用 prompt_debugger.py（工具变更时必用）
 
 验证模型能够正确理解并调用工具。**每次添加或修改工具后必须运行**。
 
 ```bash
 # 测试指定工具（如 shell_tools, memory_tools, search_tools）
-python tests/prompt_shooting.py --tool shell_tools
+python tests/prompt_debugger.py --tool shell_tools
 
 # 运行内置测试用例集
-python tests/prompt_shooting.py --suite
+python tests/prompt_debugger.py --suite
 
 # 交互模式
-python tests/prompt_shooting.py "你的测试 prompt"
+python tests/prompt_debugger.py "你的测试 prompt"
 ```
 
 验证标准：
@@ -182,7 +182,7 @@ def test_config():
 
 | 组件 | 职责 | 调用场景 |
 |------|------|---------|
-| `prompt_shooting.py` | 提示词打靶测试：验证模型对工具的理解和调用 | **添加/修改工具时必用** |
+| `prompt_debugger.py` | 提示词打靶测试：验证模型对工具的理解和调用 | **添加/修改工具时必用** |
 | `test_runner.py` | 单元/集成测试运行器：验证代码正确性 | 日常开发、提交前 |
 | `simulate_lifecycle.py` | 生命周期验证：不调用大模型，验证防断裂机制 | 重启前必检 |
 | `conftest.py` | pytest 配置：单例重置、隔离工作空间、共享 fixtures | pytest 自动加载 |

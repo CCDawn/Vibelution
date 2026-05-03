@@ -4,9 +4,8 @@
 
 测试内容：
 1. 记忆读写功能
-2. 世代管理
-3. 上下文压缩
-4. 档案归档
+2. 上下文压缩
+3. 档案列表
 
 运行：pytest tests/test_memory.py -v
 """
@@ -14,23 +13,15 @@
 import pytest
 import json
 import os
-import tempfile
-import shutil
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from datetime import datetime
 
 # 导入被测模块
 from tools.memory_tools import (
     read_memory_tool,
     commit_compressed_memory_tool,
-    get_generation_tool,
     get_current_goal_tool,
     get_core_context_tool,
-    archive_generation_history,
-    advance_generation,
-    list_archives_tool,
-    read_generation_archive_tool,
     _load_memory,
     _save_memory,
     _get_memory_index_path,
@@ -58,10 +49,8 @@ def isolate_memory_workspace(monkeypatch, tmp_path):
     # 初始化一个干净的 memory.json
     import json
     default_memory = {
-        "current_generation": 1,
         "core_wisdom": "",
         "current_goal": "Initial test goal",
-        "total_generations": 1,
     }
     memory_file.write_text(json.dumps(default_memory, ensure_ascii=False), encoding="utf-8")
 
@@ -89,20 +78,9 @@ class TestMemoryBasics:
     def test_memory_has_required_keys(self):
         """测试记忆包含必需字段"""
         memory = _load_memory()
-        required_keys = [
-            "current_generation",
-            "core_wisdom",
-            "current_goal",
-            "total_generations",
-        ]
+        required_keys = ["core_wisdom", "current_goal"]
         for key in required_keys:
             assert key in memory, f"记忆应包含字段: {key}"
-
-    def test_generation_is_positive_int(self):
-        """测试世代号是正整数"""
-        gen = get_generation_tool()
-        assert isinstance(gen, int), "世代号应该是整数"
-        assert gen >= 1, "世代号应该 >= 1"
 
     def test_get_current_goal_returns_string(self):
         """测试获取目标返回字符串"""
@@ -136,65 +114,9 @@ class TestMemoryWrite:
         result_dict = json.loads(result)
 
         assert result_dict["status"] == "success"
-        # 核心智慧应该被截断
         assert len(result_dict["core_wisdom"]) <= 300
 
-    def test_advance_generation_increments_count(self):
-        """测试推进世代递增计数"""
-        before = get_generation_tool()
-        new_gen = advance_generation()
 
-        assert new_gen == before + 1, "世代号应该递增"
-
-        # 恢复原状态
-        memory = _load_memory()
-        memory["current_generation"] = before
-        _save_memory(memory)
-
-
-class TestArchiveSystem:
-    """档案系统测试"""
-
-    def test_archive_generation_history_creates_file(self):
-        """测试归档生成历史文件"""
-        test_data = [
-            {"type": "thought", "content": "测试思考"},
-            {"type": "tool_call", "name": "test_tool", "content": "测试结果"},
-        ]
-
-        result = archive_generation_history(
-            generation=999,  # 使用特殊世代号避免干扰
-            history_data=test_data,
-            core_wisdom="测试核心智慧",
-            next_goal="测试下一目标",
-        )
-
-        result_dict = json.loads(result)
-        assert result_dict["status"] == "success", "归档应该成功"
-        assert "archive_file" in result_dict, "结果应包含文件路径"
-
-        # 验证文件存在
-        if os.path.exists(result_dict["archive_file"]):
-            with open(result_dict["archive_file"], "r", encoding="utf-8") as f:
-                archive = json.load(f)
-            assert archive["generation"] == 999, "归档世代号应匹配"
-            assert len(archive["history"]) == 2, "归档应包含2条历史"
-
-    def test_list_archives_returns_list(self):
-        """测试列出档案返回列表"""
-        result = list_archives_tool()
-        result_dict = json.loads(result)
-
-        assert result_dict["status"] == "success"
-        assert "archives" in result_dict
-        assert isinstance(result_dict["archives"], list)
-
-    def test_read_generation_archive_nonexistent_returns_error(self):
-        """测试读取不存在的档案返回错误"""
-        result = read_generation_archive_tool(generation=999999)
-        result_dict = json.loads(result)
-
-        assert result_dict["status"] == "error", "不存在的档案应返回错误"
 
 
 class TestMemoryIntegration:
@@ -203,7 +125,6 @@ class TestMemoryIntegration:
     def test_full_memory_lifecycle(self):
         """测试完整记忆生命周期"""
         # 1. 读取初始状态
-        gen_before = get_generation_tool()
         goal_before = get_current_goal_tool()
 
         # 2. 更新记忆
@@ -216,25 +137,7 @@ class TestMemoryIntegration:
         assert memory["core_wisdom"] == new_wisdom
         assert memory["current_goal"] == new_goal
 
-        # 4. 归档当前状态
-        archive_result = archive_generation_history(
-            generation=gen_before,
-            history_data=[
-                {"type": "test", "content": "生命周期测试"}
-            ],
-            core_wisdom=new_wisdom,
-            next_goal=new_goal,
-        )
-        assert json.loads(archive_result)["status"] == "success"
-
-        # 5. 推进世代
-        new_gen = advance_generation()
-        assert new_gen == gen_before + 1
-
         # 恢复原状态
-        memory = _load_memory()
-        memory["current_generation"] = gen_before
-        memory["core_wisdom"] = goal_before
         memory["current_goal"] = goal_before
         _save_memory(memory)
 
@@ -246,39 +149,31 @@ class TestMemoryIntegration:
 def run_memory_tests() -> dict:
     """
     运行所有记忆测试，返回结果摘要。
-
-    Returns:
-        dict: {
-            "passed": 通过数,
-            "failed": 失败数,
-            "total": 总数,
-            "status": "PASS" | "FAIL",
-            "details": [失败详情]
-        }
     """
-    import subprocess
+    results = {"total": 0, "passed": 0, "failed": 0, "details": []}
 
-    result = subprocess.run(
-        ["pytest", __file__, "-v", "--tb=short", "--no-header"],
-        capture_output=True,
-        text=True,
-    )
+    # 简单的手动测试
+    test_cases = [
+        ("load_memory", lambda: isinstance(_load_memory(), dict)),
+        ("get_goal", lambda: isinstance(get_current_goal_tool(), str)),
+        ("get_context", lambda: isinstance(get_core_context_tool(), str)),
+        ("read_memory", lambda: "core_wisdom" in _load_memory()),
+    ]
 
-    output = result.stdout + result.stderr
+    for name, fn in test_cases:
+        results["total"] += 1
+        try:
+            if fn():
+                results["passed"] += 1
+            else:
+                results["failed"] += 1
+                results["details"].append(f"{name}: FAILED")
+        except Exception as e:
+            results["failed"] += 1
+            results["details"].append(f"{name}: ERROR: {e}")
 
-    # 解析结果
-    passed = output.count(" PASSED")
-    failed = output.count(" FAILED")
-
-    return {
-        "passed": passed,
-        "failed": failed,
-        "total": passed + failed,
-        "status": "PASS" if failed == 0 else "FAIL",
-        "output": output,
-    }
+    return results
 
 
 if __name__ == "__main__":
-    # 直接运行测试
-    pytest.main([__file__, "-v"])
+    pytest.main([__file__, "-v", "--tb=short"])

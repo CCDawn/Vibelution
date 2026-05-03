@@ -59,7 +59,6 @@ class UIManager:
         self._stderr_console = _stderr_console
         self._live: Optional[Live] = None
         self._status_line = ""
-        self._generation = 1
         self._current_goal = ""
         self._status = "IDLE"
         self._thinking = False
@@ -119,7 +118,7 @@ class UIManager:
         art = self.avatar.get_art("happy")
 
         # Agent 状态行
-        agent_line = f"G{self._generation} | {self._status}"
+        agent_line = f"{self._status}"
         if self._current_goal:
             goal_preview = self._current_goal[:40].replace("\n", " ")
             agent_line += f" | {goal_preview}"
@@ -220,8 +219,6 @@ class UIManager:
                       iterations: int = None, tool_count: int = None,
                       input_tokens: int = None, output_tokens: int = None):
         self._status = status.upper()
-        if generation is not None:
-            self._generation = generation
         if goal is not None:
             self._current_goal = goal
         if iterations is not None:
@@ -364,9 +361,6 @@ class UIManager:
 
     def print_header(self, model: str, generation: int = None, tools_count: int = 0):
         """打印会话头 — 宠物面板版"""
-        if generation is not None:
-            self._generation = generation
-
         pet_name = "Baby Claw"
         pet_level = 1
         pet_age = 0

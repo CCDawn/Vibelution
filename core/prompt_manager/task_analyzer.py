@@ -66,7 +66,6 @@ class TaskRecord:
 @dataclass
 class TaskAnalysisReport:
     """任务分析报告"""
-    generation: int
     timestamp: str
     total_tasks: int
     completed_tasks: int
@@ -225,14 +224,12 @@ class TaskAnalyzer:
 
     def analyze_tasks(
         self,
-        generation: int,
         task_records: Optional[List[Dict[str, Any]]] = None,
     ) -> TaskAnalysisReport:
         """
         分析任务执行情况
 
         Args:
-            generation: 世代
             task_records: 任务记录列表（可选，用于外部传入）
 
         Returns:
@@ -287,7 +284,6 @@ class TaskAnalyzer:
         )
 
         return TaskAnalysisReport(
-            generation=generation,
             timestamp=datetime.now().isoformat(),
             total_tasks=total,
             completed_tasks=completed,
@@ -300,25 +296,18 @@ class TaskAnalyzer:
             task_records=records,
         )
 
-    def generate_retrospective(
-        self,
-        generation: int,
-    ) -> str:
+    def generate_retrospective(self) -> str:
         """
         生成任务复盘报告
-
-        Args:
-            generation: 世代
 
         Returns:
             Markdown 格式的复盘报告
         """
-        report = self.analyze_tasks(generation)
+        report = self.analyze_tasks()
 
         lines = [
             "# 任务执行复盘报告",
             "",
-            f"**世代**: G{generation}",
             f"**生成时间**: {report.timestamp}",
             "",
             "---",
@@ -414,10 +403,10 @@ class TaskAnalyzer:
             保存的文件路径
         """
         if filepath is None:
-            filepath = self._analysis_dir / f"task_analysis_G{report.generation}.json"
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = self._analysis_dir / f"task_analysis_{ts}.json"
 
         data = {
-            "generation": report.generation,
             "timestamp": report.timestamp,
             "total_tasks": report.total_tasks,
             "completed_tasks": report.completed_tasks,

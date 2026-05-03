@@ -62,6 +62,8 @@ from .models import (
     DebugConfig,
     CompatConfig,
     AvatarConfig,
+    PromptConfig,
+    SectionConfig,
     # 宠物系统配置
     PetConfig,
     GeneConfig,
@@ -124,6 +126,7 @@ from .settings import (
     get_strategy_config,
     get_ui_config,
     get_parser_config,
+    get_prompt_config,
     get_debug_config,
     get_pet_config,
     get_pet_gene_config,
@@ -467,6 +470,8 @@ __all__ = [
     "DebugConfig",
     "CompatConfig",
     "AvatarConfig",
+    "PromptConfig",
+    "SectionConfig",
     # 提供商
     "ModelPreset",
     "MODEL_PRESETS",
@@ -495,6 +500,7 @@ __all__ = [
     "get_memory_config",
     "get_strategy_config",
     "get_ui_config",
+    "get_prompt_config",
     "get_debug_config",
     # 工具函数
     "list_models",

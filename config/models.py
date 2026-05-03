@@ -845,6 +845,23 @@ class EvolutionConfig(BaseModel):
         default="pytest tests/ -v --tb=short -q",
         description="测试命令"
     )
+    # ── 熵减进化流程配置 ──
+    proposals_dir: str = Field(
+        default="workspace/evolution/proposals",
+        description="进化提案存储目录"
+    )
+    audit_log_path: str = Field(
+        default="workspace/evolution/audit.jsonl",
+        description="进化审计日志路径（JSONL 格式）"
+    )
+    auto_check_approved: bool = Field(
+        default=True,
+        description="Agent 苏醒时是否自动检查已审批提案"
+    )
+    allowed_target_dirs: List[str] = Field(
+        default_factory=lambda: ["workspace/prompts/"],
+        description="允许进化修改的目录白名单"
+    )
 
 
 # ============================================================================
@@ -906,13 +923,51 @@ class StrategyConfig(BaseModel):
 # 提示词管理器配置
 # ============================================================================
 
+class SectionConfig(BaseModel):
+    """单个提示词章节配置
+
+    每个章节对应一个 Markdown 文件，通过 [[prompt.sections]] 表格在 config.toml 中定义。
+    动态章节（ENV_INFO、MEMORY 等）不需要在此定义，由代码内置注册。
+    """
+    model_config = ConfigDict(extra="ignore")
+
+    name: str = Field(
+        ...,
+        description="章节唯一标识 (SOUL, SPEC, MY_RULES 等)"
+    )
+    path: str = Field(
+        ...,
+        description="Markdown 文件路径（相对于项目根目录）"
+    )
+    priority: int = Field(
+        default=50,
+        description="排序优先级，数字越小越靠前"
+    )
+    required: bool = Field(
+        default=False,
+        description="是否为必选章节（不可被 exclude 移除）"
+    )
+    cache_break: bool = Field(
+        default=False,
+        description="是否每轮重新计算（动态章节设为 true）"
+    )
+    description: str = Field(
+        default="",
+        description="章节描述"
+    )
+
+
 class PromptConfig(BaseModel):
     """提示词管理器配置"""
     model_config = ConfigDict(extra="ignore")
 
     default_components: List[str] = Field(
-        default=["SOUL", "AGENTS", "SPEC", "ENV_INFO"],
-        description="默认拼装的组件列表（可按需调整）"
+        default=["SOUL", "SPEC", "ENV_INFO"],
+        description="默认拼装的组件列表（静态章节 + 内置动态章节）"
+    )
+    sections: List[SectionConfig] = Field(
+        default_factory=list,
+        description="静态章节定义列表（对应 TOML [[prompt.sections]] 表格）"
     )
 
 
@@ -1347,6 +1402,9 @@ __all__ = [
     "StrategyConfig",
     # 代码分析配置
     "AnalysisConfig",
+    # 提示词管理器配置
+    "PromptConfig",
+    "SectionConfig",
     # UI 配置
     "UIConfig",
     "ParserConfig",

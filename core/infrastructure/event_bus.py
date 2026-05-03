@@ -109,8 +109,6 @@ class EventNames:
     COMPRESSION_END = "compression:end"
 
     # 世代事件
-    GENERATION_ADVANCE = "generation:advance"
-    GENERATION_ARCHIVE = "generation:archive"
 
     # 重启事件
     RESTART_TRIGGER = "restart:trigger"

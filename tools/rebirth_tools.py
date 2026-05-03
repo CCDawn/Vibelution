@@ -329,8 +329,7 @@ def trigger_self_restart_tool(reason: str = "") -> str:
     # 0. 【强制记忆快照】在重启前自动保存状态
     # 这是最后一道防线，确保即使 Agent 没有主动保存记忆，系统也会自动保存
     try:
-        from tools.memory_tools import force_save_current_state, get_generation_tool, get_core_context, get_current_goal
-        current_gen = get_generation_tool()
+        from tools.memory_tools import force_save_current_state, get_core_context, get_current_goal
         core_ctx = get_core_context() or "无"
         current_goal = get_current_goal() or "待定"
 
@@ -347,7 +346,6 @@ def trigger_self_restart_tool(reason: str = "") -> str:
         snapshot_result = force_save_current_state(
             core_wisdom=model_wisdom,
             next_goal=current_goal,
-            generation=current_gen
         )
         debug_logger.info(f"[强制快照] {snapshot_result}")
     except Exception as e:
@@ -491,61 +489,18 @@ def handle_restart_request(
     # 测试门控（仅当 Agent 产生过自我修改时触发）
     if self_modified:
         try:
-            from core.decision.evolution_gate import run_evolution_gate
-            test_result = run_evolution_gate()
-            if not test_result["passed"]:
-                error_msg = (
-                    f"[TEST GATE FAILED] 测试未通过，禁止进化！\n"
-                    f"失败模块: {', '.join(test_result['failed_modules'])}\n"
-                    f"通过: {test_result['passed_count']}/{test_result['total_count']}"
-                )
+            from core.infrastructure.test_gate import check_evolution_ready
+            passed, msg = check_evolution_ready()
+            if not passed:
                 debug_logger.error("测试门控失败，禁止重启", tag="GATE")
-                return (error_msg, None)
+                return (f"[TEST GATE FAILED] {msg}", None)
         except Exception as e:
             debug_logger.error(f"测试门控执行失败: {e}", tag="GATE")
 
-    # 世代归档
-    current_gen = None
-    new_gen = None
-    try:
-        from tools.memory_tools import (
-            get_generation_tool,
-            get_core_context, get_current_goal,
-            archive_generation_history, advance_generation,
-            clear_generation_task,
-        )
-        current_gen = get_generation_tool()
-        intermediate_steps = []
-        for msg in messages:
-            if hasattr(msg, 'content') and isinstance(msg.content, str):
-                if msg.type == "ai" and msg.content:
-                    intermediate_steps.append({"type": "thought", "content": msg.content[:500]})
-                elif msg.type == "tool":
-                    intermediate_steps.append({
-                        "type": "tool_call",
-                        "name": getattr(msg, 'name', 'unknown'),
-                        "content": msg.content[:200]
-                    })
-
-        core_wisdom = get_core_context() or "无"
-        current_goal = get_current_goal() or "待定"
-        archive_generation_history(
-            generation=current_gen,
-            history_data=intermediate_steps,
-            core_wisdom=core_wisdom,
-            next_goal=current_goal
-        )
-        new_gen = advance_generation()
-        clear_generation_task()
-    except Exception as e:
-        debug_logger.error(f"世代归档失败: {e}", tag="ARCHIVE")
-
     # 触发实际重启
     tool_result = trigger_self_restart_tool(**tool_args)
-    archive_msg = f"\n[世代归档] G{current_gen} -> G{new_gen}" if current_gen is not None and new_gen is not None else ""
-    tool_result_with_archive = f"{tool_result}{archive_msg}"
 
-    return (tool_result_with_archive, "restart")
+    return (tool_result, "restart")
 
 
 def enter_hibernation_tool(duration: int = 300) -> str:

@@ -133,3 +133,39 @@ def mock_llm_response():
 def project_root():
     """返回项目根目录（Path 对象）。"""
     return PROJECT_ROOT
+
+
+# ============================================================================
+# 自动标记 — 根据文件路径自动应用 pytest markers
+# ============================================================================
+
+def pytest_collection_modifyitems(items):
+    """
+    根据测试文件路径自动应用 markers，无需在每个文件手动加装饰器。
+
+    标记规则：
+    - tests/test_xxx.py (tools/)  → tools
+    - tests/test_xxx.py (core/infrastructure/) → infrastructure
+    - tests/test_xxx.py (core/orchestration/)  → orchestration
+    - tests/test_xxx.py (config/)  → config
+    """
+    from pathlib import Path
+
+    for item in items:
+        fspath = Path(str(item.fspath))
+        rel = fspath.relative_to(PROJECT_ROOT).as_posix()
+        item_path = str(item.fspath)
+
+        # Source-based markers (inferred from test file name)
+        stem = fspath.stem  # e.g., "test_shell_tools" → "shell_tools"
+
+        # Heuristic: check what the test file imports to determine layer
+        source = fspath.read_text(encoding="utf-8")[:2000]
+        if "core.infrastructure" in source or "core/infrastructure" in source:
+            item.add_marker(pytest.mark.infrastructure)
+        elif "core.orchestration" in source or "core/orchestration" in source:
+            item.add_marker(pytest.mark.orchestration)
+        elif "config" in stem and "tools" not in stem:
+            item.add_marker(pytest.mark.config)
+        elif "tools." in source or "from tools" in source or "import tools" in source:
+            item.add_marker(pytest.mark.tools)

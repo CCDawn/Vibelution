@@ -56,7 +56,6 @@ class StateRecord:
     action: Optional[str] = None
     iteration_count: Optional[int] = None
     tools_executed: Optional[int] = None
-    generation: Optional[int] = None
     current_goal: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -110,7 +109,6 @@ class StateManager:
         # 状态元数据
         self._iteration_count: int = 0
         self._tools_executed: int = 0
-        self._generation: int = 1
         self._current_goal: Optional[str] = None
 
         # 锁
@@ -141,7 +139,6 @@ class StateManager:
         action: Optional[str] = None,
         iteration_count: Optional[int] = None,
         tools_executed: Optional[int] = None,
-        generation: Optional[int] = None,
         current_goal: Optional[str] = None,
         **metadata
     ) -> None:
@@ -153,7 +150,6 @@ class StateManager:
             action: 当前动作描述
             iteration_count: 迭代计数
             tools_executed: 已执行工具数
-            generation: 当前世代
             current_goal: 当前目标
             **metadata: 其他元数据
         """
@@ -168,8 +164,6 @@ class StateManager:
                 self._iteration_count = iteration_count
             if tools_executed is not None:
                 self._tools_executed = tools_executed
-            if generation is not None:
-                self._generation = generation
             if current_goal is not None:
                 self._current_goal = current_goal
 
@@ -180,7 +174,6 @@ class StateManager:
                 action=self._action,
                 iteration_count=self._iteration_count,
                 tools_executed=self._tools_executed,
-                generation=self._generation,
                 current_goal=self._current_goal,
                 metadata=metadata,
             )
@@ -222,7 +215,6 @@ class StateManager:
             "action": self._action,
             "iteration_count": self._iteration_count,
             "tools_executed": self._tools_executed,
-            "generation": self._generation,
             "current_goal": self._current_goal,
         }
 
@@ -267,19 +259,6 @@ class StateManager:
         with self._state_lock:
             self._recent_actions.clear()
             self._consecutive_count = 0
-
-    # =========================================================================
-    # 世代管理
-    # =========================================================================
-
-    def set_generation(self, generation: int) -> None:
-        """设置当前世代"""
-        with self._state_lock:
-            self._generation = generation
-
-    def get_generation(self) -> int:
-        """获取当前世代"""
-        return self._generation
 
     def set_current_goal(self, goal: str) -> None:
         """设置当前目标"""
@@ -330,7 +309,6 @@ class StateManager:
 
         state_data = {
             "state": self._state.value,
-            "generation": self._generation,
             "current_goal": self._current_goal,
             "iteration_count": self._iteration_count,
             "tools_executed": self._tools_executed,
@@ -366,7 +344,6 @@ class StateManager:
                 state_data = json.load(f)
 
             self._state = AgentState(state_data.get("state", "idle"))
-            self._generation = state_data.get("generation", 1)
             self._current_goal = state_data.get("current_goal")
             self._iteration_count = state_data.get("iteration_count", 0)
             self._tools_executed = state_data.get("tools_executed", 0)

@@ -14,7 +14,7 @@ Workspace Manager - 统一工作区管理
   ├── prompts/            # 身份与法则
   │   ├── SOUL.md
   │   ├── IDENTITY.md
-  │   ├── AGENTS.md
+  │   ├── SPEC.md
   │   └── USER.md
   └── logs/               # 运行日志
 """
@@ -252,10 +252,6 @@ class WorkspaceManager:
         """获取提示词文件路径"""
         return self._workspace / "prompts" / name
 
-    def get_archive_path(self, generation: int) -> Path:
-        """获取世代档案路径"""
-        return self.archives_dir / f"gen_{generation}_history.json"
-
     # ==================== 数据库操作 ====================
 
     def get_identity(self, key: str) -> Optional[str]:
@@ -280,36 +276,15 @@ class WorkspaceManager:
                     updated_at = excluded.updated_at
             """, (key, value, description, now, now))
 
-    def add_long_term_memory(self, generation: int, category: str, content: str,
-                            title: str = None, importance: int = 1) -> int:
-        """添加长期记忆"""
-        now = datetime.now().isoformat()
-        with self.get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO LongTermMemory (generation, category, title, content, importance, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (generation, category, title, content, importance, now))
-            return cursor.lastrowid
-
-    def get_memories_by_generation(self, generation: int) -> List[Dict]:
-        """获取指定世代的记忆"""
-        with self.get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM LongTermMemory WHERE generation = ? ORDER BY created_at
-            """, (generation,))
-            return [dict(row) for row in cursor.fetchall()]
-
-    def add_task(self, task_id: str, generation: int, description: str) -> int:
+    def add_task(self, task_id: str, description: str) -> int:
         """添加任务"""
         now = datetime.now().isoformat()
         with self.get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO TaskLog (task_id, generation, description, status, created_at)
-                VALUES (?, ?, ?, 'pending', ?)
-            """, (task_id, generation, description, now))
+                VALUES (?, 1, ?, 'pending', ?)
+            """, (task_id, description, now))
             return cursor.lastrowid
 
     def update_task(self, task_id: str, status: str, result: str = None):
@@ -347,7 +322,7 @@ class WorkspaceManager:
 
     # ==================== 代码库认知地图操作 ====================
 
-    def record_codebase_insight(self, module_path: str, insight: str, generation: int) -> bool:
+    def record_codebase_insight(self, module_path: str, insight: str) -> bool:
         """刻印代码库认知（UPSERT 逻辑）"""
         now = datetime.now().isoformat()
         try:
@@ -355,12 +330,12 @@ class WorkspaceManager:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO CodebaseKnowledge (module_path, insight_summary, last_updated_gen, updated_at, created_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (?, ?, 1, ?, ?)
                     ON CONFLICT(module_path) DO UPDATE SET
                         insight_summary = excluded.insight_summary,
-                        last_updated_gen = excluded.last_updated_gen,
+                        last_updated_gen = 1,
                         updated_at = excluded.updated_at
-                """, (module_path, insight, generation, now, now))
+                """, (module_path, insight, now, now))
             return True
         except Exception as e:
             from core.logging import debug_logger; debug_logger.error(f"[Workspace] 刻印代码库认知失败: {e}")
@@ -404,10 +379,8 @@ class WorkspaceManager:
     def _default_memory_index(self) -> Dict[str, Any]:
         """默认记忆索引"""
         return {
-            "current_generation": 1,
             "core_wisdom": "初始状态",
             "current_goal": "熟悉环境",
-            "total_generations": 1,
             "last_archive_time": None,
         }
 

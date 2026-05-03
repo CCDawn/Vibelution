@@ -5,9 +5,9 @@
 验证模型能够正确理解并调用工具。每次添加或修改工具后必须运行。
 
 用法:
-    python tests/prompt_shooting.py --tool <工具名>    # 测试指定工具
-    python tests/prompt_shooting.py --suite           # 运行内置测试用例集
-    python tests/prompt_shooting.py                    # 交互模式
+    python tests/prompt_debugger.py --tool <工具名>    # 测试指定工具
+    python tests/prompt_debugger.py --suite           # 运行内置测试用例集
+    python tests/prompt_debugger.py                    # 交互模式
 
 验证标准:
     - 模型能识别工具名称和用途
@@ -31,7 +31,6 @@ PROJECT_ROOT = None
 try:
     from pathlib import Path
     PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-    sys.path.insert(0, str(PROJECT_ROOT))
 except Exception:
     PROJECT_ROOT = Path(".").resolve()
 
@@ -488,9 +487,9 @@ def main():
             return
 
         _print("\n用法:")
-        _print("  python tests/prompt_shooting.py --tool shell_tools")
-        _print("  python tests/prompt_shooting.py --suite")
-        _print("  python tests/prompt_shooting.py \"你的测试 prompt\"")
+        _print("  python tests/prompt_debugger.py --tool shell_tools")
+        _print("  python tests/prompt_debugger.py --suite")
+        _print("  python tests/prompt_debugger.py \"你的测试 prompt\"")
         return
 
     passed = print_summary(all_results)

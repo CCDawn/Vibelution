@@ -18,7 +18,6 @@ from pathlib import Path
 
 # 添加项目根目录到路径
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def test_1_cli_error_detection():
@@ -62,14 +61,12 @@ def test_2_memory_save():
     result = force_save_current_state(
         core_wisdom=test_wisdom,
         next_goal=test_goal,
-        generation=999  # 使用特殊世代号便于识别
     )
 
     print(f"  保存结果: {result}")
 
     # 验证读取
     memory = _load_memory()
-    print(f"  当前世代: {memory.get('current_generation')}")
     print(f"  核心智慧: {memory.get('core_wisdom')}")
     print(f"  当前目标: {memory.get('current_goal')}")
 
@@ -96,7 +93,7 @@ def test_3_restart_snapshot():
     result = force_save_current_state(
         core_wisdom=snapshot_wisdom,
         next_goal=snapshot_goal,
-        generation=998
+        
     )
 
     print(f"  快照结果: {result}")
@@ -110,7 +107,7 @@ def test_3_restart_snapshot():
     if exists:
         with open(ws_memory, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        print(f"  世代: {data.get('current_generation')}")
+        
         print(f"  智慧: {data.get('core_wisdom')}")
 
         snapshot_ok = snapshot_wisdom in data.get("core_wisdom", "")
@@ -120,50 +117,7 @@ def test_3_restart_snapshot():
     return False
 
 
-def test_4_database_write():
-    """测试4: 数据库写入"""
-    print("\n" + "=" * 60)
-    print("测试4: 数据库写入")
-    print("=" * 60)
-
-    from core.infrastructure.workspace_manager import get_workspace
-
-    ws = get_workspace()
-
-    # 检查数据库
-    db_path = ws.db_path
-    exists = db_path.exists()
-    print(f"  数据库存在: {exists}")
-    print(f"  路径: {db_path}")
-
-    if exists:
-        # 写入测试记忆
-        ws.add_long_term_memory(
-            generation=997,
-            category="sandbox_test",
-            title="沙盘测试记录",
-            content="这是沙盘测试添加的长期记忆",
-            importance=5
-        )
-
-        # 读取验证 - 使用 with 语句正确使用上下文管理器
-        with ws.get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM LongTermMemory WHERE generation = ?", (997,))
-            rows = cursor.fetchall()
-            print(f"\n  写入后记忆数: {len(rows)}")
-            test_ok = len(rows) > 0
-            if test_ok:
-                for row in rows:
-                    print(f"  记忆: {dict(row)}")
-
-        print(f"  数据库写入: {'PASS' if test_ok else 'FAIL'}")
-        return test_ok
-
-    return False
-
-
-def test_5_workspace_structure():
+def test_4_workspace_structure():
     """测试5: workspace 结构完整性"""
     print("\n" + "=" * 60)
     print("测试5: workspace 结构完整性")
@@ -183,7 +137,7 @@ def test_5_workspace_structure():
         print(f"  workspace/{d}: {'OK' if exists else 'MISSING'}")
 
     # 检查关键文件（从 workspace/prompts/ 读取）
-    for f in ["SOUL.md", "IDENTITY.md", "AGENTS.md"]:
+    for f in ["SOUL.md", "IDENTITY.md", "SPEC.md"]:
         path = ws.get_prompt_path(f)
         exists = path.exists()
         content_ok = path.exists() and len(ws.read_prompt(f)) > 0
@@ -233,13 +187,7 @@ def main():
         results.append(("重启快照", False))
 
     try:
-        results.append(("数据库写入", test_4_database_write()))
-    except Exception as e:
-        print(f"  [ERROR] {e}")
-        results.append(("数据库写入", False))
-
-    try:
-        results.append(("workspace结构", test_5_workspace_structure()))
+        results.append(("workspace结构", test_4_workspace_structure()))
     except Exception as e:
         print(f"  [ERROR] {e}")
         results.append(("workspace结构", False))

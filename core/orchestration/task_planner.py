@@ -150,9 +150,6 @@ class TaskManager:
 
         # ── 轻量任务存储（来自原 TaskManager）─────────────────────────────
         self._TASKS_FILE = "workspace/memory/tasks.json"
-        self._light_tasks: List[Dict[str, Any]] = []   # 扁平 list，持久化到 tasks.json
-        self._generation_goal: str = ""
-        self._next_light_id: int = 1
 
         # ── 统计 ────────────────────────────────────────────────────────
         self._stats = {
@@ -162,8 +159,12 @@ class TaskManager:
             "tasks_failed": 0,
         }
 
-        # 加载 tasks.json
-        self._load_light_tasks()
+        # 任务清单不再从文件自动加载 —— Agent 必须主动调用 task_create() 创建任务。
+        # 旧任务的持久化文件（tasks.json）仅用于崩溃恢复场景的手动读取，
+        # 常规启动时任务从空开始，由 LLM 动态规划。
+        self._light_tasks: List[Dict[str, Any]] = []
+        self._goal: str = ""
+        self._next_light_id: int = 1
 
     def _generate_id(self, prefix: str = "task") -> str:
         """生成唯一 ID"""
@@ -684,7 +685,7 @@ class TaskManager:
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                self._generation_goal = data.get("generation_goal", "")
+                self._goal = data.get("goal", data.get("generation_goal", ""))
                 raw = data.get("subtasks", [])
                 self._light_tasks = list(raw) if raw else []
                 self._next_light_id = max([t["id"] for t in self._light_tasks], default=0) + 1
@@ -700,15 +701,15 @@ class TaskManager:
         fpath.parent.mkdir(parents=True, exist_ok=True)
         with open(fpath, "w", encoding="utf-8") as f:
             json.dump({
-                "generation_goal": self._generation_goal,
+                "goal": self._goal,
                 "subtasks": self._light_tasks,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
             }, f, ensure_ascii=False, indent=2)
 
-    def task_create(self, tasks: List[Dict[str, Any]], generation_goal: str = "") -> str:
+    def task_create(self, tasks: List[Dict[str, Any]], goal: str = "") -> str:
         """创建任务清单（清空旧清单），返回摘要。"""
-        self._generation_goal = generation_goal
+        self._goal = goal
         self._light_tasks = []
         self._next_light_id = 1
         for t in tasks:
@@ -750,8 +751,8 @@ class TaskManager:
         if not self._light_tasks:
             return ""
         lines = ["\n\n---\n\n## 当前任务进度\n"]
-        if self._generation_goal:
-            lines.append(f"**目标**: {self._generation_goal}\n")
+        if self._goal:
+            lines.append(f"**目标**: {self._goal}\n")
         lines.append("| # | 描述 | 状态 | 结果摘要 |\n")
         lines.append("|---|------|------|----------|\n")
         for t in self._light_tasks:

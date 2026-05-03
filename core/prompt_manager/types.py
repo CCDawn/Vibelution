@@ -45,8 +45,6 @@ class SystemPromptSection:
 class BuildContext:
     """构建上下文，携带每轮可变的参数。"""
 
-    generation: Optional[int] = None
-    total_generations: Optional[int] = None
     core_context: Optional[str] = None
     current_goal: Optional[str] = None
     state_memory: str = ""

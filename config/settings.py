@@ -51,6 +51,7 @@ from .models import (
     SkinConfig,
     SoundConfig,
     PromptConfig,
+    SectionConfig,
 )
 from .providers import (
     MODEL_PRESETS,
@@ -864,6 +865,11 @@ def get_parser_config() -> "ParserConfig":
     return get_config().parser
 
 
+def get_prompt_config() -> "PromptConfig":
+    """获取提示词管理器配置"""
+    return get_config().prompt
+
+
 def get_debug_config() -> DebugConfig:
     """获取调试配置"""
     return get_config().debug
@@ -951,6 +957,8 @@ __all__ = [
     "get_memory_config",
     "get_strategy_config",
     "get_ui_config",
+    "get_parser_config",
+    "get_prompt_config",
     "get_debug_config",
     # 从 providers 导出
     "MODEL_PRESETS",

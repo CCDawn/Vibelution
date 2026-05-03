@@ -29,3 +29,10 @@ from core.infrastructure.background_tasks import (
 from core.infrastructure.cron_scheduler import (
     CronScheduler, get_cron_scheduler,
 )
+from core.infrastructure.llm_utils import (
+    classify_llm_error, build_system_message, MAX_CONSECUTIVE_FAILURES,
+)
+from core.infrastructure.mental_model import (
+    MentalModel, CognitiveState, Diagnosis, ToolRecord,
+    get_mental_model, reset_mental_model,
+)

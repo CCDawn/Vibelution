@@ -20,8 +20,6 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 
 # ============================================================================
 # Fixtures
@@ -309,9 +307,9 @@ class TestTaskManagerAPI:
         result = isolated_task_manager.task_create([
             {"description": "Task A"},
             {"description": "Task B"},
-        ], generation_goal="Gen 1 goal")
+        ], goal="Gen 1 goal")
         assert "2" in result
-        assert isolated_task_manager._generation_goal == "Gen 1 goal"
+        assert isolated_task_manager._goal == "Gen 1 goal"
 
     def test_task_create_sets_plan(self, isolated_task_manager):
         """task_create 设置 Plan"""
@@ -322,11 +320,11 @@ class TestTaskManagerAPI:
         assert plan.goal == ""
         assert len(plan.tasks) == 1
 
-    def test_task_create_with_generation_goal(self, isolated_task_manager):
-        """task_create 带世代目标"""
+    def test_task_create_with_goal(self, isolated_task_manager):
+        """task_create 带目标"""
         isolated_task_manager.task_create([
             {"description": "Task"},
-        ], generation_goal="Learn the codebase")
+        ], goal="Learn the codebase")
         plan = isolated_task_manager.get_current_plan()
         assert plan.goal == "Learn the codebase"
 
@@ -618,7 +616,7 @@ class TestPersistence:
         tasks_file = tmp_path / "workspace" / "tasks.json"
         assert tasks_file.exists()
         data = json.loads(tasks_file.read_text(encoding="utf-8"))
-        assert data["generation_goal"] == "Persist goal"
+        assert data["goal"] == "Persist goal"
         assert len(data["tasks"]) == 1
 
     def test_load_restores_state(self, isolated_task_manager, tmp_path, monkeypatch):

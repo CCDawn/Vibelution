@@ -38,7 +38,7 @@ class KeyInfoExtractor:
     # 重要工具
     IMPORTANT_TOOLS = [
         'trigger_self_restart', 'apply_diff_edit', 'execute_shell',
-        'commit_compressed_memory', 'set_generation_task',
+        'commit_compressed_memory',
     ]
 
     def __init__(self):

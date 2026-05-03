@@ -40,6 +40,10 @@ from core.infrastructure.tool_result import truncate_result
 from core.infrastructure.security import get_security_validator
 from core.infrastructure.agent_session import get_session_state
 from core.infrastructure.tool_executor import get_tool_executor
+from core.infrastructure.llm_utils import (
+    classify_llm_error, build_system_message, parse_tool_args, MAX_CONSECUTIVE_FAILURES,
+)
+from core.infrastructure.cli_utils import parse_args
 
 # LangChain 核心组件
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -52,10 +56,7 @@ from config.providers import init_model_discovery
 from tools import Key_Tools
 from tools.token_manager import EnhancedTokenCompressor, estimate_messages_tokens
 from tools.memory_tools import (
-    get_generation_tool,
     get_core_context, get_current_goal,
-    archive_generation_history, advance_generation,
-    clear_generation_task,
 )
 from tools.rebirth_tools import trigger_self_restart_tool, handle_restart_request
 
@@ -63,63 +64,17 @@ from tools.rebirth_tools import trigger_self_restart_tool, handle_restart_reques
 from core.ui.cli_ui import get_ui, ui_error
 from core.ui.token_display import print_tokens
 
-from core.prompt_manager import get_prompt_manager, to_string
+from core.prompt_manager import get_prompt_manager, to_string, split_sys_prompt_prefix
+from core.infrastructure.mental_model import get_mental_model
 
 # 导入宠物系统
 from core.pet_system import get_pet_system
 
-# LLM 错误分类与重试策略
-MAX_CONSECUTIVE_FAILURES = 5  # 单次 LLM 调用最大重试次数
+# LLM 辅助函数已下沉至 core/infrastructure/llm_utils.py
 
 
-def _classify_llm_error(e: Exception) -> tuple[str, bool, str]:
-    """分类 LLM 异常，返回 (category, is_retryable, user_message)。"""
-    exc_type = type(e).__name__
-    exc_msg = str(e)
-
-    # httpx HTTPStatusError：从异常消息中解析状态码
-    if "HTTPStatusError" in exc_type or "429" in exc_msg or "500" in exc_msg:
-        if "429" in exc_msg:
-            return ("rate_limit", True, "API 速率超限（429），等待后重试")
-        if "500" in exc_msg:
-            return ("server_error", True, "API 服务器错误（500），等待后重试")
-        if "502" in exc_msg or "503" in exc_msg or "504" in exc_msg:
-            return ("server_error", True, f"API 服务不可用（{exc_msg[:30]}），等待后重试")
-        if "401" in exc_msg or "403" in exc_msg:
-            return ("auth_error", False, "API 认证失败（401/403），请检查 API Key")
-        return ("http_error", False, f"HTTP 错误：{exc_msg[:60]}")
-
-    # 超时
-    if "Timeout" in exc_type or "timeout" in exc_msg.lower():
-        return ("timeout", True, "LLM 响应超时，等待后重试")
-
-    # 网络连接错误
-    if "ConnectError" in exc_type or "Connect" in exc_type:
-        return ("network_error", True, "网络连接失败，等待后重试")
-
-    # ReadError / RemoteProtocolError
-    if "ReadError" in exc_type or "RemoteProtocolError" in exc_type:
-        return ("network_error", True, "连接读取异常，等待后重试")
-
-    # RequestError（通用网络错误）
-    if "RequestError" in exc_type:
-        return ("network_error", True, f"网络请求异常，等待后重试")
-
-    # 认证错误（通过消息文本匹配）
-    if "auth" in exc_msg.lower() or "401" in exc_msg or "403" in exc_msg:
-        return ("auth_error", False, "认证失败，请检查 API Key 配置")
-
-    # KeyboardInterrupt
-    if exc_type == "KeyboardInterrupt":
-        return ("user_interrupt", False, "用户主动中断")
-
-    # 默认：未知错误，不可重试
-    return ("unknown_error", False, f"未知错误：{exc_type}: {exc_msg[:60]}")
-
-
-
-
-EVOLUTION_TEST_PROMPT = """你的第一次进化测试任务开始：制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"""
+# 进化测试提示
+EVOLUTION_TEST_PROMPT = "制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"
 
 
 # ============================================================================
@@ -192,6 +147,9 @@ class SelfEvolvingAgent:
         self.tool_executor = get_tool_executor()
         self.security_validator = get_security_validator(project_root)
 
+        # 心智模型（元认知引擎 — 必须在 EventBus 之后初始化）
+        self.mental_model = get_mental_model(workspace_root=self.workspace_path)
+
         self._system_prompt_written = False
 
     def _init_model_discovery(self):
@@ -230,58 +188,37 @@ class SelfEvolvingAgent:
         )
 
     def think_and_act(self, user_prompt: str = None) -> bool:
-        """
-        苏醒时执行一次思考和行动
-
-        流程：
-        1. 构建系统提示词
-        2. 调用 LLM 进行推理
-        3. 解析并执行工具调用
-        4. 返回结果给 LLM 继续推理
-        5. 直到 Agent 认为任务完成
-
-        Args:
-            user_prompt: 用户输入的提示词（可选，无则使用自主进化提示）
-            system_prompt: 预计算的系统提示词（由 run_loop 传入，避免重复构建）
+        """苏醒时执行一次思考和行动。
 
         Returns:
             True: 继续运行, False: 触发重启, "hibernated": 休眠后继续
         """
         ui = get_ui()
         sp = self.prompt_manager.build()
-        system_prompt = to_string(sp)
-        messages = [SystemMessage(content=system_prompt)]
-        self._cached_system_prompt = system_prompt
+        messages = [build_system_message(sp)]
+        self._cached_system_prompt = to_string(sp)
 
-        # 获取轮次编号
-        if user_prompt:
-            current_turn = logger._turn_count
-        else:
-            current_turn = logger._turn_count + 1
-            # 无外部输入时使用默认提示
-            if user_prompt is None:
-                user_prompt = "开始进化吧"
+        current_turn = logger._turn_count if user_prompt else logger._turn_count + 1
+        if user_prompt is None:
+            user_prompt = "@GO"
 
-        # 首次对话写入 System Prompt
         if not self._system_prompt_written:
-            logger.write_system_prompt(system_prompt)
+            logger.write_system_prompt(self._cached_system_prompt)
             self._system_prompt_written = True
 
         messages.append(HumanMessage(content=user_prompt))
         logger.start_turn(current_turn)
         logger.log_user_input(user_prompt)
-
         logger.log_llm_request(messages, model=getattr(self.config.llm, 'model_name', 'unknown'))
         max_iterations = self.config.agent.max_iterations
 
         try:
             consecutive_failures = 0
             for iteration in range(1, max_iterations + 1):
-                # 仅在组件/状态变化时重建系统提示词（由缓存自动判断命中/失效）
                 current_sp = self.prompt_manager.build()
                 current_prompt = to_string(current_sp)
                 if current_prompt != self._cached_system_prompt:
-                    messages[0] = SystemMessage(content=current_prompt)
+                    messages[0] = build_system_message(current_sp)
                     self._cached_system_prompt = current_prompt
                 response = self._invoke_llm(messages)
                 if response is None:
@@ -365,7 +302,7 @@ class SelfEvolvingAgent:
                     raise
                 except Exception as e:
                     attempt += 1
-                    category, is_retryable, user_msg = _classify_llm_error(e)
+                    category, is_retryable, user_msg = classify_llm_error(e)
 
                     _debug_logger.error(
                         f"LLM 调用失败 [{attempt}/{MAX_CONSECUTIVE_FAILURES}] {category}: {user_msg}",
@@ -393,20 +330,9 @@ class SelfEvolvingAgent:
     def _execute_tool(self, tool_call: Dict, messages: list) -> tuple:
         """执行工具调用"""
         tool_name = tool_call.get('name', 'unknown')
-        tool_args = tool_call.get('args') or tool_call.get('arguments') or {}
-        if isinstance(tool_args, str):
-            try:
-                import json
-                tool_args = json.loads(tool_args)
-            except (json.JSONDecodeError, TypeError):
-                tool_args = {}
-        elif not isinstance(tool_args, dict):
-            try:
-                import json
-                tool_args = json.loads(str(tool_args))
-            except (json.JSONDecodeError, TypeError):
-                tool_args = {}
-        tool_args = tool_args if isinstance(tool_args, dict) else {}
+        tool_args = parse_tool_args(
+            tool_call.get('args') or tool_call.get('arguments') or {}
+        )
 
         _debug_logger.tool_start(tool_name, tool_args)
 
@@ -429,22 +355,11 @@ class SelfEvolvingAgent:
     def _handle_tool_result(self, tool_call: Dict, result, action, messages: list):
         """处理工具执行结果"""
         result_str, truncated = truncate_result(result)
-
-        if action == "restart":
-            logger.log_action("restart", {"tool": tool_call['name']})
-        elif action == "skip":
-            logger.log_action("skip", {"tool": tool_call['name']})
-            messages.append(AIMessage(content=result_str))
-        elif action == "hibernated":
-            logger.log_action("hibernated", {"tool": tool_call['name']})
-            messages.append(AIMessage(content=result_str))
-        else:
-            messages.append(AIMessage(content=result_str))
-
+        if action in ("restart", "skip", "hibernated"):
+            logger.log_action(action, {"tool": tool_call['name']})
+        messages.append(AIMessage(content=result_str))
         if truncated:
-            _debug_logger.warning(
-                f"[工具] {tool_call['name']} 结果过长，已截断至 4000 字符", tag="TOOL"
-            )
+            _debug_logger.warning(f"[工具] {tool_call['name']} 结果过长，已截断", tag="TOOL")
 
     def _execute_tools_parallel(self, tool_calls: List[Dict], messages: list):
         """串行执行工具（依次通过 _execute_tool 以便统一处理特殊工具）"""
@@ -457,14 +372,13 @@ class SelfEvolvingAgent:
     def run_loop(self, initial_prompt: str = None) -> None:
         _debug_logger.system("主循环开始", tag=self.name)
 
-        generation = get_generation_tool()
         model_name = getattr(self.config.llm, 'model_name', 'unknown')
-        logger.log_action("会话开始", f"世代: G{generation}, 模型: {model_name}")
+        logger.log_action("会话开始", f"模型: {model_name}")
         get_state_manager().set_state(AgentState.AWAKENING, action="主循环启动")
 
         try:
-            _debug_logger.kv("记忆状态", f"G{get_generation_tool()} | {get_current_goal()[:50]}")
-            print_evolution_time()
+            _debug_logger.kv("记忆状态", f"{get_current_goal()[:50]}")
+            _print_evolution_time_core()
 
             user_input = initial_prompt
 
@@ -508,21 +422,6 @@ class SelfEvolvingAgent:
 # ============================================================================
 # 命令行入口
 # ============================================================================
-
-def parse_args():
-    """解析命令行参数"""
-    import argparse
-    parser = argparse.ArgumentParser(description="自我进化 Agent")
-    parser.add_argument('-c', '--config', dest='config_path', help='配置文件路径')
-    parser.add_argument('--awake-interval', type=int, dest='awake_interval', help='苏醒间隔（秒）')
-    parser.add_argument('--model', dest='model_name', help='模型名称')
-    parser.add_argument('--temperature', type=float, help='温度参数')
-    parser.add_argument('--log-level', dest='log_level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], help='日志级别')
-    parser.add_argument('--name', help='Agent 名称')
-    parser.add_argument('--test', action='store_true', help='运行首次进化测试')
-    parser.add_argument('--prompt', type=str, default=None, help='初始任务提示')
-    parser.add_argument('--auto', action='store_true', help='自动模式（无交互）')
-    return parser.parse_args()
 
 
 def main(initial_prompt: str = None):
@@ -573,31 +472,16 @@ def main(initial_prompt: str = None):
         ui_error(f"启动异常: {type(e).__name__}: {e}", traceback.format_exc())
         ui.stop_live()
         sys.exit(1)
-def print_evolution_time():
-    """打印进化时间标记 - Agent 自我进化测试"""
-    from datetime import datetime
-    from core.ui.cli_ui import get_ui
-    ui = get_ui()
-    ui.add_content("=" * 60)
-    ui.add_content(f"🧬 Evolution Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    ui.add_content("=" * 60)
-    # 🧪 进化测试标记 - Agent 代码修改验证
-    ui.add_content("[TEST] Agent.py modified successfully - Evolution test passed!")
 
 if __name__ == "__main__":
-    print_evolution_time()
+    _print_evolution_time_core()
     args = parse_args()
 
     if args.test:
         from core.ui.cli_ui import UIManager
         UIManager._test_mode = True
-        # 强制 print 到底层 stdout，debugpy 无法拦截
-        import sys as _sys
-        _sys.__stdout__.write("=" * 60 + "\n")
-        _sys.__stdout__.write("  Self-Evolving Agent - Test Mode\n")
-        _sys.__stdout__.write("=" * 60 + "\n")
-        _sys.__stdout__.flush()
-        # 构造 config（与 main() 内部保持一致）
+        sys.__stdout__.write("=" * 60 + "\n  Self-Evolving Agent - Test Mode\n" + "=" * 60 + "\n")
+        sys.__stdout__.flush()
         _test_config = Config(
             config_path=args.config_path,
             llm_model_name=args.model_name,
@@ -607,9 +491,8 @@ if __name__ == "__main__":
             log_level=args.log_level,
         )
         _agent = SelfEvolvingAgent(config=_test_config)
-        _sys.__stdout__.write(f"  Key Tools: {len(_agent.key_tools)} loaded\n")
-        _sys.__stdout__.write("-" * 60 + "\n")
-        _sys.__stdout__.flush()
+        sys.__stdout__.write(f"  Key Tools: {len(_agent.key_tools)} loaded\n" + "-" * 60 + "\n")
+        sys.__stdout__.flush()
         _agent.run_loop(initial_prompt=EVOLUTION_TEST_PROMPT)
         sys.exit(0)
     elif args.prompt:

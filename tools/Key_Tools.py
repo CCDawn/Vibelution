@@ -3,13 +3,15 @@
 LangChain 工具包装模块
 
 所有在此注册的 Tool 都会通过 agent._tools 传递给 LLM。
-文档（SOUL.md / AGENTS.md）中提到的工具必须在此注册，否则 Agent 无法调用。
+文档（SOUL.md / SPEC.md）中提到的工具必须在此注册，否则 Agent 无法调用。
 """
 from typing import Dict, List, Optional
 from langchain_core.tools import BaseTool, tool, StructuredTool
 from tools.rebirth_tools import trigger_self_restart_tool as _restart_impl
 from tools.memory_tools import (
     commit_compressed_memory_tool as _commit_compressed_impl,
+    get_core_context_tool as _get_core_context_impl,
+    get_current_goal_tool as _get_current_goal_impl,
 )
 from tools.memory_tools import (
     task_create_tool as _task_create_impl,
@@ -17,55 +19,26 @@ from tools.memory_tools import (
     task_list_tool as _task_list_impl,
 )
 from tools.search_tools import grep_search_tool as _grep_search_impl
-from tools.rebirth_tools import (
-    enter_hibernation_tool as _enter_hibernation_impl,
-)
 from tools.web_search_tool import (
     web_search_tool as _web_search_impl,
 )
-import platform as _platform
-
-_CURRENT_OS = _platform.system()
-
-if _CURRENT_OS == "Windows":
-    _OS_CHEATSHEET = """
-当前系统: Windows PowerShell
-- 看目录: Get-ChildItem -Recurse -Depth 3
-- 搜内容: Select-String -Pattern "查找词" -Path *.py -Recurse
-- 看前N行: Get-Content file.py -TotalCount 30
-- 读后N行: Get-Content file.py -Tail 30
-- 统计行数: (Get-Content file.py).Length
-- 杀进程: Stop-Process -Id PID -Force
-- 重启/刷新环境: refreshenv (或重启终端)
-"""
-else:
-    _OS_CHEATSHEET = """
-当前系统: Linux / macOS (Bash)
-- 看目录: find . -maxdepth 3
-- 搜内容: grep -rn "查找词" --include="*.py" .
-- 看前N行: head -N file.py
-- 读后N行: tail -N file.py
-- 统计行数: wc -l file.py
-- 找大文件: find . -name "*.py" -size +10k
-    - 杀进程: kill -9 PID
-"""
 
 _CLI_TOOL_DOCSTRING = """
-【万能 CLI 工具】执行任意 Shell 命令。你是资深架构师，请用最高效的命令组合！
+【CLI】执行任意 Shell 命令。
 
-""" + _OS_CHEATSHEET + """
+优先使用专用工具 (read_file_tool / grep_search_tool / glob_tool / run_test_for_tool) 而非此工具。
 
-=== ⚡ 核心纪律 (违者崩溃) ===
-1. 禁区：绝不执行交互式命令 (vim, nano, top, less) 和无休止命令 (ping, tail -f)。
-2. 管道：必须多用 `| head -n 20` 或 `| grep` 截断长输出，防止 Token 爆炸！
-3. 限制：超过 500 行的文件，禁止用 cat/Get-Content 全量读取，必须用 head/tail。
+=== 核心纪律 ===
+1. 禁止交互式命令 (vim, top, less) 和无休止命令 (ping, tail -f)
+2. 长输出必须截断: | head -n 20 或 | tail -n 30
+3. 超过 500 行的文件禁止全量读取
 
-=== 🔄 闭环准则 ===
-修改代码后，立刻组合执行：`python -m py_compile <file>.py && pytest`
+=== 闭环 ===
+修改代码后: python -m py_compile <file>.py && python -m pytest tests/ -x -q
 
 Args:
-    command: 要执行的 Shell 命令（请确保语法兼容当前 """ + _CURRENT_OS + """ 系统）
-    timeout: 建议: 文件操作 30s, 编译 60s, 测试/网络 120s
+    command: Shell 命令
+    timeout: 文件操作 30s, 编译 60s, 测试/网络 120s
 """
 
 
@@ -96,24 +69,6 @@ def create_key_tools() -> List[BaseTool]:
         return _commit_compressed_impl(new_core_context=new_core_context, next_goal=next_goal)
 
     @tool
-    def set_generation_task_tool(task: str) -> str:
-        """
-        【世代开始时必调】设置当前世代的任务。
-
-        每个世代开始时，模型应首先分析当前状态，然后调用此工具
-        将自己制定的任务写入系统提示词。该任务在整个世代有效，
-        直到下个世代重新生成新任务。
-
-        Args:
-            task: 当前世代的任务描述（Markdown 格式）
-
-        Returns:
-            更新结果
-        """
-        from tools.memory_tools import update_generation_task_tool
-        return update_generation_task_tool(task=task)
-
-    @tool
     def trigger_self_restart_tool(reason: str = "") -> str:
         """
         触发 Agent 自我重启。
@@ -128,6 +83,28 @@ def create_key_tools() -> List[BaseTool]:
             操作结果（原进程将退出）
         """
         return _restart_impl(reason=reason)
+
+    @tool
+    def get_core_context_tool() -> str:
+        """
+        【记忆读取】获取当前世代的核心上下文和智慧摘要。
+
+        Returns:
+            核心智慧文本（不超过300字）
+        """
+        return _get_core_context_impl()
+
+    @tool
+    def get_current_goal_tool() -> str:
+        """
+        【记忆读取】获取当前世代的目标。
+
+        优先从 PromptManager 内存读取，不在内存则回退到文件。
+
+        Returns:
+            当前目标描述
+        """
+        return _get_current_goal_impl()
 
     # ── 代码分析工具 ────────────────────────────────────────────────────────
 
@@ -161,43 +138,29 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def apply_diff_edit_tool(file_path: str, diff_text: str) -> str:
         """
-        Diff Block 编辑器 (Cursor/Aider 范式)。
-
-        使用 SEARCH/REPLACE 块格式精准替换代码。比用 `cli_tool` 执行 `sed` 或 PowerShell `-replace` 更可靠！
+        代码编辑器 — 修改代码的唯一工具。内建格式验证，无需单独验证步骤。
 
         格式：
         <<<<<<< SEARCH
-        要替换的旧代码（只需包含核心行，无需精确匹配缩进）
+        要替换的旧代码
         =======
         新代码
         >>>>>>> REPLACE
+
+        支持多块连续替换。
 
         Args:
             file_path: 要编辑的文件路径
             diff_text: SEARCH/REPLACE 块文本
 
         Returns:
-            操作结果描述
+            操作结果。格式错误时返回具体原因。
         """
-        from tools.code_analysis_tools import apply_diff_edit
+        from tools.code_analysis_tools import apply_diff_edit, validate_diff_format
+        is_valid, msg = validate_diff_format(diff_text)
+        if not is_valid:
+            return f"[编辑] 格式验证失败: {msg}"
         return apply_diff_edit(file_path=file_path, diff_text=diff_text, allow_fuzzy=True)
-
-    @tool
-    def validate_diff_format_tool(diff_text: str) -> str:
-        """
-        验证 diff_text 格式是否正确。
-
-        在实际编辑前验证格式，避免无效修改。
-
-        Args:
-            diff_text: 要验证的 diff 块文本
-
-        Returns:
-            验证结果
-        """
-        from tools.code_analysis_tools import validate_diff_format
-        is_valid, message = validate_diff_format(diff_text)
-        return message
 
     @tool
     def list_file_entities_tool(file_path: str, entity_type: str = "all") -> str:
@@ -282,21 +245,6 @@ def create_key_tools() -> List[BaseTool]:
 
     cli_tool = StructuredTool.from_function(_cli_tool_impl, name="cli_tool", description=_CLI_TOOL_DOCSTRING)
 
-    @tool
-    def enter_hibernation_tool(duration: int = 300) -> str:
-        """
-        让 Agent 进入休眠状态一段时间。
-
-        适用于需要等待外部条件成熟的场景。
-
-        Args:
-            duration: 休眠时长（秒），默认 300 秒（5 分钟），建议 60~3600
-
-        Returns:
-            操作结果描述
-        """
-        return _enter_hibernation_impl(duration=duration)
-
     # ── 文件读写工具 ──────────────────────────────────────────────────────
 
     @tool
@@ -355,21 +303,20 @@ def create_key_tools() -> List[BaseTool]:
     # ── TaskManager 工具（基于 tasks.json） ─────────────────────────────
 
     @tool
-    def task_create_tool(task_list: List[Dict], generation_goal: str = "") -> str:
+    def task_create_tool(task_list: List[Dict], goal: str = "") -> str:
         """
         【初始化任务清单】将子任务列表注册到系统内存并持久化。
 
-        每个世代开始时，模型应首先分析当前状态，然后调用此工具
-        注册本轮任务清单。该清单在世代内持续有效。
+        模型应首先分析当前状态，然后调用此工具注册本轮任务清单。
 
         Args:
             task_list: [{"description": "子任务描述"}, ...]
-            generation_goal: 当前世代的核心目标（可选）
+            goal: 当前核心目标（可选）
 
         Returns:
             成功创建的任务数量摘要
         """
-        return _task_create_impl(task_list=task_list, generation_goal=generation_goal)
+        return _task_create_impl(task_list=task_list, goal=goal)
 
     @tool
     def task_update_tool(task_id: int, is_completed: bool, result_summary: str = "") -> str:
@@ -456,94 +403,40 @@ def create_key_tools() -> List[BaseTool]:
         mgr = get_background_task_manager()
         return mgr.stop_task(task_id=task_id)
 
-    # ── 子代理工具 ────────────────────────────────────────────────────────
-
     @tool
-    def agent_tool(task: str, timeout: int = 120) -> str:
+    def run_test_for_tool(source_path: str, timeout: int = 120) -> str:
         """
-        【子代理】启动一个子 Agent 进程执行指定任务。
+        【测试映射运行】根据源文件路径自动查找对应测试文件并运行。
 
-        子 Agent 以 --auto 模式运行，完成后返回结果。
-        适用于将复杂任务分解给独立 Agent 执行的场景。
-        注意：最多嵌套 2 层，防止无限递归。
+        映射规则：tools/xxx.py → tests/test_xxx.py
+        修改代码后必须调用此工具验证！
 
         Args:
-            task: 要委托给子 Agent 的任务描述
+            source_path: 源文件相对路径（如 "tools/shell_tools.py"）
             timeout: 超时时间（秒），默认 120
 
         Returns:
-            JSON 格式的子 Agent 执行结果
+            格式化的测试结果摘要
         """
-        from tools.agent_tools import spawn_agent
-        return spawn_agent(task=task, timeout=timeout)
-
-    # ── Cron 定时任务工具 ──────────────────────────────────────────────────
-
-    @tool
-    def cron_create_tool(name: str, command: str, schedule: str) -> str:
-        """
-        【创建定时任务】安排命令在指定时间或间隔执行。
-
-        调度表达式：
-        - "interval:N" — 每 N 秒执行一次
-        - "*/5 * * * *" — 标准 5 字段 cron (分 时 日 月 周)
-
-        Args:
-            name: 任务名称
-            command: 要执行的 Shell 命令
-            schedule: 调度表达式（interval 或 cron）
-
-        Returns:
-            包含 job_id 的 JSON
-        """
-        from core.infrastructure.cron_scheduler import get_cron_scheduler
-        sched = get_cron_scheduler()
-        return sched.create_job(name=name, command=command, schedule=schedule)
-
-    @tool
-    def cron_list_tool() -> str:
-        """
-        【列出定时任务】查看所有已创建的定时任务及其运行状态。
-
-        Returns:
-            JSON 格式的任务列表
-        """
-        from core.infrastructure.cron_scheduler import get_cron_scheduler
-        sched = get_cron_scheduler()
-        return sched.list_jobs()
-
-    @tool
-    def cron_delete_tool(job_id: str) -> str:
-        """
-        【删除定时任务】删除指定 ID 的定时任务。
-
-        Args:
-            job_id: 任务 ID（来自 cron_create 的返回值或 cron_list 的 id 列）
-
-        Returns:
-            操作结果
-        """
-        from core.infrastructure.cron_scheduler import get_cron_scheduler
-        sched = get_cron_scheduler()
-        return sched.delete_job(job_id=job_id)
+        from tools.shell_tools import run_test_for
+        return run_test_for(source_path=source_path, timeout=timeout)
 
     return [
         # SOUL.md 核心
         commit_compressed_memory_tool,
-        # 世代与重启
-        set_generation_task_tool,
+        get_core_context_tool,
+        get_current_goal_tool,
+        # 重启
         trigger_self_restart_tool,
         # 代码分析
         grep_search_tool,
         apply_diff_edit_tool,
-        validate_diff_format_tool,
         list_file_entities_tool,
         get_code_entity_tool,
         web_search_tool,
         web_fetch_tool,
         # 文件操作
         cli_tool,
-        enter_hibernation_tool,
         read_file_tool,
         write_file_tool,
         glob_tool,
@@ -555,10 +448,6 @@ def create_key_tools() -> List[BaseTool]:
         task_start_tool,
         task_output_tool,
         task_stop_tool,
-        # Cron 定时
-        cron_create_tool,
-        cron_list_tool,
-        cron_delete_tool,
-        # 子代理
-        agent_tool,
+        # 测试映射
+        run_test_for_tool,
     ]

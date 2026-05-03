@@ -20,9 +20,6 @@ import re
 from pathlib import Path
 from datetime import datetime
 
-# 添加项目根目录到路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from tools.search_tools import (
     grep_search_tool,
     find_function_calls_tool,

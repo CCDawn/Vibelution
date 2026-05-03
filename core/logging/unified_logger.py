@@ -55,7 +55,6 @@ class UnifiedLogger:
 
         # 同步状态
         self._current_turn = 0
-        self._current_generation = 1
         self._system_prompt_written = False
 
     @property
@@ -73,20 +72,15 @@ class UnifiedLogger:
         self._current_turn = turn
         self._conversation._turn_count = turn
 
-    def _sync_generation(self, generation: int):
-        """同步世代状态"""
-        self._current_generation = generation
+    # ==================== 会话管理 ====================
 
-    # ==================== 世代管理 ====================
-
-    def start_generation(self, generation: int, system_prompt: str = None):
-        """开始新的世代（同时初始化两个日志系统）"""
-        self._current_generation = generation
+    def start_session(self, system_prompt: str = None):
+        """开始新的会话（同时初始化两个日志系统）"""
         self._current_turn = 0
         self._system_prompt_written = False
 
         # TranscriptLogger: 创建新文件
-        self._transcript.start_generation(generation, system_prompt)
+        self._transcript.start_session(system_prompt)
 
         # ConversationLogger: 开始新会话
         self._conversation.new_session()

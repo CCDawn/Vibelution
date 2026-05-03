@@ -57,14 +57,10 @@ def get_system_prompt(
         if content:
             parts.append(content)
 
-    # 构建章节索引和指南
-    index_text = _build_section_index(sorted_sections)
-    guide_text = _build_section_guide(sorted_sections)
-
-    if index_text:
-        parts.insert(0, index_text)
-    if guide_text:
-        parts.append(guide_text)
+    # 可用章节提示（精简为一行，跳过空章节）
+    available = _build_available_sections(sorted_sections)
+    if available:
+        parts.insert(0, available)
 
     return as_system_prompt(parts)
 
@@ -96,31 +92,21 @@ def to_string(sp: SystemPrompt) -> str:
     return "\n\n".join(s for s in sp if s != SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
 
 
-def _build_section_index(sections: List[SystemPromptSection]) -> str:
-    """生成章节索引（注入到提示词开头）。"""
-    lines = ["\n\n---\n\n## 提示词组件索引\n"]
-    for i, section in enumerate(sections, 1):
-        desc = section.description or section.name
-        marker = "（必选）" if section.required else ""
-        empty_tag = " [空]" if section.is_empty else ""
-        lines.append(f"{i}. [{section.name}] {desc}{empty_tag}{marker}\n")
-    return "".join(lines)
-
-
-def _build_section_guide(sections: List[SystemPromptSection]) -> str:
-    """生成可选章节说明（供 LLM 参考 <active_components> 标签使用）。"""
-    optional = [s for s in sections if not s.required]
-    if not optional:
+def _build_available_sections(sections: List[SystemPromptSection]) -> str:
+    """生成可用章节提示（精简为一行，跳过无内容空章节）。"""
+    # 只列出有实际内容或非空的章节
+    active = [s for s in sections if not s.is_empty]
+    if not active:
         return ""
 
-    lines = [
-        "\n\n---\n\n## 可选组件说明（供 <active_components> 参考）\n",
-        "| 组件名 | 描述 | 为空 |\n",
-        "|--------|------|------|\n",
-    ]
-    for s in sorted(optional, key=lambda x: x.priority):
-        desc = s.description or "—"
-        empty_tag = "是" if s.is_empty else "否"
-        lines.append(f"| `{s.name}` | {desc} | {empty_tag} |\n")
+    required_names = "、".join(s.name for s in active if s.required)
+    optional_names = "、".join(s.name for s in active if not s.required)
 
-    return "".join(lines)
+    parts = ["## 提示词组件\n"]
+    if required_names:
+        parts.append(f"- 必选: {required_names}\n")
+    if optional_names:
+        parts.append(f"- 可选: {optional_names}\n")
+        parts.append("- 使用 `<active_components>` 标签按需激活可选组件\n")
+
+    return "".join(parts)

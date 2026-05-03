@@ -77,7 +77,6 @@ class StateBroadcaster:
         # 状态信息
         self._current_status = AgentStatus.IDLE
         self._current_action = "系统初始化中..."
-        self._generation = 1
         self._token_budget = 0
         self._last_update = datetime.now().isoformat()
 
@@ -95,7 +94,6 @@ class StateBroadcaster:
         return {
             "status": self._current_status.value,
             "current_action": self._current_action,
-            "generation": self._generation,
             "token_budget": self._token_budget,
             "current_goal": "",
             "core_context_preview": "",
@@ -156,8 +154,6 @@ class StateBroadcaster:
                 self._current_status = status
             if action is not None:
                 self._current_action = action
-            if generation is not None:
-                self._generation = generation
             if token_budget is not None:
                 self._token_budget = token_budget
             if current_goal is not None:
