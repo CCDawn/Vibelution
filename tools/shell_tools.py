@@ -46,9 +46,63 @@ import locale
 import platform
 
 # ============================================================================
-# 平台检测
+# 文件 Glob 搜索
 # ============================================================================
 
+def glob_files(pattern: str = "**/*.py", search_dir: str = ".") -> list:
+    """
+    【文件模式匹配】按 glob 模式查找文件。
+
+    支持标准 glob 模式：*.py、**/*.ts、src/**/*.md 等。
+
+    Args:
+        pattern: Glob 模式（如 "*.py", "**/*.py"）
+        search_dir: 搜索起始目录，默认当前目录
+
+    Returns:
+        JSON 格式的匹配文件列表
+    """
+
+    # 解析模式
+    if not pattern or not isinstance(pattern, str):
+        return []
+
+    # 获取搜索目录
+    abs_search_dir = os.path.abspath(search_dir)
+    if not os.path.exists(abs_search_dir):
+        abs_search_dir = os.path.abspath(".")
+
+    # 使用 glob 搜索
+    try:
+        matches = glob_module.glob(
+            pattern,
+            root_dir=abs_search_dir,
+            recursive=True
+        )
+    except Exception as e:
+        logger.warning(f"glob_files: 模式 '{pattern}' 搜索失败 - {e}")
+        return []
+
+    # 转换路径
+    result = []
+    for match in matches:
+        abs_path = os.path.join(abs_search_dir, match)
+        result.append({
+            "path": abs_path,
+            "name": os.path.basename(abs_path),
+            "size": os.path.getsize(abs_path)
+        })
+
+    return result
+
+
+# 向后兼容别名
+glob_files_tool = glob_files
+
+
+# ============================================================================
+# 平台检测
+# ============================================================================
 CURRENT_SYSTEM = platform.system().lower()  # "windows" | "linux" | "darwin"
 IS_WINDOWS = CURRENT_SYSTEM == "windows"
 IS_UNIX = CURRENT_SYSTEM in ("linux", "darwin")
