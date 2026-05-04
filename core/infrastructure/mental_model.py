@@ -441,16 +441,16 @@ class MentalModel:
                 diagnosis_state = CognitiveState.TUNNEL_VISION
                 confidence = file_focus_ratio
 
-        # 4. 方向迷失检测
-        elif tool_diversity >= self._rules.get("disoriented", {}).get("threshold", 0.7):
-            if success_rate < 0.6:
-                diagnosis_state = CognitiveState.DISORIENTED
-                confidence = tool_diversity * (1 - success_rate)
-
-        # 5. 高效状态
+        # 4. 高效状态（必须在 disoriented 之前）
         elif success_rate > 0.8 and tool_diversity > 0.3:
             diagnosis_state = CognitiveState.PRODUCTIVE
             confidence = success_rate
+
+        # 5. 方向迷失检测
+        elif (tool_diversity >= self._rules.get("disoriented", {}).get("threshold", 0.7)
+              and success_rate < 0.6):
+            diagnosis_state = CognitiveState.DISORIENTED
+            confidence = tool_diversity * (1 - success_rate)
 
         # ── 生成干预文本 ──
         intervention = ""
@@ -494,18 +494,27 @@ class MentalModel:
         diagnosis = self.diagnose()
         m = diagnosis.metrics
 
+        if m.get("reason") == "insufficient_data":
+            return {
+                "元认知": {
+                    "系统诊断": "数据不足",
+                    "诊断置信度": 0.0,
+                    "样本数": m.get("sample_size", 0),
+                }
+            }
+
         return {
             "元认知": {
                 "系统诊断": diagnosis.state,
                 "诊断置信度": round(diagnosis.confidence, 2),
-                "工具成功率": round(m["success_rate"], 2),
-                "重复次数": m["repetition_count"],
-                "文件聚焦度": round(m["file_focus_ratio"], 2),
-                "聚焦文件": m["focused_file"] or "无",
+                "工具成功率": round(m.get("success_rate", 0), 2),
+                "重复次数": m.get("repetition_count", 0),
+                "文件聚焦度": round(m.get("file_focus_ratio", 0), 2),
+                "聚焦文件": m.get("focused_file", "") or "无",
             },
             "干预历史": {
                 "累计干预次数": self._intervention_count,
-                "采集样本数": m["sample_size"],
+                "采集样本数": m.get("sample_size", 0),
             },
         }
 
@@ -600,6 +609,7 @@ def reset_mental_model():
     """重置心智模型单例（用于测试）"""
     global _mental_model
     _mental_model = None
+    MentalModel._instance = None
 
 
 # ============================================================================
