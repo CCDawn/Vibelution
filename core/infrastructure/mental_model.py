@@ -600,3 +600,147 @@ def reset_mental_model():
     """重置心智模型单例（用于测试）"""
     global _mental_model
     _mental_model = None
+
+
+# ============================================================================
+# Agent 可调用工具函数
+# ============================================================================
+
+def get_mental_state_tool() -> str:
+    """
+    查看当前心智状态诊断。
+
+    返回当前认知状态、运行指标、诊断置信度。
+    用于自我监控——在执行关键操作前检查自己是否处于异常状态。
+
+    Returns:
+        JSON 格式的诊断结果
+    """
+    mm = get_mental_model()
+    diagnosis = mm.diagnose()
+    soul = mm.get_state_for_soul()
+    return json.dumps({
+        "cognitive_state": diagnosis.state,
+        "confidence": round(diagnosis.confidence, 2),
+        "metrics": diagnosis.metrics,
+        "soul_view": soul,
+        "diagnosis_history_count": len(mm.get_diagnosis_history()),
+        "total_interventions": diagnosis.metrics.get("intervention_count", 0),
+    }, ensure_ascii=False, indent=2)
+
+
+def update_diagnosis_rules_tool(rules_json: str) -> str:
+    """
+    更新心智模型的诊断规则。
+
+    允许修改诊断阈值以适应当前任务特性。
+    例如：如果当前任务需要大量探索性搜索，可以提高 looping 的阈值避免误报。
+
+    Args:
+        rules_json: JSON 字符串，包含要更新的规则。例如:
+            '{"looping": {"threshold": 6}}' 将死循环检测阈值从 4 提高到 6
+
+    Returns:
+        更新结果
+    """
+    try:
+        new_rules = json.loads(rules_json)
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"规则 JSON 解析失败: {e}",
+        }, ensure_ascii=False)
+
+    mm = get_mental_model()
+    success = mm.update_rules(new_rules)
+    mm.reload_rules()
+
+    if success:
+        return json.dumps({
+            "status": "success",
+            "message": f"已更新 {len(new_rules)} 条规则",
+            "updated_rules": list(new_rules.keys()),
+            "current_rules": mm.get_rules(),
+        }, ensure_ascii=False, indent=2)
+    else:
+        return json.dumps({
+            "status": "error",
+            "message": "规则写入失败，请检查文件权限",
+        }, ensure_ascii=False)
+
+
+def update_self_model_tool(updates_json: str) -> str:
+    """
+    更新自我模型——Agent 对自己的认知。
+
+    用于记录自己的优势、弱点、行为倾向、进化历史。
+    这是递归自我建模的核心入口——Agent 通过此工具持续完善对自己的认知。
+
+    Args:
+        updates_json: JSON 字符串，包含要更新的字段。例如:
+            '{"strengths": ["擅长重构Python代码"], "weaknesses": ["对异步逻辑理解不足"]}'
+
+    Returns:
+        更新结果
+    """
+    try:
+        updates = json.loads(updates_json)
+    except json.JSONDecodeError as e:
+        return json.dumps({
+            "status": "error",
+            "message": f"JSON 解析失败: {e}",
+        }, ensure_ascii=False)
+
+    mm = get_mental_model()
+    success = mm.update_self_model(updates)
+
+    if success:
+        current = mm.get_self_model()
+        return json.dumps({
+            "status": "success",
+            "message": "自我模型已更新",
+            "current_model": current,
+        }, ensure_ascii=False, indent=2)
+    else:
+        return json.dumps({
+            "status": "error",
+            "message": "自我模型写入失败",
+        }, ensure_ascii=False)
+
+
+def get_self_model_tool() -> str:
+    """
+    查看当前的自我模型。
+
+    返回 Agent 对自己能力的认知，包括优势、弱点、行为倾向、进化历史。
+
+    Returns:
+        JSON 格式的自我模型
+    """
+    mm = get_mental_model()
+    model = mm.get_self_model()
+    return json.dumps(model, ensure_ascii=False, indent=2)
+
+
+def record_evolution_tool(change: str, result: str) -> str:
+    """
+    记录一条进化经验到自我模型。
+
+    每次 Agent 学到新东西、发现自己的行为模式、或策略调整产生效果时调用。
+    这些记录会累积成为 Agent 的跨代经验。
+
+    Args:
+        change: 学到/改变的内容，如 "发现 apply_diff_edit 在 Windows 换行符上反复失败"
+        result: 结果/解决方案，如 "现在编辑前先检查文件换行符类型"
+
+    Returns:
+        记录结果
+    """
+    mm = get_mental_model()
+    mm.add_evolution_entry(change, result)
+    history = mm.get_self_model().get("evolution_history", [])
+    return json.dumps({
+        "status": "success",
+        "message": "进化记录已保存",
+        "total_entries": len(history),
+    }, ensure_ascii=False, indent=2)

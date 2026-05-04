@@ -49,6 +49,10 @@ class ToolExecutor:
             search_imports_tool, search_and_read_tool,
             preview_diff_tool, get_file_entities_tool,
         )
+        from core.infrastructure.mental_model import (
+            get_mental_state_tool, update_diagnosis_rules_tool,
+            update_self_model_tool, get_self_model_tool, record_evolution_tool,
+        )
 
         # ── 从 Key_Tools 自动推导工具映射 ──────────────────────────────
         from tools.Key_Tools import create_key_tools
@@ -80,6 +84,12 @@ class ToolExecutor:
             "search_and_read": search_and_read_tool,
             "preview_diff": preview_diff_tool,
             "get_file_entities": get_file_entities_tool,
+            # 心智模型工具
+            "get_mental_state": get_mental_state_tool,
+            "update_diagnosis_rules": update_diagnosis_rules_tool,
+            "update_self_model": update_self_model_tool,
+            "get_self_model": get_self_model_tool,
+            "record_evolution": record_evolution_tool,
         })
 
         self._timeout_map = {

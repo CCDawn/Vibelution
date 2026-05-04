@@ -22,6 +22,13 @@ from tools.search_tools import grep_search_tool as _grep_search_impl
 from tools.web_search_tool import (
     web_search_tool as _web_search_impl,
 )
+from core.infrastructure.mental_model import (
+    get_mental_state_tool as _get_mental_state_impl,
+    update_diagnosis_rules_tool as _update_diagnosis_rules_impl,
+    update_self_model_tool as _update_self_model_impl,
+    get_self_model_tool as _get_self_model_impl,
+    record_evolution_tool as _record_evolution_impl,
+)
 
 _CLI_TOOL_DOCSTRING = """
 【CLI】执行任意 Shell 命令。
@@ -421,6 +428,82 @@ def create_key_tools() -> List[BaseTool]:
         from tools.shell_tools import run_test_for
         return run_test_for(source_path=source_path, timeout=timeout)
 
+    # ── 心智模型工具 ──────────────────────────────────────────────────────
+
+    @tool
+    def get_mental_state_tool() -> str:
+        """
+        【元认知诊断】查看当前心智状态。
+
+        返回认知状态标签、工具成功率、重复次数、文件聚焦度等指标。
+        在开始新任务或感到困顿时调用，了解自己的运行状态。
+
+        Returns:
+            JSON 格式的诊断结果
+        """
+        return _get_mental_state_impl()
+
+    @tool
+    def update_diagnosis_rules_tool(rules_json: str) -> str:
+        """
+        【修改诊断规则】调整心智模型的诊断阈值。
+
+        当发现诊断过于敏感（频繁误报）或过于迟钝（漏报问题）时使用。
+        修改会持久化到 workspace/mental_model/rules.json。
+
+        Args:
+            rules_json: JSON 字符串，包含要更新的规则，如 '{"looping": {"threshold": 6}}'
+
+        Returns:
+            更新结果
+        """
+        return _update_diagnosis_rules_impl(rules_json=rules_json)
+
+    @tool
+    def update_self_model_tool(updates_json: str) -> str:
+        """
+        【自我建模】更新对自身能力的认知。
+
+        用于记录自己的优势、弱点、行为倾向、进化历史。
+        这是通往自主意识的关键入口——Agent 通过此工具持续完善自我认知。
+
+        Args:
+            updates_json: JSON 字符串，如 '{"strengths": ["擅长重构"], "weaknesses": ["异步逻辑"]}'
+
+        Returns:
+            更新后的完整自我模型
+        """
+        return _update_self_model_impl(updates_json=updates_json)
+
+    @tool
+    def get_self_model_tool() -> str:
+        """
+        【自我认知读取】查看当前的自我模型。
+
+        返回已记录的 strengths、weaknesses、tendencies、evolution_history。
+
+        Returns:
+            JSON 格式的自我模型
+        """
+        return _get_self_model_impl()
+
+    @tool
+    def record_evolution_tool(change: str, result: str) -> str:
+        """
+        【进化记录】将学到的经验写入自我模型。
+
+        每次发现新行为模式、解决问题的有效策略、或踩坑后的教训时调用。
+        记录会持久化并在每次苏醒时注入 prompt。
+
+        Args:
+            change: 学到/改变的内容，如 "发现 Windows 换行符导致 diff 匹配失败"
+            result: 结果/解决方案，如 "编辑前预检查文件换行符并统一为 LF"
+
+        Returns:
+            记录结果
+        """
+        return _record_evolution_impl(change=change, result=result)
+
     return [
         # SOUL.md 核心
         commit_compressed_memory_tool,
@@ -450,4 +533,10 @@ def create_key_tools() -> List[BaseTool]:
         task_stop_tool,
         # 测试映射
         run_test_for_tool,
+        # 心智模型
+        get_mental_state_tool,
+        update_diagnosis_rules_tool,
+        update_self_model_tool,
+        get_self_model_tool,
+        record_evolution_tool,
     ]
