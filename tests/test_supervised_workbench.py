@@ -14,6 +14,7 @@ from core.evaluation.supervised_workbench import (
     format_file_excerpt,
     load_gym_promotion_lifecycle,
     format_lineage_summary,
+    list_available_workbench_bundles,
     list_recent_decision_records,
     prepare_dataset_run,
     run_workbench_session,
@@ -269,6 +270,53 @@ def test_format_bundle_preview_renders_case_summary(tmp_path: Path):
     assert "bundle: demo_bundle" in rendered
     assert "cases: 1" in rendered
     assert "- case_1 [transaction/single_turn] run lint" in rendered
+
+
+def test_list_available_workbench_bundles_uses_launchable_file_stem(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True)
+    (bundle_dir / "alpha_bundle.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "declared_inside_json",
+                "benchmark": "dry",
+                "cases": [{"case_id": "case_1"}, {"case_id": "case_2"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (bundle_dir / "broken_bundle.json").write_text("{", encoding="utf-8")
+    (bundle_dir / "missing_cases.json").write_text(
+        json.dumps({"bundle_name": "declared_without_cases", "benchmark": "empty"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    rows = list_available_workbench_bundles(tmp_path)
+
+    assert rows == [
+        {
+            "name": "alpha_bundle",
+            "declaredName": "declared_inside_json",
+            "path": str(bundle_dir / "alpha_bundle.json"),
+            "caseCount": 2,
+            "benchmark": "dry",
+        },
+        {
+            "name": "broken_bundle",
+            "declaredName": "",
+            "path": str(bundle_dir / "broken_bundle.json"),
+            "caseCount": 0,
+            "benchmark": "",
+        },
+        {
+            "name": "missing_cases",
+            "declaredName": "declared_without_cases",
+            "path": str(bundle_dir / "missing_cases.json"),
+            "caseCount": 0,
+            "benchmark": "empty",
+        },
+    ]
 
 
 def test_format_file_excerpt_truncates_long_file(tmp_path: Path):

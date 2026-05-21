@@ -442,6 +442,38 @@ def resolve_workbench_bundle_path(project_root: Path, bundle_name: str) -> Path:
     return project_root / "workspace" / "evaluation" / "bundles" / f"{bundle_name}.json"
 
 
+def list_available_workbench_bundles(project_root: Path) -> list[dict[str, Any]]:
+    bundles_dir = project_root / "workspace" / "evaluation" / "bundles"
+    if not bundles_dir.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for path in sorted(bundles_dir.glob("*.json"), key=lambda item: item.name.lower()):
+        name = path.stem
+        declared_name = ""
+        case_count = 0
+        benchmark = ""
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        if isinstance(payload, dict):
+            declared_name = str(payload.get("bundle_name") or "").strip()
+            benchmark = str(payload.get("benchmark") or "").strip()
+            cases = payload.get("cases")
+            if isinstance(cases, list):
+                case_count = len(cases)
+        rows.append(
+            {
+                "name": name,
+                "declaredName": declared_name,
+                "path": str(path),
+                "caseCount": case_count,
+                "benchmark": benchmark,
+            }
+        )
+    return rows
+
+
 def format_materialization_summary(materialized: object, fallback_dataset_name: str) -> str:
     return "\n".join(
         [
