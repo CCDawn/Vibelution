@@ -48,6 +48,47 @@ def test_governor_blocks_mutation_outside_allowed_dirs(monkeypatch, tmp_path):
     assert records[-1]["target_paths"] == ["core/runtime.py"]
 
 
+def test_governor_allows_explicit_safe_modify_probe_file(monkeypatch, tmp_path):
+    project_root = _patch_runtime(monkeypatch, tmp_path)
+    evolution = SimpleNamespace(
+        allowed_target_dirs=["workspace/prompts/", "tests/harness_safe_modify_probe.py"],
+        audit_log_path="workspace/evolution/audit.jsonl",
+    )
+    monkeypatch.setattr(governor_module, "get_config", lambda: SimpleNamespace(evolution=evolution))
+    governor = governor_module.EvolutionGovernor()
+
+    message = governor.check_mutation_allowed(
+        "write_file_tool",
+        {"file_path": "tests/harness_safe_modify_probe.py", "content": "x"},
+        "txn_demo",
+    )
+
+    assert message is None
+    assert not (project_root / "workspace" / "evolution" / "audit.jsonl").exists()
+
+
+def test_governor_file_allowlist_does_not_allow_nested_paths(monkeypatch, tmp_path):
+    project_root = _patch_runtime(monkeypatch, tmp_path)
+    evolution = SimpleNamespace(
+        allowed_target_dirs=["workspace/prompts/", "tests/harness_safe_modify_probe.py"],
+        audit_log_path="workspace/evolution/audit.jsonl",
+    )
+    monkeypatch.setattr(governor_module, "get_config", lambda: SimpleNamespace(evolution=evolution))
+    governor = governor_module.EvolutionGovernor()
+
+    message = governor.check_mutation_allowed(
+        "write_file_tool",
+        {"file_path": "tests/harness_safe_modify_probe.py/extra.py", "content": "x"},
+        "txn_demo",
+    )
+
+    assert message is not None
+    assert "tests/harness_safe_modify_probe.py/extra.py" in message
+    audit_path = project_root / "workspace" / "evolution" / "audit.jsonl"
+    records = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
+    assert records[-1]["event"] == "mutation_blocked"
+
+
 def test_governor_records_complexity_for_dynamic_prompt_mutation(monkeypatch, tmp_path):
     project_root = _patch_runtime(monkeypatch, tmp_path)
     governor = governor_module.EvolutionGovernor()

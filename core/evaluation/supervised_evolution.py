@@ -200,6 +200,7 @@ def _to_supervised_run(
     result: HarnessResult,
     report_path: Optional[Path],
 ) -> SupervisedEvolutionRun:
+    materialized_prompt = _materialized_prompt_from_result(result) or prompt
     return SupervisedEvolutionRun(
         role=role,
         case_id=case_id,
@@ -209,7 +210,7 @@ def _to_supervised_run(
         ended_at=result.ended_at,
         scenario=scenario,
         mode=mode,
-        prompt=prompt,
+        prompt=materialized_prompt,
         worktree_path=result.worktree_path,
         checkpoint_commit=result.checkpoint_commit,
         report_path=str(report_path) if report_path else None,
@@ -218,6 +219,16 @@ def _to_supervised_run(
         new_debug_files=result.new_debug_files,
         evolution_summary=result.evolution_summary,
     )
+
+
+def _materialized_prompt_from_result(result: HarnessResult) -> str:
+    command = getattr(result, "command", None)
+    if not isinstance(command, list):
+        return ""
+    for index, item in enumerate(command):
+        if str(item) == "--prompt" and index + 1 < len(command):
+            return str(command[index + 1] or "").strip()
+    return ""
 
 
 def _success_rate(items: List[SupervisedEvolutionRun]) -> float:
@@ -245,6 +256,7 @@ def _extract_run_metrics(item: SupervisedEvolutionRun) -> Dict[str, Any]:
     restart = summary.get("restart") or {}
     transaction = summary.get("transaction") or {}
     git = summary.get("git") or {}
+    llm_failure = summary.get("llm_failure") if isinstance(summary.get("llm_failure"), dict) else {}
     started_at = _parse_iso_timestamp(item.started_at)
     ended_at = _parse_iso_timestamp(item.ended_at)
     wall_clock_seconds = 0.0
@@ -264,6 +276,9 @@ def _extract_run_metrics(item: SupervisedEvolutionRun) -> Dict[str, Any]:
         "restart_triggered": bool(restart.get("triggered")),
         "restart_reentered": bool(restart.get("reentered")),
         "new_logs": len(item.new_conversation_files) + len(item.new_debug_files),
+        "llm_failure_detected": bool(llm_failure.get("detected")),
+        "llm_failure_category": str(llm_failure.get("category") or ""),
+        "llm_failure_retryable": bool(llm_failure.get("retryable")),
     }
 
 
@@ -331,6 +346,63 @@ def _evaluate_gates(
     gates: List[DecisionGate] = []
     baseline_metrics = [_extract_run_metrics(item) for item in baseline_runs]
     candidate_metrics = [_extract_run_metrics(item) for item in candidate_runs]
+    baseline_llm_failures = sum(1 for item in baseline_metrics if item["llm_failure_detected"])
+    candidate_llm_failures = sum(1 for item in candidate_metrics if item["llm_failure_detected"])
+    provider_transport_failures = sum(
+        1
+        for item in [*baseline_metrics, *candidate_metrics]
+        if item["llm_failure_category"] == "provider_transport_error"
+    )
+    if baseline_llm_failures or candidate_llm_failures:
+        gates.append(
+            DecisionGate(
+                name="infrastructure",
+                status="fail",
+                reason=(
+                    "LLM provider 传输异常，监督评测未生成可比较输出"
+                    if provider_transport_failures
+                    else "LLM 调用失败，监督评测未生成可比较输出"
+                ),
+                metrics={
+                    "baseline_llm_failures": baseline_llm_failures,
+                    "candidate_llm_failures": candidate_llm_failures,
+                    "provider_transport_failures": provider_transport_failures,
+                },
+            )
+        )
+        gates.append(
+            DecisionGate(
+                name="legality",
+                status="skipped",
+                reason="LLM 调用失败，跳过事务行为合规判断",
+                metrics={"score_delta": score_delta},
+            )
+        )
+        gates.append(
+            DecisionGate(
+                name="safety",
+                status="skipped",
+                reason="LLM 调用失败，跳过安全退化判断",
+                metrics={"score_delta": score_delta},
+            )
+        )
+        gates.append(
+            DecisionGate(
+                name="survival",
+                status="skipped",
+                reason="LLM 调用失败，跳过生存门判断",
+                metrics={"score_delta": score_delta},
+            )
+        )
+        gates.append(
+            DecisionGate(
+                name="cost",
+                status="skipped",
+                reason="LLM 调用失败，跳过成本门",
+                metrics={},
+            )
+        )
+        return gates, "INCONCLUSIVE", "LLM provider 传输异常，当前监督评测不可判定", score_delta
 
     baseline_commit_detected = sum(1 for item in baseline_metrics if item["commit_detected"])
     candidate_commit_detected = sum(1 for item in candidate_metrics if item["commit_detected"])
@@ -745,6 +817,18 @@ def run_supervised_evolution_session(
             ("baseline", baseline_prompt, baseline_runs),
             ("candidate", candidate_prompt, candidate_runs),
         ):
+            _run_checkpoint(
+                checkpoint_callback,
+                {
+                    "phase": "role_start_boundary",
+                    "session_id": session_id,
+                    "bundle_name": str(bundle.get("bundle_name") or bundle_name),
+                    "case_index": case_index,
+                    "case_total": len(cases),
+                    "case_id": case_id,
+                    "role": role,
+                },
+            )
             _emit_progress(
                 progress_callback,
                 {

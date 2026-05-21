@@ -31,6 +31,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REPORT_DIR = PROJECT_ROOT / "log_info" / "harness_reports"
 LIVE_CASE_TRANSCRIPT_LIMIT = 8
 LIVE_CASE_TEXT_LIMIT = 4000
+PROVIDER_TRANSPORT_ERROR_MARKERS = (
+    "unexpected_eof_while_reading",
+    "eof occurred in violation of protocol",
+    "upstream_error",
+    "upstream request failed",
+    "badgateway",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "remoteprotocolerror",
+    "connection reset",
+    "connection aborted",
+)
 DEFAULT_TEST_PROMPT = "制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"
 DEFAULT_TRANSACTION_PROMPT = (
     "执行一轮非重启演化事务探针："
@@ -318,7 +331,116 @@ def create_harness_config(worktree_path: Path) -> Optional[Path]:
 
     target = worktree_path / "config.harness.toml"
     target.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
+    ensure_harness_safe_modify_allowlist(target)
     return target
+
+
+def ensure_harness_safe_modify_allowlist(config_path: Path) -> None:
+    """Patch the disposable harness config so the safe-modify probe can write only its probe file."""
+
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    lines = text.splitlines()
+    if _toml_evolution_allowlist_contains(lines, SAFE_MODIFY_PROBE_PATH):
+        return
+
+    evolution_start = _toml_section_start(lines, "evolution")
+    if evolution_start is None:
+        suffix = "" if text.endswith("\n") or not text else "\n"
+        config_path.write_text(
+            f"{text}{suffix}\n[evolution]\nallowed_target_dirs = [\n"
+            '    "workspace/prompts/",\n'
+            f'    "{SAFE_MODIFY_PROBE_PATH}",\n'
+            "]\n",
+            encoding="utf-8",
+        )
+        return
+
+    allowlist_start = _toml_key_start_in_section(lines, evolution_start, "allowed_target_dirs")
+    if allowlist_start is None:
+        insert_at = _toml_section_end(lines, evolution_start)
+        block = [
+            "allowed_target_dirs = [",
+            '    "workspace/prompts/",',
+            f'    "{SAFE_MODIFY_PROBE_PATH}",',
+            "]",
+        ]
+        patched = [*lines[:insert_at], *block, *lines[insert_at:]]
+        config_path.write_text("\n".join(patched) + "\n", encoding="utf-8")
+        return
+
+    allowlist_end = _toml_array_end(lines, allowlist_start)
+    if allowlist_end == allowlist_start and "[" in lines[allowlist_start] and "]" in lines[allowlist_start]:
+        current_line = lines[allowlist_start].rstrip()
+        if current_line.endswith("[]"):
+            lines[allowlist_start] = current_line.replace("[]", f'["{SAFE_MODIFY_PROBE_PATH}"]')
+        else:
+            close_index = current_line.rfind("]")
+            separator = "" if current_line[max(0, close_index - 1) : close_index].strip() in {"", "["} else ", "
+            lines[allowlist_start] = (
+                f'{current_line[:close_index]}{separator}"{SAFE_MODIFY_PROBE_PATH}"{current_line[close_index:]}'
+            )
+    else:
+        indent = _infer_toml_array_indent(lines, allowlist_start, allowlist_end)
+        lines.insert(allowlist_end, f'{indent}"{SAFE_MODIFY_PROBE_PATH}",')
+    config_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _toml_section_start(lines: List[str], section_name: str) -> Optional[int]:
+    target = f"[{section_name}]"
+    for index, line in enumerate(lines):
+        if line.strip() == target:
+            return index
+    return None
+
+
+def _toml_section_end(lines: List[str], section_start: int) -> int:
+    for index in range(section_start + 1, len(lines)):
+        stripped = lines[index].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            return index
+    return len(lines)
+
+
+def _toml_key_start_in_section(lines: List[str], section_start: int, key: str) -> Optional[int]:
+    section_end = _toml_section_end(lines, section_start)
+    for index in range(section_start + 1, section_end):
+        stripped = lines[index].strip()
+        if stripped.startswith(f"{key}") and "=" in stripped:
+            lhs = stripped.split("=", 1)[0].strip()
+            if lhs == key:
+                return index
+    return None
+
+
+def _toml_array_end(lines: List[str], start: int) -> int:
+    for index in range(start, len(lines)):
+        if "]" in lines[index]:
+            return index
+    return start
+
+
+def _toml_evolution_allowlist_contains(lines: List[str], value: str) -> bool:
+    evolution_start = _toml_section_start(lines, "evolution")
+    if evolution_start is None:
+        return False
+    allowlist_start = _toml_key_start_in_section(lines, evolution_start, "allowed_target_dirs")
+    if allowlist_start is None:
+        return False
+    allowlist_end = _toml_array_end(lines, allowlist_start)
+    block = "\n".join(lines[allowlist_start : allowlist_end + 1])
+    return f'"{value}"' in block or f"'{value}'" in block
+
+
+def _infer_toml_array_indent(lines: List[str], start: int, end: int) -> str:
+    for index in range(start + 1, end):
+        line = lines[index]
+        stripped = line.lstrip()
+        if stripped and not stripped.startswith("#"):
+            return line[: len(line) - len(stripped)]
+    return "    "
 
 
 def create_worktree(repo_root: Path, snapshot: SnapshotInfo, harness_id: str) -> Path:
@@ -493,6 +615,59 @@ def _truncate_live_case_text(text: str, *, limit: int = LIVE_CASE_TEXT_LIMIT) ->
     return normalized[: max(0, limit - 3)].rstrip() + "..."
 
 
+def _conversation_error_text(event: Dict[str, Any]) -> str:
+    message = (
+        event.get("error_msg")
+        or event.get("message")
+        or event.get("content")
+        or event.get("summary")
+        or event.get("traceback")
+        or ""
+    )
+    return str(message or "").strip()
+
+
+def _is_provider_transport_error_text(text: str) -> bool:
+    lower = str(text or "").lower()
+    if not lower:
+        return False
+    if any(marker in lower for marker in PROVIDER_TRANSPORT_ERROR_MARKERS):
+        return True
+    return "ssl" in lower and "eof" in lower
+
+
+def extract_llm_failure_from_events(events: List[Dict[str, Any]]) -> Dict[str, Any]:
+    latest_failure: Dict[str, Any] | None = None
+    latest_failure_index = -1
+    for index, event in enumerate(events):
+        if event.get("type") != "error":
+            continue
+        error_type = str(event.get("error_type") or "").strip()
+        text = _conversation_error_text(event)
+        if not text and not error_type:
+            continue
+        is_llm_error = error_type == "llm_error" or "llm" in error_type.lower()
+        if is_llm_error or _is_provider_transport_error_text(text):
+            category = "provider_transport_error" if _is_provider_transport_error_text(text) else "llm_error"
+            latest_failure = {
+                "detected": True,
+                "category": category,
+                "retryable": category == "provider_transport_error",
+                "error_type": error_type or "llm_error",
+                "message": text[:400],
+            }
+            latest_failure_index = index
+    if latest_failure is None:
+        return {"detected": False}
+    recovered_after_failure = any(
+        event.get("type") in {"tool_call", "llm_response"}
+        for event in events[latest_failure_index + 1 :]
+    )
+    if recovered_after_failure:
+        return {"detected": False, "recovered": True}
+    return latest_failure
+
+
 def _resolve_live_case_payload_ref(base_dir: Path, value: str) -> Optional[Path]:
     raw = str(value or "").strip()
     if not raw:
@@ -589,7 +764,7 @@ def build_live_case_io_payload(log_info_dir: Path) -> Dict[str, Any]:
             continue
 
         if event_type == "error":
-            content = str(event.get("error_msg") or event.get("traceback") or "").strip()
+            content = _conversation_error_text(event)
             if content:
                 transcript.append(
                     {
@@ -605,7 +780,12 @@ def build_live_case_io_payload(log_info_dir: Path) -> Dict[str, Any]:
 
     trimmed = transcript[-LIVE_CASE_TRANSCRIPT_LIMIT:]
     latest_input = next((item["content"] for item in reversed(trimmed) if item["kind"] == "input"), "")
-    latest_output_entry = next((item for item in reversed(trimmed) if item["kind"] != "input"), None)
+    latest_output_entry = next(
+        (item for item in reversed(trimmed) if item["kind"] not in {"input", "error"}),
+        None,
+    )
+    if latest_output_entry is None:
+        latest_output_entry = next((item for item in reversed(trimmed) if item["kind"] != "input"), None)
 
     return {
         "conversation_path": str(conversation_path),
@@ -655,14 +835,17 @@ def summarize_conversation_file(path: Path) -> Dict[str, Any]:
     message = (
         last.get("message")
         or last.get("content")
+        or last.get("error_msg")
         or last.get("tool_result")
         or last.get("summary")
+        or last.get("traceback")
         or ""
     )
     summary["last_message"] = str(message)[:400]
     summary["phase"] = infer_phase_from_events(events)
     summary["first_meaningful_event"] = infer_first_meaningful_event(events)
     summary["prompt_build"] = extract_prompt_build_from_events(events)
+    summary["llm_failure"] = extract_llm_failure_from_events(events)
     return summary
 
 
@@ -699,6 +882,16 @@ def infer_first_meaningful_event(events: List[Dict[str, Any]]) -> Dict[str, Any]
                 "phase": "first_llm_response",
                 "tool_name": None,
                 "message": str(event.get("content") or "")[:240],
+            }
+
+    for event in events:
+        if event.get("type") == "error":
+            message = _conversation_error_text(event)
+            return {
+                "type": "error",
+                "phase": "first_provider_transport_error" if _is_provider_transport_error_text(message) else "first_error",
+                "tool_name": None,
+                "message": message[:240],
             }
 
     for event in events:
@@ -824,6 +1017,13 @@ def infer_phase_from_events(events: List[Dict[str, Any]]) -> str:
             return classify_tool_event_phase(event)
         if event_type == "llm_response":
             return "llm_response"
+        if event_type == "error":
+            text = _conversation_error_text(event)
+            if _is_provider_transport_error_text(text):
+                return "provider_transport_error"
+            if str(event.get("error_type") or "").strip() == "llm_error":
+                return "llm_error"
+            return "error"
         if event_type == "debug":
             message = str(event.get("message", ""))
             if "Restarter 守护进程启动" in message:
@@ -1157,6 +1357,7 @@ def infer_evolution_summary(
         item for item in tool_phase_sequence
         if not item.startswith("tool:get_git_")
     ]
+    llm_failure = extract_llm_failure_from_events(events)
 
     summary = {
         "tasks": {
@@ -1193,6 +1394,7 @@ def infer_evolution_summary(
             "total": guarded_tool_count,
             "restart_guarded": restart_guarded_tool_count,
         },
+        "llm_failure": llm_failure,
     }
     if safe_modify_summary is not None:
         summary["safe_modify"] = safe_modify_summary
@@ -1370,11 +1572,19 @@ def infer_result_status(
     restart_reentered: bool,
     primary_returncode: Optional[int],
     last_observation: Dict[str, Any],
+    scenario: str = "",
     evolution_summary: Optional[Dict[str, Any]] = None,
 ) -> tuple[str, str]:
     if timed_out:
         phase = last_observation.get("phase") or "unknown"
         return "timeout", f"运行超时，最后观察阶段: {phase}"
+
+    llm_failure = (evolution_summary or {}).get("llm_failure") if evolution_summary else {}
+    if isinstance(llm_failure, dict) and llm_failure.get("detected"):
+        category = str(llm_failure.get("category") or "llm_error")
+        if category == "provider_transport_error":
+            return "failed", "LLM provider 传输异常，未生成可评估输出；请稍后重试"
+        return "failed", "LLM 调用失败，未生成可评估输出；请检查 provider 日志"
 
     if evolution_summary and "safe_modify" in evolution_summary:
         safe_modify = evolution_summary.get("safe_modify") or {}
@@ -1385,6 +1595,8 @@ def infer_result_status(
         if not safe_modify.get("marker_present"):
             return "failed", "安全修改探针文件缺少 marker"
         transaction_status = str(transaction.get("status") or "")
+        if not transaction.get("opened"):
+            return "failed", "安全修改探针事务未开账"
         if not transaction.get("closed"):
             return "failed", "安全修改探针事务未关账"
         if transaction_status == "failed":
@@ -1404,7 +1616,9 @@ def infer_result_status(
     if evolution_summary:
         transaction = evolution_summary.get("transaction") or {}
         validation = evolution_summary.get("validation") or {}
-        if transaction.get("opened"):
+        if scenario in {"transaction", "modify_rollback", "full_evolution"}:
+            if not transaction.get("opened"):
+                return "failed", "事务探针未开账"
             transaction_status = str(transaction.get("status") or "")
             if not transaction.get("closed"):
                 return "failed", "事务探针未关账"
@@ -1707,6 +1921,7 @@ def run_harness(
         restart_reentered=restart_reentered,
         primary_returncode=primary_returncode,
         last_observation=last_observation,
+        scenario=scenario,
         evolution_summary=evolution_summary,
     )
     process_summary = summarize_process_history(
