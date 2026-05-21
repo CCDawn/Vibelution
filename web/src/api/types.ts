@@ -57,8 +57,41 @@ export type HealthDiagnostics = {
     warning: number;
     blocked: number;
   };
+  findings: HealthFinding[];
+  quickActions: HealthQuickAction[];
   sessionHelpers: SessionHelper[];
   logHelpers: LogHelper[];
+};
+
+export type HealthFindingEvidence = {
+  label: string;
+  value: string;
+};
+
+export type HealthFinding = {
+  id: string;
+  severity: "blocked" | "warning" | "info" | string;
+  source: "session" | "logs" | "reset" | string;
+  helperId: string;
+  title: string;
+  summary: string;
+  evidence: HealthFindingEvidence[];
+  recommendedAction: string;
+  route: string;
+  resetItemId: string;
+  protected: boolean;
+};
+
+export type HealthQuickAction = {
+  id: string;
+  title: string;
+  description: string;
+  route: string;
+  source: string;
+  severity: "blocked" | "warning" | "info" | string;
+  findingId: string;
+  resetItemId: string;
+  protected: boolean;
 };
 
 export type SessionHelper = {
@@ -70,6 +103,7 @@ export type SessionHelper = {
   sessionCount: number;
   busyCount: number;
   failedCount: number;
+  staleCount: number;
   activeSessionId: string;
   activeTitle: string;
   currentPhase: string;
@@ -79,6 +113,8 @@ export type SessionHelper = {
   route: string;
   protected: boolean;
   protectedReason: string;
+  findingIds: string[];
+  primaryFindingId: string;
 };
 
 export type LogHelper = {
@@ -102,6 +138,8 @@ export type LogHelper = {
   resetItemId: string;
   protected: boolean;
   protectedReason: string;
+  findingIds: string[];
+  primaryFindingId: string;
 };
 
 export type RuntimeSceneListItem = {

@@ -371,6 +371,137 @@
   line-height: 1;
 }
 
+.healthWorkbenchGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  gap: 12px;
+}
+
+.findingCard,
+.quickActionItem {
+  border: 1px solid rgba(236, 230, 220, 0.06);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.healthPanel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.healthPanelHeader,
+.findingHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.healthPanelHeader h3,
+.findingHeader h4 {
+  margin: 0;
+  color: var(--fg-primary);
+}
+
+.healthPanelHeader h3 {
+  font-size: 0.96rem;
+}
+
+.findingHeader h4 {
+  margin-top: 4px;
+  font-size: 0.94rem;
+}
+
+.findingList,
+.quickActionList,
+.findingCard {
+  display: grid;
+  gap: 10px;
+}
+
+.findingCard {
+  padding: 12px;
+}
+
+.findingEvidence {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.findingEvidence span,
+.findingRecommendation {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(236, 230, 220, 0.06);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.findingEvidence span {
+  display: grid;
+  gap: 4px;
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.findingEvidence strong,
+.findingRecommendation strong {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.findingRecommendation {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.86rem;
+}
+
+.quickActionItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.quickActionItem:hover {
+  border-color: rgba(216, 167, 91, 0.32);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.quickActionItem div {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.quickActionItem strong,
+.quickActionItem small {
+  overflow-wrap: anywhere;
+}
+
+.quickActionItem strong {
+  color: var(--fg-primary);
+  font-size: 0.9rem;
+}
+
+.quickActionItem small {
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 .logHelperMetaGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -898,6 +1029,7 @@
 @media (max-width: 1400px) {
   .hashGrid,
   .matrixGrid,
+  .healthWorkbenchGrid,
   .healthSummaryGrid,
   .logHelperGrid,
   .diagnosticsGrid,
@@ -958,8 +1090,10 @@
   .sidebarMetrics,
   .hashGrid,
   .matrixGrid,
+  .healthWorkbenchGrid,
   .healthSummaryGrid,
   .diagnosticsGrid,
+  .findingEvidence,
   .logHelperMetaGrid,
   .profileGrid,
   .modelGrid,
