@@ -5,17 +5,22 @@ from __future__ import annotations
 import copy
 import json
 import os
+import sys
 import tempfile
+import threading
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from .constants import DEFAULT_URL, PID_PATH, STATE_PATH, ensure_runtime_manager_dirs
 
 
 WRITE_RETRY_TIMEOUT_SECONDS = 5.0
+WRITE_FALLBACK_TIMEOUT_SECONDS = 5.0
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
+_WRITE_LOCK = threading.Lock()
 
 
 def now_iso() -> str:
@@ -60,33 +65,75 @@ def default_state() -> dict[str, Any]:
     }
 
 
-def _atomic_write_text(path, text: str) -> None:
+def _write_retry_delay(attempt: int) -> float:
+    return min(0.05 * attempt, 0.25)
+
+
+def _write_text_in_place(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(text)
+
+
+def _retry_in_place_write(path: Path, text: str, *, timeout_seconds: float) -> None:
+    attempt = 0
+    deadline: float | None = None
+    while True:
+        try:
+            _write_text_in_place(path, text)
+            return
+        except OSError as exc:
+            attempt += 1
+            if deadline is None:
+                deadline = time.monotonic() + timeout_seconds
+            if time.monotonic() >= deadline:
+                raise exc
+            time.sleep(_write_retry_delay(attempt))
+
+
+def _log_atomic_write_failure(path: Path, exc: OSError) -> None:
+    print(
+        f"[runtime-manager] state write skipped after retries for {path}: {type(exc).__name__}: {exc}",
+        file=sys.stderr,
+    )
+
+
+def _atomic_write_text(path: Path, text: str, *, suppress_write_failure: bool = False) -> bool:
     ensure_runtime_manager_dirs()
-    fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-            handle.write(text)
-        deadline = time.monotonic() + WRITE_RETRY_TIMEOUT_SECONDS
-        attempt = 0
-        last_replace_error: PermissionError | None = None
-        while True:
-            try:
-                os.replace(temp_path, path)
-                break
-            except PermissionError as exc:
-                last_replace_error = exc
-                attempt += 1
-                if time.monotonic() >= deadline:
-                    try:
-                        with path.open("w", encoding="utf-8", newline="") as handle:
-                            handle.write(text)
+    with _WRITE_LOCK:
+        fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+                handle.write(text)
+            deadline = time.monotonic() + WRITE_RETRY_TIMEOUT_SECONDS
+            attempt = 0
+            last_replace_error: PermissionError | None = None
+            while True:
+                try:
+                    os.replace(temp_path, path)
+                    return True
+                except PermissionError as exc:
+                    last_replace_error = exc
+                    attempt += 1
+                    if time.monotonic() >= deadline:
                         break
-                    except OSError:
-                        raise last_replace_error
-                time.sleep(min(0.05 * attempt, 0.25))
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+                    time.sleep(_write_retry_delay(attempt))
+
+            try:
+                _retry_in_place_write(path, text, timeout_seconds=WRITE_FALLBACK_TIMEOUT_SECONDS)
+                return True
+            except OSError as exc:
+                if suppress_write_failure:
+                    _log_atomic_write_failure(path, exc)
+                    return False
+                if last_replace_error is not None:
+                    raise last_replace_error from exc
+                raise
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
 
 
 def _read_text_with_retry(path, *, encoding: str) -> str:
@@ -121,7 +168,7 @@ def save_state(state: dict[str, Any]) -> dict[str, Any]:
     payload = copy.deepcopy(state)
     payload["stateVersion"] = int(payload.get("stateVersion") or 0) + 1
     payload["updatedAt"] = now_iso()
-    _atomic_write_text(STATE_PATH, json.dumps(payload, ensure_ascii=False, indent=2))
+    _atomic_write_text(STATE_PATH, json.dumps(payload, ensure_ascii=False, indent=2), suppress_write_failure=True)
     return payload
 
 
