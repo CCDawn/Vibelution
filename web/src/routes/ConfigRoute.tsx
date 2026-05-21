@@ -32,6 +32,8 @@ import {
   ConfigModelPresetOption,
   ConfigWorkspace,
   HealthDiagnostics,
+  HealthFinding,
+  HealthQuickAction,
   LogHelper,
   SessionHelper,
 } from "../api/types";
@@ -117,14 +119,22 @@ type LogHelperCopy = {
   healthLoading: string;
   healthEmpty: string;
   healthRefresh: string;
+  healthPriority: string;
+  healthQuickActions: string;
+  healthEvidence: string;
+  healthRecommended: string;
+  healthRelatedFindings: string;
+  healthNoFindings: string;
   healthOpenLogs: string;
   healthOpenChat: string;
   healthOpenReset: string;
+  healthOpen: string;
   healthFiles: string;
   healthDirs: string;
   healthSessions: string;
   healthBusy: string;
   healthFailed: string;
+  healthStale: string;
   healthPhase: string;
   healthLatest: string;
   healthUpdated: string;
@@ -255,14 +265,22 @@ export const CONFIG_COPY = {
     healthLoading: "正在整理日志 Helper...",
     healthEmpty: "当前没有可用日志 Helper。",
     healthRefresh: "重新诊断",
+    healthPriority: "优先处理",
+    healthQuickActions: "快速入口",
+    healthEvidence: "证据",
+    healthRecommended: "建议",
+    healthRelatedFindings: "关联问题",
+    healthNoFindings: "当前没有阻塞或注意项。",
     healthOpenLogs: "打开日志页",
     healthOpenChat: "打开会话页",
     healthOpenReset: "去 Reset 清理",
+    healthOpen: "打开",
     healthFiles: "文件",
     healthDirs: "目录",
     healthSessions: "会话",
     healthBusy: "运行中",
     healthFailed: "失败",
+    healthStale: "缺时间",
     healthPhase: "阶段",
     healthLatest: "最近信号",
     healthUpdated: "更新时间",
@@ -427,14 +445,22 @@ export const CONFIG_COPY = {
     healthLoading: "Organizing log helpers...",
     healthEmpty: "No log helpers are available right now.",
     healthRefresh: "Run again",
+    healthPriority: "Top findings",
+    healthQuickActions: "Quick actions",
+    healthEvidence: "Evidence",
+    healthRecommended: "Recommendation",
+    healthRelatedFindings: "Related findings",
+    healthNoFindings: "No blocked or warning findings.",
     healthOpenLogs: "Open logs",
     healthOpenChat: "Open chat",
     healthOpenReset: "Open Reset",
+    healthOpen: "Open",
     healthFiles: "files",
     healthDirs: "dirs",
     healthSessions: "sessions",
     healthBusy: "busy",
     healthFailed: "failed",
+    healthStale: "stale",
     healthPhase: "phase",
     healthLatest: "Latest signal",
     healthUpdated: "Updated",
@@ -818,6 +844,20 @@ function healthStatusClassName(status: string) {
   return `${styles.inlineBadge} ${styles.statusBadgeReady}`;
 }
 
+function healthSeverityClassName(severity: string) {
+  if (severity === "blocked") {
+    return `${styles.inlineBadge} ${styles.healthBadgeBlocked}`;
+  }
+  if (severity === "warning") {
+    return `${styles.inlineBadge} ${styles.inlineBadgeWarning}`;
+  }
+  return styles.inlineBadge;
+}
+
+function formatFindingId(id: string) {
+  return id ? `#${id.replace(/_/g, "-")}` : "";
+}
+
 function LogHelperCenter({
   diagnostics,
   loading,
@@ -833,6 +873,9 @@ function LogHelperCenter({
 }) {
   const sessionHelpers = diagnostics?.sessionHelpers ?? [];
   const helpers = diagnostics?.logHelpers ?? [];
+  const findings = diagnostics?.findings ?? [];
+  const priorityFindings = findings.filter((finding) => finding.severity !== "info").slice(0, 4);
+  const quickActions = diagnostics?.quickActions ?? [];
   return (
     <section id="config-health-diagnostics" className={styles.sectionSurface}>
       <div className={styles.sectionHeader}>
@@ -871,6 +914,40 @@ function LogHelperCenter({
         </div>
       ) : null}
       {diagnostics?.summary ? <p className={styles.sectionText}>{diagnostics.summary}</p> : null}
+      {diagnostics ? (
+        <div className={styles.healthWorkbenchGrid}>
+          <div className={styles.healthPanel}>
+            <div className={styles.healthPanelHeader}>
+              <h3>{copy.healthPriority}</h3>
+              <span className={styles.inlineBadge}>{priorityFindings.length.toLocaleString()}</span>
+            </div>
+            {priorityFindings.length ? (
+              <div className={styles.findingList}>
+                {priorityFindings.map((finding) => (
+                  <HealthFindingCard key={finding.id} finding={finding} copy={copy} />
+                ))}
+              </div>
+            ) : (
+              <p className={styles.helperText}>{copy.healthNoFindings}</p>
+            )}
+          </div>
+          <div className={styles.healthPanel}>
+            <div className={styles.healthPanelHeader}>
+              <h3>{copy.healthQuickActions}</h3>
+              <span className={styles.inlineBadge}>{quickActions.length.toLocaleString()}</span>
+            </div>
+            {quickActions.length ? (
+              <div className={styles.quickActionList}>
+                {quickActions.map((action) => (
+                  <HealthQuickActionLink key={action.id} action={action} copy={copy} />
+                ))}
+              </div>
+            ) : (
+              <p className={styles.helperText}>{copy.healthNoFindings}</p>
+            )}
+          </div>
+        </div>
+      ) : null}
       {sessionHelpers.length ? (
         <div className={styles.logHelperGrid}>
           {sessionHelpers.map((helper) => (
@@ -888,6 +965,66 @@ function LogHelperCenter({
         <p className={styles.helperText}>{copy.healthEmpty}</p>
       ) : null}
     </section>
+  );
+}
+
+function HealthFindingCard({ finding, copy }: { finding: HealthFinding; copy: LogHelperCopy }) {
+  return (
+    <article className={styles.findingCard}>
+      <div className={styles.findingHeader}>
+        <div>
+          <p className={styles.matrixTitle}>{formatFindingId(finding.id)}</p>
+          <h4>{finding.title}</h4>
+        </div>
+        <span className={healthSeverityClassName(finding.severity)}>
+          {healthStatusLabel(finding.severity, copy)}
+        </span>
+      </div>
+      <p className={styles.cardSubtle}>{finding.summary}</p>
+      {finding.evidence.length ? (
+        <div className={styles.findingEvidence} aria-label={copy.healthEvidence}>
+          {finding.evidence.slice(0, 4).map((item) => (
+            <span key={`${finding.id}-${item.label}`}>
+              <strong>{item.label}</strong>
+              {item.value}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {finding.recommendedAction ? (
+        <p className={styles.findingRecommendation}>
+          <strong>{copy.healthRecommended}</strong>
+          {finding.recommendedAction}
+        </p>
+      ) : null}
+      <div className={styles.actionsRow}>
+        <a className={styles.actionButton} href={finding.route || "/logs"}>
+          <ExternalLink size={14} />
+          {copy.healthOpen}
+        </a>
+        {finding.resetItemId ? (
+          <a className={styles.actionButton} href={`/reset?item=${encodeURIComponent(finding.resetItemId)}`}>
+            <ExternalLink size={14} />
+            {copy.healthOpenReset}
+          </a>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function HealthQuickActionLink({ action, copy }: { action: HealthQuickAction; copy: LogHelperCopy }) {
+  return (
+    <a className={styles.quickActionItem} href={action.route || "/logs"}>
+      <div>
+        <span className={healthSeverityClassName(action.severity)}>
+          {action.findingId ? formatFindingId(action.findingId) : action.source}
+        </span>
+        <strong>{action.title}</strong>
+        <small>{action.description}</small>
+      </div>
+      <ExternalLink size={15} />
+    </a>
   );
 }
 
@@ -918,6 +1055,10 @@ function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang
           <strong>{helper.failedCount.toLocaleString()}</strong>
           {copy.healthFailed}
         </span>
+        <span>
+          <strong>{helper.staleCount.toLocaleString()}</strong>
+          {copy.healthStale}
+        </span>
         <span title={helper.updatedAt}>
           <strong>{updatedLabel}</strong>
           {copy.healthUpdated}
@@ -934,6 +1075,11 @@ function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang
       <p className={styles.cardSubtle}>{helper.recommendedAction}</p>
       <div className={styles.cardBadges}>
         <span className={`${styles.inlineBadge} ${styles.inlineBadgeWarning}`}>{copy.healthProtected}</span>
+        {helper.findingIds?.length ? (
+          <span className={styles.inlineBadge}>
+            {copy.healthRelatedFindings} {helper.findingIds.length}
+          </span>
+        ) : null}
       </div>
       {helper.protectedReason ? <p className={styles.helperText}>{helper.protectedReason}</p> : null}
       <div className={styles.actionsRow}>
@@ -988,6 +1134,11 @@ function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: Config
         <span className={helper.protected ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}` : styles.inlineBadge}>
           {helper.protected ? copy.healthProtected : copy.healthResetAvailable}
         </span>
+        {helper.findingIds?.length ? (
+          <span className={styles.inlineBadge}>
+            {copy.healthRelatedFindings} {helper.findingIds.length}
+          </span>
+        ) : null}
       </div>
       {helper.protectedReason ? <p className={styles.helperText}>{helper.protectedReason}</p> : null}
       <div className={styles.actionsRow}>

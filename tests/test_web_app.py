@@ -3900,6 +3900,13 @@ def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
     assert helpers["runtime_logs"]["route"] == "/logs?root=runtime_logs"
     assert helpers["conversation_logs"]["resetItemId"] == "conversation_logs"
     assert helpers["workspace_logs"]["status"] == "warning"
+    assert payload["findings"][0]["id"] == "runtime_scene_failed"
+    assert payload["findings"][0]["severity"] == "blocked"
+    assert payload["findings"][0]["route"] == "/logs?root=runtime_scenes"
+    assert helpers["runtime_scenes"]["primaryFindingId"] == "runtime_scene_failed"
+    assert any(item["source"] == "reset" and item["protected"] is True for item in payload["findings"])
+    assert payload["quickActions"][0]["findingId"] == "runtime_scene_failed"
+    assert any(item["resetItemId"] == "stopped_runtime_scenes" for item in payload["quickActions"])
 
 def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_read(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
