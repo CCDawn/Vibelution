@@ -2182,6 +2182,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <span>{t("candidateScore")}</span>
                       <p className={styles.detailLead}>{selectedRun.candidateScore}</p>
                       <p>{selectedRun.summary}</p>
+                      <div className={styles.runScoreDiagnosis}>
+                        <span>{t("diagnosis")}</span>
+                        <p>{selectedRun.diagnosis}</p>
+                      </div>
                       <div className={styles.runScoreFacts}>
                         <span>
                           {t("baselineScore")}
@@ -2231,6 +2235,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
                     <div className={styles.runRuntimeNote}>
                       <p>{selectedRun.outcomeSemantics.runtimeExplanation}</p>
+                      {selectedRun.riskReasons.length > 0 ? (
+                        <p>{selectedRun.riskReasons.join(" / ")}</p>
+                      ) : null}
                     </div>
                     {selectedRun.availableActions.length > 0 ? (
                       <div className={styles.actionRow}>
@@ -2250,14 +2257,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     ) : null}
                     {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
                     {actionMutation.error ? <p className={styles.errorText}>{actionMutation.error.message}</p> : null}
-                  </div>
-
-                  <div className={`${styles.detailSection} ${styles.runDiagnosisSection}`}>
-                    <h3>{t("diagnosis")}</h3>
-                    <p className={styles.reviewLead}>{selectedRun.diagnosis}</p>
-                    {selectedRun.riskReasons.length > 0 ? (
-                      <p className={styles.noticeText}>{selectedRun.riskReasons.join(" / ")}</p>
-                    ) : null}
                   </div>
 
                   <div className={styles.detailSection}>
