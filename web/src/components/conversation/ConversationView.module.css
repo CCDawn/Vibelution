@@ -189,6 +189,8 @@
 
 .assistantCard {
   justify-self: start;
+  width: 100%;
+  max-width: 100%;
   min-width: min(280px, 100%);
   padding-left: 18px;
   border-top-left-radius: 4px;
