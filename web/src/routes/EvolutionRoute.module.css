@@ -1045,15 +1045,18 @@
 
 .runsCommandStrip {
   display: grid;
-  gap: 10px;
+  grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
   padding: 12px 14px;
 }
 
 .runsCommandHeader {
   display: flex;
-  align-items: start;
-  justify-content: space-between;
-  gap: 14px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: end;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -1574,6 +1577,7 @@
   .overviewSecondaryGrid,
   .runsHeaderBody,
   .runsWorkspace,
+  .runsCommandStrip,
   .masterDetail,
   .controlSurface {
     grid-template-columns: 1fr;
@@ -1600,7 +1604,6 @@
   }
 
   .runsCommandHeader {
-    align-items: stretch;
     flex-direction: column;
   }
 
