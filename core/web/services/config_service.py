@@ -54,6 +54,7 @@ PROFILE_LABELS = {
 _PENDING_SECRET_PREFIX = "pending-secret:"
 _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
+_OPEN_ENVIRONMENT_TASK_NAME = r"\Vibelution\OpenEnvironmentVariables"
 
 
 def _record_config_scene_event(
@@ -932,18 +933,56 @@ def run_draft_llm_test(
     return _run_draft_test_llm_connection(submitted, profile_id, _normalize_draft_meta(draft_meta))
 
 
-def open_system_environment_settings() -> dict[str, bool]:
+def _run_schtasks(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+
+def _assert_schtasks_success(result: subprocess.CompletedProcess[str], action: str) -> None:
+    if result.returncode == 0:
+        return
+    detail = (result.stderr or result.stdout or "").strip()
+    raise ValueError(f"无法打开系统环境变量窗口：{action} 失败{f'：{detail}' if detail else ''}")
+
+
+def open_system_environment_settings() -> dict[str, object]:
     """Open the OS environment variable editor without reading environment values."""
     if os.name != "nt":
         raise ValueError("系统环境变量窗口目前只支持 Windows。")
     try:
-        subprocess.Popen(
-            ["rundll32.exe", "sysdm.cpl,EditEnvironmentVariables"],
-            close_fds=True,
+        _run_schtasks(["schtasks.exe", "/Delete", "/TN", _OPEN_ENVIRONMENT_TASK_NAME, "/F"])
+        create_result = _run_schtasks(
+            [
+                "schtasks.exe",
+                "/Create",
+                "/TN",
+                _OPEN_ENVIRONMENT_TASK_NAME,
+                "/SC",
+                "ONCE",
+                "/ST",
+                "23:59",
+                "/TR",
+                "rundll32.exe sysdm.cpl,EditEnvironmentVariables",
+                "/F",
+                "/IT",
+            ]
         )
-    except OSError as exc:
+        _assert_schtasks_success(create_result, "创建交互启动任务")
+        run_result = _run_schtasks(["schtasks.exe", "/Run", "/TN", _OPEN_ENVIRONMENT_TASK_NAME])
+        _assert_schtasks_success(run_result, "运行交互启动任务")
+    except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError(f"无法打开系统环境变量窗口：{exc}") from exc
-    return {"opened": True}
+    finally:
+        try:
+            _run_schtasks(["schtasks.exe", "/Delete", "/TN", _OPEN_ENVIRONMENT_TASK_NAME, "/F"])
+        except Exception:
+            pass
+    return {"opened": True, "method": "interactive-scheduled-task"}
 
 
 def apply_config_workspace(

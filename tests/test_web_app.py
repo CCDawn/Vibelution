@@ -3893,20 +3893,25 @@ def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeyp
 def test_config_open_environment_opens_system_ui_without_returning_keys(monkeypatch):
     launched_commands = []
 
-    class FakePopen:
-        def __init__(self, command, **kwargs):
-            launched_commands.append((command, kwargs))
+    def fake_run(command, **kwargs):
+        launched_commands.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(config_service.os, "name", "nt")
-    monkeypatch.setattr(config_service.subprocess, "Popen", FakePopen)
+    monkeypatch.setattr(config_service.subprocess, "run", fake_run)
     monkeypatch.setenv("VIBELUTION_SECRET_TEST_KEY", "should-not-leak")
 
     response = client.post("/api/config/open-environment", json={})
 
     assert response.status_code == 200, response.json()
     payload = response.json()
-    assert payload == {"opened": True}
+    assert payload["opened"] is True
+    assert payload["method"] == "interactive-scheduled-task"
     assert launched_commands
+    assert [command[0][1] for command in launched_commands] == ["/Delete", "/Create", "/Run", "/Delete"]
+    create_command = launched_commands[1][0]
+    assert "/IT" in create_command
+    assert "rundll32.exe sysdm.cpl,EditEnvironmentVariables" in create_command
     assert "should-not-leak" not in response.text
     assert "VIBELUTION_SECRET_TEST_KEY" not in response.text
 
@@ -3921,11 +3926,13 @@ def test_config_open_environment_reports_unsupported_platform(monkeypatch):
 
 
 def test_config_open_environment_reports_launch_failure(monkeypatch):
-    def fail_popen(command, **kwargs):
-        raise OSError("blocked")
+    def fake_run(command, **kwargs):
+        if command[1] == "/Create":
+            return SimpleNamespace(returncode=1, stdout="", stderr="blocked")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(config_service.os, "name", "nt")
-    monkeypatch.setattr(config_service.subprocess, "Popen", fail_popen)
+    monkeypatch.setattr(config_service.subprocess, "run", fake_run)
 
     response = client.post("/api/config/open-environment", json={})
 
