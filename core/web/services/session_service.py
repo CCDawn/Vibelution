@@ -72,6 +72,11 @@ _UNSET = object()
 _WORK_RUN_STORE = WorkRunStore()
 _NO_VISIBLE_REPLY_ZH = "本轮没有产生可见回复。"
 _NO_VISIBLE_REPLY_EN = "This turn did not produce a visible reply."
+_PROVIDER_ERROR_PATTERN = re.compile(
+    r"(?:provider_protocol_error|server_error|litellm\.|badgatewayerror|openai(?:exception|error)|"
+    r"upstream_error|upstream request failed|api(?:connection|status|timeout|rate)?error)",
+    re.IGNORECASE,
+)
 
 
 class SessionNotFoundError(ValueError):
@@ -1062,6 +1067,8 @@ def _persist_chat_turn_work_run(
     leases: list[str] | None = None,
     user_message: str = "",
     summary: str = "",
+    error_type: str = "",
+    error: str = "",
     started_at: str = "",
     updated_at: str = "",
     finished_at: str = "",
@@ -1086,6 +1093,8 @@ def _persist_chat_turn_work_run(
         "leases": list(leases or previous.get("leases") or ["readonly_chat"]),
         "userMessage": str(user_message or previous.get("userMessage") or "").strip(),
         "summary": str(summary or previous.get("summary") or "").strip(),
+        "errorType": str(error_type or previous.get("errorType") or "").strip(),
+        "error": str(error or previous.get("error") or "").strip(),
         "startedAt": started,
         "updatedAt": str(updated_at or now).strip(),
         "finishedAt": finished if normalized_status in {"completed", "failed", "stopped", "cancelled"} else "",
@@ -1342,14 +1351,14 @@ def _persist_session_turn_result(
 
 def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc: Exception) -> None:
     lang = get_web_language()
-    reason = trim_lines(str(exc or "").strip(), max_lines=2)
-    summary = text_for(
+    raw_error = str(exc or "").strip()
+    error_type = _failure_error_type(raw_error, exc=exc)
+    summary = _user_visible_failure_summary(raw_error, lang=lang, exc=exc)
+    work_run_summary = text_for(
         lang,
-        zh="网页工作台这一轮执行失败，请检查配置或稍后重试。",
-        en="This web workbench turn failed. Check configuration and try again.",
+        zh="网页工作台这一轮执行失败，完整错误已写入运行日志。",
+        en="This web workbench turn failed. The full error was written to runtime logs.",
     )
-    if reason:
-        summary = f"{summary}\n{reason}"
 
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -1368,7 +1377,9 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             session_id=session_id,
             turn_id=str(context.get("turn_id") or ""),
             status="failed",
-            summary=summary,
+            summary=work_run_summary,
+            error_type=error_type,
+            error=raw_error,
             finished_at=assistant_entry["timestamp"],
             updated_at=assistant_entry["timestamp"],
         )
@@ -1382,12 +1393,16 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
 
 def _ensure_assistant_visible_text(content: Any, *, result: Any = None, lang: str | None = None) -> str:
     cleaned = _sanitize_message_content("assistant", content)
+    if cleaned and _looks_like_provider_error_text(cleaned):
+        return _user_visible_failure_summary(cleaned, lang=lang or get_web_language())
     if cleaned:
         return cleaned
     if isinstance(result, dict):
         for key in ("error", "message", "blocked_reason", "required_user_input", "recommended_next_action", "next_action"):
             fallback = _sanitize_message_content("assistant", result.get(key) or "")
             if fallback:
+                if _looks_like_provider_error_text(fallback):
+                    return _user_visible_failure_summary(fallback, lang=lang or get_web_language())
                 return fallback
         tool_trace = result.get("tool_trace") or result.get("tool_calls") or []
         if tool_trace:
@@ -1573,6 +1588,8 @@ def _format_visible_reply(result: Any) -> str:
         "assistant",
         result.get("raw_output") or result.get("summary") or result.get("error") or result.get("message") or "",
     )
+    if visible and _looks_like_provider_error_text(visible):
+        return _user_visible_failure_summary(visible, lang=get_web_language())
     if visible and not _looks_like_structured_payload(visible):
         return visible
 
@@ -1606,6 +1623,47 @@ def _looks_like_structured_payload(text: str) -> bool:
     except Exception:
         return False
     return isinstance(parsed, (dict, list))
+
+
+def _looks_like_provider_error_text(text: Any) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return bool(_PROVIDER_ERROR_PATTERN.search(value))
+
+
+def _failure_error_type(raw_error: str, *, exc: Exception | None = None) -> str:
+    value = str(raw_error or "").strip().lower()
+    exc_type = type(exc).__name__ if exc is not None else ""
+    if _looks_like_provider_error_text(value):
+        if "upstream_error" in value or "badgateway" in value or "bad gateway" in value:
+            return "provider_upstream_error"
+        if "provider_protocol_error" in value:
+            return "provider_protocol_error"
+        return "provider_error"
+    return exc_type or "runtime_error"
+
+
+def _user_visible_failure_summary(raw_error: Any, *, lang: str | None = None, exc: Exception | None = None) -> str:
+    language = lang or get_web_language()
+    text = str(raw_error or "").strip()
+    if _looks_like_provider_error_text(text):
+        return text_for(
+            language,
+            zh="模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+            en='The model provider failed upstream, so this turn did not complete. The full provider error was written to runtime logs; retry later or send "continue".',
+        )
+    reason = trim_lines(text, max_lines=2)
+    summary = text_for(
+        language,
+        zh="网页工作台这一轮执行失败，请检查配置或稍后重试。",
+        en="This web workbench turn failed. Check configuration and try again.",
+    )
+    if reason:
+        return f"{summary}\n{reason}"
+    if exc is not None:
+        return f"{summary}\n{type(exc).__name__}"
+    return summary
 
 
 def _normalize_message_thought(raw: dict[str, Any], *, role: str) -> str:

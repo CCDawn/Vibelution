@@ -12,6 +12,7 @@ def classify_exception(exc: Exception) -> LLMError:
     exc_type = type(exc).__name__
     exc_msg = str(exc or "")
     lower = exc_msg.lower()
+    lower_type = exc_type.lower()
 
     if isinstance(exc, LLMError):
         return exc
@@ -21,6 +22,16 @@ def classify_exception(exc: Exception) -> LLMError:
         return LLMError("context_length_error", "上下文长度超过模型限制", retryable=False)
     if "quota" in lower or "insufficient_quota" in lower or "billing" in lower:
         return LLMError("quota_error", "provider 额度不足或计费受限", retryable=False)
+    if (
+        "badgateway" in lower_type
+        or "badgateway" in lower
+        or "bad gateway" in lower
+        or "upstream_error" in lower
+        or "upstream request failed" in lower
+        or "service unavailable" in lower
+        or "gateway timeout" in lower
+    ):
+        return LLMError("server_error", exc_msg or "provider 服务异常", retryable=True)
     if "duplicate tool_call id" in lower or ("tool" in lower and "schema" in lower):
         return LLMError("tool_protocol_error", exc_msg or "tool calling 协议错误", retryable=False)
     if "chat content is empty" in lower or "content is empty" in lower:
