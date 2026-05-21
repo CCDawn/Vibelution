@@ -342,10 +342,9 @@
   font-size: 0.78rem;
 }
 
+.messageField select,
 .messageField textarea {
   width: 100%;
-  min-height: 118px;
-  resize: vertical;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: rgba(14, 17, 20, 0.88);
@@ -354,6 +353,16 @@
   line-height: 1.42;
 }
 
+.messageField select {
+  min-height: 38px;
+}
+
+.messageField textarea {
+  min-height: 118px;
+  resize: vertical;
+}
+
+.messageField select:focus,
 .messageField textarea:focus {
   border-color: rgba(216, 167, 91, 0.42);
   outline: none;

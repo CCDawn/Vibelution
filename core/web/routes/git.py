@@ -19,6 +19,7 @@ router = APIRouter(tags=["git"])
 
 class GitCommitMessagePayload(BaseModel):
     paths: list[str] = Field(default_factory=list)
+    profile_id: str = Field(default="", alias="profileId")
 
 
 class GitCommitPayload(BaseModel):
@@ -47,7 +48,7 @@ def git_diff(path: str = Query(min_length=1)) -> dict:
 @router.post("/git/commit-message")
 def git_commit_message(payload: GitCommitMessagePayload) -> dict:
     try:
-        return generate_git_commit_message(payload.paths)
+        return generate_git_commit_message(payload.paths, profile_id=payload.profile_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

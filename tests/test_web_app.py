@@ -735,6 +735,8 @@ def test_git_diff_endpoint_rejects_path_escape():
 
 
 def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
+    captured_profiles = []
+
     class FakeGitStatusService:
         def is_git_available(self):
             return True, None
@@ -793,6 +795,19 @@ def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
                         "model": "local-model",
                         "contract": "basic_chat",
                         "strict_compatibility": False,
+                    },
+                    "subagent_explorer": {
+                        "provider": {
+                            "kind": "local",
+                            "api_key_env": "",
+                            "base_url": "http://localhost:11434/v1",
+                            "compat_mode": "openai",
+                            "requires_api_key": False,
+                            "context_window": 65536,
+                        },
+                        "model": "local-model",
+                        "contract": "basic_chat",
+                        "strict_compatibility": False,
                     }
                 }
             },
@@ -803,15 +818,23 @@ def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
         },
     )
     monkeypatch.setattr(git_status_service, "build_effective_config", lambda public_config: SimpleNamespace())
-    monkeypatch.setattr(git_status_service, "get_llm_client", lambda profile_id=None, config=None: FakeLlmClient())
+    monkeypatch.setattr(
+        git_status_service,
+        "get_llm_client",
+        lambda profile_id=None, config=None: captured_profiles.append(profile_id) or FakeLlmClient(),
+    )
 
-    response = client.post("/api/git/commit-message", json={"paths": ["web/src/routes/GitRoute.tsx"]})
+    response = client.post(
+        "/api/git/commit-message",
+        json={"paths": ["web/src/routes/GitRoute.tsx"], "profileId": "subagent_explorer"},
+    )
 
     assert response.status_code == 200, response.json()
     payload = response.json()
     assert payload["message"] == "feat: add git commit controls"
-    assert payload["profileId"] == "primary"
+    assert payload["profileId"] == "subagent_explorer"
     assert payload["files"] == ["web/src/routes/GitRoute.tsx"]
+    assert captured_profiles == ["subagent_explorer"]
 
 
 def test_git_commit_endpoint_rejects_empty_message():

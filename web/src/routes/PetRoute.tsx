@@ -3,8 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { PetSummary } from "../api/types";
+import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./PetRoute.module.css";
+
+const ACHIEVEMENT_LABEL_KEYS = {
+  first_task: "petAchievementFirstTask",
+  level_10: "petAchievementLevel10",
+} as const;
 
 export function PetRoute() {
   const { t } = useAppI18n();
@@ -15,6 +21,7 @@ export function PetRoute() {
 
   const pet = petQuery.data;
   const progress = pet ? Math.round((pet.exp / pet.expToNext) * 100) : 0;
+  const avatarPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
 
   return (
     <div className={styles.page}>
@@ -22,7 +29,7 @@ export function PetRoute() {
         <div className={styles.avatarPanel}>
           <div className={styles.avatarOrb}>{pet?.name?.[0] ?? "P"}</div>
           <p className={styles.avatarMeta}>
-            {pet?.avatarPreset ?? "lobster"} {t("preset")}
+            {avatarPresetLabel} {t("preset")}
           </p>
         </div>
         <div>
@@ -89,7 +96,9 @@ export function PetRoute() {
           {(pet?.achievements ?? []).length > 0 ? (
             pet?.achievements.map((achievement) => (
               <span key={achievement} className={styles.badge}>
-                {achievement}
+                {ACHIEVEMENT_LABEL_KEYS[achievement as keyof typeof ACHIEVEMENT_LABEL_KEYS]
+                  ? t(ACHIEVEMENT_LABEL_KEYS[achievement as keyof typeof ACHIEVEMENT_LABEL_KEYS])
+                  : achievement}
               </span>
             ))
           ) : (

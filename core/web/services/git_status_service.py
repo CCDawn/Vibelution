@@ -217,7 +217,7 @@ def get_git_file_diff(path: str) -> dict[str, Any]:
     }
 
 
-def generate_git_commit_message(paths: list[str]) -> dict[str, Any]:
+def generate_git_commit_message(paths: list[str], profile_id: str | None = None) -> dict[str, Any]:
     service = get_git_memory_service()
     available, error = service.is_git_available()
     if not available:
@@ -226,7 +226,7 @@ def generate_git_commit_message(paths: list[str]) -> dict[str, Any]:
     selected_files = _selected_status_files(service, paths)
     selected_paths = [item["path"] for item in selected_files]
     git_cfg = _git_commit_config()
-    profile_id = str(git_cfg.get("commit_message_profile") or DEFAULT_GIT_COMMIT_PROFILE).strip()
+    profile_id = str(profile_id or git_cfg.get("commit_message_profile") or DEFAULT_GIT_COMMIT_PROFILE).strip()
     prompt_template = str(git_cfg.get("commit_message_prompt") or DEFAULT_COMMIT_MESSAGE_PROMPT).strip()
     diff_payload = _ai_diff_payload(service, selected_files)
     user_prompt = _render_prompt_template(

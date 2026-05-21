@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
+  ConfigWorkspace,
   GitCommitMessageResponse,
   GitCommitResponse,
   GitCommitsResponse,
@@ -59,12 +60,21 @@ function formatDateTime(value: string, locale: string) {
   }).format(date);
 }
 
+function configuredGitProfileId(workspace?: ConfigWorkspace) {
+  const gitConfig = workspace?.publicConfig?.git;
+  if (!gitConfig || typeof gitConfig !== "object" || Array.isArray(gitConfig)) {
+    return "";
+  }
+  return String((gitConfig as Record<string, unknown>).commit_message_profile ?? "").trim();
+}
+
 export function GitRoute() {
   const { lang, t } = useAppI18n();
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<GitFilter>("all");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [selectedAiProfileId, setSelectedAiProfileId] = useState("");
   const [commitMessage, setCommitMessage] = useState("");
   const [commitNotice, setCommitNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
     tone: "neutral",
@@ -84,6 +94,11 @@ export function GitRoute() {
     refetchInterval: 30_000,
     refetchIntervalInBackground: true,
   });
+  const configQuery = useQuery({
+    queryKey: queryKeys.configWorkspace(),
+    queryFn: () => fetchJson<ConfigWorkspace>("/api/config/workspace"),
+    staleTime: 30_000,
+  });
 
   const files = statusQuery.data?.files ?? [];
   const filteredFiles = useMemo(
@@ -93,6 +108,21 @@ export function GitRoute() {
   const activeFile = files.find((file) => file.path === activePath) ?? null;
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const selectedCount = selectedPaths.length;
+  const aiProfileOptions = configQuery.data?.profileCards ?? [];
+  const configuredProfileId = configuredGitProfileId(configQuery.data);
+  const activeAiProfileId = selectedAiProfileId || configuredProfileId || aiProfileOptions[0]?.profileId || "";
+  const aiProfileSelectOptions = useMemo(() => {
+    if (!activeAiProfileId || aiProfileOptions.some((option) => option.profileId === activeAiProfileId)) {
+      return aiProfileOptions;
+    }
+    return [
+      {
+        profileId: activeAiProfileId,
+        label: activeAiProfileId,
+      },
+      ...aiProfileOptions,
+    ];
+  }, [activeAiProfileId, aiProfileOptions]);
 
   useEffect(() => {
     if (!filteredFiles.length) {
@@ -116,11 +146,11 @@ export function GitRoute() {
   }, [files]);
 
   const generateMessageMutation = useMutation({
-    mutationFn: (paths: string[]) =>
+    mutationFn: (payload: { paths: string[]; profileId: string }) =>
       fetchJson<GitCommitMessageResponse>("/api/git/commit-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths }),
+        body: JSON.stringify(payload),
       }),
     onSuccess: (payload) => {
       setCommitMessage(payload.message);
@@ -171,7 +201,7 @@ export function GitRoute() {
 
   const generateMessage = () => {
     setCommitNotice({ tone: "neutral", text: "" });
-    generateMessageMutation.mutate(selectedPaths);
+    generateMessageMutation.mutate({ paths: selectedPaths, profileId: activeAiProfileId });
   };
 
   const commitSelected = () => {
@@ -309,6 +339,24 @@ export function GitRoute() {
               </div>
               <span className={styles.countPill}>{selectedCount}</span>
             </div>
+            <label className={styles.messageField}>
+              <span>{t("gitAiAgentLabel")}</span>
+              <select
+                value={activeAiProfileId}
+                disabled={!aiProfileSelectOptions.length || configQuery.isPending}
+                onChange={(event) => setSelectedAiProfileId(event.target.value)}
+              >
+                {aiProfileSelectOptions.length ? (
+                  aiProfileSelectOptions.map((option) => (
+                    <option key={option.profileId} value={option.profileId}>
+                      {option.label || option.profileId}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">{t("gitAiAgentDefault")}</option>
+                )}
+              </select>
+            </label>
             <label className={styles.messageField}>
               <span>{t("gitCommitMessage")}</span>
               <textarea
