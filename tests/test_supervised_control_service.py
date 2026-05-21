@@ -483,6 +483,37 @@ def test_runtime_manager_start_supervised_run_submits_command(monkeypatch):
     )
 
 
+@pytest.mark.parametrize(
+    "manager_result",
+    [
+        {"ok": True},
+        {"ok": True, "snapshot": {}},
+    ],
+)
+def test_runtime_manager_start_supervised_run_rejects_empty_success_result(monkeypatch, manager_result):
+    calls: list[object] = []
+
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-empty"},
+    )
+    monkeypatch.setattr(service, "wait_for_result", lambda command_id: manager_result)
+    monkeypatch.setattr(service, "load_manager_run_snapshot", lambda kind, run_id: None)
+
+    with pytest.raises(service.SupervisedRunValidationError, match="snapshot"):
+        service.start_supervised_run({"sourceKind": "bundle", "bundleName": "manual_bundle"})
+
+    assert calls[0] == "ensure"
+    assert calls[1] == (
+        "start_supervised_run",
+        {"payload": {"sourceKind": "bundle", "bundleName": "manual_bundle"}},
+        "web_ui",
+    )
+
+
 def test_runtime_manager_get_active_supervised_run_reads_store(monkeypatch):
     snapshot = {
         "runId": "web-supervised-managed",
@@ -544,6 +575,157 @@ def test_runtime_manager_active_supervised_run_closes_stale_locked_snapshot(monk
     assert persisted["runtimeStatus"] == "idle"
     assert persisted["stopRequested"] is True
     assert persisted["runtimeManagerControl"]["reason"] == "orphaned"
+
+
+def test_runtime_manager_active_supervised_run_finishes_successfully_closed_stale_snapshot(monkeypatch):
+    run_id = "web-supervised-stale-success"
+    snapshot = {
+        "runId": run_id,
+        "status": "running",
+        "currentPhase": "running",
+        "runtimeStatus": "running",
+        "startedAt": "2026-05-21T23:06:28",
+        "updatedAt": "2026-05-21T23:08:10",
+        "finishedAt": "",
+        "latestMessage": "running",
+        "currentTask": "running",
+        "pauseRequested": False,
+        "pauseRequestedAt": "",
+        "stopRequested": False,
+        "stopRequestedAt": "",
+        "eventTail": [],
+        "currentCaseIo": {
+            "transcript": [
+                {
+                    "timestamp": "2026-05-21T23:07:54",
+                    "kind": "error",
+                    "label": "llm_error",
+                    "content": "network_error: [SSL: UNEXPECTED_EOF_WHILE_READING]",
+                },
+                {
+                    "timestamp": "2026-05-21T23:08:10",
+                    "kind": "tool",
+                    "label": "close_evolution_transaction_tool",
+                    "content": '{"status":"success","transaction_status":"success"}',
+                    "status": "success",
+                },
+            ],
+        },
+        "runtimeManagerControl": {
+            "ownerPid": 111,
+            "kind": "supervised",
+            "claimedAt": "2026-05-21T23:06:28",
+        },
+    }
+    service.persist_manager_run_snapshot("supervised", snapshot, active_run_id=run_id)
+
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(service, "_current_runtime_manager_owner_pid", lambda: 222)
+
+    result = service.get_active_supervised_run()
+    persisted = service.load_manager_run_snapshot("supervised", run_id)
+
+    assert result is None
+    assert service.load_manager_active_run_snapshot("supervised") is None
+    assert persisted is not None
+    assert persisted["status"] == "done"
+    assert persisted["currentPhase"] == "done"
+    assert persisted["runtimeStatus"] == "idle"
+    assert persisted["stopRequested"] is False
+    assert persisted["runtimeManagerControl"]["reason"] == "orphaned_success"
+    assert persisted["eventTail"][-1]["event"] == "run_completed"
+
+
+def test_force_cancel_active_supervised_runs_for_shutdown_releases_file_only_snapshot(monkeypatch):
+    run_id = "web-supervised-shutdown-active"
+    snapshot = {
+        "runId": run_id,
+        "status": "stopping",
+        "currentPhase": "stopping",
+        "runtimeStatus": "stopping",
+        "startedAt": "2026-05-18T12:00:00Z",
+        "updatedAt": "2026-05-18T12:00:01Z",
+        "finishedAt": "",
+        "latestMessage": "stopping",
+        "currentTask": "stopping",
+        "pauseRequested": False,
+        "pauseRequestedAt": "",
+        "stopRequested": True,
+        "stopRequestedAt": "2026-05-18T12:00:01Z",
+        "eventTail": [],
+        "leases": ["evaluation"],
+        "runtimeManagerControl": {
+            "ownerPid": 222,
+            "kind": "supervised",
+            "claimedAt": "2026-05-18T12:00:00Z",
+        },
+    }
+    service.persist_manager_run_snapshot("supervised", snapshot, active_run_id=run_id)
+
+    closed = service.force_cancel_active_supervised_runs_for_shutdown("closing")
+    persisted = service.load_manager_run_snapshot("supervised", run_id)
+
+    assert len(closed) == 1
+    assert closed[0]["runId"] == run_id
+    assert closed[0]["status"] == "cancelled"
+    assert service.load_manager_active_run_snapshot("supervised") is None
+    assert persisted is not None
+    assert persisted["status"] == "cancelled"
+    assert persisted["currentPhase"] == "cancelled"
+    assert persisted["runtimeStatus"] == "idle"
+    assert persisted["finishedAt"]
+    assert persisted["runtimeManagerControl"]["reason"] == "shutdown"
+
+
+def test_force_cancel_active_supervised_runs_for_shutdown_preserves_successfully_closed_snapshot(monkeypatch):
+    run_id = "web-supervised-shutdown-success"
+    snapshot = {
+        "runId": run_id,
+        "status": "running",
+        "currentPhase": "running",
+        "runtimeStatus": "running",
+        "startedAt": "2026-05-21T23:06:28",
+        "updatedAt": "2026-05-21T23:08:10",
+        "finishedAt": "",
+        "latestMessage": "running",
+        "currentTask": "running",
+        "pauseRequested": False,
+        "pauseRequestedAt": "",
+        "stopRequested": False,
+        "stopRequestedAt": "",
+        "eventTail": [],
+        "leases": ["evaluation"],
+        "currentCaseIo": {
+            "transcript": [
+                {
+                    "timestamp": "2026-05-21T23:08:10",
+                    "kind": "tool",
+                    "label": "close_evolution_transaction_tool",
+                    "content": '{"status":"success","transaction_status":"success"}',
+                    "status": "success",
+                },
+            ],
+        },
+        "runtimeManagerControl": {
+            "ownerPid": 222,
+            "kind": "supervised",
+            "claimedAt": "2026-05-21T23:06:28",
+        },
+    }
+    service.persist_manager_run_snapshot("supervised", snapshot, active_run_id=run_id)
+
+    closed = service.force_cancel_active_supervised_runs_for_shutdown("closing")
+    persisted = service.load_manager_run_snapshot("supervised", run_id)
+
+    assert len(closed) == 1
+    assert closed[0]["status"] == "done"
+    assert service.load_manager_active_run_snapshot("supervised") is None
+    assert persisted is not None
+    assert persisted["status"] == "done"
+    assert persisted["currentPhase"] == "done"
+    assert persisted["runtimeStatus"] == "idle"
+    assert persisted["stopRequested"] is False
+    assert persisted["runtimeManagerControl"]["reason"] == "shutdown_success"
 
 
 def test_runtime_manager_active_supervised_run_keeps_current_owner(monkeypatch):

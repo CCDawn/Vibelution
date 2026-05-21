@@ -108,6 +108,22 @@ def _run_sort_key(payload: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def _snapshot_lifecycle_signature(
+    payload: dict[str, Any],
+    *,
+    active_run_id: str = "",
+) -> tuple[str, ...]:
+    return (
+        str(payload.get("status") or "").strip(),
+        str(payload.get("phase") or payload.get("currentPhase") or "").strip(),
+        str(payload.get("runtimeStatus") or "").strip(),
+        str(active_run_id or "").strip(),
+        str(payload.get("finishedAt") or "").strip(),
+        str(payload.get("errorType") or "").strip(),
+        str(payload.get("error") or "").strip(),
+    )
+
+
 def _record_work_run_event(
     phase: str,
     event_code: str,
@@ -209,11 +225,20 @@ class WorkRunStore:
         except ValueError as exc:
             raise ValueError("Work run snapshot is missing runId.") from exc
         payload = json.loads(json.dumps(snapshot, ensure_ascii=False))
+        previous_payload = self.load_snapshot(run_kind, run_id)
+        previous_signature = (
+            _snapshot_lifecycle_signature(previous_payload, active_run_id=active_run_id)
+            if previous_payload
+            else ()
+        )
+        current_signature = _snapshot_lifecycle_signature(payload, active_run_id=active_run_id)
         self.ensure_kind_dirs(run_kind)
         _atomic_write_json(self.runs_dir(run_kind) / f"{run_id}.json", payload)
         self.save_run_index(run_kind, active_run_id=active_run_id, latest_run_id=run_id, emit_event=False)
         status = str(payload.get("status") or "").strip()
         phase = str(payload.get("phase") or payload.get("currentPhase") or "").strip()
+        lifecycle_status = status in {"queued", "running", "paused", "stopping", "done", "failed", "cancelled"}
+        lifecycle_changed = previous_signature != current_signature
         _record_work_run_event(
             "state",
             "work_run.snapshot.persisted",
@@ -233,7 +258,7 @@ class WorkRunStore:
             message=f"Work run snapshot persisted: {run_kind}/{run_id} {status or 'unknown'}",
             outcome="succeeded",
             level="error" if status == "failed" else "info",
-            lifecycle=status in {"queued", "running", "paused", "stopping", "done", "failed", "cancelled"},
+            lifecycle=lifecycle_status and (lifecycle_changed or status == "failed"),
         )
         return payload
 

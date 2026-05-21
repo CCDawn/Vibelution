@@ -5,6 +5,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
 import threading
@@ -80,6 +81,7 @@ def get_runtime_summary() -> dict:
     runtime_manager = _load_runtime_manager_snapshot()
     work_runs = _work_run_summary()
     workbench = _workbench_payload(lang, runtime_manager)
+    lifecycle_proof = _runtime_lifecycle_proof(lang, runtime_manager, workbench, work_runs)
     task_summary = (
         active_session.get("taskSummary")
         or text_for(
@@ -129,6 +131,7 @@ def get_runtime_summary() -> dict:
         },
         "workbench": workbench,
         "workRuns": work_runs,
+        "lifecycleProof": lifecycle_proof,
     }
 
 
@@ -137,12 +140,13 @@ def request_runtime_shutdown() -> dict[str, object]:
 
     lang = get_web_language()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
+    stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
     if _can_use_managed_launcher_shutdown():
         try:
             ensure_daemon_running()
             submit_command(
                 "close_workbench",
-                args={"reason": "web_close_button", "source": "web_ui"},
+                args={"reason": "web_close_button", "source": "web_ui", "stopManager": True},
                 requested_by="web_ui",
             )
             return {
@@ -154,6 +158,7 @@ def request_runtime_shutdown() -> dict[str, object]:
                     en="Closing the workbench. The app window will close after the backend stops.",
                 ),
                 "chatTurns": stopped_chat_turns,
+                "evolutionRuns": stopped_evolution_runs,
             }
         except Exception:
             _spawn_managed_launcher_shutdown()
@@ -166,6 +171,7 @@ def request_runtime_shutdown() -> dict[str, object]:
                     en="Closing the workbench. The app window will close after the backend stops.",
                 ),
                 "chatTurns": stopped_chat_turns,
+                "evolutionRuns": stopped_evolution_runs,
             }
 
     _schedule_local_backend_exit()
@@ -178,6 +184,7 @@ def request_runtime_shutdown() -> dict[str, object]:
             en="Shutting down the local backend.",
         ),
         "chatTurns": stopped_chat_turns,
+        "evolutionRuns": stopped_evolution_runs,
     }
 
 
@@ -293,6 +300,57 @@ def _stop_active_chat_turns_before_shutdown() -> list[dict[str, object]]:
     return stopped
 
 
+def _stop_active_evolution_runs_before_shutdown() -> list[dict[str, object]]:
+    """Release active evolution leases before closing the workbench."""
+
+    stopped: list[dict[str, object]] = []
+    reason = text_for(
+        get_web_language(),
+        zh="工作台关闭前释放活跃进化任务。",
+        en="Released active evolution work before workbench shutdown.",
+    )
+
+    for kind, stopper in (
+        ("self_evolution_run", _force_cancel_self_evolution_for_shutdown),
+        ("supervised_evolution_run", _force_cancel_supervised_evolution_for_shutdown),
+    ):
+        try:
+            snapshots = stopper(reason)
+        except Exception as exc:
+            stopped.append(
+                {
+                    "kind": kind,
+                    "runId": "",
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        for snapshot in snapshots:
+            if not isinstance(snapshot, dict):
+                continue
+            stopped.append(
+                {
+                    "kind": kind,
+                    "runId": str(snapshot.get("runId") or ""),
+                    "status": str(snapshot.get("status") or ""),
+                }
+            )
+    return stopped
+
+
+def _force_cancel_self_evolution_for_shutdown(reason: str) -> list[dict[str, object]]:
+    from . import self_evolution_control_service
+
+    return list(self_evolution_control_service.force_cancel_active_self_evolution_runs_for_shutdown(reason))
+
+
+def _force_cancel_supervised_evolution_for_shutdown(reason: str) -> list[dict[str, object]]:
+    from . import supervised_control_service
+
+    return list(supervised_control_service.force_cancel_active_supervised_runs_for_shutdown(reason))
+
+
 def _work_run_summary() -> dict[str, dict[str, dict | None]]:
     chat = load_chat_turn_work_run_summary()
     self_active = _safe_load_evolution_work_run("self", active=True)
@@ -386,12 +444,349 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
         "phase": phase,
         "backendPid": int(workbench.get("backendPid") or 0),
         "browserWindowPid": int(workbench.get("browserWindowPid") or 0),
+        "backendAlive": bool(workbench.get("backendAlive")),
+        "backendHealthy": bool(workbench.get("backendHealthy")),
+        "backendObserved": bool(workbench.get("backendObserved")),
+        "backendPort": int(workbench.get("backendPort") or 0),
+        "backendPortListening": bool(workbench.get("backendPortListening")),
+        "backendPortOwnerPid": int(workbench.get("backendPortOwnerPid") or 0),
+        "backendPortOwnerTrusted": bool(workbench.get("backendPortOwnerTrusted")),
+        "backendPortConflict": bool(workbench.get("backendPortConflict")),
+        "browserWindowAlive": bool(workbench.get("browserWindowAlive")),
         "browserManaged": bool(workbench.get("browserManaged", True)),
         "url": str(workbench.get("url") or "").strip(),
         "lastReason": str(workbench.get("lastReason") or "").strip(),
         "statusLine": status_line,
         "failureMessage": failure_message,
     }
+
+
+def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, work_runs: dict) -> dict[str, object]:
+    verified_at = _utc_now_iso()
+    desired_state = str(workbench.get("desiredState") or "closed").strip().lower() or "closed"
+    observed_state = str(workbench.get("observedState") or "closed").strip().lower() or "closed"
+    phase = str(workbench.get("phase") or "steady").strip().lower() or "steady"
+    failure_message = str(workbench.get("failureMessage") or "").strip()
+    manager_running = bool(runtime_manager.get("daemonRunning"))
+    manager_pid = int(runtime_manager.get("managerPid") or 0)
+    manager_project_root = str(runtime_manager.get("projectRoot") or "").strip()
+    project_root_matches = _same_project_root(manager_project_root, str(PROJECT_ROOT))
+    runtime_manager_meta = runtime_manager.get("runtimeManager") if isinstance(runtime_manager, dict) else {}
+    if not isinstance(runtime_manager_meta, dict):
+        runtime_manager_meta = {}
+    source_matches = runtime_manager_meta.get("sourceMatches")
+    residual_processes = runtime_manager.get("residualProcesses") if isinstance(runtime_manager, dict) else {}
+    if not isinstance(residual_processes, dict):
+        residual_processes = {}
+    residual_items = [item for item in residual_processes.get("items", []) if isinstance(item, dict)]
+    residual_count = max(int(residual_processes.get("count") or 0), len(residual_items))
+    backend_pid = int(workbench.get("backendPid") or 0)
+    backend_port_owner_pid = int(workbench.get("backendPortOwnerPid") or 0)
+    backend_port_listening = bool(workbench.get("backendPortListening"))
+    backend_port_owner_trusted = bool(workbench.get("backendPortOwnerTrusted"))
+    backend_port_conflict = bool(workbench.get("backendPortConflict"))
+    backend_alive = bool(workbench.get("backendAlive"))
+    backend_healthy = bool(workbench.get("backendHealthy"))
+    backend_observed = (
+        bool(workbench.get("backendObserved"))
+        or (backend_alive and not backend_port_conflict)
+        or (backend_healthy and not backend_port_conflict)
+        or backend_port_owner_trusted
+        or (observed_state == "open" and backend_pid > 0)
+    )
+    browser_pid = int(workbench.get("browserWindowPid") or 0)
+    browser_managed = bool(workbench.get("browserManaged", True))
+    browser_window_alive = bool(workbench.get("browserWindowAlive")) or (
+        observed_state == "open" and browser_pid > 0
+    )
+    active_work_runs = _active_work_runs(work_runs)
+    backend_verified = observed_state == "open" and backend_observed
+    backend_closed = desired_state == "closed" and observed_state == "closed" and not backend_observed
+    window_verified = observed_state == "open" and (not browser_managed or browser_window_alive)
+    window_closed = desired_state == "closed" and observed_state == "closed" and not browser_window_alive
+    project_root_state = "verified" if project_root_matches else ("failed" if manager_project_root else "unknown")
+
+    components = [
+        {
+            "id": "runtime_manager",
+            "label": text_for(lang, zh="运行管理器", en="Runtime manager"),
+            "state": "verified" if manager_running else "missing",
+            "ok": manager_running,
+            "requiredForOpen": True,
+            "requiredForClosed": False,
+            "detail": (
+                text_for(lang, zh=f"manager pid {manager_pid}", en=f"manager pid {manager_pid}")
+                if manager_running
+                else text_for(lang, zh="没有观测到运行管理器进程。", en="No runtime manager process was observed.")
+            ),
+            "pid": manager_pid,
+            "verifiedAt": verified_at,
+        },
+        {
+            "id": "backend",
+            "label": text_for(lang, zh="后端服务", en="Backend service"),
+            "state": "verified" if backend_verified or backend_closed else ("closing" if desired_state == "closed" else "missing"),
+            "ok": backend_verified or backend_closed,
+            "requiredForOpen": True,
+            "requiredForClosed": True,
+            "detail": (
+                text_for(lang, zh=f"backend pid {backend_pid}", en=f"backend pid {backend_pid}")
+                if backend_verified and backend_pid > 0
+                else text_for(lang, zh=f"端口被外部 pid {backend_port_owner_pid} 占用。", en=f"Port is occupied by external pid {backend_port_owner_pid}.")
+                if backend_port_conflict and backend_port_owner_pid > 0
+                else text_for(lang, zh=f"端口仍被 pid {backend_port_owner_pid} 占用。", en=f"Port is still owned by pid {backend_port_owner_pid}.")
+                if not backend_closed and backend_port_owner_pid > 0
+                else text_for(lang, zh="后端端口仍在监听。", en="Backend port is still listening.")
+                if not backend_closed and backend_port_listening
+                else text_for(lang, zh="工作台观测证明后端可达。", en="Workbench observation proves the backend is reachable.")
+                if backend_verified
+                else text_for(lang, zh="后端已不再被观测为打开。", en="Backend is no longer observed open.")
+                if backend_closed
+                else text_for(lang, zh="后端未被证明为打开状态。", en="Backend is not proven open.")
+            ),
+            "pid": backend_pid,
+            "verifiedAt": verified_at,
+        },
+        {
+            "id": "workbench_window",
+            "label": text_for(lang, zh="工作台窗口", en="Workbench window"),
+            "state": "verified" if window_verified or window_closed else ("closing" if desired_state == "closed" else "missing"),
+            "ok": window_verified or window_closed,
+            "requiredForOpen": True,
+            "requiredForClosed": True,
+            "detail": text_for(
+                lang,
+                zh=f"desired={desired_state}, observed={observed_state}, phase={phase}",
+                en=f"desired={desired_state}, observed={observed_state}, phase={phase}",
+            ),
+            "pid": browser_pid,
+            "verifiedAt": verified_at,
+        },
+        {
+            "id": "project_root",
+            "label": text_for(lang, zh="项目根目录", en="Project root"),
+            "state": project_root_state,
+            "ok": project_root_matches,
+            "requiredForOpen": True,
+            "requiredForClosed": False,
+            "detail": (
+                manager_project_root
+                if project_root_matches and manager_project_root
+                else text_for(lang, zh="运行管理器未提供项目根目录。", en="Runtime manager did not provide a project root.")
+                if not manager_project_root
+                else text_for(lang, zh="运行管理器项目根目录与当前仓库不一致。", en="Runtime manager project root does not match this repo.")
+            ),
+            "pid": 0,
+            "verifiedAt": verified_at,
+        },
+        {
+            "id": "active_work_runs",
+            "label": text_for(lang, zh="活跃任务", en="Active work runs"),
+            "state": "verified" if not active_work_runs else "running",
+            "ok": not active_work_runs,
+            "requiredForOpen": False,
+            "requiredForClosed": True,
+            "detail": _active_work_run_detail(lang, active_work_runs),
+            "pid": 0,
+            "verifiedAt": verified_at,
+        },
+        {
+            "id": "source_freshness",
+            "label": text_for(lang, zh="运行器源码", en="Runtime source"),
+            "state": "verified" if source_matches is not False else "failed",
+            "ok": source_matches is not False,
+            "requiredForOpen": False,
+            "requiredForClosed": False,
+            "detail": (
+                text_for(lang, zh="运行器源码签名匹配或未提供签名。", en="Runtime source signature matches or was not provided.")
+                if source_matches is not False
+                else text_for(lang, zh="运行器源码签名已过期，下一次控制命令需要换代。", en="Runtime source signature is stale; the next control command must replace it.")
+            ),
+            "pid": 0,
+            "verifiedAt": verified_at,
+        },
+        {
+            "id": "residual_processes",
+            "label": text_for(lang, zh="残留仓库进程", en="Residual repo processes"),
+            "state": "verified" if residual_count == 0 else "running",
+            "ok": residual_count == 0,
+            "requiredForOpen": False,
+            "requiredForClosed": True,
+            "detail": _residual_process_detail(lang, residual_items, residual_count),
+            "pid": int(residual_items[0].get("pid") or 0) if residual_items else 0,
+            "verifiedAt": verified_at,
+        },
+    ]
+
+    failed = phase == "failed" or bool(failure_message) or any(item["state"] == "failed" for item in components)
+    if failed:
+        overall_state = "failed"
+    elif desired_state == "open" and observed_state == "open":
+        open_components_ok = manager_running and backend_verified and project_root_matches
+        overall_state = "ready" if open_components_ok else "partial"
+    elif desired_state == "open" and observed_state != "open":
+        overall_state = "starting"
+    elif desired_state == "closed" and observed_state != "closed":
+        overall_state = "closing"
+    elif desired_state == "closed" and observed_state == "closed":
+        overall_state = "closed" if not active_work_runs and backend_closed and window_closed and residual_count == 0 else "partial"
+    else:
+        overall_state = "partial"
+
+    overall_label = _lifecycle_overall_label(lang, overall_state)
+    return {
+        "overallState": overall_state,
+        "overallLabel": overall_label,
+        "summary": _lifecycle_summary(
+            lang,
+            overall_state=overall_state,
+            desired_state=desired_state,
+            observed_state=observed_state,
+            active_count=len(active_work_runs),
+            failure_message=failure_message,
+        ),
+        "verifiedAt": verified_at,
+        "desiredState": desired_state,
+        "observedState": observed_state,
+        "phase": phase,
+        "browserManaged": browser_managed,
+        "projectRootMatches": project_root_matches,
+        "components": components,
+        "activeWorkRuns": {
+            "count": len(active_work_runs),
+            "kinds": [str(item.get("kind") or "") for item in active_work_runs],
+            "items": active_work_runs,
+        },
+        "residualProcesses": {
+            "count": residual_count,
+            "items": residual_items,
+        },
+    }
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _same_project_root(left: str, right: str) -> bool:
+    if not left:
+        return False
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except OSError:
+        return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+
+
+def _active_work_runs(work_runs: dict) -> list[dict[str, str]]:
+    active = work_runs.get("active") if isinstance(work_runs, dict) else {}
+    if not isinstance(active, dict):
+        return []
+    items: list[dict[str, str]] = []
+    for kind, payload in active.items():
+        if not isinstance(payload, dict):
+            continue
+        run_id = str(payload.get("runId") or payload.get("sessionId") or "").strip()
+        status = str(payload.get("status") or payload.get("currentPhase") or "").strip()
+        items.append(
+            {
+                "kind": str(kind or ""),
+                "runId": run_id,
+                "status": status,
+            }
+        )
+    return items
+
+
+def _active_work_run_detail(lang: str, active_work_runs: list[dict[str, str]]) -> str:
+    if not active_work_runs:
+        return text_for(lang, zh="没有活跃 work run。", en="No active work runs.")
+    kinds = ", ".join(item["kind"] for item in active_work_runs if item.get("kind"))
+    return text_for(
+        lang,
+        zh=f"仍有 {len(active_work_runs)} 个活跃任务：{kinds}",
+        en=f"{len(active_work_runs)} active work run(s): {kinds}",
+    )
+
+
+def _residual_process_detail(lang: str, residual_items: list[dict], residual_count: int) -> str:
+    if residual_count <= 0:
+        return text_for(lang, zh="没有观测到当前仓库的残留 workbench 进程。", en="No repo-local residual workbench processes were observed.")
+    examples = []
+    for item in residual_items[:3]:
+        pid = int(item.get("pid") or 0)
+        port = int(item.get("port") or 0)
+        kind = str(item.get("kind") or "process")
+        examples.append(f"{kind} pid={pid}" + (f" port={port}" if port else ""))
+    suffix = "; ".join(examples)
+    return text_for(
+        lang,
+        zh=f"仍有 {residual_count} 个当前仓库残留进程：{suffix}",
+        en=f"{residual_count} repo-local residual process(es) remain: {suffix}",
+    )
+
+
+def _lifecycle_overall_label(lang: str, state: str) -> str:
+    labels = {
+        "ready": text_for(lang, zh="已真正开启", en="Proven open"),
+        "starting": text_for(lang, zh="正在开启", en="Starting"),
+        "closing": text_for(lang, zh="正在关闭", en="Closing"),
+        "closed": text_for(lang, zh="已真正关闭", en="Proven closed"),
+        "partial": text_for(lang, zh="部分成立", en="Partial"),
+        "failed": text_for(lang, zh="异常", en="Failed"),
+    }
+    return labels.get(state, state)
+
+
+def _lifecycle_summary(
+    lang: str,
+    *,
+    overall_state: str,
+    desired_state: str,
+    observed_state: str,
+    active_count: int,
+    failure_message: str,
+) -> str:
+    if overall_state == "ready":
+        return text_for(
+            lang,
+            zh="运行管理器、后端、窗口和项目根目录都已对齐，软件可判定为真正开启。",
+            en="Runtime manager, backend, window, and project root all agree; the app is proven open.",
+        )
+    if overall_state == "closed":
+        return text_for(
+            lang,
+            zh="工作台已观测为关闭，且没有活跃任务或同仓库残留进程，可判定为真正关闭。",
+            en="Workbench is observed closed and no work runs or repo-local residual processes remain; the app is proven closed.",
+        )
+    if overall_state == "starting":
+        return text_for(
+            lang,
+            zh="目标状态是开启，但窗口或后端尚未全部观测到。",
+            en="Desired state is open, but the backend or window is not fully observed yet.",
+        )
+    if overall_state == "closing":
+        return text_for(
+            lang,
+            zh="目标状态是关闭，但仍能观测到后端或窗口，关闭尚未完成。",
+            en="Desired state is closed, but backend or window evidence still exists; close is not complete.",
+        )
+    if overall_state == "failed":
+        return failure_message or text_for(
+            lang,
+            zh="生命周期证明中存在失败组件，需要查看 launcher/runtime-manager 日志。",
+            en="A lifecycle proof component failed. Check launcher/runtime-manager logs.",
+        )
+    if active_count > 0:
+        return text_for(
+            lang,
+            zh=f"工作台状态为 desired={desired_state}, observed={observed_state}，但仍有 {active_count} 个活跃任务。",
+            en=f"Workbench is desired={desired_state}, observed={observed_state}, but {active_count} work run(s) remain active.",
+        )
+    return text_for(
+        lang,
+        zh=f"工作台状态为 desired={desired_state}, observed={observed_state}，部分证明仍不一致。",
+        en=f"Workbench is desired={desired_state}, observed={observed_state}; proof components do not fully agree.",
+    )
 
 
 def _derive_web_status(task_status: object, runtime_state: dict) -> str:

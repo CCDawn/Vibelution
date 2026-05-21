@@ -330,6 +330,10 @@ def test_runtime_summary_shape():
     assert "mentalState" in payload
     assert "runtimeManager" in payload
     assert "workbench" in payload
+    assert "workRuns" in payload
+    assert "lifecycleProof" in payload
+    assert "overallState" in payload["lifecycleProof"]
+    assert "components" in payload["lifecycleProof"]
 
 
 def test_ignores_windows_proactor_disconnect_noise(monkeypatch):
@@ -390,7 +394,11 @@ def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, mon
     assert response.json()["mode"] == "runtime_manager"
     assert response.json()["chatTurns"] == []
     assert calls[0] == "ensure"
-    assert calls[1] == ("close_workbench", {"reason": "web_close_button", "source": "web_ui"}, "web_ui")
+    assert calls[1] == (
+        "close_workbench",
+        {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+        "web_ui",
+    )
 
 
 def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
@@ -440,7 +448,11 @@ def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, 
         ]
         assert calls == [
             "ensure",
-            ("close_workbench", {"reason": "web_close_button", "source": "web_ui"}, "web_ui"),
+            (
+                "close_workbench",
+                {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+                "web_ui",
+            ),
         ]
 
         detail_response = client.get("/api/sessions/session-live")
@@ -457,6 +469,58 @@ def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, 
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
         session_service._clear_session_live_output("session-live")
+
+
+def test_runtime_shutdown_releases_active_evolution_runs_before_manager_close(tmp_path, monkeypatch):
+    script_path = tmp_path / "vibelution_launcher.ps1"
+    script_path.write_text("Write-Host managed\n", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    calls: list[object] = []
+    self_calls: list[str] = []
+    supervised_calls: list[str] = []
+
+    monkeypatch.setattr(runtime_service, "LAUNCHER_SCRIPT_PATH", script_path)
+    monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_self_evolution_for_shutdown",
+        lambda reason: self_calls.append(reason) or [{"runId": "web-self-active", "status": "cancelled"}],
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_supervised_evolution_for_shutdown",
+        lambda reason: supervised_calls.append(reason) or [{"runId": "web-supervised-active", "status": "cancelled"}],
+    )
+
+    response = client.post("/api/runtime/shutdown")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["mode"] == "runtime_manager"
+    assert payload["evolutionRuns"] == [
+        {"kind": "self_evolution_run", "runId": "web-self-active", "status": "cancelled"},
+        {"kind": "supervised_evolution_run", "runId": "web-supervised-active", "status": "cancelled"},
+    ]
+    assert self_calls
+    assert supervised_calls
+    assert calls == [
+        "ensure",
+        (
+            "close_workbench",
+            {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+            "web_ui",
+        ),
+    ]
 
 
 def test_runtime_shutdown_continues_when_chat_stop_fails(tmp_path, monkeypatch):
@@ -497,7 +561,11 @@ def test_runtime_shutdown_continues_when_chat_stop_fails(tmp_path, monkeypatch):
     assert "RuntimeError" in payload["chatTurns"][0]["error"]
     assert calls == [
         "ensure",
-        ("close_workbench", {"reason": "web_close_button", "source": "web_ui"}, "web_ui"),
+        (
+            "close_workbench",
+            {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+            "web_ui",
+        ),
     ]
 
 
@@ -1320,6 +1388,76 @@ def test_runtime_scene_event_helper_records_structured_lifecycle_event(tmp_path,
     assert manifest["package"]["lifecycle_path"] == "lifecycle.jsonl"
 
 
+def test_runtime_scene_event_helper_ignores_absolute_child_log_path(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-absolute-child", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-event-absolute-child",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = runtime_scene_service.record_runtime_scene_event(
+        "work_run",
+        "state",
+        "work_run.snapshot.persisted",
+        child_log_path=str(tmp_path / "outside.jsonl"),
+        child_log_payload={"status": "running"},
+    )
+
+    assert response["accepted"] is True
+    assert response["path"] == ""
+    assert not (tmp_path / "outside.jsonl").exists()
+    event_rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "work_run.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert event_rows[-1]["raw_refs"] == []
+
+
+def test_runtime_scene_event_helper_ignores_traversal_child_log_path(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-traversal-child", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-event-traversal-child",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = runtime_scene_service.record_runtime_scene_event(
+        "work_run",
+        "state",
+        "work_run.snapshot.persisted",
+        child_log_path="agent/../outside.jsonl",
+        child_log_payload={"status": "running"},
+    )
+
+    assert response["accepted"] is True
+    assert response["path"] == ""
+    assert not (scene_dir / "outside.jsonl").exists()
+    event_rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "work_run.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert event_rows[-1]["raw_refs"] == []
+
+
 def test_runtime_scene_event_helper_returns_false_without_active_scene(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
@@ -1393,6 +1531,247 @@ def test_work_run_store_records_snapshot_into_active_runtime_scene(tmp_path, mon
     assert "work_run.snapshot.persisted" in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
 
 
+def test_work_run_store_keeps_duplicate_snapshot_out_of_lifecycle(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-work-run-dedupe", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-work-run-dedupe",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    store = WorkRunStore(root=tmp_path / ".runtime" / "runtime-manager" / "work_runs")
+    base_snapshot = {
+        "runId": "run-dedupe",
+        "status": "running",
+        "currentPhase": "running",
+        "runtimeStatus": "running",
+        "updatedAt": "2026-05-18T12:01:00Z",
+    }
+    store.persist_snapshot("supervised", base_snapshot, active_run_id="run-dedupe")
+    store.persist_snapshot(
+        "supervised",
+        {**base_snapshot, "updatedAt": "2026-05-18T12:01:01Z"},
+        active_run_id="run-dedupe",
+    )
+    store.persist_snapshot(
+        "supervised",
+        {
+            **base_snapshot,
+            "status": "done",
+            "currentPhase": "completed",
+            "runtimeStatus": "idle",
+            "updatedAt": "2026-05-18T12:02:00Z",
+            "finishedAt": "2026-05-18T12:02:00Z",
+        },
+        active_run_id="",
+    )
+
+    work_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "work_run.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [event["fields"]["status"] for event in work_events[-3:]] == ["running", "running", "done"]
+
+    lifecycle_events = [
+        json.loads(line)
+        for line in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    work_lifecycle = [
+        event for event in lifecycle_events
+        if event.get("event_code") == "work_run.snapshot.persisted"
+    ]
+    assert [event["fields"]["status"] for event in work_lifecycle] == ["running", "done"]
+
+
+def test_supervised_progress_records_child_log_into_runtime_scene(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-supervised", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-supervised",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    supervised_control_service._record_supervised_progress_scene_event(
+        "web-supervised-demo",
+        {
+            "timestamp": "2026-05-18T12:01:00Z",
+            "event": "role_finish",
+            "title": "Case 完成",
+            "summary": "case-1 candidate status=success reason=improved",
+            "status": "success",
+            "caseId": "case-1",
+            "caseIndex": 1,
+            "caseTotal": 2,
+            "role": "candidate",
+            "scenario": "compare prompt",
+            "mode": "supervised",
+            "bundleName": "demo-bundle",
+            "sessionId": "session-1",
+            "decision": "",
+            "reason": "improved",
+            "errorType": "",
+            "elapsedSeconds": 1.5,
+            "resultStatus": "success",
+        },
+    )
+
+    child_log = scene_dir / "agent" / "supervised_runs" / "web-supervised-demo.jsonl"
+    assert child_log.exists()
+    child_event = json.loads(child_log.read_text(encoding="utf-8").splitlines()[-1])
+    assert child_event["event"] == "role_finish"
+    assert child_event["caseId"] == "case-1"
+    assert child_event["role"] == "candidate"
+    assert "prompt" not in child_event
+
+    event_rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "supervised_run.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    event = event_rows[-1]
+    assert event["event_code"] == "supervised_run.progress.role_finish"
+    assert event["raw_refs"] == [{"path": "agent/supervised_runs/web-supervised-demo.jsonl", "tail_lines": 80}]
+    assert "supervised_run.progress.role_finish" in (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
+    assert "supervised_run.progress.role_finish" not in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
+
+
+def test_self_evolution_state_records_child_log_into_runtime_scene(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-self", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-self",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    self_evolution_control_service._record_self_state_change_scene_event(
+        "web-self-demo",
+        {
+            "runId": "web-self-demo",
+            "status": "done",
+            "phase": "completed",
+            "runtimeStatus": "idle",
+            "toolCallCount": 3,
+            "lastToolName": "read_file",
+            "summary": "finished current bounded pass",
+            "updatedAt": "2026-05-18T12:02:00Z",
+            "finishedAt": "2026-05-18T12:02:00Z",
+            "rollback": {
+                "status": "available",
+                "manifestPath": "workspace/web_self_evolution/web-self-demo/rollback_manifest.json",
+            },
+        },
+        {"status": "done", "phase": "completed"},
+        clear_active=True,
+    )
+
+    child_log = scene_dir / "agent" / "self_evolution_runs" / "web-self-demo.jsonl"
+    assert child_log.exists()
+    child_event = json.loads(child_log.read_text(encoding="utf-8").splitlines()[-1])
+    assert child_event["status"] == "done"
+    assert child_event["toolCallCount"] == 3
+    assert child_event["lastToolName"] == "read_file"
+    assert child_event["rollbackStatus"] == "available"
+
+    event_rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "self_evolution_run.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    event = event_rows[-1]
+    assert event["event_code"] == "self_evolution_run.state.changed"
+    assert event["raw_refs"] == [{"path": "agent/self_evolution_runs/web-self-demo.jsonl", "tail_lines": 80}]
+    assert "self_evolution_run.state.changed" in (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
+    assert "self_evolution_run.state.changed" in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
+
+
+def test_self_evolution_control_paths_record_child_log_before_agent_turn(tmp_path, monkeypatch):
+    _reset_self_evolution_live_state()
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-self-control", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-self-control",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(self_evolution_control_service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(self_evolution_control_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(self_evolution_control_service, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "_capture_preflight_state",
+        lambda run_id: {
+            "runDir": "",
+            "backupDir": "",
+            "manifestPath": "",
+            "baseRev": "base-rev",
+        },
+    )
+    monkeypatch.setattr(self_evolution_control_service._RUN_EXECUTOR, "submit", lambda *args, **kwargs: None)
+
+    started = self_evolution_control_service.start_self_evolution_run({"goal": "只验证日志包"})
+    paused = self_evolution_control_service.request_pause_self_evolution_run(started["runId"])
+
+    assert paused["status"] == "paused"
+    child_log = scene_dir / "agent" / "self_evolution_runs" / f"{started['runId']}.jsonl"
+    assert child_log.exists()
+    child_events = [
+        json.loads(line)
+        for line in child_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [event["status"] for event in child_events[-2:]] == ["queued", "paused"]
+
+    event_rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "self_evolution_run.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    state_events = [event for event in event_rows if event["event_code"] == "self_evolution_run.state.changed"]
+    assert state_events[-1]["raw_refs"] == [
+        {"path": f"agent/self_evolution_runs/{started['runId']}.jsonl", "tail_lines": 80}
+    ]
+    assert state_events[-1]["fields"]["status"] == "paused"
+    assert state_events[-1]["fields"]["clearActive"] is False
+
+
 def test_runtime_browser_telemetry_records_into_active_scene(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-live", status="running")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
@@ -1444,6 +1823,92 @@ def test_runtime_browser_telemetry_records_into_active_scene(tmp_path, monkeypat
     assert manifest["browser"]["current_pathname"] == "/chat"
     assert manifest["browser"]["active_nav_href"] == "/self-evolution"
     assert manifest["browser"]["current_heading"] == "Self evolution"
+
+
+def test_runtime_browser_visibility_noise_stays_in_raw_log(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-browser-noise", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-browser-noise",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    def post_visibility(value: str):
+        return client.post(
+            "/api/runtime/browser-telemetry",
+            json={
+                "phase": "lifecycle",
+                "eventCode": "browser.visibility.changed",
+                "message": f"Visibility changed to {value}",
+                "level": "info",
+                "fields": {
+                    "pathname": "/supervised-evolution/runs",
+                    "visibilityState": value,
+                },
+            },
+        )
+
+    assert post_visibility("visible").status_code == 202
+    assert post_visibility("hidden").status_code == 202
+    route_response = client.post(
+        "/api/runtime/browser-telemetry",
+        json={
+            "phase": "navigation",
+            "eventCode": "browser.route.changed",
+            "message": "React route changed to /chat",
+            "level": "info",
+            "fields": {
+                "pathname": "/chat",
+                "visibilityState": "hidden",
+            },
+        },
+    )
+    assert route_response.status_code == 202
+
+    raw_lines = [
+        line for line in (scene_dir / "raw" / "browser.telemetry.log").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(raw_lines) == 3
+    assert sum("browser.visibility.changed" in line for line in raw_lines) == 2
+
+    browser_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "browser_page.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [event["event_code"] for event in browser_events] == [
+        "browser.visibility.changed",
+        "browser.route.changed",
+    ]
+
+    timeline_events = [
+        json.loads(line)
+        for line in (scene_dir / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    browser_timeline_events = [
+        event for event in timeline_events
+        if event.get("component") == "browser_page"
+    ]
+    assert [event["event_code"] for event in browser_timeline_events] == [
+        "browser.visibility.changed",
+        "browser.route.changed",
+    ]
+
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["browser"]["visibility_state"] == "hidden"
+    assert manifest["browser"]["last_event_indexed"] is True
+    assert manifest["browser"]["last_visibility_event_at"]
+    assert manifest["browser"]["last_indexed_visibility_event_at"]
 
 
 def test_backend_api_runtime_event_records_mutating_request(tmp_path, monkeypatch):
@@ -3542,6 +4007,257 @@ def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
     assert payload["workbench"]["observedState"] == "open"
     assert payload["workbench"]["phase"] == "closing"
     assert payload["workbench"]["backendPid"] == 3001
+    assert payload["lifecycleProof"]["overallState"] == "closing"
+
+
+def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 17,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3001,
+                "browserWindowPid": 4002,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "start",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    assert proof["overallState"] == "ready"
+    assert proof["projectRootMatches"] is True
+    assert proof["activeWorkRuns"]["count"] == 0
+    assert {component["id"] for component in proof["components"]} >= {
+        "runtime_manager",
+        "backend",
+        "workbench_window",
+        "project_root",
+        "active_work_runs",
+    }
+
+
+def test_runtime_lifecycle_proof_does_not_mark_closed_with_active_work_runs(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": {
+                    "runId": "turn-live",
+                    "runKind": "chat_turn",
+                    "status": "running",
+                },
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": False,
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "stateVersion": 17,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 0,
+                "browserWindowPid": 0,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    assert proof["overallState"] == "partial"
+    assert proof["activeWorkRuns"]["count"] == 1
+    assert proof["activeWorkRuns"]["kinds"] == ["chat_turn"]
+
+
+def test_runtime_lifecycle_proof_does_not_mark_closed_when_backend_port_is_still_owned(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 19964,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": True,
+                "backendPort": 8766,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 52396,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": True,
+                "browserWindowPid": 0,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8766",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    backend_component = next(component for component in proof["components"] if component["id"] == "backend")
+    assert proof["overallState"] == "partial"
+    assert backend_component["ok"] is False
+    assert backend_component["state"] == "closing"
+    assert backend_component["pid"] == 19964
+    assert "52396" in backend_component["detail"]
+
+
+def test_runtime_lifecycle_proof_does_not_mark_closed_with_residual_repo_processes(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": False,
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "stateVersion": 19,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": True},
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "closed",
+                "phase": "steady",
+                "backendPid": 0,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8766,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "browserWindowPid": 0,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8766",
+                "lastReason": "web_close_button",
+                "failureMessage": "",
+            },
+            "residualProcesses": {
+                "count": 1,
+                "items": [
+                    {
+                        "pid": 49780,
+                        "parentPid": 0,
+                        "kind": "unmanaged_workbench",
+                        "name": "python.exe",
+                        "commandLine": "python scripts/web_workbench.py --port 8001 --no-browser",
+                        "cwd": str(runtime_service.PROJECT_ROOT),
+                        "port": 8001,
+                    }
+                ],
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    residual_component = next(component for component in proof["components"] if component["id"] == "residual_processes")
+    assert proof["overallState"] == "partial"
+    assert proof["residualProcesses"]["count"] == 1
+    assert residual_component["ok"] is False
+    assert residual_component["state"] == "running"
+    assert residual_component["pid"] == 49780
 
 
 def test_runtime_summary_exposes_tool_call_session_state(monkeypatch):
@@ -3824,7 +4540,7 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert relay_preset["category"] == "relay"
     assert relay_preset["provider"]["kind"] == "relay"
     assert relay_preset["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
-    assert relay_preset["model"]["transport"] == "chat_completions"
+    assert relay_preset["model"]["transport"] == "responses"
     assert relay_preset["model"]["contract"] == "tool_chat"
     assert "modelOptions" in payload
     assert "profileCards" in payload
@@ -3848,10 +4564,22 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     sections_by_id = {section["id"]: section for section in payload["sections"]}
     assert sections_by_id["profiles"]["title"] == "任务模型"
     assert "配置档" not in sections_by_id["profiles"]["summary"]
+    assert sections_by_id["draft"]["title"] == "高级配置检查"
+    assert "JSON" not in sections_by_id["draft"]["title"]
+    assert "JSON" not in sections_by_id["draft"]["summary"]
+    assert "草稿" not in sections_by_id["draft"]["summary"]
     assert editor_sections["llm-profiles"]["title"] == "模型"
     assert editor_sections["runtime"]["path"] == "runtime"
+    assert "workbench" in editor_sections
+    assert editor_sections["workbench"]["path"] == "workbench"
+    assert payload["publicConfig"]["workbench"]["backend_port"] == 8000
+    assert payload["publicConfig"]["workbench"]["frontend_port"] == 5173
     assert editor_meta["runtime.profile"]["kind"] == "select"
     assert editor_meta["runtime.profile"]["badge"] == "选项"
+    assert editor_meta["workbench.backend_port"]["kind"] == "number"
+    assert editor_meta["workbench.backend_port"]["label"] == "后端端口"
+    assert editor_meta["workbench.frontend_port"]["kind"] == "number"
+    assert editor_meta["workbench.frontend_port"]["label"] == "前端端口"
     assert editor_meta["tools.file.editable_extensions"]["kind"] == "string_list"
     assert editor_meta["prompt.sections"]["kind"] == "object_list"
     assert editor_meta["prompt.sections"]["badge"] == "列表"
@@ -3867,6 +4595,7 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert sections_by_id["health-diagnostics"]["title"] == "健康诊断"
     assert any(section["id"] == "overview" for section in payload["sections"])
     assert any(section["id"] == "shell" for section in payload["sections"])
+
 
 def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
@@ -3907,6 +4636,7 @@ def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
     assert any(item["source"] == "reset" and item["protected"] is True for item in payload["findings"])
     assert payload["quickActions"][0]["findingId"] == "runtime_scene_failed"
     assert any(item["resetItemId"] == "stopped_runtime_scenes" for item in payload["quickActions"])
+
 
 def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_read(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
@@ -4679,6 +5409,19 @@ def test_evolution_routes_handle_empty_supervised_workspace(tmp_path, monkeypatc
 
 
 def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_path, monkeypatch):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / "real_bundle_v1.json").write_text(
+        json.dumps(
+            {
+                "bundle_name": "real_bundle_v1",
+                "benchmark": "dry",
+                "cases": [{"case_id": "probe", "prompt": "run"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     _write_workbench_state(
         tmp_path,
         {
@@ -4698,6 +5441,15 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert payload["defaultBundleName"]
     assert payload["savedState"]["source"] == "bundle"
     assert payload["savedState"]["bundleName"] == "saved_bundle_v1"
+    assert payload["bundles"] == [
+        {
+            "name": "real_bundle_v1",
+            "declaredName": "real_bundle_v1",
+            "path": str(bundle_dir / "real_bundle_v1.json"),
+            "caseCount": 1,
+            "benchmark": "dry",
+        }
+    ]
     assert any(item["name"] == "supervised_dry_run" for item in payload["datasets"])
     assert payload["activeRun"] is None
 
@@ -4921,6 +5673,40 @@ def test_start_supervised_run_from_web_does_not_write_real_runtime_manager_store
     finally:
         _restore_real_runtime_index_if_touched("supervised", run_id, original_index_text)
         _reset_supervised_live_state()
+
+
+def test_start_supervised_run_from_bundle_uses_launchable_file_stem(tmp_path, monkeypatch):
+    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "launchable_bundle.json"
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_path.write_text(
+        json.dumps({"bundle_name": "declared_inside_json", "cases": [{"case_id": "case_1"}]}),
+        encoding="utf-8",
+    )
+    _reset_supervised_live_state()
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        supervised_control_service._RUN_EXECUTOR,
+        "submit",
+        lambda fn, *args, **kwargs: object(),
+    )
+
+    response = client.post(
+        "/api/evolution/runs",
+        json={
+            "sourceKind": "bundle",
+            "bundleName": "launchable_bundle",
+            "keepWorktree": False,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["bundleName"] == "launchable_bundle"
+    state_path = tmp_path / "workspace" / "supervised_evolution" / "workbench_state.json"
+    saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved_state["bundle_name"] == "launchable_bundle"
+
+    _reset_supervised_live_state()
 
 
 def test_start_supervised_run_rejects_second_active_run(tmp_path, monkeypatch):
@@ -5668,6 +6454,43 @@ def test_start_self_evolution_run_rejects_when_supervised_run_active(monkeypatch
         self_evolution_control_service,
         "get_active_supervised_run",
         lambda: {"runId": "supervised-1", "status": "running"},
+    )
+
+    response = client.post("/api/evolution/self/runs", json={"goal": "blocked"})
+
+    assert response.status_code == 409
+    assert "监督任务" in response.json()["detail"]
+
+    _reset_self_evolution_live_state()
+
+
+def test_start_self_evolution_run_rejects_when_supervised_run_paused(monkeypatch):
+    _reset_self_evolution_live_state()
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "get_workbench_contract",
+        lambda: {
+            "defaultMode": "self_evolution",
+            "defaultRoute": "/evolution",
+            "intakeMode": "manual_review",
+            "modeAvailability": {
+                "chat": True,
+                "self_evolution": True,
+                "supervised_evolution": True,
+            },
+            "domainAvailability": {
+                "chat": True,
+                "evolution": True,
+                "config": True,
+            },
+        },
+    )
+    monkeypatch.setattr(self_evolution_control_service, "has_running_sessions", lambda: False)
+    monkeypatch.setattr(self_evolution_control_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "get_active_supervised_run",
+        lambda: {"runId": "supervised-paused", "status": "paused"},
     )
 
     response = client.post("/api/evolution/self/runs", json={"goal": "blocked"})
