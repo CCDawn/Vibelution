@@ -15,7 +15,7 @@ exclude_lines =
     pass
     if TYPE_CHECKING:
     @abstractmethod
-fail_under = 0
+fail_under = 70
 
 [html]
 directory = htmlcov
