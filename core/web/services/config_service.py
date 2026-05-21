@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import copy
+import ctypes
 import os
 import secrets
 import subprocess
+import time
 from typing import Any
 
 import config.public_config as public_config_module
@@ -55,6 +57,14 @@ _PENDING_SECRET_PREFIX = "pending-secret:"
 _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
 _OPEN_ENVIRONMENT_TASK_NAME = r"\Vibelution\OpenEnvironmentVariables"
+_ENVIRONMENT_WINDOW_TITLE_PARTS = ("环境变量", "Environment Variables")
+_SW_RESTORE = 9
+_SW_SHOW = 5
+_HWND_TOPMOST = -1
+_HWND_NOTOPMOST = -2
+_SWP_NOSIZE = 0x0001
+_SWP_NOMOVE = 0x0002
+_SWP_SHOWWINDOW = 0x0040
 
 
 def _record_config_scene_event(
@@ -950,10 +960,80 @@ def _assert_schtasks_success(result: subprocess.CompletedProcess[str], action: s
     raise ValueError(f"无法打开系统环境变量窗口：{action} 失败{f'：{detail}' if detail else ''}")
 
 
+def _find_environment_variables_window() -> int | None:
+    user32 = ctypes.windll.user32
+    handles: list[int] = []
+
+    enum_windows_proc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+
+    @enum_windows_proc
+    def callback(hwnd: int, lparam: int) -> bool:
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buffer, length + 1)
+        title = buffer.value.strip()
+        if any(part in title for part in _ENVIRONMENT_WINDOW_TITLE_PARTS):
+            handles.append(int(hwnd))
+            return False
+        return True
+
+    user32.EnumWindows(callback, 0)
+    return handles[0] if handles else None
+
+
+def _focus_window(hwnd: int) -> bool:
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    foreground_hwnd = user32.GetForegroundWindow()
+    current_thread = kernel32.GetCurrentThreadId()
+    target_thread = user32.GetWindowThreadProcessId(hwnd, None)
+    foreground_thread = user32.GetWindowThreadProcessId(foreground_hwnd, None) if foreground_hwnd else 0
+    attached_threads = [thread_id for thread_id in {target_thread, foreground_thread} if thread_id and thread_id != current_thread]
+    for thread_id in attached_threads:
+        user32.AttachThreadInput(current_thread, thread_id, True)
+    user32.ShowWindow(hwnd, _SW_RESTORE)
+    user32.ShowWindow(hwnd, _SW_SHOW)
+    focused = False
+    try:
+        user32.BringWindowToTop(hwnd)
+        user32.SetActiveWindow(hwnd)
+        user32.SetFocus(hwnd)
+        user32.SwitchToThisWindow(hwnd, True)
+        focused = bool(user32.GetForegroundWindow() == hwnd)
+    except Exception:
+        focused = False
+    try:
+        focused = bool(user32.SetForegroundWindow(hwnd)) or focused
+        if not focused:
+            user32.SetWindowPos(hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_SHOWWINDOW)
+            user32.SetWindowPos(hwnd, _HWND_NOTOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_SHOWWINDOW)
+        return focused or bool(user32.GetForegroundWindow() == hwnd)
+    finally:
+        for thread_id in attached_threads:
+            user32.AttachThreadInput(current_thread, thread_id, False)
+
+
+def _focus_environment_variables_window(timeout_seconds: float = 4.0) -> bool:
+    if os.name != "nt":
+        return False
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        hwnd = _find_environment_variables_window()
+        if hwnd is not None:
+            return _focus_window(hwnd)
+        time.sleep(0.2)
+    return False
+
+
 def open_system_environment_settings() -> dict[str, object]:
     """Open the OS environment variable editor without reading environment values."""
     if os.name != "nt":
         raise ValueError("系统环境变量窗口目前只支持 Windows。")
+    focused = False
     try:
         _run_schtasks(["schtasks.exe", "/Delete", "/TN", _OPEN_ENVIRONMENT_TASK_NAME, "/F"])
         create_result = _run_schtasks(
@@ -975,6 +1055,7 @@ def open_system_environment_settings() -> dict[str, object]:
         _assert_schtasks_success(create_result, "创建交互启动任务")
         run_result = _run_schtasks(["schtasks.exe", "/Run", "/TN", _OPEN_ENVIRONMENT_TASK_NAME])
         _assert_schtasks_success(run_result, "运行交互启动任务")
+        focused = _focus_environment_variables_window()
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError(f"无法打开系统环境变量窗口：{exc}") from exc
     finally:
@@ -982,7 +1063,7 @@ def open_system_environment_settings() -> dict[str, object]:
             _run_schtasks(["schtasks.exe", "/Delete", "/TN", _OPEN_ENVIRONMENT_TASK_NAME, "/F"])
         except Exception:
             pass
-    return {"opened": True, "method": "interactive-scheduled-task"}
+    return {"opened": True, "focused": focused, "method": "interactive-scheduled-task"}
 
 
 def apply_config_workspace(
