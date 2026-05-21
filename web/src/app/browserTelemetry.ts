@@ -1,4 +1,4 @@
-import { getControlToken } from "../api/client";
+import { clearControlToken, getControlToken } from "../api/client";
 
 export type BrowserTelemetryEventInput = {
   phase: string;
@@ -20,6 +20,10 @@ function truncateText(value: string, limit: number): string {
 
 function compactText(value: string, limit: number): string {
   return truncateText(String(value ?? "").replace(/\s+/g, " ").trim(), limit);
+}
+
+function compactLength(value: string): number {
+  return String(value ?? "").replace(/\s+/g, " ").trim().length;
 }
 
 function summarizeUnknown(value: unknown, limit = 240): string {
@@ -61,7 +65,7 @@ export function collectBrowserPageSnapshot(): Record<string, unknown> {
     activeNavHref: activeNav?.getAttribute("href") ?? "",
     activeNavText: compactText(activeNav?.textContent ?? "", 80),
     heading: compactText(heading?.textContent ?? "", 120),
-    mainTextPreview: compactText(main?.textContent ?? "", 320),
+    mainTextLength: compactLength(main?.textContent ?? ""),
   };
 }
 
@@ -88,5 +92,10 @@ export function postBrowserTelemetry(
         keepalive: true,
       }),
     )
+    .then((response) => {
+      if (response.status === 403) {
+        clearControlToken();
+      }
+    })
     .catch(() => {});
 }

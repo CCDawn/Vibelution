@@ -389,6 +389,52 @@ export type WorkRunSummary = {
   };
 };
 
+export type RuntimeLifecycleProofComponent = {
+  id: string;
+  label: string;
+  state: "verified" | "missing" | "closing" | "failed" | "unknown" | "running" | string;
+  ok: boolean;
+  requiredForOpen: boolean;
+  requiredForClosed: boolean;
+  detail: string;
+  pid: number;
+  verifiedAt: string;
+};
+
+export type RuntimeLifecycleProof = {
+  overallState: "ready" | "starting" | "closing" | "closed" | "partial" | "failed" | string;
+  overallLabel: string;
+  summary: string;
+  verifiedAt: string;
+  desiredState: string;
+  observedState: string;
+  phase: string;
+  browserManaged: boolean;
+  projectRootMatches: boolean;
+  components: RuntimeLifecycleProofComponent[];
+  activeWorkRuns: {
+    count: number;
+    kinds: string[];
+    items: Array<{
+      kind: string;
+      runId: string;
+      status: string;
+    }>;
+  };
+  residualProcesses: {
+    count: number;
+    items: Array<{
+      pid: number;
+      parentPid: number;
+      kind: string;
+      name: string;
+      commandLine: string;
+      cwd: string;
+      port: number;
+    }>;
+  };
+};
+
 export type RuntimeSummary = {
   status: string;
   mode: string;
@@ -437,6 +483,15 @@ export type RuntimeSummary = {
     phase: string;
     backendPid: number;
     browserWindowPid: number;
+    backendAlive: boolean;
+    backendHealthy: boolean;
+    backendObserved: boolean;
+    backendPort: number;
+    backendPortListening: boolean;
+    backendPortOwnerPid: number;
+    backendPortOwnerTrusted: boolean;
+    backendPortConflict: boolean;
+    browserWindowAlive: boolean;
     browserManaged: boolean;
     url: string;
     lastReason: string;
@@ -444,6 +499,7 @@ export type RuntimeSummary = {
     failureMessage: string;
   };
   workRuns: WorkRunSummary;
+  lifecycleProof: RuntimeLifecycleProof;
 };
 
 export type BackendHealth = {
@@ -456,6 +512,12 @@ export type ShutdownResponse = {
   message: string;
   chatTurns: Array<{
     sessionId: string;
+    runId: string;
+    status: string;
+    error?: string;
+  }>;
+  evolutionRuns: Array<{
+    kind: string;
     runId: string;
     status: string;
     error?: string;
@@ -809,6 +871,13 @@ export type SelfEvolutionRunStreamEvent = {
 export type EvolutionWorkbench = {
   defaultBundleName: string;
   savedState: EvolutionOverview["workbench"];
+  bundles: Array<{
+    name: string;
+    declaredName: string;
+    path: string;
+    caseCount: number;
+    benchmark: string;
+  }>;
   datasets: EvolutionDatasetOption[];
   activeRun: EvolutionActiveRun | null;
 };

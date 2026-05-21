@@ -6,6 +6,26 @@
   --bg-panel-soft: #22272c;
   --bg-active: #292f35;
 
+  --surface-page: rgba(18, 20, 22, 0.74);
+  --surface-header: rgba(22, 25, 28, 0.78);
+  --surface-panel: rgba(27, 31, 35, 0.82);
+  --surface-panel-muted: rgba(21, 24, 27, 0.78);
+  --surface-panel-strong: rgba(34, 39, 44, 0.92);
+  --surface-panel-hover: rgba(34, 39, 44, 0.9);
+  --surface-card: rgba(20, 23, 26, 0.72);
+  --surface-card-muted: rgba(255, 255, 255, 0.03);
+  --surface-card-subtle: rgba(255, 255, 255, 0.025);
+  --surface-card-hover: rgba(255, 255, 255, 0.05);
+  --surface-input: rgba(21, 24, 27, 0.86);
+  --surface-input-strong: rgba(14, 17, 20, 0.88);
+  --surface-code: rgba(11, 13, 15, 0.72);
+  --surface-active-neutral: rgba(35, 36, 33, 0.96);
+  --surface-overlay: rgba(10, 12, 14, 0.62);
+  --surface-resize-track: rgba(236, 230, 220, 0.08);
+  --surface-scrollbar-track: rgba(20, 23, 26, 0.75);
+  --shadow-soft: 0 14px 30px rgba(10, 12, 14, 0.18);
+  --shadow-strong: 0 24px 60px rgba(0, 0, 0, 0.22);
+
   --fg-primary: #ece6dc;
   --fg-secondary: #b7b0a4;
   --fg-tertiary: #8c877d;
@@ -20,8 +40,54 @@
 
   --border-soft: rgba(236, 230, 220, 0.08);
   --border-strong: rgba(236, 230, 220, 0.12);
+  --border-hairline: rgba(236, 230, 220, 0.06);
 
   --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
   --font-body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-canvas: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-panel-soft: #f4f4f5;
+  --bg-active: #ececf0;
+
+  --surface-page: #ffffff;
+  --surface-header: rgba(255, 255, 255, 0.92);
+  --surface-panel: #ffffff;
+  --surface-panel-muted: #f7f7f8;
+  --surface-panel-strong: #ffffff;
+  --surface-panel-hover: #f1f1f3;
+  --surface-card: #ffffff;
+  --surface-card-muted: #f6f6f7;
+  --surface-card-subtle: #fafafa;
+  --surface-card-hover: #eeeeef;
+  --surface-input: #ffffff;
+  --surface-input-strong: #ffffff;
+  --surface-code: #f7f7f8;
+  --surface-active-neutral: #eef4ff;
+  --surface-overlay: rgba(15, 23, 42, 0.18);
+  --surface-resize-track: rgba(15, 23, 42, 0.1);
+  --surface-scrollbar-track: #f1f1f3;
+  --shadow-soft: 0 12px 28px rgba(15, 23, 42, 0.08);
+  --shadow-strong: 0 20px 52px rgba(15, 23, 42, 0.12);
+
+  --fg-primary: #171717;
+  --fg-secondary: #525252;
+  --fg-tertiary: #8a8a8a;
+
+  --accent-warm: #2563eb;
+  --accent-warm-2: #1d4ed8;
+  --accent-cool: #0f766e;
+
+  --state-success: #16803c;
+  --state-warning: #9a6700;
+  --state-error: #c2413a;
+
+  --border-soft: rgba(15, 23, 42, 0.1);
+  --border-strong: rgba(15, 23, 42, 0.16);
+  --border-hairline: rgba(15, 23, 42, 0.07);
 }

@@ -17,6 +17,10 @@ export function resetControlTokenForTests() {
   controlTokenPromise = null;
 }
 
+export function clearControlToken() {
+  controlTokenPromise = null;
+}
+
 export function setFetchJsonFailureReporter(reporter: ((report: FetchJsonFailureReport) => void) | null) {
   fetchJsonFailureReporter = reporter;
 }
@@ -114,6 +118,9 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
   }
 
   if (!response.ok) {
+    if (response.status === 403 && shouldAttachControlToken(input, method)) {
+      clearControlToken();
+    }
     const contentType = response.headers.get("content-type") ?? "";
     let message = "";
     if (contentType.includes("application/json")) {
