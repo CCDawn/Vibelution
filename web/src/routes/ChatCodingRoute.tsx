@@ -12,6 +12,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
+import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -233,6 +234,7 @@ function writeStoredMentalModelToggle(enabled: boolean) {
 export function ChatCodingRoute() {
   const { lang, t, statusLabel } = useAppI18n();
   const queryClient = useQueryClient();
+  const location = useLocation();
   const rightPanel = useShellStore((state) => state.rightPanel);
   const setRightPanel = useShellStore((state) => state.setRightPanel);
   const chatPanelWidths = useShellStore((state) => state.chatPanelWidths);
@@ -260,6 +262,9 @@ export function ChatCodingRoute() {
     () => readStoredMentalModelToggle() !== null,
   );
   const layoutRef = useRef<HTMLDivElement | null>(null);
+  const requestedSessionId = useMemo(() => {
+    return new URLSearchParams(location.search).get("session") ?? "";
+  }, [location.search]);
 
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
@@ -287,10 +292,18 @@ export function ChatCodingRoute() {
   });
 
   useEffect(() => {
+    if (
+      requestedSessionId
+      && sessionsQuery.data?.some((session) => session.id === requestedSessionId)
+      && activeSessionId !== requestedSessionId
+    ) {
+      setActiveSession(requestedSessionId);
+      return;
+    }
     if (!activeSessionId && sessionsQuery.data && sessionsQuery.data.length > 0) {
       setActiveSession(sessionsQuery.data[0].id);
     }
-  }, [activeSessionId, sessionsQuery.data, setActiveSession]);
+  }, [activeSessionId, requestedSessionId, sessionsQuery.data, setActiveSession]);
 
   useEffect(() => {
     const pendingHandoff = loadPendingSelfEvolutionHandoff();

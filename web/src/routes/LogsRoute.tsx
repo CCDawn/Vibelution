@@ -23,6 +23,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from "react";
+import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -400,6 +401,7 @@ async function copyText(text: string) {
 export function LogsRoute() {
   const { lang, t, statusLabel } = useAppI18n();
   const queryClient = useQueryClient();
+  const location = useLocation();
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [activeRootId, setActiveRootId] = useState<string>("");
@@ -437,14 +439,24 @@ export function LogsRoute() {
     refetchIntervalInBackground: true,
   });
 
+  const requestedRootId = useMemo(() => {
+    return new URLSearchParams(location.search).get("root") ?? "";
+  }, [location.search]);
+
   useEffect(() => {
     if (!rootsQuery.data?.length) {
+      return;
+    }
+    if (requestedRootId && rootsQuery.data.some((root) => root.id === requestedRootId)) {
+      if (activeRootId !== requestedRootId) {
+        setActiveRootId(requestedRootId);
+      }
       return;
     }
     if (!activeRootId || !rootsQuery.data.some((root) => root.id === activeRootId)) {
       setActiveRootId(rootsQuery.data[0].id);
     }
-  }, [activeRootId, rootsQuery.data]);
+  }, [activeRootId, requestedRootId, rootsQuery.data]);
 
   const activeRoot = useMemo(
     () => rootsQuery.data?.find((root) => root.id === activeRootId) ?? rootsQuery.data?.[0] ?? null,

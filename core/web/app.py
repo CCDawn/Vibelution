@@ -17,6 +17,7 @@ from starlette.responses import Response
 
 from .control import WebControlGuardMiddleware, control_token_payload, ensure_control_source, trusted_control_origins
 from .routes.config import router as config_router
+from .routes.diagnostics import router as diagnostics_router
 from .routes.evolution import router as evolution_router
 from .routes.files import router as files_router
 from .routes.git import router as git_router
@@ -193,6 +194,7 @@ def create_app() -> FastAPI:
     app.include_router(files_router, prefix="/api")
     app.include_router(git_router, prefix="/api")
     app.include_router(logs_router, prefix="/api")
+    app.include_router(diagnostics_router, prefix="/api")
     app.include_router(evolution_router, prefix="/api")
     app.include_router(config_router, prefix="/api")
     app.include_router(reset_router, prefix="/api")

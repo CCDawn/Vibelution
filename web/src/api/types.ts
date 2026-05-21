@@ -49,6 +49,61 @@ export type LogDiagnostics = {
   suggestedNextStep: string;
 };
 
+export type HealthDiagnostics = {
+  status: "ok" | "warning" | "blocked" | string;
+  summary: string;
+  counts: {
+    ok: number;
+    warning: number;
+    blocked: number;
+  };
+  sessionHelpers: SessionHelper[];
+  logHelpers: LogHelper[];
+};
+
+export type SessionHelper = {
+  id: string;
+  title: string;
+  description: string;
+  status: "ok" | "warning" | "blocked" | string;
+  statusLabel: string;
+  sessionCount: number;
+  busyCount: number;
+  failedCount: number;
+  activeSessionId: string;
+  activeTitle: string;
+  currentPhase: string;
+  updatedAt: string;
+  latestSignal: string;
+  recommendedAction: string;
+  route: string;
+  protected: boolean;
+  protectedReason: string;
+};
+
+export type LogHelper = {
+  id: string;
+  title: string;
+  description: string;
+  rootPath: string;
+  exists: boolean;
+  status: "ok" | "warning" | "blocked" | string;
+  statusLabel: string;
+  fileCount: number;
+  directoryCount: number;
+  sizeBytes: number;
+  lastModifiedAt: string;
+  latestPath: string;
+  latestSignal: string;
+  userGuide: string;
+  agentGuide: string;
+  recommendedAction: string;
+  route: string;
+  resetItemId: string;
+  protected: boolean;
+  protectedReason: string;
+};
+
 export type RuntimeSceneListItem = {
   runtimeSceneId: string;
   directoryName: string;

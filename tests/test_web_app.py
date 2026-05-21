@@ -3863,9 +3863,42 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_meta["git.commit_message_profile"]["label"] == "AI 提交说明模型"
     assert "profile" not in editor_meta["git.commit_message_profile"]["hint"].lower()
     assert editor_meta["git.commit_message_prompt"]["kind"] == "multiline"
+    assert sections_by_id["health-diagnostics"]["title"] == "健康诊断"
     assert any(section["id"] == "overview" for section in payload["sections"])
     assert any(section["id"] == "shell" for section in payload["sections"])
 
+def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    runtime_log = tmp_path / "logs" / "agent_realtime.log"
+    runtime_log.parent.mkdir(parents=True, exist_ok=True)
+    runtime_log.write_text("runtime line\n", encoding="utf-8")
+    conversation_log = tmp_path / "log_info" / "conversation_debug.jsonl"
+    conversation_log.parent.mkdir(parents=True, exist_ok=True)
+    conversation_log.write_text('{"type":"external_request"}\n', encoding="utf-8")
+
+    _seed_runtime_scene_bundle(tmp_path, scene_id="scene-health", status="failed")
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/diagnostics/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    session_helpers = {item["id"]: item for item in payload["sessionHelpers"]}
+    assert session_helpers["chat_sessions"]["sessionCount"] == 1
+    assert session_helpers["chat_sessions"]["activeSessionId"] == "session-live"
+    assert session_helpers["chat_sessions"]["route"] == "/chat?session=session-live"
+    assert session_helpers["chat_sessions"]["protected"] is True
+    helpers = {item["id"]: item for item in payload["logHelpers"]}
+    assert set(helpers) == {"runtime_scenes", "runtime_logs", "workspace_logs", "conversation_logs"}
+    assert helpers["runtime_scenes"]["route"] == "/logs?root=runtime_scenes"
+    assert helpers["runtime_scenes"]["resetItemId"] == "stopped_runtime_scenes"
+    assert helpers["runtime_scenes"]["protected"] is True
+    assert helpers["runtime_logs"]["route"] == "/logs?root=runtime_logs"
+    assert helpers["conversation_logs"]["resetItemId"] == "conversation_logs"
+    assert helpers["workspace_logs"]["status"] == "warning"
 
 def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_read(monkeypatch):
     public_config = copy.deepcopy(load_public_config())

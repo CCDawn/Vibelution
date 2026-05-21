@@ -31,6 +31,9 @@ import {
   ConfigModelOption,
   ConfigModelPresetOption,
   ConfigWorkspace,
+  HealthDiagnostics,
+  LogHelper,
+  SessionHelper,
 } from "../api/types";
 import {
   applyModelOptionToProfileDraft,
@@ -106,6 +109,33 @@ type ConfigSidebarGroup = {
   title: string;
   summary: string;
   memberSectionIds: string[];
+};
+
+type LogHelperCopy = {
+  healthTitle: string;
+  healthBody: string;
+  healthLoading: string;
+  healthEmpty: string;
+  healthRefresh: string;
+  healthOpenLogs: string;
+  healthOpenChat: string;
+  healthOpenReset: string;
+  healthFiles: string;
+  healthDirs: string;
+  healthSessions: string;
+  healthBusy: string;
+  healthFailed: string;
+  healthPhase: string;
+  healthLatest: string;
+  healthUpdated: string;
+  healthSize: string;
+  healthProtected: string;
+  healthResetAvailable: string;
+  healthStatusOk: string;
+  healthStatusWarning: string;
+  healthStatusBlocked: string;
+  healthMissing: string;
+  healthNotRecorded: string;
 };
 
 const SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.config.sidebar.width";
@@ -220,6 +250,30 @@ export const CONFIG_COPY = {
     groupAgentEvolutionSummary: "Agent 运行、自进化与上下文策略相关设置。",
     groupToolingTitle: "工具与诊断",
     groupToolingSummary: "工具、网络、安全、日志、提示词与调试相关设置。",
+    healthTitle: "健康诊断中心",
+    healthBody: "把会话入口、日志入口、最近信号、可清理建议和保护边界整理到同一个只读诊断面。",
+    healthLoading: "正在整理日志 Helper...",
+    healthEmpty: "当前没有可用日志 Helper。",
+    healthRefresh: "重新诊断",
+    healthOpenLogs: "打开日志页",
+    healthOpenChat: "打开会话页",
+    healthOpenReset: "去 Reset 清理",
+    healthFiles: "文件",
+    healthDirs: "目录",
+    healthSessions: "会话",
+    healthBusy: "运行中",
+    healthFailed: "失败",
+    healthPhase: "阶段",
+    healthLatest: "最近信号",
+    healthUpdated: "更新时间",
+    healthSize: "体量",
+    healthProtected: "保护",
+    healthResetAvailable: "可从 Reset 清理",
+    healthStatusOk: "正常",
+    healthStatusWarning: "注意",
+    healthStatusBlocked: "阻塞",
+    healthMissing: "暂无日志文件",
+    healthNotRecorded: "未记录",
     groupGitTitle: "Git 提交",
     groupGitSummary: "配置 Git 页面用于生成提交说明的任务模型和提示词模板。",
     runtimeProfile: "运行档位",
@@ -368,6 +422,30 @@ export const CONFIG_COPY = {
     groupAgentEvolutionSummary: "Agent runtime, self-evolution, and context strategy settings.",
     groupToolingTitle: "Tooling and Diagnostics",
     groupToolingSummary: "Tooling, network, security, logging, prompt, and debug settings.",
+    healthTitle: "Health Diagnostics Center",
+    healthBody: "Organizes session entry points, log entry points, recent signals, cleanup hints, and protected boundaries in one read-only diagnostic surface.",
+    healthLoading: "Organizing log helpers...",
+    healthEmpty: "No log helpers are available right now.",
+    healthRefresh: "Run again",
+    healthOpenLogs: "Open logs",
+    healthOpenChat: "Open chat",
+    healthOpenReset: "Open Reset",
+    healthFiles: "files",
+    healthDirs: "dirs",
+    healthSessions: "sessions",
+    healthBusy: "busy",
+    healthFailed: "failed",
+    healthPhase: "phase",
+    healthLatest: "Latest signal",
+    healthUpdated: "Updated",
+    healthSize: "Size",
+    healthProtected: "Protected",
+    healthResetAvailable: "Reset cleanup available",
+    healthStatusOk: "OK",
+    healthStatusWarning: "Attention",
+    healthStatusBlocked: "Blocked",
+    healthMissing: "No log files yet",
+    healthNotRecorded: "Not recorded",
     groupGitTitle: "Git Commits",
     groupGitSummary: "Configure the task model and prompt template used by the Git page.",
     runtimeProfile: "Runtime mode",
@@ -563,7 +641,7 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "tooling-diagnostics",
       title: copy.groupToolingTitle,
       summary: copy.groupToolingSummary,
-      memberSectionIds: ["tools", "security", "network", "log", "prompt", "parser", "debug"],
+      memberSectionIds: ["health-diagnostics", "tools", "security", "network", "log", "prompt", "parser", "debug"],
     },
   ];
 }
@@ -584,6 +662,38 @@ function emptyProfileEditState(modelId = ""): ProfileEditState {
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function formatBytes(size: number) {
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let value = size;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
+function formatTimestamp(value: string, lang: ConfigLanguage, emptyLabel: string) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return emptyLabel;
+  }
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) {
+    return text;
+  }
+  return new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(parsed);
 }
 
 function getBoolean(value: unknown, fallback = false): boolean {
@@ -686,6 +796,214 @@ function buildModelDetailsPayload(draft: ModelDetailsDraft): Record<string, unkn
 
 function splitConfigPath(path: string): string[] {
   return path.split(".").filter(Boolean);
+}
+
+function healthStatusLabel(status: string, copy: LogHelperCopy) {
+  if (status === "blocked") {
+    return copy.healthStatusBlocked;
+  }
+  if (status === "warning") {
+    return copy.healthStatusWarning;
+  }
+  return copy.healthStatusOk;
+}
+
+function healthStatusClassName(status: string) {
+  if (status === "blocked") {
+    return `${styles.inlineBadge} ${styles.healthBadgeBlocked}`;
+  }
+  if (status === "warning") {
+    return `${styles.inlineBadge} ${styles.inlineBadgeWarning}`;
+  }
+  return `${styles.inlineBadge} ${styles.statusBadgeReady}`;
+}
+
+function LogHelperCenter({
+  diagnostics,
+  loading,
+  lang,
+  copy,
+  onRefresh,
+}: {
+  diagnostics: HealthDiagnostics | undefined;
+  loading: boolean;
+  lang: ConfigLanguage;
+  copy: LogHelperCopy;
+  onRefresh: () => void;
+}) {
+  const sessionHelpers = diagnostics?.sessionHelpers ?? [];
+  const helpers = diagnostics?.logHelpers ?? [];
+  return (
+    <section id="config-health-diagnostics" className={styles.sectionSurface}>
+      <div className={styles.sectionHeader}>
+        <div className={styles.sectionHeaderMain}>
+          <p className={styles.eyebrow}>{copy.healthTitle}</p>
+          <h2 className={styles.sectionTitle}>{copy.healthTitle}</h2>
+          <p className={styles.sectionText}>{copy.healthBody}</p>
+        </div>
+        <div className={styles.sectionHeaderActions}>
+          {diagnostics ? (
+            <span className={healthStatusClassName(diagnostics.status)}>
+              {healthStatusLabel(diagnostics.status, copy)}
+            </span>
+          ) : null}
+          <button type="button" className={styles.actionButton} onClick={onRefresh} disabled={loading}>
+            <RefreshCw size={14} />
+            {copy.healthRefresh}
+          </button>
+        </div>
+      </div>
+      {loading && !diagnostics ? <p className={styles.helperText}>{copy.healthLoading}</p> : null}
+      {diagnostics ? (
+        <div className={styles.healthSummaryGrid}>
+          <article className={styles.matrixCard}>
+            <p className={styles.matrixTitle}>{copy.healthStatusOk}</p>
+            <strong className={styles.healthMetric}>{diagnostics.counts.ok}</strong>
+          </article>
+          <article className={styles.matrixCard}>
+            <p className={styles.matrixTitle}>{copy.healthStatusWarning}</p>
+            <strong className={styles.healthMetric}>{diagnostics.counts.warning}</strong>
+          </article>
+          <article className={styles.matrixCard}>
+            <p className={styles.matrixTitle}>{copy.healthStatusBlocked}</p>
+            <strong className={styles.healthMetric}>{diagnostics.counts.blocked}</strong>
+          </article>
+        </div>
+      ) : null}
+      {diagnostics?.summary ? <p className={styles.sectionText}>{diagnostics.summary}</p> : null}
+      {sessionHelpers.length ? (
+        <div className={styles.logHelperGrid}>
+          {sessionHelpers.map((helper) => (
+            <SessionHelperCard key={helper.id} helper={helper} lang={lang} copy={copy} />
+          ))}
+        </div>
+      ) : null}
+      {helpers.length ? (
+        <div className={styles.logHelperGrid}>
+          {helpers.map((helper) => (
+            <LogHelperCard key={helper.id} helper={helper} lang={lang} copy={copy} />
+          ))}
+        </div>
+      ) : !loading ? (
+        <p className={styles.helperText}>{copy.healthEmpty}</p>
+      ) : null}
+    </section>
+  );
+}
+
+function SessionHelperCard({ helper, lang, copy }: { helper: SessionHelper; lang: ConfigLanguage; copy: LogHelperCopy }) {
+  const updatedLabel = formatTimestamp(helper.updatedAt, lang, copy.healthNotRecorded);
+  return (
+    <article className={styles.logHelperCard}>
+      <div className={styles.logHelperHeader}>
+        <div>
+          <p className={styles.matrixTitle}>{helper.activeSessionId || helper.id}</p>
+          <h3 className={styles.cardTitle}>{helper.title}</h3>
+        </div>
+        <span className={healthStatusClassName(helper.status)}>
+          {helper.statusLabel || healthStatusLabel(helper.status, copy)}
+        </span>
+      </div>
+      <p className={styles.cardSubtle}>{helper.description}</p>
+      <div className={styles.logHelperMetaGrid}>
+        <span>
+          <strong>{helper.sessionCount.toLocaleString()}</strong>
+          {copy.healthSessions}
+        </span>
+        <span>
+          <strong>{helper.busyCount.toLocaleString()}</strong>
+          {copy.healthBusy}
+        </span>
+        <span>
+          <strong>{helper.failedCount.toLocaleString()}</strong>
+          {copy.healthFailed}
+        </span>
+        <span title={helper.updatedAt}>
+          <strong>{updatedLabel}</strong>
+          {copy.healthUpdated}
+        </span>
+      </div>
+      <div className={styles.logHelperSignal}>
+        <span>{copy.healthLatest}</span>
+        <strong>{helper.latestSignal || helper.activeTitle || copy.healthMissing}</strong>
+      </div>
+      <div className={styles.logHelperSignal}>
+        <span>{copy.healthPhase}</span>
+        <strong>{helper.currentPhase || copy.healthNotRecorded}</strong>
+      </div>
+      <p className={styles.cardSubtle}>{helper.recommendedAction}</p>
+      <div className={styles.cardBadges}>
+        <span className={`${styles.inlineBadge} ${styles.inlineBadgeWarning}`}>{copy.healthProtected}</span>
+      </div>
+      {helper.protectedReason ? <p className={styles.helperText}>{helper.protectedReason}</p> : null}
+      <div className={styles.actionsRow}>
+        <a className={styles.actionButton} href={helper.route || "/chat"}>
+          <ExternalLink size={14} />
+          {copy.healthOpenChat}
+        </a>
+      </div>
+    </article>
+  );
+}
+
+function LogHelperCard({ helper, lang, copy }: { helper: LogHelper; lang: ConfigLanguage; copy: LogHelperCopy }) {
+  const updatedLabel = formatTimestamp(helper.lastModifiedAt, lang, copy.healthNotRecorded);
+  const latestSignal = helper.latestSignal || helper.latestPath || copy.healthMissing;
+  return (
+    <article className={styles.logHelperCard}>
+      <div className={styles.logHelperHeader}>
+        <div>
+          <p className={styles.matrixTitle}>{helper.rootPath}</p>
+          <h3 className={styles.cardTitle}>{helper.title}</h3>
+        </div>
+        <span className={healthStatusClassName(helper.status)}>
+          {helper.statusLabel || healthStatusLabel(helper.status, copy)}
+        </span>
+      </div>
+      <p className={styles.cardSubtle}>{helper.description}</p>
+      <div className={styles.logHelperMetaGrid}>
+        <span>
+          <strong>{helper.fileCount.toLocaleString()}</strong>
+          {copy.healthFiles}
+        </span>
+        <span>
+          <strong>{helper.directoryCount.toLocaleString()}</strong>
+          {copy.healthDirs}
+        </span>
+        <span>
+          <strong>{formatBytes(helper.sizeBytes)}</strong>
+          {copy.healthSize}
+        </span>
+        <span title={helper.lastModifiedAt}>
+          <strong>{updatedLabel}</strong>
+          {copy.healthUpdated}
+        </span>
+      </div>
+      <div className={styles.logHelperSignal}>
+        <span>{copy.healthLatest}</span>
+        <strong>{latestSignal}</strong>
+      </div>
+      <p className={styles.cardSubtle}>{helper.recommendedAction}</p>
+      <div className={styles.cardBadges}>
+        <span className={helper.protected ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}` : styles.inlineBadge}>
+          {helper.protected ? copy.healthProtected : copy.healthResetAvailable}
+        </span>
+      </div>
+      {helper.protectedReason ? <p className={styles.helperText}>{helper.protectedReason}</p> : null}
+      <div className={styles.actionsRow}>
+        <a className={styles.actionButton} href={helper.route || "/logs"}>
+          <ExternalLink size={14} />
+          {copy.healthOpenLogs}
+        </a>
+        {helper.resetItemId ? (
+          <a className={styles.actionButton} href={`/reset?item=${encodeURIComponent(helper.resetItemId)}`}>
+            <ExternalLink size={14} />
+            {copy.healthOpenReset}
+          </a>
+        ) : null}
+      </div>
+    </article>
+  );
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -1163,6 +1481,10 @@ export function ConfigRoute() {
   const workspaceQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),
     queryFn: () => fetchJson<ConfigWorkspace>("/api/config/workspace"),
+  });
+  const healthDiagnosticsQuery = useQuery({
+    queryKey: queryKeys.diagnosticsHealth(),
+    queryFn: () => fetchJson<HealthDiagnostics>("/api/diagnostics/health"),
   });
 
   const [draftConfig, setDraftConfig] = useState<PublicConfigShape | null>(null);
@@ -2745,6 +3067,18 @@ export function ConfigRoute() {
             />
           </div>
         </section>
+        ) : null}
+
+        {isSectionVisible("health-diagnostics") ? (
+          <LogHelperCenter
+            diagnostics={healthDiagnosticsQuery.data}
+            loading={healthDiagnosticsQuery.isLoading || healthDiagnosticsQuery.isFetching}
+            lang={currentLanguage}
+            copy={copy}
+            onRefresh={() => {
+              void healthDiagnosticsQuery.refetch();
+            }}
+          />
         ) : null}
 
         {isSectionVisible("diagnostics") ? (
