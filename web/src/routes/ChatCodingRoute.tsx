@@ -25,6 +25,7 @@ import {
   SessionStreamEvent,
 } from "../api/types";
 import { ConversationView } from "../components/conversation/ConversationView";
+import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import { useShellStore } from "../store/shellStore";
@@ -701,6 +702,7 @@ export function ChatCodingRoute() {
           : (pet?.energy ?? 0) < 35
             ? t("petCompanionLowEnergy")
             : t("petCompanionStable");
+  const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
   const contextStatusLine = runtimeQuery.isError
     ? describeError(runtimeQuery.error, t("loadFailed"))
     : runtime
@@ -1066,10 +1068,14 @@ export function ChatCodingRoute() {
         <section className={styles.leftBlock}>
           <div className={styles.sectionHeader}>
             <p className={styles.blockEyebrow}>{t("petSpace")}</p>
-            <span className={styles.metricValue}>Lv. {pet?.level ?? 0}</span>
+            <span className={styles.metricValue}>{t("level")} {pet?.level ?? 0}</span>
           </div>
           <h3 className={styles.sectionTitle}>{pet?.name ?? t("loadingPetState")}</h3>
           <p className={styles.contextLine}>{petCompanionLine}</p>
+          <div className={styles.taskSummaryBlock}>
+            <span className={styles.taskSummaryLabel}>{t("preset")}</span>
+            <p className={styles.taskSummaryValue}>{petPresetLabel}</p>
+          </div>
           <div className={styles.taskSummaryBlock}>
             <span className={styles.taskSummaryLabel}>{t("petBoundary")}</span>
             <p className={styles.taskSummaryValue}>{t("petBoundaryLine")}</p>

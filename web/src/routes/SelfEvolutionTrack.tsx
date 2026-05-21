@@ -27,6 +27,7 @@ import {
   SelfEvolutionTransaction,
 } from "../api/types";
 import { ConversationView } from "../components/conversation/ConversationView";
+import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SelfEvolutionTrack.module.css";
 
@@ -356,6 +357,7 @@ export function SelfEvolutionTrack({
           : (pet?.energy ?? 0) < 35
             ? t("petCompanionLowEnergy")
             : t("petCompanionStable");
+  const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
 
   function disabledReason(state: { enabled: boolean; reason: string } | undefined) {
     if (!state || state.enabled) {
@@ -597,7 +599,7 @@ export function SelfEvolutionTrack({
                   <p className={styles.eyebrow}>{t("petSpace")}</p>
                   <h3 className={styles.sectionTitle}>{pet?.name ?? t("loadingPetState")}</h3>
                 </div>
-                <span className={styles.secondaryPill}>Lv. {pet?.level ?? 0}</span>
+                <span className={styles.secondaryPill}>{t("level")} {pet?.level ?? 0}</span>
               </div>
 
               <div className={styles.petAvatarStage}>
@@ -607,7 +609,7 @@ export function SelfEvolutionTrack({
                   alt={pet?.name ?? "pet"}
                   className={styles.petAvatarImage}
                 />
-                <div className={styles.petAvatarBadge}>{pet?.avatarPreset ?? "lobster"} {t("preset")}</div>
+                <div className={styles.petAvatarBadge}>{petPresetLabel} {t("preset")}</div>
               </div>
 
               <p className={styles.noticeText}>{pet?.statusLine ?? t("readingCompanionState")}</p>
