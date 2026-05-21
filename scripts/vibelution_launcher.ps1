@@ -78,6 +78,8 @@ $sceneSchemaVersion = 2
 $script:currentRuntimeSceneId = $null
 $script:currentRuntimeSceneDir = $null
 $script:sceneEventSequence = @{}
+$script:launcherStateWriteMaxAttempts = 25
+$script:launcherStateWriteRetryDelayMilliseconds = 120
 
 function Set-LauncherEndpoint {
     param(
@@ -121,6 +123,13 @@ function Sync-LauncherEndpointFromState {
 function Write-Note {
     param([string]$Message)
     Write-Host "[Vibelution] $Message"
+}
+
+function Set-LauncherWindowTitle {
+    try {
+        $Host.UI.RawUI.WindowTitle = "Vibelution Launcher"
+    } catch {
+    }
 }
 
 function Get-ObjectPropertyValue {
@@ -203,7 +212,8 @@ function Invoke-RuntimeManagerClient {
         [string]$Mode,
         [string]$CommandType = "",
         [string]$Reason = "",
-        [switch]$ForwardNoBrowser
+        [switch]$ForwardNoBrowser,
+        [switch]$StopManager
     )
 
     $pythonRuntime = Resolve-PythonRuntime
@@ -214,9 +224,10 @@ function Invoke-RuntimeManagerClient {
 
     if ($Mode -eq "status") {
         $pythonArgs += @("-m", "core.runtime_manager.cli", "status")
-        & $pythonRuntime.FilePath @pythonArgs
-        if ($LASTEXITCODE -ne 0) {
-            throw "Runtime manager status failed with exit code $LASTEXITCODE."
+        $exitCode = Invoke-HiddenNativeCommand -CommandPath $pythonRuntime.FilePath -ArgumentList $pythonArgs
+        Set-LauncherWindowTitle
+        if ($exitCode -ne 0) {
+            throw "Runtime manager status failed with exit code $exitCode."
         }
         return
     }
@@ -239,10 +250,14 @@ function Invoke-RuntimeManagerClient {
     if ($ForwardNoBrowser) {
         $pythonArgs += "--no-browser"
     }
+    if ($StopManager) {
+        $pythonArgs += "--stop-manager"
+    }
 
-    & $pythonRuntime.FilePath @pythonArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "Runtime manager command '$CommandType' failed with exit code $LASTEXITCODE."
+    $exitCode = Invoke-HiddenNativeCommand -CommandPath $pythonRuntime.FilePath -ArgumentList $pythonArgs
+    Set-LauncherWindowTitle
+    if ($exitCode -ne 0) {
+        throw "Runtime manager command '$CommandType' failed with exit code $exitCode."
     }
 }
 
@@ -1098,11 +1113,65 @@ function Get-State {
     }
 }
 
+function Write-LauncherStateFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Value
+    )
+
+    $targetDir = Split-Path -Parent $Path
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+
+    $maxAttempts = [Math]::Max(1, [int]$script:launcherStateWriteMaxAttempts)
+    $delayMilliseconds = [Math]::Max(0, [int]$script:launcherStateWriteRetryDelayMilliseconds)
+    $lastError = $null
+
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $tempName = ".{0}.{1}.{2}.tmp" -f (Split-Path -Leaf $Path), $PID, ([guid]::NewGuid().ToString("N"))
+        $tempPath = Join-Path $targetDir $tempName
+        try {
+            $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+            [System.IO.File]::WriteAllText($tempPath, $Value, $utf8NoBom)
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+
+            if ($attempt -gt 1) {
+                Write-LauncherControlLog `
+                    -Event "launcher.state.write.recovered" `
+                    -Message "Launcher state file write recovered after retry." `
+                    -Level "warning" `
+                    -Fields @{ path = $Path; attempts = $attempt }
+            }
+            return
+        } catch {
+            $lastError = $_.Exception
+            if ($tempPath -and (Test-Path $tempPath)) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+            if ($attempt -lt $maxAttempts) {
+                Start-Sleep -Milliseconds $delayMilliseconds
+            }
+        }
+    }
+
+    $errorMessage = if ($lastError) { $lastError.Message } else { "unknown error" }
+    Write-LauncherControlLog `
+        -Event "launcher.state.write.failed" `
+        -Message "Launcher state file write failed after retries." `
+        -Level "error" `
+        -Fields @{ path = $Path; attempts = $maxAttempts; error = $errorMessage }
+    throw "Launcher state file write failed after $maxAttempts attempts: $errorMessage"
+}
+
 function Save-State {
     param([hashtable]$State)
 
     Ensure-Directories
-    $State | ConvertTo-Json -Depth 6 | Set-Content -Path $statePath -Encoding utf8
+    $payloadJson = $State | ConvertTo-Json -Depth 6
+    Write-LauncherStateFile -Path $statePath -Value $payloadJson
 }
 
 function Remove-State {
@@ -1160,10 +1229,8 @@ function Wait-ForBackendHealthy {
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if (-not (Test-ProcessAlive $ProcessId)) {
-            return $false
-        }
-        if (Test-WebHealthy) {
+        $liveness = Get-ManagedBackendLiveness -TrackedPid $ProcessId
+        if ($liveness.Healthy) {
             return $true
         }
         Start-Sleep -Milliseconds 500
@@ -1234,6 +1301,73 @@ function Invoke-NativeCommand {
             $PSNativeCommandUseErrorActionPreference = $previousNativePreference
         }
         $ErrorActionPreference = $previousErrorActionPreference
+    }
+}
+
+function Invoke-HiddenNativeCommand {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CommandPath,
+        [string[]]$ArgumentList = @()
+    )
+
+    Ensure-Directories
+    $token = [guid]::NewGuid().ToString("N")
+    $stdoutPath = Join-Path $launcherDir "runtime-manager-client-$token.out.log"
+    $stderrPath = Join-Path $launcherDir "runtime-manager-client-$token.err.log"
+
+    try {
+        $proc = Start-Process `
+            -FilePath $CommandPath `
+            -ArgumentList $ArgumentList `
+            -WorkingDirectory $projectDir `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -PassThru
+
+        $proc.WaitForExit()
+
+        $stdout = if (Test-Path $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
+        $stderr = if (Test-Path $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
+
+        if ($stdout) {
+            [Console]::Out.Write($stdout)
+        }
+        if ($stderr) {
+            [Console]::Error.Write($stderr)
+        }
+
+        $exitCode = [int]$proc.ExitCode
+        if ($exitCode -ne 0) {
+            Write-LauncherControlLog `
+                -Event "launcher.runtime_manager_client.failed" `
+                -Message "Runtime manager client command failed." `
+                -Level "error" `
+                -Fields @{
+                    command_path = $CommandPath
+                    arguments = @($ArgumentList)
+                    exit_code = $exitCode
+                    stdout_log = $stdoutPath
+                    stderr_log = $stderrPath
+                }
+        } else {
+            Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+        }
+        return $exitCode
+    } catch {
+        Write-LauncherControlLog `
+            -Event "launcher.runtime_manager_client.spawn_failed" `
+            -Message "Runtime manager client command could not be started." `
+            -Level "error" `
+            -Fields @{
+                command_path = $CommandPath
+                arguments = @($ArgumentList)
+                error = $_.Exception.Message
+                stdout_log = $stdoutPath
+                stderr_log = $stderrPath
+            }
+        throw
     }
 }
 
@@ -1709,6 +1843,45 @@ function Get-ManagedBackendCandidatePids {
     return @($pids | Sort-Object -Unique)
 }
 
+function Get-PrimaryManagedBackendPid {
+    param([int]$FallbackPid = 0)
+
+    $candidatePids = @(Get-ManagedBackendCandidatePids)
+    if ($candidatePids.Count -gt 0) {
+        return [int]$candidatePids[0]
+    }
+    if ($FallbackPid -gt 0) {
+        return $FallbackPid
+    }
+    return 0
+}
+
+function Get-ManagedBackendLiveness {
+    param([int]$TrackedPid = 0)
+
+    $candidatePids = @(Get-ManagedBackendCandidatePids)
+    $trackedPidAlive = $false
+    if ($TrackedPid -gt 0) {
+        $trackedPidAlive = Test-ProcessAlive $TrackedPid
+    }
+    $healthy = Test-WebHealthy
+
+    return [pscustomobject]@{
+        Alive = [bool]($trackedPidAlive -or $candidatePids.Count -gt 0 -or $healthy)
+        Healthy = [bool]$healthy
+        TrackedPid = if ($TrackedPid -gt 0) { $TrackedPid } else { $null }
+        TrackedPidAlive = [bool]$trackedPidAlive
+        CandidatePids = @($candidatePids)
+    }
+}
+
+function Test-ManagedBackendAlive {
+    param([int]$TrackedPid = 0)
+
+    $liveness = Get-ManagedBackendLiveness -TrackedPid $TrackedPid
+    return [bool]$liveness.Alive
+}
+
 function Get-ManagedBrowserProcesses {
     Ensure-Directories
     $profileMarker = [regex]::Escape([System.IO.Path]::GetFullPath($browserProfileDir))
@@ -1890,18 +2063,27 @@ function Start-ManagedBackend {
         throw "Bundled web service failed to become healthy.$([Environment]::NewLine)$tail"
     }
 
+    $backendPid = Get-PrimaryManagedBackendPid -FallbackPid $proc.Id
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ backend = @{ pid = $proc.Id; health_status = "healthy" } }
+        $healthFields = @{ pid = $backendPid; url = $url }
+        if ($backendPid -ne $proc.Id) {
+            $healthFields.launcher_pid = $proc.Id
+        }
+        Update-RuntimeSceneManifest @{ backend = @{ pid = $backendPid; launcher_pid = $proc.Id; health_status = "healthy" } }
         Write-RuntimeSceneEvent `
             -Component "backend" `
             -Phase "health" `
             -EventCode "backend.health.succeeded" `
             -Message "Backend passed health checks." `
             -Outcome "succeeded" `
-            -Fields @{ pid = $proc.Id; url = $url }
+            -Fields $healthFields
     }
 
-    return $proc
+    return [pscustomobject]@{
+        Id = $backendPid
+        LauncherPid = $proc.Id
+        Process = $proc
+    }
 }
 
 function Start-ManagedBrowser {
@@ -2567,6 +2749,8 @@ function Run-SupervisorLoop {
         throw "Supervisor mode requires -SessionId."
     }
 
+    $reportedBackendPidMismatch = $false
+
     while ($true) {
         $state = Get-State
         if (-not $state) {
@@ -2576,9 +2760,28 @@ function Run-SupervisorLoop {
             return
         }
 
-        $backendAlive = $false
+        $trackedBackendPid = 0
         if ($state.backendPid) {
-            $backendAlive = Test-ProcessAlive ([int]$state.backendPid)
+            $trackedBackendPid = [int]$state.backendPid
+        }
+        $backendLiveness = Get-ManagedBackendLiveness -TrackedPid $trackedBackendPid
+        $backendAlive = [bool]$backendLiveness.Alive
+        if (
+            $backendAlive `
+            -and $trackedBackendPid -gt 0 `
+            -and -not $backendLiveness.TrackedPidAlive `
+            -and -not $reportedBackendPidMismatch
+        ) {
+            Write-LauncherControlLog `
+                -Event "launcher.supervisor.backend_pid.reconciled" `
+                -Message "Supervisor found a live backend even though the tracked backend PID is gone." `
+                -Level "warning" `
+                -Fields @{
+                    tracked_pid = $trackedBackendPid
+                    candidate_pids = @($backendLiveness.CandidatePids)
+                    healthy = [bool]$backendLiveness.Healthy
+                }
+            $reportedBackendPidMismatch = $true
         }
 
         $browserWindowCount = @(Get-ManagedBrowserWindowProcesses).Count
@@ -2620,9 +2823,38 @@ function Invoke-DesktopLifecycleMonitor {
         -Outcome "started" `
         -Fields @{ open_timeout_seconds = $OpenTimeoutSeconds; close_timeout_seconds = $CloseTimeoutSeconds; control_log_path = $launcherControlLogPath }
 
+    $initialClosure = Get-ManagedSessionClosureSnapshot
+    if (Test-ManagedSessionClosureSucceeded -Closure $initialClosure -RequireManagerClosed $true) {
+        Write-LauncherMonitorEvent `
+            -EventCode "launcher.monitor.already_closed" `
+            -Message "Launcher monitor found the workbench already closed." `
+            -Outcome "succeeded" `
+            -Fields @{
+                backend_stopped = [bool]$initialClosure.BackendStopped
+                browser_stopped = [bool]$initialClosure.BrowserStopped
+                manager_closed = [bool]$initialClosure.ManagerClosed
+                port_owner_pid = $initialClosure.PortOwnerPid
+            }
+        return
+    }
+
     $opened = Wait-ForRuntimeManagerWorkbenchOpen -TimeoutSeconds $OpenTimeoutSeconds
     if (-not $opened) {
         [void](Restore-RuntimeSceneContextFromState)
+        $closure = Get-ManagedSessionClosureSnapshot
+        if (Test-ManagedSessionClosureSucceeded -Closure $closure -RequireManagerClosed $true) {
+            Write-LauncherMonitorEvent `
+                -EventCode "launcher.monitor.closed_before_open" `
+                -Message "Workbench closed before the launcher monitor observed an open steady state." `
+                -Outcome "succeeded" `
+                -Fields @{
+                    backend_stopped = [bool]$closure.BackendStopped
+                    browser_stopped = [bool]$closure.BrowserStopped
+                    manager_closed = [bool]$closure.ManagerClosed
+                    port_owner_pid = $closure.PortOwnerPid
+                }
+            return
+        }
         $workbench = Get-RuntimeManagerWorkbench
         $message = "Workbench did not reach open/steady before launcher monitor timeout."
         $fields = @{
@@ -2760,7 +2992,7 @@ if ($runtimeManagerClientActions -contains $Action) {
             Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser:$NoBrowser
         }
         "stop" {
-            Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop"
+            Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop" -StopManager
         }
         "restart" {
             Invoke-RuntimeManagerClient -Mode "command" -CommandType "restart_workbench" -Reason "launcher_restart" -ForwardNoBrowser:$NoBrowser

@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 
 import pytest
 
@@ -7,6 +8,7 @@ from core.runtime_manager import cli as runtime_cli
 from core.runtime_manager import daemon
 from core.runtime_manager import constants
 from core.runtime_manager import evolution_store
+from core.runtime_manager import process_inventory
 from core.runtime_manager import state_store
 from core.runtime_manager import workbench_controller
 
@@ -32,6 +34,47 @@ def test_print_status_reports_stale_runtime_manager_source(capsys):
 
     output = capsys.readouterr().out
     assert "source changed" in output
+
+
+def test_cli_command_forwards_stop_manager(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(runtime_cli, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_cli,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
+        or {"commandId": "cmd-stop-manager"},
+    )
+
+    exit_code = runtime_cli.main(["command", "close_workbench", "--reason", "launcher_stop", "--stop-manager"])
+
+    assert exit_code == 0
+    assert calls == [
+        "ensure",
+        ("close_workbench", {"reason": "launcher_stop", "stopManager": True}, "cli"),
+    ]
+
+
+def test_cli_command_forwards_no_browser_without_stop_manager(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(runtime_cli, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_cli,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
+        or {"commandId": "cmd-no-browser"},
+    )
+
+    exit_code = runtime_cli.main(["command", "open_workbench", "--reason", "launcher_start", "--no-browser"])
+
+    assert exit_code == 0
+    assert calls == [
+        "ensure",
+        ("open_workbench", {"reason": "launcher_start", "noBrowser": True}, "cli"),
+    ]
+
 
 def test_load_runtime_snapshot_aligns_legacy_open_session(monkeypatch):
     monkeypatch.setattr(
@@ -215,6 +258,80 @@ def test_run_forever_refreshes_manager_started_at(monkeypatch):
     assert saved_states[0]["runtimeManager"]["sourceSignature"] == "sig-current"
 
 
+def test_run_forever_cleans_descendants_before_completing_stop_daemon(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    order: list[str] = []
+
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(daemon, "recover_processing_queue", lambda: None)
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "startedAt": "2026-05-18T01:00:00+00:00",
+            "command": {},
+            "workbench": {},
+        },
+    )
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T08:00:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "save_state", lambda state: state)
+
+    commands = iter(
+        [
+            (
+                "cmd-path",
+                {
+                    "commandId": "cmd-stop",
+                    "type": "close_workbench",
+                    "requestedBy": "test",
+                    "args": {"stopManager": True},
+                },
+            )
+        ]
+    )
+    monkeypatch.setattr(daemon, "claim_next_command", lambda: next(commands))
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_handle_command",
+        lambda payload: {
+            "commandId": payload["commandId"],
+            "accepted": True,
+            "completed": True,
+            "ok": True,
+            "message": "closed",
+            "stopDaemon": True,
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_prepare_daemon_shutdown",
+        lambda: order.append("cleanup") or {"closedEvolutionRuns": [], "descendantCleanup": {"terminated": [991]}},
+    )
+    monkeypatch.setattr(
+        daemon,
+        "complete_command",
+        lambda path, result: order.append(f"complete:{result['descendantCleanup']['terminated'][0]}"),
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: order.append(event_type))
+    monkeypatch.setattr(daemon, "clear_pid", lambda pid: order.append("clear_pid"))
+    def fake_exit(code: int = 0):
+        order.append(f"exit:{code}")
+        raise SystemExit(code)
+
+    monkeypatch.setattr(daemon, "_exit_current_process", fake_exit)
+
+    with pytest.raises(SystemExit) as exit_info:
+        runtime_daemon.run_forever()
+
+    assert order[:3] == ["cleanup", "daemon.stopped", "complete:991"]
+    assert order[-3:] == ["clear_pid", "exit:0", "clear_pid"]
+    assert exit_info.value.code == 0
+
+
 def test_handle_command_reports_exception_type(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     monkeypatch.setattr(daemon, "load_state", lambda: {"command": {}, "workbench": {}})
@@ -374,6 +491,50 @@ def test_load_launcher_state_supports_utf8_bom(tmp_path, monkeypatch):
     assert state["browserManaged"] is False
 
 
+def test_observe_workbench_drops_stale_backend_pid(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "backendPid": 40904,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "browserManaged": False,
+            "sessionId": "stale-no-browser",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 0)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "closed"
+    assert observation["backendPid"] == 0
+    assert observation["backendAlive"] is False
+    assert observation["backendObserved"] is False
+
+
+def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch):
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        kwargs["stdout"].write(b"ok\n")
+        kwargs["stdout"].flush()
+        return subprocess.CompletedProcess(args=args[0], returncode=0)
+
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 9101)
+    monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+
+    result = workbench_controller.run_launcher_action("internal-start")
+
+    assert result.returncode == 0
+    assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
+
+
 def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
@@ -523,6 +684,12 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
         "close_workbench",
         lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
+    closed_calls = []
+    monkeypatch.setattr(
+        daemon,
+        "_close_active_evolution_runs_for_shutdown",
+        lambda: closed_calls.append("closed") or [],
+    )
 
     result = runtime_daemon._handle_close_workbench(
         command_id="cmd-close",
@@ -530,8 +697,436 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     )
 
     assert result["ok"] is True
+    assert closed_calls == ["closed"]
     assert saved_states[0]["workbench"]["lastReason"] == "web_close_button"
     assert saved_states[0]["workbench"]["lastSource"] == "web_ui"
+
+
+def test_handle_close_workbench_closes_active_evolution_runs(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T09:00:00+00:00")
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "launcherStatePresent": True,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "backendPid": 28888,
+            "browserLaunchPid": 29999,
+            "browserWindowPid": 29999,
+            "sessionId": "managed-session",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        daemon,
+        "_close_active_evolution_runs_for_shutdown",
+        lambda: [
+            {"kind": "self_evolution_run", "runId": "web-self-active", "status": "cancelled"},
+            {"kind": "supervised_evolution_run", "runId": "web-supervised-active", "status": "cancelled"},
+        ],
+    )
+
+    result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={"stopManager": True})
+
+    assert result["ok"] is True
+    assert result["closedEvolutionRuns"] == [
+        {"kind": "self_evolution_run", "runId": "web-self-active", "status": "cancelled"},
+        {"kind": "supervised_evolution_run", "runId": "web-supervised-active", "status": "cancelled"},
+    ]
+    assert result["stopDaemon"] is True
+
+
+def test_handle_close_workbench_does_not_short_circuit_when_backend_port_is_still_owned(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    close_calls = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T09:00:00+00:00")
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "launcherStatePresent": True,
+            "browserManaged": True,
+            "browserWindowAlive": False,
+            "backendPid": 19964,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": True,
+            "backendPort": 8766,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 52396,
+            "browserLaunchPid": 5168,
+            "browserWindowPid": 5168,
+            "sessionId": "managed-session",
+            "url": "http://127.0.0.1:8766",
+        },
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+
+    def fake_close_workbench():
+        close_calls.append("close")
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(daemon, "close_workbench", fake_close_workbench)
+
+    result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench closed."
+    assert close_calls == ["close"]
+
+
+def test_handle_close_workbench_cleans_residual_processes_and_can_stop_daemon(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    cleanup_calls: list[dict] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T09:00:00+00:00")
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "launcherStatePresent": False,
+            "browserManaged": True,
+            "browserWindowAlive": False,
+            "backendPid": 0,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8766,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "sessionId": "",
+            "url": "http://127.0.0.1:8766",
+        },
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    def fake_cleanup(**kwargs):
+        cleanup_calls.append(kwargs)
+        return {"supported": True, "requested": [49780], "terminated": [49780], "remaining": []}
+
+    monkeypatch.setattr(daemon, "terminate_unmanaged_workbench_processes", fake_cleanup)
+
+    result = runtime_daemon._handle_close_workbench(
+        command_id="cmd-close",
+        args={"stopManager": True},
+    )
+
+    assert result["ok"] is True
+    assert result["stopDaemon"] is True
+    assert result["residualCleanup"]["terminated"] == [49780]
+    assert cleanup_calls
+    assert runtime_daemon._pid in cleanup_calls[0]["exclude_pids"]
+
+
+def test_handle_close_workbench_cleans_residual_processes_when_already_closed(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    cleanup_calls = []
+    close_calls = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "browserWindowAlive": False,
+        },
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_cleanup_residual_workbench_processes",
+        lambda: cleanup_calls.append("cleanup") or {"supported": True, "requested": [49128], "terminated": [49128], "remaining": []},
+    )
+
+    result = runtime_daemon._handle_close_workbench(
+        command_id="cmd-close",
+        args={"stopManager": True},
+    )
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench is already closed."
+    assert result["stopDaemon"] is True
+    assert result["residualCleanup"]["terminated"] == [49128]
+    assert cleanup_calls == ["cleanup"]
+    assert close_calls == []
+
+
+def test_observe_workbench_treats_repo_port_owner_as_open_when_tracked_pid_is_dead(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / "state.json"
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "backendPid": 19964,
+                "browserWindowPid": 5168,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8766",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 52396)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
+    monkeypatch.setattr(workbench_controller, "_pid_is_repo_workbench_backend", lambda pid: pid == 52396)
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "open"
+    assert observation["backendObserved"] is True
+    assert observation["backendPortListening"] is True
+    assert observation["backendPortOwnerPid"] == 52396
+    assert observation["backendPortOwnerTrusted"] is True
+    assert observation["backendPortConflict"] is False
+
+
+def test_observe_workbench_does_not_treat_external_port_owner_as_open(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / "state.json"
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "backendPid": 19964,
+                "browserWindowPid": 0,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8766",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 52396)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+    monkeypatch.setattr(workbench_controller, "_pid_is_repo_workbench_backend", lambda pid: False)
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "closed"
+    assert observation["backendObserved"] is False
+    assert observation["backendPortListening"] is True
+    assert observation["backendPortOwnerPid"] == 52396
+    assert observation["backendPortOwnerTrusted"] is False
+    assert observation["backendPortConflict"] is True
+
+
+def test_listening_pid_for_port_prefers_psutil(monkeypatch):
+    class LocalAddress:
+        port = 8766
+
+    class Connection:
+        laddr = LocalAddress()
+        status = "LISTEN"
+        pid = 52396
+
+    class FakePsutil:
+        @staticmethod
+        def net_connections(kind):
+            assert kind == "tcp"
+            return [Connection()]
+
+    monkeypatch.setitem(sys.modules, "psutil", FakePsutil)
+    monkeypatch.setattr(workbench_controller.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port_windows", lambda port: 0)
+
+    assert workbench_controller._listening_pid_for_port(8766) == 52396
+
+
+def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 49780,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
+                        "cwd": str(repo),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 18860,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": ["python", "-m", "core.runtime_manager.cli", "daemon"],
+                        "cwd": str(repo),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 3000,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "9001", "--no-browser"],
+                        "cwd": str(other),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo, exclude_pids={18860})
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["pid"] == 49780
+    assert payload["items"][0]["port"] == 8001
+
+
+def test_residual_process_payload_ignores_adjacent_repo_prefix_match(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adjacent_repo = tmp_path / "repo-backup"
+    adjacent_repo.mkdir()
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 49780,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": [
+                            "python",
+                            str(adjacent_repo / "scripts" / "web_workbench.py"),
+                            "--port",
+                            "8001",
+                            "--no-browser",
+                        ],
+                        "cwd": "",
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo)
+
+    assert payload == {"count": 0, "items": []}
+
+
+def test_residual_process_payload_uses_command_line_path_when_cwd_is_unavailable(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    script_path = repo / "scripts" / "web_workbench.py"
+    script_path.parent.mkdir(parents=True)
+    script_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 49780,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": ["python", str(script_path), "--port", "8001", "--no-browser"],
+                        "cwd": "",
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo)
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["pid"] == 49780
+    assert payload["items"][0]["port"] == 8001
 
 
 def test_atomic_write_text_retries_permission_error(tmp_path, monkeypatch):

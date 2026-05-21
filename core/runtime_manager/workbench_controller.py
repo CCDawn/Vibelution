@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 import locale
 import os
+import socket
 import subprocess
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
+
+from config.workbench import configured_backend_port
 
 from .constants import DEFAULT_HEALTH_URL, DEFAULT_URL, LAUNCHER_SCRIPT_PATH, LAUNCHER_STATE_PATH, PROJECT_ROOT
 
@@ -78,28 +82,138 @@ def _is_backend_healthy(url: str) -> bool:
         return False
 
 
+def _port_for_url(url: str) -> int:
+    try:
+        parsed = urllib.parse.urlparse(str(url or ""))
+    except ValueError:
+        return 0
+    if parsed.port:
+        return int(parsed.port)
+    if parsed.scheme == "https":
+        return 443
+    if parsed.scheme == "http":
+        return 80
+    return 0
+
+
+def _listening_pid_for_port_windows(port: int) -> int:
+    if port <= 0:
+        return 0
+    command = (
+        "Get-NetTCPConnection -LocalPort "
+        f"{int(port)} -State Listen -ErrorAction SilentlyContinue | "
+        "Select-Object -First 1 -ExpandProperty OwningProcess"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command", command],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            creationflags=_creation_flags(),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    if result.returncode != 0:
+        return 0
+    try:
+        return int(str(result.stdout or "").strip().splitlines()[0])
+    except (IndexError, ValueError):
+        return 0
+
+
+def _port_is_listening_socket(port: int) -> bool:
+    if port <= 0:
+        return False
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.settimeout(0.2)
+    try:
+        return probe.connect_ex(("127.0.0.1", int(port))) == 0
+    finally:
+        probe.close()
+
+
+def _listening_pid_for_port(port: int) -> int:
+    if port <= 0:
+        return 0
+    psutil_pid = _listening_pid_for_port_psutil(port)
+    if psutil_pid > 0:
+        return psutil_pid
+    if os.name == "nt":
+        return _listening_pid_for_port_windows(port)
+    return 0
+
+
+def _listening_pid_for_port_psutil(port: int) -> int:
+    if port <= 0:
+        return 0
+    try:
+        import psutil
+    except Exception:
+        return 0
+    try:
+        for connection in psutil.net_connections(kind="tcp"):
+            local = getattr(connection, "laddr", None)
+            if not local or int(getattr(local, "port", 0) or 0) != int(port):
+                continue
+            if str(getattr(connection, "status", "") or "").upper() != "LISTEN":
+                continue
+            pid = int(getattr(connection, "pid", 0) or 0)
+            if pid > 0:
+                return pid
+    except Exception:
+        return 0
+    return 0
+
+
+def _pid_is_repo_workbench_backend(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        from .process_inventory import list_repo_runtime_processes
+    except Exception:
+        return False
+    try:
+        return any(
+            item.pid == int(pid) and item.kind == "unmanaged_workbench"
+            for item in list_repo_runtime_processes(project_root=PROJECT_ROOT)
+        )
+    except Exception:
+        return False
+
+
 def observe_workbench() -> dict[str, Any]:
     launcher_state = _load_launcher_state()
     url = str(launcher_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL
-    backend_pid = int(launcher_state.get("backendPid") or 0)
+    state_backend_pid = int(launcher_state.get("backendPid") or 0)
     browser_launch_pid = int(launcher_state.get("browserLaunchPid") or 0)
     browser_window_pid = int(launcher_state.get("browserWindowPid") or 0)
     browser_managed = bool(launcher_state.get("browserManaged", True))
 
-    backend_alive = _is_process_alive(backend_pid)
+    backend_alive = _is_process_alive(state_backend_pid)
     health_probe_url = url if launcher_state else DEFAULT_URL
     healthy = _is_backend_healthy(health_probe_url)
+    port = _port_for_url(url)
+    port_owner_pid = _listening_pid_for_port(port)
+    port_listening = bool(port_owner_pid) or _port_is_listening_socket(port)
     browser_window_alive = _is_process_alive(browser_window_pid)
-    if not healthy:
+    port_owner_trusted = bool(
+        port_owner_pid > 0
+        and (
+            (state_backend_pid > 0 and port_owner_pid == state_backend_pid)
+            or _pid_is_repo_workbench_backend(port_owner_pid)
+        )
+    )
+    port_conflict = bool(port_owner_pid > 0 and not port_owner_trusted)
+    trusted_health = healthy and not port_conflict and (backend_alive or port_owner_trusted or port_owner_pid <= 0)
+    backend_observed = (backend_alive and not port_conflict) or port_owner_trusted or trusted_health
+    backend_pid = state_backend_pid if backend_alive else port_owner_pid if port_owner_trusted else 0
+    if not backend_observed and not browser_window_alive:
         observed_state = "closed"
-    elif not launcher_state:
-        observed_state = "open"
-    elif not browser_managed:
-        observed_state = "open"
-    elif browser_window_alive:
-        observed_state = "open"
     else:
-        observed_state = "closed"
+        observed_state = "open"
 
     return {
         "launcherStatePresent": bool(launcher_state),
@@ -112,6 +226,12 @@ def observe_workbench() -> dict[str, Any]:
         "healthUrl": _health_url_for(health_probe_url),
         "backendAlive": backend_alive,
         "backendHealthy": healthy,
+        "backendObserved": backend_observed,
+        "backendPort": port,
+        "backendPortListening": port_listening,
+        "backendPortOwnerPid": port_owner_pid,
+        "backendPortOwnerTrusted": port_owner_trusted,
+        "backendPortConflict": port_conflict,
         "browserWindowAlive": browser_window_alive,
         "observedState": observed_state,
     }
@@ -147,6 +267,8 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
     ]
     if no_browser:
         args.append("-NoBrowser")
+    env = os.environ.copy()
+    env["VIBELUTION_PORT"] = str(configured_backend_port())
     stdout_fd, stdout_path = tempfile.mkstemp(prefix="vibelution-launcher-stdout-", suffix=".log")
     stderr_fd, stderr_path = tempfile.mkstemp(prefix="vibelution-launcher-stderr-", suffix=".log")
     try:
@@ -158,6 +280,7 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
                 stdout=stdout_handle,
                 stderr=stderr_handle,
                 creationflags=_creation_flags(),
+                env=env,
                 check=False,
             )
         return subprocess.CompletedProcess(

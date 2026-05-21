@@ -21,6 +21,7 @@ def _build_parser() -> argparse.ArgumentParser:
     command_parser.add_argument("--requested-by", default="cli")
     command_parser.add_argument("--reason", default="")
     command_parser.add_argument("--no-browser", action="store_true")
+    command_parser.add_argument("--stop-manager", action="store_true")
     command_parser.add_argument("--wait", action="store_true")
     command_parser.add_argument("--timeout", type=float, default=45.0)
     command_parser.add_argument("--json", action="store_true", dest="json_output")
@@ -68,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
             payload_args["reason"] = args.reason
         if getattr(args, "no_browser", False):
             payload_args["noBrowser"] = True
+        if getattr(args, "stop_manager", False):
+            payload_args["stopManager"] = True
 
         command = submit_command(args.command_type, args=payload_args, requested_by=args.requested_by)
         if not args.wait:

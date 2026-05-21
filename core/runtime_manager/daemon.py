@@ -27,6 +27,11 @@ from .constants import (
     ensure_runtime_manager_dirs,
 )
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
+from .process_inventory import (
+    residual_process_payload,
+    terminate_process_descendants,
+    terminate_unmanaged_workbench_processes,
+)
 from .workbench_controller import close_workbench, observe_workbench, open_workbench, restart_workbench
 
 
@@ -37,6 +42,7 @@ _SOURCE_SIGNATURE_PATHS = (
     Path("core/runtime_manager/constants.py"),
     Path("core/runtime_manager/daemon.py"),
     Path("core/runtime_manager/evolution_store.py"),
+    Path("core/runtime_manager/process_inventory.py"),
     Path("core/runtime_manager/state_store.py"),
     Path("core/runtime_manager/workbench_controller.py"),
     Path("core/web/services/self_evolution_control_service.py"),
@@ -111,6 +117,10 @@ def _terminate_daemon_process(pid: int) -> None:
     clear_pid(pid)
 
 
+def _exit_current_process(exit_code: int = 0) -> None:
+    os._exit(int(exit_code))
+
+
 def _workbench_failure_should_stick(state: dict[str, Any], *, desired_state: str, observed_state: str) -> bool:
     if observed_state == desired_state:
         return False
@@ -129,6 +139,20 @@ def _open_request_already_satisfied(observation: dict[str, Any], *, no_browser: 
     if not bool(observation.get("browserManaged")):
         return False
     return bool(observation.get("browserWindowAlive"))
+
+
+def _close_request_already_satisfied(observation: dict[str, Any]) -> bool:
+    if str(observation.get("observedState") or "closed") != "closed":
+        return False
+    live_backend_evidence = (
+        bool(observation.get("backendAlive"))
+        or bool(observation.get("backendHealthy"))
+        or bool(observation.get("backendObserved"))
+        or bool(observation.get("backendPortListening"))
+        or int(observation.get("backendPortOwnerPid") or 0) > 0
+    )
+    live_browser_evidence = bool(observation.get("browserWindowAlive"))
+    return not live_backend_evidence and not live_browser_evidence
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -234,6 +258,11 @@ def load_runtime_snapshot() -> dict[str, Any]:
     state = load_state()
     observation = observe_workbench()
     manager_running = is_daemon_running()
+    manager_pid = load_pid() if manager_running else 0
+    residual_processes = residual_process_payload(
+        project_root=PROJECT_ROOT,
+        exclude_pids=_snapshot_residual_excluded_pids(observation, manager_pid),
+    )
 
     if not state:
         state = default_state()
@@ -270,6 +299,15 @@ def load_runtime_snapshot() -> dict[str, Any]:
             "backendPid": int(observation.get("backendPid") or 0),
             "browserLaunchPid": int(observation.get("browserLaunchPid") or 0),
             "browserWindowPid": int(observation.get("browserWindowPid") or 0),
+            "backendAlive": bool(observation.get("backendAlive")),
+            "backendHealthy": bool(observation.get("backendHealthy")),
+            "backendObserved": bool(observation.get("backendObserved")),
+            "backendPort": int(observation.get("backendPort") or 0),
+            "backendPortListening": bool(observation.get("backendPortListening")),
+            "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+            "backendPortOwnerTrusted": bool(observation.get("backendPortOwnerTrusted")),
+            "backendPortConflict": bool(observation.get("backendPortConflict")),
+            "browserWindowAlive": bool(observation.get("browserWindowAlive")),
             "browserManaged": bool(observation.get("browserManaged", True)),
             "sessionId": str(observation.get("sessionId") or "").strip(),
             "url": str(observation.get("url") or workbench.get("url") or "").strip(),
@@ -284,11 +322,12 @@ def load_runtime_snapshot() -> dict[str, Any]:
         }
     )
     state["runtimeState"] = "running" if manager_running else "idle"
-    state["managerPid"] = load_pid() if manager_running else 0
+    state["managerPid"] = manager_pid
     state["daemonRunning"] = manager_running
     state["projectRoot"] = str(PROJECT_ROOT)
     state["statePath"] = str(STATE_PATH)
     state["evolution"] = build_evolution_summary()
+    state["residualProcesses"] = residual_processes
     runtime_manager = state.get("runtimeManager") if isinstance(state.get("runtimeManager"), dict) else {}
     state["runtimeManager"] = {
         "sourceSignature": str(runtime_manager.get("sourceSignature") or "").strip(),
@@ -296,6 +335,18 @@ def load_runtime_snapshot() -> dict[str, Any]:
         "sourceMatches": _state_source_signature(state) == _process_source_signature(),
     }
     return state
+
+
+def _snapshot_residual_excluded_pids(observation: dict[str, Any], manager_pid: int = 0) -> set[int]:
+    excluded = {os.getpid(), int(manager_pid or 0)}
+    for key in ("backendPid", "backendPortOwnerPid", "browserLaunchPid", "browserWindowPid"):
+        try:
+            value = int(observation.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            excluded.add(value)
+    return excluded
 
 
 def _build_workbench_status_line(
@@ -325,6 +376,47 @@ def _launcher_error_detail(result: Any, fallback: str) -> str:
     return detail or fallback
 
 
+def _close_active_evolution_runs_for_shutdown() -> list[dict[str, Any]]:
+    reason = "Runtime manager is closing the workbench."
+    closed: list[dict[str, Any]] = []
+    for kind, closer in (
+        ("self_evolution_run", self_evolution_control_service.force_cancel_active_self_evolution_runs_for_shutdown),
+        ("supervised_evolution_run", supervised_control_service.force_cancel_active_supervised_runs_for_shutdown),
+    ):
+        try:
+            snapshots = closer(reason)
+        except Exception as exc:
+            closed.append(
+                {
+                    "kind": kind,
+                    "runId": "",
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        for snapshot in list(snapshots or []):
+            if not isinstance(snapshot, dict):
+                continue
+            closed.append(
+                {
+                    "kind": kind,
+                    "runId": str(snapshot.get("runId") or ""),
+                    "status": str(snapshot.get("status") or ""),
+                }
+            )
+    return closed
+
+
+def _prepare_daemon_shutdown() -> dict[str, Any]:
+    closed_runs = _close_active_evolution_runs_for_shutdown()
+    descendants = terminate_process_descendants(os.getpid(), exclude_pids={os.getpid()}, timeout_seconds=5.0)
+    return {
+        "closedEvolutionRuns": closed_runs,
+        "descendantCleanup": descendants,
+    }
+
+
 class RuntimeManagerDaemon:
     def __init__(self) -> None:
         self._pid = os.getpid()
@@ -350,7 +442,17 @@ class RuntimeManagerDaemon:
                 if command is not None:
                     path, payload = command
                     result = self._handle_command(payload)
+                    if bool(result.get("stopDaemon")):
+                        shutdown_cleanup = _prepare_daemon_shutdown()
+                        if shutdown_cleanup.get("closedEvolutionRuns"):
+                            result["closedEvolutionRuns"] = shutdown_cleanup["closedEvolutionRuns"]
+                        result["descendantCleanup"] = shutdown_cleanup.get("descendantCleanup")
+                        _append_event("daemon.stopped", {"commandId": str(result.get("commandId") or "")})
                     complete_command(path, result)
+                    if bool(result.get("stopDaemon")):
+                        clear_pid(self._pid)
+                        _exit_current_process(0)
+                        return
                     continue
 
                 state = self._reconcile_observation(load_state())
@@ -451,6 +553,10 @@ class RuntimeManagerDaemon:
 
     def _reconcile_observation(self, state: dict[str, Any]) -> dict[str, Any]:
         observation = observe_workbench()
+        residual_processes = residual_process_payload(
+            project_root=PROJECT_ROOT,
+            exclude_pids=_snapshot_residual_excluded_pids(observation, self._pid),
+        )
         workbench = state.setdefault("workbench", {})
         desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"
         observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
@@ -493,6 +599,15 @@ class RuntimeManagerDaemon:
                 "backendPid": int(observation.get("backendPid") or 0),
                 "browserLaunchPid": int(observation.get("browserLaunchPid") or 0),
                 "browserWindowPid": int(observation.get("browserWindowPid") or 0),
+                "backendAlive": bool(observation.get("backendAlive")),
+                "backendHealthy": bool(observation.get("backendHealthy")),
+                "backendObserved": bool(observation.get("backendObserved")),
+                "backendPort": int(observation.get("backendPort") or 0),
+                "backendPortListening": bool(observation.get("backendPortListening")),
+                "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+                "backendPortOwnerTrusted": bool(observation.get("backendPortOwnerTrusted")),
+                "backendPortConflict": bool(observation.get("backendPortConflict")),
+                "browserWindowAlive": bool(observation.get("browserWindowAlive")),
                 "browserManaged": bool(observation.get("browserManaged", True)),
                 "url": str(observation.get("url") or workbench.get("url") or "").strip(),
                 "statusLine": _build_workbench_status_line(
@@ -508,6 +623,7 @@ class RuntimeManagerDaemon:
         state["managerPid"] = self._pid
         state["runtimeManager"] = {"sourceSignature": _process_source_signature()}
         state["evolution"] = build_evolution_summary()
+        state["residualProcesses"] = residual_processes
         return state
 
     def _handle_open_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -542,13 +658,27 @@ class RuntimeManagerDaemon:
         state = load_state()
         workbench = state.setdefault("workbench", {})
         observation = observe_workbench()
-        if str(observation.get("observedState") or "closed") == "closed" and str(workbench.get("phase") or "") != "failed":
+        if _close_request_already_satisfied(observation) and str(workbench.get("phase") or "") != "failed":
+            closed_runs = _close_active_evolution_runs_for_shutdown()
             workbench["desiredState"] = "closed"
             workbench["phase"] = "steady"
             workbench["failureMessage"] = ""
             save_state(self._reconcile_observation(state))
-            return self._finish_command(command_id, ok=True, message="Workbench is already closed.")
+            cleanup_result = self._cleanup_residual_workbench_processes()
+            if bool(args.get("stopManager")):
+                _append_event("daemon.stop_requested", {"commandId": command_id, "reason": "close_workbench"})
+            return self._finish_command(
+                command_id,
+                ok=True,
+                message="Workbench is already closed.",
+                result_data={
+                    "residualCleanup": cleanup_result,
+                    "closedEvolutionRuns": closed_runs,
+                    "stopDaemon": bool(args.get("stopManager")),
+                },
+            )
 
+        closed_runs = _close_active_evolution_runs_for_shutdown()
         workbench.update(
             {
                 "desiredState": "closed",
@@ -563,7 +693,26 @@ class RuntimeManagerDaemon:
         result = close_workbench()
         if result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(result, "Closing the workbench failed."))
-        return self._finish_command(command_id, ok=True, message="Workbench closed.")
+        cleanup_result = self._cleanup_residual_workbench_processes()
+        final_result = self._finish_command(
+            command_id,
+            ok=True,
+            message="Workbench closed.",
+            result_data={
+                "residualCleanup": cleanup_result,
+                "closedEvolutionRuns": closed_runs,
+                "stopDaemon": bool(args.get("stopManager")),
+            },
+        )
+        if bool(args.get("stopManager")):
+            _append_event("daemon.stop_requested", {"commandId": command_id, "reason": "close_workbench"})
+        return final_result
+
+    def _cleanup_residual_workbench_processes(self) -> dict[str, Any]:
+        return terminate_unmanaged_workbench_processes(
+            project_root=PROJECT_ROOT,
+            exclude_pids=_snapshot_residual_excluded_pids(observe_workbench(), self._pid),
+        )
 
     def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
