@@ -1594,7 +1594,6 @@
   .monitorMetrics,
   .monitorMetricsDense,
   .statusMetricGrid,
-  .runDetailMetricGrid,
   .detailFactGrid,
   .runSignalGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1627,7 +1626,6 @@
   .monitorMetrics,
   .monitorMetricsDense,
   .statusMetricGrid,
-  .runDetailMetricGrid,
   .detailFactGrid,
   .runSignalGrid,
   .runsCommandMetrics,
