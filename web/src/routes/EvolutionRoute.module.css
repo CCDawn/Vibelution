@@ -1360,6 +1360,28 @@
   line-height: 1.45;
 }
 
+.runScoreDiagnosis {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+}
+
+.runScoreDiagnosis span {
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+}
+
+.runScoreDiagnosis p {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg-primary);
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
 .runScoreFacts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1458,11 +1480,6 @@
 .runRuntimeNote p {
   margin: 0;
   line-height: 1.45;
-}
-
-.runDiagnosisSection {
-  margin-top: 10px;
-  padding-top: 12px;
 }
 
 .dangerDetailSection {
