@@ -1045,8 +1045,8 @@
 
 .runsCommandStrip {
   display: grid;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 10px;
+  padding: 12px 14px;
 }
 
 .runsCommandHeader {
@@ -1057,27 +1057,19 @@
   min-width: 0;
 }
 
-.runsCommandBody {
-  display: grid;
-  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.35fr);
-  gap: 12px;
-  align-items: stretch;
-  min-width: 0;
-}
-
 .runsCommandMetrics {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
 }
 
 .compactFact {
   display: grid;
   align-content: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  min-height: 54px;
-  padding: 9px 10px;
+  min-height: 48px;
+  padding: 8px 9px;
   border-radius: 8px;
   border: 1px solid var(--border-hairline);
   background: var(--surface-card-subtle);
@@ -1098,74 +1090,6 @@
   font-size: 0.92rem;
   font-weight: 650;
   overflow-wrap: anywhere;
-}
-
-.runsSelectedSnapshot {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(280px, 0.92fr);
-  gap: 10px;
-  min-width: 0;
-}
-
-.runsSnapshotPrimary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 10px;
-  align-content: center;
-  min-width: 0;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border-hairline);
-  background: var(--surface-card-muted);
-}
-
-.runsSnapshotPrimary > strong {
-  min-width: 0;
-  color: var(--fg-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.runsSnapshotPrimary > p {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: var(--fg-secondary);
-  line-height: 1.45;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.runsSnapshotFacts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.runsSnapshotFacts span {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-  min-height: 34px;
-  padding: 7px 9px;
-  border-radius: 8px;
-  border: 1px solid var(--border-hairline);
-  background: var(--surface-card-subtle);
-  color: var(--fg-secondary);
-  font-size: 0.8rem;
-}
-
-.runsSnapshotFacts strong {
-  min-width: 0;
-  color: var(--fg-primary);
-  font-size: 0.86rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .runsWorkspace {
@@ -1406,9 +1330,9 @@
 
 .runDetailOverview {
   display: grid;
-  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1fr);
+  grid-template-columns: minmax(190px, 0.42fr) minmax(0, 1fr);
   gap: 12px;
-  align-items: stretch;
+  align-items: start;
   padding: 12px;
   border-radius: 8px;
   border: 1px solid var(--border-hairline);
@@ -1433,10 +1357,28 @@
   line-height: 1.45;
 }
 
-.runDetailMetricGrid {
+.runScoreFacts {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+  margin-top: 4px;
+}
+
+.runScoreFacts span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+}
+
+.runScoreFacts strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detailLead {
@@ -1484,6 +1426,21 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.runSignalStack {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.runSignalStack h3 {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--fg-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .runRuntimeNote {
@@ -1617,15 +1574,13 @@
   .overviewSecondaryGrid,
   .runsHeaderBody,
   .runsWorkspace,
-  .runsCommandBody,
   .masterDetail,
   .controlSurface {
     grid-template-columns: 1fr;
   }
 
   .compactFieldGrid,
-  .filterRow,
-  .runsSelectedSnapshot {
+  .filterRow {
     grid-template-columns: 1fr;
   }
 }
@@ -1676,7 +1631,7 @@
   .detailFactGrid,
   .runSignalGrid,
   .runsCommandMetrics,
-  .runsSnapshotFacts {
+  .runScoreFacts {
     grid-template-columns: 1fr;
   }
 
