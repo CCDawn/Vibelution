@@ -460,6 +460,107 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_closure_record_normalizes_successful_manifest_runtime_manager(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Write-ManagedSessionClosureRecord"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Write-ManagedSessionClosureRecord was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:currentRuntimeSceneId = "scene-1"
+$launcherControlLogPath = "control.log"
+$script:manifestUpdates = @()
+$script:controlFields = @()
+function Get-RuntimeSceneFinalState {
+    param([string]$Reason)
+    if ($Reason -match "startup failure") {
+        return @{ status = "failed"; result = "startup_failed" }
+    }
+    return @{ status = "stopped"; result = "runtime_manager_stop" }
+}
+function Get-RuntimeSceneRelativePaths {
+    return [pscustomobject]@{ LauncherControl = "raw/launcher-control.log" }
+}
+function Update-RuntimeSceneManifest {
+    param([hashtable]$Changes)
+    $script:manifestUpdates += ,$Changes
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlFields += ,$Fields
+}
+
+$closingSnapshot = [pscustomobject]@{
+    BackendStopped = $true
+    BrowserStopped = $true
+    ManagerClosed = $false
+    BackendPids = @()
+    BrowserPids = @()
+    BrowserWindowCount = 0
+    PortOwnerPid = $null
+    DesiredState = "closed"
+    ObservedState = "open"
+    Phase = "closing"
+    FailureMessage = ""
+}
+
+Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "runtime manager stop" -Source "launcher_stop" -Success $true
+Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "desktop monitor shutdown timeout" -Source "desktop_monitor" -Success $false
+Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "startup failure" -Source "launcher_stop" -Success $true
+
+$successRuntimeManager = $script:manifestUpdates[0].runtime_manager
+$failedRuntimeManager = $script:manifestUpdates[1].runtime_manager
+$startupFailureRuntimeManager = $script:manifestUpdates[2].runtime_manager
+$payload = @{
+    success = $successRuntimeManager
+    failed = $failedRuntimeManager
+    startupFailure = $startupFailureRuntimeManager
+    controlLogPhase = $script:controlFields[0].phase
+    controlLogObservedState = $script:controlFields[0].observed_state
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["success"] == {
+        "desired_state": "closed",
+        "failure_message": "",
+        "observed_state": "closed",
+        "phase": "steady",
+    }
+    assert payload["failed"]["observed_state"] == "open"
+    assert payload["failed"]["phase"] == "closing"
+    assert payload["startupFailure"]["observed_state"] == "open"
+    assert payload["startupFailure"]["phase"] == "closing"
+    assert payload["controlLogObservedState"] == "open"
+    assert payload["controlLogPhase"] == "closing"
+
+
 def test_launcher_backend_liveness_accepts_reconciled_backend(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
