@@ -3892,6 +3892,7 @@ def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeyp
 
 def test_config_open_environment_opens_system_ui_without_returning_keys(monkeypatch):
     launched_commands = []
+    focused_windows = []
 
     def fake_run(command, **kwargs):
         launched_commands.append((command, kwargs))
@@ -3899,6 +3900,7 @@ def test_config_open_environment_opens_system_ui_without_returning_keys(monkeypa
 
     monkeypatch.setattr(config_service.os, "name", "nt")
     monkeypatch.setattr(config_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(config_service, "_focus_environment_variables_window", lambda: focused_windows.append("focused") or True)
     monkeypatch.setenv("VIBELUTION_SECRET_TEST_KEY", "should-not-leak")
 
     response = client.post("/api/config/open-environment", json={})
@@ -3907,7 +3909,9 @@ def test_config_open_environment_opens_system_ui_without_returning_keys(monkeypa
     payload = response.json()
     assert payload["opened"] is True
     assert payload["method"] == "interactive-scheduled-task"
+    assert payload["focused"] is True
     assert launched_commands
+    assert focused_windows == ["focused"]
     assert [command[0][1] for command in launched_commands] == ["/Delete", "/Create", "/Run", "/Delete"]
     create_command = launched_commands[1][0]
     assert "/IT" in create_command
@@ -3938,6 +3942,77 @@ def test_config_open_environment_reports_launch_failure(monkeypatch):
 
     assert response.status_code == 422
     assert "无法打开系统环境变量窗口" in response.json()["detail"]
+
+
+def test_config_open_environment_focuses_detected_window(monkeypatch):
+    focused_handles = []
+
+    monkeypatch.setattr(config_service.os, "name", "nt")
+    monkeypatch.setattr(config_service, "_find_environment_variables_window", lambda: 12345)
+    monkeypatch.setattr(config_service, "_focus_window", lambda hwnd: focused_handles.append(hwnd) or True)
+
+    assert config_service._focus_environment_variables_window(timeout_seconds=0.01) is True
+    assert focused_handles == [12345]
+
+
+def test_config_open_environment_promotes_window_when_foreground_is_blocked(monkeypatch):
+    calls = []
+
+    class FakeUser32:
+        def GetForegroundWindow(self):
+            return 0
+
+        def GetWindowThreadProcessId(self, hwnd, process_id):
+            return 222 if hwnd == 12345 else 0
+
+        def AttachThreadInput(self, current_thread, target_thread, attach):
+            calls.append(("AttachThreadInput", current_thread, target_thread, attach))
+            return True
+
+        def ShowWindow(self, hwnd, mode):
+            calls.append(("ShowWindow", hwnd, mode))
+            return True
+
+        def BringWindowToTop(self, hwnd):
+            calls.append(("BringWindowToTop", hwnd))
+            return True
+
+        def SetActiveWindow(self, hwnd):
+            calls.append(("SetActiveWindow", hwnd))
+            return hwnd
+
+        def SetFocus(self, hwnd):
+            calls.append(("SetFocus", hwnd))
+            return hwnd
+
+        def SetForegroundWindow(self, hwnd):
+            calls.append(("SetForegroundWindow", hwnd))
+            return False
+
+        def SwitchToThisWindow(self, hwnd, alt_tab):
+            calls.append(("SwitchToThisWindow", hwnd, alt_tab))
+            return None
+
+        def SetWindowPos(self, hwnd, insert_after, x, y, cx, cy, flags):
+            calls.append(("SetWindowPos", hwnd, insert_after, flags))
+            return True
+
+    class FakeKernel32:
+        def GetCurrentThreadId(self):
+            return 111
+
+    monkeypatch.setattr(
+        config_service.ctypes,
+        "windll",
+        SimpleNamespace(user32=FakeUser32(), kernel32=FakeKernel32()),
+        raising=False,
+    )
+
+    assert config_service._focus_window(12345) is False
+    assert ("AttachThreadInput", 111, 222, True) in calls
+    assert ("AttachThreadInput", 111, 222, False) in calls
+    assert ("SetWindowPos", 12345, config_service._HWND_TOPMOST, config_service._SWP_NOMOVE | config_service._SWP_NOSIZE | config_service._SWP_SHOWWINDOW) in calls
+    assert ("SetWindowPos", 12345, config_service._HWND_NOTOPMOST, config_service._SWP_NOMOVE | config_service._SWP_NOSIZE | config_service._SWP_SHOWWINDOW) in calls
 
 
 def test_config_workspace_test_llm_uses_pending_draft_key(monkeypatch):
