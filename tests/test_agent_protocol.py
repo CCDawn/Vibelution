@@ -3035,6 +3035,40 @@ class TestRuntimeStateMemoryFlow:
 
         assert request is None
 
+    def test_supervised_dry_run_transaction_probe_goal_is_not_delegated(self):
+        governor = DelegationGovernor(
+            spawn_execute=lambda *_args, **_kwargs: ("{}", None),
+            sync_runtime_state_memory=lambda: None,
+            ui_getter=lambda: None,
+            session_getter=lambda: SimpleNamespace(
+                get_attention_snapshot=lambda: {
+                    "last_validation_summary": "ruff lint 通过",
+                    "last_validation_passed": True,
+                    "recent_blockers": [],
+                    "modified_paths": [],
+                    "delegation_history": [],
+                    "delegation_failures": [],
+                    "delegation_evidence_digest": "",
+                },
+                has_recent_delegation=lambda *_args, **_kwargs: False,
+                _normalize_scope_signature=lambda scope: str(scope),
+            ),
+        )
+
+        request = governor.build_request(
+            goal=(
+                "执行一轮监督进化 dry-run 基线探针："
+                "1) 只调用一次 open_evolution_transaction_tool 开账，summary 写“supervised baseline probe”；"
+                "2) 调用 python_lint_tool 检查 scripts/evolution_harness.py；"
+                "3) lint 完成后必须立即调用 close_evolution_transaction_tool 关账，lint 通过则 status=success；"
+                "4) 不要再次开账，不要修改文件，不要触发重启，不要委派子 agent。"
+            ),
+            iteration=2,
+            total_tool_calls=3,
+        )
+
+        assert request is None
+
     def test_gym_probe_goal_is_not_delegated(self):
         governor = DelegationGovernor(
             spawn_execute=lambda *_args, **_kwargs: ("{}", None),

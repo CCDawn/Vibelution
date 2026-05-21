@@ -311,6 +311,17 @@ class DelegationGovernor:
             "safe_modify_probe.py",
             "do not call spawn_agent_tool",
             "do not delegate",
+            "不要调用 spawn_agent_tool",
+            "不调用 spawn_agent_tool",
+            "禁止调用 spawn_agent_tool",
+            "不要委派",
+            "不委派",
+            "禁止委派",
+            "不得委派",
+            "不要派发子 agent",
+            "禁止派发子 agent",
+            "不要派发新的 agent",
+            "禁止派发新的 agent",
         ]
         return any(marker in text for marker in probe_markers)
 
