@@ -124,7 +124,10 @@ def test_materialize_builtin_supervised_bundle_respects_limit(tmp_path: Path):
     full_bundle = json.loads(Path(full.bundle_path).read_text(encoding="utf-8"))
 
     assert result.case_count == 1
+    assert result.bundle_name.endswith("_limit_1")
     assert len(bundle["cases"]) == 1
+    assert bundle["bundle_name"] == result.bundle_name
+    assert Path(result.bundle_path).stem == result.bundle_name
     assert result.bundle_path != full.bundle_path
     assert len(full_bundle["cases"]) > 1
 

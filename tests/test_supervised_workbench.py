@@ -93,6 +93,14 @@ def test_prepare_dataset_run_returns_runnable_bundle(monkeypatch, tmp_path: Path
     assert "dataset: custom_prompt_jsonl" in prepared.summary
 
 
+def test_prepare_dataset_run_uses_limited_supervised_bundle_name(tmp_path: Path):
+    prepared = prepare_dataset_run(tmp_path, "supervised_dry_run", 1)
+
+    assert prepared.bundle_name.endswith("_limit_1")
+    assert prepared.dataset_limit == 1
+    assert "cases: 1" in prepared.summary
+
+
 def test_prepare_dataset_run_returns_blocked_reason(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(
         "core.evaluation.dataset_registry.materialize_dataset_bundle",
