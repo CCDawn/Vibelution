@@ -161,6 +161,8 @@ describe("config route copy", () => {
 
     expect(CONFIG_COPY.zh.profilesTitle).toBe("任务模型");
     expect(CONFIG_COPY.en.profilesTitle).toBe("Task Models");
+    expect(CONFIG_COPY.zh.openEnvironment).toBe("打开系统环境变量");
+    expect(CONFIG_COPY.en.openEnvironment).toBe("Open system environment variables");
     expect(zhCopy).not.toContain("配置档");
     expect(zhCopy).not.toContain("模型档案");
     expect(enCopy).not.toMatch(/\bprofiles?\b/i);

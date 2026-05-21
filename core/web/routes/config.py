@@ -16,6 +16,7 @@ from core.web.services.config_service import (
     draft_update_model,
     get_config_summary,
     get_config_workspace,
+    open_system_environment_settings,
     preview_config_workspace,
     run_draft_llm_test,
     update_intake_mode,
@@ -90,6 +91,14 @@ def public_config_summary() -> dict:
 @router.get("/config/workspace")
 def config_workspace() -> dict:
     return get_config_workspace()
+
+
+@router.post("/config/open-environment")
+def config_open_environment() -> dict:
+    try:
+        return open_system_environment_settings()
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
 
 
 @router.post("/config/draft/preview")
