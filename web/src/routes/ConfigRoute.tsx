@@ -4,6 +4,7 @@ import {
   Blocks,
   ChevronRight,
   Database,
+  ExternalLink,
   Languages,
   Pencil,
   Play,
@@ -197,6 +198,10 @@ export const CONFIG_COPY = {
     refresh: "重新读取",
     validateDraft: "检查当前修改",
     resetDraft: "还原 JSON 文本",
+    openEnvironment: "打开系统环境变量",
+    openEnvironmentHint: "会打开 Windows 系统窗口，方便你自己查看当前使用了哪些 key。",
+    openEnvironmentPending: "正在打开系统环境变量",
+    openEnvironmentOpened: "已打开系统环境变量窗口。",
     saveConfig: "保存到 config.toml",
     applying: "保存中",
     interfaceLanguage: "界面语言",
@@ -341,6 +346,10 @@ export const CONFIG_COPY = {
     refresh: "Reload",
     validateDraft: "Check changes",
     resetDraft: "Restore JSON text",
+    openEnvironment: "Open system environment variables",
+    openEnvironmentHint: "Opens the Windows system dialog so you can inspect which keys are in use.",
+    openEnvironmentPending: "Opening system environment variables",
+    openEnvironmentOpened: "System environment variables window opened.",
     saveConfig: "Save to config.toml",
     applying: "Saving",
     interfaceLanguage: "Interface language",
@@ -1414,6 +1423,18 @@ export function ConfigRoute() {
     }
   }
 
+  async function handleOpenEnvironment() {
+    setBusyAction(copy.openEnvironmentPending);
+    try {
+      await requestJson<{ opened: boolean }>("/api/config/open-environment", {});
+      setNotice({ tone: "success", text: copy.openEnvironmentOpened });
+    } catch (error) {
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   async function handleApply() {
     setBusyAction(copy.applying);
     try {
@@ -1951,6 +1972,10 @@ export function ConfigRoute() {
               <RefreshCw size={14} />
               {copy.refresh}
             </button>
+            <button type="button" className={styles.actionButton} disabled={Boolean(busyAction)} onClick={handleOpenEnvironment}>
+              <ExternalLink size={14} />
+              {busyAction === copy.openEnvironmentPending ? copy.openEnvironmentPending : copy.openEnvironment}
+            </button>
             <button
               type="button"
               className={styles.actionButton}
@@ -1963,6 +1988,7 @@ export function ConfigRoute() {
               <RotateCcw size={14} />
               {copy.resetDraft}
             </button>
+            <span className={styles.helperText}>{copy.openEnvironmentHint}</span>
           </div>
           <details className={styles.rawConfigPanel}>
             <summary>{copy.rawToml}</summary>

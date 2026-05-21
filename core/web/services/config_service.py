@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import os
 import secrets
+import subprocess
 from typing import Any
 
 import config.public_config as public_config_module
@@ -930,6 +932,20 @@ def run_draft_llm_test(
     return _run_draft_test_llm_connection(submitted, profile_id, _normalize_draft_meta(draft_meta))
 
 
+def open_system_environment_settings() -> dict[str, bool]:
+    """Open the OS environment variable editor without reading environment values."""
+    if os.name != "nt":
+        raise ValueError("系统环境变量窗口目前只支持 Windows。")
+    try:
+        subprocess.Popen(
+            ["rundll32.exe", "sysdm.cpl,EditEnvironmentVariables"],
+            close_fds=True,
+        )
+    except OSError as exc:
+        raise ValueError(f"无法打开系统环境变量窗口：{exc}") from exc
+    return {"opened": True}
+
+
 def apply_config_workspace(
     public_config: dict[str, Any] | None,
     *,
@@ -997,6 +1013,7 @@ __all__ = [
     "draft_update_model",
     "get_config_summary",
     "get_config_workspace",
+    "open_system_environment_settings",
     "preview_config_workspace",
     "run_draft_llm_test",
     "update_intake_mode",

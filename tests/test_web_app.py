@@ -3890,6 +3890,49 @@ def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeyp
     assert next(item for item in payload["profileCards"] if item["profileId"] == "primary")["requiredModelMissing"] is True
 
 
+def test_config_open_environment_opens_system_ui_without_returning_keys(monkeypatch):
+    launched_commands = []
+
+    class FakePopen:
+        def __init__(self, command, **kwargs):
+            launched_commands.append((command, kwargs))
+
+    monkeypatch.setattr(config_service.os, "name", "nt")
+    monkeypatch.setattr(config_service.subprocess, "Popen", FakePopen)
+    monkeypatch.setenv("VIBELUTION_SECRET_TEST_KEY", "should-not-leak")
+
+    response = client.post("/api/config/open-environment", json={})
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload == {"opened": True}
+    assert launched_commands
+    assert "should-not-leak" not in response.text
+    assert "VIBELUTION_SECRET_TEST_KEY" not in response.text
+
+
+def test_config_open_environment_reports_unsupported_platform(monkeypatch):
+    monkeypatch.setattr(config_service.os, "name", "posix")
+
+    response = client.post("/api/config/open-environment", json={})
+
+    assert response.status_code == 422
+    assert "Windows" in response.json()["detail"]
+
+
+def test_config_open_environment_reports_launch_failure(monkeypatch):
+    def fail_popen(command, **kwargs):
+        raise OSError("blocked")
+
+    monkeypatch.setattr(config_service.os, "name", "nt")
+    monkeypatch.setattr(config_service.subprocess, "Popen", fail_popen)
+
+    response = client.post("/api/config/open-environment", json={})
+
+    assert response.status_code == 422
+    assert "无法打开系统环境变量窗口" in response.json()["detail"]
+
+
 def test_config_workspace_test_llm_uses_pending_draft_key(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
 
