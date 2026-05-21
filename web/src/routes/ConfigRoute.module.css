@@ -23,9 +23,9 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(36, 42, 47, 0.92), rgba(27, 31, 35, 0.96)),
-    rgba(27, 31, 35, 0.92);
-  box-shadow: 0 14px 30px rgba(10, 12, 14, 0.18);
+    linear-gradient(180deg, var(--surface-panel-strong), var(--surface-panel)),
+    var(--surface-panel);
+  box-shadow: var(--shadow-soft);
 }
 
 .sidebar {
@@ -51,9 +51,9 @@
 
 .sidebarStatus {
   padding: 12px 14px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
 }
 
 .eyebrow {
@@ -98,9 +98,9 @@
   gap: 8px;
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: var(--control-radius);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
   color: var(--fg-secondary);
   font-size: 0.86rem;
   font-weight: 500;
@@ -117,14 +117,14 @@
 }
 
 .sectionLink:hover {
-  border-color: rgba(216, 167, 91, 0.26);
-  background: rgba(255, 255, 255, 0.05);
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  background: var(--surface-card-hover);
   color: var(--fg-primary);
 }
 
 .sectionLinkActive {
-  border-color: rgba(216, 167, 91, 0.34);
-  background: rgba(216, 167, 91, 0.14);
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
   color: var(--accent-warm-2);
 }
 
@@ -166,26 +166,26 @@
 .statusBadge,
 .inlineBadge {
   color: var(--fg-secondary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-card-muted);
 }
 
 .statusBadgeReady {
-  color: #8fd0b5;
-  background: rgba(124, 155, 150, 0.14);
-  border-color: rgba(124, 155, 150, 0.26);
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
 }
 
 .statusBadgePending,
 .inlineBadgeWarning {
   color: var(--accent-warm-2);
-  background: rgba(216, 167, 91, 0.12);
-  border-color: rgba(216, 167, 91, 0.22);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
 }
 
 .healthBadgeBlocked {
   color: var(--state-error);
-  background: rgba(187, 108, 93, 0.14);
-  border-color: rgba(187, 108, 93, 0.26);
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
+  border-color: color-mix(in srgb, var(--state-error) 26%, transparent);
 }
 
 .content {
@@ -198,20 +198,20 @@
 .notice {
   padding: 12px 14px;
   border-radius: 8px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-muted);
 }
 
 .noticeSuccess {
-  color: #8fd0b5;
-  background: rgba(124, 155, 150, 0.12);
-  border-color: rgba(124, 155, 150, 0.24);
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, transparent);
 }
 
 .noticeError {
-  color: #e79b9b;
-  background: rgba(192, 94, 94, 0.14);
-  border-color: rgba(192, 94, 94, 0.24);
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
+  border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
 }
 
 .sectionSurface,
@@ -250,9 +250,9 @@
   gap: 8px;
   min-height: 34px;
   padding: 0 12px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-card-subtle);
 }
 
 .sectionHeaderMetaLabel {
@@ -267,9 +267,9 @@
   align-items: center;
   gap: 8px;
   padding: 4px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-card-subtle);
   flex-wrap: wrap;
   justify-content: end;
 }
@@ -352,9 +352,9 @@
 
 .logHelperCard {
   align-content: start;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
 }
 
 .logHelperHeader {
@@ -379,9 +379,9 @@
 
 .findingCard,
 .quickActionItem {
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
 }
 
 .healthPanel {
@@ -435,9 +435,9 @@
 .findingRecommendation {
   min-width: 0;
   padding: 9px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-card-subtle);
 }
 
 .findingEvidence span {
@@ -476,8 +476,8 @@
 }
 
 .quickActionItem:hover {
-  border-color: rgba(216, 167, 91, 0.32);
-  background: rgba(255, 255, 255, 0.05);
+  border-color: color-mix(in srgb, var(--accent-warm) 32%, transparent);
+  background: var(--surface-card-hover);
 }
 
 .quickActionItem div {
@@ -512,9 +512,9 @@
 .logHelperSignal {
   min-width: 0;
   padding: 10px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-card-subtle);
 }
 
 .logHelperMetaGrid span {
@@ -595,21 +595,21 @@
 .dangerButton,
 .segmentButton {
   border: 1px solid var(--border-soft);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-card-subtle);
   color: var(--fg-primary);
 }
 
 .primaryButton {
-  border: 1px solid rgba(216, 167, 91, 0.26);
-  background: rgba(216, 167, 91, 0.16);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
   color: var(--accent-warm-2);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 var(--surface-card-hover);
 }
 
 .dangerButton {
-  color: #e79b9b;
-  border-color: rgba(192, 94, 94, 0.24);
-  background: rgba(192, 94, 94, 0.12);
+  color: var(--state-error);
+  border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
+  background: color-mix(in srgb, var(--state-error) 12%, transparent);
 }
 
 .actionButton:hover,
@@ -627,8 +627,8 @@
 }
 
 .primaryButton:hover {
-  border-color: rgba(216, 167, 91, 0.4);
-  background: rgba(216, 167, 91, 0.2);
+  border-color: color-mix(in srgb, var(--accent-warm) 40%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 20%, transparent);
 }
 
 .actionButton:disabled,
@@ -646,7 +646,7 @@
   padding: 4px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: rgba(27, 31, 35, 0.82);
+  background: var(--surface-panel);
   flex-wrap: wrap;
 }
 
@@ -658,7 +658,7 @@
 }
 
 .segmentButtonActive {
-  background: rgba(216, 167, 91, 0.16);
+  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
   color: var(--accent-warm-2);
 }
 
@@ -676,9 +676,9 @@
 .rawToml {
   margin: 0;
   padding: 14px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(11, 13, 15, 0.72);
+  background: var(--surface-code);
   color: var(--fg-secondary);
   line-height: 1.55;
 }
@@ -723,7 +723,7 @@
   min-width: 0;
   border: 1px solid var(--border-soft);
   border-radius: var(--control-radius);
-  background: rgba(21, 24, 27, 0.86);
+  background: var(--surface-input);
   color: var(--fg-primary);
   padding: 10px 12px;
   font: inherit;
@@ -737,9 +737,9 @@
 .toggleField {
   min-height: 100%;
   padding: 11px 12px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
 }
 
 .toggleField input {
@@ -758,7 +758,7 @@
   flex-direction: column;
   gap: 12px;
   padding-top: 4px;
-  border-top: 1px solid rgba(236, 230, 220, 0.06);
+  border-top: 1px solid var(--border-hairline);
 }
 
 .sidebarNavPanelCollapsed {
@@ -816,7 +816,7 @@
 .sidebarResizeY:hover,
 .sidebarResizeCorner:hover {
   opacity: 0.88;
-  background: rgba(216, 167, 91, 0.2);
+  background: color-mix(in srgb, var(--accent-warm) 20%, transparent);
 }
 
 .sidebarResizeX {
@@ -890,9 +890,9 @@
 .treeObjectBlock,
 .treeNestedBlock,
 .treeFieldCard {
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
 }
 
 .treeObjectBlock,
@@ -985,10 +985,10 @@
 
 .editorWrap {
   min-height: 420px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
   overflow: hidden;
-  background: rgba(11, 13, 15, 0.72);
+  background: var(--surface-code);
 }
 
 .editorWrap :global(.cm-editor) {

@@ -9,7 +9,7 @@
 .card {
   border-radius: 12px;
   border: 1px solid var(--border-soft);
-  background: rgba(27, 31, 35, 0.82);
+  background: var(--surface-panel);
 }
 
 .hero {
@@ -25,7 +25,7 @@
   align-content: center;
   gap: 10px;
   border-radius: 10px;
-  background: rgba(34, 39, 44, 0.86);
+  background: var(--surface-panel-strong);
   padding: 18px;
 }
 
@@ -35,7 +35,7 @@
   border-radius: 999px;
   display: grid;
   place-items: center;
-  background: rgba(216, 167, 91, 0.18);
+  background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
   color: var(--accent-warm-2);
   font-family: var(--font-display);
   font-size: 2.2rem;
@@ -105,7 +105,7 @@
   height: 12px;
   border-radius: 999px;
   overflow: hidden;
-  background: rgba(34, 39, 44, 0.88);
+  background: var(--surface-panel-strong);
 }
 
 .progressFill {
@@ -122,6 +122,6 @@
 .badge {
   padding: 7px 10px;
   border-radius: 999px;
-  background: rgba(124, 155, 150, 0.12);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
 }

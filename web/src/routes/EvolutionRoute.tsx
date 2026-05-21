@@ -47,6 +47,7 @@ import { SelfEvolutionTrack } from "./SelfEvolutionTrack";
 import { SupervisedWorkspaceTabs } from "./SupervisedWorkspaceTabs";
 import {
   isLiveSupervisedRunStatus,
+  requireEvolutionRunSnapshot,
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
@@ -169,6 +170,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [libraryView, setLibraryView] = useState<LibraryView>("items");
   const [selectedLibraryItemId, setSelectedLibraryItemId] = useState<string | null>(null);
   const [selectedPendingItemId, setSelectedPendingItemId] = useState<string | null>(null);
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [selectedProposalRunIds, setSelectedProposalRunIds] = useState<string[]>([]);
   const [librarySearchInput, setLibrarySearchInput] = useState("");
   const [libraryStatusFilter, setLibraryStatusFilter] = useState<LibraryStatusFilter>("all");
@@ -185,6 +187,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [liveSelfRun, setLiveSelfRun] = useState<SelfEvolutionActiveRun | null>(null);
   const [actionFeedback, setActionFeedback] = useState("");
   const [selfActionFeedback, setSelfActionFeedback] = useState("");
+  const [runRecordsFeedback, setRunRecordsFeedback] = useState("");
   const [libraryFeedback, setLibraryFeedback] = useState("");
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
@@ -283,7 +286,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           bundleName: sourceKind === "bundle" ? bundleNameInput : "",
           keepWorktree,
         }),
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised evolution start")),
     onSuccess: async (snapshot) => {
       setActionFeedback("");
       setLiveActiveRun(snapshot);
@@ -384,7 +387,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         body: JSON.stringify({
           goal: selfGoalInput.trim(),
         }),
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution start")),
     onSuccess: async (snapshot) => {
       setSelfActionFeedback("");
       setLiveSelfRun(snapshot);
@@ -545,8 +548,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const nextIntakeMode = currentIntakeMode === "auto" ? "manual_review" : "auto";
   const overviewCurrentStatus = overview?.currentStatus ?? null;
   const overviewRecentRuns = overview?.recentRuns ?? [];
-  const overviewRecentLibrary = overview?.recentLibrary ?? [];
   const overviewLatestRunId = overviewCurrentStatus?.latestRunId || overviewRecentRuns[0]?.id || latestRun?.id || "";
+  const overviewLatestScore =
+    overviewRecentRuns[0] ? clampScore(overviewRecentRuns[0].score) : latestRun ? clampScore(latestRun.candidateScore) : "--";
+  const workbenchPrimarySource =
+    workbenchState?.source === "bundle"
+      ? workbenchState.bundleName || "--"
+      : workbenchState?.datasetName || workbenchState?.bundleName || "--";
+  const workbenchSourceLimit = workbenchState?.datasetLimit ?? "--";
   const effectiveActiveRunSnapshot = shouldIgnoreActiveRunSnapshot(activeRunSnapshot, liveActiveRun)
     ? null
     : activeRunSnapshot;
@@ -597,6 +606,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       : null;
   const selfRunLocked = Boolean(lockedSelfRun);
   const selectedDataset = workbenchControl?.datasets.find((item) => item.name === datasetName) ?? null;
+  const availableBundles = workbenchControl?.bundles ?? [];
+  const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
   const filterLibraryEntries = (entries: EvolutionLibraryEntry[]) =>
     entries.filter((item) => {
@@ -721,19 +732,93 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ]);
     },
   });
+  const deleteRunRecordMutation = useMutation({
+    mutationFn: (sessionId: string) =>
+      fetchJson<EvolutionProposalDeleteResponse>(`/api/evolution/proposals/${sessionId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: async (payload) => {
+      setRunRecordsFeedback(payload.summary);
+      setSelectedRunIds((current) => current.filter((item) => item !== payload.sessionId));
+      setSelectedProposalRunIds((current) => current.filter((item) => item !== payload.sessionId));
+      if (selectedRunId === payload.sessionId) {
+        setSelectedRunId(null);
+      }
+      if (selectedLibraryItemId === payload.sessionId) {
+        setSelectedLibraryItemId(null);
+      }
+      if (selectedPendingItemId === payload.sessionId) {
+        setSelectedPendingItemId(null);
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionProposal(payload.sessionId) }),
+      ]);
+    },
+  });
+  const bulkDeleteRunRecordsMutation = useMutation({
+    mutationFn: (sessionIds: string[]) =>
+      fetchJson<EvolutionProposalBulkDeleteResponse>("/api/evolution/proposals/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ sessionIds }),
+      }),
+    onSuccess: async (payload) => {
+      const deletedIds = new Set(
+        payload.results
+          .filter((item) => item.status === "deleted")
+          .map((item) => item.sessionId),
+      );
+      setRunRecordsFeedback(payload.summary);
+      setSelectedRunIds([]);
+      setSelectedProposalRunIds((current) => current.filter((item) => !deletedIds.has(item)));
+      if (selectedRunId && deletedIds.has(selectedRunId)) {
+        setSelectedRunId(null);
+      }
+      if (selectedLibraryItemId && deletedIds.has(selectedLibraryItemId)) {
+        setSelectedLibraryItemId(null);
+      }
+      if (selectedPendingItemId && deletedIds.has(selectedPendingItemId)) {
+        setSelectedPendingItemId(null);
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionProposal(selectedRunId ?? "__none__") }),
+      ]);
+    },
+  });
 
   useEffect(() => {
     if (formInitialized || !workbenchControl) {
       return;
     }
     const savedState = workbenchControl.savedState;
-    setSourceKind(savedState.source === "bundle" ? "bundle" : "dataset");
+    const bundleNames = new Set((workbenchControl.bundles ?? []).map((item) => item.name));
+    const fallbackBundle = workbenchControl.defaultBundleName || workbenchControl.bundles[0]?.name || "";
+    const savedBundle = savedState.bundleName && bundleNames.has(savedState.bundleName) ? savedState.bundleName : fallbackBundle;
+    setSourceKind(savedState.source === "bundle" && savedBundle ? "bundle" : "dataset");
     setDatasetName(savedState.datasetName || workbenchControl.datasets[0]?.name || "");
     setDatasetLimitInput(toLimitInput(savedState.datasetLimit));
-    setBundleNameInput(savedState.bundleName || workbenchControl.defaultBundleName || "");
+    setBundleNameInput(savedBundle);
     setKeepWorktree(Boolean(savedState.keepWorktree));
     setFormInitialized(true);
   }, [formInitialized, workbenchControl]);
+
+  useEffect(() => {
+    if (!formInitialized || !workbenchControl || sourceKind !== "bundle") {
+      return;
+    }
+    const bundleNames = new Set((workbenchControl.bundles ?? []).map((item) => item.name));
+    if (!bundleNameInput || !bundleNames.has(bundleNameInput)) {
+      setBundleNameInput(workbenchControl.defaultBundleName || workbenchControl.bundles[0]?.name || "");
+    }
+  }, [bundleNameInput, formInitialized, sourceKind, workbenchControl]);
 
   useEffect(() => {
     const datasetParam = new URLSearchParams(location.search).get("dataset");
@@ -895,6 +980,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const runSuccessCount = runs.filter((run) => run.status === "success").length;
   const runFailedCount = runs.filter((run) => run.status === "failed").length;
   const runPendingCount = runs.filter((run) => run.status === "waiting").length;
+  const visibleDeletableRunIds = useMemo(
+    () => filteredRuns.filter((run) => run.canDelete).map((run) => run.id),
+    [filteredRuns],
+  );
+  const selectedRunIdSet = useMemo(() => new Set(selectedRunIds), [selectedRunIds]);
+  const runDeletableCount = visibleDeletableRunIds.length;
+  const runBlockedDeleteCount = filteredRuns.length - runDeletableCount;
+  const allVisibleDeletableRunsSelected =
+    visibleDeletableRunIds.length > 0
+    && visibleDeletableRunIds.every((runId) => selectedRunIdSet.has(runId));
   const runHeaderMessage = !hasRuns
     ? t("noRunsRecordedHint")
     : filteredRunsEmpty
@@ -909,6 +1004,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selectedRun = useMemo(() => {
     return filteredRuns.find((run) => run.id === selectedRunId) ?? filteredRuns[0] ?? null;
   }, [filteredRuns, selectedRunId]);
+
+  useEffect(() => {
+    const visibleDeletableIds = new Set(visibleDeletableRunIds);
+    setSelectedRunIds((current) => {
+      const next = current.filter((runId) => visibleDeletableIds.has(runId));
+      if (
+        next.length === current.length
+        && next.every((runId, index) => runId === current[index])
+      ) {
+        return current;
+      }
+      return next;
+    });
+  }, [visibleDeletableRunIds]);
 
   const relatedLibraryItems = selectedRun
     ? libraryItems.filter((item) => item.sourceRun === selectedRun.id)
@@ -1139,6 +1248,36 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   function triggerRunAction(sessionId: string, action: string) {
     setActionFeedback("");
     actionMutation.mutate({ sessionId, action });
+  }
+
+  function toggleRunSelection(run: EvolutionRun) {
+    if (!run.canDelete) {
+      return;
+    }
+    setRunRecordsFeedback("");
+    setSelectedRunIds((current) =>
+      current.includes(run.id)
+        ? current.filter((item) => item !== run.id)
+        : [...current, run.id],
+    );
+  }
+
+  function selectVisibleRunRecords() {
+    setRunRecordsFeedback("");
+    setSelectedRunIds(visibleDeletableRunIds);
+  }
+
+  function triggerRunRecordDelete(sessionId: string) {
+    setRunRecordsFeedback("");
+    deleteRunRecordMutation.mutate(sessionId);
+  }
+
+  function triggerBulkRunRecordDelete() {
+    if (selectedRunIds.length === 0) {
+      return;
+    }
+    setRunRecordsFeedback("");
+    bulkDeleteRunRecordsMutation.mutate(selectedRunIds);
   }
 
   function toggleProposalSelection(sessionId: string) {
@@ -1409,13 +1548,23 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 ) : (
                   <div className={styles.formField}>
                     <label htmlFor="supervised-bundle">{t("selectedBundle")}</label>
-                    <input
+                    <select
                       id="supervised-bundle"
-                      className={styles.textInput}
-                      type="text"
+                      className={styles.selectInput}
                       value={bundleNameInput}
                       onChange={(event) => setBundleNameInput(event.target.value)}
-                    />
+                    >
+                      {availableBundles.map((item) => (
+                        <option key={item.name} value={item.name}>
+                          {item.name} [{item.caseCount} cases]
+                        </option>
+                      ))}
+                    </select>
+                    {!selectedBundleExists ? (
+                      <p className={styles.errorTextCompact}>
+                        {lang === "zh" ? "请选择一个存在的监督 bundle。" : "Choose an existing supervised bundle."}
+                      </p>
+                    ) : null}
                   </div>
                 )}
 
@@ -1434,7 +1583,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <button
                     type="button"
                     className={styles.inlineAction}
-                    disabled={runLocked || startRunMutation.isPending}
+                    disabled={runLocked || startRunMutation.isPending || (sourceKind === "bundle" && !selectedBundleExists)}
                     onClick={() => startRunMutation.mutate()}
                   >
                     {startRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
@@ -1728,122 +1877,63 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   {workbenchSourceLabel(workbenchState?.source ?? "unknown")}
                 </span>
               </div>
-              <div className={styles.listStack}>
-                <article className={styles.listRow}>
-                  <div className={styles.metaRow}>
-                    <span>{t("status")}</span>
-                    <span>{overviewCurrentStatus ? statusLabel(overviewCurrentStatus.state) : "--"}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("decision")}</span>
-                    <span>{overviewCurrentStatus ? decisionLabel(overviewCurrentStatus.decision) : "--"}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("proposalStatus")}</span>
-                    <span>{overviewCurrentStatus?.outcomeSemantics.proposalStatusLabel || "--"}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("runtimeLayer")}</span>
-                    <span>{overviewCurrentStatus?.outcomeSemantics.runtimeEffectLabel || "--"}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("datasetNameLabel")}</span>
-                    <span>{workbenchState?.datasetName || "--"}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("bundleNameLabel")}</span>
-                    <span>{workbenchState?.bundleName || "--"}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("datasetLimitLabel")}</span>
-                    <span>{workbenchState?.datasetLimit ?? "--"}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("nextRecommendedAction")}</span>
-                    <span>{overviewCurrentStatus?.nextAction || "--"}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("activeAdvisoryBaselines")}</span>
-                    <span>{overviewCurrentStatus?.activeAdvisoryCount ?? 0}</span>
-                  </div>
-                  <div className={styles.metaRow}>
-                    <span>{t("recentLibraryAdditions")}</span>
-                    <span>{overviewRecentLibrary.length}</span>
-                  </div>
+              <div className={styles.sourceSummary}>
+                <article className={styles.sourceHero}>
+                  <span>{t("selectedSource")}</span>
+                  <strong title={workbenchPrimarySource}>{workbenchPrimarySource}</strong>
+                  <small>
+                    {workbenchSourceLabel(workbenchState?.source ?? "unknown")} / {t("datasetLimitLabel")} {workbenchSourceLimit}
+                  </small>
                 </article>
+                <div className={styles.sourceMetricGrid}>
+                  <article className={styles.stripItem}>
+                    <span>{t("status")}</span>
+                    <strong>{overviewCurrentStatus ? statusLabel(overviewCurrentStatus.state) : "--"}</strong>
+                  </article>
+                  <article className={styles.stripItem}>
+                    <span>{t("decision")}</span>
+                    <strong>{overviewCurrentStatus ? decisionLabel(overviewCurrentStatus.decision) : "--"}</strong>
+                  </article>
+                  <article className={styles.stripItem}>
+                    <span>{t("latestScore")}</span>
+                    <strong>{overviewLatestScore}</strong>
+                  </article>
+                  <article className={styles.stripItem}>
+                    <span>{t("activeAdvisoryBaselines")}</span>
+                    <strong>{overviewCurrentStatus?.activeAdvisoryCount ?? 0}</strong>
+                  </article>
+                </div>
+                <div className={styles.sourceNextAction}>
+                  <span>{t("nextRecommendedAction")}</span>
+                  <strong>{overviewCurrentStatus?.nextAction || "--"}</strong>
+                </div>
                 <div className={styles.detailSection}>
                   <h3>{t("recentRunPerformance")}</h3>
                   {overviewRecentRuns.length > 0 ? (
-                    <div className={styles.relatedList}>
+                    <div className={styles.compactRunList}>
                       {overviewRecentRuns.slice(0, 3).map((run) => (
-                        <article key={run.id} className={styles.relatedRow}>
-                          <div className={styles.listRowTop}>
+                        <button
+                          key={run.id}
+                          type="button"
+                          className={styles.compactRunRow}
+                          title={run.summary}
+                          onClick={() => openRun(run.id)}
+                        >
+                          <span className={styles.compactRunMain}>
                             <strong>{run.id}</strong>
+                            <span>{run.summary}</span>
+                          </span>
+                          <span className={styles.compactRunMeta}>
                             <span>{decisionLabel(run.decision)}</span>
-                          </div>
-                          <p>{run.summary}</p>
-                          <div className={styles.actionRow}>
                             <span>{statusLabel(run.status)}</span>
-                            <span>{clampScore(run.score)}</span>
-                            <button
-                              type="button"
-                              className={styles.inlineAction}
-                              onClick={() => openRun(run.id)}
-                            >
-                              <ArrowUpRight size={15} />
-                              {t("openSourceRun")}
-                            </button>
-                          </div>
-                        </article>
+                            <strong>{clampScore(run.score)}</strong>
+                            <ArrowUpRight size={14} />
+                          </span>
+                        </button>
                       ))}
                     </div>
                   ) : (
                     <p>{t("noRunsRecordedHint")}</p>
-                  )}
-                </div>
-                <div className={styles.detailSection}>
-                  <h3>{t("recentLibraryAdditions")}</h3>
-                  {overviewRecentLibrary.length > 0 ? (
-                    <div className={styles.relatedList}>
-                      {overviewRecentLibrary.slice(0, 3).map((item) => (
-                        <article key={`${item.sourceRun}-${item.id}`} className={styles.relatedRow}>
-                          <div className={styles.listRowTop}>
-                            <strong>{item.title}</strong>
-                            <span>{statusLabel(item.source)}</span>
-                          </div>
-                          <div className={styles.metaRow}>
-                            <span>{t("sourceRun")}</span>
-                            <span>{item.sourceRun}</span>
-                          </div>
-                          <div className={styles.actionRow}>
-                            <button
-                              type="button"
-                              className={styles.inlineAction}
-                              onClick={() => openRun(item.sourceRun)}
-                            >
-                              <ArrowUpRight size={15} />
-                              {t("openSourceRun")}
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.inlineAction}
-                              onClick={() => {
-                                const targetPending = item.source === "proposed";
-                                setLibraryView(targetPending ? "pending" : "items");
-                                setSelectedPendingItemId(targetPending ? item.id : null);
-                                setSelectedLibraryItemId(targetPending ? null : item.id);
-                                goToSupervisedView("library");
-                              }}
-                            >
-                              <LibraryBig size={15} />
-                              {t("openProposal")}
-                            </button>
-                          </div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : (
-                    <p>{t("emptyLibraryItems")}</p>
                   )}
                 </div>
                 <div className={styles.actionGridCompact}>
@@ -1884,137 +1974,93 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
       {activeTrack === "supervised" && evolutionView === "runs" ? (
         <div className={styles.viewStack}>
-          <div className={styles.overviewWorkspace}>
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
-              <div className={styles.surfaceHeaderCompact}>
-                <div>
-                  <p className={styles.eyebrow}>{t("recentRunPerformance")}</p>
-                  <h2 className={styles.sectionTitle}>{t("runList")}</h2>
-                </div>
-                <div className={styles.filterSegmented}>
-                  {(["all", "success", "failed"] as const).map((filter) => (
-                    <button
-                      key={filter}
-                      type="button"
-                      className={
-                        runFilter === filter
-                          ? `${styles.filterButton} ${styles.filterButtonActive}`
-                          : styles.filterButton
-                      }
-                      onClick={() => setRunFilter(filter)}
-                    >
-                      {filter === "all" ? t("allRuns") : statusLabel(filter)}
-                    </button>
-                  ))}
-                </div>
+          <section className={`${styles.surface} ${styles.runsCommandStrip}`}>
+            <div className={styles.runsCommandHeader}>
+              <div>
+                <p className={styles.eyebrow}>{t("recentRunPerformance")}</p>
+                <h2 className={styles.sectionTitle}>{t("runList")}</h2>
               </div>
-              <div className={styles.summaryMetricStrip}>
-                <article className={styles.stripItem}>
+              <div className={styles.filterSegmented}>
+                {(["all", "success", "failed"] as const).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={
+                      runFilter === filter
+                        ? `${styles.filterButton} ${styles.filterButtonActive}`
+                        : styles.filterButton
+                    }
+                    onClick={() => setRunFilter(filter)}
+                  >
+                    {filter === "all" ? t("allRuns") : statusLabel(filter)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className={styles.runsCommandBody}>
+              <div className={styles.runsCommandMetrics}>
+                <article className={styles.compactFact}>
                   <span>{t("runs")}</span>
-                  <strong>{runs.length}</strong>
+                  <strong>{hasRuns ? `${filteredRuns.length} / ${runs.length}` : "0 / 0"}</strong>
                 </article>
-                <article className={styles.stripItem}>
+                <article className={styles.compactFact}>
                   <span>{statusLabel("success")}</span>
                   <strong>{runSuccessCount}</strong>
                 </article>
-                <article className={styles.stripItem}>
+                <article className={styles.compactFact}>
                   <span>{statusLabel("failed")}</span>
                   <strong>{runFailedCount}</strong>
                 </article>
-                <article className={styles.stripItem}>
+                <article className={styles.compactFact}>
                   <span>{t("pendingReview")}</span>
                   <strong>{runPendingCount}</strong>
                 </article>
+                <article className={styles.compactFact}>
+                  <span>{t("selectedCount")}</span>
+                  <strong>{selectedRunIds.length}</strong>
+                </article>
               </div>
-              <p className={styles.noticeText}>{t("runQueueHint")}</p>
-            </section>
 
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
-              <div className={styles.surfaceHeaderCompact}>
-                <div>
-                  <p className={styles.eyebrow}>{t("runQueue")}</p>
-                  <h2 className={styles.sectionTitle}>{t("runs")}</h2>
+              <div className={styles.runsSelectedSnapshot}>
+                <div className={styles.runsSnapshotPrimary}>
+                  <strong>{selectedRun?.id ?? latestRun?.id ?? "--"}</strong>
+                  <span className={selectedRun ? styles.statusPill : styles.secondaryPill}>
+                    {selectedRun
+                      ? decisionLabel(selectedRun.decision)
+                      : runFilter === "all"
+                        ? t("allRuns")
+                        : statusLabel(runFilter)}
+                  </span>
+                  <p>
+                    {selectedRun
+                      ? selectedRun.summary
+                      : hasRuns
+                        ? t("runDetailFilterHint")
+                        : t("runDetailPlaceholder")}
+                  </p>
                 </div>
-                <span className={styles.secondaryPill}>
-                  {hasRuns ? `${filteredRuns.length} / ${runs.length}` : "0 / 0"}
-                </span>
-              </div>
-              <p className={styles.statusLead}>{runHeaderMessage}</p>
-              <div className={styles.relatedList}>
-                <article className={styles.relatedRow}>
-                  <strong>{t("latestRun")}</strong>
-                  <span>{latestRun?.id ?? "--"}</span>
-                </article>
-                <article className={styles.relatedRow}>
-                  <strong>{t("pendingReview")}</strong>
-                  <span>{runPendingCount}</span>
-                </article>
-              </div>
-              {!hasRuns ? (
-                <div className={styles.actionRow}>
-                  <button
-                    type="button"
-                    className={styles.inlineAction}
-                    onClick={() => goToSupervisedView("live")}
-                  >
-                    <ArrowUpRight size={15} />
-                    {t("returnToOverview")}
-                  </button>
+                <div className={styles.runsSnapshotFacts}>
+                  <span>
+                    {t("latestScore")}
+                    <strong>{selectedRun ? clampScore(selectedRun.candidateScore) : "--"}</strong>
+                  </span>
+                  <span>
+                    {t("proposalLayer")}
+                    <strong>{selectedRun ? selectedRun.outcomeSemantics.proposalStatusLabel : "--"}</strong>
+                  </span>
+                  <span>
+                    {t("runtimeLayer")}
+                    <strong>{selectedRun ? selectedRun.outcomeSemantics.runtimeEffectLabel : "--"}</strong>
+                  </span>
+                  <span>
+                    {t("deletionAllowed")}
+                    <strong>{runDeletableCount}</strong>
+                  </span>
                 </div>
-              ) : filteredRunsEmpty ? (
-                <div className={styles.actionRow}>
-                  <button
-                    type="button"
-                    className={styles.inlineAction}
-                    onClick={() => setRunFilter("all")}
-                  >
-                    {t("allRuns")}
-                  </button>
-                </div>
-              ) : null}
-            </section>
-
-            <section className={`${styles.surface} ${styles.summarySurface}`}>
-              <div className={styles.surfaceHeaderCompact}>
-                <div>
-                  <p className={styles.eyebrow}>{t("runDetail")}</p>
-                  <h2 className={styles.sectionTitle}>{selectedRun?.id ?? "--"}</h2>
-                </div>
-                <span className={selectedRun ? styles.statusPill : styles.secondaryPill}>
-                  {selectedRun
-                    ? decisionLabel(selectedRun.decision)
-                    : runFilter === "all"
-                      ? t("allRuns")
-                      : statusLabel(runFilter)}
-                </span>
               </div>
-              <p className={styles.statusLead}>
-                {selectedRun
-                  ? selectedRun.summary
-                  : hasRuns
-                    ? t("runDetailFilterHint")
-                    : t("runDetailPlaceholder")}
-              </p>
-              <div className={styles.statusMetricGrid}>
-                <article className={styles.metricTile}>
-                  <span>{t("latestScore")}</span>
-                  <strong>{selectedRun ? clampScore(selectedRun.candidateScore) : "--"}</strong>
-                </article>
-                <article className={styles.metricTile}>
-                  <span>{t("runLayer")}</span>
-                  <strong>{selectedRun ? selectedRun.runSemantics.runStatusLabel : "--"}</strong>
-                </article>
-                <article className={styles.metricTile}>
-                  <span>{t("proposalLayer")}</span>
-                  <strong>{selectedRun ? selectedRun.outcomeSemantics.proposalStatusLabel : "--"}</strong>
-                </article>
-                <article className={styles.metricTile}>
-                  <span>{t("runtimeLayer")}</span>
-                  <strong>{selectedRun ? selectedRun.outcomeSemantics.runtimeEffectLabel : "--"}</strong>
-                </article>
-              </div>
-            </section>
-          </div>
+            </div>
+          </section>
 
           <div className={styles.runsWorkspace}>
             <section className={`${styles.surface} ${styles.runQueuePanel}`}>
@@ -2025,7 +2071,48 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
                 <span className={styles.secondaryPill}>{filteredRuns.length}</span>
               </div>
-              <p className={styles.noticeText}>{t("runQueueHint")}</p>
+              {hasFilteredRuns ? (
+                <div className={styles.bulkToolbar}>
+                  <div className={styles.bulkToolbarText}>
+                    <strong>{t("selectedCount")}</strong>
+                    <span>{selectedRunIds.length}</span>
+                  </div>
+                  <div className={styles.actionRow}>
+                    <button
+                      type="button"
+                      className={styles.inlineAction}
+                      disabled={visibleDeletableRunIds.length === 0 || allVisibleDeletableRunsSelected}
+                      onClick={selectVisibleRunRecords}
+                    >
+                      <CheckCircle2 size={15} />
+                      {t("selectVisibleRuns")}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.inlineAction}
+                      disabled={selectedRunIds.length === 0}
+                      onClick={() => setSelectedRunIds([])}
+                    >
+                      {t("clearSelection")}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.inlineAction}
+                      disabled={selectedRunIds.length === 0 || bulkDeleteRunRecordsMutation.isPending}
+                      onClick={triggerBulkRunRecordDelete}
+                    >
+                      {bulkDeleteRunRecordsMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
+                      {t("deleteSelectedRuns")}
+                    </button>
+                  </div>
+                  <p className={styles.bulkToolbarHint}>{t("runBatchDeleteHint")}</p>
+                </div>
+              ) : (
+                <p className={styles.noticeText}>{runHeaderMessage}</p>
+              )}
+              {runRecordsFeedback ? <p className={styles.feedbackText}>{runRecordsFeedback}</p> : null}
+              {deleteRunRecordMutation.error ? <p className={styles.errorText}>{deleteRunRecordMutation.error.message}</p> : null}
+              {bulkDeleteRunRecordsMutation.error ? <p className={styles.errorText}>{bulkDeleteRunRecordsMutation.error.message}</p> : null}
               {!hasRuns ? (
                 <div className={styles.structuredEmptyState}>
                   <h3>{t("noSupervisedRunsYet")}</h3>
@@ -2058,34 +2145,55 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               ) : (
                 <div className={styles.runListScrollable}>
                   {filteredRuns.map((run) => (
-                    <button
+                    <article
                       key={run.id}
-                      type="button"
                       className={
                         selectedRun?.id === run.id
-                          ? `${styles.runItem} ${styles.runItemActive}`
-                          : styles.runItem
+                          ? `${styles.runItem} ${styles.runItemActive} ${styles.runRecordCard}`
+                          : `${styles.runItem} ${styles.runRecordCard}`
                       }
-                      onClick={() => setSelectedRunId(run.id)}
                     >
-                      <div className={styles.listRowTop}>
-                        <strong>{run.id}</strong>
-                        <span className={styles.secondaryPill}>{decisionLabel(run.decision)}</span>
+                      <div className={styles.selectionBar}>
+                        <label className={styles.batchToggle}>
+                          <input
+                            type="checkbox"
+                            checked={selectedRunIdSet.has(run.id)}
+                            disabled={!run.canDelete}
+                            onChange={() => toggleRunSelection(run)}
+                          />
+                          <span>{t("selectRunForDelete")}</span>
+                        </label>
+                        <span className={run.canDelete ? styles.secondaryPill : styles.statusPill}>
+                          {run.canDelete ? t("deletionAllowed") : t("deletionBlocked")}
+                        </span>
                       </div>
-                      <div className={styles.metaRow}>
-                        <span>{statusLabel(run.status)}</span>
-                        <span>{run.outcomeSemantics.proposalStatusLabel}</span>
-                      </div>
-                      <div className={styles.scoreRow}>
-                        <span>{run.bundleName || "--"}</span>
-                        <strong>{run.candidateScore}</strong>
-                      </div>
-                      <p>{run.summary}</p>
-                      <div className={styles.cardFooter}>
-                        <span>{riskLabel(run.riskLevel)}</span>
-                        <span>{run.nextAction || "--"}</span>
-                      </div>
-                    </button>
+                      <button
+                        type="button"
+                        className={styles.runCardButton}
+                        onClick={() => setSelectedRunId(run.id)}
+                      >
+                        <div className={styles.listRowTop}>
+                          <strong>{run.id}</strong>
+                          <span className={styles.secondaryPill}>{decisionLabel(run.decision)}</span>
+                        </div>
+                        <div className={styles.metaRow}>
+                          <span>{statusLabel(run.status)}</span>
+                          <span>{run.outcomeSemantics.proposalStatusLabel}</span>
+                        </div>
+                        <div className={styles.scoreRow}>
+                          <span>{run.bundleName || "--"}</span>
+                          <strong>{run.candidateScore}</strong>
+                        </div>
+                        <p>{run.summary}</p>
+                        <div className={styles.cardFooter}>
+                          <span>{riskLabel(run.riskLevel)}</span>
+                          <span>{run.nextAction || "--"}</span>
+                        </div>
+                      </button>
+                      {!run.canDelete && run.deleteBlockReason ? (
+                        <p className={styles.noticeText}>{run.deleteBlockReason}</p>
+                      ) : null}
+                    </article>
                   ))}
                 </div>
               )}
@@ -2106,9 +2214,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   </div>
 
                   <div className={styles.runDetailOverview}>
-                    <div>
+                    <div className={styles.runScorePanel}>
+                      <span>{t("candidateScore")}</span>
                       <p className={styles.detailLead}>{selectedRun.candidateScore}</p>
-                      <p className={styles.reviewLead}>{selectedRun.summary}</p>
+                      <p>{selectedRun.summary}</p>
                     </div>
                     <div className={styles.runDetailMetricGrid}>
                       <article className={styles.metricTile}>
@@ -2130,43 +2239,37 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </div>
                   </div>
 
-                  <div className={styles.detailSection}>
-                    <h3>{t("diagnosis")}</h3>
-                    <p className={styles.reviewLead}>{selectedRun.diagnosis}</p>
-                  </div>
-
-                  <div className={styles.detailSection}>
+                  <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
                     <h3>{t("resultLayersTitle")}</h3>
-                    <div className={styles.detailFactGrid}>
-                      <article className={styles.relatedRow}>
-                        <strong>{t("runLayer")}</strong>
-                        <span>{selectedRun.runSemantics.runStatusLabel}</span>
+                    <div className={styles.runSignalGrid}>
+                      <article className={styles.compactFact}>
+                        <span>{t("runLayer")}</span>
+                        <strong>{selectedRun.runSemantics.runStatusLabel}</strong>
                       </article>
-                      <article className={styles.relatedRow}>
-                        <strong>{t("decision")}</strong>
-                        <span>{selectedRun.outcomeSemantics.decisionLabel}</span>
+                      <article className={styles.compactFact}>
+                        <span>{t("decision")}</span>
+                        <strong>{selectedRun.outcomeSemantics.decisionLabel}</strong>
                       </article>
-                      <article className={styles.relatedRow}>
-                        <strong>{t("proposalLayer")}</strong>
-                        <span>{selectedRun.outcomeSemantics.proposalStatusLabel}</span>
+                      <article className={styles.compactFact}>
+                        <span>{t("proposalLayer")}</span>
+                        <strong>{selectedRun.outcomeSemantics.proposalStatusLabel}</strong>
                       </article>
-                      <article className={styles.relatedRow}>
-                        <strong>{t("runtimeLayer")}</strong>
-                        <span>{selectedRun.outcomeSemantics.runtimeEffectLabel}</span>
+                      <article className={styles.compactFact}>
+                        <span>{t("runtimeLayer")}</span>
+                        <strong>{selectedRun.outcomeSemantics.runtimeEffectLabel}</strong>
                       </article>
-                      <article className={styles.relatedRow}>
-                        <strong>{t("nextRecommendedAction")}</strong>
-                        <span>{selectedRun.runSemantics.nextAction}</span>
+                      <article className={styles.compactFact}>
+                        <span>{t("nextRecommendedAction")}</span>
+                        <strong>{selectedRun.runSemantics.nextAction || "--"}</strong>
                       </article>
-                      <article className={styles.relatedRow}>
-                        <strong>{t("riskLevel")}</strong>
-                        <span>{riskLabel(selectedRun.riskLevel)}</span>
+                      <article className={styles.compactFact}>
+                        <span>{t("riskLevel")}</span>
+                        <strong>{riskLabel(selectedRun.riskLevel)}</strong>
                       </article>
                     </div>
-                    <p className={styles.noticeText}>{selectedRun.outcomeSemantics.runtimeExplanation}</p>
-                    {selectedRun.riskReasons.length > 0 ? (
-                      <p>{selectedRun.riskReasons.join(" / ")}</p>
-                    ) : null}
+                    <div className={styles.runRuntimeNote}>
+                      <p>{selectedRun.outcomeSemantics.runtimeExplanation}</p>
+                    </div>
                     {selectedRun.availableActions.length > 0 ? (
                       <div className={styles.actionRow}>
                         {selectedRun.availableActions.map((action) => (
@@ -2187,30 +2290,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     {actionMutation.error ? <p className={styles.errorText}>{actionMutation.error.message}</p> : null}
                   </div>
 
-                  <div className={styles.detailSection}>
-                    <h3>{t("deleteAndCleanup")}</h3>
-                    <div className={styles.relatedList}>
-                      <article className={styles.relatedRow}>
-                        <strong>{selectedRun.canDelete ? t("deletionAllowed") : t("deletionBlocked")}</strong>
-                        <span>
-                          {selectedRun.canDelete
-                            ? t("deleteRunRecord")
-                            : selectedRun.deleteBlockReason || "--"}
-                        </span>
-                      </article>
-                    </div>
-                    <p>{t("runDeleteImpact")}</p>
-                    <div className={styles.actionRow}>
-                      <button
-                        type="button"
-                        className={styles.inlineAction}
-                        disabled={!selectedRun.canDelete || deleteProposalMutation.isPending}
-                        onClick={() => triggerProposalDelete(selectedRun.id)}
-                      >
-                        <Trash2 size={15} />
-                        {t("deleteRunRecord")}
-                      </button>
-                    </div>
+                  <div className={`${styles.detailSection} ${styles.runDiagnosisSection}`}>
+                    <h3>{t("diagnosis")}</h3>
+                    <p className={styles.reviewLead}>{selectedRun.diagnosis}</p>
+                    {selectedRun.riskReasons.length > 0 ? (
+                      <p className={styles.noticeText}>{selectedRun.riskReasons.join(" / ")}</p>
+                    ) : null}
                   </div>
 
                   <div className={styles.detailSection}>
@@ -2285,6 +2370,32 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     )}
                     {libraryFeedback ? <p className={styles.feedbackText}>{libraryFeedback}</p> : null}
                     {deleteProposalMutation.error ? <p className={styles.errorText}>{deleteProposalMutation.error.message}</p> : null}
+                  </div>
+
+                  <div className={`${styles.detailSection} ${styles.dangerDetailSection}`}>
+                    <h3>{t("deleteAndCleanup")}</h3>
+                    <div className={styles.relatedList}>
+                      <article className={styles.relatedRow}>
+                        <strong>{selectedRun.canDelete ? t("deletionAllowed") : t("deletionBlocked")}</strong>
+                        <span>
+                          {selectedRun.canDelete
+                            ? t("deleteRunRecord")
+                            : selectedRun.deleteBlockReason || "--"}
+                        </span>
+                      </article>
+                    </div>
+                    <p>{t("runDeleteImpact")}</p>
+                    <div className={styles.actionRow}>
+                      <button
+                        type="button"
+                        className={styles.inlineAction}
+                        disabled={!selectedRun.canDelete || deleteRunRecordMutation.isPending}
+                        onClick={() => triggerRunRecordDelete(selectedRun.id)}
+                      >
+                        {deleteRunRecordMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
+                        {t("deleteRunRecord")}
+                      </button>
+                    </div>
                   </div>
                 </>
               ) : (

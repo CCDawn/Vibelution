@@ -3,7 +3,7 @@
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  background: rgba(18, 20, 22, 0.74);
+  background: var(--surface-page);
 }
 
 .header {
@@ -13,7 +13,7 @@
   gap: 20px;
   padding: 22px 24px 16px;
   border-bottom: 1px solid var(--border-strong);
-  background: rgba(22, 25, 28, 0.78);
+  background: var(--surface-header);
 }
 
 .eyebrow,
@@ -55,7 +55,7 @@
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
-  background: rgba(27, 31, 35, 0.82);
+  background: var(--surface-panel);
   color: var(--fg-secondary);
   font-size: 0.8rem;
 }
@@ -70,15 +70,15 @@
   padding: 12px 14px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.78);
+  background: var(--surface-panel);
   color: var(--fg-primary);
   text-align: left;
 }
 
 .rootButtonActive {
-  border-color: rgba(216, 167, 91, 0.24);
+  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   box-shadow: inset 2px 0 0 var(--accent-warm);
-  background: rgba(34, 39, 44, 0.94);
+  background: var(--surface-panel-strong);
 }
 
 .rootButtonHeader,
@@ -150,13 +150,13 @@
 
 .rootState {
   flex: 0 0 auto;
-  color: #8fd0b5;
+  color: var(--state-success);
   font-size: 0.78rem;
   white-space: nowrap;
 }
 
 .rootStateMissing {
-  color: #e79b9b;
+  color: var(--state-error);
 }
 
 .workspace {
@@ -191,7 +191,7 @@
   gap: 14px;
   padding: 18px;
   border-right: 1px solid var(--border-soft);
-  background: rgba(21, 24, 27, 0.76);
+  background: var(--surface-panel-muted);
 }
 
 .resizableLayout > .sidebar {
@@ -208,7 +208,7 @@
   padding: 14px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.78);
+  background: var(--surface-panel);
 }
 
 .selectionToolbar {
@@ -224,8 +224,8 @@
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(124, 155, 150, 0.22);
-  background: rgba(124, 155, 150, 0.12);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
   font-size: 0.78rem;
 }
@@ -258,7 +258,7 @@
   padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
-  background: rgba(20, 23, 26, 0.72);
+  background: var(--surface-card);
   color: var(--fg-secondary);
   cursor: pointer;
   font-size: 0.78rem;
@@ -266,12 +266,12 @@
 
 .filterButton:hover {
   border-color: var(--border-strong);
-  background: rgba(34, 39, 44, 0.9);
+  background: var(--surface-panel-hover);
 }
 
 .filterButtonActive {
-  border-color: rgba(216, 167, 91, 0.28);
-  background: rgba(216, 167, 91, 0.12);
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   color: var(--fg-primary);
 }
 
@@ -286,7 +286,7 @@
   padding: 7px 12px;
   border-radius: 8px;
   border: 1px solid var(--border-soft);
-  background: rgba(20, 23, 26, 0.72);
+  background: var(--surface-card);
   color: var(--fg-primary);
   cursor: pointer;
 }
@@ -294,18 +294,18 @@
 .toolbarButton:hover:not(:disabled),
 .deleteButton:hover:not(:disabled) {
   border-color: var(--border-strong);
-  background: rgba(34, 39, 44, 0.9);
+  background: var(--surface-panel-hover);
 }
 
 .deleteButton {
-  border-color: rgba(192, 94, 94, 0.22);
-  background: rgba(192, 94, 94, 0.14);
-  color: #f0b3b3;
+  border-color: color-mix(in srgb, var(--state-error) 22%, transparent);
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
+  color: var(--state-error);
 }
 
 .deleteButton:hover:not(:disabled) {
-  border-color: rgba(192, 94, 94, 0.32);
-  background: rgba(192, 94, 94, 0.2);
+  border-color: color-mix(in srgb, var(--state-error) 32%, transparent);
+  background: color-mix(in srgb, var(--state-error) 20%, transparent);
 }
 
 .toolbarButton:disabled,
@@ -325,11 +325,11 @@
 }
 
 .noticeSuccess {
-  color: #8fd0b5;
+  color: var(--state-success);
 }
 
 .noticeError {
-  color: #f0a6a6;
+  color: var(--state-error);
 }
 
 .panelSearch {
@@ -343,7 +343,7 @@
   width: 100%;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.82);
+  background: var(--surface-panel);
   color: var(--fg-primary);
   padding: 9px 12px;
   font: inherit;
@@ -371,12 +371,12 @@
 .panelState {
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.62);
+  background: var(--surface-card);
 }
 
 .emptySurface {
   height: 100%;
-  background: rgba(27, 31, 35, 0.92);
+  background: var(--surface-panel-strong);
 }
 
 .previewPane {
@@ -385,7 +385,7 @@
   min-width: 0;
   overflow: hidden;
   padding: 18px 20px;
-  background: rgba(27, 31, 35, 0.92);
+  background: var(--surface-panel-strong);
 }
 
 .logPreviewStack {
@@ -402,7 +402,7 @@
   padding: 16px;
   border: 1px solid var(--border-soft);
   border-radius: 10px;
-  background: rgba(21, 24, 27, 0.86);
+  background: var(--surface-input);
 }
 
 .diagnosticsHeader {
@@ -429,21 +429,21 @@
 }
 
 .diagnosticPillError {
-  color: #f0a6a6;
-  border-color: rgba(192, 94, 94, 0.24);
-  background: rgba(192, 94, 94, 0.14);
+  color: var(--state-error);
+  border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
 }
 
 .diagnosticPillWarning {
-  color: #e4bd7b;
-  border-color: rgba(216, 167, 91, 0.24);
-  background: rgba(216, 167, 91, 0.12);
+  color: var(--state-warning);
+  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
 .diagnosticPillInfo {
-  color: #8fd0b5;
-  border-color: rgba(124, 155, 150, 0.24);
-  background: rgba(124, 155, 150, 0.12);
+  color: var(--state-success);
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
 .diagnosticMetricGrid {
@@ -456,7 +456,7 @@
 .diagnosticHintGrid article {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.72);
+  background: var(--surface-panel);
 }
 
 .diagnosticMetricGrid span {
@@ -539,8 +539,8 @@
 .resizeHandle:hover::before,
 .resizeHandle:focus-visible::before,
 .resizeHandleActive::before {
-  background: rgba(216, 167, 91, 0.52);
-  box-shadow: 0 0 12px rgba(216, 167, 91, 0.18);
+  background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
 }
 
 .rightRail {
@@ -549,12 +549,12 @@
   gap: 14px;
   padding: 18px;
   border-left: 1px solid var(--border-soft);
-  background: rgba(21, 24, 27, 0.82);
+  background: var(--surface-panel-muted);
 }
 
 .rightRailResizeHandle {
   border-left: 1px solid var(--border-soft);
-  background: rgba(21, 24, 27, 0.82);
+  background: var(--surface-panel-muted);
 }
 
 .railHeader {
@@ -563,7 +563,7 @@
   padding: 14px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.78);
+  background: var(--surface-panel);
 }
 
 .railTitle {
@@ -590,7 +590,7 @@
 .treeDir {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.78);
+  background: var(--surface-panel);
   padding: 8px 10px;
 }
 
@@ -626,15 +626,15 @@
   padding: 0;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(20, 23, 26, 0.72);
+  background: var(--surface-card);
   color: var(--fg-tertiary);
   cursor: pointer;
 }
 
 .treeSelectButtonActive {
   color: var(--accent-cool);
-  border-color: rgba(124, 155, 150, 0.26);
-  background: rgba(124, 155, 150, 0.12);
+  border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
 .treeFileButton {
@@ -644,7 +644,7 @@
   padding: 10px;
   border: 1px solid transparent;
   border-radius: 8px;
-  background: rgba(34, 39, 44, 0.82);
+  background: var(--surface-panel-strong);
   color: var(--fg-secondary);
   text-align: left;
   cursor: pointer;
@@ -652,8 +652,8 @@
 
 .treeFileButtonActive {
   color: var(--fg-primary);
-  border-color: rgba(216, 167, 91, 0.22);
-  background: rgba(216, 167, 91, 0.12);
+  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
 .treeFileName {
@@ -674,14 +674,14 @@
   padding: 6px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: rgba(27, 31, 35, 0.82);
+  background: var(--surface-panel);
   color: var(--fg-primary);
   cursor: pointer;
 }
 
 .copyButton:hover {
   border-color: var(--border-strong);
-  background: rgba(41, 47, 53, 0.92);
+  background: var(--surface-panel-hover);
 }
 
 .sceneCard {
@@ -690,12 +690,12 @@
   padding: 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.8);
+  background: var(--surface-panel);
 }
 
 .sceneCardActive {
-  border-color: rgba(216, 167, 91, 0.24);
-  background: rgba(34, 39, 44, 0.94);
+  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  background: var(--surface-panel-strong);
   box-shadow: inset 2px 0 0 var(--accent-warm);
 }
 
@@ -749,9 +749,9 @@
   width: fit-content;
   max-width: 100%;
   padding: 3px 6px;
-  border: 1px solid rgba(124, 155, 150, 0.18);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, transparent);
   border-radius: 6px;
-  background: rgba(124, 155, 150, 0.08);
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
   color: var(--accent-cool);
   font-family: var(--font-mono);
   font-size: 0.74rem;
@@ -810,7 +810,7 @@
   padding: 14px 16px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(20, 23, 26, 0.72);
+  background: var(--surface-card);
 }
 
 .sceneIdentityBlock {
@@ -848,7 +848,7 @@
   padding: 4px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: rgba(27, 31, 35, 0.74);
+  background: var(--surface-panel);
   color: var(--fg-secondary);
   font-size: 0.78rem;
   white-space: nowrap;
@@ -867,12 +867,12 @@
   padding: 10px 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.52);
+  background: var(--surface-card-subtle);
 }
 
 .sceneEvidenceStrip > span {
   border-color: rgba(236, 230, 220, 0.08);
-  background: rgba(18, 20, 22, 0.48);
+  background: var(--surface-card-subtle);
 }
 
 .sceneEvidenceStrip strong {
@@ -882,7 +882,7 @@
 .sceneTechnicalDetails {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(18, 20, 22, 0.46);
+  background: var(--surface-card-subtle);
 }
 
 .sceneTechnicalDetails summary {
@@ -928,7 +928,7 @@
 .rawFileButton {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(20, 23, 26, 0.72);
+  background: var(--surface-card);
 }
 
 .sceneMetricCard {
@@ -988,13 +988,13 @@
 }
 
 .timelineItemError {
-  border-color: rgba(187, 108, 93, 0.38);
-  background: rgba(187, 108, 93, 0.12);
+  border-color: color-mix(in srgb, var(--state-error) 38%, transparent);
+  background: color-mix(in srgb, var(--state-error) 12%, transparent);
 }
 
 .timelineItemWarning {
-  border-color: rgba(215, 160, 84, 0.34);
-  background: rgba(215, 160, 84, 0.1);
+  border-color: color-mix(in srgb, var(--state-warning) 34%, transparent);
+  background: color-mix(in srgb, var(--state-warning) 10%, transparent);
 }
 
 .timelineItemError .timelineCode,
@@ -1030,7 +1030,7 @@
   min-height: 24px;
   padding: 0 8px;
   border-radius: 999px;
-  background: rgba(36, 42, 47, 0.92);
+  background: var(--surface-panel-strong);
 }
 
 .timelineRawRefs .toolbarButton {
@@ -1062,8 +1062,8 @@
 }
 
 .rawFileButtonActive {
-  border-color: rgba(216, 167, 91, 0.24);
-  background: rgba(216, 167, 91, 0.1);
+  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
   color: var(--fg-primary);
 }
 
@@ -1087,16 +1087,16 @@
   gap: 6px;
   min-height: 34px;
   padding: 6px 10px;
-  border: 1px solid rgba(192, 94, 94, 0.22);
+  border: 1px solid color-mix(in srgb, var(--state-error) 22%, transparent);
   border-radius: 999px;
-  background: rgba(192, 94, 94, 0.14);
-  color: #f0b3b3;
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
+  color: var(--state-error);
   cursor: pointer;
 }
 
 .clearButton:hover:not(:disabled) {
-  border-color: rgba(192, 94, 94, 0.32);
-  background: rgba(192, 94, 94, 0.2);
+  border-color: color-mix(in srgb, var(--state-error) 32%, transparent);
+  background: color-mix(in srgb, var(--state-error) 20%, transparent);
 }
 
 @media (max-width: 960px) {

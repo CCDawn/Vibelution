@@ -3,9 +3,9 @@
   align-items: center;
   gap: 6px;
   padding: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: rgba(17, 21, 27, 0.78);
+  background: var(--surface-panel-muted);
 }
 
 .segmentButton {
@@ -16,7 +16,7 @@
   padding: 9px 14px;
   border: 0;
   border-radius: 999px;
-  color: rgba(228, 228, 224, 0.74);
+  color: var(--fg-secondary);
   text-decoration: none;
   font-size: 13px;
   font-weight: 600;
@@ -24,11 +24,11 @@
 }
 
 .segmentButton:hover {
-  color: rgba(245, 239, 227, 0.95);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--fg-primary);
+  background: var(--surface-card-hover);
 }
 
 .segmentButtonActive {
   background: rgba(191, 153, 86, 0.18);
-  color: rgba(245, 233, 209, 0.98);
+  color: var(--accent-warm-2);
 }

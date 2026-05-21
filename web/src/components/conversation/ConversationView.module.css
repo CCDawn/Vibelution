@@ -44,8 +44,8 @@
   align-items: center;
   padding: 6px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(216, 167, 91, 0.22);
-  background: rgba(216, 167, 91, 0.1);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 22%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
   color: var(--accent-warm-2);
   font-size: 0.82rem;
   text-transform: capitalize;
@@ -67,7 +67,7 @@
   padding: 12px 13px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(31, 35, 40, 0.82);
+  background: var(--surface-panel);
 }
 
 .summaryLabel {
@@ -125,7 +125,7 @@
 
 .statPill {
   color: var(--fg-secondary);
-  background: rgba(46, 52, 58, 0.9);
+  background: var(--surface-panel-strong);
 }
 
 .toolsBlock {
@@ -162,7 +162,7 @@
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
   color: var(--fg-secondary);
-  background: rgba(24, 28, 32, 0.78);
+  background: var(--surface-card);
 }
 
 .messageCard {
@@ -174,7 +174,7 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   padding: 14px 16px;
-  background: rgba(27, 31, 35, 0.78);
+  background: var(--surface-panel);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
 }
 
@@ -194,15 +194,15 @@
   min-width: min(280px, 100%);
   padding-left: 18px;
   border-top-left-radius: 4px;
-  border-color: rgba(216, 167, 91, 0.16);
+  border-color: color-mix(in srgb, var(--accent-warm) 16%, var(--border-soft));
   box-shadow:
-    inset 0 1px 0 rgba(216, 167, 91, 0.08),
+    inset 0 1px 0 color-mix(in srgb, var(--accent-warm) 8%, transparent),
     0 10px 28px rgba(0, 0, 0, 0.16);
 }
 
 .assistantCard::before {
   left: 8px;
-  background: rgba(216, 167, 91, 0.62);
+  background: color-mix(in srgb, var(--accent-warm) 62%, transparent);
 }
 
 .userCard {
@@ -211,16 +211,16 @@
   max-width: min(68%, 760px);
   padding-right: 18px;
   border-top-right-radius: 4px;
-  background: rgba(34, 39, 44, 0.86);
-  border-color: rgba(124, 155, 150, 0.28);
+  background: var(--surface-panel-strong);
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
   box-shadow:
-    inset 0 1px 0 rgba(124, 155, 150, 0.08),
+    inset 0 1px 0 color-mix(in srgb, var(--accent-cool) 8%, transparent),
     0 10px 28px rgba(0, 0, 0, 0.18);
 }
 
 .userCard::before {
   right: 8px;
-  background: rgba(124, 155, 150, 0.62);
+  background: color-mix(in srgb, var(--accent-cool) 62%, transparent);
 }
 
 .messageMeta {
@@ -276,9 +276,9 @@
   display: grid;
   gap: 12px;
   padding: 12px 13px;
-  border: 1px solid rgba(124, 155, 150, 0.16);
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 16%, transparent);
   border-radius: 8px;
-  background: rgba(20, 24, 28, 0.82);
+  background: var(--surface-card);
 }
 
 .mentalSnapshot,
@@ -338,7 +338,7 @@
   gap: 6px;
   padding: 4px 8px;
   border-radius: 999px;
-  background: rgba(124, 155, 150, 0.12);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
   font-size: 0.76rem;
 }
@@ -351,7 +351,7 @@
 }
 
 .toolPill {
-  background: rgba(124, 155, 150, 0.12);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
 }
 
@@ -362,7 +362,7 @@
   gap: 12px;
   padding: 16px 20px 20px;
   border-top: 1px solid var(--border-soft);
-  background: rgba(27, 31, 35, 0.96);
+  background: var(--surface-panel-strong);
 }
 
 .composerField {
@@ -409,7 +409,7 @@
   width: 34px;
   height: 18px;
   border-radius: 999px;
-  border: 1px solid rgba(216, 167, 91, 0.22);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 22%, transparent);
   background: rgba(124, 132, 142, 0.18);
   transition: background 120ms ease, border-color 120ms ease;
 }
@@ -427,8 +427,8 @@
 }
 
 .optionCheckbox:checked + .optionSwitch {
-  border-color: rgba(216, 167, 91, 0.42);
-  background: rgba(216, 167, 91, 0.24);
+  border-color: color-mix(in srgb, var(--accent-warm) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 24%, transparent);
 }
 
 .optionCheckbox:checked + .optionSwitch::after {
@@ -437,7 +437,7 @@
 }
 
 .optionCheckbox:focus-visible + .optionSwitch {
-  outline: 2px solid rgba(216, 167, 91, 0.4);
+  outline: 2px solid color-mix(in srgb, var(--accent-warm) 40%, transparent);
   outline-offset: 2px;
 }
 
@@ -459,7 +459,7 @@
 
 .composerError {
   margin: 0;
-  color: #f0a6a6;
+  color: var(--state-error);
   font-size: 0.82rem;
   line-height: 1.45;
 }
@@ -469,7 +469,7 @@
   resize: none;
   border-radius: 8px;
   border: 1px solid var(--border-soft);
-  background: rgba(20, 23, 26, 0.92);
+  background: var(--surface-input-strong);
   color: var(--fg-primary);
   padding: 12px 14px;
   font: inherit;
@@ -483,28 +483,28 @@
 .sendButton {
   align-self: end;
   padding: 10px 16px;
-  border: 1px solid rgba(216, 167, 91, 0.24);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, transparent);
   border-radius: 999px;
-  background: rgba(216, 167, 91, 0.18);
+  background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
   color: var(--accent-warm-2);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
 }
 
 .sendButton:hover:not(:disabled) {
-  background: rgba(216, 167, 91, 0.26);
-  border-color: rgba(216, 167, 91, 0.34);
+  background: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
 }
 
 .stopButton {
-  border-color: rgba(192, 94, 94, 0.28);
-  background: rgba(192, 94, 94, 0.16);
-  color: #f0b3b3;
+  border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
+  background: color-mix(in srgb, var(--state-error) 16%, transparent);
+  color: var(--state-error);
 }
 
 .stopButton:hover:not(:disabled) {
-  background: rgba(192, 94, 94, 0.22);
-  border-color: rgba(192, 94, 94, 0.38);
+  background: color-mix(in srgb, var(--state-error) 22%, transparent);
+  border-color: color-mix(in srgb, var(--state-error) 38%, transparent);
 }
 
 .sendButton:disabled {
@@ -521,16 +521,16 @@
   gap: 8px;
   padding: 10px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(216, 167, 91, 0.24);
-  background: rgba(20, 23, 26, 0.92);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  background: var(--surface-input-strong);
   color: var(--accent-warm-2);
   cursor: pointer;
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.28);
 }
 
 .backToBottomButton:hover {
-  border-color: rgba(216, 167, 91, 0.38);
-  background: rgba(27, 31, 35, 0.98);
+  border-color: color-mix(in srgb, var(--accent-warm) 38%, transparent);
+  background: var(--surface-panel-strong);
 }
 
 @media (max-width: 1280px) {

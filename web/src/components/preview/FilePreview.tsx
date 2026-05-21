@@ -3,7 +3,6 @@ import { type ReactNode, useMemo } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, EditorView } from "@codemirror/view";
-import { oneDark } from "@codemirror/theme-one-dark";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
@@ -11,6 +10,7 @@ import { python } from "@codemirror/lang-python";
 import { yaml } from "@codemirror/lang-yaml";
 
 import { FileContent } from "../../api/types";
+import { workbenchCodeMirrorTheme } from "../../design/codeMirrorTheme";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { classifyLogText, matchesSeverityFilter, type LogSeverityFilter } from "../../logs/logSeverity";
 import styles from "./FilePreview.module.css";
@@ -108,7 +108,7 @@ export function FilePreview({
         <CodeMirror
           value={displayContent}
           editable={false}
-          theme={oneDark}
+          theme={workbenchCodeMirrorTheme}
           height="100%"
           extensions={editorExtensions}
           basicSetup={{

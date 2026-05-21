@@ -99,7 +99,7 @@
   padding: 4px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
-  background: rgba(27, 31, 35, 0.92);
+  background: var(--surface-panel-strong);
 }
 
 .tabButton {
@@ -114,15 +114,15 @@
 }
 
 .tabButtonActive {
-  background: rgba(216, 167, 91, 0.16);
+  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
   color: var(--accent-warm-2);
 }
 
 .surface {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(27, 31, 35, 0.82);
-  box-shadow: 0 14px 30px rgba(10, 12, 14, 0.18);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-soft);
   padding: 18px;
 }
 
@@ -187,7 +187,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(124, 155, 150, 0.14);
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
   color: var(--accent-cool);
   flex: 0 0 auto;
 }
@@ -208,13 +208,13 @@
 
 .statusPill {
   color: var(--accent-warm-2);
-  background: rgba(216, 167, 91, 0.12);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
 .secondaryPill,
 .counter {
   color: var(--fg-secondary);
-  background: rgba(36, 42, 47, 0.92);
+  background: var(--surface-panel-strong);
 }
 
 .conversationActions {
@@ -238,7 +238,7 @@
   min-height: 38px;
   border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(36, 42, 47, 0.92);
+  background: var(--surface-panel-strong);
   color: var(--fg-primary);
   padding: 0 14px;
   display: inline-flex;
@@ -277,7 +277,7 @@
   padding: 12px 14px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(20, 23, 26, 0.82);
+  background: var(--surface-card);
 }
 
 .signalRow,
@@ -296,7 +296,7 @@
 .stripItem {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background: rgba(20, 23, 26, 0.72);
+  background: var(--surface-card);
 }
 
 .signalCard,
@@ -336,7 +336,7 @@
   border-radius: 8px;
   background:
     radial-gradient(circle at top, rgba(80, 96, 124, 0.22), transparent 58%),
-    rgba(20, 23, 26, 0.82);
+    var(--surface-card);
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -348,7 +348,7 @@
   width: 180px;
   height: 180px;
   border-radius: 999px;
-  background: radial-gradient(circle, rgba(216, 167, 91, 0.22), rgba(216, 167, 91, 0));
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-warm) 22%, transparent), rgba(216, 167, 91, 0));
   filter: blur(4px);
 }
 
@@ -372,7 +372,7 @@
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  background: rgba(36, 42, 47, 0.92);
+  background: var(--surface-panel-strong);
   color: var(--fg-secondary);
   font-size: 0.78rem;
 }
@@ -439,8 +439,8 @@
 }
 
 .listItemSelected {
-  border-color: rgba(216, 167, 91, 0.28);
-  background: rgba(216, 167, 91, 0.08);
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 8%, transparent);
 }
 
 .listItem strong,
@@ -466,7 +466,7 @@
   min-height: 32px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.2);
-  background: rgba(36, 42, 47, 0.92);
+  background: var(--surface-panel-strong);
   color: var(--fg-secondary);
   padding: 0 12px;
   display: inline-flex;
@@ -518,7 +518,7 @@
 .vitalFill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(90deg, rgba(216, 167, 91, 0.72), rgba(124, 155, 150, 0.9));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 72%, transparent), rgba(124, 155, 150, 0.9));
 }
 
 .paginationBar {
@@ -539,8 +539,8 @@
 }
 
 .paginationButtonActive {
-  border-color: rgba(216, 167, 91, 0.32);
-  background: rgba(216, 167, 91, 0.12);
+  border-color: color-mix(in srgb, var(--accent-warm) 32%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
   color: var(--accent-warm-2);
 }
 
@@ -554,12 +554,12 @@
 }
 
 .feedbackText {
-  color: #bae6fd;
+  color: var(--accent-warm-2);
   overflow-wrap: anywhere;
 }
 
 .errorText {
-  color: #fecaca;
+  color: var(--state-error);
   overflow-wrap: anywhere;
 }
 
