@@ -16,7 +16,7 @@ SECTION_LABELS = {
     "zh": {
         "runtime": "运行时",
         "avatar": "形象",
-        "llm.profiles": "模型档案",
+        "llm.profiles": "模型",
         "llm.discovery": "模型发现",
         "agent": "智能体",
         "context_compression": "上下文压缩",
@@ -31,13 +31,14 @@ SECTION_LABELS = {
         "ui": "界面",
         "parser": "解析器",
         "prompt": "提示词",
+        "git": "Git",
         "debug": "调试",
         "pet": "宠物",
     },
     "en": {
         "runtime": "Runtime",
         "avatar": "Avatar",
-        "llm.profiles": "LLM Profiles",
+        "llm.profiles": "Models",
         "llm.discovery": "Model Discovery",
         "agent": "Agent",
         "context_compression": "Context Compression",
@@ -52,6 +53,7 @@ SECTION_LABELS = {
         "ui": "UI",
         "parser": "Parser",
         "prompt": "Prompt",
+        "git": "Git",
         "debug": "Debug",
         "pet": "Pet",
     },
@@ -59,7 +61,7 @@ SECTION_LABELS = {
 
 FIELD_LABELS = {
     "zh": {
-        "runtime.profile": "运行档案",
+        "runtime.profile": "运行档位",
         "runtime.preflight_doctor": "启动前自检",
         "runtime.require_venv": "要求使用 .venv",
         "avatar.preset": "形象预设",
@@ -115,6 +117,8 @@ FIELD_LABELS = {
         "ui.show_ascii_art": "显示 ASCII Art",
         "ui.show_welcome": "显示欢迎面板",
         "prompt.default_components": "默认提示词组件",
+        "git.commit_message_profile": "AI 提交说明模型",
+        "git.commit_message_prompt": "AI 提交说明提示词",
         "evolution.chat_dataset.enabled": "启用 chat 数据采样",
         "evolution.chat_dataset.source_modes": "采样来源模式",
         "evolution.chat_dataset.auto_capture": "自动采样",
@@ -130,7 +134,7 @@ FIELD_LABELS = {
         "evolution.chat_dataset.rejected_log_path": "拒绝审计路径",
     },
     "en": {
-        "runtime.profile": "Runtime Profile",
+        "runtime.profile": "Runtime Mode",
         "runtime.preflight_doctor": "Preflight Doctor",
         "runtime.require_venv": "Require .venv",
         "avatar.preset": "Avatar Preset",
@@ -186,6 +190,8 @@ FIELD_LABELS = {
         "ui.show_ascii_art": "Show ASCII Art",
         "ui.show_welcome": "Show Welcome Panel",
         "prompt.default_components": "Default Prompt Components",
+        "git.commit_message_profile": "AI Commit Message Model",
+        "git.commit_message_prompt": "AI Commit Message Prompt",
         "evolution.chat_dataset.enabled": "Enable Chat Dataset Capture",
         "evolution.chat_dataset.source_modes": "Capture Source Modes",
         "evolution.chat_dataset.auto_capture": "Auto Capture",
@@ -277,6 +283,7 @@ BADGE_LABELS = {
         "URL": "地址",
         "Path": "路径",
         "Text": "文本",
+        "Multiline": "多行文本",
     },
     "en": {
         "Group": "Group",
@@ -291,6 +298,7 @@ BADGE_LABELS = {
         "URL": "URL",
         "Path": "Path",
         "Text": "Text",
+        "Multiline": "Multiline",
     },
 }
 
@@ -314,6 +322,8 @@ FIELD_HINTS = {
         "evolution.chat_dataset.segmentation_strategy": "chat 采样如何切分连续多轮上下文。",
         "ui.refresh_rate": "终端工作台刷新频率。",
         "ui.max_log_entries": "UI 内部保留的日志条目数。",
+        "git.commit_message_profile": "点击“AI 生成说明”时使用的任务模型。",
+        "git.commit_message_prompt": "生成提交说明时的模板。可使用 {summary}、{files}、{diff}、{branch} 占位符。",
     },
     "en": {
         "runtime.profile": "Sets the default runtime posture. Start with safe_local or debug in most cases.",
@@ -334,6 +344,8 @@ FIELD_HINTS = {
         "evolution.chat_dataset.segmentation_strategy": "How chat capture segments contiguous multi-turn context.",
         "ui.refresh_rate": "Refresh cadence for the terminal workbench.",
         "ui.max_log_entries": "How many UI log entries are retained.",
+        "git.commit_message_profile": "Task model used by the AI commit message button.",
+        "git.commit_message_prompt": "Prompt template for generated commit messages. Supports {summary}, {files}, {diff}, and {branch}.",
     },
 }
 
@@ -355,6 +367,7 @@ EDITOR_SECTION_SPECS = [
     ("ui", "ui"),
     ("parser", "parser"),
     ("prompt", "prompt"),
+    ("git", "git"),
     ("debug", "debug"),
     ("pet", "pet"),
 ]
@@ -424,7 +437,18 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
     return []
 
 
+def _field_options_for_config(path: str, public_config: dict[str, Any], lang: str) -> list[dict[str, str]]:
+    if path == "git.commit_message_profile":
+        profiles = public_config.get("llm", {}).get("profiles", {}) if isinstance(public_config.get("llm", {}), dict) else {}
+        if isinstance(profiles, dict):
+            return [{"value": str(profile_id), "label": str(profile_id)} for profile_id in profiles.keys()]
+        return [{"value": "primary", "label": "primary"}]
+    return _field_options(path, lang)
+
+
 def _field_kind(path: str, value: Any, options: list[dict[str, str]] | None = None) -> tuple[str, str]:
+    if path == "git.commit_message_prompt":
+        return "multiline", "Multiline"
     if isinstance(value, bool):
         return "boolean", "Toggle"
     if options:
@@ -471,7 +495,7 @@ def _count_leaf_fields(value: Any) -> int:
     return 1
 
 
-def _walk_editor_meta(value: Any, path: str, lang: str, into: dict[str, dict[str, Any]]) -> None:
+def _walk_editor_meta(value: Any, path: str, lang: str, into: dict[str, dict[str, Any]], public_config: dict[str, Any]) -> None:
     label = localize_section_label(path, path.split(".")[-1] if path else "", lang)
     hint = field_hint(path, lang)
     if isinstance(value, dict):
@@ -485,7 +509,7 @@ def _walk_editor_meta(value: Any, path: str, lang: str, into: dict[str, dict[str
         }
         for key, child in value.items():
             child_path = f"{path}.{key}" if path else key
-            _walk_editor_meta(child, child_path, lang, into)
+            _walk_editor_meta(child, child_path, lang, into, public_config)
         return
     if isinstance(value, list) and value and all(isinstance(item, dict) for item in value):
         into[path] = {
@@ -498,9 +522,9 @@ def _walk_editor_meta(value: Any, path: str, lang: str, into: dict[str, dict[str
         }
         for index, child in enumerate(value):
             child_path = f"{path}.{index}"
-            _walk_editor_meta(child, child_path, lang, into)
+            _walk_editor_meta(child, child_path, lang, into, public_config)
         return
-    options = _field_options(path, lang)
+    options = _field_options_for_config(path, public_config, lang)
     kind, badge = _field_kind(path, value, options)
     into[path] = {
         "path": path,
@@ -519,7 +543,7 @@ def build_editor_meta(public_config: dict[str, Any], lang: str) -> dict[str, dic
             section_value = _lookup_path_value(public_config, path)
         except KeyError:
             continue
-        _walk_editor_meta(copy.deepcopy(section_value), path, lang, meta)
+        _walk_editor_meta(copy.deepcopy(section_value), path, lang, meta, public_config)
     return meta
 
 

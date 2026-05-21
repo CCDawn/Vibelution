@@ -18,6 +18,33 @@ from .streaming import extract_message_tool_calls, extract_text_content
 from .types import LLMCapabilities, LLMError, StreamChunk, UsageStats
 
 
+def _record_llm_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: Dict[str, Any] | None = None,
+    lifecycle: bool = False,
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "llm",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
 def _default_completion_backend(payload: Dict[str, Any]) -> Any:
     try:
         from litellm import completion
@@ -260,7 +287,28 @@ class LLMClient:
         try:
             response = self._backend(payload)
         except Exception as exc:
-            raise classify_exception(exc) from exc
+            llm_error = classify_exception(exc)
+            _record_llm_scene_event(
+                "invoke",
+                "llm.invoke.failed",
+                message=f"LLM invoke failed: {llm_error.error_type}",
+                level="error",
+                outcome="failed",
+                fields={
+                    "role": self.role,
+                    "profileId": self.profile_id,
+                    "provider": self.provider.kind,
+                    "model": self.profile.model,
+                    "messageCount": len(messages or []),
+                    "toolCount": len(tools or self.bound_tools or []),
+                    "metadata": metadata or {},
+                    "errorType": llm_error.error_type,
+                    "retryable": llm_error.retryable,
+                    "error": str(llm_error),
+                },
+                lifecycle=True,
+            )
+            raise llm_error from exc
         latency_ms = int((time.time() - start) * 1000)
         message = self._choice_message(response)
         tool_calls = extract_message_tool_calls(message)
@@ -269,6 +317,27 @@ class LLMClient:
         reasoning_content = extract_text_content(message.get("reasoning_content") or "")
         if reasoning_content.strip():
             additional_kwargs["reasoning_content"] = reasoning_content
+        _record_llm_scene_event(
+            "invoke",
+            "llm.invoke.succeeded",
+            message="LLM invoke succeeded.",
+            outcome="succeeded",
+            fields={
+                "role": self.role,
+                "profileId": self.profile_id,
+                "provider": self.provider.kind,
+                "model": self.profile.model,
+                "messageCount": len(messages or []),
+                "toolCount": len(tools or self.bound_tools or []),
+                "toolCallCount": len(tool_calls),
+                "inputTokens": usage.input_tokens,
+                "outputTokens": usage.output_tokens,
+                "totalTokens": usage.total_tokens,
+                "latencyMs": latency_ms,
+                "metadata": metadata or {},
+            },
+            lifecycle=False,
+        )
         return AIMessage(
             content=extract_text_content(message.get("content") or ""),
             tool_calls=[
@@ -308,11 +377,51 @@ class LLMClient:
         try:
             iterator = self._backend(payload)
         except Exception as exc:
-            raise classify_exception(exc) from exc
+            llm_error = classify_exception(exc)
+            _record_llm_scene_event(
+                "stream",
+                "llm.stream.failed",
+                message=f"LLM stream failed before iterator: {llm_error.error_type}",
+                level="error",
+                outcome="failed",
+                fields={
+                    "role": self.role,
+                    "profileId": self.profile_id,
+                    "provider": self.provider.kind,
+                    "model": self.profile.model,
+                    "messageCount": len(messages or []),
+                    "toolCount": len(tools or self.bound_tools or []),
+                    "errorType": llm_error.error_type,
+                    "retryable": llm_error.retryable,
+                    "error": str(llm_error),
+                },
+                lifecycle=True,
+            )
+            raise llm_error from exc
         try:
             yield from self.adapter.stream_normalizer().events(iterator)
         except Exception as exc:
-            raise classify_exception(exc) from exc
+            llm_error = classify_exception(exc)
+            _record_llm_scene_event(
+                "stream",
+                "llm.stream.failed",
+                message=f"LLM stream failed: {llm_error.error_type}",
+                level="error",
+                outcome="failed",
+                fields={
+                    "role": self.role,
+                    "profileId": self.profile_id,
+                    "provider": self.provider.kind,
+                    "model": self.profile.model,
+                    "messageCount": len(messages or []),
+                    "toolCount": len(tools or self.bound_tools or []),
+                    "errorType": llm_error.error_type,
+                    "retryable": llm_error.retryable,
+                    "error": str(llm_error),
+                },
+                lifecycle=True,
+            )
+            raise llm_error from exc
 
     def stream(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> Iterator[AIMessageChunk]:
         response_metadata = self._response_metadata(metadata)

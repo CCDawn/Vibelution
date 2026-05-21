@@ -34,6 +34,7 @@ from core.runtime_manager.work_run_leases import (
 )
 
 from .i18n import get_web_language, text_for
+from .runtime_scene_service import record_runtime_scene_event
 from .session_service import (
     SessionBusyError,
     SessionNotFoundError,
@@ -109,6 +110,61 @@ def _map_runtime_manager_error(message: str, error_type: str) -> Exception:
     if normalized == "SelfEvolutionRunNotFoundError":
         return SelfEvolutionRunNotFoundError(message)
     return SelfEvolutionRunValidationError(message)
+
+
+def _record_self_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    run_id: str = "",
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+    lifecycle: bool = False,
+) -> None:
+    event_fields: dict[str, Any] = {"runId": str(run_id or "").strip()}
+    if fields:
+        event_fields.update(fields)
+    try:
+        record_runtime_scene_event(
+            "self_evolution_run",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=event_fields,
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
+def _optional_scene_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _self_snapshot_event_fields(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    payload = snapshot if isinstance(snapshot, dict) else {}
+    rollback = payload.get("rollback") if isinstance(payload.get("rollback"), dict) else {}
+    return {
+        "status": str(payload.get("status") or "").strip(),
+        "phase": str(payload.get("phase") or "").strip(),
+        "runtimeStatus": str(payload.get("runtimeStatus") or "").strip(),
+        "toolCallCount": _optional_scene_int(payload.get("toolCallCount")),
+        "lastToolName": str(payload.get("lastToolName") or "").strip(),
+        "controlAction": str(payload.get("controlAction") or "").strip(),
+        "stopReason": str(payload.get("stopReason") or "").strip(),
+        "error": str(payload.get("error") or "").strip(),
+        "updatedAt": str(payload.get("updatedAt") or "").strip(),
+        "finishedAt": str(payload.get("finishedAt") or "").strip(),
+        "rollbackStatus": str(rollback.get("status") or "").strip(),
+        "rollbackManifestPath": str(rollback.get("manifestPath") or "").strip(),
+    }
 
 
 def get_active_self_evolution_run() -> dict[str, Any] | None:
@@ -1149,6 +1205,19 @@ def _mark_run_failed(
             ),
         )
     _merge_run_state(run_id, payload, clear_active=True)
+    _record_self_scene_event(
+        "state",
+        "self_evolution_run.failed",
+        run_id=run_id,
+        message=str(message or "Self-evolution run failed."),
+        level="error",
+        outcome="failed",
+        fields={
+            **_self_snapshot_event_fields({**snapshot, **payload}),
+            "summary": visible_summary,
+        },
+        lifecycle=True,
+    )
 
 
 def _mark_run_cancelled(
@@ -1889,13 +1958,34 @@ def _capture_preflight_state(run_id: str) -> dict[str, Any]:
             "backupPath": backup_path,
             "backupError": backup_error,
         }
-    return {
+    preflight = {
         "runDir": str(run_dir),
         "backupDir": str(backup_dir),
         "manifestPath": str(manifest_path),
         "baseRev": base_rev,
         "dirtyEntries": dirty_entries,
     }
+    backup_error_count = sum(
+        1
+        for item in dirty_entries.values()
+        if isinstance(item, dict) and str(item.get("backupError") or "").strip()
+    )
+    _record_self_scene_event(
+        "preflight",
+        "self_evolution_run.preflight.captured",
+        run_id=run_id,
+        message="Self-evolution preflight state captured.",
+        outcome="succeeded",
+        fields={
+            "baseRev": base_rev,
+            "dirtyEntryCount": len(dirty_entries),
+            "backupErrorCount": backup_error_count,
+            "runDir": str(run_dir),
+            "manifestPath": str(manifest_path),
+        },
+        lifecycle=True,
+    )
+    return preflight
 
 
 def _finalize_rollback_manifest(run_id: str, preflight: dict[str, Any]) -> dict[str, Any] | None:
@@ -2384,17 +2474,69 @@ def _submit_self_runtime_manager_command(command_type: str, *, run_id: str = "",
     command = submit_command(command_type, args=args, requested_by="web_ui")
     result = wait_for_result(command["commandId"])
     if not bool(result.get("ok")):
+        _record_self_scene_event(
+            "runtime_manager",
+            f"self_evolution_run.manager.{command_type}.failed",
+            run_id=run_id,
+            message=str(result.get("message") or "Runtime manager command failed."),
+            level="error",
+            outcome="failed",
+            fields={
+                "commandType": command_type,
+                "commandId": str(command.get("commandId") or ""),
+                "errorType": str(result.get("errorType") or ""),
+            },
+            lifecycle=True,
+        )
         raise _map_runtime_manager_error(
             str(result.get("message") or "Runtime manager command failed."),
             str(result.get("errorType") or ""),
         )
     snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else None
     if snapshot is not None:
+        _record_self_scene_event(
+            "runtime_manager",
+            f"self_evolution_run.manager.{command_type}.succeeded",
+            run_id=str(snapshot.get("runId") or run_id),
+            message="Self-evolution runtime-manager command succeeded.",
+            outcome="succeeded",
+            fields={
+                "commandType": command_type,
+                "commandId": str(command.get("commandId") or ""),
+                **_self_snapshot_event_fields(snapshot),
+            },
+            lifecycle=True,
+        )
         return snapshot
     target_run_id = str(result.get("runId") or run_id or "").strip()
     loaded = load_manager_run_snapshot("self", target_run_id) if target_run_id else None
     if loaded is not None:
+        _record_self_scene_event(
+            "runtime_manager",
+            f"self_evolution_run.manager.{command_type}.succeeded",
+            run_id=target_run_id,
+            message="Self-evolution runtime-manager command loaded snapshot.",
+            outcome="succeeded",
+            fields={
+                "commandType": command_type,
+                "commandId": str(command.get("commandId") or ""),
+                **_self_snapshot_event_fields(loaded),
+            },
+            lifecycle=True,
+        )
         return loaded
+    _record_self_scene_event(
+        "runtime_manager",
+        f"self_evolution_run.manager.{command_type}.succeeded",
+        run_id=target_run_id,
+        message="Self-evolution runtime-manager command returned no snapshot.",
+        outcome="succeeded",
+        fields={
+            "commandType": command_type,
+            "commandId": str(command.get("commandId") or ""),
+        },
+        lifecycle=True,
+    )
     return {}
 
 
@@ -2484,13 +2626,33 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
                 )
             )
         return _submit_self_runtime_manager_command("start_self_evolution_run", payload=payload)
-    return _LOCAL_START_SELF_EVOLUTION_RUN(payload)
+    snapshot = _LOCAL_START_SELF_EVOLUTION_RUN(payload)
+    _record_self_scene_event(
+        "control",
+        "self_evolution_run.started",
+        run_id=str(snapshot.get("runId") or ""),
+        message="Self-evolution run started from web UI.",
+        outcome="succeeded",
+        fields=_self_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot
 
 
 def request_pause_self_evolution_run(run_id: str) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         return _submit_self_runtime_manager_command("pause_self_evolution_run", run_id=run_id)
-    return _LOCAL_REQUEST_PAUSE_SELF_EVOLUTION_RUN(run_id)
+    snapshot = _LOCAL_REQUEST_PAUSE_SELF_EVOLUTION_RUN(run_id)
+    _record_self_scene_event(
+        "control",
+        "self_evolution_run.pause_requested",
+        run_id=run_id,
+        message="Self-evolution run pause requested.",
+        outcome="succeeded",
+        fields=_self_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot
 
 
 def resume_self_evolution_run(run_id: str) -> dict[str, Any]:
@@ -2502,13 +2664,33 @@ def resume_self_evolution_run(run_id: str) -> dict[str, Any]:
                     zh="当前有写入型网页会话还在运行，请等这一轮结束后再继续自进化。",
                     en="A write-capable web chat turn is still running. Wait for it to finish before resuming self evolution.",
                 )
-            )
+        )
         _raise_if_self_lease_conflict(lang=get_web_language())
         return _submit_self_runtime_manager_command("resume_self_evolution_run", run_id=run_id)
-    return _LOCAL_RESUME_SELF_EVOLUTION_RUN(run_id)
+    snapshot = _LOCAL_RESUME_SELF_EVOLUTION_RUN(run_id)
+    _record_self_scene_event(
+        "control",
+        "self_evolution_run.resumed",
+        run_id=run_id,
+        message="Self-evolution run resumed.",
+        outcome="succeeded",
+        fields=_self_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot
 
 
 def request_stop_self_evolution_run(run_id: str) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         return _submit_self_runtime_manager_command("stop_self_evolution_run", run_id=run_id)
-    return _LOCAL_REQUEST_STOP_SELF_EVOLUTION_RUN(run_id)
+    snapshot = _LOCAL_REQUEST_STOP_SELF_EVOLUTION_RUN(run_id)
+    _record_self_scene_event(
+        "control",
+        "self_evolution_run.stop_requested",
+        run_id=run_id,
+        message="Self-evolution run stop requested.",
+        outcome="succeeded",
+        fields=_self_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot

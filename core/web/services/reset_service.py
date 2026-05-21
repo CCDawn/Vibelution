@@ -12,6 +12,7 @@ from typing import Any, Callable, Iterable
 from core.ui.chat_state import build_chat_state, chat_state_path, save_chat_state
 
 from .i18n import get_web_language, text_for
+from .runtime_scene_service import record_runtime_scene_event
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -57,6 +58,31 @@ class ResetActionResult:
     message: str = ""
 
 
+def _record_reset_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+    lifecycle: bool = False,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "reset",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
 def get_reset_summary() -> dict:
     """Return the current reset inventory without executing destructive actions."""
 
@@ -65,7 +91,7 @@ def get_reset_summary() -> dict:
     protected = [
         {
             "id": "config",
-            "label": text_for(lang, zh="配置与模型档案", en="Config and model profiles"),
+            "label": text_for(lang, zh="配置与任务模型", en="Config and task models"),
             "paths": ["config.toml", "config/"],
             "reason": text_for(lang, zh="配置不是垃圾内容，不提供重置勾选。", en="Config is not cleanup residue."),
         },
@@ -116,7 +142,7 @@ def preview_reset(item_ids: list[str] | tuple[str, ...]) -> dict:
     previews = [_preview_item(definition, lang) for definition in definitions]
     totals = _total_from_item_results(previews)
     warnings = _collect_rebuild_hints(definitions, lang)
-    return {
+    payload = {
         "selectedItemIds": [definition.id for definition in definitions],
         "items": previews,
         "totals": totals,
@@ -124,6 +150,18 @@ def preview_reset(item_ids: list[str] | tuple[str, ...]) -> dict:
         "rebuildHints": warnings,
         "summary": _preview_summary(totals, lang),
     }
+    _record_reset_scene_event(
+        "preview",
+        "reset.preview.generated",
+        message="Reset preview generated.",
+        outcome="succeeded",
+        fields={
+            "selectedItemIds": payload["selectedItemIds"],
+            **totals,
+        },
+        lifecycle=True,
+    )
+    return payload
 
 
 def execute_reset(item_ids: list[str] | tuple[str, ...], *, confirmed: bool) -> dict:
@@ -137,7 +175,7 @@ def execute_reset(item_ids: list[str] | tuple[str, ...], *, confirmed: bool) -> 
     results = [_execute_item(definition, lang) for definition in definitions]
     totals = _total_from_item_results(results)
     rebuild_hints = _collect_rebuild_hints(definitions, lang)
-    return {
+    payload = {
         "selectedItemIds": [definition.id for definition in definitions],
         "items": results,
         "totals": totals,
@@ -145,6 +183,20 @@ def execute_reset(item_ids: list[str] | tuple[str, ...], *, confirmed: bool) -> 
         "rebuildHints": rebuild_hints,
         "summary": _execute_summary(totals, lang),
     }
+    failed_count = int(totals.get("failedCount") or 0)
+    _record_reset_scene_event(
+        "execute",
+        "reset.execute.completed",
+        message="Reset execution completed.",
+        level="error" if failed_count else "info",
+        outcome="failed" if failed_count else "succeeded",
+        fields={
+            "selectedItemIds": payload["selectedItemIds"],
+            **totals,
+        },
+        lifecycle=True,
+    )
+    return payload
 
 
 def _reset_items() -> tuple[ResetItemDefinition, ...]:
@@ -529,16 +581,49 @@ def _collect_web_dist() -> list[ResetCandidate]:
 def _execute_delete_candidate(candidate: ResetCandidate) -> ResetActionResult:
     try:
         if not candidate.path.exists():
-            return ResetActionResult("skipped", candidate.path, candidate.kind, candidate.action, "missing")
+            result = ResetActionResult("skipped", candidate.path, candidate.kind, candidate.action, "missing")
+            _record_reset_candidate_event(result)
+            return result
         if candidate.path.is_file() or candidate.path.is_symlink():
             candidate.path.unlink()
         elif candidate.path.is_dir():
             shutil.rmtree(candidate.path)
         else:
-            return ResetActionResult("skipped", candidate.path, candidate.kind, candidate.action, "unsupported path type")
+            result = ResetActionResult("skipped", candidate.path, candidate.kind, candidate.action, "unsupported path type")
+            _record_reset_candidate_event(result)
+            return result
     except Exception as exc:
-        return ResetActionResult("failed", candidate.path, candidate.kind, candidate.action, str(exc))
-    return ResetActionResult("deleted", candidate.path, candidate.kind, candidate.action)
+        result = ResetActionResult("failed", candidate.path, candidate.kind, candidate.action, str(exc))
+        _record_reset_candidate_event(result)
+        return result
+    result = ResetActionResult("deleted", candidate.path, candidate.kind, candidate.action)
+    _record_reset_candidate_event(result)
+    return result
+
+
+def _record_reset_candidate_event(result: ResetActionResult) -> None:
+    if result.status == "deleted":
+        level = "info"
+        outcome = "succeeded"
+    elif result.status == "failed":
+        level = "error"
+        outcome = "failed"
+    else:
+        level = "warning"
+        outcome = "skipped"
+    _record_reset_scene_event(
+        "delete",
+        f"reset.candidate.{result.status}",
+        message=f"Reset candidate {result.status}: {_relative_path(result.path)}",
+        level=level,
+        outcome=outcome,
+        fields={
+            "path": _relative_path(result.path),
+            "kind": result.kind,
+            "action": result.action,
+            "message": result.message,
+        },
+    )
 
 
 def _definitions_for_ids(item_ids: list[str] | tuple[str, ...]) -> list[ResetItemDefinition]:

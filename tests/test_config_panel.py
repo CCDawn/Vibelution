@@ -135,7 +135,7 @@ def test_render_panel_html_uses_inline_profile_clone_controls():
     assert 'id="add-llm-profile-model"' in html
     assert 'data-add-profile-field="provider_id"' not in html
     assert 'saveInlineLlmProfile()' in html
-    assert "profile_id and model_id are required" in html
+    assert "task model id and model id are required" in html
 
 
 def test_render_panel_html_embeds_inline_provider_js_helpers():
@@ -199,7 +199,7 @@ def test_render_llm_profile_card_includes_stable_card_id():
 def test_render_llm_profile_card_accepts_model_ref_profiles():
     public_config = load_public_config()
     public_config["llm"]["profiles"]["primary"] = {
-        "model_ref": "openai_gpt_5_5",
+        "model_ref": "relay_openai_gpt_5_5",
         "overrides": {"temperature": 0.25},
     }
 
@@ -360,7 +360,7 @@ def test_draft_add_llm_profile_returns_preview_fragments_without_persisting_conf
                 "response_mode": "fragments",
                 "profile_id": "preview_profile_copy",
                 "source_profile_id": "primary",
-                "model_id": "openai_gpt_5_5",
+                "model_id": "relay_openai_gpt_5_5",
                 "lang": "zh",
             },
         )
@@ -381,7 +381,7 @@ def test_draft_add_llm_profile_returns_preview_fragments_without_persisting_conf
 def test_draft_delete_llm_model_fragments_mark_referencing_profiles_unconfigured(tmp_path, monkeypatch):
     public_config = load_public_config()
     public_config["llm"]["profiles"]["primary"] = {
-        "model_ref": "openai_gpt_5_5",
+        "model_ref": "relay_openai_gpt_5_5",
         "overrides": {},
     }
     config_path = tmp_path / "config.toml"
@@ -400,7 +400,7 @@ def test_draft_delete_llm_model_fragments_mark_referencing_profiles_unconfigured
                 "draft_meta": json.dumps({}, ensure_ascii=False),
                 "base_hash": base_hash,
                 "response_mode": "fragments",
-                "model_id": "openai_gpt_5_5",
+                "model_id": "relay_openai_gpt_5_5",
                 "lang": "zh",
             },
         )
@@ -516,6 +516,10 @@ def test_get_config_language_falls_back_safely():
 def test_label_localization_prefers_exact_and_fallback_rules():
     assert localize_label("llm.providers.remote_main.api_key", "api_key", "zh") == "API 密钥"
     assert localize_label("tools.shell.default_timeout", "default_timeout", "en") == "Default Timeout"
+    assert localize_label("git.commit_message_profile", "commit_message_profile", "zh") == "AI 提交说明模型"
+    assert localize_label("git.commit_message_profile", "commit_message_profile", "en") == "AI Commit Message Model"
+    assert localize_section_label("llm.profiles", "profiles", "zh") == "模型"
+    assert localize_section_label("llm.profiles", "profiles", "en") == "Models"
     assert localize_section_label("llm.discovery", "discovery", "zh") == "模型发现"
     assert localize_section_label("network", "network", "en") == "Network"
 
@@ -566,7 +570,10 @@ def test_apply_codex_model_preset_materializes_inline_provider():
 
 
 def test_apply_relay_model_preset_materializes_openai_compatible_provider():
-    updated = apply_llm_model_preset(load_public_config(), "relay_openai_gpt_5_5")
+    public_config = load_public_config()
+    public_config["llm"]["model_library"].pop("relay_openai_gpt_5_5", None)
+
+    updated = apply_llm_model_preset(public_config, "relay_openai_gpt_5_5")
     model = updated["llm"]["model_library"]["relay_openai_gpt_5_5"]
 
     assert model["provider"]["kind"] == "relay"
@@ -584,13 +591,15 @@ def test_apply_relay_model_preset_materializes_openai_compatible_provider():
 
 def test_default_public_config_includes_new_official_model_templates():
     public_config = load_public_config()
-    openai_model = public_config["llm"]["model_library"]["openai_gpt_5_5"]
+    relay_model = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
 
-    assert openai_model["provider"]["kind"] == "openai"
-    assert openai_model["provider"]["context_window"] == 1050000
-    assert openai_model["model"] == "gpt-5.5"
-    assert openai_model["max_output_tokens"] == 128000
-    assert openai_model["api_key_env"] == "VIBELUTION_LLM_OPENAI_GPT_5_5_API_KEY"
+    assert relay_model["provider"]["kind"] == "relay"
+    assert relay_model["provider"]["context_window"] == 1000000
+    assert relay_model["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
+    assert relay_model["model"] == "gpt-5.5"
+    assert relay_model["contract"] == "tool_chat"
+    assert relay_model["max_output_tokens"] == 128000
+    assert relay_model["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
 
     deepseek_model = public_config["llm"]["model_library"]["deepseek_v4_flash"]
 

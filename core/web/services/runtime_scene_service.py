@@ -28,6 +28,20 @@ MAX_TELEMETRY_TEXT_CHARS = 4_000
 MAX_TELEMETRY_FIELD_TEXT_CHARS = 1_200
 MAX_TELEMETRY_FIELD_ITEMS = 24
 MAX_CONVERSATION_TEXT_CHARS = 20_000
+REDACTED_FIELD_VALUE = "[redacted]"
+SENSITIVE_FIELD_KEYWORDS = (
+    "authorization",
+    "api_key",
+    "apikey",
+    "access_key",
+    "private_key",
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "cookie",
+    "bearer",
+)
 BROWSER_TELEMETRY_WRITE_LOCK = Lock()
 BACKEND_API_WRITE_LOCK = Lock()
 RUNTIME_SCENE_PACKAGE_WRITE_LOCK = Lock()
@@ -367,6 +381,66 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
         _append_scene_event(scene_dir, BACKEND_COMPONENT, event_payload)
         _update_runtime_scene_package_manifest(scene_dir, manifest)
         _update_backend_api_manifest(scene_dir, manifest, timestamp, level, fields)
+
+    return {
+        "accepted": True,
+        "runtimeSceneId": scene_id,
+        "recordedAt": timestamp,
+    }
+
+
+def record_runtime_scene_event(
+    component: str,
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+    raw_refs: list[dict[str, Any]] | None = None,
+    lifecycle: bool = False,
+) -> dict[str, Any]:
+    """Append one structured service/runtime event into the active runtime scene package."""
+
+    scene_dir = _resolve_current_runtime_scene_dir()
+    if scene_dir is None:
+        return {
+            "accepted": False,
+            "reason": "no_runtime_scene",
+        }
+
+    timestamp = _now_utc()
+    component_name = _sanitize_path_token(component, default="runtime")
+    phase_name = _sanitize_token(phase, default="runtime")
+    event_name = _sanitize_token(event_code, default=f"{component_name}.event")
+    level_name = _sanitize_token(level, default="info")
+    outcome_name = _sanitize_token(outcome, default="observed")
+    message_text = _truncate_text(str(message or event_name), 320)
+    normalized_fields = _normalize_telemetry_fields(fields)
+    normalized_raw_refs = _normalize_raw_refs(raw_refs)
+
+    with RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
+        manifest = _load_scene_manifest(scene_dir)
+        scene_id = _scene_id(scene_dir, manifest)
+        event_payload = {
+            "schema_version": 1,
+            "runtime_scene_id": scene_id,
+            "ts": timestamp,
+            "seq": _next_scene_event_seq(scene_dir, component_name),
+            "component": component_name,
+            "phase": phase_name,
+            "event_code": event_name,
+            "level": level_name,
+            "outcome": outcome_name,
+            "message": message_text,
+            "fields": normalized_fields,
+            "raw_refs": normalized_raw_refs,
+        }
+        if lifecycle:
+            event_payload["lifecycle"] = True
+        _append_scene_event(scene_dir, component_name, event_payload)
+        _update_runtime_scene_package_manifest(scene_dir, manifest)
 
     return {
         "accepted": True,
@@ -1033,6 +1107,8 @@ def _append_scene_event(scene_dir: Path, component: str, payload: dict[str, Any]
 
 
 def _is_lifecycle_event(payload: dict[str, Any]) -> bool:
+    if bool(payload.get("lifecycle")):
+        return True
     phase = str(payload.get("phase") or "").strip().lower()
     event_code = str(payload.get("event_code") or "").strip()
     component = str(payload.get("component") or "").strip().lower()
@@ -1209,7 +1285,12 @@ def _normalize_telemetry_fields(value: object) -> dict[str, Any]:
         for index, (key, item) in enumerate(value.items()):
             if index >= MAX_TELEMETRY_FIELD_ITEMS:
                 break
-            normalized[str(key)] = _normalize_telemetry_value(item, depth=0)
+            key_text = str(key)
+            normalized[key_text] = (
+                REDACTED_FIELD_VALUE
+                if _is_sensitive_telemetry_key(key_text)
+                else _normalize_telemetry_value(item, depth=0)
+            )
         return normalized
     if value is None:
         return {}
@@ -1228,7 +1309,12 @@ def _normalize_telemetry_value(value: object, *, depth: int) -> Any:
         for index, (key, item) in enumerate(value.items()):
             if index >= MAX_TELEMETRY_FIELD_ITEMS:
                 break
-            normalized[str(key)] = _normalize_telemetry_value(item, depth=depth + 1)
+            key_text = str(key)
+            normalized[key_text] = (
+                REDACTED_FIELD_VALUE
+                if _is_sensitive_telemetry_key(key_text)
+                else _normalize_telemetry_value(item, depth=depth + 1)
+            )
         return normalized
     if isinstance(value, (list, tuple)):
         return [
@@ -1236,6 +1322,29 @@ def _normalize_telemetry_value(value: object, *, depth: int) -> Any:
             for item in list(value)[:MAX_TELEMETRY_FIELD_ITEMS]
         ]
     return _truncate_text(str(value), MAX_TELEMETRY_FIELD_TEXT_CHARS)
+
+
+def _is_sensitive_telemetry_key(key: str) -> bool:
+    normalized = str(key or "").strip().lower().replace("-", "_")
+    return any(keyword in normalized for keyword in SENSITIVE_FIELD_KEYWORDS)
+
+
+def _normalize_raw_refs(value: object) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    refs: list[dict[str, Any]] = []
+    for item in value[:MAX_TELEMETRY_FIELD_ITEMS]:
+        if not isinstance(item, dict):
+            continue
+        path = _truncate_text(str(item.get("path") or "").strip().replace("\\", "/"), 240)
+        if not path:
+            continue
+        ref: dict[str, Any] = {"path": path}
+        tail_lines = _coerce_int(item.get("tail_lines"), default=0)
+        if tail_lines > 0:
+            ref["tail_lines"] = min(tail_lines, 1_000)
+        refs.append(ref)
+    return refs
 
 
 def _normalize_scene_ids(scene_ids: list[str] | tuple[str, ...]) -> list[str]:

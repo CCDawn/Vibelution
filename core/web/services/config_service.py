@@ -30,7 +30,9 @@ from config.public_config import (
 )
 
 from .config_editor_schema import build_editor_meta, build_editor_sections
+from .git_status_service import with_git_config_defaults
 from .i18n import resolve_language, text_for
+from .runtime_scene_service import record_runtime_scene_event
 from .workbench_contract_service import get_workbench_contract
 
 
@@ -50,6 +52,31 @@ PROFILE_LABELS = {
 _PENDING_SECRET_PREFIX = "pending-secret:"
 _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
+
+
+def _record_config_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+    lifecycle: bool = False,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "config",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
 
 
 def _resolve_workspace_language(public_config: dict[str, Any]) -> str:
@@ -78,11 +105,11 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
         },
         {
             "id": "profiles",
-            "title": text_for(lang, zh="配置档", en="Profiles"),
+            "title": text_for(lang, zh="任务模型", en="Task Models"),
             "summary": text_for(
                 lang,
-                zh="查看各个 profile 当前绑定的模型、密钥状态，并直接做连接测试。",
-                en="Inspect bound models, key state, and run direct connection checks per profile.",
+                zh="查看每个任务当前使用的模型、密钥状态，并直接做连接测试。",
+                en="Inspect the model and key state used by each task, then run direct connection checks.",
             ),
         },
         {
@@ -217,7 +244,7 @@ def _draft_meta_has_pending_changes(draft_meta: dict | None) -> bool:
 
 def _llm_test_config_scope(public_config: dict[str, Any], draft_meta: dict | None) -> str:
     try:
-        persisted_hash = public_config_hash(load_public_config())
+        persisted_hash = public_config_hash(with_git_config_defaults(load_public_config()))
     except Exception:
         persisted_hash = ""
     draft_hash = public_config_hash(public_config)
@@ -374,8 +401,8 @@ def _validate_required_llm_profiles(public_config: dict[str, Any], lang: str) ->
     raise ValueError(
         text_for(
             lang,
-            zh=f"以下必需配置档还没有绑定可用模型：{display_names}",
-            en=f"These required profiles do not have a usable model bound yet: {display_names}",
+            zh=f"以下任务模型还没有绑定可用模型：{display_names}",
+            en=f"These task models do not have a usable model bound yet: {display_names}",
         )
     )
 
@@ -480,9 +507,52 @@ def _run_draft_test_llm_connection(
                     api_key_source = f"pending-env:{env_name}"
                     break
     try:
-        result = public_config_module._probe_llm_http(provider, profile, api_key)
-    except TypeError:
-        result = public_config_module._probe_llm_http(provider, profile)
+        try:
+            result = public_config_module._probe_llm_http(provider, profile, api_key)
+        except TypeError:
+            result = public_config_module._probe_llm_http(provider, profile)
+    except Exception as exc:
+        _record_config_scene_event(
+            "llm_test",
+            "config.llm_test.failed",
+            message=f"Draft LLM connection test failed: {type(exc).__name__}",
+            level="error",
+            outcome="failed",
+            fields={
+                "profileId": profile.profile_id,
+                "providerId": provider.provider_id,
+                "providerKind": provider.kind,
+                "model": profile.model,
+                "apiKeySource": api_key_source,
+                "requiresApiKey": bool(provider.requires_api_key),
+                "configScope": _llm_test_config_scope(public_config, draft_meta),
+                "errorType": type(exc).__name__,
+                "error": str(exc),
+            },
+            lifecycle=True,
+        )
+        raise
+    success = bool(result.get("ok") if isinstance(result, dict) and "ok" in result else result.get("success") if isinstance(result, dict) else False)
+    _record_config_scene_event(
+        "llm_test",
+        "config.llm_test.completed",
+        message="Draft LLM connection test completed.",
+        level="info" if success else "warning",
+        outcome="succeeded" if success else "failed",
+        fields={
+            "profileId": profile.profile_id,
+            "providerId": provider.provider_id,
+            "providerKind": provider.kind,
+            "model": profile.model,
+            "apiKeySource": api_key_source,
+            "requiresApiKey": bool(provider.requires_api_key),
+            "configScope": _llm_test_config_scope(public_config, draft_meta),
+            "ok": success,
+            "status": str(result.get("status") if isinstance(result, dict) else "").strip(),
+            "error": str(result.get("error") if isinstance(result, dict) else "").strip(),
+        },
+        lifecycle=True,
+    )
     return {
         **result,
         "profile_id": profile.profile_id,
@@ -511,6 +581,7 @@ def _build_workspace(
     message: str = "",
     raw_toml: str | None = None,
 ) -> dict[str, Any]:
+    public_config = with_git_config_defaults(public_config)
     diagnostics = inspect_public_config(public_config)
     diagnosis = diagnostics.get("diagnosis", {})
     summary = diagnostics.get("summary", {})
@@ -557,12 +628,13 @@ def _build_workspace(
 
 
 def _prepare_submitted_public_config(public_config: dict[str, Any] | None, old_public: dict[str, Any]) -> dict[str, Any]:
-    submitted = copy.deepcopy(public_config) if isinstance(public_config, dict) else copy.deepcopy(old_public)
-    return preserve_secret_blanks(submitted, old_public)
+    old_with_defaults = with_git_config_defaults(old_public)
+    submitted = copy.deepcopy(public_config) if isinstance(public_config, dict) else copy.deepcopy(old_with_defaults)
+    return with_git_config_defaults(preserve_secret_blanks(submitted, old_with_defaults))
 
 
 def _assert_base_hash_matches(base_hash: str, old_public: dict[str, Any], lang: str) -> str:
-    current_hash = public_config_hash(old_public)
+    current_hash = public_config_hash(with_git_config_defaults(old_public))
     expected_hash = str(base_hash or "").strip()
     if expected_hash and expected_hash != current_hash:
         raise ConfigConflictError(
@@ -578,7 +650,7 @@ def _assert_base_hash_matches(base_hash: str, old_public: dict[str, Any], lang: 
 def get_config_summary() -> dict[str, Any]:
     """Return a condensed config summary for shell-wide consumers."""
 
-    public_config = load_public_config()
+    public_config = with_git_config_defaults(load_public_config())
     diagnostics = inspect_public_config(public_config)
     diagnosis = diagnostics.get("diagnosis", {})
     contract = get_workbench_contract(public_config)
@@ -610,14 +682,14 @@ def get_config_summary() -> dict[str, Any]:
 def get_config_workspace() -> dict[str, Any]:
     """Return the full config workspace payload for the Config route."""
 
-    public_config = load_public_config()
+    public_config = with_git_config_defaults(load_public_config())
     return _build_workspace(public_config)
 
 
 def preview_config_workspace(public_config: dict[str, Any] | None, draft_meta: dict | None = None, base_hash: str = "") -> dict[str, Any]:
     """Validate and normalize a draft config without persisting it."""
 
-    old_public = load_public_config()
+    old_public = with_git_config_defaults(load_public_config())
     submitted = _prepare_submitted_public_config(public_config, old_public)
     return _build_workspace(
         submitted,
@@ -634,21 +706,45 @@ def preview_config_workspace(public_config: dict[str, Any] | None, draft_meta: d
 def update_intake_mode(intake_mode: str) -> dict[str, Any]:
     """Persist the evolution intake mode and return the refreshed config summary."""
 
-    public_config = load_public_config()
+    public_config = with_git_config_defaults(load_public_config())
     evolution_cfg = public_config.setdefault("evolution", {})
     evolution_cfg["intake_mode"] = intake_mode
     save_public_config(public_config)
-    return get_config_summary()
+    summary = get_config_summary()
+    _record_config_scene_event(
+        "persist",
+        "config.intake_mode.updated",
+        message="Evolution intake mode updated.",
+        outcome="succeeded",
+        fields={
+            "intakeMode": str(intake_mode or "").strip(),
+            "configPath": str(CONFIG_PATH),
+        },
+        lifecycle=True,
+    )
+    return summary
 
 
 def update_language(language: str) -> dict[str, Any]:
     """Persist the UI language and return the refreshed config summary."""
 
-    public_config = load_public_config()
+    public_config = with_git_config_defaults(load_public_config())
     ui_cfg = public_config.setdefault("ui", {})
     ui_cfg["language"] = "en" if str(language or "").strip().lower() == "en" else "zh"
     save_public_config(public_config)
-    return get_config_summary()
+    summary = get_config_summary()
+    _record_config_scene_event(
+        "persist",
+        "config.language.updated",
+        message="UI language updated.",
+        outcome="succeeded",
+        fields={
+            "language": ui_cfg["language"],
+            "configPath": str(CONFIG_PATH),
+        },
+        lifecycle=True,
+    )
+    return summary
 
 
 def draft_add_model(
@@ -665,7 +761,7 @@ def draft_add_model(
     api_key_env: str = "",
     api_key: str = "",
 ) -> dict[str, Any]:
-    old_public = load_public_config()
+    old_public = with_git_config_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
     validate_llm_public_config(current)
@@ -729,7 +825,7 @@ def draft_update_model(
     api_key: str = "",
     clear_api_key: bool = False,
 ) -> dict[str, Any]:
-    old_public = load_public_config()
+    old_public = with_git_config_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
     validate_llm_public_config(current)
@@ -772,7 +868,7 @@ def draft_delete_model(
     base_hash: str = "",
     model_id: str,
 ) -> dict[str, Any]:
-    old_public = load_public_config()
+    old_public = with_git_config_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     current_meta = _normalize_draft_meta(draft_meta)
     current_library = current.get("llm", {}).get("model_library", {}) if isinstance(current.get("llm", {}), dict) else {}
@@ -801,7 +897,7 @@ def draft_add_profile(
     source_profile_id: str = "primary",
     model_id: str = "",
 ) -> dict[str, Any]:
-    old_public = load_public_config()
+    old_public = with_git_config_defaults(load_public_config())
     current = _prepare_submitted_public_config(public_config, old_public)
     validate_llm_public_config(current)
     updated = add_llm_profile(
@@ -816,8 +912,8 @@ def draft_add_profile(
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(updated),
-            zh="配置档修改已更新，尚未保存到 config.toml。",
-            en="Profile changes updated and not yet saved to config.toml.",
+            zh="任务模型修改已更新，尚未保存到 config.toml。",
+            en="Task model changes updated and not yet saved to config.toml.",
         ),
     )
 
@@ -828,7 +924,7 @@ def run_draft_llm_test(
     draft_meta: dict | None = None,
     profile_id: str | None = None,
 ) -> dict[str, Any]:
-    old_public = load_public_config()
+    old_public = with_git_config_defaults(load_public_config())
     submitted = _prepare_submitted_public_config(public_config, old_public)
     validate_llm_public_config(submitted)
     return _run_draft_test_llm_connection(submitted, profile_id, _normalize_draft_meta(draft_meta))
@@ -840,7 +936,7 @@ def apply_config_workspace(
     draft_meta: dict | None = None,
     base_hash: str = "",
 ) -> dict[str, Any]:
-    old_public = load_public_config()
+    old_public = with_git_config_defaults(load_public_config())
     submitted = _prepare_submitted_public_config(public_config, old_public)
     lang = _resolve_workspace_language(submitted)
     _assert_base_hash_matches(base_hash, old_public, lang)
@@ -850,6 +946,8 @@ def apply_config_workspace(
     save_public_config(submitted)
 
     normalized_meta = _normalize_draft_meta(draft_meta)
+    cleared_envs = [str(env_name) for env_name in normalized_meta.get("pending_cleared_api_keys", [])]
+    updated_envs: list[str] = []
     for env_name in normalized_meta.get("pending_cleared_api_keys", []):
         _delete_user_env_var(str(env_name))
         _PENDING_CLEAR_ENVS.discard(str(env_name))
@@ -858,10 +956,11 @@ def apply_config_workspace(
         if secret is None:
             continue
         _set_user_env_var(str(env_name), secret)
+        updated_envs.append(str(env_name))
         _drop_pending_api_key_token(api_key)
 
-    persisted = load_public_config()
-    return _build_workspace(
+    persisted = with_git_config_defaults(load_public_config())
+    workspace = _build_workspace(
         persisted,
         message=text_for(
             _resolve_workspace_language(persisted),
@@ -869,6 +968,24 @@ def apply_config_workspace(
             en="Config saved to config.toml.",
         ),
     )
+    _record_config_scene_event(
+        "persist",
+        "config.workspace.applied",
+        message="Config workspace applied.",
+        outcome="succeeded",
+        fields={
+            "configPath": str(CONFIG_PATH),
+            "baseHash": str(base_hash or "").strip(),
+            "resultHash": public_config_hash(persisted),
+            "language": _resolve_workspace_language(persisted),
+            "pendingApiKeyEnvCount": len(updated_envs),
+            "pendingApiKeyEnvs": updated_envs,
+            "clearedApiKeyEnvCount": len(cleared_envs),
+            "clearedApiKeyEnvs": cleared_envs,
+        },
+        lifecycle=True,
+    )
+    return workspace
 
 
 __all__ = [
