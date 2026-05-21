@@ -108,6 +108,43 @@ def _run_sort_key(payload: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def _record_work_run_event(
+    phase: str,
+    event_code: str,
+    *,
+    run_kind: str,
+    run_id: str = "",
+    status: str = "",
+    fields: dict[str, Any] | None = None,
+    message: str = "",
+    outcome: str = "observed",
+    level: str = "info",
+    lifecycle: bool = False,
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        event_fields: dict[str, Any] = {
+            "runKind": str(run_kind or "").strip(),
+            "runId": str(run_id or "").strip(),
+            "status": str(status or "").strip(),
+        }
+        if fields:
+            event_fields.update(fields)
+        record_runtime_scene_event(
+            "work_run",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=event_fields,
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
 @dataclass(frozen=True)
 class WorkRunStore:
     root: Path = WORK_RUNS_DIR
@@ -132,7 +169,14 @@ class WorkRunStore:
         default.update(payload)
         return default
 
-    def save_run_index(self, run_kind: str, *, active_run_id: str = "", latest_run_id: str = "") -> dict[str, Any]:
+    def save_run_index(
+        self,
+        run_kind: str,
+        *,
+        active_run_id: str = "",
+        latest_run_id: str = "",
+        emit_event: bool = True,
+    ) -> dict[str, Any]:
         payload = self.load_run_index(run_kind)
         payload.update(
             {
@@ -143,6 +187,20 @@ class WorkRunStore:
         )
         self.ensure_kind_dirs(run_kind)
         _atomic_write_json(self.index_path(run_kind), payload)
+        if emit_event:
+            _record_work_run_event(
+                "state",
+                "work_run.index.saved",
+                run_kind=run_kind,
+                run_id=str(latest_run_id or active_run_id or "").strip(),
+                fields={
+                    "activeRunId": str(active_run_id or "").strip(),
+                    "latestRunId": str(latest_run_id or "").strip(),
+                    "indexPath": str(self.index_path(run_kind)),
+                },
+                message="Work run index saved.",
+                outcome="succeeded",
+            )
         return payload
 
     def persist_snapshot(self, run_kind: str, snapshot: dict[str, Any], *, active_run_id: str = "") -> dict[str, Any]:
@@ -153,7 +211,30 @@ class WorkRunStore:
         payload = json.loads(json.dumps(snapshot, ensure_ascii=False))
         self.ensure_kind_dirs(run_kind)
         _atomic_write_json(self.runs_dir(run_kind) / f"{run_id}.json", payload)
-        self.save_run_index(run_kind, active_run_id=active_run_id, latest_run_id=run_id)
+        self.save_run_index(run_kind, active_run_id=active_run_id, latest_run_id=run_id, emit_event=False)
+        status = str(payload.get("status") or "").strip()
+        phase = str(payload.get("phase") or payload.get("currentPhase") or "").strip()
+        _record_work_run_event(
+            "state",
+            "work_run.snapshot.persisted",
+            run_kind=run_kind,
+            run_id=run_id,
+            status=status,
+            fields={
+                "phase": phase,
+                "activeRunId": str(active_run_id or "").strip(),
+                "runtimeStatus": str(payload.get("runtimeStatus") or "").strip(),
+                "updatedAt": str(payload.get("updatedAt") or "").strip(),
+                "finishedAt": str(payload.get("finishedAt") or "").strip(),
+                "errorType": str(payload.get("errorType") or "").strip(),
+                "error": str(payload.get("error") or "").strip(),
+                "snapshotPath": str(self.runs_dir(run_kind) / f"{run_id}.json"),
+            },
+            message=f"Work run snapshot persisted: {run_kind}/{run_id} {status or 'unknown'}",
+            outcome="succeeded",
+            level="error" if status == "failed" else "info",
+            lifecycle=status in {"queued", "running", "paused", "stopping", "done", "failed", "cancelled"},
+        )
         return payload
 
     def load_snapshot(self, run_kind: str, run_id: str) -> dict[str, Any] | None:
@@ -219,6 +300,23 @@ class WorkRunStore:
         if existed or cleared_active or cleared_latest:
             self.save_run_index(run_kind, active_run_id=next_active_id, latest_run_id=next_latest_id)
 
+        _record_work_run_event(
+            "state",
+            "work_run.snapshot.deleted",
+            run_kind=run_kind,
+            run_id=normalized,
+            fields={
+                "deleted": existed,
+                "clearedActive": cleared_active,
+                "clearedLatest": cleared_latest,
+                "activeRunId": next_active_id,
+                "latestRunId": next_latest_id,
+                "snapshotPath": str(target),
+            },
+            message=f"Work run snapshot deleted: {run_kind}/{normalized}",
+            outcome="succeeded" if existed else "skipped",
+            lifecycle=True,
+        )
         return {
             "deleted": existed,
             "runId": normalized,

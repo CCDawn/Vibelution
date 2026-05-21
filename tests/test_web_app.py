@@ -22,6 +22,7 @@ from core.gym.promotion import (
 from core.web import app as web_app
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.runtime_manager import constants as runtime_manager_constants
+from core.runtime_manager.work_run_store import WorkRunStore
 from fastapi.testclient import TestClient
 
 from core.web.app import create_app
@@ -733,6 +734,200 @@ def test_git_diff_endpoint_rejects_path_escape():
     assert "project root" in response.json()["detail"]
 
 
+def test_git_commit_message_endpoint_generates_ai_draft(monkeypatch):
+    class FakeGitStatusService:
+        def is_git_available(self):
+            return True, None
+
+        def scan_working_tree(self, store=False):
+            return SimpleNamespace(
+                available=True,
+                error=None,
+                snapshot_id="wt-test",
+                created_at="2026-05-21T10:00:00",
+                base_rev="abcdef1234567890",
+                files=[
+                    SimpleNamespace(
+                        path="web/src/routes/GitRoute.tsx",
+                        status=" M",
+                        staged=False,
+                        unstaged=True,
+                        untracked=False,
+                        deleted=False,
+                        old_path=None,
+                    )
+                ],
+            )
+
+        def _run_git(self, args):
+            if args == ["diff", "--cached", "--no-ext-diff", "--no-color", "--", "web/src/routes/GitRoute.tsx"]:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if args == ["diff", "--no-ext-diff", "--no-color", "--", "web/src/routes/GitRoute.tsx"]:
+                return SimpleNamespace(returncode=0, stdout="diff --git a/web/src/routes/GitRoute.tsx b/web/src/routes/GitRoute.tsx\n+commit ui\n", stderr="")
+            if args == ["branch", "--show-current"]:
+                return SimpleNamespace(returncode=0, stdout="codex/git-page\n", stderr="")
+            raise AssertionError(args)
+
+    class FakeLlmClient:
+        def invoke(self, messages, metadata=None):
+            assert metadata["selected_paths"] == ["web/src/routes/GitRoute.tsx"]
+            assert "commit ui" in messages[-1]["content"]
+            return SimpleNamespace(content="feat: add git commit controls")
+
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: FakeGitStatusService())
+    monkeypatch.setattr(
+        git_status_service,
+        "load_public_config",
+        lambda: {
+            "llm": {
+                "profiles": {
+                    "primary": {
+                        "provider": {
+                            "kind": "local",
+                            "api_key_env": "",
+                            "base_url": "http://localhost:11434/v1",
+                            "compat_mode": "openai",
+                            "requires_api_key": False,
+                            "context_window": 65536,
+                        },
+                        "model": "local-model",
+                        "contract": "basic_chat",
+                        "strict_compatibility": False,
+                    }
+                }
+            },
+            "git": {
+                "commit_message_profile": "primary",
+                "commit_message_prompt": "Summary: {summary}\nFiles: {files}\nDiff: {diff}",
+            },
+        },
+    )
+    monkeypatch.setattr(git_status_service, "build_effective_config", lambda public_config: SimpleNamespace())
+    monkeypatch.setattr(git_status_service, "get_llm_client", lambda profile_id=None, config=None: FakeLlmClient())
+
+    response = client.post("/api/git/commit-message", json={"paths": ["web/src/routes/GitRoute.tsx"]})
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["message"] == "feat: add git commit controls"
+    assert payload["profileId"] == "primary"
+    assert payload["files"] == ["web/src/routes/GitRoute.tsx"]
+
+
+def test_git_commit_endpoint_rejects_empty_message():
+    response = client.post("/api/git/commit", json={"paths": ["web/src/routes/GitRoute.tsx"], "message": ""})
+
+    assert response.status_code == 422
+    assert "Commit message is required" in response.json()["detail"]
+
+
+def test_git_commit_endpoint_rejects_path_escape():
+    response = client.post("/api/git/commit", json={"paths": ["../secret.txt"], "message": "feat: nope"})
+
+    assert response.status_code == 422
+    assert "project root" in response.json()["detail"]
+
+
+def test_git_commit_endpoint_rejects_unselected_staged_files(monkeypatch):
+    class FakeGitStatusService:
+        def is_git_available(self):
+            return True, None
+
+        def scan_working_tree(self, store=False):
+            return SimpleNamespace(
+                available=True,
+                error=None,
+                snapshot_id="wt-test",
+                created_at="2026-05-21T10:00:00",
+                base_rev="abcdef1234567890",
+                files=[
+                    SimpleNamespace(
+                        path="web/src/routes/GitRoute.tsx",
+                        status=" M",
+                        staged=False,
+                        unstaged=True,
+                        untracked=False,
+                        deleted=False,
+                        old_path=None,
+                    ),
+                    SimpleNamespace(
+                        path="core/web/routes/git.py",
+                        status="M ",
+                        staged=True,
+                        unstaged=False,
+                        untracked=False,
+                        deleted=False,
+                        old_path=None,
+                    ),
+                ],
+            )
+
+        def _run_git(self, args):
+            raise AssertionError(args)
+
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: FakeGitStatusService())
+
+    response = client.post(
+        "/api/git/commit",
+        json={"paths": ["web/src/routes/GitRoute.tsx"], "message": "feat: selected only"},
+    )
+
+    assert response.status_code == 422
+    assert "staged files outside" in response.json()["detail"]
+
+
+def test_git_commit_endpoint_commits_selected_files(monkeypatch):
+    calls = []
+
+    class FakeGitStatusService:
+        def is_git_available(self):
+            return True, None
+
+        def scan_working_tree(self, store=False):
+            return SimpleNamespace(
+                available=True,
+                error=None,
+                snapshot_id="wt-test",
+                created_at="2026-05-21T10:00:00",
+                base_rev="abcdef1234567890",
+                files=[
+                    SimpleNamespace(
+                        path="web/src/routes/GitRoute.tsx",
+                        status=" M",
+                        staged=False,
+                        unstaged=True,
+                        untracked=False,
+                        deleted=False,
+                        old_path=None,
+                    )
+                ],
+            )
+
+        def _run_git(self, args):
+            calls.append(args)
+            if args == ["commit", "-m", "feat: selected git commit", "--", "web/src/routes/GitRoute.tsx"]:
+                return SimpleNamespace(returncode=0, stdout="[branch abcdef1] feat: selected git commit\n 1 file changed\n", stderr="")
+            if args == ["rev-parse", "HEAD"]:
+                return SimpleNamespace(returncode=0, stdout="abcdef1234567890\n", stderr="")
+            raise AssertionError(args)
+
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: FakeGitStatusService())
+
+    response = client.post(
+        "/api/git/commit",
+        json={"paths": ["web/src/routes/GitRoute.tsx"], "message": "feat: selected git commit"},
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["committed"] is True
+    assert payload["shortSha"] == "abcdef123456"
+    assert calls == [
+        ["commit", "-m", "feat: selected git commit", "--", "web/src/routes/GitRoute.tsx"],
+        ["rev-parse", "HEAD"],
+    ]
+
+
 def test_logs_roots_and_tree_are_read_only(tmp_path, monkeypatch):
     runtime_log = tmp_path / "logs" / "agent_realtime.log"
     runtime_log.parent.mkdir(parents=True, exist_ok=True)
@@ -1043,6 +1238,135 @@ def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monke
     assert detail["timeline"][-1]["eventCode"] == "conversation.user_message"
     assert detail["timeline"][-1]["rawRefs"] == [{"path": "conversations/session-demo.jsonl", "tail_lines": 80}]
     assert detail["conversationLogs"][0]["path"] == "conversations/session-demo.jsonl"
+
+
+def test_runtime_scene_event_helper_records_structured_lifecycle_event(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-event",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = runtime_scene_service.record_runtime_scene_event(
+        "work_run",
+        "state",
+        "work_run.snapshot.persisted",
+        message="Snapshot persisted",
+        outcome="succeeded",
+        fields={
+            "runId": "run-1",
+            "status": "running",
+            "apiKey": "secret-value",
+            "longText": "x" * 1400,
+        },
+        raw_refs=[{"path": "raw/work.log", "tail_lines": 20}],
+        lifecycle=True,
+    )
+
+    assert response["accepted"] is True
+    event_rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "work_run.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    event = event_rows[-1]
+    assert event["component"] == "work_run"
+    assert event["phase"] == "state"
+    assert event["event_code"] == "work_run.snapshot.persisted"
+    assert event["fields"]["runId"] == "run-1"
+    assert event["fields"]["apiKey"] == "[redacted]"
+    assert event["fields"]["longText"].endswith("...")
+    assert len(event["fields"]["longText"]) == runtime_scene_service.MAX_TELEMETRY_FIELD_TEXT_CHARS
+    assert event["raw_refs"] == [{"path": "raw/work.log", "tail_lines": 20}]
+
+    lifecycle_text = (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
+    assert "work_run.snapshot.persisted" in lifecycle_text
+
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["package"]["timeline_path"] == "timeline.jsonl"
+    assert manifest["package"]["lifecycle_path"] == "lifecycle.jsonl"
+
+
+def test_runtime_scene_event_helper_returns_false_without_active_scene(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = runtime_scene_service.record_runtime_scene_event(
+        "work_run",
+        "state",
+        "work_run.snapshot.persisted",
+    )
+
+    assert response == {"accepted": False, "reason": "no_runtime_scene"}
+    assert not (tmp_path / "logs" / "runtime_scenes").exists()
+
+
+def test_pytest_runtime_scene_recording_defaults_to_isolated_launcher_state(tmp_path):
+    response = runtime_scene_service.record_runtime_scene_event(
+        "work_run",
+        "state",
+        "work_run.snapshot.persisted",
+    )
+
+    assert response == {"accepted": False, "reason": "no_runtime_scene"}
+    assert runtime_scene_service.PROJECT_ROOT == tmp_path
+    assert runtime_scene_service.LAUNCHER_STATE_PATH == tmp_path / ".runtime" / "launcher" / "state.json"
+    assert not (tmp_path / "logs" / "runtime_scenes").exists()
+
+
+def test_work_run_store_records_snapshot_into_active_runtime_scene(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-work-run", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-work-run",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    store = WorkRunStore(root=tmp_path / ".runtime" / "runtime-manager" / "work_runs")
+    store.persist_snapshot(
+        "supervised",
+        {
+            "runId": "run-1",
+            "status": "failed",
+            "currentPhase": "failed",
+            "runtimeStatus": "failed",
+            "updatedAt": "2026-05-18T12:01:00Z",
+            "error": "boom",
+        },
+        active_run_id="run-1",
+    )
+
+    rows = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "work_run.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    event = rows[-1]
+    assert event["event_code"] == "work_run.snapshot.persisted"
+    assert event["level"] == "error"
+    assert event["fields"]["runKind"] == "supervised"
+    assert event["fields"]["runId"] == "run-1"
+    assert event["fields"]["status"] == "failed"
+    assert event["fields"]["error"] == "boom"
+    assert "work_run.snapshot.persisted" in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
 
 
 def test_runtime_browser_telemetry_records_into_active_scene(tmp_path, monkeypatch):
@@ -1469,6 +1793,9 @@ def test_session_detail_hydrates_file_context_from_saved_active_task(tmp_path, m
         "web/src/routes/ChatCodingRoute.tsx",
     ]
     assert payload["activePreviewPath"] == "core/web/services/session_service.py"
+    assert payload["activeTask"]["title"] == "修复会话页面文件上下文"
+    assert payload["activeTask"]["changedFiles"] == ["core/web/services/session_service.py"]
+    assert payload["activeTask"]["readFiles"] == ["web/src/routes/ChatCodingRoute.tsx"]
 
 
 def test_session_events_stream_initial_detail(tmp_path, monkeypatch):
@@ -1582,7 +1909,10 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
         "web/src/routes/ChatCodingRoute.tsx",
     ]
     assert payload["activePreviewPath"] == "core/web/services/session_service.py"
-    assert "activeTask" not in payload
+    assert payload["activeTask"]["goal"] == "请继续修复 web/src/routes/ChatCodingRoute.tsx 并验证"
+    assert payload["activeTask"]["latestSummary"] == "已完成网页对话提交接线。"
+    assert payload["activeTask"]["changedFiles"] == ["core/web/services/session_service.py"]
+    assert payload["activeTask"]["verificationStatus"] == "passed"
 
 
 def test_chat_turn_registers_as_work_run_until_finished(tmp_path, monkeypatch):
@@ -2202,6 +2532,10 @@ def test_session_detail_sanitizes_persisted_protocol_messages_and_active_task(tm
     assert assistant["content"] == "继续检查。"
     assert "thought" not in assistant
     assert payload["taskSummary"] == "继续检查。"
+    assert payload["activeTask"]["latestSummary"] == "继续检查。"
+    assert payload["activeTask"]["title"] == ""
+    assert payload["activeTask"]["goal"] == ""
+    assert payload["activeTask"]["nextAction"] == ""
     assert normalized_task["latest_summary"] == "继续检查。"
     assert normalized_task["title"] == ""
     assert normalized_task["goal"] == ""
@@ -2231,6 +2565,8 @@ def test_session_detail_recovers_stale_running_state(tmp_path, monkeypatch):
 
 
 def test_submit_session_message_allows_follow_up_when_previous_turn_finished(tmp_path, monkeypatch):
+    (tmp_path / "web" / "src" / "routes").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "web" / "src" / "routes" / "ChatCodingRoute.tsx").write_text("export {};\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -2273,7 +2609,57 @@ def test_submit_session_message_allows_follow_up_when_previous_turn_finished(tmp
     assert payload["messages"][-1]["role"] == "assistant"
     assert payload["messages"][-1]["content"] == "继续推进并给出下一步建议。"
     assert payload["currentPhase"] == "ready"
-    assert "activeTask" not in payload
+    assert payload["activeTask"]["goal"] == "继续修复 web/src/routes/ChatCodingRoute.tsx"
+    assert payload["activeTask"]["latestSummary"] == "继续推进并给出下一步建议。"
+
+
+def test_submit_session_message_keeps_streamed_reply_when_final_result_is_control_marker(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+
+    class ControlMarkerAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            from core.ui import get_ui
+
+            get_ui().stream_response("项目审查完成：核心问题集中在会话持久化和前端状态冗余。", done=False)
+            get_ui().stream_response("[outcome=done]", done=True)
+            return {
+                "status": "completed",
+                "summary": "[outcome=done]",
+                "raw_output": "[outcome=done]",
+                "outcome": "done",
+                "read_files": ["README.md"],
+                "tool_call_count": 1,
+                "tool_trace": [{"name": "read_file_tool", "args": {"file_path": "README.md"}}],
+            }
+
+    (tmp_path / "README.md").write_text("# demo\n", encoding="utf-8")
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ControlMarkerAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "审查整个项目并汇报"},
+    )
+
+    assert response.status_code == 202, response.json()
+    payload = response.json()
+    assistant = payload["messages"][-1]
+    assert assistant["content"] == "项目审查完成：核心问题集中在会话持久化和前端状态冗余。"
+    assert "[outcome=done]" not in json.dumps(payload, ensure_ascii=False)
+    assert payload["activeTask"]["latestSummary"] == "项目审查完成：核心问题集中在会话持久化和前端状态冗余。"
 
 
 def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypatch):
@@ -2335,6 +2721,114 @@ def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypa
     assert "继续完成同一个用户目标" in calls[1]
     assert payload["messages"][-1]["content"] == "规划完成：先复用 prompt_debugger，再包装 BDD 调试入口。"
     assert payload["currentPhase"] == "ready"
+
+
+def test_submit_session_message_keeps_previous_continuation_reply_when_done_marker_follows(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=2),
+    )
+    calls = []
+
+    class MarkerAfterReplyAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            calls.append(initial_prompt)
+            if len(calls) == 1:
+                return {
+                    "status": "completed",
+                    "summary": "已审查当前项目。以下是汇报结果。\n\n核心问题是回答持久化和 UI 区分度。",
+                    "raw_output": "已审查当前项目。以下是汇报结果。\n\n核心问题是回答持久化和 UI 区分度。",
+                    "outcome": "progress",
+                    "read_files": ["README.md"],
+                    "tool_call_count": 1,
+                    "tool_trace": [
+                        {"name": "read_file_tool", "args": {"file_path": "README.md"}},
+                    ],
+                }
+            return {
+                "status": "completed",
+                "summary": "[outcome=done]",
+                "raw_output": "[outcome=done]",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    (tmp_path / "README.md").write_text("# demo\n", encoding="utf-8")
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: MarkerAfterReplyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "你现在审查一下整个项目,并向我汇报结果"},
+    )
+
+    assert response.status_code == 202, response.json()
+    payload = response.json()
+    assistant = payload["messages"][-1]
+    assert len(calls) == 2
+    assert assistant["content"] == "已审查当前项目。以下是汇报结果。\n\n核心问题是回答持久化和 UI 区分度。"
+    assert "[outcome=done]" not in json.dumps(payload, ensure_ascii=False)
+    assert payload["activeTask"]["latestSummary"] == "已审查当前项目。以下是汇报结果。\n核心问题是回答持久化和 UI 区分度。"
+    assert payload["activeTask"]["readFiles"] == ["README.md"]
+
+
+def test_submit_session_message_never_persists_empty_assistant_reply(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+
+    class EmptyVisibleAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "[outcome=done]",
+                "raw_output": "<state>{}</state>",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: EmptyVisibleAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "请审查项目并汇报"},
+    )
+
+    assert response.status_code == 202, response.json()
+    payload = response.json()
+    assistant = payload["messages"][-1]
+    assert assistant["role"] == "assistant"
+    assert assistant["content"].strip()
+    assert assistant["content"] == "本轮没有产生可见回复。"
+
+    state = load_chat_state(tmp_path)
+    persisted_assistant = state["conversations"][0]["messages"][-1]
+    assert persisted_assistant["role"] == "assistant"
+    assert persisted_assistant["content"] == "本轮没有产生可见回复。"
 
 
 def test_submit_session_message_does_not_persist_xml_protocol_as_reply_or_task(tmp_path, monkeypatch):
@@ -3327,6 +3821,10 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert "tools" in editor_sections
     assert "prompt" in editor_sections
     assert "llm-profiles" in editor_sections
+    sections_by_id = {section["id"]: section for section in payload["sections"]}
+    assert sections_by_id["profiles"]["title"] == "任务模型"
+    assert "配置档" not in sections_by_id["profiles"]["summary"]
+    assert editor_sections["llm-profiles"]["title"] == "模型"
     assert editor_sections["runtime"]["path"] == "runtime"
     assert editor_meta["runtime.profile"]["kind"] == "select"
     assert editor_meta["runtime.profile"]["badge"] == "选项"
@@ -3335,6 +3833,13 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_meta["prompt.sections"]["badge"] == "列表"
     assert editor_meta["llm.profiles.primary.provider.kind"]["label"] == "服务商类型"
     assert editor_meta["llm.profiles.primary.provider.base_url"]["label"] == "服务商基础地址"
+    assert "git" in editor_sections
+    assert payload["publicConfig"]["git"]["commit_message_profile"]
+    assert "{diff}" in payload["publicConfig"]["git"]["commit_message_prompt"]
+    assert editor_meta["git.commit_message_profile"]["kind"] == "select"
+    assert editor_meta["git.commit_message_profile"]["label"] == "AI 提交说明模型"
+    assert "profile" not in editor_meta["git.commit_message_profile"]["hint"].lower()
+    assert editor_meta["git.commit_message_prompt"]["kind"] == "multiline"
     assert any(section["id"] == "overview" for section in payload["sections"])
     assert any(section["id"] == "shell" for section in payload["sections"])
 
@@ -3363,7 +3868,7 @@ def test_config_workspace_surfaces_llm_security_diagnostics_without_blocking_rea
 def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     public_config["llm"]["profiles"]["primary"] = {
-        "model_ref": "openai_gpt_5_5",
+        "model_ref": "relay_openai_gpt_5_5",
         "overrides": {},
     }
 
@@ -3375,7 +3880,7 @@ def test_config_workspace_draft_delete_model_marks_profiles_unconfigured(monkeyp
             "publicConfig": public_config,
             "draftMeta": {},
             "baseHash": public_config_hash(public_config),
-            "modelId": "openai_gpt_5_5",
+            "modelId": "relay_openai_gpt_5_5",
         },
     )
 

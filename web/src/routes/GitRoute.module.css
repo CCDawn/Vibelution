@@ -40,7 +40,10 @@
 
 .refreshButton,
 .filterButton,
-.filterButtonActive {
+.filterButtonActive,
+.selectionButton,
+.secondaryButton,
+.primaryButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -58,10 +61,20 @@
 }
 
 .refreshButton:hover,
-.filterButton:hover {
+.filterButton:hover,
+.selectionButton:hover,
+.secondaryButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
   background: rgba(34, 39, 44, 0.9);
+}
+
+.refreshButton:disabled,
+.selectionButton:disabled,
+.secondaryButton:disabled,
+.primaryButton:disabled {
+  opacity: 0.56;
+  cursor: default;
 }
 
 .summaryGrid {
@@ -129,7 +142,7 @@
 }
 
 .commitPanel {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .panelHeader {
@@ -167,8 +180,14 @@
   gap: 8px;
 }
 
+.selectionRow {
+  display: flex;
+  gap: 8px;
+}
+
 .filterButton,
-.filterButtonActive {
+.filterButtonActive,
+.selectionButton {
   min-height: 30px;
   padding: 5px 9px;
   font-size: 0.78rem;
@@ -193,7 +212,8 @@
 .fileButton,
 .fileButtonActive {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: 26px 42px minmax(0, 1fr);
+  align-items: start;
   gap: 10px;
   width: 100%;
   padding: 10px;
@@ -221,13 +241,38 @@
   font-size: 0.76rem;
 }
 
+.fileCheckButton,
+.fileCopyButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fileCheckButton {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  color: var(--accent-warm-2);
+}
+
+.fileCopyButton {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 0;
+}
+
 .fileCopy {
   display: grid;
   min-width: 0;
   gap: 4px;
 }
 
-.fileCopy strong,
+.fileCopyButton strong,
 .commitItem strong {
   min-width: 0;
   overflow: hidden;
@@ -235,7 +280,7 @@
   white-space: nowrap;
 }
 
-.fileCopy span,
+.fileCopyButton span,
 .commitItem p,
 .emptyState,
 .emptyPreview p {
@@ -245,7 +290,7 @@
   line-height: 1.4;
 }
 
-.fileCopy span {
+.fileCopyButton span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -278,6 +323,84 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: rgba(21, 24, 27, 0.82);
+}
+
+.manualCommitPanel {
+  display: grid;
+  gap: 12px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.messageField {
+  display: grid;
+  gap: 7px;
+}
+
+.messageField span {
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+}
+
+.messageField textarea {
+  width: 100%;
+  min-height: 118px;
+  resize: vertical;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(14, 17, 20, 0.88);
+  color: var(--fg-primary);
+  padding: 10px 11px;
+  line-height: 1.42;
+}
+
+.messageField textarea:focus {
+  border-color: rgba(216, 167, 91, 0.42);
+  outline: none;
+}
+
+.commitActions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.secondaryButton,
+.primaryButton {
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: 0.82rem;
+}
+
+.primaryButton {
+  border-color: rgba(216, 167, 91, 0.34);
+  background: rgba(216, 167, 91, 0.16);
+  color: var(--accent-warm-2);
+}
+
+.primaryButton:hover {
+  border-color: rgba(216, 167, 91, 0.52);
+  background: rgba(216, 167, 91, 0.22);
+}
+
+.commitHint,
+.commitNotice,
+.commitNoticeError {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.commitHint {
+  color: var(--fg-tertiary);
+}
+
+.commitNotice {
+  color: var(--state-success);
+}
+
+.commitNoticeError {
+  color: #efb0ad;
 }
 
 .commitHeader {

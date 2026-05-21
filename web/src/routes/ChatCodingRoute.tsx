@@ -722,10 +722,18 @@ export function ChatCodingRoute() {
     ?? (sessionDetailQuery.isError
       ? describeError(sessionDetailQuery.error, t("loadFailed"))
       : detail?.taskSummary || t("preparingShell"));
+  const activeTask = detail?.activeTask ?? null;
   const sessionStateValue = String(runtime?.sessionState ?? detail?.currentPhase ?? "idle")
     .trim()
     .toLowerCase();
-  const sessionSummary = detail?.taskSummary ?? runtime?.taskSummary ?? t("preparingShell");
+  const currentTaskSummary =
+    activeTask?.goal
+    || activeTask?.title
+    || activeTask?.nextAction
+    || activeTask?.latestSummary
+    || detail?.taskSummary
+    || runtime?.taskSummary
+    || t("preparingShell");
   const sessionNeedsResponse =
     runtime?.sessionNeedsResponse ?? ["ready", "failed"].includes(sessionStateValue);
   const sessionActionLabel =
@@ -741,9 +749,12 @@ export function ChatCodingRoute() {
     ? t("elapsed")
     : t("lastUpdated");
   const sessionRelativeTime = formatRelativeTime(sessionReferenceTime, Date.now(), locale) || "--";
-  const sessionChangedFilesCount = detail?.changedFiles.length ?? runtime?.changedFilesCount ?? 0;
   const conversationStats = useMemo(
     () => [
+      {
+        label: sessionTimeLabel,
+        value: sessionRelativeTime,
+      },
       {
         label: t("filesRead"),
         value: numberFormatter.format(detail?.readFiles.length ?? 0),
@@ -753,7 +764,7 @@ export function ChatCodingRoute() {
         value: numberFormatter.format(detail?.changedFiles.length ?? 0),
       },
     ],
-    [detail?.changedFiles.length, detail?.readFiles.length, numberFormatter, t],
+    [detail?.changedFiles.length, detail?.readFiles.length, numberFormatter, sessionRelativeTime, sessionTimeLabel, t],
   );
   const mental = runtime?.mentalState;
   useEffect(() => {
@@ -1014,27 +1025,9 @@ export function ChatCodingRoute() {
           </div>
           <div className={styles.taskSummaryBlock}>
             <span className={styles.taskSummaryLabel}>{t("currentTask")}</span>
-            <p className={styles.taskSummaryValue} title={sessionSummary}>
-              {sessionSummary}
+            <p className={styles.taskSummaryValue} title={currentTaskSummary}>
+              {currentTaskSummary}
             </p>
-          </div>
-          <div className={styles.compactStatGrid}>
-            <div className={styles.compactStat}>
-              <span>{t("status")}</span>
-              <strong>{statusLabel(detail?.currentPhase ?? runtime?.currentPhase ?? "idle")}</strong>
-            </div>
-            <div className={styles.compactStat}>
-              <span>{t("needsYourAction")}</span>
-              <strong>{sessionActionLabel}</strong>
-            </div>
-            <div className={styles.compactStat}>
-              <span>{sessionTimeLabel}</span>
-              <strong title={formatTime(sessionReferenceTime)}>{sessionRelativeTime}</strong>
-            </div>
-            <div className={styles.compactStat}>
-              <span>{t("filesChanged")}</span>
-              <strong>{numberFormatter.format(sessionChangedFilesCount)}</strong>
-            </div>
           </div>
         </section>
 
@@ -1200,10 +1193,14 @@ export function ChatCodingRoute() {
                 title={detail.title}
                 phase={detail.currentPhase}
                 messages={detail.messages}
-                taskSummary={detail.taskSummary}
+                taskSummary={currentTaskSummary}
                 defaultFileContext={detail.defaultFileContext}
                 showHeader={false}
-                showSessionOverview={false}
+                summaryItems={[
+                  { label: t("status"), value: statusLabel(detail.currentPhase) },
+                  { label: t("needsYourAction"), value: sessionActionLabel },
+                ]}
+                showSessionOverview
                 stats={conversationStats}
                 composerValue={activeDraft}
                 composerPlaceholder={composerPlaceholder}

@@ -33,6 +33,10 @@ _TRAILING_PARTIAL_PREFIXES = (
     "/tool_call",
 )
 
+_BRACKET_CONTROL_MARKER_RE = re.compile(
+    r"(?im)^[ \t]*\[(?:outcome|task_outcome|status)\s*=\s*[^\]\r\n]*\][ \t]*(?:\r?\n|$)"
+)
+
 
 def _coerce_text(value: Any) -> str:
     return str(value or "")
@@ -117,6 +121,7 @@ def strip_llm_protocol_artifacts(value: Any) -> str:
     )
     text = re.sub(r"</?[\w:.-]*tool_call[^>]*>", "", text, flags=re.IGNORECASE)
     text = re.sub(r"</?[^>\n]*DSML[^>]*>", "", text, flags=re.IGNORECASE)
+    text = _BRACKET_CONTROL_MARKER_RE.sub("", text)
 
     text = _strip_trailing_partial_protocol_tag(text)
     text = re.sub(r"\n{3,}", "\n\n", text)

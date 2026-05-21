@@ -11,6 +11,7 @@ pytest 配置和共享 fixtures
 import pytest
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # 项目根目录
@@ -113,6 +114,7 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     """Keep manager-owned evolution snapshots out of the real .runtime tree."""
     from core.runtime_manager import evolution_store
     from core.runtime_manager import work_run_store
+    from core.web.services import runtime_scene_service
     try:
         from core.web.services import session_service
     except Exception:
@@ -123,6 +125,7 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     self_runs_dir = evolution_dir / "self" / "runs"
     supervised_runs_dir = evolution_dir / "supervised" / "runs"
     work_runs_dir = runtime_manager_dir / "work_runs"
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
 
     monkeypatch.setattr(evolution_store, "EVOLUTION_DIR", evolution_dir)
     monkeypatch.setattr(evolution_store, "SELF_RUNS_DIR", self_runs_dir)
@@ -130,7 +133,12 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     monkeypatch.setattr(evolution_store, "SELF_INDEX_PATH", evolution_dir / "self" / "index.json")
     monkeypatch.setattr(evolution_store, "SUPERVISED_INDEX_PATH", evolution_dir / "supervised" / "index.json")
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
     if session_service is not None:
+        previous_executor = session_service._SESSION_EXECUTOR
+        isolated_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-web-chat-turn")
+        monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", isolated_executor)
         monkeypatch.setattr(session_service, "_WORK_RUN_STORE", work_run_store.WorkRunStore(root=work_runs_dir))
         with session_service._RUNNING_SESSIONS_LOCK:
             session_service._RUNNING_SESSION_IDS.clear()
@@ -138,6 +146,17 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
             session_service._SESSION_ACTIVE_TURN_LEASES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
+        yield
+        isolated_executor.shutdown(wait=True, cancel_futures=True)
+        monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", previous_executor)
+        with session_service._RUNNING_SESSIONS_LOCK:
+            session_service._RUNNING_SESSION_IDS.clear()
+            session_service._SESSION_ACTIVE_TURN_IDS.clear()
+            session_service._SESSION_ACTIVE_TURN_LEASES.clear()
+        with session_service._SESSION_TURN_CONTROLS_LOCK:
+            session_service._SESSION_TURN_CONTROLS.clear()
+    else:
+        yield
 
 
 # ============================================================================

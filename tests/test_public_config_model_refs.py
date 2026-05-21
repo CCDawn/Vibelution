@@ -12,8 +12,34 @@ from config.public_config import UNCONFIGURED_MODEL_REF, build_effective_config,
 PROJECT_ROOT = Path(__file__).parent.parent
 
 
+def _openai_gpt_5_5_library_entry() -> dict:
+    return {
+        "model": "gpt-5.5",
+        "label": "OpenAI GPT-5.5",
+        "api_key_env": "VIBELUTION_LLM_OPENAI_GPT_5_5_API_KEY",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "temperature": 0.7,
+        "max_output_tokens": 128000,
+        "timeout": 120,
+        "connect_timeout": 20,
+        "streaming": True,
+        "tool_calling_mode": "auto",
+        "discovery_enabled": True,
+        "provider": {
+            "kind": "openai",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://api.openai.com/v1",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 1050000,
+        },
+    }
+
+
 def test_build_effective_config_resolves_model_ref_and_overrides():
     public_config = load_public_config()
+    public_config["llm"].setdefault("model_library", {})["openai_gpt_5_5"] = _openai_gpt_5_5_library_entry()
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "openai_gpt_5_5",
         "overrides": {
@@ -82,6 +108,7 @@ max_output_tokens = 32000
 
 def test_delete_llm_model_marks_model_ref_profiles_unconfigured():
     public_config = load_public_config()
+    public_config["llm"].setdefault("model_library", {})["openai_gpt_5_5"] = _openai_gpt_5_5_library_entry()
     public_config["llm"]["profiles"]["primary"] = {
         "model_ref": "openai_gpt_5_5",
         "overrides": {"temperature": 0.3},

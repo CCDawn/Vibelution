@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CONFIG_COPY,
+} from "./ConfigRoute";
+import {
   applyModelOptionToProfileDraft,
   collectModelDetailKeys,
   groupModelPresets,
@@ -145,5 +148,21 @@ describe("configRouteLogic", () => {
         pending_cleared_api_keys: ["VIBELUTION_LLM_TEST_API_KEY"],
       }),
     ).toBe(true);
+  });
+});
+
+describe("config route copy", () => {
+  it("uses task-model language instead of exposing profile jargon", () => {
+    const zhCopy = JSON.stringify(CONFIG_COPY.zh);
+    const enCopy = Object.entries(CONFIG_COPY.en)
+      .filter(([key]) => !["runtimeProfile"].includes(key))
+      .map(([, value]) => value)
+      .join("\n");
+
+    expect(CONFIG_COPY.zh.profilesTitle).toBe("任务模型");
+    expect(CONFIG_COPY.en.profilesTitle).toBe("Task Models");
+    expect(zhCopy).not.toContain("配置档");
+    expect(zhCopy).not.toContain("模型档案");
+    expect(enCopy).not.toMatch(/\bprofiles?\b/i);
   });
 });

@@ -232,6 +232,22 @@ export type GitFileDiff = {
   binary: boolean;
 };
 
+export type GitCommitMessageResponse = {
+  message: string;
+  profileId: string;
+  prompt: string;
+  files: string[];
+  diffSummary: string;
+};
+
+export type GitCommitResponse = {
+  committed: boolean;
+  commitSha: string;
+  shortSha: string;
+  summary: string;
+  files: string[];
+};
+
 export type LogTreeResponse = {
   root: LogRoot;
   nodes: FileTreeNode[];
@@ -362,6 +378,29 @@ export type SessionSummary = {
   currentPhase: string;
 };
 
+export type SessionActiveTask = {
+  taskId: string;
+  kind: string;
+  status: string;
+  title: string;
+  goal: string;
+  readFiles: string[];
+  changedFiles: string[];
+  verificationStatus: string;
+  verificationSummary: string;
+  latestSummary: string;
+  nextAction: string;
+  lastUserMessage: string;
+  turnCount: number;
+  resumeCount: number;
+  createdAt: string;
+  updatedAt: string;
+  defaultFileContext: string;
+  previewTabs: string[];
+  activePreviewPath: string;
+  metadata: Record<string, unknown>;
+};
+
 export type ToolCall = {
   name: string;
   status: string;
@@ -400,6 +439,7 @@ export type ConversationMessage = {
 };
 
 export type SessionDetail = SessionSummary & {
+  activeTask?: SessionActiveTask | null;
   defaultFileContext: string;
   previewTabs: string[];
   activePreviewPath: string;
@@ -1152,7 +1192,19 @@ export type ConfigEditorMeta = {
   path: string;
   label: string;
   hint: string;
-  kind: "object" | "object_list" | "boolean" | "select" | "number" | "string_list" | "json" | "secret" | "url" | "path" | "text";
+  kind:
+    | "object"
+    | "object_list"
+    | "boolean"
+    | "select"
+    | "number"
+    | "string_list"
+    | "json"
+    | "secret"
+    | "url"
+    | "path"
+    | "text"
+    | "multiline";
   badge: string;
   options: ConfigEditorOption[];
 };

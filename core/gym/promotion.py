@@ -14,6 +14,33 @@ from .episodes import trace_index_path_for_decision
 from .models import utcnow_iso
 
 
+def _record_gym_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, object] | None = None,
+    lifecycle: bool = False,
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "gym_promotion",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
 @dataclass
 class GymPromotionApplication:
     proposal_id: str
@@ -141,6 +168,14 @@ def apply_gym_promotion_proposal(
     )
     active_proposal_path.write_text(json.dumps(proposal, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _append_ledger_once(ledger_path, application)
+    _record_gym_scene_event(
+        "apply",
+        "gym_promotion.applied",
+        message="Gym promotion proposal applied.",
+        outcome="succeeded",
+        fields=application.to_dict(),
+        lifecycle=True,
+    )
     return application
 
 
@@ -219,6 +254,14 @@ def rollback_gym_promotion_proposal(
     )
     active_proposal_path.write_text(json.dumps(proposal, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _append_ledger_once(ledger_path, rollback)
+    _record_gym_scene_event(
+        "rollback",
+        "gym_promotion.rolled_back",
+        message="Gym promotion proposal rolled back.",
+        outcome="succeeded",
+        fields=rollback.to_dict(),
+        lifecycle=True,
+    )
     return rollback
 
 
@@ -326,6 +369,14 @@ def activate_gym_promotion_proposal(
     )
     active_proposal_path.write_text(json.dumps(proposal, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     _append_ledger_once(history_path, activation)
+    _record_gym_scene_event(
+        "activate",
+        "gym_promotion.activated",
+        message="Gym promotion proposal activated.",
+        outcome="succeeded",
+        fields=activation.to_dict(),
+        lifecycle=True,
+    )
     return activation
 
 

@@ -45,6 +45,11 @@ import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SelfEvolutionTrack } from "./SelfEvolutionTrack";
 import { SupervisedWorkspaceTabs } from "./SupervisedWorkspaceTabs";
+import {
+  isLiveSupervisedRunStatus,
+  selectSupervisedRunStreamTarget,
+  shouldIgnoreActiveRunSnapshot,
+} from "./evolutionLiveRun";
 import { savePendingSelfEvolutionHandoff } from "./selfEvolutionHandoff";
 import styles from "./EvolutionRoute.module.css";
 
@@ -124,10 +129,6 @@ function compactTimestamp(value: string) {
     return normalized.slice(0, 19);
   }
   return normalized;
-}
-
-function isLiveSupervisedRunStatus(status: string) {
-  return ["queued", "running", "paused", "stopping"].includes(String(status || "").trim().toLowerCase());
 }
 
 function formatTurnRange(startTurn: number, endTurn: number) {
@@ -546,11 +547,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const overviewRecentRuns = overview?.recentRuns ?? [];
   const overviewRecentLibrary = overview?.recentLibrary ?? [];
   const overviewLatestRunId = overviewCurrentStatus?.latestRunId || overviewRecentRuns[0]?.id || latestRun?.id || "";
-  const monitoredRun = activeRunSnapshot
+  const effectiveActiveRunSnapshot = shouldIgnoreActiveRunSnapshot(activeRunSnapshot, liveActiveRun)
+    ? null
+    : activeRunSnapshot;
+  const monitoredRun = effectiveActiveRunSnapshot
     ?? (liveActiveRun && ["done", "failed", "cancelled"].includes(String(liveActiveRun.status || "").toLowerCase())
       ? liveActiveRun
       : null);
-  const runningRun = activeRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
+  const runningRun = effectiveActiveRunSnapshot ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
     ? liveActiveRun
     : null);
   const runLocked = Boolean(runningRun && isLiveSupervisedRunStatus(runningRun.status));
@@ -830,11 +834,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [monitoredSelfRun?.runId, monitoredSelfRun?.status, queryClient]);
 
   useEffect(() => {
-    const target = activeRunSnapshot
-      ?? (liveActiveRun && isLiveSupervisedRunStatus(liveActiveRun.status)
-        ? liveActiveRun
-        : null);
-    if (!target || !isLiveSupervisedRunStatus(target.status)) {
+    const target = selectSupervisedRunStreamTarget(activeRunSnapshot, liveActiveRun);
+    if (!target) {
       return;
     }
 

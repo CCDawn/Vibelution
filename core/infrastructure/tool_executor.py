@@ -26,6 +26,61 @@ from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_recommender import decide_next_tools
 
 
+def _record_tool_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    tool_name: str,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+    lifecycle: bool = False,
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        event_fields: dict[str, Any] = {"toolName": str(tool_name or "").strip()}
+        if fields:
+            event_fields.update(fields)
+        record_runtime_scene_event(
+            "tool_executor",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=event_fields,
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
+def _summarize_tool_args(tool_args: dict) -> dict[str, Any]:
+    payload = tool_args if isinstance(tool_args, dict) else {}
+    keys = sorted(str(key) for key in payload.keys() if str(key) != "_cancel_checker")
+    summary: dict[str, Any] = {
+        "argKeys": keys[:24],
+        "argCount": len(keys),
+    }
+    for path_key in ("file_path", "path", "target_path", "directory", "cwd"):
+        if path_key in payload:
+            summary[path_key] = str(payload.get(path_key) or "")
+    if "command" in payload:
+        summary["commandLength"] = len(str(payload.get("command") or ""))
+    return summary
+
+
+def _summarize_tool_result(result: Any) -> dict[str, Any]:
+    text = str(result or "")
+    return {
+        "resultType": type(result).__name__,
+        "resultPreview": text[:320],
+        "resultLength": len(text),
+    }
+
+
 class ToolExecutor:
     """
     工具执行器
@@ -209,6 +264,7 @@ class ToolExecutor:
                 action: 特殊动作 (如 "restart", "hibernated", None)
         """
         tool_args = parse_tool_args(tool_args or {})
+        started_at = time.monotonic()
 
         readonly_block = self._check_readonly_subagent_block(tool_name)
         if readonly_block:
@@ -216,6 +272,15 @@ class ToolExecutor:
                 "name": tool_name,
                 "error": readonly_block,
             })
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.blocked",
+                tool_name=tool_name,
+                message=readonly_block,
+                level="warning",
+                outcome="blocked",
+                fields=_summarize_tool_args(tool_args),
+            )
             return (readonly_block, None)
 
         blocked_message = self._check_runtime_block(tool_name, tool_args)
@@ -224,6 +289,15 @@ class ToolExecutor:
                 "name": tool_name,
                 "error": blocked_message,
             })
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.blocked",
+                tool_name=tool_name,
+                message=blocked_message,
+                level="warning",
+                outcome="blocked",
+                fields=_summarize_tool_args(tool_args),
+            )
             return (blocked_message, None)
 
         self._track_tool_decision_alignment(tool_name)
@@ -240,6 +314,16 @@ class ToolExecutor:
                 "name": tool_name,
                 "error": error_msg,
             })
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.failed",
+                tool_name=tool_name,
+                message=error_msg,
+                level="error",
+                outcome="failed",
+                fields={**_summarize_tool_args(tool_args), "error": error_msg},
+                lifecycle=True,
+            )
             return (error_msg, None)
 
         func = self._tool_map[tool_name]
@@ -262,6 +346,20 @@ class ToolExecutor:
                     "name": tool_name,
                     "error": error_msg,
                 })
+                _record_tool_scene_event(
+                    "execute",
+                    "tool.execute.cancelled",
+                    tool_name=tool_name,
+                    message=error_msg,
+                    level="warning",
+                    outcome="cancelled",
+                    fields={
+                        **_summarize_tool_args(tool_args),
+                        "durationMs": int((time.monotonic() - started_at) * 1000),
+                        "cancelReason": cancel_reason,
+                    },
+                    lifecycle=True,
+                )
                 return (error_msg, None)
             future = executor.submit(func, **call_args)
             deadline = time.monotonic() + max(float(timeout), 0.1)
@@ -276,6 +374,20 @@ class ToolExecutor:
                         "error": error_msg,
                     })
                     self._record_runtime_signals(tool_name, tool_args, error_msg)
+                    _record_tool_scene_event(
+                        "execute",
+                        "tool.execute.cancelled",
+                        tool_name=tool_name,
+                        message=error_msg,
+                        level="warning",
+                        outcome="cancelled",
+                        fields={
+                            **_summarize_tool_args(tool_args),
+                            "durationMs": int((time.monotonic() - started_at) * 1000),
+                            "cancelReason": cancel_reason,
+                        },
+                        lifecycle=True,
+                    )
                     return (error_msg, None)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -290,6 +402,20 @@ class ToolExecutor:
                             "error": error_msg,
                         })
                         self._record_runtime_signals(tool_name, tool_args, error_msg)
+                        _record_tool_scene_event(
+                            "execute",
+                            "tool.execute.cancelled",
+                            tool_name=tool_name,
+                            message=error_msg,
+                            level="warning",
+                            outcome="cancelled",
+                            fields={
+                                **_summarize_tool_args(tool_args),
+                                "durationMs": int((time.monotonic() - started_at) * 1000),
+                                "cancelReason": cancel_reason,
+                            },
+                            lifecycle=True,
+                        )
                         return (error_msg, None)
                     break
                 except TimeoutError:
@@ -302,6 +428,19 @@ class ToolExecutor:
             })
 
             self._record_runtime_signals(tool_name, tool_args, result)
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.succeeded",
+                tool_name=tool_name,
+                message=f"Tool executed: {tool_name}",
+                outcome="succeeded",
+                fields={
+                    **_summarize_tool_args(tool_args),
+                    **_summarize_tool_result(result),
+                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "timeoutSeconds": timeout,
+                },
+            )
 
             # ── 自动更新代码库地图（检测文件修改工具）──
             self._try_auto_update_map(tool_name, tool_args)
@@ -319,6 +458,21 @@ class ToolExecutor:
                 "error": error_msg,
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.timeout",
+                tool_name=tool_name,
+                message=error_msg,
+                level="error",
+                outcome="timeout",
+                fields={
+                    **_summarize_tool_args(tool_args),
+                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "timeoutSeconds": timeout,
+                    "error": error_msg,
+                },
+                lifecycle=True,
+            )
             return (error_msg, None)
 
         except Exception as e:
@@ -329,6 +483,21 @@ class ToolExecutor:
                 "error": error_msg,
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.failed",
+                tool_name=tool_name,
+                message=error_msg,
+                level="error",
+                outcome="failed",
+                fields={
+                    **_summarize_tool_args(tool_args),
+                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "errorType": type(e).__name__,
+                    "error": str(e),
+                },
+                lifecycle=True,
+            )
             return (error_msg, None)
 
     def _resolve_timeout(self, tool_name: str, tool_args: dict) -> int:

@@ -70,6 +70,8 @@ _SESSION_LIVE_OUTPUTS: dict[str, "SessionLiveOutputState"] = {}
 _SESSION_UI_CAPTURE_LOCK = threading.Lock()
 _UNSET = object()
 _WORK_RUN_STORE = WorkRunStore()
+_NO_VISIBLE_REPLY_ZH = "本轮没有产生可见回复。"
+_NO_VISIBLE_REPLY_EN = "This turn did not produce a visible reply."
 
 
 class SessionNotFoundError(ValueError):
@@ -651,6 +653,35 @@ def _sanitize_message_content(role: str, content: Any) -> str:
     return sanitize_assistant_visible_text(text)
 
 
+def _active_task_to_api(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    task = _normalize_session_active_task(value)
+    if not task:
+        return None
+    metadata = dict(task.get("metadata") or {}) if isinstance(task.get("metadata"), dict) else {}
+    return {
+        "taskId": str(task.get("task_id") or "").strip(),
+        "kind": str(task.get("kind") or "").strip(),
+        "status": str(task.get("status") or "").strip(),
+        "title": str(task.get("title") or "").strip(),
+        "goal": str(task.get("goal") or "").strip(),
+        "readFiles": list(task.get("read_files") or []),
+        "changedFiles": list(task.get("changed_files") or []),
+        "verificationStatus": str(task.get("verification_status") or "").strip(),
+        "verificationSummary": str(task.get("verification_summary") or "").strip(),
+        "latestSummary": str(task.get("latest_summary") or "").strip(),
+        "nextAction": str(task.get("next_action") or "").strip(),
+        "lastUserMessage": str(task.get("last_user_message") or "").strip(),
+        "turnCount": _coerce_nonnegative_int(task.get("turn_count") or 0),
+        "resumeCount": _coerce_nonnegative_int(task.get("resume_count") or 0),
+        "createdAt": str(task.get("created_at") or "").strip(),
+        "updatedAt": str(task.get("updated_at") or "").strip(),
+        "defaultFileContext": str(task.get("default_file_context") or "").strip(),
+        "previewTabs": list(task.get("preview_tabs") or []),
+        "activePreviewPath": str(task.get("active_preview_path") or "").strip(),
+        "metadata": metadata,
+    }
+
+
 def _build_session_summary(conversation: dict[str, Any]) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
     summary = _latest_message_summary(conversation.get("messages") or [])
@@ -687,6 +718,7 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
     detail_messages = _messages_with_live_output(conversation["id"], conversation.get("messages") or [])
     detail = {
         **summary,
+        "activeTask": _active_task_to_api(active_task),
         "defaultFileContext": default_file_context,
         "previewTabs": preview_tabs,
         "activePreviewPath": active_preview_path,
@@ -1193,13 +1225,16 @@ def _run_session_continuation_loop(
             prompt = f"继续完成上一任务：{resume_goal}"
 
     result: Any = None
+    last_visible_result: dict[str, Any] | None = None
     for turn_index in range(1, max_turns + 1):
         stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
         if stop_reason:
             return _build_stopped_turn_result(stop_reason)
 
         result = agent.run_single_turn(initial_prompt=prompt)
+        last_visible_result = _remember_continuation_visible_result(result, last_visible_result)
         if _is_session_turn_terminal(result):
+            result = _merge_continuation_visible_result(result, last_visible_result)
             return _annotate_continuation_result(result, turn_index, max_turns, reached_limit=False)
 
         if turn_index >= max_turns:
@@ -1255,6 +1290,7 @@ def _persist_session_turn_result(
             if stop_requested
             else _format_visible_reply(result)
         )
+        assistant_text = _ensure_assistant_visible_text(assistant_text, result=result, lang=lang)
         assistant_entry = _make_chat_message(
             "assistant",
             assistant_text,
@@ -1344,6 +1380,29 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
     )
 
 
+def _ensure_assistant_visible_text(content: Any, *, result: Any = None, lang: str | None = None) -> str:
+    cleaned = _sanitize_message_content("assistant", content)
+    if cleaned:
+        return cleaned
+    if isinstance(result, dict):
+        for key in ("error", "message", "blocked_reason", "required_user_input", "recommended_next_action", "next_action"):
+            fallback = _sanitize_message_content("assistant", result.get(key) or "")
+            if fallback:
+                return fallback
+        tool_trace = result.get("tool_trace") or result.get("tool_calls") or []
+        if tool_trace:
+            return text_for(
+                lang or get_web_language(),
+                zh="本轮只记录了工具调用，没有生成可见回答；请发送“继续”让 agent 汇总结果。",
+                en='This turn only recorded tool calls and did not produce a visible reply. Send "continue" to summarize the result.',
+            )
+    return text_for(
+        lang or get_web_language(),
+        zh=_NO_VISIBLE_REPLY_ZH,
+        en=_NO_VISIBLE_REPLY_EN,
+    )
+
+
 def _make_chat_message(
     role: str,
     content: str,
@@ -1354,7 +1413,7 @@ def _make_chat_message(
 ) -> dict[str, Any]:
     message: dict[str, Any] = {
         "role": str(role or "").strip().lower(),
-        "content": str(content or "").strip(),
+        "content": _ensure_assistant_visible_text(content) if str(role or "").strip().lower() == "assistant" else str(content or "").strip(),
         "timestamp": _now_timestamp(),
     }
     cleaned_thought = _sanitize_thought_text(thought)
@@ -1517,7 +1576,13 @@ def _format_visible_reply(result: Any) -> str:
     if visible and not _looks_like_structured_payload(visible):
         return visible
 
-    summary = _sanitize_message_content("assistant", format_chat_reply(result))
+    visible_result = _visible_reply_candidate(result)
+    reply_source = {
+        **result,
+        "raw_output": visible_result,
+        "summary": visible_result,
+    }
+    summary = _sanitize_message_content("assistant", format_chat_reply(reply_source))
     if summary:
         return summary
     return text_for(
@@ -2014,8 +2079,10 @@ def _attach_turn_capture_to_result(
         return result
     if capture.thought and not result.get("thought") and not result.get("reasoning_content"):
         result["thought"] = capture.thought
-    if capture.content and not result.get("raw_output") and not result.get("summary"):
+    visible_result = _visible_reply_candidate(result)
+    if capture.content and (not visible_result or _looks_like_structured_payload(visible_result)):
         result["raw_output"] = capture.content
+        result["summary"] = capture.content
     if (
         _is_mental_model_enabled_for_turn(mental_model_enabled)
         and capture.mental_state
@@ -2068,6 +2135,8 @@ def _capture_session_ui_stream(
             if cleaned:
                 capture.note_content(cleaned)
                 _set_session_live_output(session_id, turn_id=capture.turn_id, content=cleaned)
+            elif done:
+                return
 
         def clear_response_stream_proxy():
             if callable(original_clear_response_stream):
@@ -2309,6 +2378,59 @@ def _visible_reply_candidate(result: dict[str, Any]) -> str:
     )
 
 
+def _visible_reply_summary_candidate(result: dict[str, Any]) -> str:
+    visible = _visible_reply_candidate(result)
+    if visible and not _looks_like_structured_payload(visible):
+        return visible
+    reply = _format_visible_reply(result)
+    if reply and _NO_VISIBLE_REPLY_ZH not in reply and _NO_VISIBLE_REPLY_EN not in reply:
+        return reply
+    return ""
+
+
+def _remember_continuation_visible_result(
+    result: Any,
+    current: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(result, dict):
+        return current
+    visible = _visible_reply_summary_candidate(result)
+    if not visible:
+        return current
+    remembered = dict(result)
+    remembered["raw_output"] = visible
+    remembered["summary"] = visible
+    return remembered
+
+
+def _merge_continuation_visible_result(
+    result: Any,
+    visible_result: dict[str, Any] | None,
+) -> Any:
+    if not isinstance(result, dict) or not isinstance(visible_result, dict):
+        return result
+    visible = _visible_reply_summary_candidate(result)
+    if visible:
+        return result
+    merged = dict(result)
+    remembered_visible = _visible_reply_summary_candidate(visible_result)
+    if not remembered_visible:
+        return result
+    merged["raw_output"] = remembered_visible
+    merged["summary"] = remembered_visible
+    for key in (
+        "read_files",
+        "changed_files",
+        "verification_status",
+        "verification_summary",
+        "tool_call_count",
+        "tool_trace",
+    ):
+        if not merged.get(key) and visible_result.get(key):
+            merged[key] = visible_result.get(key)
+    return merged
+
+
 def _annotate_continuation_result(
     result: Any,
     turn_count: int,
@@ -2340,7 +2462,7 @@ def _build_continuation_limit_result(result: Any, turn_count: int, max_turns: in
     summary_lines = [
         f"已达到 Web Chat 任务级持续上限（{max_turns} 轮），本次先暂停，避免后台无限运行。",
     ]
-    if latest and "本轮没有产生可见回复" not in latest:
+    if latest and _NO_VISIBLE_REPLY_ZH not in latest:
         summary_lines.append(f"当前进展：{latest}")
     if next_action and raw_next_action:
         summary_lines.append(f"下一步：{next_action}；也可以发送“继续”以继续同一任务。")
@@ -2447,11 +2569,7 @@ def _build_session_active_task(
         verification_status=verification_status,
     )
     latest_summary = trim_lines(
-        _sanitize_message_content(
-            "assistant",
-            result.get("summary") or result.get("raw_output") or result.get("error") or result.get("message") or "",
-        )
-        or _format_visible_reply(result),
+        _visible_reply_summary_candidate(result),
         max_lines=6,
     )
     last_user_message = _latest_user_message(messages)

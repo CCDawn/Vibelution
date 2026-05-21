@@ -1,74 +1,71 @@
 # Vibelution
 
-> 仓库状态快照：2026-05-19
+> 仓库状态快照：2026-05-21
 
-Vibelution 是一套面向编码与自我改进场景的 AI Agent 系统。它已经不再只是一个单文件 CLI 实验，而是一个由 Python runtime、FastAPI 后端、React/Vite Web workbench、监督评测 harness、Gym promotion 记录链路和多档 LLM 配置组成的完整工程。
+Vibelution 是一个本地优先的 AI Agent 工作台。它把编码对话、仓库阅读、Git 局势、自进化、监督评测、运行现场日志和模型配置收进同一套 Python runtime + FastAPI + React Web surface 里，让 agent 能在一个可观察、可回滚、可验证的工程环境中持续改进。
 
-当前仓库的主线能力集中在 3 条工作模式上：
+这个项目不是一个单轮脚本，也不是线上托管代理。它的核心目标是：在本地仓库里稳定地执行协作、记录证据、评估候选改动，并让每一轮演化都能被人和后续 agent 重新理解。
 
-- `chat`：面向日常编码协作的工作台模式
-- `self_evolution`：围绕当前代码库进行自我修复、自检、重启和迭代
-- `supervised_evolution`：用 bundle / dataset 运行基线与候选对比，记录决策、lineage 和 proposal 生命周期
+## 前端工作台预览
 
----
+以下截图使用脱敏演示数据生成，只展示公开安全的界面状态；不包含真实本地路径、账号、密钥、聊天内容或运行日志。
 
-## 现在这个仓库包含什么
+![Vibelution 对话工作台](docs/assets/readme/web-workbench-chat.png)
 
-截至本次 README 同步时，仓库已经具备：
+![Vibelution Git 局势页](docs/assets/readme/web-workbench-git.png)
 
-- 统一 Agent 入口：[agent.py](agent.py)
-- Core First 架构：主流程尽量下沉到 `core/`
-- 配置驱动的 LLM profiles / providers / model library
-- 统一工作台 Shell + Web workbench
-- Git memory、演化事务、test gate、重启守护
-- 监督进化 harness、dashboard、dataset registry、Gym proposal 生命周期
-- 前后端分离的 Web UI：后端 FastAPI，前端 React + Vite
-- 较完整的测试覆盖：`pytest` 当前收集约 `1611` 条测试用例，另有前端 `vitest`
+![Vibelution 监督进化控制台](docs/assets/readme/web-workbench-supervised.png)
 
-当前仓库盘点中，`agent.py` 约 `1625` 行，`core/` 已扩展到 `169` 个文件，`web/` 有独立前端工程，`tests/` 有 `71` 个测试模块。也就是说，这个项目现在更接近一个可持续演进的 Agent workbench，而不是早期的“单轮 ReAct 脚本”。
+## 当前能力
 
----
+| 能力 | 说明 |
+| --- | --- |
+| Chat 工作台 | 面向日常编码协作的多会话界面，支持文件树、只读预览、消息流、停止/继续和任务状态摘要。 |
+| Git 局势 | 顶栏 Git chip 展示缩略状态，hover 预览变化；独立 Git 页面读取工作区、diff、最近提交，并支持选择文件手动提交。 |
+| AI 提交说明 | Git 页面可以根据当前选中的改动生成 commit message 草稿；使用的 AI profile 与提示词模板在配置页维护。 |
+| Self Evolution | 自进化页面展示目标、事务、fitness、工作区状态、审计尾迹和回滚边界，支持从网页启动有界自进化。 |
+| Supervised Evolution | 监督进化页面支持 dataset / bundle 运行、active run 监控、case 输入输出、提案库和建议基线治理。 |
+| Runtime Scenes | 日志页按单次运行打包前端、后端、浏览器、生命周期和原始日志，便于复盘失败、卡住或漂移。 |
+| Config Workbench | Web 配置面管理语言、默认入口、模型库、profiles、Git 提交说明模型和提示词模板。 |
+| Reset / Pet | 提供受保护的清理面和长期陪伴体状态面，避免把运行产物、记忆和演化证据混在一起。 |
 
 ## 运行模式
 
-| 模式 | 作用 | 默认入口 |
+| 模式 | 作用 | 常用入口 |
 | --- | --- | --- |
-| `chat` | 日常对话式编码协作、会话状态管理、文件预览、日志与 session 追踪 | 工作台默认 Shell 模式 |
-| `self_evolution` | 自检、自修改、事务跟踪、重启与回流观察 | 默认 headless 模式 |
-| `supervised_evolution` | 用 bundle / dataset 跑基线与候选，生成决策与可追踪评测记录 | 通过 CLI 参数显式进入 |
+| `chat` | 日常对话式编码协作、文件阅读、会话状态管理 | Web `/chat` 或 `python agent.py --mode chat` |
+| `self_evolution` | 在当前仓库内执行有界自检、自修改、验证和回滚记录 | Web `/self-evolution` 或 headless 模式 |
+| `supervised_evolution` | 用 dataset / bundle 比较 baseline 与 candidate，生成决策、lineage 和 proposal | Web `/supervised-evolution` 或 CLI 参数 |
 
-模式定义与策略入口在 [core/orchestration/agent_modes.py](core/orchestration/agent_modes.py)。
-
----
+模式定义与策略入口位于 [core/orchestration/agent_modes.py](core/orchestration/agent_modes.py)。
 
 ## 项目结构
 
 ```text
 Vibelution/
 ├── agent.py                    # Agent 主入口与主循环编排
-├── config/                     # 配置模型、加载、public config 同步
+├── config/                     # 配置模型、profiles、provider 与 public config 同步
 ├── core/
+│   ├── chat/                   # Chat session、结果格式与任务状态
+│   ├── evaluation/             # 监督进化、dataset registry、dashboard、chat case review
+│   ├── gym/                    # proposal lifecycle、advisory baseline、promotion 记录
 │   ├── infrastructure/         # session、tool executor、git memory、security、workspace
-│   ├── orchestration/          # 模式策略、回合收束、委托与响应编排
-│   ├── prompt_manager/         # 提示词拼装、任务分析、代码库地图
-│   ├── evaluation/             # supervised evolution、dataset registry、dashboard
-│   ├── gym/                    # promotion proposal、activation/advisory 记录
+│   ├── orchestration/          # 模式策略、委托、输出边界、回合收束
+│   ├── prompt_manager/         # prompt 组装、任务分析、代码库地图
+│   ├── runtime_manager/        # Web workbench 与运行进程生命周期
 │   ├── web/                    # FastAPI app、routes、services
-│   ├── ui/                     # 统一 Shell / CLI workbench
-│   └── logging/                # transcript、tool tracker、runtime log
-├── tools/                      # LLM 可见工具与内部工具封装
+│   └── logging/                # transcript、tool tracker、runtime scene 日志
+├── tools/                      # Agent 可见工具与内部工具封装
 ├── web/                        # React + Vite 前端工程
-├── workspace/                  # prompts、memory、evaluation、logs 等运行态产物
+├── workspace/                  # 本地运行态产物、evaluation 数据和日志
 ├── tests/                      # Python 测试套件
 ├── scripts/web_workbench.py    # 本地 Web workbench 启动脚本
-└── AGENTS.md                   # 协作约束与工程规范
+└── .docs/project-memory/       # 项目记忆与多页 HTML 状态面
 ```
-
----
 
 ## 快速开始
 
-### 1. 安装依赖
+### 1. 安装 Python 依赖
 
 建议使用 Python `3.11` 或 `3.12`，并在项目虚拟环境中运行。
 
@@ -76,18 +73,16 @@ Vibelution/
 pip install -r requirements.txt
 ```
 
-如果要运行前端开发环境：
+### 2. 安装前端依赖
 
 ```bash
 cd web
 npm install
 ```
 
-### 2. 配置 LLM
+### 3. 配置 LLM
 
-新环境建议从 [config.example.toml](config.example.toml) 开始。当前配置体系已经切换到“profile + inline provider + model library”风格，不再是旧版 README 里那种 `llm.providers.remote_main` / `role_bindings` 的单层写法。
-
-一个最小可读的配置骨架大致如下：
+新环境建议从 [config.example.toml](config.example.toml) 开始，复制为本地 `config.toml` 后再按需调整。
 
 ```toml
 [runtime]
@@ -101,49 +96,51 @@ temperature = 1.0
 max_output_tokens = 8192
 timeout = 120
 streaming = true
-api_key_env = "VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY"
 
 [llm.profiles.primary.provider]
-kind = "minimax"
-api_key_env = "MINIMAX_API_KEY"
-base_url = "https://api.minimaxi.com/v1"
+kind = "openai"
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://api.openai.com/v1"
 compat_mode = "openai"
 requires_api_key = true
-
-[agent.modes]
-default_shell_mode = "chat"
-default_headless_mode = "self_evolution"
-explicit_evolution_request_behavior = "route_to_workbench"
 ```
 
-说明：
-
-- `config.example.toml` 提供了完整示例
-- `llm.model_library` 中已预置 DeepSeek、OpenAI、MiniMax 等模型条目
-- `runtime.profile` 当前支持 `safe_local`、`safe_remote`、`debug`、`ci`
-- 新配置优先级仍是：CLI 覆盖 > 环境变量 > `config.toml` > 默认值
-
-设置环境变量示例：
+示例环境变量：
 
 ```powershell
-$env:MINIMAX_API_KEY="your-api-key"
-$env:DEEPSEEK_API_KEY="your-api-key"
 $env:OPENAI_API_KEY="your-api-key"
+$env:DEEPSEEK_API_KEY="your-api-key"
+$env:MINIMAX_API_KEY="your-api-key"
 ```
 
-### 3. 启动方式
+`config.toml` 是本地文件，不应提交真实密钥。README 中的示例只使用环境变量名，不包含密钥值。
 
-#### 统一 Shell
+## 启动方式
 
-默认直接运行：
+### Web Workbench
+
+后端与静态前端入口：
+
+```bash
+python scripts/web_workbench.py --reload
+```
+
+默认监听 `http://127.0.0.1:8000`。如果只跑前端开发服务器：
+
+```bash
+cd web
+npm run dev
+```
+
+Vite 默认监听 `http://127.0.0.1:5173`，并把 `/api` 代理到本地后端。
+
+### 统一 Agent 入口
 
 ```bash
 python agent.py
 ```
 
-在当前配置下，这会进入统一工作台，并默认落在 `chat` 模式。
-
-#### Headless / 单轮执行
+常用 headless / 单轮执行：
 
 ```bash
 python agent.py --auto
@@ -151,7 +148,7 @@ python agent.py --mode chat --prompt "分析当前仓库结构" --single-turn
 python agent.py --mode self_evolution --prompt "检查最近变更的回归风险"
 ```
 
-#### 监督进化 CLI
+### 监督进化 CLI
 
 ```bash
 python agent.py --list-datasets
@@ -161,117 +158,66 @@ python agent.py --dataset custom_prompt_jsonl --dataset-limit 20
 python agent.py --supervised-dashboard
 ```
 
----
+## Web 工作台页面
 
-## Web Workbench
+| 路由 | 作用 |
+| --- | --- |
+| `/chat` | 对话式编码工作台，包含会话列表、文件树、只读预览、消息输入和实时状态。 |
+| `/git` | 仓库局势页，展示变化文件、diff、最近提交、手动提交和 AI commit message 生成。 |
+| `/self-evolution` | 自进化现场，展示 readiness、事务历史、fitness、worktree snapshot、审计尾迹和回滚控制。 |
+| `/supervised-evolution` | 监督进化 live 控制台，启动 dataset / bundle 运行并观察 active run。 |
+| `/supervised-evolution/runs` | 监督运行记录，查看得分、诊断、动作和关联提案。 |
+| `/supervised-evolution/library` | Proposal library 与待推进建议项。 |
+| `/supervised-evolution/review` | 对话样本审核面，把聊天片段转为可控监督样本。 |
+| `/logs` | Runtime scene 和日志文件观察面。 |
+| `/config` | 统一配置工作台，包含模型库、profiles、Git 提交说明配置和 JSON 草稿编辑。 |
+| `/reset` | 受保护的本地清理入口。 |
+| `/pet` | 长期陪伴体状态入口。 |
 
-项目现在有独立的 Web workbench。
-
-### 后端
-
-```bash
-python scripts/web_workbench.py --reload
-```
-
-默认监听 `http://127.0.0.1:8000`。
-
-### 前端开发服务器
-
-```bash
-cd web
-npm run dev
-```
-
-默认监听 `http://127.0.0.1:5173`，并代理 `/api` 到后端。
-
-### 前端验证
-
-```bash
-cd web
-npm run test
-npm run build
-```
-
-Web workbench 当前已经覆盖：
-
-- Chat 编码会话
-- Session 列表与实时事件流
-- 文件树与只读预览
-- Runtime summary / health / mental state 摘要
-- Self-evolution 与 supervised-evolution 轨道页
-- Logs / Config / Reset / Pet 等路由
-
----
-
-## 自进化与监督进化
+## 自进化与监督进化边界
 
 ### Self Evolution
 
-当前自进化链路已经具备这些关键部件：
+自进化负责在当前仓库中执行一轮有界改进。它关注：
 
-- Git working tree 信号采集
-- 演化事务记录与 fitness 摘要
-- 重启守护与回流观察
-- 运行时约束与 tool blocking
-- chat 数据采样与候选评测输入
+- 当前目标和 readiness
+- Git working tree 信号
+- 演化事务与 fitness 摘要
+- 工具调用、验证、审计尾迹
+- 回滚 manifest 与冲突说明
+
+自进化不是无限后台任务。每轮都应有目标、证据、验证和停止条件。
 
 ### Supervised Evolution
 
-监督进化已经不是占位命令，而是完整的最小闭环：
+监督进化负责用评测样本比较 baseline 与 candidate，并把结果沉淀成可审核的 proposal / advisory baseline。它关注：
 
-- baseline / candidate 对比运行
-- decision record 持久化
-- bundle / dataset materialization
-- lineage 索引与链路摘要
-- Gym promotion proposal lifecycle
-- dashboard 生成
+- dataset / bundle materialization
+- baseline / candidate 对比
+- decision record 与 lineage
+- proposal lifecycle
+- active advisory baseline
+- chat case review
 
-数据集注册表位于：
-
-- [workspace/evaluation/datasets/registry.json](workspace/evaluation/datasets/registry.json)
-
-当前内置或约定支持的来源包括：
-
-- dry-run probe bundle
-- reviewed chat multiturn
-- generated cases
-- HumanEval / MBPP 风格本地 JSONL
-- SWE-bench Lite / Verified 占位入口
-
-其中 SWE-bench 相关条目目前仍依赖额外 harness，仓库已经给出 registry 与物化入口，但不代表开箱即跑。
-
----
-
-## 当前边界
-
-这里特意写清楚，避免 README 比系统本身更乐观：
-
-- `Gym promotion` 的 `active advisory baseline` 目前是观察与治理语义，不代表自动把新能力重写进 runtime
-- 监督进化默认 bundle 仍偏向 dry-run / transaction safety / regression probe，而不是大规模真实 benchmark
-- Web 前端已经可构建，但随着功能扩展，chunk 拆分和包体优化仍是持续工作
-- 当前系统仍以本地仓库演化、评测和工作台协作为主，不应被误解成一个“自动线上部署代理”
-
----
+`active advisory baseline` 是建议和治理语义，不代表系统会自动把新能力重写进 runtime。
 
 ## 测试与验证
 
-### Python
+Python：
 
-当 `config.toml` 中 `runtime.require_venv = true` 时，建议显式使用项目虚拟环境：
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest tests -q
+```bash
+pytest tests -q
 ```
 
 常用局部验证：
 
 ```bash
-pytest tests/test_tool_executor.py -v
-pytest tests/test_web_app.py -v
-pytest tests/test_supervised_evolution.py -v
+pytest tests/test_web_app.py -q
+pytest tests/test_git_status_service.py -q
+pytest tests/test_supervised_evolution.py -q
 ```
 
-### Frontend
+前端：
 
 ```bash
 cd web
@@ -279,17 +225,21 @@ npm run test
 npm run build
 ```
 
-### CI
+CI 通常覆盖：
 
-GitHub Actions currently enforces three gates:
+- Windows Python `3.11` / `3.12`
+- Python compile 与 pytest
+- 变更文件 ruff check
+- 前端 `npm ci`、`npm run test`、`npm run build`
 
-- Windows Python `3.11` and `3.12`: create project-local `.venv`, run `compileall`, then run `pytest tests -q`
-- Incremental Python lint: run `ruff check` only on changed `*.py` files
-- Frontend verification: `npm ci`, `npm run test`, `npm run build`
+## 隐私与安全说明
 
-The Python workflow explicitly clears provider API key environment variables before running tests so config-sensitive cases do not inherit machine secrets.
-
----
+- Web workbench 默认面向本地使用，写接口带本地 control token 与来源校验。
+- README 截图使用脱敏演示数据，不是当前机器的真实工作区状态。
+- 不要提交 `config.toml` 中的真实密钥、provider 私有地址或本地路径。
+- Git 页面提交时只提交用户选择的文件；如果存在未选择的 staged 文件，后端会拒绝提交，避免误带 unrelated changes。
+- Reset 页面使用后端白名单和保护区，不接受任意路径清理。
+- Runtime scene 日志用于诊断，应避免把包含敏感信息的原始运行包公开发布。
 
 ## 进一步阅读
 
@@ -298,10 +248,10 @@ The Python workflow explicitly clears provider API key environment variables bef
 | [AGENTS.md](AGENTS.md) | 仓库协作约束与工程规范 |
 | [INDEX.md](INDEX.md) | 项目索引 |
 | [CONTEXT.md](CONTEXT.md) | 运行上下文说明 |
+| [PROJECT_MEMORY.html](PROJECT_MEMORY.html) | 项目记忆 HTML 入口 |
+| [.docs/project-memory/INDEX.md](.docs/project-memory/INDEX.md) | 项目记忆导航 |
 | [core/core_prompt/SOUL.md](core/core_prompt/SOUL.md) | 核心使命与行为边界 |
 | [core/core_prompt/SPEC.md](core/core_prompt/SPEC.md) | 核心开发规范 |
-
----
 
 ## License
 

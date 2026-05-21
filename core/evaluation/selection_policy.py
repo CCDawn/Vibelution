@@ -15,6 +15,33 @@ from config import get_config
 DEFAULT_OBSERVATION_BUDGET = 3
 
 
+def _record_policy_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: Dict[str, Any] | None = None,
+    lifecycle: bool = False,
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "selection_policy",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
 @dataclass
 class PolicyExecutionRecord:
     action: str
@@ -539,6 +566,26 @@ def execute_supervised_policy(
         touched_files.append(str(policy_record_path))
         record.touched_files = touched_files
         policy_record_path.write_text(json.dumps(asdict(record), ensure_ascii=False, indent=2), encoding="utf-8")
+    _record_policy_scene_event(
+        "execute",
+        "selection_policy.executed",
+        message="Supervised selection policy executed.",
+        outcome="succeeded",
+        fields={
+            "action": record.action,
+            "summary": record.summary,
+            "bundlePath": record.bundle_path,
+            "policyRecordPath": record.policy_record_path,
+            "touchedFileCount": len(record.touched_files),
+            "promotedCaseCount": len(record.promoted_cases),
+            "observationCaseCount": len(record.observation_cases),
+            "rejectedCaseCount": len(record.rejected_cases),
+            "proposalCount": len(record.proposal_paths),
+            "proposalPaths": record.proposal_paths,
+            "lineageIndexPath": record.lineage_index_path,
+        },
+        lifecycle=True,
+    )
     return record
 
 

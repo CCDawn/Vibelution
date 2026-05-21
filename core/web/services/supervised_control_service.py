@@ -39,6 +39,7 @@ from core.runtime_manager.work_run_leases import (
 
 from .evolution_service import get_run, get_workbench_state_payload
 from .i18n import get_web_language, text_for
+from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
 
 
@@ -122,6 +123,55 @@ def _map_runtime_manager_error(message: str, error_type: str) -> Exception:
     if normalized == "SupervisedRunDeleteError":
         return SupervisedRunDeleteError(message)
     return SupervisedRunValidationError(message)
+
+
+def _record_supervised_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    run_id: str = "",
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+    lifecycle: bool = False,
+) -> None:
+    event_fields: dict[str, Any] = {"runId": str(run_id or "").strip()}
+    if fields:
+        event_fields.update(fields)
+    try:
+        record_runtime_scene_event(
+            "supervised_run",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=event_fields,
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
+def _supervised_snapshot_event_fields(snapshot: dict[str, Any] | None) -> dict[str, Any]:
+    payload = snapshot if isinstance(snapshot, dict) else {}
+    return {
+        "status": str(payload.get("status") or "").strip(),
+        "currentPhase": str(payload.get("currentPhase") or payload.get("phase") or "").strip(),
+        "runtimeStatus": str(payload.get("runtimeStatus") or "").strip(),
+        "sourceKind": str(payload.get("sourceKind") or "").strip(),
+        "bundleName": str(payload.get("bundleName") or "").strip(),
+        "datasetName": str(payload.get("datasetName") or "").strip(),
+        "sessionId": str(payload.get("sessionId") or "").strip(),
+        "caseIndex": _optional_int(payload.get("currentCaseIndex")),
+        "caseTotal": _optional_int(payload.get("caseTotal")),
+        "decision": str(payload.get("decision") or "").strip(),
+        "policyAction": str(payload.get("policyAction") or "").strip(),
+        "error": str(payload.get("error") or payload.get("reason") or "").strip(),
+        "updatedAt": str(payload.get("updatedAt") or "").strip(),
+        "finishedAt": str(payload.get("finishedAt") or "").strip(),
+    }
 
 
 class _SupervisedRunController:
@@ -1787,20 +1837,85 @@ def _submit_supervised_runtime_manager_command(command_type: str, *, run_id: str
     command = submit_command(command_type, args=args, requested_by="web_ui")
     result = wait_for_result(command["commandId"])
     if not bool(result.get("ok")):
+        _record_supervised_scene_event(
+            "runtime_manager",
+            f"supervised_run.manager.{command_type}.failed",
+            run_id=run_id,
+            message=str(result.get("message") or "Runtime manager command failed."),
+            level="error",
+            outcome="failed",
+            fields={
+                "commandType": command_type,
+                "commandId": str(command.get("commandId") or ""),
+                "errorType": str(result.get("errorType") or ""),
+            },
+            lifecycle=True,
+        )
         raise _map_runtime_manager_error(
             str(result.get("message") or "Runtime manager command failed."),
             str(result.get("errorType") or ""),
         )
     snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else None
     if snapshot is not None:
+        _record_supervised_scene_event(
+            "runtime_manager",
+            f"supervised_run.manager.{command_type}.succeeded",
+            run_id=str(snapshot.get("runId") or run_id),
+            message="Supervised runtime-manager command succeeded.",
+            outcome="succeeded",
+            fields={
+                "commandType": command_type,
+                "commandId": str(command.get("commandId") or ""),
+                **_supervised_snapshot_event_fields(snapshot),
+            },
+            lifecycle=True,
+        )
         return snapshot
     delete_result = result.get("deleteResult") if isinstance(result.get("deleteResult"), dict) else None
     if delete_result is not None:
+        _record_supervised_scene_event(
+            "runtime_manager",
+            f"supervised_run.manager.{command_type}.succeeded",
+            run_id=run_id,
+            message="Supervised runtime-manager delete command succeeded.",
+            outcome="succeeded",
+            fields={
+                "commandType": command_type,
+                "commandId": str(command.get("commandId") or ""),
+                **delete_result,
+            },
+            lifecycle=True,
+        )
         return delete_result
     target_run_id = str(result.get("runId") or run_id or "").strip()
     loaded = load_manager_run_snapshot("supervised", target_run_id) if target_run_id else None
     if loaded is not None:
+        _record_supervised_scene_event(
+            "runtime_manager",
+            f"supervised_run.manager.{command_type}.succeeded",
+            run_id=target_run_id,
+            message="Supervised runtime-manager command loaded snapshot.",
+            outcome="succeeded",
+            fields={
+                "commandType": command_type,
+                "commandId": str(command.get("commandId") or ""),
+                **_supervised_snapshot_event_fields(loaded),
+            },
+            lifecycle=True,
+        )
         return loaded
+    _record_supervised_scene_event(
+        "runtime_manager",
+        f"supervised_run.manager.{command_type}.succeeded",
+        run_id=target_run_id,
+        message="Supervised runtime-manager command returned no snapshot.",
+        outcome="succeeded",
+        fields={
+            "commandType": command_type,
+            "commandId": str(command.get("commandId") or ""),
+        },
+        lifecycle=True,
+    )
     return {}
 
 
@@ -1818,7 +1933,17 @@ def get_supervised_workbench() -> dict[str, Any]:
 def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         return _submit_supervised_runtime_manager_command("start_supervised_run", payload=payload)
-    return _LOCAL_START_SUPERVISED_RUN(payload)
+    snapshot = _LOCAL_START_SUPERVISED_RUN(payload)
+    _record_supervised_scene_event(
+        "control",
+        "supervised_run.started",
+        run_id=str(snapshot.get("runId") or ""),
+        message="Supervised run started from web UI.",
+        outcome="succeeded",
+        fields=_supervised_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot
 
 
 def get_active_supervised_run() -> dict[str, Any] | None:
@@ -1846,25 +1971,65 @@ def get_supervised_run_snapshot(run_id: str) -> dict[str, Any]:
 def request_pause_supervised_run(run_id: str) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         return _submit_supervised_runtime_manager_command("pause_supervised_run", run_id=run_id)
-    return _LOCAL_REQUEST_PAUSE_SUPERVISED_RUN(run_id)
+    snapshot = _LOCAL_REQUEST_PAUSE_SUPERVISED_RUN(run_id)
+    _record_supervised_scene_event(
+        "control",
+        "supervised_run.pause_requested",
+        run_id=run_id,
+        message="Supervised run pause requested.",
+        outcome="succeeded",
+        fields=_supervised_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot
 
 
 def request_resume_supervised_run(run_id: str) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         return _submit_supervised_runtime_manager_command("resume_supervised_run", run_id=run_id)
-    return _LOCAL_REQUEST_RESUME_SUPERVISED_RUN(run_id)
+    snapshot = _LOCAL_REQUEST_RESUME_SUPERVISED_RUN(run_id)
+    _record_supervised_scene_event(
+        "control",
+        "supervised_run.resumed",
+        run_id=run_id,
+        message="Supervised run resumed.",
+        outcome="succeeded",
+        fields=_supervised_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot
 
 
 def request_stop_supervised_run(run_id: str) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         return _submit_supervised_runtime_manager_command("stop_supervised_run", run_id=run_id)
-    return _LOCAL_REQUEST_STOP_SUPERVISED_RUN(run_id)
+    snapshot = _LOCAL_REQUEST_STOP_SUPERVISED_RUN(run_id)
+    _record_supervised_scene_event(
+        "control",
+        "supervised_run.stop_requested",
+        run_id=run_id,
+        message="Supervised run stop requested.",
+        outcome="succeeded",
+        fields=_supervised_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot
 
 
 def delete_supervised_run_snapshot(run_id: str) -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
         return _submit_supervised_runtime_manager_command("delete_supervised_run", run_id=run_id)
-    return _LOCAL_DELETE_SUPERVISED_RUN_SNAPSHOT(run_id)
+    result = _LOCAL_DELETE_SUPERVISED_RUN_SNAPSHOT(run_id)
+    _record_supervised_scene_event(
+        "control",
+        "supervised_run.snapshot.deleted",
+        run_id=run_id,
+        message="Supervised run snapshot deleted.",
+        outcome="succeeded" if bool(result.get("deleted")) else "skipped",
+        fields=result,
+        lifecycle=True,
+    )
+    return result
 
 
 def stream_active_supervised_run_events(initial_snapshot: dict[str, Any] | None = None):

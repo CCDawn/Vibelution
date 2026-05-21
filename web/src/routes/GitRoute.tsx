@@ -1,10 +1,17 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw, Square } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
-import { GitCommitsResponse, GitFileDiff, GitStatusFile, GitStatusSummary } from "../api/types";
+import {
+  GitCommitMessageResponse,
+  GitCommitResponse,
+  GitCommitsResponse,
+  GitFileDiff,
+  GitStatusFile,
+  GitStatusSummary,
+} from "../api/types";
 import { FilePreview } from "../components/preview/FilePreview";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./GitRoute.module.css";
@@ -57,6 +64,12 @@ export function GitRoute() {
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<GitFilter>("all");
   const [activePath, setActivePath] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [commitNotice, setCommitNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
+    tone: "neutral",
+    text: "",
+  });
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
   const statusQuery = useQuery({
@@ -78,6 +91,8 @@ export function GitRoute() {
     [activeFilter, files],
   );
   const activeFile = files.find((file) => file.path === activePath) ?? null;
+  const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
+  const selectedCount = selectedPaths.length;
 
   useEffect(() => {
     if (!filteredFiles.length) {
@@ -95,12 +110,73 @@ export function GitRoute() {
     enabled: Boolean(activePath && statusQuery.data?.available),
   });
 
+  useEffect(() => {
+    const availablePaths = new Set(files.map((file) => file.path));
+    setSelectedPaths((current) => current.filter((path) => availablePaths.has(path)));
+  }, [files]);
+
+  const generateMessageMutation = useMutation({
+    mutationFn: (paths: string[]) =>
+      fetchJson<GitCommitMessageResponse>("/api/git/commit-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paths }),
+      }),
+    onSuccess: (payload) => {
+      setCommitMessage(payload.message);
+      setCommitNotice({ tone: "success", text: t("gitAiMessageReady") });
+    },
+    onError: (error) => {
+      setCommitNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const commitMutation = useMutation({
+    mutationFn: (payload: { paths: string[]; message: string }) =>
+      fetchJson<GitCommitResponse>("/api/git/commit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: (payload) => {
+      setCommitNotice({ tone: "success", text: `${t("gitCommitSuccess")} ${payload.shortSha}` });
+      setSelectedPaths([]);
+      setCommitMessage("");
+      refresh();
+    },
+    onError: (error) => {
+      setCommitNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.gitStatus() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.gitCommits() });
     if (activePath) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.gitDiff(activePath) });
     }
+  };
+
+  const toggleSelectedPath = (path: string) => {
+    setSelectedPaths((current) => (current.includes(path) ? current.filter((item) => item !== path) : [...current, path]));
+  };
+
+  const selectVisible = () => {
+    setSelectedPaths((current) => Array.from(new Set([...current, ...filteredFiles.map((file) => file.path)])));
+  };
+
+  const clearSelection = () => {
+    setSelectedPaths([]);
+  };
+
+  const generateMessage = () => {
+    setCommitNotice({ tone: "neutral", text: "" });
+    generateMessageMutation.mutate(selectedPaths);
+  };
+
+  const commitSelected = () => {
+    setCommitNotice({ tone: "neutral", text: "" });
+    commitMutation.mutate({ paths: selectedPaths, message: commitMessage });
   };
 
   const status = statusQuery.data;
@@ -110,6 +186,8 @@ export function GitRoute() {
     diffQuery.data?.diff ||
     diffQuery.data?.content ||
     (diffQuery.data?.binary ? t("gitBinaryFile") : t("gitDiffEmpty"));
+  const commitDisabled = selectedCount === 0 || !commitMessage.trim() || commitMutation.isPending;
+  const aiDisabled = selectedCount === 0 || generateMessageMutation.isPending;
 
   return (
     <section className={styles.route}>
@@ -169,20 +247,34 @@ export function GitRoute() {
               </button>
             ))}
           </div>
+          <div className={styles.selectionRow}>
+            <button type="button" className={styles.selectionButton} onClick={selectVisible} disabled={!filteredFiles.length}>
+              {t("gitSelectVisible")}
+            </button>
+            <button type="button" className={styles.selectionButton} onClick={clearSelection} disabled={!selectedCount}>
+              {t("gitClearSelection")}
+            </button>
+          </div>
           <div className={styles.fileList}>
             {filteredFiles.map((file) => (
-              <button
+              <article
                 key={`${file.status}-${file.path}`}
-                type="button"
                 className={file.path === activePath ? styles.fileButtonActive : styles.fileButton}
-                onClick={() => setActivePath(file.path)}
               >
+                <button
+                  type="button"
+                  className={styles.fileCheckButton}
+                  aria-label={selectedSet.has(file.path) ? t("gitUnselectFile") : t("gitSelectFileForCommit")}
+                  onClick={() => toggleSelectedPath(file.path)}
+                >
+                  {selectedSet.has(file.path) ? <CheckSquare size={16} /> : <Square size={16} />}
+                </button>
                 <span className={styles.fileStatus}>{file.status}</span>
-                <span className={styles.fileCopy}>
+                <button type="button" className={styles.fileCopyButton} onClick={() => setActivePath(file.path)}>
                   <strong>{fileName(file.path)}</strong>
                   <span>{displayPath(file.path)}</span>
-                </span>
-              </button>
+                </button>
+              </article>
             ))}
             {!filteredFiles.length ? <p className={styles.emptyState}>{t("gitNoMatchingChanges")}</p> : null}
           </div>
@@ -216,6 +308,41 @@ export function GitRoute() {
         </main>
 
         <aside className={styles.commitPanel}>
+          <section className={styles.manualCommitPanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{t("gitManualCommit")}</p>
+                <h2>{t("gitCommitSelected")}</h2>
+              </div>
+              <span className={styles.countPill}>{selectedCount}</span>
+            </div>
+            <label className={styles.messageField}>
+              <span>{t("gitCommitMessage")}</span>
+              <textarea
+                rows={6}
+                value={commitMessage}
+                placeholder={t("gitCommitMessagePlaceholder")}
+                onChange={(event) => setCommitMessage(event.target.value)}
+              />
+            </label>
+            <div className={styles.commitActions}>
+              <button type="button" className={styles.secondaryButton} onClick={generateMessage} disabled={aiDisabled}>
+                <Bot size={15} />
+                {generateMessageMutation.isPending ? t("gitAiGenerating") : t("gitAiGenerateMessage")}
+              </button>
+              <button type="button" className={styles.primaryButton} onClick={commitSelected} disabled={commitDisabled}>
+                <GitCommitHorizontal size={15} />
+                {commitMutation.isPending ? t("gitCommitting") : t("gitCommitSelected")}
+              </button>
+            </div>
+            {commitNotice.text ? (
+              <p className={commitNotice.tone === "error" ? styles.commitNoticeError : styles.commitNotice}>
+                {commitNotice.text}
+              </p>
+            ) : (
+              <p className={styles.commitHint}>{t("gitCommitHint")}</p>
+            )}
+          </section>
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{t("gitHead")}</p>

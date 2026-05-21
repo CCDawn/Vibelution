@@ -101,7 +101,7 @@ I18N = {
         "actions": "建议动作",
         "raw_toml": "原始 TOML",
         "raw_toml_summary": "查看当前写盘内容",
-        "profile_id": "配置标识",
+        "profile_id": "任务模型标识",
         "provider_id": "服务标识",
         "api_base": "API 地址",
         "open_runtime": "运行时设置",
@@ -116,7 +116,7 @@ I18N = {
         "provider_context_window": "上下文窗口",
         "provider_extra_headers": "额外请求头(JSON)",
         "model": "模型",
-        "profile": "智能体配置",
+        "profile": "任务模型",
         "api_key_source": "密钥来源",
         "selectable_models": "可选模型",
         "none": "无",
@@ -130,20 +130,20 @@ I18N = {
         "language": "语言",
         "lang_zh": "中文",
         "lang_en": "English",
-        "add_llm": "复制配置",
+        "add_llm": "复制任务模型",
         "test_llm": "测试连接",
         "switch_provider": "切换",
         "test_provider": "测试",
         "switch_success": "主模型已切换",
         "test_success_title": "连接正常",
         "test_failed_title": "连接失败",
-        "prompt_profile_id": "配置标识",
+        "prompt_profile_id": "任务模型标识",
         "prompt_provider_id": "模型服务标识",
-        "prompt_source_profile_id": "来源配置",
+        "prompt_source_profile_id": "参考任务",
         "prompt_model_id": "选择模型",
         "prompt_model": "模型名称",
         "model_library": "通用模型库",
-        "model_library_hint": "统一管理可选择的模型；各智能体配置从这里挑选模型，复制后保留各自独立的服务配置与微调参数。",
+        "model_library_hint": "统一管理可选择的模型；各任务从这里挑选模型，复制后保留各自独立的服务配置与微调参数。",
         "preset_template": "预设模板",
         "preset_template_hint": "选择主流厂商模板会自动填入服务配置、模型和默认参数；保存后写入统一配置结构。",
         "preset_custom": "手动配置",
@@ -182,7 +182,7 @@ I18N = {
         "actions": "Suggested Actions",
         "raw_toml": "Raw TOML",
         "raw_toml_summary": "View current persisted content",
-        "profile_id": "Profile ID",
+        "profile_id": "Task Model ID",
         "provider_id": "Provider ID",
         "api_base": "API Base",
         "open_runtime": "Runtime",
@@ -197,7 +197,7 @@ I18N = {
         "provider_context_window": "Context Window",
         "provider_extra_headers": "Extra Headers (JSON)",
         "model": "Model",
-        "profile": "Agent Config",
+        "profile": "Task Model",
         "api_key_source": "API Key Source",
         "selectable_models": "Selectable Models",
         "none": "None",
@@ -211,20 +211,20 @@ I18N = {
         "language": "Language",
         "lang_zh": "中文",
         "lang_en": "English",
-        "add_llm": "Clone Config",
+        "add_llm": "Clone Task Model",
         "test_llm": "Test Connection",
         "switch_provider": "Switch",
         "test_provider": "Test",
         "switch_success": "Primary LLM switched",
         "test_success_title": "Connection OK",
         "test_failed_title": "Connection Failed",
-        "prompt_profile_id": "profile_id",
+        "prompt_profile_id": "task model id",
         "prompt_provider_id": "provider_id",
-        "prompt_source_profile_id": "source_profile_id",
+        "prompt_source_profile_id": "based on task",
         "prompt_model_id": "model_id",
         "prompt_model": "model",
         "model_library": "Model Library",
-        "model_library_hint": "Manage selectable models once; agent configs pick from here, then keep their own provider copy and tuning.",
+        "model_library_hint": "Manage selectable models once; tasks pick from here, then keep their own provider copy and tuning.",
         "preset_template": "Preset Template",
         "preset_template_hint": "Choose a vendor preset to fill provider config, model, and defaults; saving still writes the normal config shape.",
         "preset_custom": "Manual",
@@ -258,7 +258,7 @@ SECTION_LABELS = {
         "avatar": "形象",
         "llm": "模型",
         "llm.providers": "模型服务",
-        "llm.profiles": "模型档案",
+        "llm.profiles": "模型",
         "llm.discovery": "模型发现",
         "agent": "智能体",
         "context_compression": "上下文压缩",
@@ -300,7 +300,7 @@ SECTION_LABELS = {
         "avatar": "Avatar",
         "llm": "LLM",
         "llm.providers": "Providers",
-        "llm.profiles": "LLM Profiles",
+        "llm.profiles": "Models",
         "llm.discovery": "Model Discovery",
         "agent": "智能体",
         "context_compression": "Context Compression",
@@ -341,7 +341,7 @@ SECTION_LABELS = {
 
 FIELD_LABELS = {
     "zh": {
-        "runtime.profile": "运行档案",
+        "runtime.profile": "运行档位",
         "runtime.preflight_doctor": "启动前自检",
         "runtime.require_venv": "要求使用 .venv",
         "avatar.preset": "形象预设",
@@ -428,6 +428,8 @@ FIELD_LABELS = {
         "ui.show_ascii_art": "显示 ASCII Art",
         "ui.show_welcome": "显示欢迎面板",
         "prompt.default_components": "默认提示词组件",
+        "git.commit_message_profile": "AI 提交说明模型",
+        "git.commit_message_prompt": "AI 提交说明提示词",
         "evolution.chat_dataset.enabled": "启用 chat 数据采样",
         "evolution.chat_dataset.source_modes": "采样来源模式",
         "evolution.chat_dataset.auto_capture": "自动采样",
@@ -443,7 +445,7 @@ FIELD_LABELS = {
         "evolution.chat_dataset.rejected_log_path": "拒绝审计路径",
     },
     "en": {
-        "runtime.profile": "Runtime Profile",
+        "runtime.profile": "Runtime Mode",
         "runtime.preflight_doctor": "Preflight Doctor",
         "runtime.require_venv": "Require .venv",
         "avatar.preset": "Avatar Preset",
@@ -530,6 +532,8 @@ FIELD_LABELS = {
         "ui.show_ascii_art": "Show ASCII Art",
         "ui.show_welcome": "Show Welcome Panel",
         "prompt.default_components": "Default Prompt Components",
+        "git.commit_message_profile": "AI Commit Message Model",
+        "git.commit_message_prompt": "AI Commit Message Prompt",
         "evolution.chat_dataset.enabled": "Enable Chat Dataset Capture",
         "evolution.chat_dataset.source_modes": "Capture Source Modes",
         "evolution.chat_dataset.auto_capture": "Auto Capture",
@@ -716,8 +720,8 @@ TOKEN_LABELS = {
         "preflight": "预检",
         "preservation": "保留",
         "primary": "主",
-        "profile": "档案",
-        "profiles": "档案",
+        "profile": "模型",
+        "profiles": "模型",
         "prompt": "提示词",
         "provider": "服务",
         "providers": "服务",
@@ -1230,7 +1234,7 @@ def _find_profile_id_for_provider(public_config: dict, provider_id: str) -> str:
     for profile_id, profile in profiles.items():
         if isinstance(profile, dict) and profile.get("provider_id") == provider_id:
             return str(profile_id)
-    raise ValueError(f"no LLM profile uses provider: {provider_id}")
+    raise ValueError(f"no task model uses provider: {provider_id}")
 
 
 def _probe_llm_http(provider, profile, api_key: str | None = None) -> dict:
@@ -1646,7 +1650,7 @@ def _render_llm_profile_card(public_config: dict, profile_id: str, lang: str) ->
         raise ValueError("llm.profiles must be an object")
     value = profiles.get(profile_id, {})
     if not isinstance(value, dict):
-        raise ValueError(f"unknown LLM profile: {profile_id}")
+        raise ValueError(f"unknown task model: {profile_id}")
     path = f"llm.profiles.{profile_id}"
     return _render_config_object_card(public_config, path, value, lang)
 
@@ -3090,7 +3094,7 @@ def render_panel_html(
       const sourceProfileId = (card.querySelector('[data-add-profile-field="source_profile_id"]')?.value || "").trim();
       const modelId = (document.getElementById("add-llm-profile-model")?.value || "").trim();
       if (!profileId || !modelId) {{
-        setToolbarMessage("{html.escape(t['save_failed'])}: profile_id and model_id are required", true);
+        setToolbarMessage("{html.escape(t['save_failed'])}: task model id and model id are required", true);
         return;
       }}
       try {{

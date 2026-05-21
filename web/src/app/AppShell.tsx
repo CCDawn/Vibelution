@@ -105,27 +105,17 @@ export function AppShell() {
   const clockFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(locale, {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      }),
-    [locale],
-  );
-  const fullClockFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
+        weekday: "long",
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
-        hour12: false,
+        hour12: true,
       }),
     [locale],
   );
-
   const frontendState = deriveFrontendSystemState({
     online: frontendOnline,
     visible: frontendVisible,
@@ -138,7 +128,6 @@ export function AppShell() {
   });
   const runtimeControllerState = deriveRuntimeControllerState(runtimeQuery.data);
   const currentTime = clockFormatter.format(clockNow);
-  const fullCurrentTime = fullClockFormatter.format(clockNow);
   const buildId = __VIBELUTION_BUILD_ID__;
   const gitStatus = gitStatusQuery.data;
   const gitAvailable = Boolean(gitStatus?.available);
@@ -632,7 +621,7 @@ export function AppShell() {
       label: t("systemTime"),
       value: currentTime,
       tone: "idle",
-      note: `${fullCurrentTime} · ${timezone}`,
+      note: timezone,
       states: [
         {
           label: t("systemTimeLive"),
@@ -706,11 +695,52 @@ export function AppShell() {
               <span className={styles.gitBranchName}>{gitBranch}</span>
               <strong className={styles.gitCount}>{gitValue}</strong>
             </div>
+            <div className={styles.gitPanel} role="note" aria-live="polite">
+              <div className={styles.gitPanelHeader}>
+                <strong>{t("gitStatusGuide")}</strong>
+                <span>{gitStatus?.summary || t("gitStatusGuideHint")}</span>
+              </div>
+              <div className={styles.gitMetaGrid}>
+                <span>{t("gitBranch")}</span>
+                <strong>{gitBranch}</strong>
+                <span>{t("gitUpstream")}</span>
+                <strong>{gitStatus?.upstream?.name || gitStatus?.upstream?.remote || t("gitNoUpstream")}</strong>
+              </div>
+              <div className={styles.gitCountGrid}>
+                <span>
+                  <strong>{gitStatus?.counts.staged ?? 0}</strong>
+                  {t("gitStaged")}
+                </span>
+                <span>
+                  <strong>{gitStatus?.counts.unstaged ?? 0}</strong>
+                  {t("gitUnstaged")}
+                </span>
+                <span>
+                  <strong>{gitStatus?.counts.untracked ?? 0}</strong>
+                  {t("gitUntracked")}
+                </span>
+                <span>
+                  <strong>{gitStatus?.counts.deleted ?? 0}</strong>
+                  {t("gitDeleted")}
+                </span>
+              </div>
+              <div className={styles.gitFileList}>
+                {(gitStatus?.files ?? []).slice(0, 6).map((file) => (
+                  <div key={`${file.status}-${file.path}`} className={styles.gitFileItem}>
+                    <code>{file.status}</code>
+                    <span>{file.path}</span>
+                  </div>
+                ))}
+                {gitStatus?.truncated ? <p>{t("gitTruncated")}</p> : null}
+                {gitStatus && gitStatus.available && !gitStatus.files.length ? <p>{t("gitNoChanges")}</p> : null}
+                {gitStatus && !gitStatus.available ? <p>{gitStatus.error || t("gitUnavailable")}</p> : null}
+              </div>
+            </div>
           </div>
           <div className={styles.statusCluster} tabIndex={0} aria-label={t("systemStatusGuide")}>
             <div className={styles.statusChipRow}>
               {systemStatusCards.map((item) => (
-                <span key={item.id} className={styles.statusBadge}>
+                <span key={item.id} className={`${styles.statusBadge} ${item.id === "time" ? styles.statusBadgeTime : ""}`}>
                   <span className={`${styles.statusDot} ${styles[`status_${item.tone}`]}`} />
                   <span className={styles.statusBadgeLabel}>{item.label}</span>
                   <strong className={styles.statusBadgeValue}>{item.value}</strong>
