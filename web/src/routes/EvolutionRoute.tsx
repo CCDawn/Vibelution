@@ -1998,67 +1998,31 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
             </div>
 
-            <div className={styles.runsCommandBody}>
-              <div className={styles.runsCommandMetrics}>
-                <article className={styles.compactFact}>
-                  <span>{t("runs")}</span>
-                  <strong>{hasRuns ? `${filteredRuns.length} / ${runs.length}` : "0 / 0"}</strong>
-                </article>
-                <article className={styles.compactFact}>
-                  <span>{statusLabel("success")}</span>
-                  <strong>{runSuccessCount}</strong>
-                </article>
-                <article className={styles.compactFact}>
-                  <span>{statusLabel("failed")}</span>
-                  <strong>{runFailedCount}</strong>
-                </article>
-                <article className={styles.compactFact}>
-                  <span>{t("pendingReview")}</span>
-                  <strong>{runPendingCount}</strong>
-                </article>
-                <article className={styles.compactFact}>
-                  <span>{t("selectedCount")}</span>
-                  <strong>{selectedRunIds.length}</strong>
-                </article>
-              </div>
-
-              <div className={styles.runsSelectedSnapshot}>
-                <div className={styles.runsSnapshotPrimary}>
-                  <strong>{selectedRun?.id ?? latestRun?.id ?? "--"}</strong>
-                  <span className={selectedRun ? styles.statusPill : styles.secondaryPill}>
-                    {selectedRun
-                      ? decisionLabel(selectedRun.decision)
-                      : runFilter === "all"
-                        ? t("allRuns")
-                        : statusLabel(runFilter)}
-                  </span>
-                  <p>
-                    {selectedRun
-                      ? selectedRun.summary
-                      : hasRuns
-                        ? t("runDetailFilterHint")
-                        : t("runDetailPlaceholder")}
-                  </p>
-                </div>
-                <div className={styles.runsSnapshotFacts}>
-                  <span>
-                    {t("latestScore")}
-                    <strong>{selectedRun ? clampScore(selectedRun.candidateScore) : "--"}</strong>
-                  </span>
-                  <span>
-                    {t("proposalLayer")}
-                    <strong>{selectedRun ? selectedRun.outcomeSemantics.proposalStatusLabel : "--"}</strong>
-                  </span>
-                  <span>
-                    {t("runtimeLayer")}
-                    <strong>{selectedRun ? selectedRun.outcomeSemantics.runtimeEffectLabel : "--"}</strong>
-                  </span>
-                  <span>
-                    {t("deletionAllowed")}
-                    <strong>{runDeletableCount}</strong>
-                  </span>
-                </div>
-              </div>
+            <div className={styles.runsCommandMetrics}>
+              <article className={styles.compactFact}>
+                <span>{t("runs")}</span>
+                <strong>{hasRuns ? `${filteredRuns.length} / ${runs.length}` : "0 / 0"}</strong>
+              </article>
+              <article className={styles.compactFact}>
+                <span>{statusLabel("success")}</span>
+                <strong>{runSuccessCount}</strong>
+              </article>
+              <article className={styles.compactFact}>
+                <span>{statusLabel("failed")}</span>
+                <strong>{runFailedCount}</strong>
+              </article>
+              <article className={styles.compactFact}>
+                <span>{t("pendingReview")}</span>
+                <strong>{runPendingCount}</strong>
+              </article>
+              <article className={styles.compactFact}>
+                <span>{t("deletionAllowed")}</span>
+                <strong>{runDeletableCount}</strong>
+              </article>
+              <article className={styles.compactFact}>
+                <span>{t("selectedCount")}</span>
+                <strong>{selectedRunIds.length}</strong>
+              </article>
             </div>
           </section>
 
@@ -2218,55 +2182,53 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <span>{t("candidateScore")}</span>
                       <p className={styles.detailLead}>{selectedRun.candidateScore}</p>
                       <p>{selectedRun.summary}</p>
+                      <div className={styles.runScoreFacts}>
+                        <span>
+                          {t("baselineScore")}
+                          <strong>{selectedRun.baselineScore}</strong>
+                        </span>
+                        <span>
+                          {t("scoreDelta")}
+                          <strong>{selectedRun.deltaScore}</strong>
+                        </span>
+                        <span>
+                          {t("linkedItems")}
+                          <strong>{relatedProposalCount}</strong>
+                        </span>
+                      </div>
                     </div>
-                    <div className={styles.runDetailMetricGrid}>
-                      <article className={styles.metricTile}>
-                        <span>{t("baselineScore")}</span>
-                        <strong>{selectedRun.baselineScore}</strong>
-                      </article>
-                      <article className={styles.metricTile}>
-                        <span>{t("candidateScore")}</span>
-                        <strong>{selectedRun.candidateScore}</strong>
-                      </article>
-                      <article className={styles.metricTile}>
-                        <span>{t("scoreDelta")}</span>
-                        <strong>{selectedRun.deltaScore}</strong>
-                      </article>
-                      <article className={styles.metricTile}>
-                        <span>{t("linkedItems")}</span>
-                        <strong>{relatedProposalCount}</strong>
-                      </article>
+                    <div className={styles.runSignalStack}>
+                      <h3>{t("resultLayersTitle")}</h3>
+                      <div className={styles.runSignalGrid}>
+                        <article className={styles.compactFact}>
+                          <span>{t("runLayer")}</span>
+                          <strong>{selectedRun.runSemantics.runStatusLabel}</strong>
+                        </article>
+                        <article className={styles.compactFact}>
+                          <span>{t("decision")}</span>
+                          <strong>{selectedRun.outcomeSemantics.decisionLabel}</strong>
+                        </article>
+                        <article className={styles.compactFact}>
+                          <span>{t("proposalLayer")}</span>
+                          <strong>{selectedRun.outcomeSemantics.proposalStatusLabel}</strong>
+                        </article>
+                        <article className={styles.compactFact}>
+                          <span>{t("runtimeLayer")}</span>
+                          <strong>{selectedRun.outcomeSemantics.runtimeEffectLabel}</strong>
+                        </article>
+                        <article className={styles.compactFact}>
+                          <span>{t("nextRecommendedAction")}</span>
+                          <strong>{selectedRun.runSemantics.nextAction || "--"}</strong>
+                        </article>
+                        <article className={styles.compactFact}>
+                          <span>{t("riskLevel")}</span>
+                          <strong>{riskLabel(selectedRun.riskLevel)}</strong>
+                        </article>
+                      </div>
                     </div>
                   </div>
 
                   <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
-                    <h3>{t("resultLayersTitle")}</h3>
-                    <div className={styles.runSignalGrid}>
-                      <article className={styles.compactFact}>
-                        <span>{t("runLayer")}</span>
-                        <strong>{selectedRun.runSemantics.runStatusLabel}</strong>
-                      </article>
-                      <article className={styles.compactFact}>
-                        <span>{t("decision")}</span>
-                        <strong>{selectedRun.outcomeSemantics.decisionLabel}</strong>
-                      </article>
-                      <article className={styles.compactFact}>
-                        <span>{t("proposalLayer")}</span>
-                        <strong>{selectedRun.outcomeSemantics.proposalStatusLabel}</strong>
-                      </article>
-                      <article className={styles.compactFact}>
-                        <span>{t("runtimeLayer")}</span>
-                        <strong>{selectedRun.outcomeSemantics.runtimeEffectLabel}</strong>
-                      </article>
-                      <article className={styles.compactFact}>
-                        <span>{t("nextRecommendedAction")}</span>
-                        <strong>{selectedRun.runSemantics.nextAction || "--"}</strong>
-                      </article>
-                      <article className={styles.compactFact}>
-                        <span>{t("riskLevel")}</span>
-                        <strong>{riskLabel(selectedRun.riskLevel)}</strong>
-                      </article>
-                    </div>
                     <div className={styles.runRuntimeNote}>
                       <p>{selectedRun.outcomeSemantics.runtimeExplanation}</p>
                     </div>
