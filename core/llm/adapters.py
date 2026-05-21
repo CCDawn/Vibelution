@@ -66,6 +66,11 @@ def _is_litellm_provider_qualified(model: str) -> bool:
     return bool(separator and prefix.strip().lower() in _LITELLM_PROVIDER_PREFIXES)
 
 
+def _is_responses_prefixed_model(model: str) -> bool:
+    parts = [part.strip().lower() for part in str(model or "").split("/") if part.strip()]
+    return "responses" in parts[:2]
+
+
 class ProviderAdapter:
     """Base adapter for provider/model specific payload quirks."""
 
@@ -80,6 +85,8 @@ class ProviderAdapter:
 
     def litellm_model_name(self) -> str:
         raw_model = str(self.profile.model or "").strip()
+        if str(getattr(self.profile, "transport", "") or "").strip().lower() == "responses":
+            return self._responses_litellm_model_name(raw_model)
         if not raw_model or _is_litellm_provider_qualified(raw_model):
             return raw_model
 
@@ -87,6 +94,17 @@ class ProviderAdapter:
         if prefix:
             return f"{prefix}/{raw_model}"
         return raw_model
+
+    def _responses_litellm_model_name(self, raw_model: str) -> str:
+        if not raw_model or _is_responses_prefixed_model(raw_model):
+            return raw_model
+        prefix = self._litellm_provider_prefix()
+        if _is_litellm_provider_qualified(raw_model):
+            model_prefix, _, model_name = raw_model.partition("/")
+            return f"{model_prefix}/responses/{model_name}"
+        if prefix:
+            return f"{prefix}/responses/{raw_model}"
+        return f"responses/{raw_model}"
 
     def _litellm_provider_prefix(self) -> str:
         if self.kind in _OPENAI_COMPAT_PROVIDER_KINDS:

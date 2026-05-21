@@ -1210,6 +1210,7 @@ class SelfEvolvingAgent:
                     single_turn_mode_active=self._single_turn_mode_active,
                     tool_calls=tool_calls,
                     visible_text=self._last_visible_response_text,
+                    active_goal=getattr(self, "_active_goal", "") or user_prompt or goal_override or "",
                     active_evolution_txn_id=get_session_state().get_active_evolution_txn(),
                 ):
                     ui.add_log("单轮请求已给出直接回答，本轮收束。", "INFO")

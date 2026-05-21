@@ -54,6 +54,21 @@ def test_upstream_bad_gateway_is_retryable_server_error():
     assert decision.stop_current_turn is False
 
 
+def test_ssl_eof_is_retryable_network_error():
+    error = Exception(
+        "litellm.InternalServerError: InternalServerError: OpenAIException - "
+        "[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1010)"
+    )
+
+    normalized = classify_exception(error)
+    decision = plan_recovery(error, attempt=1, max_attempts=5)
+
+    assert normalized.category == "network_error"
+    assert normalized.retryable is True
+    assert decision.category == "network_error"
+    assert decision.action == "retry_with_backoff"
+
+
 def test_stream_upstream_failure_records_retryable_server_error(monkeypatch):
     config = _make_config(
         **{

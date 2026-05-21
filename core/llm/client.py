@@ -288,10 +288,11 @@ class LLMClient:
             response = self._backend(payload)
         except Exception as exc:
             llm_error = classify_exception(exc)
+            error_category = llm_error.category
             _record_llm_scene_event(
                 "invoke",
                 "llm.invoke.failed",
-                message=f"LLM invoke failed: {llm_error.error_type}",
+                message=f"LLM invoke failed: {error_category}",
                 level="error",
                 outcome="failed",
                 fields={
@@ -302,7 +303,7 @@ class LLMClient:
                     "messageCount": len(messages or []),
                     "toolCount": len(tools or self.bound_tools or []),
                     "metadata": metadata or {},
-                    "errorType": llm_error.error_type,
+                    "errorType": error_category,
                     "retryable": llm_error.retryable,
                     "error": str(llm_error),
                 },
@@ -378,10 +379,11 @@ class LLMClient:
             iterator = self._backend(payload)
         except Exception as exc:
             llm_error = classify_exception(exc)
+            error_category = llm_error.category
             _record_llm_scene_event(
                 "stream",
                 "llm.stream.failed",
-                message=f"LLM stream failed before iterator: {llm_error.error_type}",
+                message=f"LLM stream failed before iterator: {error_category}",
                 level="error",
                 outcome="failed",
                 fields={
@@ -391,7 +393,7 @@ class LLMClient:
                     "model": self.profile.model,
                     "messageCount": len(messages or []),
                     "toolCount": len(tools or self.bound_tools or []),
-                    "errorType": llm_error.error_type,
+                    "errorType": error_category,
                     "retryable": llm_error.retryable,
                     "error": str(llm_error),
                 },
@@ -402,10 +404,11 @@ class LLMClient:
             yield from self.adapter.stream_normalizer().events(iterator)
         except Exception as exc:
             llm_error = classify_exception(exc)
+            error_category = llm_error.category
             _record_llm_scene_event(
                 "stream",
                 "llm.stream.failed",
-                message=f"LLM stream failed: {llm_error.error_type}",
+                message=f"LLM stream failed: {error_category}",
                 level="error",
                 outcome="failed",
                 fields={
@@ -415,7 +418,7 @@ class LLMClient:
                     "model": self.profile.model,
                     "messageCount": len(messages or []),
                     "toolCount": len(tools or self.bound_tools or []),
-                    "errorType": llm_error.error_type,
+                    "errorType": error_category,
                     "retryable": llm_error.retryable,
                     "error": str(llm_error),
                 },

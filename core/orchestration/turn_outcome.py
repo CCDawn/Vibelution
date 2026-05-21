@@ -179,6 +179,7 @@ class TurnOutcomeController:
         single_turn_mode_active: bool,
         tool_calls: list,
         visible_text: str,
+        active_goal: str = "",
         active_evolution_txn_id: Optional[str] = None,
     ) -> bool:
         if not single_turn_mode_active:
@@ -186,6 +187,16 @@ class TurnOutcomeController:
         if active_evolution_txn_id:
             return False
         if tool_calls:
+            return False
+        normalized_goal = str(active_goal or "").strip().lower()
+        required_tool_markers = (
+            "open_evolution_transaction_tool",
+            "close_evolution_transaction_tool",
+            "write_file_tool",
+            "python_lint_tool",
+            "trigger_self_restart_tool",
+        )
+        if any(marker in normalized_goal for marker in required_tool_markers):
             return False
         return bool((visible_text or "").strip())
 
