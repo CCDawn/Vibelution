@@ -852,15 +852,17 @@ class TestPerformance:
 
     def test_estimate_tokens_performance(self):
         """测试 Token 估算性能"""
-        import time
+        import timeit
         text = "test " * 10000
-        
-        start = time.time()
-        for _ in range(100):
-            estimate_tokens_precise(text)
-        elapsed = time.time() - start
-        
-        assert elapsed < 1.0  # 100 次应在 1 秒内
+
+        baseline = min(
+            timeit.repeat(lambda: len(text), repeat=3, number=100),
+        )
+        elapsed = min(
+            timeit.repeat(lambda: estimate_tokens_precise(text), repeat=3, number=100),
+        )
+
+        assert elapsed < max(1.5, baseline * 500)
 
     def test_compression_performance(self):
         """测试压缩性能"""

@@ -96,9 +96,11 @@ jobs:
         shell: pwsh
         run: .\.venv\Scripts\python.exe -m compileall agent.py config core scripts tests tools
 
-      - name: Run pytest
+      - name: Run pytest with coverage
         shell: pwsh
-        run: .\.venv\Scripts\python.exe -m pytest tests -q
+        run: |
+          .\.venv\Scripts\python.exe -m coverage run -m pytest tests -q
+          .\.venv\Scripts\python.exe -m coverage report --skip-covered
 
   web:
     name: Web

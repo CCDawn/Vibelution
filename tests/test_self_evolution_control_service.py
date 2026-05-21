@@ -530,6 +530,98 @@ def test_runtime_manager_start_self_evolution_blocks_write_chat_session(monkeypa
         service.start_self_evolution_run({"goal": "managed"})
 
 
+@pytest.mark.parametrize("status", ["queued", "running", "stopping", "paused"])
+def test_supervised_run_blocks_self_evolution_for_locked_statuses(status):
+    assert service._supervised_run_blocks_self_evolution({"status": status}) is True
+
+
+@pytest.mark.parametrize("status", ["done", "failed", "cancelled", "", "missing"])
+def test_supervised_run_does_not_block_self_evolution_for_terminal_statuses(status):
+    assert service._supervised_run_blocks_self_evolution({"status": status}) is False
+
+
+def test_local_start_self_evolution_blocks_paused_supervised_run(monkeypatch):
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(
+        service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(
+        service,
+        "get_active_supervised_run",
+        lambda: {"runId": "web-supervised-paused", "status": "paused"},
+    )
+    monkeypatch.setattr(
+        service,
+        "_capture_preflight_state",
+        lambda run_id: {
+            "runDir": "",
+            "backupDir": "",
+            "manifestPath": "",
+            "baseRev": "",
+        },
+    )
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda *args, **kwargs: None)
+
+    with pytest.raises(service.SelfEvolutionRunBusyError):
+        service.start_self_evolution_run({"goal": "local blocked"})
+
+
+def test_local_resume_self_evolution_blocks_stopping_supervised_run(monkeypatch):
+    run_id = "web-self-resume-blocked"
+    with service._RUN_STATE_LOCK:
+        service._RUN_STATES[run_id] = {
+            "runId": run_id,
+            "goal": "resume me",
+            "status": "paused",
+            "phase": "paused",
+            "startedAt": "2026-05-18T12:00:00Z",
+            "updatedAt": "2026-05-18T12:01:00Z",
+            "finishedAt": "",
+            "latestMessage": "paused",
+            "currentGoal": "resume me",
+            "lastToolName": "",
+            "runtimeStatus": "idle",
+            "toolCallCount": 0,
+            "summary": "",
+            "error": "",
+            "cancelRequested": False,
+            "cancelRequestedAt": "",
+            "stopReason": "paused",
+            "controlAction": "",
+            "controlRequestedAt": "",
+            "messages": [],
+            "turnCount": 0,
+            "resumeCount": 0,
+            "rollback": {
+                "status": "idle",
+                "reason": "",
+                "baseRev": "",
+                "rolledBackAt": "",
+                "entryCount": 0,
+                "touchedFiles": [],
+                "conflictFiles": [],
+                "blockedHint": "",
+            },
+        }
+        service._ACTIVE_RUN_ID = run_id
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(
+        service,
+        "get_active_supervised_run",
+        lambda: {"runId": "web-supervised-stopping", "status": "stopping"},
+    )
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda *args, **kwargs: None)
+
+    with pytest.raises(service.SelfEvolutionRunBusyError):
+        service.resume_self_evolution_run(run_id)
+
+
 def test_runtime_manager_start_self_evolution_ignores_cleaned_stale_supervised_lock(monkeypatch):
     calls: list[object] = []
     snapshot = {"runId": "web-self-managed", "status": "queued"}
