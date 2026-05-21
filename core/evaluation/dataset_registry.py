@@ -489,15 +489,19 @@ def materialize_dataset_bundle(
         source_bundle = resolve_supervised_bundle_path(spec.bundle_name, project_root=root)
         payload = json.loads(source_bundle.read_text(encoding="utf-8"))
         cases = list(payload.get("cases") or [])
+        materialized_bundle_name = spec.bundle_name
         if limit is not None:
+            limit_count = max(1, int(limit))
+            materialized_bundle_name = f"{spec.bundle_name}_limit_{limit_count}"
             bundle_path = (
                 root
                 / "workspace"
                 / "evaluation"
                 / "bundles"
-                / f"{spec.bundle_name}_limit_{max(1, int(limit))}.json"
+                / f"{materialized_bundle_name}.json"
             )
-            payload["cases"] = cases[:limit]
+            payload["bundle_name"] = materialized_bundle_name
+            payload["cases"] = cases[:limit_count]
         if source_bundle != bundle_path or limit is not None:
             bundle_path.parent.mkdir(parents=True, exist_ok=True)
             bundle_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -506,7 +510,7 @@ def materialize_dataset_bundle(
             shutil.copy2(source_bundle, bundle_path)
         return DatasetMaterialization(
             dataset_name=spec.name,
-            bundle_name=spec.bundle_name,
+            bundle_name=materialized_bundle_name,
             bundle_path=str(bundle_path),
             case_count=len(payload.get("cases") or []),
             runnable=spec.runnable,
