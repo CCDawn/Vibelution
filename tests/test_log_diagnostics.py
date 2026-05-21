@@ -92,6 +92,22 @@ def test_health_diagnostics_groups_log_helpers_and_reset_hints(tmp_path, monkeyp
     assert helpers["workspace_logs"]["protected"] is True
     assert helpers["conversation_logs"]["resetItemId"] == "conversation_logs"
     assert payload["counts"] == {"ok": 3, "warning": 1, "blocked": 1}
+    finding_ids = [item["id"] for item in payload["findings"]]
+    assert finding_ids[:1] == ["runtime_scene_failed"]
+    assert "workspace_logs_missing" in finding_ids
+    assert "runtime_scenes_protected_boundary" in finding_ids
+    runtime_finding = payload["findings"][0]
+    assert runtime_finding["severity"] == "blocked"
+    assert runtime_finding["source"] == "logs"
+    assert runtime_finding["route"] == "/logs?root=runtime_scenes"
+    assert runtime_finding["resetItemId"] == "stopped_runtime_scenes"
+    assert any(item["label"] == "最近信号" and "工作台启动" in item["value"] for item in runtime_finding["evidence"])
+    assert helpers["runtime_scenes"]["primaryFindingId"] == "runtime_scene_failed"
+    assert "runtime_scenes_protected_boundary" in helpers["runtime_scenes"]["findingIds"]
+    quick_actions = payload["quickActions"]
+    assert quick_actions[0]["findingId"] == "runtime_scene_failed"
+    assert quick_actions[0]["route"] == "/logs?root=runtime_scenes"
+    assert any(item["resetItemId"] == "stopped_runtime_scenes" for item in quick_actions)
 
 
 def test_log_file_content_returns_user_summary_and_agent_anchor(tmp_path, monkeypatch):
