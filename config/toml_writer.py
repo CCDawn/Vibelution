@@ -20,7 +20,14 @@ def _format_scalar(value: Any) -> str:
         return str(value)
     if value is None:
         return '""'
-    text = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    text = (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .replace("\n", "\\n")
+        .replace('"', '\\"')
+    )
     return f'"{text}"'
 
 
