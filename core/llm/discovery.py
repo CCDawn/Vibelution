@@ -92,9 +92,6 @@ def _compatibility_issues(profile, provider) -> tuple[list[str], list[str]]:
     provider_kind = str(provider.kind or "").strip().lower()
     compat_mode = str(provider.compat_mode or "").strip().lower()
 
-    if transport == "responses":
-        errors.append("当前版本尚未启用 responses transport；请改用 chat_completions")
-
     if contract == "responses_agent":
         errors.append("当前版本尚未启用 responses_agent 合同；请改用 tool_chat 或 reasoning_chat")
 
@@ -105,8 +102,8 @@ def _compatibility_issues(profile, provider) -> tuple[list[str], list[str]]:
             warnings.append("basic_chat 不需要 reasoning_state_field，建议留空")
 
     if contract == "tool_chat":
-        if transport != "chat_completions":
-            errors.append("tool_chat 目前只支持 chat_completions transport")
+        if transport not in {"chat_completions", "responses"}:
+            errors.append("tool_chat 目前只支持 chat_completions 或 responses transport")
         if tool_mode == "disabled":
             errors.append("tool_chat 要求启用 tool calling，tool_calling_mode 不能为 disabled")
 

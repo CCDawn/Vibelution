@@ -93,3 +93,8 @@ class LLMError(RuntimeError):
         self.provider = provider
         self.model = model
         self.details = details or {}
+
+    @property
+    def error_type(self) -> str:
+        """Backward-compatible alias for older logging/recovery call sites."""
+        return self.category

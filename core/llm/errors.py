@@ -23,9 +23,20 @@ def classify_exception(exc: Exception) -> LLMError:
     if "quota" in lower or "insufficient_quota" in lower or "billing" in lower:
         return LLMError("quota_error", "provider 额度不足或计费受限", retryable=False)
     if (
+        "unexpected_eof_while_reading" in lower
+        or "eof occurred in violation of protocol" in lower
+        or ("ssl" in lower and "eof" in lower)
+        or "remoteprotocolerror" in lower
+        or "connection reset" in lower
+        or "connection aborted" in lower
+    ):
+        return LLMError("network_error", exc_msg or "provider 传输连接异常", retryable=True)
+    if (
         "badgateway" in lower_type
         or "badgateway" in lower
         or "bad gateway" in lower
+        or "internalservererror" in lower_type
+        or "internalservererror" in lower
         or "upstream_error" in lower
         or "upstream request failed" in lower
         or "service unavailable" in lower

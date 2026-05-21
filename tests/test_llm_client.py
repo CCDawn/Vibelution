@@ -1,14 +1,17 @@
 from langchain_core.messages import AIMessage
+import pytest
 
 from config import Settings
 from core.orchestration.response_processor import ResponseProcessor
 from core.llm.client import LLMClient
 from core.llm.errors import classify_exception
+from core.llm.types import LLMError
 from core.llm.recovery import plan_recovery
 from core.llm.routing import attach_recovery_fallback, select_recovery_profile
 
 
 def make_config(**kwargs):
+    kwargs.setdefault("llm.profiles.primary.transport", "chat_completions")
     return Settings(None, **kwargs).config
 
 
@@ -84,6 +87,44 @@ def test_litellm_payload_prefixes_relay_openai_compatible_model():
     payload = client._build_payload([{"role": "user", "content": "ping"}])
 
     assert payload["model"] == "openai/gpt-5.5"
+
+
+def test_responses_transport_routes_openai_compatible_model_through_responses_bridge():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["model"] == "openai/responses/gpt-5.5"
+    assert payload["messages"][0]["content"] == "ping"
+
+
+def test_responses_transport_preserves_existing_provider_prefix():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "openai",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://api.openai.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "openai/gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "user", "content": "ping"}])
+
+    assert payload["model"] == "openai/responses/gpt-5.5"
 
 
 def test_openai_compatible_payload_prefixes_model_names_that_contain_slash():
@@ -207,6 +248,70 @@ def test_invoke_preserves_reasoning_content_in_ai_message():
 
     assert message.content == "已完成"
     assert message.additional_kwargs["reasoning_content"] == "先分析再作答"
+
+
+def test_llm_error_exposes_legacy_error_type_alias():
+    error = LLMError("provider_protocol_error", "bad request", retryable=False)
+
+    assert error.error_type == "provider_protocol_error"
+
+
+def test_invoke_failure_records_category_without_masking_provider_error(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        raise Exception('400: One of "input" or "previous_response_id" must be provided.')
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+
+    with pytest.raises(LLMError) as raised:
+        client.invoke([{"role": "user", "content": "ping"}])
+
+    assert raised.value.category == "provider_protocol_error"
+    assert 'One of "input"' in str(raised.value)
+    assert recorded[-1][1]["message"] == "LLM invoke failed: provider_protocol_error"
+    assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
+    assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
+
+
+def test_stream_failure_records_category_without_masking_provider_error(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        raise Exception('400: One of "input" or "previous_response_id" must be provided.')
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+
+    with pytest.raises(LLMError) as raised:
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert raised.value.category == "provider_protocol_error"
+    assert 'One of "input"' in str(raised.value)
+    assert recorded[-1][1]["message"] == "LLM stream failed before iterator: provider_protocol_error"
+    assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
+    assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
 
 
 def test_native_anthropic_payload_preserves_structured_content_blocks_by_default():
