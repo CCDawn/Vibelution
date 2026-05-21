@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
+from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -20,19 +21,8 @@ DAEMON_STDERR_PATH = RUNTIME_MANAGER_DIR / "daemon.err.log"
 LAUNCHER_SCRIPT_PATH = PROJECT_ROOT / "scripts" / "vibelution_launcher.ps1"
 LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 
-DEFAULT_HOST = "127.0.0.1"
-
-
-def _read_default_port() -> int:
-    raw_value = str(os.environ.get("VIBELUTION_PORT") or "").strip()
-    try:
-        port = int(raw_value)
-    except ValueError:
-        return 8000
-    return port if 0 < port < 65536 else 8000
-
-
-DEFAULT_PORT = _read_default_port()
+DEFAULT_HOST = DEFAULT_WORKBENCH_HOST
+DEFAULT_PORT = configured_backend_port()
 DEFAULT_URL = f"http://{DEFAULT_HOST}:{DEFAULT_PORT}"
 DEFAULT_HEALTH_URL = f"{DEFAULT_URL}/api/health"
 
