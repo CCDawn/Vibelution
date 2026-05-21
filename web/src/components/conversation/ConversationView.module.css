@@ -150,7 +150,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 18px 20px 8px;
+  padding: 18px 22px 10px;
   display: grid;
   align-content: start;
   gap: 14px;
@@ -165,22 +165,60 @@
 }
 
 .messageCard {
-  width: min(74%, 860px);
+  position: relative;
+  box-sizing: border-box;
+  width: fit-content;
+  min-width: min(220px, 100%);
+  max-width: min(78%, 920px);
+  overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   padding: 14px 16px;
   background: rgba(27, 31, 35, 0.78);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+
+.messageCard::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 999px;
 }
 
 .assistantCard {
   justify-self: start;
-  box-shadow: inset 0 1px 0 rgba(216, 167, 91, 0.06);
+  min-width: min(280px, 100%);
+  padding-left: 18px;
+  border-top-left-radius: 4px;
+  border-color: rgba(216, 167, 91, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(216, 167, 91, 0.08),
+    0 10px 28px rgba(0, 0, 0, 0.16);
+}
+
+.assistantCard::before {
+  left: 8px;
+  background: rgba(216, 167, 91, 0.62);
 }
 
 .userCard {
   justify-self: end;
+  min-width: min(180px, 100%);
+  max-width: min(68%, 760px);
+  padding-right: 18px;
+  border-top-right-radius: 4px;
   background: rgba(34, 39, 44, 0.86);
-  border-color: rgba(124, 155, 150, 0.2);
+  border-color: rgba(124, 155, 150, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(124, 155, 150, 0.08),
+    0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.userCard::before {
+  right: 8px;
+  background: rgba(124, 155, 150, 0.62);
 }
 
 .messageMeta {
@@ -191,6 +229,10 @@
   margin-bottom: 10px;
   color: var(--fg-tertiary);
   font-size: 0.78rem;
+}
+
+.userCard .messageMeta {
+  justify-content: flex-end;
 }
 
 .messageBody {
@@ -205,6 +247,10 @@
   display: grid;
   gap: 10px;
   margin-bottom: 12px;
+}
+
+.messageCard > :last-child {
+  margin-bottom: 0;
 }
 
 .sectionToggle {
@@ -492,7 +538,12 @@
 }
 
 @media (max-width: 760px) {
+  .timeline {
+    padding-inline: 14px;
+  }
+
   .messageCard {
-    width: min(100%, 92vw);
+    min-width: min(220px, 100%);
+    max-width: 100%;
   }
 }
