@@ -121,6 +121,7 @@ def _record_self_scene_event(
     level: str = "info",
     outcome: str = "observed",
     fields: dict[str, Any] | None = None,
+    child_log_payload: dict[str, Any] | None = None,
     lifecycle: bool = False,
 ) -> None:
     event_fields: dict[str, Any] = {"runId": str(run_id or "").strip()}
@@ -135,10 +136,20 @@ def _record_self_scene_event(
             level=level,
             outcome=outcome,
             fields=event_fields,
+            child_log_path=_self_child_log_path(run_id) if child_log_payload is not None else "",
+            child_log_payload=child_log_payload,
             lifecycle=lifecycle,
         )
     except Exception:
         return
+
+
+def _self_child_log_path(run_id: str) -> str:
+    normalized = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "_"
+        for char in str(run_id or "").strip()
+    ).strip("._-")
+    return f"agent/self_evolution_runs/{normalized or 'run'}.jsonl"
 
 
 def _optional_scene_int(value: Any) -> int | None:
@@ -312,7 +323,7 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
     _raise_if_self_lease_conflict(lang=lang)
 
     active_supervised = get_active_supervised_run()
-    if active_supervised is not None and str(active_supervised.get("status") or "").strip().lower() in {"queued", "running"}:
+    if _supervised_run_blocks_self_evolution(active_supervised):
         raise SelfEvolutionRunBusyError(
             text_for(
                 lang,
@@ -403,7 +414,7 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
             "carryover": {},
         }
         _ACTIVE_RUN_ID = run_id
-    _publish_run_snapshot(run_id)
+    _publish_run_snapshot(run_id, record_scene_state=True)
 
     try:
         _RUN_EXECUTOR.submit(_run_self_evolution_turn, context)
@@ -498,10 +509,10 @@ def request_pause_self_evolution_run(run_id: str) -> dict[str, Any]:
                 }
             )
     if immediate_snapshot is not None:
-        _publish_run_snapshot(normalized, terminal=True)
+        _publish_run_snapshot(normalized, terminal=True, record_scene_state=True)
         return immediate_snapshot
 
-    _publish_run_snapshot(normalized)
+    _publish_run_snapshot(normalized, record_scene_state=True)
     get_session_state().note_scope_completion(
         text_for(
             lang,
@@ -531,7 +542,7 @@ def resume_self_evolution_run(run_id: str) -> dict[str, Any]:
         )
     _raise_if_self_lease_conflict(lang=lang)
     active_supervised = get_active_supervised_run()
-    if active_supervised is not None and str(active_supervised.get("status") or "").strip().lower() in {"queued", "running"}:
+    if _supervised_run_blocks_self_evolution(active_supervised):
         raise SelfEvolutionRunBusyError(
             text_for(
                 lang,
@@ -590,7 +601,7 @@ def resume_self_evolution_run(run_id: str) -> dict[str, Any]:
         state_snapshot = _clone_payload(current)
 
     assert state_snapshot is not None
-    _publish_run_snapshot(normalized)
+    _publish_run_snapshot(normalized, record_scene_state=True)
     try:
         _RUN_EXECUTOR.submit(
             _run_self_evolution_turn,
@@ -724,10 +735,15 @@ def request_stop_self_evolution_run(run_id: str) -> dict[str, Any]:
         if manifest is not None:
             _merge_run_state(normalized, {"rollback": manifest})
         if publish_terminal:
-            _publish_run_snapshot(normalized, terminal=True)
+            _publish_run_snapshot(
+                normalized,
+                terminal=True,
+                record_scene_state=True,
+                scene_clear_active=True,
+            )
         return get_self_evolution_run_snapshot(normalized) or finalize_snapshot
 
-    _publish_run_snapshot(normalized)
+    _publish_run_snapshot(normalized, record_scene_state=True)
     get_session_state().note_scope_completion(
         text_for(
             lang,
@@ -879,6 +895,7 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
     internal = _get_run_internal(run_id)
     preflight = internal.get("preflight") if isinstance(internal.get("preflight"), dict) else {}
     carryover = internal.get("carryover") if isinstance(internal.get("carryover"), dict) else {}
+    total_tool_call_count = max(0, int(initial.get("toolCallCount") or 0))
 
     _merge_run_state(
         run_id,
@@ -897,6 +914,26 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
             "turnCount": max(0, int(initial.get("turnCount") or 0)) + 1,
         },
     )
+    _record_self_scene_event(
+        "turn",
+        "self_evolution_run.turn.started",
+        run_id=run_id,
+        message="Self-evolution turn started.",
+        outcome="observed",
+        fields={
+            "goalPreview": goal[:320],
+            "hadCarryover": bool(carryover),
+            "previousToolCallCount": total_tool_call_count,
+            "turnCount": max(0, int(initial.get("turnCount") or 0)) + 1,
+        },
+        child_log_payload={
+            "goalPreview": goal[:320],
+            "hadCarryover": bool(carryover),
+            "previousToolCallCount": total_tool_call_count,
+            "turnCount": max(0, int(initial.get("turnCount") or 0)) + 1,
+        },
+        lifecycle=True,
+    )
     live_refresh_stop = threading.Event()
     live_refresh_thread = threading.Thread(
         target=_self_live_refresh_loop,
@@ -909,7 +946,6 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
     result_status = ""
     summary = ""
     tool_call_count = 0
-    total_tool_call_count = max(0, int(initial.get("toolCallCount") or 0))
     try:
         from agent import SelfEvolvingAgent
 
@@ -946,6 +982,30 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
         )
         transcript_tool_calls = _tool_calls_from_result(result)
         last_tool_name = _last_tool_name_from_result(result)
+        _record_self_scene_event(
+            "turn",
+            "self_evolution_run.turn.completed",
+            run_id=run_id,
+            message=f"Self-evolution turn completed: {result_status or 'unknown'}",
+            level="error" if result_status == "failed" else "info",
+            outcome="failed" if result_status == "failed" else "succeeded",
+            fields={
+                "resultStatus": result_status,
+                "toolCallCount": tool_call_count,
+                "totalToolCallCount": total_tool_call_count,
+                "lastToolName": last_tool_name,
+                "summaryPreview": (assistant_message or summary)[:320],
+            },
+            child_log_payload={
+                "resultStatus": result_status,
+                "toolCallCount": tool_call_count,
+                "totalToolCallCount": total_tool_call_count,
+                "lastToolName": last_tool_name,
+                "summaryPreview": (assistant_message or summary)[:800],
+                "toolCalls": transcript_tool_calls,
+            },
+            lifecycle=True,
+        )
         if result_status == "failed":
             error = str(result.get("error") or summary or "").strip()
             if control_action == "pause":
@@ -1294,8 +1354,44 @@ def _merge_run_state(run_id: str, payload: dict[str, Any], *, clear_active: bool
             active_run_id = _ACTIVE_RUN_ID if _ACTIVE_RUN_ID else ""
     if file_only_snapshot is not None:
         persist_manager_run_snapshot("self", file_only_snapshot, active_run_id=active_run_id)
+        _record_self_state_change_scene_event(normalized, file_only_snapshot, payload, clear_active=clear_active)
         return
     _publish_run_snapshot(normalized, terminal=terminal)
+    latest = get_self_evolution_run_snapshot(normalized) or {}
+    _record_self_state_change_scene_event(normalized, latest, payload, clear_active=clear_active)
+
+
+def _record_self_state_change_scene_event(
+    run_id: str,
+    snapshot: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    clear_active: bool,
+) -> None:
+    status = str(snapshot.get("status") or payload.get("status") or "").strip().lower()
+    phase = str(snapshot.get("phase") or payload.get("phase") or status or "state").strip().lower()
+    if not status and not phase:
+        return
+    level = "error" if status == "failed" or str(snapshot.get("runtimeStatus") or "").strip().lower() == "failed" else "info"
+    outcome = "failed" if level == "error" else "succeeded" if status in {"done", "cancelled", "paused"} else "observed"
+    fields = {
+        **_self_snapshot_event_fields(snapshot),
+        "clearActive": bool(clear_active),
+        "turnCount": _optional_scene_int(snapshot.get("turnCount")),
+        "resumeCount": _optional_scene_int(snapshot.get("resumeCount")),
+        "summaryPreview": str(snapshot.get("summary") or snapshot.get("latestMessage") or "")[:320],
+    }
+    _record_self_scene_event(
+        "state",
+        "self_evolution_run.state.changed",
+        run_id=run_id,
+        message=f"Self-evolution state changed: {status or phase}",
+        level=level,
+        outcome=outcome,
+        fields=fields,
+        child_log_payload=fields,
+        lifecycle=status in _RUN_FINAL_STATUSES | {"running", "queued", "paused", "stopping"},
+    )
 
 
 def _raise_if_self_lease_conflict(*, lang: str) -> None:
@@ -1312,6 +1408,13 @@ def _raise_if_self_lease_conflict(*, lang: str) -> None:
     )
     if not decision.allowed:
         raise SelfEvolutionRunBusyError(_localize_lease_conflict(decision.reason, lang=lang))
+
+
+def _supervised_run_blocks_self_evolution(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    status = str(snapshot.get("status") or "").strip().lower()
+    return status in _RUN_LOCKED_STATUSES
 
 
 def _load_active_work_run_snapshot(kind: str) -> dict[str, Any] | None:
@@ -1536,10 +1639,18 @@ def _persist_self_snapshot(run_id: str, *, decorate: bool = True) -> dict[str, A
     return persist_manager_run_snapshot("self", snapshot, active_run_id=active_run_id)
 
 
-def _publish_run_snapshot(run_id: str, *, terminal: bool = False) -> None:
+def _publish_run_snapshot(
+    run_id: str,
+    *,
+    terminal: bool = False,
+    record_scene_state: bool = False,
+    scene_clear_active: bool = False,
+) -> None:
     snapshot = _persist_self_snapshot(run_id)
     if snapshot is None:
         return
+    if record_scene_state:
+        _record_self_state_change_scene_event(run_id, snapshot, {}, clear_active=scene_clear_active)
     event = {
         "type": "self_evolution_run",
         "runId": run_id,
@@ -1820,6 +1931,111 @@ def _finalize_orphaned_manager_self_run(snapshot: dict[str, Any]) -> dict[str, A
             en="Cleaned up an orphaned self-evolution run snapshot.",
         ),
     )
+
+
+def force_cancel_active_self_evolution_runs_for_shutdown(reason: str = "") -> list[dict[str, Any]]:
+    """Force-close active self-evolution snapshots before the workbench exits."""
+
+    lang = get_web_language()
+    run_ids: list[str] = []
+    with _RUN_STATE_LOCK:
+        if _ACTIVE_RUN_ID:
+            run_ids.append(_ACTIVE_RUN_ID)
+    try:
+        active_snapshot = load_manager_active_run_snapshot("self")
+    except Exception:
+        active_snapshot = None
+    active_run_id = str((active_snapshot or {}).get("runId") or "").strip()
+    if active_run_id and active_run_id not in run_ids:
+        run_ids.append(active_run_id)
+
+    closed: list[dict[str, Any]] = []
+    for run_id in run_ids:
+        snapshot = _force_cancel_self_run_for_shutdown(run_id, lang=lang, reason=reason)
+        if snapshot is not None:
+            closed.append(snapshot)
+    return closed
+
+
+def _force_cancel_self_run_for_shutdown(run_id: str, *, lang: str, reason: str = "") -> dict[str, Any] | None:
+    normalized = str(run_id or "").strip()
+    if not normalized:
+        return None
+
+    latest_message = text_for(
+        lang,
+        zh="工作台正在关闭，系统已收口这轮自进化，可以重新开始新的一轮。",
+        en="The workbench is shutting down, so this self-evolution pass was closed and a new pass can be started later.",
+    )
+    summary = str(reason or "").strip() or text_for(
+        lang,
+        zh="工作台关闭时终止活跃自进化运行。",
+        en="Closed the active self-evolution run during workbench shutdown.",
+    )
+    stop_reason = text_for(
+        lang,
+        zh="工作台关闭时收口活跃自进化运行。",
+        en="Closed the active self-evolution run during workbench shutdown.",
+    )
+
+    with _RUN_STATE_LOCK:
+        current = _RUN_STATES.get(normalized)
+        if current is not None:
+            status = str(current.get("status") or "").strip().lower()
+            if status not in _RUN_LOCKED_STATUSES:
+                return _decorate_runtime_snapshot(_clone_payload(current))
+            now = _now_timestamp()
+            current.update(
+                {
+                    "status": "cancelled",
+                    "phase": "cancelled",
+                    "updatedAt": now,
+                    "finishedAt": now,
+                    "runtimeStatus": "idle",
+                    "latestMessage": latest_message,
+                    "summary": summary,
+                    "cancelRequested": True,
+                    "cancelRequestedAt": str(current.get("cancelRequestedAt") or now),
+                    "stopReason": stop_reason,
+                    "controlAction": "",
+                    "controlRequestedAt": "",
+                    _MANAGER_CONTROL_KEY: {
+                        "ownerPid": "",
+                        "kind": "self",
+                        "clearedAt": now,
+                        "reason": "shutdown",
+                    },
+                }
+            )
+            _append_run_message_locked(
+                current,
+                role="assistant",
+                content=latest_message,
+                timestamp=now,
+            )
+    if current is not None:
+        _merge_run_state(normalized, {}, clear_active=True)
+        return get_self_evolution_run_snapshot(normalized)
+
+    stored = load_manager_run_snapshot("self", normalized)
+    if stored is None:
+        return None
+    status = str(stored.get("status") or "").strip().lower()
+    if status not in _RUN_LOCKED_STATUSES:
+        return _decorate_runtime_snapshot(_clone_payload(stored))
+    payload = _build_cancelled_file_self_run_snapshot(
+        stored,
+        latest_message=latest_message,
+        summary=summary,
+        stop_reason=stop_reason,
+    )
+    payload[_MANAGER_CONTROL_KEY] = {
+        "ownerPid": "",
+        "kind": "self",
+        "clearedAt": str(payload.get("updatedAt") or _now_timestamp()),
+        "reason": "shutdown",
+    }
+    return persist_manager_run_snapshot("self", payload, active_run_id="")
 
 
 def _build_cancelled_file_self_run_snapshot(
@@ -2493,7 +2709,7 @@ def _submit_self_runtime_manager_command(command_type: str, *, run_id: str = "",
             str(result.get("errorType") or ""),
         )
     snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else None
-    if snapshot is not None:
+    if snapshot is not None and str(snapshot.get("runId") or run_id or "").strip():
         _record_self_scene_event(
             "runtime_manager",
             f"self_evolution_run.manager.{command_type}.succeeded",
@@ -2525,19 +2741,22 @@ def _submit_self_runtime_manager_command(command_type: str, *, run_id: str = "",
             lifecycle=True,
         )
         return loaded
+    missing_snapshot_message = "Runtime manager command completed without a self-evolution snapshot."
     _record_self_scene_event(
         "runtime_manager",
-        f"self_evolution_run.manager.{command_type}.succeeded",
+        f"self_evolution_run.manager.{command_type}.failed",
         run_id=target_run_id,
-        message="Self-evolution runtime-manager command returned no snapshot.",
-        outcome="succeeded",
+        message=missing_snapshot_message,
+        level="error",
+        outcome="failed",
         fields={
             "commandType": command_type,
             "commandId": str(command.get("commandId") or ""),
+            "errorType": "MissingRuntimeManagerSnapshot",
         },
         lifecycle=True,
     )
-    return {}
+    raise SelfEvolutionRunValidationError(missing_snapshot_message)
 
 
 def get_active_self_evolution_run() -> dict[str, Any] | None:

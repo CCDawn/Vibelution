@@ -443,6 +443,64 @@ def test_runtime_manager_active_self_evolution_run_closes_stale_locked_snapshot(
     assert persisted["payload"]["runtimeManagerControl"]["reason"] == "orphaned"
 
 
+def test_force_cancel_active_self_evolution_runs_for_shutdown_releases_file_only_snapshot(monkeypatch):
+    run_id = "web-self-shutdown-active"
+    snapshot = {
+        "runId": run_id,
+        "goal": "shutdown",
+        "status": "stopping",
+        "phase": "stopping",
+        "startedAt": "2026-05-18T12:00:00Z",
+        "updatedAt": "2026-05-18T12:00:01Z",
+        "finishedAt": "",
+        "latestMessage": "stopping",
+        "currentGoal": "shutdown",
+        "lastToolName": "",
+        "runtimeStatus": "stopping",
+        "toolCallCount": 0,
+        "summary": "",
+        "error": "",
+        "cancelRequested": True,
+        "cancelRequestedAt": "2026-05-18T12:00:01Z",
+        "stopReason": "",
+        "controlAction": "terminate",
+        "controlRequestedAt": "2026-05-18T12:00:01Z",
+        "messages": [],
+        "turnCount": 0,
+        "resumeCount": 0,
+        "rollback": {
+            "status": "unavailable",
+            "reason": "",
+            "baseRev": "",
+            "rolledBackAt": "",
+            "entryCount": 0,
+            "touchedFiles": [],
+            "conflictFiles": [],
+            "blockedHint": "",
+        },
+        "runtimeManagerControl": {
+            "ownerPid": 222,
+            "kind": "self",
+            "claimedAt": "2026-05-18T12:00:00Z",
+        },
+    }
+    service.persist_manager_run_snapshot("self", snapshot, active_run_id=run_id)
+
+    closed = service.force_cancel_active_self_evolution_runs_for_shutdown("closing")
+    persisted = service.load_manager_run_snapshot("self", run_id)
+
+    assert len(closed) == 1
+    assert closed[0]["runId"] == run_id
+    assert closed[0]["status"] == "cancelled"
+    assert service.load_manager_active_run_snapshot("self") is None
+    assert persisted is not None
+    assert persisted["status"] == "cancelled"
+    assert persisted["phase"] == "cancelled"
+    assert persisted["runtimeStatus"] == "idle"
+    assert persisted["finishedAt"]
+    assert persisted["runtimeManagerControl"]["reason"] == "shutdown"
+
+
 def test_runtime_manager_active_self_evolution_run_keeps_current_owner(monkeypatch):
     snapshot = {
         "runId": "web-self-current-active",
@@ -507,6 +565,46 @@ def test_runtime_manager_start_self_evolution_allows_readonly_chat_session(monke
     result = service.start_self_evolution_run({"goal": "managed"})
 
     assert result == snapshot
+    assert calls == [
+        "ensure",
+        (
+            "start_self_evolution_run",
+            {"payload": {"goal": "managed"}},
+            "web_ui",
+        ),
+    ]
+
+
+@pytest.mark.parametrize(
+    "manager_result",
+    [
+        {"ok": True},
+        {"ok": True, "snapshot": {}},
+    ],
+)
+def test_runtime_manager_start_self_evolution_rejects_empty_success_result(monkeypatch, manager_result):
+    calls: list[object] = []
+
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(
+        service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)) or {"commandId": "cmd-empty"},
+    )
+    monkeypatch.setattr(service, "wait_for_result", lambda command_id: manager_result)
+    monkeypatch.setattr(service, "load_manager_run_snapshot", lambda kind, run_id: None)
+
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="snapshot"):
+        service.start_self_evolution_run({"goal": "managed"})
+
     assert calls == [
         "ensure",
         (

@@ -17,6 +17,7 @@ from core.evaluation import (
     build_workbench_state,
     default_bundle_name,
     execute_gym_promotion_action,
+    list_available_workbench_bundles,
     list_dataset_choices,
     load_gym_promotion_lifecycle,
     prepare_dataset_run,
@@ -134,6 +135,7 @@ def _record_supervised_scene_event(
     level: str = "info",
     outcome: str = "observed",
     fields: dict[str, Any] | None = None,
+    child_log_payload: dict[str, Any] | None = None,
     lifecycle: bool = False,
 ) -> None:
     event_fields: dict[str, Any] = {"runId": str(run_id or "").strip()}
@@ -148,10 +150,20 @@ def _record_supervised_scene_event(
             level=level,
             outcome=outcome,
             fields=event_fields,
+            child_log_path=_supervised_child_log_path(run_id) if child_log_payload is not None else "",
+            child_log_payload=child_log_payload,
             lifecycle=lifecycle,
         )
     except Exception:
         return
+
+
+def _supervised_child_log_path(run_id: str) -> str:
+    normalized = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "_"
+        for char in str(run_id or "").strip()
+    ).strip("._-")
+    return f"agent/supervised_runs/{normalized or 'run'}.jsonl"
 
 
 def _supervised_snapshot_event_fields(snapshot: dict[str, Any] | None) -> dict[str, Any]:
@@ -202,6 +214,7 @@ def get_supervised_workbench() -> dict[str, Any]:
     return {
         "defaultBundleName": default_bundle_name(),
         "savedState": get_workbench_state_payload(project_root=PROJECT_ROOT),
+        "bundles": list_available_workbench_bundles(PROJECT_ROOT),
         "datasets": [_dataset_payload(item) for item in list_dataset_choices(PROJECT_ROOT)],
         "activeRun": get_active_supervised_run(),
     }
@@ -649,7 +662,15 @@ def _cancel_file_only_supervised_run(run_id: str, *, lang: str) -> dict[str, Any
     if status not in _ACTIVE_RUN_STATUSES:
         return _decorate_supervised_snapshot(_clone_locked(stored))
 
-    now = _now_timestamp()
+    successful_snapshot = _build_completed_file_supervised_run_snapshot_if_closed_successfully(
+        stored,
+        lang=lang,
+        control_reason="orphaned_success",
+    )
+    if successful_snapshot is not None:
+        persisted = persist_manager_run_snapshot("supervised", successful_snapshot, active_run_id="")
+        return _decorate_supervised_snapshot(_clone_locked(persisted))
+
     summary = text_for(
         lang,
         zh="运行管理器中断后已清理孤儿监督运行。",
@@ -660,7 +681,126 @@ def _cancel_file_only_supervised_run(run_id: str, *, lang: str) -> dict[str, Any
         zh="监督运行只有持久化快照，没有可继续控制的内存运行上下文。",
         en="The supervised run only had a persisted snapshot and no live in-memory control context.",
     )
-    payload = _clone_locked(stored)
+    payload = _build_cancelled_file_supervised_run_snapshot(
+        stored,
+        lang=lang,
+        summary=summary,
+        reason=reason,
+        control_reason="orphaned",
+    )
+    persisted = persist_manager_run_snapshot("supervised", payload, active_run_id="")
+    return _decorate_supervised_snapshot(_clone_locked(persisted))
+
+
+def force_cancel_active_supervised_runs_for_shutdown(reason: str = "") -> list[dict[str, Any]]:
+    """Force-close active supervised snapshots before the workbench process exits."""
+
+    lang = get_web_language()
+    run_ids: list[str] = []
+    with _RUN_STATE_LOCK:
+        if _ACTIVE_RUN_ID:
+            run_ids.append(_ACTIVE_RUN_ID)
+    try:
+        active_snapshot = load_manager_active_run_snapshot("supervised")
+    except Exception:
+        active_snapshot = None
+    active_run_id = str((active_snapshot or {}).get("runId") or "").strip()
+    if active_run_id and active_run_id not in run_ids:
+        run_ids.append(active_run_id)
+
+    closed: list[dict[str, Any]] = []
+    for run_id in run_ids:
+        snapshot = _force_cancel_supervised_run_for_shutdown(run_id, lang=lang, reason=reason)
+        if snapshot is not None:
+            closed.append(snapshot)
+    return closed
+
+
+def _force_cancel_supervised_run_for_shutdown(run_id: str, *, lang: str, reason: str = "") -> dict[str, Any] | None:
+    normalized = str(run_id or "").strip()
+    if not normalized:
+        return None
+
+    summary = text_for(
+        lang,
+        zh="工作台正在关闭，系统已收口这轮监督运行，可以重新开始新的一轮。",
+        en="The workbench is shutting down, so this supervised run was closed and a new run can be started later.",
+    )
+    cancel_reason = str(reason or "").strip() or text_for(
+        lang,
+        zh="工作台关闭时终止活跃监督运行。",
+        en="Closed the active supervised run during workbench shutdown.",
+    )
+    controller: _SupervisedRunController | None = None
+    publish_memory_snapshot = False
+    with _RUN_STATE_LOCK:
+        state = _RUN_STATES.get(normalized)
+        if state is not None:
+            status = str(state.get("status") or "").strip().lower()
+            if status not in _ACTIVE_RUN_STATUSES:
+                return _decorate_supervised_snapshot(_clone_locked(state))
+            now = _now_timestamp()
+            controller = _RUN_CONTROLLERS.get(normalized)
+            state["stopRequested"] = True
+            state["stopRequestedAt"] = str(state.get("stopRequestedAt") or now)
+            state["pauseRequested"] = False
+            _cancel_run_locked(
+                normalized,
+                state,
+                lang=lang,
+                now=now,
+                summary=summary,
+                reason=cancel_reason,
+            )
+            state[_MANAGER_CONTROL_KEY] = {
+                "ownerPid": "",
+                "kind": "supervised",
+                "clearedAt": now,
+                "reason": "shutdown",
+            }
+            publish_memory_snapshot = True
+
+    if controller is not None:
+        controller.request_stop()
+    if publish_memory_snapshot:
+        _publish_run_snapshot(normalized, terminal=True)
+        return get_supervised_run_snapshot(normalized)
+
+    stored = load_manager_run_snapshot("supervised", normalized)
+    if stored is None:
+        return None
+    status = str(stored.get("status") or "").strip().lower()
+    if status not in _ACTIVE_RUN_STATUSES:
+        return _decorate_supervised_snapshot(_clone_locked(stored))
+    successful_snapshot = _build_completed_file_supervised_run_snapshot_if_closed_successfully(
+        stored,
+        lang=lang,
+        control_reason="shutdown_success",
+    )
+    if successful_snapshot is not None:
+        persisted = persist_manager_run_snapshot("supervised", successful_snapshot, active_run_id="")
+        return _decorate_supervised_snapshot(_clone_locked(persisted))
+    payload = _build_cancelled_file_supervised_run_snapshot(
+        stored,
+        lang=lang,
+        summary=summary,
+        reason=cancel_reason,
+        control_reason="shutdown",
+    )
+    persisted = persist_manager_run_snapshot("supervised", payload, active_run_id="")
+    return _decorate_supervised_snapshot(_clone_locked(persisted))
+
+
+def _build_cancelled_file_supervised_run_snapshot(
+    snapshot: dict[str, Any],
+    *,
+    lang: str,
+    summary: str,
+    reason: str,
+    control_reason: str,
+) -> dict[str, Any]:
+    now = _now_timestamp()
+    payload = _clone_locked(snapshot)
     payload["status"] = "cancelled"
     payload["currentPhase"] = "cancelled"
     payload["runtimeStatus"] = "idle"
@@ -680,7 +820,7 @@ def _cancel_file_only_supervised_run(run_id: str, *, lang: str) -> dict[str, Any
         "ownerPid": "",
         "kind": "supervised",
         "clearedAt": now,
-        "reason": "orphaned",
+        "reason": control_reason,
     }
     _append_control_event_locked(
         payload,
@@ -689,8 +829,81 @@ def _cancel_file_only_supervised_run(run_id: str, *, lang: str) -> dict[str, Any
         summary=summary,
         status="cancelled",
     )
-    persisted = persist_manager_run_snapshot("supervised", payload, active_run_id="")
-    return _decorate_supervised_snapshot(_clone_locked(persisted))
+    return payload
+
+
+def _build_completed_file_supervised_run_snapshot_if_closed_successfully(
+    snapshot: dict[str, Any],
+    *,
+    lang: str,
+    control_reason: str,
+) -> dict[str, Any] | None:
+    if not _snapshot_has_successful_transaction_close(snapshot):
+        return None
+
+    now = _now_timestamp()
+    payload = _clone_locked(snapshot)
+    summary = text_for(
+        lang,
+        zh="监督事务已成功关账；运行管理器只清理残留控制权。",
+        en="The supervised transaction closed successfully; only the stale runtime-manager control state was cleared.",
+    )
+    payload["status"] = "done"
+    payload["currentPhase"] = "done"
+    payload["runtimeStatus"] = "idle"
+    payload["updatedAt"] = now
+    payload["finishedAt"] = str(payload.get("finishedAt") or now)
+    payload["stopRequested"] = False
+    payload["stopRequestedAt"] = ""
+    payload["pauseRequested"] = False
+    payload["reason"] = str(payload.get("reason") or summary)
+    payload["latestMessage"] = summary
+    payload["currentTask"] = text_for(
+        lang,
+        zh="监督任务已完成，可查看 case 输出轨迹。",
+        en="The supervised run is complete. Review the case output trace.",
+    )
+    payload[_MANAGER_CONTROL_KEY] = {
+        "ownerPid": "",
+        "kind": "supervised",
+        "clearedAt": now,
+        "reason": control_reason,
+    }
+    _append_control_event_locked(
+        payload,
+        event="run_completed",
+        title="监督运行完成",
+        summary=summary,
+        status="done",
+    )
+    return payload
+
+
+def _snapshot_has_successful_transaction_close(snapshot: dict[str, Any]) -> bool:
+    case_io = snapshot.get("currentCaseIo") if isinstance(snapshot.get("currentCaseIo"), dict) else {}
+    for item in case_io.get("transcript") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("kind") or "").strip().lower() != "tool":
+            continue
+        if str(item.get("label") or "").strip() != "close_evolution_transaction_tool":
+            continue
+        status = str(item.get("status") or "").strip().lower()
+        content = str(item.get("content") or "")
+        if status and status not in {"success", "ok"}:
+            continue
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            payload = {}
+        transaction_status = str(payload.get("transaction_status") or "").strip().lower()
+        tool_status = str(payload.get("status") or "").strip().lower()
+        if transaction_status == "success" or tool_status in {"success", "ok"}:
+            return True
+        lowered = content.lower()
+        if '"transaction_status"' in lowered and '"success"' in lowered:
+            return True
+    return False
 
 
 def stream_active_supervised_run_events(initial_snapshot: dict[str, Any] | None = None):
@@ -855,6 +1068,7 @@ def _supervised_run_should_execute(run_id: str) -> bool:
 
 def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
     lang = get_web_language()
+    scene_event: dict[str, Any] | None = None
     with _RUN_STATE_LOCK:
         state = _RUN_STATES.get(run_id)
         if state is None:
@@ -1036,7 +1250,10 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
                 en="The supervised run hit an error. Inspect the error and logs.",
             )
         if event_type != "role_live":
-            _append_event_locked(state, _event_tail_entry(event, timestamp=state["updatedAt"]))
+            scene_event = _event_tail_entry(event, timestamp=state["updatedAt"])
+            _append_event_locked(state, scene_event)
+    if scene_event is not None:
+        _record_supervised_progress_scene_event(run_id, scene_event)
     _publish_run_snapshot(run_id)
 
 
@@ -1595,6 +1812,48 @@ def _event_tail_entry(event: dict[str, Any], *, timestamp: str) -> dict[str, Any
     }
 
 
+def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -> None:
+    event_name = str(item.get("event") or "").strip() or "progress"
+    status = str(item.get("status") or "").strip().lower()
+    level = "error" if status == "failed" or event_name == "session_error" else "info"
+    outcome = "failed" if level == "error" else "succeeded" if event_name in {"role_finish", "session_finish"} else "observed"
+    lifecycle = event_name in {"session_start", "session_finish", "session_error"}
+    fields = {
+        "runId": run_id,
+        "event": event_name,
+        "status": status,
+        "caseId": str(item.get("caseId") or ""),
+        "caseIndex": _optional_int(item.get("caseIndex")),
+        "caseTotal": _optional_int(item.get("caseTotal")),
+        "role": str(item.get("role") or ""),
+        "scenario": str(item.get("scenario") or ""),
+        "mode": str(item.get("mode") or ""),
+        "bundleName": str(item.get("bundleName") or ""),
+        "sessionId": str(item.get("sessionId") or ""),
+        "decision": str(item.get("decision") or ""),
+        "policyAction": str(item.get("policyAction") or ""),
+        "reason": str(item.get("reason") or ""),
+        "errorType": str(item.get("errorType") or ""),
+        "elapsedSeconds": _optional_float(item.get("elapsedSeconds")),
+    }
+    _record_supervised_scene_event(
+        "progress",
+        f"supervised_run.progress.{event_name}",
+        run_id=run_id,
+        message=str(item.get("summary") or item.get("title") or event_name),
+        level=level,
+        outcome=outcome,
+        fields=fields,
+        child_log_payload={
+            **fields,
+            "timestamp": str(item.get("timestamp") or ""),
+            "title": str(item.get("title") or ""),
+            "summary": str(item.get("summary") or ""),
+        },
+        lifecycle=lifecycle,
+    )
+
+
 def _event_title(event: dict[str, Any]) -> str:
     event_type = str(event.get("event") or "").strip()
     return {
@@ -1856,7 +2115,7 @@ def _submit_supervised_runtime_manager_command(command_type: str, *, run_id: str
             str(result.get("errorType") or ""),
         )
     snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else None
-    if snapshot is not None:
+    if snapshot is not None and str(snapshot.get("runId") or run_id or "").strip():
         _record_supervised_scene_event(
             "runtime_manager",
             f"supervised_run.manager.{command_type}.succeeded",
@@ -1904,19 +2163,22 @@ def _submit_supervised_runtime_manager_command(command_type: str, *, run_id: str
             lifecycle=True,
         )
         return loaded
+    missing_snapshot_message = "Runtime manager command completed without a supervised run snapshot."
     _record_supervised_scene_event(
         "runtime_manager",
-        f"supervised_run.manager.{command_type}.succeeded",
+        f"supervised_run.manager.{command_type}.failed",
         run_id=target_run_id,
-        message="Supervised runtime-manager command returned no snapshot.",
-        outcome="succeeded",
+        message=missing_snapshot_message,
+        level="error",
+        outcome="failed",
         fields={
             "commandType": command_type,
             "commandId": str(command.get("commandId") or ""),
+            "errorType": "MissingRuntimeManagerSnapshot",
         },
         lifecycle=True,
     )
-    return {}
+    raise SupervisedRunValidationError(missing_snapshot_message)
 
 
 def get_supervised_workbench() -> dict[str, Any]:
@@ -1924,6 +2186,7 @@ def get_supervised_workbench() -> dict[str, Any]:
         return {
             "defaultBundleName": default_bundle_name(),
             "savedState": get_workbench_state_payload(project_root=PROJECT_ROOT),
+            "bundles": list_available_workbench_bundles(PROJECT_ROOT),
             "datasets": [_dataset_payload(item) for item in list_dataset_choices(PROJECT_ROOT)],
             "activeRun": get_active_supervised_run(),
         }

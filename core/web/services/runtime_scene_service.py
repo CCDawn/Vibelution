@@ -27,6 +27,7 @@ ARTIFACTS_DIR = "artifacts"
 MAX_TELEMETRY_TEXT_CHARS = 4_000
 MAX_TELEMETRY_FIELD_TEXT_CHARS = 1_200
 MAX_TELEMETRY_FIELD_ITEMS = 24
+BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS = 60.0
 MAX_CONVERSATION_TEXT_CHARS = 20_000
 REDACTED_FIELD_VALUE = "[redacted]"
 SENSITIVE_FIELD_KEYWORDS = (
@@ -289,6 +290,7 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
                 "tail_lines": 80,
             },
         ]
+        indexed = _should_index_browser_telemetry_event(manifest, timestamp, event_code, level, fields)
         event_payload = {
             "schema_version": 1,
             "runtime_scene_id": scene_id,
@@ -303,9 +305,10 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
             "fields": fields,
             "raw_refs": raw_refs,
         }
-        _append_scene_event(scene_dir, BROWSER_TELEMETRY_COMPONENT, event_payload)
+        if indexed:
+            _append_scene_event(scene_dir, BROWSER_TELEMETRY_COMPONENT, event_payload)
         _update_runtime_scene_package_manifest(scene_dir, manifest)
-        _update_browser_manifest(scene_dir, manifest, timestamp, event_code, level, message, fields)
+        _update_browser_manifest(scene_dir, manifest, timestamp, event_code, level, message, fields, indexed=indexed)
 
     return {
         "accepted": True,
@@ -399,6 +402,8 @@ def record_runtime_scene_event(
     outcome: str = "observed",
     fields: dict[str, Any] | None = None,
     raw_refs: list[dict[str, Any]] | None = None,
+    child_log_path: str = "",
+    child_log_payload: dict[str, Any] | None = None,
     lifecycle: bool = False,
 ) -> dict[str, Any]:
     """Append one structured service/runtime event into the active runtime scene package."""
@@ -419,10 +424,35 @@ def record_runtime_scene_event(
     message_text = _truncate_text(str(message or event_name), 320)
     normalized_fields = _normalize_telemetry_fields(fields)
     normalized_raw_refs = _normalize_raw_refs(raw_refs)
+    normalized_child_path = _safe_optional_relative_path(child_log_path)
+    if normalized_child_path:
+        normalized_raw_refs = [
+            *normalized_raw_refs,
+            {
+                "path": normalized_child_path,
+                "tail_lines": 80,
+            },
+        ]
 
     with RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
         manifest = _load_scene_manifest(scene_dir)
         scene_id = _scene_id(scene_dir, manifest)
+        if normalized_child_path:
+            child_payload = _normalize_telemetry_fields(child_log_payload or {})
+            child_payload.update(
+                {
+                    "schema_version": 1,
+                    "runtime_scene_id": scene_id,
+                    "ts": timestamp,
+                    "component": component_name,
+                    "phase": phase_name,
+                    "event_code": event_name,
+                    "level": level_name,
+                    "outcome": outcome_name,
+                    "message": message_text,
+                }
+            )
+            _append_scene_jsonl(scene_dir, normalized_child_path, child_payload)
         event_payload = {
             "schema_version": 1,
             "runtime_scene_id": scene_id,
@@ -446,6 +476,7 @@ def record_runtime_scene_event(
         "accepted": True,
         "runtimeSceneId": scene_id,
         "recordedAt": timestamp,
+        "path": normalized_child_path,
     }
 
 
@@ -1119,6 +1150,34 @@ def _is_lifecycle_event(payload: dict[str, Any]) -> bool:
     return component in {"launcher", "supervisor"} and phase in {"session", "shutdown"}
 
 
+def _should_index_browser_telemetry_event(
+    manifest: dict[str, Any],
+    timestamp: str,
+    event_code: str,
+    level: str,
+    fields: dict[str, Any],
+) -> bool:
+    """Keep noisy browser focus changes in raw logs unless they add timeline signal."""
+
+    if level in {"warning", "error"}:
+        return True
+    if event_code != "browser.visibility.changed":
+        return True
+
+    browser = manifest.get("browser") if isinstance(manifest.get("browser"), dict) else {}
+    previous_visibility = str(browser.get("visibility_state") or "").strip()
+    next_visibility = str(fields.get("visibilityState") or "").strip()
+    if not previous_visibility:
+        return True
+    if next_visibility and previous_visibility == next_visibility:
+        return False
+
+    last_indexed_at = str(browser.get("last_indexed_visibility_event_at") or "").strip()
+    if not last_indexed_at:
+        return True
+    return _seconds_between_iso(last_indexed_at, timestamp) >= BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS
+
+
 def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
     package = manifest.get("package")
     if not isinstance(package, dict):
@@ -1173,6 +1232,8 @@ def _update_browser_manifest(
     level: str,
     message: str,
     fields: dict[str, Any],
+    *,
+    indexed: bool = True,
 ) -> None:
     browser = manifest.get("browser")
     if not isinstance(browser, dict):
@@ -1180,6 +1241,7 @@ def _update_browser_manifest(
 
     browser["telemetry_path"] = BROWSER_TELEMETRY_RAW_PATH
     browser["last_event_at"] = timestamp
+    browser["last_event_indexed"] = bool(indexed)
 
     field_to_manifest_key = {
         "href": "current_href",
@@ -1206,6 +1268,11 @@ def _update_browser_manifest(
     if event_code in {"browser.page.error", "browser.promise.rejected", "browser.resource.error"}:
         browser["last_page_error_at"] = timestamp
         browser["last_page_error_message"] = message
+
+    if event_code == "browser.visibility.changed":
+        browser["last_visibility_event_at"] = timestamp
+        if indexed:
+            browser["last_indexed_visibility_event_at"] = timestamp
 
     manifest["browser"] = browser
     _save_scene_manifest(scene_dir, manifest)
@@ -1263,6 +1330,15 @@ def _now_utc() -> str:
 def _truncate_text(value: str, limit: int) -> str:
     text = str(value or "")
     return text if len(text) <= limit else f"{text[: max(0, limit - 3)]}..."
+
+
+def _seconds_between_iso(start: str, end: str) -> float:
+    try:
+        start_at = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        end_at = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS
+    return max(0.0, (end_at - start_at).total_seconds())
 
 
 def _coerce_int(value: object, *, default: int = 0) -> int:
@@ -1345,6 +1421,30 @@ def _normalize_raw_refs(value: object) -> list[dict[str, Any]]:
             ref["tail_lines"] = min(tail_lines, 1_000)
         refs.append(ref)
     return refs
+
+
+def _safe_optional_relative_path(value: object) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    if not text:
+        return ""
+    try:
+        relative = _normalize_relative_path(text)
+    except ValueError:
+        return ""
+    if (
+        relative.startswith("/")
+        or relative.startswith("//")
+        or relative.startswith("../")
+        or "/../" in relative
+        or relative == ".."
+        or _looks_like_windows_absolute_path(relative)
+    ):
+        return ""
+    return _truncate_text(relative, 240)
+
+
+def _looks_like_windows_absolute_path(value: str) -> bool:
+    return len(value) >= 3 and value[1] == ":" and value[0].isalpha() and value[2] == "/"
 
 
 def _normalize_scene_ids(scene_ids: list[str] | tuple[str, ...]) -> list[str]:
