@@ -749,38 +749,8 @@ export function ChatCodingRoute() {
     || detail?.taskSummary
     || runtime?.taskSummary
     || t("preparingShell");
-  const sessionNeedsResponse =
-    runtime?.sessionNeedsResponse ?? ["ready", "failed"].includes(sessionStateValue);
-  const sessionActionLabel =
-    sessionStateValue === "failed"
-      ? t("handleNeeded")
-      : sessionNeedsResponse
-        ? t("replyNeeded")
-        : t("replyNotNeeded");
   const sessionReferenceTime = runtime?.sessionUpdatedAt || detail?.updatedAt || "";
-  const sessionTimeLabel = ["running", "thinking", "tooling", "answering", "failed"].includes(
-    sessionStateValue,
-  )
-    ? t("elapsed")
-    : t("lastUpdated");
   const sessionRelativeTime = formatRelativeTime(sessionReferenceTime, Date.now(), locale) || "--";
-  const conversationStats = useMemo(
-    () => [
-      {
-        label: sessionTimeLabel,
-        value: sessionRelativeTime,
-      },
-      {
-        label: t("filesRead"),
-        value: numberFormatter.format(detail?.readFiles.length ?? 0),
-      },
-      {
-        label: t("filesChanged"),
-        value: numberFormatter.format(detail?.changedFiles.length ?? 0),
-      },
-    ],
-    [detail?.changedFiles.length, detail?.readFiles.length, numberFormatter, sessionRelativeTime, sessionTimeLabel, t],
-  );
   const mental = runtime?.mentalState;
   useEffect(() => {
     if (mentalModelToggleHydrated || !runtime) {
@@ -1217,12 +1187,7 @@ export function ChatCodingRoute() {
                 taskSummary={currentTaskSummary}
                 defaultFileContext={detail.defaultFileContext}
                 showHeader={false}
-                summaryItems={[
-                  { label: t("status"), value: statusLabel(detail.currentPhase) },
-                  { label: t("needsYourAction"), value: sessionActionLabel },
-                ]}
-                showSessionOverview
-                stats={conversationStats}
+                showSessionOverview={false}
                 composerValue={activeDraft}
                 composerPlaceholder={composerPlaceholder}
                 composerDisabled={composerDisabled}

@@ -58,7 +58,7 @@
   padding: 4px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
-  background: rgba(27, 31, 35, 0.82);
+  background: var(--surface-panel);
 }
 
 .segmentButton,
@@ -76,7 +76,7 @@
 .segmentButtonActive,
 .intakeButtonActive,
 .filterButtonActive {
-  background: rgba(216, 167, 91, 0.16);
+  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
   color: var(--accent-warm-2);
 }
 
@@ -95,9 +95,9 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(36, 42, 47, 0.92), rgba(27, 31, 35, 0.96)),
-    rgba(27, 31, 35, 0.92);
-  box-shadow: 0 14px 30px rgba(10, 12, 14, 0.22);
+    linear-gradient(180deg, var(--surface-panel-strong), var(--surface-panel)),
+    var(--surface-panel);
+  box-shadow: var(--shadow-soft);
 }
 
 .overviewGrid {
@@ -192,7 +192,7 @@
   height: 34px;
   border-radius: 999px;
   color: var(--accent-warm-2);
-  background: rgba(216, 167, 91, 0.12);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
 .heroHeadingRow {
@@ -227,12 +227,12 @@
 
 .statusPill {
   color: var(--accent-warm-2);
-  background: rgba(216, 167, 91, 0.12);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
 .secondaryPill {
   color: var(--fg-secondary);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
 }
 
 .heroSummary,
@@ -257,6 +257,12 @@
   gap: 10px;
 }
 
+.sourceMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .metricTile,
 .stripItem {
   display: grid;
@@ -264,8 +270,8 @@
   min-width: 0;
   padding: 12px 14px;
   border-radius: 8px;
-  border: 1px solid rgba(236, 230, 220, 0.05);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
 }
 
 .metricTile span,
@@ -322,8 +328,8 @@
   gap: 6px;
   padding: 12px 14px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(236, 230, 220, 0.05);
+  background: var(--surface-card-muted);
+  border: 1px solid var(--border-hairline);
 }
 
 .listRowTop,
@@ -354,7 +360,7 @@
   display: grid;
   gap: 10px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
   color: var(--fg-primary);
   text-align: left;
 }
@@ -363,8 +369,8 @@
 .runItem:hover,
 .inlineAction:hover,
 .actionButton:hover {
-  border-color: rgba(216, 167, 91, 0.26);
-  background: rgba(255, 255, 255, 0.05);
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  background: var(--surface-card-hover);
 }
 
 .trendMeta {
@@ -389,28 +395,28 @@
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-resize-track);
 }
 
 .trendBarFill {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, rgba(124, 155, 150, 0.8), rgba(216, 167, 91, 0.95));
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 80%, transparent), rgba(216, 167, 91, 0.95));
 }
 
 .deltaPositive {
   color: var(--state-success);
-  background: rgba(126, 163, 124, 0.12);
+  background: color-mix(in srgb, var(--state-success) 12%, transparent);
 }
 
 .deltaNegative {
   color: var(--state-error);
-  background: rgba(187, 108, 93, 0.14);
+  background: color-mix(in srgb, var(--state-error) 14%, transparent);
 }
 
 .deltaNeutral {
   color: var(--fg-secondary);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface-card-muted);
 }
 
 .actionGrid {
@@ -459,14 +465,14 @@
   padding: 0 12px;
   border: 1px solid rgba(236, 230, 220, 0.08);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-input);
   color: var(--fg-primary);
 }
 
 .textInput:focus,
 .selectInput:focus {
-  outline: 1px solid rgba(216, 167, 91, 0.26);
-  border-color: rgba(216, 167, 91, 0.26);
+  outline: 1px solid color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
 }
 
 .checkboxRow {
@@ -529,8 +535,8 @@
   gap: 6px;
   padding: 12px 14px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(236, 230, 220, 0.05);
+  background: var(--surface-card-muted);
+  border: 1px solid var(--border-hairline);
 }
 
 .datasetMeta strong {
@@ -542,8 +548,115 @@
   gap: 8px;
   padding: 12px 14px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(236, 230, 220, 0.05);
+  background: var(--surface-card-subtle);
+  border: 1px solid var(--border-hairline);
+}
+
+.sourceSummary {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px 16px;
+}
+
+.sourceHero {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-muted);
+}
+
+.sourceHero span,
+.sourceHero small,
+.sourceNextAction span {
+  color: var(--fg-tertiary);
+  font-size: 0.82rem;
+}
+
+.sourceHero strong,
+.sourceNextAction strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceHero small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceNextAction {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  border: 1px solid var(--border-hairline);
+}
+
+.compactRunList {
+  display: grid;
+  gap: 6px;
+}
+
+.compactRunRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  color: var(--fg-primary);
+  text-align: left;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.compactRunRow:hover {
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  background: var(--surface-card-hover);
+}
+
+.compactRunMain {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.compactRunMain strong,
+.compactRunMain span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compactRunMain span,
+.compactRunMeta {
+  color: var(--fg-tertiary);
+  font-size: 0.82rem;
+}
+
+.compactRunMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.compactRunMeta strong {
+  color: var(--fg-primary);
 }
 
 .runMonitor {
@@ -635,8 +748,8 @@
   min-width: 0;
   padding: 9px 10px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(236, 230, 220, 0.05);
+  background: var(--surface-card-muted);
+  border: 1px solid var(--border-hairline);
 }
 
 .eventHeader {
@@ -678,7 +791,7 @@
   gap: 8px;
   min-height: 40px;
   padding: 0 14px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
   color: var(--fg-primary);
 }
 
@@ -703,9 +816,9 @@
   gap: 10px;
   min-width: 0;
   padding: 8px;
-  border: 1px solid rgba(236, 230, 220, 0.06);
+  border: 1px solid var(--border-hairline);
   border-radius: 8px;
-  background: rgba(11, 13, 15, 0.28);
+  background: var(--surface-card-subtle);
 }
 
 .compactActionGroup {
@@ -724,7 +837,7 @@
   min-height: 34px;
   border: 1px solid rgba(236, 230, 220, 0.08);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
   color: var(--fg-primary);
   transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
 }
@@ -744,8 +857,8 @@
 
 .compactIconAction:hover,
 .compactTextAction:hover {
-  border-color: rgba(216, 167, 91, 0.26);
-  background: rgba(255, 255, 255, 0.05);
+  border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+  background: var(--surface-card-hover);
 }
 
 .compactIconAction:disabled,
@@ -767,8 +880,8 @@
   min-width: 0;
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(236, 230, 220, 0.05);
+  background: var(--surface-card-subtle);
+  border: 1px solid var(--border-hairline);
 }
 
 .liveSummaryRow .statusIcon {
@@ -803,18 +916,18 @@
 
 .noticeTextCompact {
   color: var(--fg-secondary);
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-card-subtle);
 }
 
 .feedbackTextCompact {
   color: var(--fg-secondary);
   white-space: pre-wrap;
-  background: rgba(126, 163, 124, 0.09);
+  background: color-mix(in srgb, var(--state-success) 9%, transparent);
 }
 
 .errorTextCompact {
   color: var(--state-error);
-  background: rgba(187, 108, 93, 0.11);
+  background: color-mix(in srgb, var(--state-error) 11%, transparent);
 }
 
 .ioStack {
@@ -837,8 +950,8 @@
   min-width: 0;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(236, 230, 220, 0.05);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-muted);
 }
 
 .ioMetaRow {
@@ -878,7 +991,7 @@
 }
 
 .collapsibleEvidence[open] {
-  background: rgba(255, 255, 255, 0.025);
+  background: var(--surface-card-subtle);
 }
 
 .primaryEvidenceBlock .ioContent {
@@ -896,7 +1009,10 @@
 .viewStack {
   display: grid;
   gap: 16px;
+  align-content: start;
   min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
 }
 
 .runsHeaderSurface {
@@ -917,8 +1033,8 @@
   gap: 10px;
   padding: 12px 14px;
   border-radius: 8px;
-  border: 1px solid rgba(236, 230, 220, 0.05);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
 }
 
 .runsGuideCard p {
@@ -927,11 +1043,136 @@
   line-height: 1.55;
 }
 
+.runsCommandStrip {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.runsCommandHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+}
+
+.runsCommandBody {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.35fr);
+  gap: 12px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.runsCommandMetrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.compactFact {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 54px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+}
+
+.compactFact span {
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compactFact strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.runsSelectedSnapshot {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(280px, 0.92fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.runsSnapshotPrimary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  align-content: center;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-muted);
+}
+
+.runsSnapshotPrimary > strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runsSnapshotPrimary > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.runsSnapshotFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.runsSnapshotFacts span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+}
+
+.runsSnapshotFacts strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .runsWorkspace {
   display: grid;
   grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
   min-height: 0;
 }
 
@@ -952,7 +1193,7 @@
   display: grid;
   align-content: start;
   gap: 10px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .runDetailPanel {
@@ -965,7 +1206,7 @@
 .runListScrollable {
   display: grid;
   gap: 10px;
-  max-height: 620px;
+  max-height: min(620px, 58vh);
   overflow: auto;
   padding-right: 4px;
 }
@@ -978,7 +1219,7 @@
   padding: 16px;
   border-radius: 8px;
   border: 1px dashed rgba(236, 230, 220, 0.08);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-card-subtle);
 }
 
 .structuredEmptyState h3 {
@@ -1026,6 +1267,14 @@
   flex-wrap: wrap;
 }
 
+.bulkToolbarHint {
+  flex-basis: 100%;
+  margin: -2px 0 0;
+  color: var(--fg-tertiary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .libraryFilters {
   display: grid;
   gap: 10px;
@@ -1059,14 +1308,28 @@
   display: grid;
   gap: 8px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
   color: var(--fg-primary);
   text-align: left;
 }
 
+.runRecordCard {
+  gap: 10px;
+}
+
+.runCardButton {
+  display: grid;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
 .runItemActive {
-  border-color: rgba(216, 167, 91, 0.28);
-  background: rgba(216, 167, 91, 0.08);
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 8%, transparent);
 }
 
 .proposalCard {
@@ -1075,7 +1338,7 @@
   padding: 12px 14px;
   border: 1px solid rgba(236, 230, 220, 0.08);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
 }
 
 .selectionBar {
@@ -1143,21 +1406,42 @@
 
 .runDetailOverview {
   display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(0, 1fr);
   gap: 12px;
-  padding: 14px;
+  align-items: stretch;
+  padding: 12px;
   border-radius: 8px;
-  border: 1px solid rgba(236, 230, 220, 0.05);
-  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card-subtle);
+}
+
+.runScorePanel {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.runScorePanel span {
+  color: var(--fg-tertiary);
+  font-size: 0.82rem;
+}
+
+.runScorePanel p {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.45;
 }
 
 .runDetailMetricGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .detailLead {
-  font-size: 2rem;
+  margin: 0;
+  font-size: 2.2rem;
   color: var(--fg-primary) !important;
   line-height: 1;
 }
@@ -1174,7 +1458,7 @@
   gap: 8px;
   padding-top: 16px;
   margin-top: 16px;
-  border-top: 1px solid rgba(236, 230, 220, 0.06);
+  border-top: 1px solid var(--border-hairline);
 }
 
 .detailSection h3 {
@@ -1194,6 +1478,35 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.runSignalGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.runRuntimeNote {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  color: var(--fg-secondary);
+}
+
+.runRuntimeNote p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.runDiagnosisSection {
+  margin-top: 10px;
+  padding-top: 12px;
+}
+
+.dangerDetailSection {
+  opacity: 0.86;
 }
 
 .detailList {
@@ -1231,7 +1544,7 @@
 .rawBlock {
   border: 1px solid rgba(236, 230, 220, 0.08);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-card-muted);
   padding: 10px 12px;
   min-width: 0;
   overflow: hidden;
@@ -1248,7 +1561,7 @@
   padding: 12px;
   border-radius: 8px;
   overflow: auto;
-  background: rgba(11, 13, 15, 0.72);
+  background: var(--surface-code);
   color: var(--fg-secondary);
   font-size: 0.82rem;
   line-height: 1.55;
@@ -1304,13 +1617,15 @@
   .overviewSecondaryGrid,
   .runsHeaderBody,
   .runsWorkspace,
+  .runsCommandBody,
   .masterDetail,
   .controlSurface {
     grid-template-columns: 1fr;
   }
 
   .compactFieldGrid,
-  .filterRow {
+  .filterRow,
+  .runsSelectedSnapshot {
     grid-template-columns: 1fr;
   }
 }
@@ -1318,14 +1633,29 @@
 @media (max-width: 900px) {
   .metricGrid,
   .summaryMetricStrip,
+  .sourceMetricGrid,
   .metricStrip,
   .actionGrid,
   .monitorMetrics,
   .monitorMetricsDense,
   .statusMetricGrid,
   .runDetailMetricGrid,
-  .detailFactGrid {
+  .detailFactGrid,
+  .runSignalGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .runsCommandHeader {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .runsCommandMetrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .runDetailOverview {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -1336,17 +1666,31 @@
 
   .metricGrid,
   .summaryMetricStrip,
+  .sourceMetricGrid,
   .metricStrip,
   .actionGrid,
   .monitorMetrics,
   .monitorMetricsDense,
   .statusMetricGrid,
   .runDetailMetricGrid,
-  .detailFactGrid {
+  .detailFactGrid,
+  .runSignalGrid,
+  .runsCommandMetrics,
+  .runsSnapshotFacts {
     grid-template-columns: 1fr;
   }
 
   .toolbarControls {
     justify-content: flex-start;
+  }
+
+  .compactRunRow,
+  .sourceNextAction {
+    grid-template-columns: 1fr;
+  }
+
+  .compactRunMeta {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 }

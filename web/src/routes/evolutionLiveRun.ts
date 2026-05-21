@@ -42,3 +42,14 @@ export function selectSupervisedRunStreamTarget(
   }
   return null;
 }
+
+export function requireEvolutionRunSnapshot<T extends { runId?: string } | null | undefined>(
+  snapshot: T,
+  actionLabel: string,
+): Exclude<T, null | undefined> {
+  const runId = String(snapshot?.runId || "").trim();
+  if (!snapshot || !runId) {
+    throw new Error(`${actionLabel} response did not include a runId.`);
+  }
+  return snapshot as Exclude<T, null | undefined>;
+}

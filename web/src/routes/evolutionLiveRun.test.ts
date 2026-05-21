@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EvolutionActiveRun } from "../api/types";
 import {
+  requireEvolutionRunSnapshot,
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
@@ -29,5 +30,13 @@ describe("evolutionLiveRun", () => {
 
   it("falls back to the local live run while active-run query is empty", () => {
     expect(selectSupervisedRunStreamTarget(null, run("run-1", "paused"))?.runId).toBe("run-1");
+  });
+
+  it("rejects mutation success payloads without a run id", () => {
+    expect(requireEvolutionRunSnapshot(run("run-1", "queued"), "self-evolution").runId).toBe("run-1");
+
+    expect(() => requireEvolutionRunSnapshot(null, "self-evolution")).toThrow("self-evolution");
+    expect(() => requireEvolutionRunSnapshot({} as EvolutionActiveRun, "self-evolution")).toThrow("runId");
+    expect(() => requireEvolutionRunSnapshot({ runId: "   " } as EvolutionActiveRun, "supervised")).toThrow("runId");
   });
 });
