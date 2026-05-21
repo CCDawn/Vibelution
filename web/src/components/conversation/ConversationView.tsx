@@ -19,6 +19,8 @@ type ConversationViewProps = {
   phase: string;
   messages: ConversationMessage[];
   eyebrowLabel?: string;
+  assistantDisplayName?: string;
+  userDisplayName?: string;
   taskSummary?: string;
   defaultFileContext: string;
   summaryItems?: Array<{
@@ -59,6 +61,8 @@ export function ConversationView({
   phase,
   messages,
   eyebrowLabel,
+  assistantDisplayName,
+  userDisplayName,
   taskSummary,
   defaultFileContext,
   summaryItems,
@@ -104,6 +108,8 @@ export function ConversationView({
     resolvedActionMode === "stop"
       ? (stopPendingLabel ?? t("stopPending"))
       : (submitPendingLabel ?? t("sendPending"));
+  const assistantLabel = assistantDisplayName?.trim() || t("agent");
+  const userLabel = userDisplayName?.trim() || t("operator");
   const handlePrimaryAction = resolvedActionMode === "stop" ? onStop ?? onSubmit : onSubmit;
   const timestampFormatter = useMemo(
     () =>
@@ -371,7 +377,7 @@ export function ConversationView({
               }
             >
               <div className={styles.messageMeta}>
-                <span>{message.role === "assistant" ? t("agent") : t("operator")}</span>
+                <span>{message.role === "assistant" ? assistantLabel : userLabel}</span>
                 {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
               </div>
               {hasUserContent(message) ? (

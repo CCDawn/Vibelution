@@ -1212,6 +1212,8 @@ export function ChatCodingRoute() {
                 title={detail.title}
                 phase={detail.currentPhase}
                 messages={detail.messages}
+                assistantDisplayName={pet?.name}
+                userDisplayName={runtime?.userName}
                 taskSummary={currentTaskSummary}
                 defaultFileContext={detail.defaultFileContext}
                 showHeader={false}

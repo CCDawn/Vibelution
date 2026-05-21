@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
 from pathlib import Path
@@ -104,6 +105,7 @@ def get_runtime_summary() -> dict:
         "modeAvailability": contract["modeAvailability"],
         "domainAvailability": contract["domainAvailability"],
         "agentName": "Vibelution",
+        "userName": _local_user_name(),
         "agentStatusLine": _agent_status_line(lang, status, current_phase),
         "sessionTitle": active_session.get("title")
         or text_for(lang, zh="网页工作台 Shell", en="Web workbench shell"),
@@ -231,6 +233,17 @@ def _load_runtime_manager_snapshot() -> dict:
     except Exception:
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _local_user_name() -> str:
+    for key in ("VIBELUTION_USER_NAME", "USERNAME", "USER", "LOGNAME"):
+        value = str(os.environ.get(key) or "").strip()
+        if value:
+            return value
+    try:
+        return str(getpass.getuser() or "").strip()
+    except Exception:
+        return ""
 
 
 def _stop_active_chat_turns_before_shutdown() -> list[dict[str, object]]:

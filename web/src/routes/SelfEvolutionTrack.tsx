@@ -22,6 +22,7 @@ import { queryKeys } from "../api/queryKeys";
 import {
   ConversationMessage,
   PetSummary,
+  RuntimeSummary,
   SelfEvolutionActiveRun,
   SelfEvolutionOverview,
   SelfEvolutionTransaction,
@@ -231,7 +232,14 @@ export function SelfEvolutionTrack({
     refetchInterval: 10_000,
     refetchIntervalInBackground: true,
   });
+  const runtimeQuery = useQuery({
+    queryKey: queryKeys.runtimeSummary(),
+    queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
+    refetchInterval: 5_000,
+    refetchIntervalInBackground: true,
+  });
   const pet = petQuery.data;
+  const runtime = runtimeQuery.data;
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -675,6 +683,8 @@ export function SelfEvolutionTrack({
                 title={t("selfWorkspacePage")}
                 phase={runSemantics?.phase || latestRun?.status || overview.readiness.state}
                 messages={conversationMessages}
+                assistantDisplayName={pet?.name}
+                userDisplayName={runtime?.userName}
                 taskSummary={conversationTask.latestSummary}
                 defaultFileContext={conversationTask.changedFiles.at(-1) || conversationTask.readFiles.at(-1) || "workspace"}
                 summaryItems={[]}
