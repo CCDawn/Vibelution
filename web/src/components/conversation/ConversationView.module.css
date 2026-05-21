@@ -150,6 +150,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  scrollbar-gutter: stable;
   padding: 18px 22px 10px;
   display: grid;
   align-content: start;
@@ -170,7 +171,6 @@
   width: fit-content;
   min-width: min(220px, 100%);
   max-width: min(78%, 920px);
-  overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   padding: 14px 16px;
