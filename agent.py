@@ -128,7 +128,12 @@ class SelfEvolvingAgent:
     支持定时苏醒，主动思考优化方向。
     """
 
-    def __init__(self, config: Optional[AppConfig] = None, mode: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        config: Optional[AppConfig] = None,
+        mode: Optional[str] = None,
+        workspace_path: Optional[str] = None,
+    ) -> None:
         """初始化 Agent 实例"""
         self.config = config or get_config()
         self.name = self.config.agent.name
@@ -179,10 +184,16 @@ class SelfEvolvingAgent:
         self._consecutive_failed_turns = 0
 
         # 工作区域
-        workspace_dir = getattr(self.config.agent, 'workspace', 'workspace')
         project_root = os.path.dirname(os.path.abspath(__file__))
         self.project_root = project_root
-        self.workspace_path = os.path.join(project_root, workspace_dir)
+        if workspace_path:
+            candidate_workspace = Path(workspace_path)
+            if not candidate_workspace.is_absolute():
+                candidate_workspace = Path(project_root) / candidate_workspace
+            self.workspace_path = str(candidate_workspace.resolve())
+        else:
+            workspace_dir = getattr(self.config.agent, 'workspace', 'workspace')
+            self.workspace_path = os.path.join(project_root, workspace_dir)
         os.makedirs(self.workspace_path, exist_ok=True)
 
         # 核心组件

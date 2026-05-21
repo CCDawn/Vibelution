@@ -43,6 +43,8 @@ import glob as glob_module
 import re
 from pathlib import Path
 from typing import Optional, List
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 import locale
 import platform
@@ -227,10 +229,24 @@ def _has_unix_shell_markers(command: str) -> bool:
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
+_WORKSPACE_ROOT_OVERRIDE: ContextVar[str] = ContextVar("vibelution_workspace_root_override", default="")
+
+
+@contextmanager
+def workspace_root_override(workspace_root: str | Path):
+    """Temporarily route relative workspace file writes to a session workspace."""
+    token = _WORKSPACE_ROOT_OVERRIDE.set(str(Path(workspace_root).resolve()))
+    try:
+        yield
+    finally:
+        _WORKSPACE_ROOT_OVERRIDE.reset(token)
 
 
 def _get_workspace_root() -> Path:
     """稳定获取 workspace 根目录。"""
+    override = _WORKSPACE_ROOT_OVERRIDE.get("").strip()
+    if override:
+        return Path(override).resolve()
     try:
         from config import get_config
         workspace_name = get_config().agent.workspace

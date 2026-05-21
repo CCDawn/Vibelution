@@ -426,6 +426,7 @@ export type ShutdownResponse = {
 export type SessionSummary = {
   id: string;
   title: string;
+  workspacePath?: string;
   status: string;
   taskSummary: string;
   lastActive: string;

@@ -6,6 +6,8 @@ import json
 import queue
 import re
 import threading
+import hashlib
+import inspect
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -77,6 +79,8 @@ _PROVIDER_ERROR_PATTERN = re.compile(
     r"upstream_error|upstream request failed|api(?:connection|status|timeout|rate)?error)",
     re.IGNORECASE,
 )
+_SESSION_WORKSPACE_SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
+_SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
 
 
 class SessionNotFoundError(ValueError):
@@ -89,6 +93,63 @@ class SessionBusyError(RuntimeError):
 
 class SessionValidationError(ValueError):
     """Raised when an incoming session turn payload is invalid."""
+
+
+def _safe_session_workspace_token(session_id: str) -> str:
+    raw = str(session_id or "").strip()
+    token = _SESSION_WORKSPACE_SAFE_CHARS.sub("-", raw).strip("._-")
+    if not token:
+        token = "session"
+    if token != raw or len(token) > 96:
+        digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:10]
+        token = f"{token[:84].rstrip('._-') or 'session'}-{digest}"
+    return token
+
+
+def _session_workspace_relative_path(session_id: str) -> str:
+    return f"workspace/sessions/{_safe_session_workspace_token(session_id)}"
+
+
+def _ensure_session_workspace(session_id: str) -> Path:
+    sessions_root = (PROJECT_ROOT / "workspace" / "sessions").resolve()
+    workspace_path = (PROJECT_ROOT / _session_workspace_relative_path(session_id)).resolve()
+    if not workspace_path.is_relative_to(sessions_root):
+        raise SessionValidationError(f"Invalid session workspace path: {workspace_path}")
+    workspace_path.mkdir(parents=True, exist_ok=True)
+    for subdir in _SESSION_WORKSPACE_SUBDIRS:
+        (workspace_path / subdir).mkdir(parents=True, exist_ok=True)
+    return workspace_path
+
+
+def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> bool:
+    conversation_id = str(conversation.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
+    if not conversation_id:
+        return False
+    workspace_path = _session_workspace_relative_path(conversation_id)
+    _ensure_session_workspace(conversation_id)
+    changed = conversation.get("workspace_path") != workspace_path
+    if changed:
+        conversation["workspace_path"] = workspace_path
+    return changed
+
+
+@contextmanager
+def _session_tool_workspace_override(session_workspace: str | Path):
+    try:
+        from core.infrastructure.mental_model import active_mental_workspace
+        from core.orchestration.task_planner import task_storage_override
+        from tools.shell_tools import workspace_root_override
+        from tools.memory_tools import memory_storage_override
+    except Exception:
+        yield
+        return
+    with (
+        active_mental_workspace(session_workspace),
+        workspace_root_override(session_workspace),
+        memory_storage_override(session_workspace),
+        task_storage_override(session_workspace),
+    ):
+        yield
 
 
 @dataclass
@@ -248,6 +309,7 @@ def create_chat_session() -> dict:
             title=text_for(lang, zh="新会话", en="New session"),
             timestamp=now,
         )
+        _ensure_conversation_workspace_metadata(conversation)
         conversations.append(conversation)
         payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
         payload["active_conversation_id"] = session_id
@@ -276,6 +338,7 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
         conversation = _find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        _ensure_conversation_workspace_metadata(conversation)
 
         conversation["title"] = normalized_title
         payload["updated_at"] = _now_timestamp()
@@ -312,6 +375,7 @@ def delete_chat_session(session_id: str) -> dict:
                 break
         if target_index < 0 or target_conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        _ensure_conversation_workspace_metadata(target_conversation)
 
         normalized_target = _normalize_conversation(target_conversation) or {}
         if _is_session_busy_for_delete(conversation_id, normalized_target):
@@ -465,6 +529,7 @@ def submit_session_message(
         conversation = _find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        _ensure_conversation_workspace_metadata(conversation)
 
         if _is_session_running(conversation_id):
             raise SessionBusyError(
@@ -547,10 +612,16 @@ def _load_conversations() -> tuple[str, list[dict[str, Any]]]:
     payload = _repair_stale_running_conversations(payload)
     active_id = str(payload.get("active_conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
     conversations: list[dict[str, Any]] = []
+    changed = False
     for raw in list(payload.get("conversations") or []):
+        if isinstance(raw, dict):
+            changed = _ensure_conversation_workspace_metadata(raw) or changed
         conversation = _normalize_conversation(raw)
         if conversation is not None:
             conversations.append(conversation)
+    if changed:
+        payload["updated_at"] = _now_timestamp()
+        save_chat_state(PROJECT_ROOT, payload)
     return active_id or DEFAULT_CHAT_CONVERSATION_ID, conversations
 
 
@@ -599,6 +670,8 @@ def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
     conversation_id = str(raw.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
     if not conversation_id:
         return None
+    workspace_path = _session_workspace_relative_path(conversation_id)
+    _ensure_session_workspace(conversation_id)
     title = str(raw.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip() or DEFAULT_CHAT_CONVERSATION_TITLE
     messages = _normalize_messages(conversation_id, raw.get("messages") or [])
     last_turn_status = str(raw.get("last_turn_status") or "").strip().lower()
@@ -614,6 +687,7 @@ def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
     return {
         "id": conversation_id,
         "title": title,
+        "workspacePath": workspace_path,
         "messages": messages,
         "lastTurnStatus": last_turn_status,
         "updatedAt": updated_at,
@@ -694,6 +768,7 @@ def _build_session_summary(conversation: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": conversation["id"],
         "title": conversation["title"],
+        "workspacePath": str(conversation.get("workspacePath") or _session_workspace_relative_path(conversation["id"])),
         "status": status,
         "taskSummary": summary,
         "lastActive": updated_at,
@@ -964,6 +1039,7 @@ def _make_empty_conversation(session_id: str, *, title: str, timestamp: str) -> 
     return {
         "conversation_id": str(session_id or "").strip(),
         "title": str(title or "").strip() or DEFAULT_CHAT_CONVERSATION_TITLE,
+        "workspace_path": _session_workspace_relative_path(session_id),
         "updated_at": str(timestamp or "").strip() or _now_timestamp(),
         "last_turn_status": "ready",
         "active_task": None,
@@ -1149,8 +1225,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         turn_control = _get_session_turn_control(session_id)
     turn_capture = SessionTurnCapture(session_id=session_id, turn_id=turn_id)
     mental_model_enabled = _normalize_optional_bool(context.get("mental_model_enabled"))
+    session_workspace = _ensure_session_workspace(session_id)
     try:
-        with mental_model_enabled_override(mental_model_enabled):
+        with mental_model_enabled_override(mental_model_enabled), _session_tool_workspace_override(session_workspace):
             initial_stop_reason = _get_turn_control_stop_reason(turn_control)
             if initial_stop_reason:
                 _persist_session_turn_result(
@@ -1162,7 +1239,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 return
 
             with _capture_session_ui_stream(session_id, turn_capture, mental_model_enabled=mental_model_enabled):
-                agent = create_chat_agent()
+                agent = _create_chat_agent_for_session(session_workspace)
                 mental_override_configurer = getattr(agent, "set_mental_model_enabled_override", None)
                 if callable(mental_override_configurer):
                     mental_override_configurer(mental_model_enabled)
@@ -1201,6 +1278,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 session_id,
                 result,
                 mental_model_enabled=mental_model_enabled,
+                session_workspace=session_workspace,
                 turn_id=turn_id,
             )
     except Exception as exc:
@@ -1212,10 +1290,25 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         _publish_session_detail_snapshot(session_id)
 
 
-def create_chat_agent() -> Any:
+def _create_chat_agent_for_session(session_workspace: Path) -> Any:
+    factory = create_chat_agent
+    try:
+        signature = inspect.signature(factory)
+        accepts_workspace = (
+            "workspace_path" in signature.parameters
+            or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
+        )
+    except (TypeError, ValueError):
+        accepts_workspace = True
+    if accepts_workspace:
+        return factory(workspace_path=session_workspace)
+    return factory()
+
+
+def create_chat_agent(workspace_path: str | Path | None = None) -> Any:
     from agent import SelfEvolvingAgent
 
-    return SelfEvolvingAgent(mode="chat")
+    return SelfEvolvingAgent(mode="chat", workspace_path=str(workspace_path) if workspace_path else None)
 
 
 def _run_session_continuation_loop(
@@ -1265,6 +1358,7 @@ def _persist_session_turn_result(
     result: Any,
     *,
     mental_model_enabled: bool | None = None,
+    session_workspace: str | Path | None = None,
     turn_id: str = "",
 ) -> None:
     lang = get_web_language()
@@ -1305,7 +1399,12 @@ def _persist_session_turn_result(
             assistant_text,
             _extract_chat_tool_calls(result),
             thought=_extract_chat_thought(result, assistant_text),
-            mental_snapshot=_build_turn_mental_snapshot(result, lang, mental_model_enabled=mental_model_enabled),
+            mental_snapshot=_build_turn_mental_snapshot(
+                result,
+                lang,
+                mental_model_enabled=mental_model_enabled,
+                session_workspace=session_workspace or _ensure_session_workspace(session_id),
+            ),
         )
         if isinstance(result, dict):
             assistant_entry["toolCalls"] = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
@@ -1451,6 +1550,13 @@ def _record_session_cycle_message(
     status: str,
     active_task: dict[str, Any] | None = None,
 ) -> None:
+    _append_session_workspace_log(
+        session_id,
+        message,
+        event=event,
+        status=status,
+        active_task=active_task,
+    )
     try:
         role = str(message.get("role") or "").strip() or "message"
         content = _sanitize_message_content(role, message.get("content") or "")
@@ -1470,6 +1576,62 @@ def _record_session_cycle_message(
         _debug_logger.warning(
             f"runtime scene conversation log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
+        )
+
+
+def _append_session_workspace_log(
+    session_id: str,
+    message: dict[str, Any],
+    *,
+    event: str,
+    status: str,
+    active_task: dict[str, Any] | None = None,
+) -> None:
+    try:
+        workspace = _ensure_session_workspace(session_id)
+        logs_dir = workspace / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        role = str(message.get("role") or "").strip().lower() or "message"
+        record = {
+            "timestamp": str(message.get("timestamp") or _now_timestamp()).strip(),
+            "session_id": str(session_id or "").strip(),
+            "event": str(event or "message").strip() or "message",
+            "status": str(status or "").strip(),
+            "role": role,
+            "content": _sanitize_message_content(role, message.get("content") or ""),
+            "thought": _sanitize_thought_text(message.get("thought") or ""),
+            "mental_snapshot": _normalize_mental_snapshot(message.get("mental_snapshot") or message.get("mentalSnapshot")),
+            "tool_calls": _normalize_persisted_tool_calls(
+                message.get("tool_calls") or message.get("toolCalls") or []
+            ),
+            "active_task": active_task if isinstance(active_task, dict) else {},
+        }
+        with (logs_dir / "conversation.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+        content = str(record["content"] or "").strip()
+        thought = str(record["thought"] or "").strip()
+        tool_names = ", ".join(
+            str(item.get("name") or "").strip()
+            for item in list(record["tool_calls"] or [])
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        )
+        md_lines = [
+            f"## {record['timestamp']} {role}",
+            "",
+            f"- event: {record['event']}",
+            f"- status: {record['status'] or 'observed'}",
+        ]
+        if tool_names:
+            md_lines.append(f"- tools: {tool_names}")
+        md_lines.extend(["", content or "(empty)", ""])
+        if thought:
+            md_lines.extend(["```thought", thought, "```", ""])
+        with (logs_dir / "conversation.md").open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(md_lines) + "\n")
+    except Exception as exc:
+        _debug_logger.warning(
+            f"session workspace log skipped: {type(exc).__name__}: {exc}",
+            tag="CHAT",
         )
 
 
@@ -1831,6 +1993,7 @@ def _build_turn_mental_snapshot(
     lang: str,
     *,
     mental_model_enabled: bool | None = None,
+    session_workspace: str | Path | None = None,
 ) -> dict[str, Any] | None:
     if not _is_mental_model_enabled_for_turn(mental_model_enabled):
         return None
@@ -1851,7 +2014,7 @@ def _build_turn_mental_snapshot(
     except Exception:
         runtime_snapshot = None
 
-    diagnosis_snapshot = _diagnosis_mental_snapshot(lang)
+    diagnosis_snapshot = _diagnosis_mental_snapshot(lang, session_workspace=session_workspace)
 
     if _has_meaningful_mental_snapshot(runtime_snapshot):
         merged = dict(runtime_snapshot)
@@ -1875,11 +2038,12 @@ def _build_turn_mental_snapshot(
     return None
 
 
-def _diagnosis_mental_snapshot(lang: str) -> dict[str, Any] | None:
+def _diagnosis_mental_snapshot(lang: str, *, session_workspace: str | Path | None = None) -> dict[str, Any] | None:
     try:
         from core.infrastructure.mental_model import get_mental_model
 
-        mental_model = get_mental_model(workspace_root=str(PROJECT_ROOT / "workspace"))
+        workspace_root = Path(session_workspace).resolve() if session_workspace else (PROJECT_ROOT / "workspace")
+        mental_model = get_mental_model(workspace_root=str(workspace_root))
         diagnosis = mental_model.diagnose()
         history = []
         try:
