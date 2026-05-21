@@ -320,6 +320,7 @@ def test_runtime_summary_shape():
     assert response.status_code == 200, response.json()
     payload = response.json()
     assert payload["agentName"] == "Vibelution"
+    assert isinstance(payload["userName"], str)
     assert "mode" in payload
     assert "profile" in payload
     assert "sessionState" in payload

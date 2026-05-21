@@ -361,6 +361,7 @@ export type RuntimeSummary = {
   modeAvailability: ModeAvailability;
   domainAvailability: DomainAvailability;
   agentName: string;
+  userName: string;
   agentStatusLine: string;
   sessionTitle: string;
   taskSummary: string;
