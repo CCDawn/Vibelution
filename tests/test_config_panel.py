@@ -536,7 +536,7 @@ def test_model_preset_options_include_codex_preset():
     assert "relay_openai_gpt_5_5" in presets
     assert presets["relay_openai_gpt_5_5"]["category"] == "relay"
     assert presets["relay_openai_gpt_5_5"]["model"]["model"] == "gpt-5.5"
-    assert presets["relay_openai_gpt_5_5"]["model"]["transport"] == "chat_completions"
+    assert presets["relay_openai_gpt_5_5"]["model"]["transport"] == "responses"
     assert presets["relay_openai_gpt_5_5"]["model"]["contract"] == "tool_chat"
     assert presets["relay_openai_gpt_5_5"]["provider"]["kind"] == "relay"
     assert presets["relay_openai_gpt_5_5"]["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
@@ -583,7 +583,7 @@ def test_apply_relay_model_preset_materializes_openai_compatible_provider():
     assert model["provider"]["requires_api_key"] is True
     assert model["provider"]["context_window"] == 1000000
     assert model["model"] == "gpt-5.5"
-    assert model["transport"] == "chat_completions"
+    assert model["transport"] == "responses"
     assert model["contract"] == "tool_chat"
     assert model["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
     build_effective_config(updated)

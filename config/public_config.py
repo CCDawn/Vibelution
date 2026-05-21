@@ -103,7 +103,7 @@ LLM_MODEL_PRESETS = {
         "model": {
             "model": "gpt-5.5",
             "label": "GPT-5.5 via relay",
-            "transport": "chat_completions",
+            "transport": "responses",
             "contract": "tool_chat",
             "temperature": 0.7,
             "max_output_tokens": 128000,
