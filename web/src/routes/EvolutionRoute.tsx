@@ -565,6 +565,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const runPauseRequested = Boolean(monitoredRun?.pauseRequested) && monitoredRunStatus !== "paused";
   const runPaused = monitoredRunStatus === "paused";
   const runStopping = monitoredRunStatus === "stopping" || Boolean(monitoredRun?.stopRequested);
+  const monitoredRunIdentity = monitoredRun?.sessionId || monitoredRun?.runId || "";
+  const monitoredCaseLabel = monitoredRun?.currentCaseId
+    ? `${monitoredRun.currentCaseIndex ?? "--"}/${monitoredRun.caseTotal ?? "--"} ${monitoredRun.currentCaseId}`
+    : "--";
+  const monitoredTaskLabel = monitoredRun?.currentTask || monitoredRun?.latestMessage || "--";
   const pauseSupervisedAction = monitoredRun?.actionStates?.pause;
   const resumeSupervisedAction = monitoredRun?.actionStates?.resume;
   const terminateSupervisedAction = monitoredRun?.actionStates?.terminate;
@@ -1446,12 +1451,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>{t("activeSupervisedRun")}</p>
-                  <h2 className={styles.sectionTitle}>
-                    {monitoredRun?.sessionId || monitoredRun?.runId || t("activeSupervisedRun")}
+                  <h2 className={`${styles.sectionTitle} ${styles.truncateText}`} title={monitoredRunIdentity || undefined}>
+                    {monitoredRunIdentity || t("activeSupervisedRun")}
                   </h2>
                 </div>
                 {monitoredRun ? (
-                  <div className={styles.heroHeadingRow}>
+                  <div className={styles.liveStatusRow}>
                     <span className={styles.statusPill}>{statusLabel(monitoredRun.status)}</span>
                     <span className={styles.secondaryPill}>{sourceKindLabel(monitoredRun.sourceKind)}</span>
                   </div>
@@ -1464,75 +1469,91 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
               {monitoredRun ? (
                 <div className={styles.runMonitorDense}>
-                  <div className={styles.controlActions}>
-                    <button
-                      type="button"
-                      className={styles.inlineAction}
-                      disabled={!canPauseSupervisedRun || pauseRunMutation.isPending}
-                      title={disabledReason(pauseSupervisedAction) || undefined}
-                      onClick={() => monitoredRun && pauseRunMutation.mutate(monitoredRun.runId)}
-                    >
-                      {pauseRunMutation.isPending ? <LoaderCircle size={15} /> : <Pause size={15} />}
-                      {t("pauseSupervisedRun")}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.inlineAction}
-                      disabled={!canResumeSupervisedRun || resumeRunMutation.isPending}
-                      title={disabledReason(resumeSupervisedAction) || undefined}
-                      onClick={() => monitoredRun && resumeRunMutation.mutate(monitoredRun.runId)}
-                    >
-                      {resumeRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
-                      {t("resumeSupervisedRun")}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.inlineAction}
-                      disabled={!canTerminateSupervisedRun || terminateRunMutation.isPending}
-                      title={disabledReason(terminateSupervisedAction) || undefined}
-                      onClick={() => monitoredRun && terminateRunMutation.mutate(monitoredRun.runId)}
-                    >
-                      {terminateRunMutation.isPending ? <LoaderCircle size={15} /> : <Square size={15} />}
-                      {t("terminateSupervisedRun")}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.inlineAction}
-                      disabled={!canDeleteSupervisedRun || deleteRunMutation.isPending}
-                      title={disabledReason(deleteSupervisedAction) || undefined}
-                      onClick={() => monitoredRun && deleteRunMutation.mutate(monitoredRun.runId)}
-                    >
-                      {deleteRunMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
-                      {t("deleteSupervisedRun")}
-                    </button>
+                  <div className={styles.liveRunToolbar}>
+                    <div className={styles.compactActionGroup}>
+                      <button
+                        type="button"
+                        className={styles.compactIconAction}
+                        disabled={!canPauseSupervisedRun || pauseRunMutation.isPending}
+                        title={disabledReason(pauseSupervisedAction) || t("pauseSupervisedRun")}
+                        onClick={() => monitoredRun && pauseRunMutation.mutate(monitoredRun.runId)}
+                        aria-label={t("pauseSupervisedRun")}
+                      >
+                        {pauseRunMutation.isPending ? <LoaderCircle size={15} /> : <Pause size={15} />}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.compactIconAction}
+                        disabled={!canResumeSupervisedRun || resumeRunMutation.isPending}
+                        title={disabledReason(resumeSupervisedAction) || t("resumeSupervisedRun")}
+                        onClick={() => monitoredRun && resumeRunMutation.mutate(monitoredRun.runId)}
+                        aria-label={t("resumeSupervisedRun")}
+                      >
+                        {resumeRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.compactIconAction}
+                        disabled={!canTerminateSupervisedRun || terminateRunMutation.isPending}
+                        title={disabledReason(terminateSupervisedAction) || t("terminateSupervisedRun")}
+                        onClick={() => monitoredRun && terminateRunMutation.mutate(monitoredRun.runId)}
+                        aria-label={t("terminateSupervisedRun")}
+                      >
+                        {terminateRunMutation.isPending ? <LoaderCircle size={15} /> : <Square size={15} />}
+                      </button>
+                    </div>
+                    <div className={styles.compactActionGroup}>
+                      {monitoredRun.sessionId ? (
+                        <button
+                          type="button"
+                          className={styles.compactTextAction}
+                          onClick={() => openRun(monitoredRun.sessionId)}
+                        >
+                          <Activity size={15} />
+                          {t("openLatestRuns")}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className={`${styles.compactIconAction} ${styles.dangerIconAction}`}
+                        disabled={!canDeleteSupervisedRun || deleteRunMutation.isPending}
+                        title={disabledReason(deleteSupervisedAction) || t("deleteSupervisedRun")}
+                        onClick={() => monitoredRun && deleteRunMutation.mutate(monitoredRun.runId)}
+                        aria-label={t("deleteSupervisedRun")}
+                      >
+                        {deleteRunMutation.isPending ? <LoaderCircle size={15} /> : <Trash2 size={15} />}
+                      </button>
+                    </div>
                   </div>
 
-                  {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
-                  {supervisedControlError ? <p className={styles.errorText}>{supervisedControlError}</p> : null}
+                  {actionFeedback ? <p className={styles.feedbackTextCompact}>{actionFeedback}</p> : null}
+                  {supervisedControlError ? <p className={styles.errorTextCompact}>{supervisedControlError}</p> : null}
                   {!canPauseSupervisedRun && disabledReason(pauseSupervisedAction) ? (
-                    <p className={styles.noticeText}>{disabledReason(pauseSupervisedAction)}</p>
+                    <p className={styles.noticeTextCompact}>{disabledReason(pauseSupervisedAction)}</p>
                   ) : null}
                   {!canResumeSupervisedRun && disabledReason(resumeSupervisedAction) && (runPaused || runPauseRequested) ? (
-                    <p className={styles.noticeText}>{disabledReason(resumeSupervisedAction)}</p>
+                    <p className={styles.noticeTextCompact}>{disabledReason(resumeSupervisedAction)}</p>
                   ) : null}
                   {!canTerminateSupervisedRun && disabledReason(terminateSupervisedAction) && runStopping ? (
-                    <p className={styles.noticeText}>{disabledReason(terminateSupervisedAction)}</p>
+                    <p className={styles.noticeTextCompact}>{disabledReason(terminateSupervisedAction)}</p>
                   ) : null}
                   {!canDeleteSupervisedRun && disabledReason(deleteSupervisedAction) ? (
-                    <p className={styles.noticeText}>{disabledReason(deleteSupervisedAction)}</p>
+                    <p className={styles.noticeTextCompact}>{disabledReason(deleteSupervisedAction)}</p>
                   ) : null}
 
                   <div className={styles.monitorSummary}>
-                    <div className={styles.heroHeadingRow}>
+                    <div className={styles.liveSummaryRow}>
                       <span className={styles.statusIcon}>{statusIcon(monitoredRun.status)}</span>
-                      <p className={styles.heroSummary}>{monitoredRun.latestMessage}</p>
+                      <p className={styles.heroSummary} title={monitoredRun.latestMessage}>
+                        {monitoredRun.latestMessage}
+                      </p>
                     </div>
                   </div>
 
                   <div className={styles.monitorMetricsDense}>
                     <article className={styles.metricTile}>
                       <span>{t("activeRunSession")}</span>
-                      <strong>{monitoredRun.sessionId || monitoredRun.runId}</strong>
+                      <strong title={monitoredRunIdentity}>{monitoredRunIdentity}</strong>
                     </article>
                     <article className={styles.metricTile}>
                       <span>{t("activeRunPhase")}</span>
@@ -1540,11 +1561,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </article>
                     <article className={styles.metricTile}>
                       <span>{t("activeRunCurrentCase")}</span>
-                      <strong>
-                        {monitoredRun.currentCaseId
-                          ? `${monitoredRun.currentCaseIndex}/${monitoredRun.caseTotal} ${monitoredRun.currentCaseId}`
-                          : "--"}
-                      </strong>
+                      <strong title={monitoredCaseLabel}>{monitoredCaseLabel}</strong>
                     </article>
                     <article className={styles.metricTile}>
                       <span>{t("activeRunCurrentRole")}</span>
@@ -1552,7 +1569,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </article>
                     <article className={styles.metricTile}>
                       <span>{t("activeRunCurrentTask")}</span>
-                      <strong>{monitoredRun.currentTask || monitoredRun.latestMessage || "--"}</strong>
+                      <strong title={monitoredTaskLabel}>{monitoredTaskLabel}</strong>
                     </article>
                     <article className={styles.metricTile}>
                       <span>{t("latestLiveMessage")}</span>
@@ -1576,16 +1593,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </div>
                   </div>
 
-                  {monitoredRun.sessionId ? (
-                    <button
-                      type="button"
-                      className={styles.inlineAction}
-                      onClick={() => openRun(monitoredRun.sessionId)}
-                    >
-                      <Activity size={15} />
-                      {t("openLatestRuns")}
-                    </button>
-                  ) : null}
                 </div>
               ) : (
                 <div className={styles.idleMonitor}>
@@ -1644,11 +1651,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>{t("currentCaseTranscript")}</p>
-                  <h2 className={styles.sectionTitle}>
+                  <h2 className={`${styles.sectionTitle} ${styles.truncateText}`} title={monitoredRun?.currentCaseId || undefined}>
                     {monitoredRun?.currentCaseId || t("currentCaseOutput")}
                   </h2>
                 </div>
-                <div className={styles.heroHeadingRow}>
+                <div className={styles.liveStatusRow}>
                   {monitoredRun?.currentRole ? (
                     <span className={styles.secondaryPill}>{runRoleLabel(monitoredRun.currentRole)}</span>
                   ) : null}
@@ -1664,18 +1671,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               {monitoredCaseHasVisibleIo ? (
                 <div className={styles.ioStack}>
                   {monitoredRun?.currentCasePrompt ? (
-                    <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
-                      <h3>{t("currentCasePrompt")}</h3>
-                      <div className={styles.rawBlock}>
-                        <pre className={styles.ioContent}>{monitoredRun.currentCasePrompt}</pre>
-                      </div>
-                    </div>
+                    <details className={`${styles.rawBlock} ${styles.collapsibleEvidence}`}>
+                      <summary>{t("currentCasePrompt")}</summary>
+                      <pre className={styles.ioContent}>{monitoredRun.currentCasePrompt}</pre>
+                    </details>
                   ) : null}
 
                   <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
                     <h3>{currentCaseOutputLabel(monitoredRun)}</h3>
                     {monitoredRun?.currentCaseIo?.latestOutput ? (
-                      <div className={styles.rawBlock}>
+                      <div className={`${styles.rawBlock} ${styles.primaryEvidenceBlock}`}>
                         <pre className={styles.ioContent}>{monitoredRun.currentCaseIo.latestOutput}</pre>
                       </div>
                     ) : (
@@ -1696,7 +1701,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                               <strong>{caseIoEntryLabel(entry.kind, entry.label)}</strong>
                               <span className={styles.formHint}>{compactTimestamp(entry.timestamp)}</span>
                             </div>
-                            <pre className={styles.ioContent}>{entry.content}</pre>
+                            <pre className={styles.ioContent} title={entry.content}>{entry.content}</pre>
                           </article>
                         ))}
                       </div>
