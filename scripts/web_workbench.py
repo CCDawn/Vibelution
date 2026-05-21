@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
+import os
+import re
 import sys
 import threading
 import webbrowser
@@ -19,6 +22,48 @@ if str(PROJECT_ROOT) not in sys.path:
 from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port  # noqa: E402
 
 
+class WorkbenchAccessLogFilter(logging.Filter):
+    """Suppress high-frequency workbench access lines while keeping diagnostic requests."""
+
+    _REQUEST_RE = re.compile(r'"(?P<method>[A-Z]+)\s+(?P<path>[^ ?"]+)')
+    _SUPPRESSED_GET_PATHS = {
+        "/api/health",
+        "/api/runtime/summary",
+        "/api/runtime/events",
+        "/api/git/status",
+        "/api/control-token",
+        "/api/config/public",
+        "/api/pet/summary",
+        "/api/files/tree",
+        "/api/sessions",
+        "/api/evolution/active-run",
+        "/api/evolution/active-run/events",
+        "/api/evolution/runs",
+        "/api/evolution/library",
+        "/api/evolution/overview",
+        "/api/evolution/workbench",
+    }
+    _SUPPRESSED_POST_PATHS = {
+        "/api/runtime/browser-telemetry",
+    }
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        match = self._REQUEST_RE.search(message)
+        if not match:
+            return True
+        method = match.group("method").upper()
+        path = match.group("path")
+        if method == "GET" and path in self._SUPPRESSED_GET_PATHS:
+            return False
+        if method == "POST" and path in self._SUPPRESSED_POST_PATHS:
+            return False
+        return True
+
+
+HealthAccessLogFilter = WorkbenchAccessLogFilter
+
+
 def default_port() -> int:
     return configured_backend_port()
 
@@ -32,11 +77,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def install_access_log_filters() -> None:
+    logger = logging.getLogger("uvicorn.access")
+    if any(isinstance(existing, WorkbenchAccessLogFilter) for existing in logger.filters):
+        return
+    logger.addFilter(WorkbenchAccessLogFilter())
+
+
 def main() -> None:
     args = parse_args()
     url = f"http://{args.host}:{args.port}"
     if not args.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    install_access_log_filters()
     uvicorn.run("core.web.app:app", host=args.host, port=args.port, reload=args.reload)
 
 
