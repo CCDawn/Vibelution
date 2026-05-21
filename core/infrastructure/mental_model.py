@@ -21,6 +21,8 @@ import os
 import re
 import threading
 from collections import deque
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +30,9 @@ from typing import Optional, Dict, Any, List
 
 from core.infrastructure.event_bus import get_event_bus, EventNames, Event
 from core.infrastructure.state import get_state_manager
+
+
+_ACTIVE_MENTAL_WORKSPACE_ROOT: ContextVar[str] = ContextVar("vibelution_active_mental_workspace_root", default="")
 
 
 # ============================================================================
@@ -174,17 +179,26 @@ class MentalModel:
         diagnosis = mm.diagnose()  # 在 prompt 构建时调用
     """
 
+    _instances: Dict[str, "MentalModel"] = {}
     _instance = None
     _lock = threading.Lock()
 
     def __new__(cls, workspace_root: str = "workspace"):
-        if cls._instance is None:
-            with cls._lock:
+        key = cls._workspace_key(workspace_root)
+        with cls._lock:
+            obj = cls._instances.get(key)
+            if obj is None:
+                obj = super().__new__(cls)
+                obj._initialized = False
+                obj._workspace_key = key
+                cls._instances[key] = obj
                 if cls._instance is None:
-                    obj = super().__new__(cls)
-                    obj._initialized = False
                     cls._instance = obj
-        return cls._instance
+            return obj
+
+    @staticmethod
+    def _workspace_key(workspace_root: str = "workspace") -> str:
+        return str(Path(workspace_root or "workspace").resolve())
 
     def __init__(self, workspace_root: str = "workspace"):
         if getattr(self, '_initialized', False):
@@ -306,6 +320,8 @@ class MentalModel:
 
     def _on_event(self, event: Event):
         """全局事件处理 - 采集运行时信号"""
+        if not self._is_active_workspace_collector():
+            return
         try:
             if event.name == EventNames.TOOL_START:
                 self._on_tool_start(event)
@@ -318,8 +334,16 @@ class MentalModel:
         except Exception:
             pass  # 监听器静默失败，不干扰主流程
 
+    def _is_active_workspace_collector(self) -> bool:
+        active = _ACTIVE_MENTAL_WORKSPACE_ROOT.get("").strip()
+        if not active:
+            return self is MentalModel._instance
+        return active == str(getattr(self, "_workspace_key", "") or "")
+
     def _on_file_modified(self, event: Event):
         """同步会话注意力中的实体聚焦信息。"""
+        if not self._is_active_workspace_collector():
+            return
         try:
             from core.infrastructure.agent_session import get_session_state
             attention = get_session_state().get_attention_snapshot()
@@ -332,6 +356,8 @@ class MentalModel:
 
     def _on_validation_completed(self, event: Event):
         """记录最近一次验证结果。"""
+        if not self._is_active_workspace_collector():
+            return
         self._last_validation = dict(event.data or {})
 
     def _on_tool_start(self, event: Event):
@@ -380,6 +406,8 @@ class MentalModel:
 
     def _on_file_created(self, event: Event):
         """处理文件创建事件，记录到会话追踪中"""
+        if not self._is_active_workspace_collector():
+            return
         try:
             data = event.data or {}
             file_path = data.get("path", "")
@@ -1012,22 +1040,51 @@ class MentalModel:
 # 全局单例
 # ============================================================================
 
+_mental_models: Dict[str, MentalModel] = {}
 _mental_model: Optional[MentalModel] = None
 
 
 def get_mental_model(workspace_root: str = "workspace") -> MentalModel:
     """获取心智模型单例"""
     global _mental_model
+    active = _ACTIVE_MENTAL_WORKSPACE_ROOT.get("").strip()
+    if active and str(workspace_root or "workspace").strip() in {"", "workspace"}:
+        key = active
+        effective_root = active
+    else:
+        key = MentalModel._workspace_key(workspace_root)
+        effective_root = workspace_root
+    if key not in _mental_models:
+        _mental_models[key] = MentalModel(workspace_root=effective_root)
     if _mental_model is None:
-        _mental_model = MentalModel(workspace_root=workspace_root)
-    return _mental_model
+        _mental_model = _mental_models[key]
+    return _mental_models[key]
+
+
+@contextmanager
+def active_mental_workspace(workspace_root: str | Path):
+    """Route global runtime signals to the mental model for one active workspace."""
+    token = _ACTIVE_MENTAL_WORKSPACE_ROOT.set(MentalModel._workspace_key(str(workspace_root)))
+    try:
+        yield
+    finally:
+        _ACTIVE_MENTAL_WORKSPACE_ROOT.reset(token)
+
+
+def _current_mental_model() -> MentalModel:
+    active = _ACTIVE_MENTAL_WORKSPACE_ROOT.get("").strip()
+    if active and active in _mental_models:
+        return _mental_models[active]
+    return get_mental_model()
 
 
 def reset_mental_model():
     """重置心智模型单例（用于测试）"""
     global _mental_model
+    _mental_models.clear()
     _mental_model = None
     MentalModel._instance = None
+    MentalModel._instances.clear()
 
 
 # ============================================================================
@@ -1044,7 +1101,7 @@ def get_mental_state_tool() -> str:
     Returns:
         JSON 格式的诊断结果
     """
-    mm = get_mental_model()
+    mm = _current_mental_model()
     diagnosis = mm.diagnose()
     soul = mm.get_state_for_soul()
     return json.dumps({
@@ -1079,7 +1136,7 @@ def update_diagnosis_rules_tool(rules_json: str) -> str:
             "message": f"规则 JSON 解析失败: {e}",
         }, ensure_ascii=False)
 
-    mm = get_mental_model()
+    mm = _current_mental_model()
     success = mm.update_rules(new_rules)
     mm.reload_rules()
 
@@ -1119,7 +1176,7 @@ def update_self_model_tool(updates_json: str) -> str:
             "message": f"JSON 解析失败: {e}",
         }, ensure_ascii=False)
 
-    mm = get_mental_model()
+    mm = _current_mental_model()
     success = mm.update_self_model(updates)
 
     if success:
@@ -1145,7 +1202,7 @@ def get_self_model_tool() -> str:
     Returns:
         JSON 格式的自我模型
     """
-    mm = get_mental_model()
+    mm = _current_mental_model()
     model = mm.get_self_model()
     return json.dumps(model, ensure_ascii=False, indent=2)
 
@@ -1164,7 +1221,7 @@ def record_evolution_tool(change: str, result: str) -> str:
     Returns:
         记录结果
     """
-    mm = get_mental_model()
+    mm = _current_mental_model()
     mm.add_evolution_entry(change, result)
     history = mm.get_self_model().get("evolution_history", [])
     return json.dumps({

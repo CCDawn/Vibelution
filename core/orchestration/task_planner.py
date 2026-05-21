@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import os
 from collections import defaultdict
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -14,6 +16,18 @@ from pathlib import Path
 from typing import Any, ClassVar, Dict, List, Optional
 
 from core.prompt_manager.task_analyzer import TaskStatus
+
+
+_TASK_STORAGE_OVERRIDE: ContextVar[str] = ContextVar("vibelution_task_storage_override", default="")
+
+
+@contextmanager
+def task_storage_override(workspace_root: str | Path):
+    token = _TASK_STORAGE_OVERRIDE.set(str(Path(workspace_root).resolve()))
+    try:
+        yield
+    finally:
+        _TASK_STORAGE_OVERRIDE.reset(token)
 
 
 def _resolve_root() -> Path:
@@ -32,6 +46,9 @@ def _resolve_root() -> Path:
 
 def _tasks_json_path() -> str:
     """返回任务清单持久化路径。测试会 monkeypatch 这个函数。"""
+    workspace_override = _TASK_STORAGE_OVERRIDE.get("").strip()
+    if workspace_override:
+        return str(Path(workspace_override) / "memory" / "tasks.json")
     return str(_resolve_root() / "workspace" / "memory" / "tasks.json")
 
 
@@ -604,6 +621,23 @@ _task_manager_root: Optional[Path] = None
 def get_task_manager(project_root: Optional[str] = None) -> TaskManager:
     """获取统一 TaskManager 单例，支持 project_root 校验。"""
     global _task_manager_instance, _task_manager_root
+    workspace_override = _TASK_STORAGE_OVERRIDE.get("").strip()
+    if workspace_override and project_root is None:
+        manager = TaskManager.__new__(TaskManager)
+        manager._TASKS_FILE = "memory/tasks.json"
+        manager.project_root = Path(workspace_override).resolve()
+        manager._tasks_path = manager.project_root / "memory" / "tasks.json"
+        manager._light_tasks = []
+        manager._goal = ""
+        manager._next_light_id = 1
+        manager._created_at = ""
+        manager._stats = {
+            "tasks_created": 0,
+            "tasks_completed": 0,
+            "tasks_failed": 0,
+        }
+        manager._load_tasks()
+        return manager
     if TaskManager._instance is not None and _task_manager_instance is None:
         _task_manager_instance = TaskManager._instance
 

@@ -19,11 +19,26 @@ import json
 import os
 import re
 from datetime import datetime
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 # 导入统一工作区管理器
 from core.infrastructure.workspace_manager import get_workspace
 from core.orchestration.task_planner import get_task_manager
+
+
+_MEMORY_WORKSPACE_OVERRIDE: ContextVar[str] = ContextVar("vibelution_memory_workspace_override", default="")
+
+
+@contextmanager
+def memory_storage_override(workspace_root: str | Path):
+    token = _MEMORY_WORKSPACE_OVERRIDE.set(str(Path(workspace_root).resolve()))
+    try:
+        yield
+    finally:
+        _MEMORY_WORKSPACE_OVERRIDE.reset(token)
 
 
 # ============================================================================
@@ -32,6 +47,11 @@ from core.orchestration.task_planner import get_task_manager
 
 def _get_memory_index_path() -> str:
     """获取记忆索引文件路径"""
+    workspace_override = _MEMORY_WORKSPACE_OVERRIDE.get("").strip()
+    if workspace_override:
+        path = Path(workspace_override) / "memory" / "memory.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return str(path)
     override = os.getenv("VIBELUTION_MEMORY_INDEX_PATH", "").strip()
     if override:
         os.makedirs(os.path.dirname(override), exist_ok=True)
@@ -42,6 +62,11 @@ def _get_memory_index_path() -> str:
 
 def _get_archives_path() -> str:
     """获取档案库路径"""
+    workspace_override = _MEMORY_WORKSPACE_OVERRIDE.get("").strip()
+    if workspace_override:
+        archives = Path(workspace_override) / "memory" / "archives"
+        archives.mkdir(parents=True, exist_ok=True)
+        return str(archives)
     ws = get_workspace()
     archives = ws.archives_dir
     archives.mkdir(parents=True, exist_ok=True)
@@ -50,6 +75,11 @@ def _get_archives_path() -> str:
 
 def _get_dynamic_prompt_path() -> str:
     """获取动态提示词文件路径"""
+    workspace_override = _MEMORY_WORKSPACE_OVERRIDE.get("").strip()
+    if workspace_override:
+        prompts = Path(workspace_override) / "prompts"
+        prompts.mkdir(parents=True, exist_ok=True)
+        return str(prompts / "DYNAMIC.md")
     ws = get_workspace()
     return str(ws.get_prompt_path("DYNAMIC.md"))
 
