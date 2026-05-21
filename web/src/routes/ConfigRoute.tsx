@@ -19,7 +19,6 @@ import {
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { json } from "@codemirror/lang-json";
 import { EditorView } from "@codemirror/view";
-import { oneDark } from "@codemirror/theme-one-dark";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -42,12 +41,14 @@ import {
   asRecord,
   clonePublicConfig,
   collectModelDetailKeys,
+  deriveConfigEditorSyncState,
   getString,
   groupModelPresets,
   hasPendingSecretChanges,
   type ModelPresetGroupLabels,
   type PublicConfigShape,
 } from "./configRouteLogic";
+import { workbenchCodeMirrorTheme } from "../design/codeMirrorTheme";
 import styles from "./ConfigRoute.module.css";
 
 type ConfigLanguage = "zh" | "en";
@@ -214,7 +215,7 @@ function defaultSectionUiState(): ConfigSectionUiState {
 export const CONFIG_COPY = {
   zh: {
     pageTitle: "统一配置工作台",
-    subtitle: "这里是唯一配置网页入口。结构化编辑、JSON 检查和最终保存，都收口到同一份 config.toml。",
+    subtitle: "这里是唯一配置网页入口。结构化编辑、完整配置检查和最终保存，都收口到同一份 config.toml。",
     loading: "正在加载统一配置工作区...",
     loadFailed: "配置工作区加载失败",
     sourceTitle: "配置源",
@@ -225,8 +226,8 @@ export const CONFIG_COPY = {
     profilesBody: "查看每个任务当前使用的模型、服务商和密钥状态；需要修改时先点编辑，确认后页面立即展示本次修改。",
     modelsTitle: "模型库编辑",
     modelsBody: "新增、编辑、删除模型库项后，页面会先展示本次修改，保存后写回 config.toml。",
-    draftTitle: "高级 JSON 编辑",
-    draftBody: "如果结构化面板不够用，可以直接检查整份 JSON；保存时仍只写 config.toml。",
+    draftTitle: "高级配置检查",
+    draftBody: "如果结构化面板不够用，可以直接检查整份当前配置；保存时仍只写 config.toml。",
     diagnosticsTitle: "诊断与保存",
     diagnosticsBody: "保存前会显示阻塞问题、警告和可能需要处理的动作。",
     configPath: "配置路径",
@@ -237,7 +238,7 @@ export const CONFIG_COPY = {
     unsavedDraft: "有未保存修改",
     refresh: "重新读取",
     validateDraft: "检查当前修改",
-    resetDraft: "还原 JSON 文本",
+    resetDraft: "还原编辑文本",
     openEnvironment: "打开系统环境变量",
     openEnvironmentHint: "会打开 Windows 系统窗口，方便你自己查看当前使用了哪些 key。",
     openEnvironmentPending: "正在打开系统环境变量",
@@ -368,8 +369,9 @@ export const CONFIG_COPY = {
     blockingIssues: "阻塞问题",
     warningSignals: "警告信号",
     suggestedActions: "建议动作",
-    editorDirtyHint: "JSON 文本有未检查改动。先检查当前修改，再继续结构化编辑或测试。",
-    editorCleanHint: "当前结构化面板和 JSON 文本一致。",
+    editorDirtyHint: "编辑文本有未检查改动。先检查当前修改，再继续结构化编辑或测试。",
+    editorCleanHint: "当前结构化面板和编辑文本一致。",
+    editorRestoreHint: "放弃编辑文本里的未检查内容，并回到当前结构化面板。",
     saveSourceHint: "当前修改还没写入 config.toml，保存成功后这里会刷新为最新文件状态。",
     modelSavePending: "保存模型修改中",
     profileSavePending: "保存任务模型修改中",
@@ -394,7 +396,7 @@ export const CONFIG_COPY = {
   },
   en: {
     pageTitle: "Unified Config Workbench",
-    subtitle: "This is the single config web entry. Structured editing, JSON checks, and final writes converge on one config.toml.",
+    subtitle: "This is the single config web entry. Structured editing, full-config checks, and final writes converge on one config.toml.",
     loading: "Loading unified config workspace...",
     loadFailed: "Failed to load config workspace",
     sourceTitle: "Config Source",
@@ -405,8 +407,8 @@ export const CONFIG_COPY = {
     profilesBody: "Review the model, provider, and key state used by each task. Click edit, then confirm to update the page immediately.",
     modelsTitle: "Model Library",
     modelsBody: "Add, edit, and delete model-library entries here. The page updates first, and saving writes config.toml.",
-    draftTitle: "Advanced JSON",
-    draftBody: "When the structured panel is not enough, check the full JSON here. Saving still writes only config.toml.",
+    draftTitle: "Advanced Config Check",
+    draftBody: "When the structured panel is not enough, check the full current config here. Saving still writes only config.toml.",
     diagnosticsTitle: "Diagnostics and Save",
     diagnosticsBody: "Blocking issues, warnings, and suggested actions stay visible before saving.",
     configPath: "Config path",
@@ -417,7 +419,7 @@ export const CONFIG_COPY = {
     unsavedDraft: "Unsaved changes",
     refresh: "Reload",
     validateDraft: "Check changes",
-    resetDraft: "Restore JSON text",
+    resetDraft: "Restore editor text",
     openEnvironment: "Open system environment variables",
     openEnvironmentHint: "Opens the Windows system dialog so you can inspect which keys are in use.",
     openEnvironmentPending: "Opening system environment variables",
@@ -548,8 +550,9 @@ export const CONFIG_COPY = {
     blockingIssues: "Blocking issues",
     warningSignals: "Warnings",
     suggestedActions: "Suggested actions",
-    editorDirtyHint: "The JSON editor has unchecked changes. Check them before more structured edits or tests.",
-    editorCleanHint: "Structured controls and JSON editor are in sync.",
+    editorDirtyHint: "The editor text has unchecked changes. Check them before more structured edits or tests.",
+    editorCleanHint: "Structured controls and editor text are in sync.",
+    editorRestoreHint: "Discard unchecked editor text and return to the current structured panel.",
     saveSourceHint: "Save to config.toml to persist the current changes.",
     modelSavePending: "Saving model changes",
     profileSavePending: "Saving task model changes",
@@ -637,7 +640,7 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "workbench-interface",
       title: copy.groupWorkbenchTitle,
       summary: copy.groupWorkbenchSummary,
-      memberSectionIds: ["shell", "runtime", "ui"],
+      memberSectionIds: ["shell", "runtime", "workbench", "ui"],
     },
     {
       id: "avatar-pet",
@@ -1738,10 +1741,7 @@ export function ConfigRoute() {
   const resizeHeightTitle = currentLanguage === "en" ? "Drag to resize sidebar height" : "上下拖动调整侧栏高度";
   const resizeCornerTitle = currentLanguage === "en" ? "Drag to resize sidebar" : "拖动调整侧栏尺寸";
   const formattedDraft = useMemo(() => formatJson(draftConfig ?? {}), [draftConfig]);
-  const hasEditorChanges = jsonText !== formattedDraft;
   const hasUnsavedConfigChanges = Boolean(baseHash && draftHash && baseHash !== draftHash);
-  const hasPendingApply = hasUnsavedConfigChanges || hasPendingSecretChanges(draftMeta) || hasEditorChanges;
-  const structuredActionsDisabled = !draftConfig || hasEditorChanges || Boolean(busyAction);
   const sidebarSections = workspace?.sections ?? [];
   const editorSections = workspace?.editorSections ?? [];
   const editorMeta = workspace?.editorMeta ?? {};
@@ -1802,6 +1802,22 @@ export function ConfigRoute() {
     [sidebarHeight],
   );
   const saveButtonLabel = busyAction === copy.applying ? copy.applying : copy.saveConfig;
+  const editorSyncState = deriveConfigEditorSyncState({
+    editorText: jsonText,
+    formattedConfigText: formattedDraft,
+    configLoaded: Boolean(draftConfig),
+    hasUnsavedConfigChanges,
+    hasPendingSecretChanges: hasPendingSecretChanges(draftMeta),
+    busy: Boolean(busyAction),
+  });
+  const {
+    hasEditorChanges,
+    hasPendingApply,
+    structuredActionsDisabled,
+    canSaveConfig,
+    canCheckCurrentChanges,
+    canRestoreEditorText,
+  } = editorSyncState;
 
   function updateSectionUiState(sectionId: string, nextState: ConfigSectionUiState) {
     setSectionUiState((current) => ({ ...current, [sectionId]: nextState }));
@@ -1820,6 +1836,12 @@ export function ConfigRoute() {
     updateSectionUiState(sectionId, sectionUiState[sectionId] ?? defaultSectionUiState());
     pageRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   }
+
+  function restoreEditorText() {
+    setJsonText(formattedDraft);
+    setNotice({ tone: "neutral", text: "" });
+  }
+
   const sidebarApplyHint = hasEditorChanges ? copy.editorDirtyHint : hasPendingApply ? copy.saveSourceHint : copy.editorCleanHint;
 
   async function invalidateWorkbenchQueries() {
@@ -2314,7 +2336,7 @@ export function ConfigRoute() {
           <button
             type="button"
             className={`${styles.primaryButton} ${styles.buttonBlock}`}
-            disabled={Boolean(busyAction) || !hasPendingApply}
+            disabled={!canSaveConfig}
             onClick={handleApply}
           >
             <Save size={14} />
@@ -2452,11 +2474,9 @@ export function ConfigRoute() {
             <button
               type="button"
               className={styles.actionButton}
-              disabled={Boolean(busyAction)}
-              onClick={() => {
-                setJsonText(formattedDraft);
-                setNotice({ tone: "neutral", text: "" });
-              }}
+              disabled={!canRestoreEditorText}
+              title={copy.editorRestoreHint}
+              onClick={restoreEditorText}
             >
               <RotateCcw size={14} />
               {copy.resetDraft}
@@ -3198,16 +3218,26 @@ export function ConfigRoute() {
           </div>
           <p className={styles.sectionText}>{copy.draftBody}</p>
           <div className={styles.actionsRow}>
-            <button type="button" className={styles.actionButton} disabled={Boolean(busyAction)} onClick={handleValidateEditorDraft}>
+            <button type="button" className={styles.actionButton} disabled={!canCheckCurrentChanges} onClick={handleValidateEditorDraft}>
               <RefreshCw size={14} />
               {copy.validateDraft}
+            </button>
+            <button
+              type="button"
+              className={styles.actionButton}
+              disabled={!canRestoreEditorText}
+              title={copy.editorRestoreHint}
+              onClick={restoreEditorText}
+            >
+              <RotateCcw size={14} />
+              {copy.resetDraft}
             </button>
             <span className={styles.helperText}>{hasEditorChanges ? copy.editorDirtyHint : copy.editorCleanHint}</span>
           </div>
           <div className={styles.editorWrap}>
             <CodeMirror
               value={jsonText}
-              theme={oneDark}
+              theme={workbenchCodeMirrorTheme}
               height="100%"
               extensions={[json(), EditorView.lineWrapping]}
               onChange={(value) => setJsonText(value)}

@@ -6,6 +6,7 @@ import {
 import {
   applyModelOptionToProfileDraft,
   collectModelDetailKeys,
+  deriveConfigEditorSyncState,
   groupModelPresets,
   hasPendingSecretChanges,
   presetCategory,
@@ -149,6 +150,39 @@ describe("configRouteLogic", () => {
       }),
     ).toBe(true);
   });
+
+  it("locks structured edits while advanced config text has unchecked changes and exposes recovery actions", () => {
+    const dirtyState = deriveConfigEditorSyncState({
+      editorText: "{\n  \"ui\": {}\n}",
+      formattedConfigText: "{\n  \"ui\": {\"language\":\"zh\"}\n}",
+      configLoaded: true,
+      hasUnsavedConfigChanges: false,
+      hasPendingSecretChanges: false,
+      busy: false,
+    });
+
+    expect(dirtyState.hasEditorChanges).toBe(true);
+    expect(dirtyState.hasPendingApply).toBe(true);
+    expect(dirtyState.structuredActionsDisabled).toBe(true);
+    expect(dirtyState.canSaveConfig).toBe(false);
+    expect(dirtyState.canCheckCurrentChanges).toBe(true);
+    expect(dirtyState.canRestoreEditorText).toBe(true);
+
+    const cleanState = deriveConfigEditorSyncState({
+      editorText: "{\n  \"ui\": {}\n}",
+      formattedConfigText: "{\n  \"ui\": {}\n}",
+      configLoaded: true,
+      hasUnsavedConfigChanges: false,
+      hasPendingSecretChanges: true,
+      busy: false,
+    });
+
+    expect(cleanState.hasEditorChanges).toBe(false);
+    expect(cleanState.hasPendingApply).toBe(true);
+    expect(cleanState.structuredActionsDisabled).toBe(false);
+    expect(cleanState.canSaveConfig).toBe(true);
+    expect(cleanState.canRestoreEditorText).toBe(false);
+  });
 });
 
 describe("config route copy", () => {
@@ -166,5 +200,22 @@ describe("config route copy", () => {
     expect(zhCopy).not.toContain("配置档");
     expect(zhCopy).not.toContain("模型档案");
     expect(enCopy).not.toMatch(/\bprofiles?\b/i);
+  });
+
+  it("keeps internal draft and JSON editor jargon out of visible copy", () => {
+    const visibleCopy = {
+      zh: Object.values(CONFIG_COPY.zh).join("\n"),
+      en: Object.values(CONFIG_COPY.en).join("\n"),
+    };
+
+    expect(CONFIG_COPY.zh.draftTitle).toBe("高级配置检查");
+    expect(CONFIG_COPY.en.draftTitle).toBe("Advanced Config Check");
+    expect(CONFIG_COPY.zh.validateDraft).toBe("检查当前修改");
+    expect(CONFIG_COPY.en.validateDraft).toBe("Check changes");
+    expect(visibleCopy.zh).not.toContain("草稿");
+    expect(visibleCopy.zh).not.toContain("JSON");
+    expect(visibleCopy.en).not.toMatch(/\bdrafts?\b/i);
+    expect(visibleCopy.en).not.toMatch(/\bJSON\b/i);
+    expect(visibleCopy.en).not.toMatch(/\bJSON editor\b/i);
   });
 });

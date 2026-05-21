@@ -12,6 +12,24 @@ export type ModelPresetGroup = {
 
 export type ModelPresetGroupLabels = Record<ModelPresetGroupId, string>;
 
+export type ConfigEditorSyncStateInput = {
+  editorText: string;
+  formattedConfigText: string;
+  configLoaded: boolean;
+  hasUnsavedConfigChanges: boolean;
+  hasPendingSecretChanges: boolean;
+  busy: boolean;
+};
+
+export type ConfigEditorSyncState = {
+  hasEditorChanges: boolean;
+  hasPendingApply: boolean;
+  structuredActionsDisabled: boolean;
+  canSaveConfig: boolean;
+  canCheckCurrentChanges: boolean;
+  canRestoreEditorText: boolean;
+};
+
 export function clonePublicConfig<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -50,6 +68,19 @@ export function collectModelDetailKeys(options: ConfigModelOption[]): string[] {
 
 export function hasPendingSecretChanges(draftMeta: ConfigDraftMeta): boolean {
   return Boolean(Object.keys(draftMeta.pending_api_keys).length || draftMeta.pending_cleared_api_keys.length);
+}
+
+export function deriveConfigEditorSyncState(input: ConfigEditorSyncStateInput): ConfigEditorSyncState {
+  const hasEditorChanges = input.editorText !== input.formattedConfigText;
+  const hasPendingApply = input.hasUnsavedConfigChanges || input.hasPendingSecretChanges || hasEditorChanges;
+  return {
+    hasEditorChanges,
+    hasPendingApply,
+    structuredActionsDisabled: !input.configLoaded || hasEditorChanges || input.busy,
+    canSaveConfig: input.configLoaded && hasPendingApply && !hasEditorChanges && !input.busy,
+    canCheckCurrentChanges: input.configLoaded && !input.busy,
+    canRestoreEditorText: input.configLoaded && hasEditorChanges && !input.busy,
+  };
 }
 
 export function presetCategory(preset: ConfigModelPresetOption): ModelPresetGroupId {
