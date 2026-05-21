@@ -2434,6 +2434,21 @@ function Write-ManagedSessionClosureRecord {
         } else {
             @{ status = "failed"; result = "shutdown_failed" }
         }
+        $manifestRuntimeManager = if ($Success -and $finalState.status -eq "stopped") {
+            @{
+                desired_state = "closed"
+                observed_state = "closed"
+                phase = "steady"
+                failure_message = ""
+            }
+        } else {
+            @{
+                desired_state = [string]$Closure.DesiredState
+                observed_state = [string]$Closure.ObservedState
+                phase = [string]$Closure.Phase
+                failure_message = [string]$Closure.FailureMessage
+            }
+        }
         Update-RuntimeSceneManifest @{
             status = $finalState.status
             result = $finalState.result
@@ -2453,12 +2468,7 @@ function Write-ManagedSessionClosureRecord {
                 visible_monitor = if ($Source -eq "desktop_monitor") { if ($Success) { "closed" } else { "failed" } } else { "observed" }
                 last_shutdown_source = $Source
             }
-            runtime_manager = @{
-                desired_state = [string]$Closure.DesiredState
-                observed_state = [string]$Closure.ObservedState
-                phase = [string]$Closure.Phase
-                failure_message = [string]$Closure.FailureMessage
-            }
+            runtime_manager = $manifestRuntimeManager
         }
     }
 
