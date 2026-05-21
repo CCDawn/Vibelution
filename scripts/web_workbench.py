@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import threading
 import webbrowser
@@ -17,19 +16,16 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port  # noqa: E402
+
 
 def default_port() -> int:
-    raw_value = str(os.environ.get("VIBELUTION_PORT") or "").strip()
-    try:
-        port = int(raw_value)
-    except ValueError:
-        return 8000
-    return port if 0 < port < 65536 else 8000
+    return configured_backend_port()
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Launch the Vibelution web workbench")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default=DEFAULT_WORKBENCH_HOST)
     parser.add_argument("--port", type=int, default=default_port())
     parser.add_argument("--reload", action="store_true")
     parser.add_argument("--no-browser", action="store_true")

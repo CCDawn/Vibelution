@@ -15,6 +15,7 @@ AVATAR_PRESET_OPTIONS = ["lobster", "shrimp", "crab", "cat", "chick", "bunny", "
 SECTION_LABELS = {
     "zh": {
         "runtime": "运行时",
+        "workbench": "工作台端口",
         "avatar": "形象",
         "llm.profiles": "模型",
         "llm.discovery": "模型发现",
@@ -37,6 +38,7 @@ SECTION_LABELS = {
     },
     "en": {
         "runtime": "Runtime",
+        "workbench": "Workbench Ports",
         "avatar": "Avatar",
         "llm.profiles": "Models",
         "llm.discovery": "Model Discovery",
@@ -64,6 +66,8 @@ FIELD_LABELS = {
         "runtime.profile": "运行档位",
         "runtime.preflight_doctor": "启动前自检",
         "runtime.require_venv": "要求使用 .venv",
+        "workbench.backend_port": "后端端口",
+        "workbench.frontend_port": "前端端口",
         "avatar.preset": "形象预设",
         "llm.profiles.primary.provider_id": "模型服务绑定",
         "llm.profiles.primary.model": "模型名称",
@@ -137,6 +141,8 @@ FIELD_LABELS = {
         "runtime.profile": "Runtime Mode",
         "runtime.preflight_doctor": "Preflight Doctor",
         "runtime.require_venv": "Require .venv",
+        "workbench.backend_port": "Backend Port",
+        "workbench.frontend_port": "Frontend Port",
         "avatar.preset": "Avatar Preset",
         "llm.profiles.primary.provider_id": "Provider Binding",
         "llm.profiles.primary.model": "Model Name",
@@ -306,6 +312,8 @@ FIELD_HINTS = {
     "zh": {
         "runtime.profile": "决定默认运行策略，通常先从 safe_local 或 debug 开始。",
         "runtime.preflight_doctor": "启动前先做自检，适合排查环境漂移。",
+        "workbench.backend_port": "后端 API 服务使用的本地端口，修改后下次启动或重启生效。",
+        "workbench.frontend_port": "前端开发服务使用的本地端口，修改后下次启动或重启生效。",
         "agent.awake_interval": "自主模式两次苏醒之间的间隔。",
         "agent.max_iterations": "单轮最多允许多少次工具动作。",
         "agent.max_runtime": "单轮可持续的最长运行时间。",
@@ -328,6 +336,8 @@ FIELD_HINTS = {
     "en": {
         "runtime.profile": "Sets the default runtime posture. Start with safe_local or debug in most cases.",
         "runtime.preflight_doctor": "Runs startup checks before execution to catch environment drift.",
+        "workbench.backend_port": "Local port used by the backend API service. Restart the workbench after changing it.",
+        "workbench.frontend_port": "Local port used by the frontend dev server. Restart the workbench after changing it.",
         "agent.awake_interval": "Delay between autonomous wake cycles.",
         "agent.max_iterations": "Maximum tool actions allowed in one round.",
         "agent.max_runtime": "Maximum duration for a single round.",
@@ -351,6 +361,7 @@ FIELD_HINTS = {
 
 EDITOR_SECTION_SPECS = [
     ("runtime", "runtime"),
+    ("workbench", "workbench"),
     ("avatar", "avatar"),
     ("llm-profiles", "llm.profiles"),
     ("llm-discovery", "llm.discovery"),
