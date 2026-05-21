@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigationType } from "react-router-dom";
-import { GitBranch, LoaderCircle, Power, Settings } from "lucide-react";
+import { GitBranch, LoaderCircle, Moon, Power, Settings, Sun } from "lucide-react";
 
-import { fetchJson, setFetchJsonFailureReporter } from "../api/client";
+import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { BackendHealth, ConfigSummary, GitStatusSummary, RuntimeSummary, ShutdownResponse } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -15,13 +15,18 @@ import {
 } from "./browserTelemetry";
 import {
   backendSystemTone,
+  deriveActiveWorkIndicator,
   deriveBackendSystemState,
   deriveFrontendSystemState,
   deriveRuntimeControllerState,
   frontendSystemTone,
+  lifecycleStateLabel,
+  lifecycleStateTone,
   runtimeControllerTone,
   type SystemStatusTone,
 } from "./systemStatus";
+import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
+import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import styles from "./AppShell.module.css";
 
@@ -36,8 +41,23 @@ function formatHistoryTarget(value: string | URL | null | undefined): string {
   return typeof value === "string" ? value : value.toString();
 }
 
+export function shouldSuppressApiFailureTelemetry(
+  failure: FetchJsonFailureReport,
+  options: {
+    shutdownRequested: boolean;
+    runtimeControllerState: string;
+  },
+): boolean {
+  const { shutdownRequested, runtimeControllerState } = options;
+  if (shutdownRequested || runtimeControllerState === "closing") {
+    return true;
+  }
+  return failure.status === 403
+    && (failure.endpoint === "/api/control-token" || failure.endpoint === "/api/runtime/browser-telemetry");
+}
+
 export function AppShell() {
-  const { lang, t } = useAppI18n();
+  const { lang, t, statusLabel } = useAppI18n();
   const location = useLocation();
   const navigationType = useNavigationType();
   const [shutdownOpen, setShutdownOpen] = useState(false);
@@ -46,6 +66,7 @@ export function AppShell() {
   const [shutdownFailed, setShutdownFailed] = useState(false);
   const [shutdownRequested, setShutdownRequested] = useState(false);
   const [clockNow, setClockNow] = useState(() => Date.now());
+  const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
     () => (typeof document === "undefined" ? true : document.visibilityState === "visible"),
   );
@@ -85,11 +106,13 @@ export function AppShell() {
   });
 
   const workbench = runtimeQuery.data?.workbench;
+  const lifecycleProof = runtimeQuery.data?.lifecycleProof;
   const shutdownInFlight = workbench?.desiredState === "closed" && workbench?.observedState !== "closed";
   const chatEnabled = isWorkbenchDomainEnabled(configQuery.data, "chat");
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");
   const selfEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "self_evolution");
   const closeWorkbenchLabel = lang === "en" ? "Close workbench" : "关闭工作台";
+  const themeToggleLabel = theme === "dark" ? t("switchToLightTheme") : t("switchToDarkTheme");
   const shutdownHeading = lang === "en" ? "Closing workbench" : "正在关闭工作台";
   const shutdownBody = lang === "en"
     ? "Please keep this window open. The runtime manager will close the backend and app window."
@@ -127,6 +150,7 @@ export function AppShell() {
     health: backendHealthQuery.data,
   });
   const runtimeControllerState = deriveRuntimeControllerState(runtimeQuery.data);
+  const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   const currentTime = clockFormatter.format(clockNow);
   const buildId = __VIBELUTION_BUILD_ID__;
   const gitStatus = gitStatusQuery.data;
@@ -162,6 +186,7 @@ export function AppShell() {
     unmanaged: t("systemRuntime_unmanaged"),
     failed: t("systemRuntime_failed"),
   }[runtimeControllerState];
+  const suppressApiFailureTelemetry = shutdownRequested || runtimeControllerState === "closing";
 
   const emitBrowserTelemetry = useCallback((
     payload: BrowserTelemetryEventInput,
@@ -214,13 +239,27 @@ export function AppShell() {
     return task;
   }, [shutdownBody, shutdownErrorBody, shutdownHeading]);
 
+  const toggleTheme = useCallback(() => {
+    setTheme((current) => {
+      const next = nextWorkbenchTheme(current);
+      writeStoredWorkbenchTheme(next);
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
-    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    applyWorkbenchDocumentLanguage(document, lang);
     document.title = t("appTitle");
   }, [lang, t]);
 
   useEffect(() => {
     setFetchJsonFailureReporter((failure) => {
+      if (shouldSuppressApiFailureTelemetry(failure, {
+        shutdownRequested,
+        runtimeControllerState,
+      })) {
+        return;
+      }
       emitBrowserTelemetry({
         phase: "api",
         eventCode: failure.failureKind === "network" ? "browser.api.network_error" : "browser.api.request_failed",
@@ -236,7 +275,7 @@ export function AppShell() {
       });
     });
     return () => setFetchJsonFailureReporter(null);
-  }, [emitBrowserTelemetry]);
+  }, [emitBrowserTelemetry, suppressApiFailureTelemetry]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -592,7 +631,7 @@ export function AppShell() {
       label: t("systemRuntime"),
       value: runtimeControllerLabel,
       tone: runtimeControllerTone(runtimeControllerState),
-      note: workbench?.statusLine || t("systemRuntimeHint"),
+      note: lifecycleProof?.summary || workbench?.statusLine || t("systemRuntimeHint"),
       states: [
         {
           label: t("systemRuntime_managed"),
@@ -631,9 +670,10 @@ export function AppShell() {
       ],
     },
   ];
+  const rightStatusCards = systemStatusCards.filter((item) => item.id !== "time");
 
   return (
-    <div className={styles.shell}>
+    <div className={styles.shell} data-theme={theme}>
       {shutdownOpen ? (
         <div className={styles.shutdownOverlay} role="status" aria-live="polite" aria-busy={!shutdownFailed}>
           <div className={styles.shutdownPanel}>
@@ -647,8 +687,33 @@ export function AppShell() {
       ) : null}
       <header className={styles.topBar}>
         <div className={styles.brandBlock}>
-          <span className={styles.brand}>Vibelution</span>
-          <span className={styles.brandSubtle}>{t("brandSubtle")}</span>
+          <div className={styles.brandCopy}>
+            <span className={styles.brand}>Vibelution</span>
+            <span className={styles.brandSubtle}>{t("brandSubtle")}</span>
+          </div>
+          <div className={styles.topClock} title={timezone} aria-label={`${t("systemTime")}: ${currentTime}`}>
+            <span className={`${styles.statusDot} ${styles.status_idle}`} />
+            <span>{currentTime}</span>
+          </div>
+          {activeWorkIndicator ? (
+            <div
+              className={styles.activeWorkChip}
+              title={activeWorkIndicator.detail}
+              aria-label={`${t("activeWorkNow")}: ${activeWorkIndicator.label} ${activeWorkIndicator.summary}`}
+            >
+              <span className={`${styles.statusDot} ${styles[`status_${activeWorkIndicator.tone}`]}`} />
+              <span className={styles.activeWorkKicker}>{t("activeWorkNow")}</span>
+              <strong>{activeWorkIndicator.label}</strong>
+              <span className={styles.activeWorkSummary}>{activeWorkIndicator.summary}</span>
+              <span className={styles.activeWorkStatus}>{statusLabel(activeWorkIndicator.status)}</span>
+              {activeWorkIndicator.overflowCount > 0 ? (
+                <span className={styles.activeWorkMore}>
+                  {t("activeWorkMorePrefix")}
+                  {activeWorkIndicator.overflowCount}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <nav className={styles.nav}>
@@ -739,8 +804,8 @@ export function AppShell() {
           </div>
           <div className={styles.statusCluster} tabIndex={0} aria-label={t("systemStatusGuide")}>
             <div className={styles.statusChipRow}>
-              {systemStatusCards.map((item) => (
-                <span key={item.id} className={`${styles.statusBadge} ${item.id === "time" ? styles.statusBadgeTime : ""}`}>
+              {rightStatusCards.map((item) => (
+                <span key={item.id} className={styles.statusBadge}>
                   <span className={`${styles.statusDot} ${styles[`status_${item.tone}`]}`} />
                   <span className={styles.statusBadgeLabel}>{item.label}</span>
                   <strong className={styles.statusBadgeValue}>{item.value}</strong>
@@ -753,7 +818,7 @@ export function AppShell() {
                 <span>{t("systemStatusGuideHint")}</span>
               </div>
               <div className={styles.statusGuideGrid}>
-                {systemStatusCards.map((item) => (
+                {rightStatusCards.map((item) => (
                   <section key={item.id} className={styles.statusGuideCard}>
                     <div className={styles.statusGuideCardHeader}>
                       <span>{item.label}</span>
@@ -772,8 +837,55 @@ export function AppShell() {
                   </section>
                 ))}
               </div>
+              <section className={styles.lifecycleProofCard}>
+                <div className={styles.lifecycleProofHeader}>
+                  <span>{t("lifecycleProofTitle")}</span>
+                  <strong>
+                    <span
+                      className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(lifecycleProof?.overallState)}`]}`}
+                    />
+                    {lifecycleProof?.overallLabel || t("lifecycleProofUnavailable")}
+                  </strong>
+                </div>
+                <p className={styles.statusGuideNote}>
+                  {lifecycleProof?.summary || t("lifecycleProofUnavailable")}
+                </p>
+                {lifecycleProof ? (
+                  <>
+                    <div className={styles.lifecycleProofMeta}>
+                      <span>{t("lifecycleProofDesiredObserved")}</span>
+                      <strong>
+                        {lifecycleProof.desiredState} / {lifecycleProof.observedState}
+                      </strong>
+                      <span>{t("lifecycleProofVerifiedAt")}</span>
+                      <strong>{lifecycleProof.verifiedAt || "-"}</strong>
+                    </div>
+                    <ul className={styles.lifecycleProofList}>
+                      {lifecycleProof.components.map((component) => (
+                        <li key={component.id} className={styles.lifecycleProofItem}>
+                          <span
+                            className={`${styles.statusDot} ${styles[`status_${lifecycleStateTone(component.state)}`]}`}
+                          />
+                          <span className={styles.lifecycleProofName}>{component.label}</span>
+                          <strong>{lifecycleStateLabel(component.state, lang)}</strong>
+                          <span>{component.detail}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : null}
+              </section>
             </div>
           </div>
+          <button
+            type="button"
+            className={styles.actionIconButton}
+            aria-label={themeToggleLabel}
+            title={themeToggleLabel}
+            onClick={toggleTheme}
+          >
+            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
           <button
             type="button"
             className={styles.actionIconButton}

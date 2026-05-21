@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchJson, resetControlTokenForTests, setFetchJsonFailureReporter } from "./client";
+import { fetchJson, getControlToken, resetControlTokenForTests, setFetchJsonFailureReporter } from "./client";
 
 describe("fetchJson control token", () => {
   afterEach(() => {
@@ -87,6 +87,40 @@ describe("fetchJson control token", () => {
         failureKind: "http",
       },
     ]);
+  });
+
+  it("clears cached control token after a guarded write returns 403", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "expired-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({ detail: "Missing or invalid web control token" }),
+        text: async () => "",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "fresh-token",
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchJson("/api/runtime/shutdown", { method: "POST" })).rejects.toThrow(
+      "Missing or invalid web control token",
+    );
+    const control = await getControlToken();
+
+    expect(control.token).toBe("fresh-token");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("reports same-origin API network failures", async () => {

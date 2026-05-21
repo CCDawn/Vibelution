@@ -42,7 +42,7 @@ pre {
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(20, 23, 26, 0.75);
+  background: var(--surface-scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
