@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from core.evaluation.supervised_evolution import (
     DEFAULT_BUNDLE_NAME,
     format_decision_record_summary,
@@ -203,6 +205,46 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert "policy:" in rendered
 
 
+def test_run_supervised_evolution_session_records_materialized_prompt(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        """
+{
+  "benchmark": "dry",
+  "bundle_name": "supervised_evolution_dry_run_v1",
+  "cases": [
+    {
+      "case_id": "safe_modify_probe",
+      "scenario": "modify_rollback",
+      "mode": "single_turn",
+      "baseline_prompt": "write {SAFE_MODIFY_ABSOLUTE_PATH}",
+      "candidate_prompt": "write {SAFE_MODIFY_ABSOLUTE_PATH}"
+    }
+  ]
+}
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    def fake_runner(**kwargs):
+        result = _fake_result("failed", "probe failed", kwargs["prompt"])
+        result.command = ["python", "agent.py", "--single-turn", "--prompt", "write C:\\tmp\\probe.py"]
+        return result
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    assert decision.baseline_runs[0].prompt == "write C:\\tmp\\probe.py"
+    payload = json.loads(Path(decision.decision_path).read_text(encoding="utf-8"))
+    assert payload["baseline_runs"][0]["prompt"] == "write C:\\tmp\\probe.py"
+    assert "{SAFE_MODIFY_ABSOLUTE_PATH}" not in payload["baseline_runs"][0]["prompt"]
+
+
 def test_run_supervised_evolution_session_emits_progress_events(tmp_path: Path):
     bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
     bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -374,13 +416,60 @@ def test_run_supervised_evolution_session_emits_safe_checkpoints(tmp_path: Path)
     )
 
     assert checkpoints[0]["phase"] == "session_start"
-    assert checkpoints[1]["phase"] == "role_boundary"
+    assert checkpoints[1]["phase"] == "role_start_boundary"
     assert checkpoints[1]["case_id"] == "probe"
     assert checkpoints[1]["role"] == "baseline"
     assert checkpoints[2]["phase"] == "role_boundary"
-    assert checkpoints[2]["role"] == "candidate"
-    assert checkpoints[3]["phase"] == "case_boundary"
-    assert checkpoints[3]["case_id"] == "probe"
+    assert checkpoints[2]["role"] == "baseline"
+    assert checkpoints[3]["phase"] == "role_start_boundary"
+    assert checkpoints[3]["role"] == "candidate"
+    assert checkpoints[4]["phase"] == "role_boundary"
+    assert checkpoints[4]["role"] == "candidate"
+    assert checkpoints[5]["phase"] == "case_boundary"
+    assert checkpoints[5]["case_id"] == "probe"
+
+
+def test_run_supervised_evolution_session_checks_boundary_before_next_role(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        """
+{
+  "benchmark": "dry",
+  "bundle_name": "supervised_evolution_dry_run_v1",
+  "cases": [
+    {
+      "case_id": "probe",
+      "scenario": "transaction",
+      "mode": "single_turn",
+      "baseline_prompt": "baseline",
+      "candidate_prompt": "candidate"
+    }
+  ]
+}
+        """.strip(),
+        encoding="utf-8",
+    )
+    prompts = []
+
+    def fake_runner(**kwargs):
+        prompts.append(kwargs["prompt"])
+        return _fake_result("success", f"{kwargs['prompt']} ok", kwargs["prompt"])
+
+    def stop_after_baseline_boundary(checkpoint):
+        if checkpoint["phase"] == "role_start_boundary" and checkpoint["role"] == "candidate":
+            raise RuntimeError("stop at boundary")
+
+    with pytest.raises(RuntimeError, match="stop at boundary"):
+        run_supervised_evolution_session(
+            bundle_name=DEFAULT_BUNDLE_NAME,
+            project_root=tmp_path,
+            harness_runner=fake_runner,
+            checkpoint_callback=stop_after_baseline_boundary,
+        )
+
+    assert prompts == ["baseline"]
 
 
 def test_run_supervised_evolution_session_captures_active_advisory_context(tmp_path: Path):
@@ -572,6 +661,73 @@ def test_run_supervised_evolution_session_is_inconclusive_when_baseline_and_cand
     observation_pool = tmp_path / "workspace" / "supervised_evolution" / "policy" / "candidate_observation_pool.jsonl"
     assert not rollback_pool.exists()
     assert not observation_pool.exists()
+
+
+def test_run_supervised_evolution_session_reports_provider_transport_as_infrastructure_failure(
+    tmp_path: Path,
+):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        """
+{
+  "benchmark": "dry",
+  "bundle_name": "supervised_evolution_dry_run_v1",
+  "cases": [
+    {
+      "case_id": "probe",
+      "scenario": "transaction",
+      "mode": "single_turn",
+      "baseline_prompt": "baseline",
+      "candidate_prompt": "candidate"
+    }
+  ]
+}
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    def provider_transport_failure(worktree_name: str):
+        result = _fake_result(
+            "failed",
+            "LLM provider 传输异常，未生成可评估输出；请稍后重试",
+            worktree_name,
+        )
+        result.evolution_summary["transaction"]["opened"] = False
+        result.evolution_summary["transaction"]["closed"] = False
+        result.evolution_summary["transaction"]["status"] = None
+        result.evolution_summary["validation"]["passed"] = 0
+        result.evolution_summary["validation"]["failed"] = 0
+        result.evolution_summary["llm_failure"] = {
+            "detected": True,
+            "category": "provider_transport_error",
+            "retryable": True,
+            "error_type": "llm_error",
+            "message": "UNEXPECTED_EOF_WHILE_READING",
+        }
+        return result
+
+    def fake_runner(**kwargs):
+        if kwargs["prompt"] == "baseline":
+            return provider_transport_failure("baseline")
+        return provider_transport_failure("candidate")
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    assert decision.decision == "INCONCLUSIVE"
+    assert decision.reason == "LLM provider 传输异常，当前监督评测不可判定"
+    assert decision.gates[0].name == "infrastructure"
+    assert decision.gates[0].status == "fail"
+    assert decision.gates[0].metrics["provider_transport_failures"] == 2
+    assert decision.gates[1].name == "legality"
+    assert decision.gates[1].status == "skipped"
+    assert "未开账" not in format_decision_record_summary(decision)
+    assert decision.policy_action["action"] == "INCONCLUSIVE"
 
 
 def test_run_supervised_evolution_session_holds_improvement_when_cost_is_too_high(tmp_path: Path):

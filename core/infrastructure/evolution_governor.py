@@ -275,8 +275,13 @@ class EvolutionGovernor:
     def _is_under_allowed_roots(path: Path, allowed_roots: Iterable[Path]) -> bool:
         normalized = path.resolve()
         for root in allowed_roots:
+            resolved_root = root.resolve()
+            if resolved_root.suffix:
+                if normalized == resolved_root:
+                    return True
+                continue
             try:
-                normalized.relative_to(root.resolve())
+                normalized.relative_to(resolved_root)
                 return True
             except ValueError:
                 continue

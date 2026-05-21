@@ -15,6 +15,7 @@ from scripts.evolution_harness import (
     DEFAULT_FULL_EVOLUTION_PROMPT,
     DEFAULT_SAFE_MODIFY_PROMPT,
     DEFAULT_TRANSACTION_PROMPT,
+    ensure_harness_safe_modify_allowlist,
     extend_deadline_for_restart_trigger,
     infer_phase_from_agent_state,
     infer_phase_from_debug_lines,
@@ -23,6 +24,7 @@ from scripts.evolution_harness import (
     infer_evolution_summary,
     infer_post_restart_phase,
     infer_result_status,
+    extract_llm_failure_from_events,
     is_restart_trigger_line,
     mirror_venv_into_worktree,
     read_conversation_events,
@@ -44,6 +46,7 @@ from scripts.evolution_harness import (
     summarize_latest_matching_file,
     summarize_conversation_file,
 )
+from core.orchestration.turn_outcome import TurnOutcomeController
 
 
 def test_build_agent_command_for_test_mode():
@@ -226,9 +229,10 @@ def test_infer_result_status_requires_safe_modify_and_restart_for_full_evolution
         restart_reentered=True,
         primary_returncode=0,
         last_observation={"phase": "first_tool:task_create_tool:success"},
+        scenario="full_evolution",
         evolution_summary={
             "validation": {"passed": 1, "failed": 0},
-            "transaction": {"closed": True, "status": "success"},
+            "transaction": {"opened": True, "closed": True, "status": "success"},
             "safe_modify": {
                 "exists": True,
                 "marker_present": True,
@@ -248,9 +252,10 @@ def test_infer_result_status_rejects_restart_when_safe_modify_missing_even_if_re
         restart_reentered=True,
         primary_returncode=0,
         last_observation={"phase": "first_tool:task_create_tool:success"},
+        scenario="full_evolution",
         evolution_summary={
             "validation": {"passed": 1, "failed": 0},
-            "transaction": {"closed": True, "status": "success"},
+            "transaction": {"opened": True, "closed": True, "status": "success"},
             "safe_modify": {
                 "exists": False,
                 "marker_present": False,
@@ -515,6 +520,104 @@ def test_build_live_case_io_payload_reads_inline_and_referenced_content(tmp_path
     assert payload["transcript"][1]["content"] == "tool result body"
 
 
+def test_build_live_case_io_payload_reads_llm_error_message(tmp_path: Path):
+    conversation_path = tmp_path / "conversation_demo.jsonl"
+    provider_error = (
+        "provider_protocol_error: litellm.InternalServerError: InternalServerError: "
+        "OpenAIException - [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"
+    )
+    conversation_path.write_text(
+        "\n".join(
+            [
+                '{"type":"external_request","timestamp":"2026-05-21T21:41:30Z","content":"run probe"}',
+                '{"type":"error","timestamp":"2026-05-21T21:41:46Z","error_type":"llm_error","error_msg":"'
+                + provider_error.replace("\\", "\\\\").replace('"', '\\"')
+                + '"}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_live_case_io_payload(tmp_path)
+    summary = summarize_conversation_file(conversation_path)
+
+    assert payload["latest_output_kind"] == "error"
+    assert payload["latest_output_label"] == "llm_error"
+    assert "UNEXPECTED_EOF_WHILE_READING" in payload["latest_output"]
+    assert summary["phase"] == "provider_transport_error"
+    assert summary["llm_failure"]["category"] == "provider_transport_error"
+    assert summary["first_meaningful_event"]["phase"] == "first_provider_transport_error"
+
+
+def test_build_live_case_io_payload_keeps_recovered_llm_error_out_of_latest_output(tmp_path: Path):
+    conversation_path = tmp_path / "conversation_demo.jsonl"
+    conversation_path.write_text(
+        "\n".join(
+            [
+                '{"type":"external_request","timestamp":"2026-05-21T23:06:51Z","content":"run probe"}',
+                '{"type":"error","timestamp":"2026-05-21T23:07:09Z","error_type":"llm_error","error_msg":"network_error: [SSL: UNEXPECTED_EOF_WHILE_READING]"}',
+                '{"type":"tool_call","timestamp":"2026-05-21T23:07:48Z","tool_name":"python_lint_tool","status":"success","tool_result":"{\\"status\\":\\"ok\\",\\"issue_count\\":0}"}',
+                '{"type":"error","timestamp":"2026-05-21T23:07:54Z","error_type":"llm_error","error_msg":"network_error: [SSL: UNEXPECTED_EOF_WHILE_READING]"}',
+                '{"type":"tool_call","timestamp":"2026-05-21T23:08:10Z","tool_name":"close_evolution_transaction_tool","status":"success","tool_result":"{\\"status\\":\\"success\\",\\"transaction_status\\":\\"success\\"}"}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_live_case_io_payload(tmp_path)
+
+    assert payload["latest_output_kind"] == "tool"
+    assert payload["latest_output_label"] == "close_evolution_transaction_tool"
+    assert '"transaction_status":"success"' in payload["latest_output"]
+    assert [item["label"] for item in payload["transcript"]].count("llm_error") == 2
+
+
+def test_infer_evolution_summary_records_provider_transport_llm_failure():
+    provider_error = (
+        "provider_protocol_error: litellm.InternalServerError: InternalServerError: "
+        "OpenAIException - [SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol"
+    )
+    events = [
+        {
+            "type": "error",
+            "error_type": "llm_error",
+            "error_msg": provider_error,
+        }
+    ]
+
+    failure = extract_llm_failure_from_events(events)
+    summary = infer_evolution_summary(
+        events,
+        [],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert failure["category"] == "provider_transport_error"
+    assert summary["llm_failure"]["detected"] is True
+    assert summary["llm_failure"]["retryable"] is True
+
+
+def test_extract_llm_failure_ignores_recovered_llm_error():
+    events = [
+        {
+            "type": "error",
+            "error_type": "llm_error",
+            "error_msg": "provider_protocol_error: [SSL: UNEXPECTED_EOF_WHILE_READING]",
+        },
+        {
+            "type": "llm_response",
+            "content": "recovered",
+        },
+    ]
+
+    failure = extract_llm_failure_from_events(events)
+
+    assert failure["detected"] is False
+    assert failure["recovered"] is True
+
+
 def test_safe_modify_probe_summary_reports_marker_and_dirty_state(tmp_path: Path):
     probe = tmp_path / SAFE_MODIFY_PROBE_PATH
     probe.parent.mkdir(parents=True)
@@ -530,6 +633,41 @@ def test_safe_modify_probe_summary_reports_marker_and_dirty_state(tmp_path: Path
     assert summary["marker_present"] is True
     assert summary["size"] > 0
     assert summary["cleanup"] == "pending"
+
+
+def test_create_harness_config_injects_safe_modify_probe_allowlist(tmp_path: Path):
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "[runtime]\n"
+        'profile = "dev"\n'
+        "[evolution]\n"
+        "allowed_target_dirs = [\n"
+        '    "workspace/prompts/",\n'
+        "]\n",
+        encoding="utf-8",
+    )
+
+    harness_config = create_harness_config(tmp_path)
+
+    assert harness_config is not None
+    text = harness_config.read_text(encoding="utf-8")
+    assert 'profile = ""' in text
+    assert f'"{SAFE_MODIFY_PROBE_PATH}"' in text
+    assert config_path.read_text(encoding="utf-8").count(SAFE_MODIFY_PROBE_PATH) == 0
+
+
+def test_harness_safe_modify_allowlist_handles_inline_array(tmp_path: Path):
+    harness_config = tmp_path / "config.harness.toml"
+    harness_config.write_text(
+        "[evolution]\n"
+        'allowed_target_dirs = ["workspace/prompts/"]\n',
+        encoding="utf-8",
+    )
+
+    ensure_harness_safe_modify_allowlist(harness_config)
+
+    text = harness_config.read_text(encoding="utf-8")
+    assert 'allowed_target_dirs = ["workspace/prompts/", "tests/harness_safe_modify_probe.py"]' in text
 
 
 def test_safe_modify_probe_summary_reports_out_of_scope_dirty_paths(monkeypatch, tmp_path: Path):
@@ -757,6 +895,7 @@ def test_infer_result_status_rejects_unclosed_transaction_probe():
         restart_reentered=False,
         primary_returncode=0,
         last_observation={"phase": "session_end"},
+        scenario="transaction",
         evolution_summary={
             "validation": {"passed": 1, "failed": 0},
             "transaction": {
@@ -769,6 +908,69 @@ def test_infer_result_status_rejects_unclosed_transaction_probe():
 
     assert status == "failed"
     assert "未关账" in reason
+
+
+def test_infer_result_status_rejects_transaction_probe_without_tool_activity():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "session_end"},
+        scenario="transaction",
+        evolution_summary={
+            "validation": {"passed": 0, "failed": 0},
+            "transaction": {
+                "opened": False,
+                "closed": False,
+                "status": None,
+            },
+        },
+    )
+
+    assert status == "failed"
+    assert "未开账" in reason
+
+
+def test_infer_result_status_prefers_provider_transport_error_over_missing_transaction():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "provider_transport_error"},
+        scenario="transaction",
+        evolution_summary={
+            "validation": {"passed": 0, "failed": 0},
+            "transaction": {
+                "opened": False,
+                "closed": False,
+                "status": None,
+            },
+            "llm_failure": {
+                "detected": True,
+                "category": "provider_transport_error",
+                "retryable": True,
+                "message": "UNEXPECTED_EOF_WHILE_READING",
+            },
+        },
+    )
+
+    assert status == "failed"
+    assert "provider 传输异常" in reason
+    assert "未开账" not in reason
+
+
+def test_single_turn_direct_response_does_not_finish_tool_required_probe():
+    should_finish = TurnOutcomeController.should_finish_single_turn_after_direct_response(
+        single_turn_mode_active=True,
+        tool_calls=[],
+        visible_text="我会开始执行。",
+        active_goal="调用 open_evolution_transaction_tool 开账，然后调用 python_lint_tool。",
+        active_evolution_txn_id=None,
+    )
+
+    assert should_finish is False
 
 
 def test_infer_result_status_handles_timeout_with_phase():
@@ -791,6 +993,7 @@ def test_infer_result_status_requires_complete_safe_modify_probe():
         restart_reentered=False,
         primary_returncode=0,
         last_observation={"phase": "session_end"},
+        scenario="modify_rollback",
         evolution_summary={
             "safe_modify": {
                 "exists": True,
@@ -801,6 +1004,7 @@ def test_infer_result_status_requires_complete_safe_modify_probe():
                 "passed": 0,
             },
             "transaction": {
+                "opened": True,
                 "closed": False,
                 "status": None,
             },
@@ -811,6 +1015,35 @@ def test_infer_result_status_requires_complete_safe_modify_probe():
     assert "事务未关账" in reason
 
 
+def test_infer_result_status_rejects_safe_modify_without_transaction_open():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "session_end"},
+        scenario="modify_rollback",
+        evolution_summary={
+            "safe_modify": {
+                "exists": True,
+                "marker_present": True,
+                "out_of_scope_paths": [],
+            },
+            "validation": {
+                "passed": 1,
+            },
+            "transaction": {
+                "opened": False,
+                "closed": True,
+                "status": "success",
+            },
+        },
+    )
+
+    assert status == "failed"
+    assert "事务未开账" in reason
+
+
 def test_infer_result_status_reports_failed_safe_modify_validation_close():
     status, reason = infer_result_status(
         timed_out=False,
@@ -818,6 +1051,7 @@ def test_infer_result_status_reports_failed_safe_modify_validation_close():
         restart_reentered=False,
         primary_returncode=0,
         last_observation={"phase": "session_end"},
+        scenario="modify_rollback",
         evolution_summary={
             "safe_modify": {
                 "exists": True,
@@ -829,6 +1063,7 @@ def test_infer_result_status_reports_failed_safe_modify_validation_close():
                 "failed": 1,
             },
             "transaction": {
+                "opened": True,
                 "closed": True,
                 "status": "failed",
             },
@@ -847,6 +1082,7 @@ def test_infer_result_status_rejects_out_of_scope_safe_modify_paths():
         restart_reentered=False,
         primary_returncode=0,
         last_observation={"phase": "session_end"},
+        scenario="modify_rollback",
         evolution_summary={
             "safe_modify": {
                 "exists": True,
@@ -857,6 +1093,7 @@ def test_infer_result_status_rejects_out_of_scope_safe_modify_paths():
                 "passed": 1,
             },
             "transaction": {
+                "opened": True,
                 "closed": True,
                 "status": "success",
             },
@@ -874,6 +1111,7 @@ def test_infer_result_status_accepts_complete_safe_modify_probe():
         restart_reentered=False,
         primary_returncode=0,
         last_observation={"phase": "session_end"},
+        scenario="modify_rollback",
         evolution_summary={
             "safe_modify": {
                 "exists": True,
@@ -884,6 +1122,7 @@ def test_infer_result_status_accepts_complete_safe_modify_probe():
                 "passed": 1,
             },
             "transaction": {
+                "opened": True,
                 "closed": True,
                 "status": "success",
             },
