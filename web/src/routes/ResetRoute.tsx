@@ -9,6 +9,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -133,6 +134,7 @@ export function ResetRoute() {
   const { lang } = useAppI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
+  const location = useLocation();
   const resetQuery = useQuery({
     queryKey: queryKeys.resetSummary(),
     queryFn: () => fetchJson<ResetSummary>("/api/reset/summary"),
@@ -145,17 +147,24 @@ export function ResetRoute() {
   const [result, setResult] = useState<ResetExecuteResponse | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [previewedSignature, setPreviewedSignature] = useState("");
+  const requestedItemId = useMemo(() => {
+    return new URLSearchParams(location.search).get("item") ?? "";
+  }, [location.search]);
   const currentSignature = previewSignature(selectedIds);
 
   useEffect(() => {
     if (!summary || selectedIds.length > 0) {
       return;
     }
+    if (requestedItemId && items.some((item) => item.id === requestedItemId && (item.exists || item.id === "chat_history"))) {
+      setSelectedIds([requestedItemId]);
+      return;
+    }
     const defaults = items.filter((item) => item.defaultSelected && (item.exists || item.id === "chat_history")).map((item) => item.id);
     if (defaults.length > 0) {
       setSelectedIds(defaults);
     }
-  }, [items, selectedIds.length, summary]);
+  }, [items, requestedItemId, selectedIds.length, summary]);
 
   const previewMutation = useMutation({
     mutationFn: (itemIds: string[]) =>

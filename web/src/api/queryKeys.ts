@@ -29,6 +29,7 @@ export const queryKeys = {
   evolutionSelfAudit: () => ["evolution", "self", "audit"] as const,
   petSummary: () => ["pet", "summary"] as const,
   resetSummary: () => ["reset", "summary"] as const,
+  diagnosticsHealth: () => ["diagnostics", "health"] as const,
   configPublic: () => ["config", "public"] as const,
   configWorkspace: () => ["config", "workspace"] as const,
 };

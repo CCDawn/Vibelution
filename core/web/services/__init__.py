@@ -3,6 +3,7 @@
 __all__ = [
     "chat_review_service",
     "config_service",
+    "diagnostics_service",
     "evolution_service",
     "file_service",
     "i18n",

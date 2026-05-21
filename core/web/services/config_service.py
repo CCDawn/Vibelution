@@ -146,6 +146,15 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
     sections.extend(
         [
             {
+                "id": "health-diagnostics",
+                "title": text_for(lang, zh="健康诊断", en="Health Diagnostics"),
+                "summary": text_for(
+                    lang,
+                    zh="只读整理日志 Helper、最近信号、Reset 清理建议和保护边界。",
+                    en="Read-only log helpers, recent signals, Reset cleanup hints, and protected boundaries.",
+                ),
+            },
+            {
                 "id": "draft",
                 "title": text_for(lang, zh="高级 JSON 编辑", en="Advanced JSON"),
                 "summary": text_for(
