@@ -22,6 +22,7 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 
 from config import get_config
+from config.workbench import configured_backend_port
 from core.chat import (
     format_chat_reply,
     load_chat_session,
@@ -74,12 +75,7 @@ from core.ui.cli_ui import get_ui
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 def _default_workbench_port() -> int:
-    raw_value = str(os.environ.get("VIBELUTION_PORT") or "").strip()
-    try:
-        port = int(raw_value)
-    except ValueError:
-        return 8000
-    return port if 0 < port < 65536 else 8000
+    return configured_backend_port()
 
 
 CONFIG_PANEL_PORT = _default_workbench_port()
