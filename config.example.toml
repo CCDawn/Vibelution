@@ -11,6 +11,10 @@ profile = "safe_remote"
 preflight_doctor = true
 require_venv = true
 
+[workbench]
+backend_port = 8000
+frontend_port = 5173
+
 [avatar]
 preset = "lobster"
 

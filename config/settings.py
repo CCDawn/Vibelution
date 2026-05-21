@@ -27,6 +27,7 @@ NetworkConfig,
     UIConfig,
     DebugConfig,
     SecurityConfig,    # 宠物系统配置
+    WorkbenchConfig,
     PetConfig,
     GeneConfig,
     HeartConfig,
@@ -572,6 +573,12 @@ class ConfigLoader:
             # === Web Chat 配置 ===
             f"{prefix}WEB_CHAT_MAX_CONTINUATION_TURNS": "web_chat.max_continuation_turns",
 
+            # === Web 工作台配置 ===
+            f"{prefix}WORKBENCH_BACKEND_PORT": "workbench.backend_port",
+            f"{prefix}WORKBENCH_FRONTEND_PORT": "workbench.frontend_port",
+            "VIBELUTION_PORT": "workbench.backend_port",
+            "VIBELUTION_FRONTEND_PORT": "workbench.frontend_port",
+
             # === 上下文压缩配置 ===
             f"{prefix}COMPRESSION_ENABLED": "context_compression.enabled",
             f"{prefix}COMPRESSION_MAX_TOKEN_LIMIT": "context_compression.max_token_limit",
@@ -735,6 +742,23 @@ class ConfigLoader:
             "strategy.exploration_rate",
         }
 
+        int_keys = {
+            "max_output_tokens", "timeout", "connect_timeout",
+            "awake_interval", "max_iterations", "max_runtime",
+            "max_continuation_turns",
+            "backend_port", "frontend_port",
+            "backup_interval", "auto_restart_threshold",
+            "min_turns", "max_turns",
+            "max_retries", "max_token_limit",
+            "keep_recent_steps", "summary_max_chars",
+            "max_compressions_per_session", "max_read_lines",
+            "max_read_chars", "default_timeout", "max_output_length",
+            "max_file_size", "max_matches_per_file", "max_results",
+            "context_lines", "max_search_results", "search_timeout",
+            "backup_count", "max_entries",
+            "test_gate_timeout", "max_log_entries", "refresh_rate",
+        }
+
         def assign_path(target: Dict[str, Any], path: str, value: Any) -> None:
             current = target
             parts = path.split(".")
@@ -759,23 +783,11 @@ class ConfigLoader:
                         value = float(value)
                     except ValueError:
                         value = value
-                elif path.split(".")[-1] in ("max_output_tokens", "timeout", "connect_timeout",
-                            "awake_interval", "max_iterations", "max_runtime",
-                            "max_continuation_turns",
-                            "backup_interval", "auto_restart_threshold",
-                            "min_turns", "max_turns",
-                            "max_retries", "max_token_limit",
-                            "keep_recent_steps", "summary_max_chars",
-                            "max_compressions_per_session", "max_read_lines",
-                            "max_read_chars", "default_timeout", "max_output_length",
-                            "max_file_size", "max_matches_per_file", "max_results",
-                            "context_lines", "max_search_results", "search_timeout",
-                            "max_file_size", "backup_count", "max_entries",
-                            "test_gate_timeout", "max_log_entries", "refresh_rate"):
+                elif path.split(".")[-1] in int_keys:
                     try:
                         value = int(value)
                     except ValueError:
-                        value = value
+                        continue
 
                 assign_path(config, path, value)
                 touched = True
@@ -1077,6 +1089,11 @@ def get_web_chat_config() -> WebChatConfig:
     return get_config().web_chat
 
 
+def get_workbench_config() -> WorkbenchConfig:
+    """获取 Web 工作台端口配置"""
+    return get_config().workbench
+
+
 def get_compression_config() -> ContextCompressionConfig:
     """获取压缩配置"""
     return get_config().context_compression
@@ -1210,6 +1227,7 @@ __all__ = [
     "get_llm_config",
     "get_agent_config",
     "get_web_chat_config",
+    "get_workbench_config",
     "get_compression_config",
     "get_tools_config",
     "get_log_config",

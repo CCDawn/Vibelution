@@ -1449,6 +1449,14 @@ class RuntimeConfig(BaseModel):
         return (v or "").strip().lower()
 
 
+class WorkbenchConfig(BaseModel):
+    """本地 Web 工作台端口配置。"""
+    model_config = ConfigDict(extra="ignore")
+
+    backend_port: int = Field(default=8000, ge=1, le=65535, description="后端服务端口")
+    frontend_port: int = Field(default=5173, ge=1, le=65535, description="前端开发服务端口")
+
+
 # ============================================================================
 # 宠物系统配置
 # ============================================================================
@@ -1603,6 +1611,7 @@ class AppConfig(BaseModel):
     prompt: PromptConfig = Field(default_factory=PromptConfig)
     debug: DebugConfig = Field(default_factory=DebugConfig)
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    workbench: WorkbenchConfig = Field(default_factory=WorkbenchConfig)
 
     # 宠物系统配置
     pet: PetConfig = Field(default_factory=PetConfig)
@@ -1880,6 +1889,8 @@ __all__ = [
     "ParserConfig",
     # 调试配置
     "DebugConfig",
+    # 工作台配置
+    "WorkbenchConfig",
     # 主配置类
     "AppConfig",
 ]

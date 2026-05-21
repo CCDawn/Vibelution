@@ -25,13 +25,50 @@ $statePath = Join-Path $launcherDir "state.json"
 $pythonDepsStampPath = Join-Path $launcherDir "python-deps.stamp"
 $frontendDepsStampPath = Join-Path $launcherDir "frontend-deps.stamp"
 $bindHost = "127.0.0.1"
-$port = 8000
-if ($env:VIBELUTION_PORT) {
-    $parsedPort = 0
-    if ([int]::TryParse($env:VIBELUTION_PORT, [ref]$parsedPort) -and $parsedPort -gt 0 -and $parsedPort -lt 65536) {
-        $port = $parsedPort
+$configPath = Join-Path $projectDir "config.toml"
+
+function Resolve-ConfiguredWorkbenchPort {
+    param([int]$DefaultPort = 8000)
+
+    $resolvedPort = $DefaultPort
+    if (Test-Path $configPath) {
+        try {
+            $inWorkbenchBlock = $false
+            foreach ($line in Get-Content -LiteralPath $configPath -Encoding utf8) {
+                $trimmed = ([string]$line).Trim()
+                if ($trimmed -match '^\[(.+)\]$') {
+                    $inWorkbenchBlock = ($matches[1] -eq "workbench")
+                    continue
+                }
+                if (-not $inWorkbenchBlock) {
+                    continue
+                }
+                if ($trimmed -match '^backend_port\s*=\s*"?([0-9]+)"?\s*(?:#.*)?$') {
+                    $candidate = 0
+                    if ([int]::TryParse($matches[1], [ref]$candidate) -and $candidate -gt 0 -and $candidate -lt 65536) {
+                        $resolvedPort = $candidate
+                    }
+                    break
+                }
+            }
+        } catch {
+        }
     }
+
+    $envPortValue = $env:VIBELUTION_PORT
+    if (-not $envPortValue) {
+        $envPortValue = $env:AGENT_WORKBENCH_BACKEND_PORT
+    }
+    if ($envPortValue) {
+        $envPort = 0
+        if ([int]::TryParse($envPortValue, [ref]$envPort) -and $envPort -gt 0 -and $envPort -lt 65536) {
+            $resolvedPort = $envPort
+        }
+    }
+
+    return $resolvedPort
 }
+$port = Resolve-ConfiguredWorkbenchPort
 $url = "http://$bindHost`:$port"
 $healthUrl = "$url/api/health"
 $mode = "single_service_bundled_edge_app"
