@@ -12,8 +12,8 @@ import {
   GitStatusFile,
   GitStatusSummary,
 } from "../api/types";
-import { FilePreview } from "../components/preview/FilePreview";
 import { useAppI18n } from "../i18n/useAppI18n";
+import { GitDiffView } from "./GitDiffView";
 import styles from "./GitRoute.module.css";
 
 type GitFilter = "all" | "staged" | "unstaged" | "untracked" | "deleted";
@@ -182,10 +182,6 @@ export function GitRoute() {
   const status = statusQuery.data;
   const upstream = status?.upstream;
   const aheadBehind = upstream?.hasUpstream ? `${upstream.ahead} / ${upstream.behind}` : t("gitNoUpstream");
-  const previewContent =
-    diffQuery.data?.diff ||
-    diffQuery.data?.content ||
-    (diffQuery.data?.binary ? t("gitBinaryFile") : t("gitDiffEmpty"));
   const commitDisabled = selectedCount === 0 || !commitMessage.trim() || commitMutation.isPending;
   const aiDisabled = selectedCount === 0 || generateMessageMutation.isPending;
 
@@ -282,13 +278,10 @@ export function GitRoute() {
 
         <main className={styles.diffPanel}>
           {activePath ? (
-            <FilePreview
-              file={{
-                path: activePath,
-                language: diffQuery.data?.language || "diff",
-                content: diffQuery.isPending ? t("loading") : previewContent,
-                truncated: Boolean(diffQuery.data?.truncated),
-              }}
+            <GitDiffView
+              path={activePath}
+              diff={diffQuery.data}
+              loading={diffQuery.isPending}
               changed={Boolean(activeFile)}
               sourceLabel={activeFile?.statusLabel || t("gitFileDiff")}
               headerActions={
