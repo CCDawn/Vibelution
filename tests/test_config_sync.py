@@ -92,6 +92,15 @@ def test_config_loader_normalizes_nested_public_blocks():
     assert config.workbench.frontend_port == raw["workbench"]["frontend_port"]
 
 
+def test_evolution_default_allowlist_includes_safe_modify_probe_file():
+    config = AppConfig()
+
+    assert config.evolution.allowed_target_dirs == [
+        "workspace/prompts/",
+        "tests/harness_safe_modify_probe.py",
+    ]
+
+
 def test_workbench_ports_have_defaults_and_validate_range():
     config = AppConfig()
 

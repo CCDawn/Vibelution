@@ -156,11 +156,11 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
             },
             {
                 "id": "draft",
-                "title": text_for(lang, zh="高级 JSON 编辑", en="Advanced JSON"),
+                "title": text_for(lang, zh="高级配置检查", en="Advanced Config Check"),
                 "summary": text_for(
                     lang,
-                    zh="结构化操作之外，还可以直接检查整份 JSON；保存时仍只写 config.toml。",
-                    en="Beyond structured controls, check the full JSON here while saving still writes only config.toml.",
+                    zh="结构化操作之外，还可以检查整份当前配置；保存时仍只写 config.toml。",
+                    en="Beyond structured controls, check the full current config here while saving still writes only config.toml.",
                 ),
             },
             {

@@ -1183,8 +1183,8 @@ class EvolutionConfig(BaseModel):
         description="Agent 苏醒时是否自动检查已审批提案"
     )
     allowed_target_dirs: List[str] = Field(
-        default_factory=lambda: ["workspace/prompts/"],
-        description="允许进化修改的目录白名单"
+        default_factory=lambda: ["workspace/prompts/", "tests/harness_safe_modify_probe.py"],
+        description="允许进化修改的目录或文件白名单"
     )
     chat_dataset: ChatDatasetCaptureConfig = Field(
         default_factory=ChatDatasetCaptureConfig,

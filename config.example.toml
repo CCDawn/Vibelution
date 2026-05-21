@@ -25,7 +25,7 @@ preset = "lobster"
 [llm.profiles.primary]
 model = "gpt-5.5"
 api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
-transport = "chat_completions"
+transport = "responses"
 contract = "tool_chat"
 strict_compatibility = false
 temperature = 0.7
@@ -47,7 +47,7 @@ context_window = 1000000
 [llm.profiles.mental_model]
 model = "gpt-5.5"
 api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
-transport = "chat_completions"
+transport = "responses"
 contract = "tool_chat"
 strict_compatibility = false
 temperature = 0.7
@@ -250,7 +250,7 @@ context_window = 204800
 [llm.model_library.relay_openai_gpt_5_5]
 model = "gpt-5.5"
 label = "GPT-5.5 via relay"
-transport = "chat_completions"
+transport = "responses"
 contract = "tool_chat"
 strict_compatibility = false
 temperature = 0.7
@@ -539,7 +539,8 @@ proposals_dir = "workspace/evolution/proposals"
 audit_log_path = "workspace/evolution/audit.jsonl"
 auto_check_approved = true
 allowed_target_dirs = [
-    "workspace/prompts/"
+    "workspace/prompts/",
+    "tests/harness_safe_modify_probe.py"
 ]
 intake_mode = "manual_review"
 
