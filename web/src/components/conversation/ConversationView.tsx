@@ -1,7 +1,7 @@
 import { ArrowDown, BrainCircuit, ChevronDown, ChevronRight } from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { ConversationMessage, MentalStateSnapshot } from "../../api/types";
+import { ConversationMessage, MentalStateSnapshot, SessionTurnError } from "../../api/types";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
@@ -43,6 +43,7 @@ type ConversationViewProps = {
   composerActionMode?: "send" | "stop";
   composerPending: boolean;
   composerError?: string;
+  turnError?: SessionTurnError | null;
   mentalModelEnabled?: boolean;
   mentalModelOptionDisabled?: boolean;
   submitLabel?: string;
@@ -79,6 +80,7 @@ export function ConversationView({
   composerActionMode,
   composerPending,
   composerError,
+  turnError,
   mentalModelEnabled,
   mentalModelOptionDisabled,
   submitLabel,
@@ -551,6 +553,16 @@ export function ConversationView({
           <ArrowDown size={16} />
           <span>{t("newContent")}</span>
         </button>
+      ) : null}
+
+      {turnError?.message ? (
+        <div className={styles.turnError} role="status" aria-live="polite">
+          <div className={styles.turnErrorText}>
+            <span className={styles.turnErrorLabel}>{t("turnErrorLabel")}</span>
+            <span>{turnError.message}</span>
+          </div>
+          {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
+        </div>
       ) : null}
 
       <div className={styles.composer}>

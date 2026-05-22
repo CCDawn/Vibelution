@@ -1352,6 +1352,7 @@ export function ChatCodingRoute() {
                 composerActionMode={composerStopMode ? "stop" : "send"}
                 composerPending={composerPending}
                 composerError={activeComposerError}
+                turnError={detail.lastTurnError}
                 mentalModelEnabled={mentalModelEnabledForNextTurn}
                 mentalModelOptionDisabled={!activeSessionId}
                 stopLabel={t("stop")}

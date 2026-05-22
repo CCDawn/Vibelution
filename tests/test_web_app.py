@@ -2145,6 +2145,7 @@ def test_session_detail_exists(tmp_path, monkeypatch):
         {"name": "read_file_tool", "status": "done"},
         {"name": "search_code_tool", "status": "done"},
     ]
+    assert payload["lastTurnError"] is None
     assert payload["taskSummary"] == "已经接到真实状态了。"
     assert payload["previewTabs"] == []
     assert payload["currentPhase"] == "ready"
@@ -3765,6 +3766,60 @@ def test_submit_session_message_surfaces_failed_result_error(tmp_path, monkeypat
     assert payload["messages"][-1]["role"] == "assistant"
     assert "LiteLLM 未安装" in payload["messages"][-1]["content"]
     assert payload["currentPhase"] == "failed"
+
+
+def test_submit_session_message_surfaces_provider_error_outside_messages(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_WORK_RUN_STORE",
+        session_service.WorkRunStore(tmp_path / ".runtime" / "runtime-manager" / "work_runs"),
+    )
+
+    provider_error = (
+        'provider_protocol_error: litellm.BadGatewayError: BadGatewayError: OpenAIException - '
+        '{"error":{"message":"Upstream request failed","type":"upstream_error"}}'
+    )
+
+    class ProviderFailingAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "failed",
+                "summary": provider_error,
+                "raw_output": provider_error,
+                "error": provider_error,
+                "outcome": "blocked",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ProviderFailingAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续当前对话"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-1]["content"] == "继续当前对话"
+    assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
+    assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
+    assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
+    assert all("模型服务上游暂时失败" not in item["content"] for item in payload["messages"])
+    latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
+    assert latest_run["errorType"] == "provider_upstream_error"
+    assert "litellm.BadGatewayError" in latest_run["error"]
 
 
 def test_submit_session_message_omits_mental_snapshot_when_disabled(tmp_path, monkeypatch):
