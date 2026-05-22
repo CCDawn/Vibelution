@@ -324,7 +324,28 @@ def commit_git_changes(paths: list[str], message: str) -> dict[str, Any]:
     if untracked_paths:
         _run_git_or_raise(service, ["add", "--", *untracked_paths], "git add failed")
 
-    commit_result = _run_git_or_raise(service, ["commit", "-m", commit_message, "--", *selected_paths], "git commit failed")
+    try:
+        commit_result = _run_git_or_raise(
+            service,
+            ["commit", "-m", commit_message, "--", *selected_paths],
+            "git commit failed",
+        )
+    except ValueError as exc:
+        _record_git_scene_event(
+            "commit",
+            "git.commit.failed",
+            message="Git commit failed.",
+            level="error",
+            outcome="failed",
+            fields={
+                "selectedFileCount": len(selected_paths),
+                "selectedPaths": selected_paths,
+                "errorType": type(exc).__name__,
+                "error": str(exc),
+            },
+            lifecycle=True,
+        )
+        raise
     head_result = _run_git_or_raise(service, ["rev-parse", "HEAD"], "git rev-parse failed")
     commit_sha = head_result.stdout.strip()
     _record_git_scene_event(
