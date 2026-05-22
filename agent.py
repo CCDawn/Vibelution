@@ -513,6 +513,25 @@ class SelfEvolvingAgent:
         total_tool_calls: int,
         messages: list,
     ) -> Optional[Dict[str, Any]]:
+        get_packet = getattr(getattr(self, "prompt_manager", None), "get_runtime_goal_packet", None)
+        if callable(get_packet):
+            try:
+                packet = get_packet()
+            except Exception:
+                packet = None
+            if packet is not None and getattr(packet, "allow_subagents", True) is False:
+                _debug_logger.info("[Delegation] 当前运行目标包禁止子 agent，跳过委派。", tag="DELEGATE")
+                _record_agent_scene_event(
+                    "delegation",
+                    "agent.delegation.blocked",
+                    message="运行目标包禁止子 agent，已跳过委派。",
+                    fields={
+                        "source": str(getattr(packet, "source", "") or ""),
+                        "objectiveType": str(getattr(packet, "objective_type", "") or ""),
+                        "reason": "runtime_goal_disallows_subagents",
+                    },
+                )
+                return None
         governor = self._get_delegation_governor()
         return governor.maybe_delegate(
             goal=goal,
