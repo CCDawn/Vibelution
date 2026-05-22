@@ -547,17 +547,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       : configQuery.data?.intakeMode === "auto"
         ? "auto"
         : "manual_review";
-  const nextIntakeMode = currentIntakeMode === "auto" ? "manual_review" : "auto";
   const overviewCurrentStatus = overview?.currentStatus ?? null;
   const overviewRecentRuns = overview?.recentRuns ?? [];
   const overviewLatestRunId = overviewCurrentStatus?.latestRunId || overviewRecentRuns[0]?.id || latestRun?.id || "";
-  const overviewLatestScore =
-    overviewRecentRuns[0] ? clampScore(overviewRecentRuns[0].score) : latestRun ? clampScore(latestRun.candidateScore) : "--";
-  const workbenchPrimarySource =
-    workbenchState?.source === "bundle"
-      ? workbenchState.bundleName || "--"
-      : workbenchState?.datasetName || workbenchState?.bundleName || "--";
-  const workbenchSourceLimit = workbenchState?.datasetLimit ?? "--";
   const effectiveActiveRunSnapshot = shouldIgnoreActiveRunSnapshot(activeRunSnapshot, liveActiveRun)
     ? null
     : activeRunSnapshot;
@@ -1881,108 +1873,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               )}
           </section>
 
-          <section className={`${styles.surface} ${styles.sourceSurface} ${styles.dashboardSource}`}>
-              <div className={styles.surfaceHeader}>
-                <div>
-                  <p className={styles.eyebrow}>{t("workbenchContext")}</p>
-                  <h2 className={styles.sectionTitle}>{t("selectedSource")}</h2>
-                </div>
-                <span className={styles.secondaryPill}>
-                  {workbenchSourceLabel(workbenchState?.source ?? "unknown")}
-                </span>
-              </div>
-              <div className={styles.sourceSummary}>
-                <article className={styles.sourceHero}>
-                  <span>{t("selectedSource")}</span>
-                  <strong title={workbenchPrimarySource}>{workbenchPrimarySource}</strong>
-                  <small>
-                    {workbenchSourceLabel(workbenchState?.source ?? "unknown")} / {t("datasetLimitLabel")} {workbenchSourceLimit}
-                  </small>
-                </article>
-                <div className={styles.sourceMetricGrid}>
-                  <article className={styles.stripItem}>
-                    <span>{t("status")}</span>
-                    <strong>{overviewCurrentStatus ? statusLabel(overviewCurrentStatus.state) : "--"}</strong>
-                  </article>
-                  <article className={styles.stripItem}>
-                    <span>{t("decision")}</span>
-                    <strong>{overviewCurrentStatus ? decisionLabel(overviewCurrentStatus.decision) : "--"}</strong>
-                  </article>
-                  <article className={styles.stripItem}>
-                    <span>{t("latestScore")}</span>
-                    <strong>{overviewLatestScore}</strong>
-                  </article>
-                  <article className={styles.stripItem}>
-                    <span>{t("activeAdvisoryBaselines")}</span>
-                    <strong>{overviewCurrentStatus?.activeAdvisoryCount ?? 0}</strong>
-                  </article>
-                </div>
-                <div className={styles.sourceNextAction}>
-                  <span>{t("nextRecommendedAction")}</span>
-                  <strong>{overviewCurrentStatus?.nextAction || "--"}</strong>
-                </div>
-                <div className={styles.detailSection}>
-                  <h3>{t("recentRunPerformance")}</h3>
-                  {overviewRecentRuns.length > 0 ? (
-                    <div className={styles.compactRunList}>
-                      {overviewRecentRuns.slice(0, 3).map((run) => (
-                        <button
-                          key={run.id}
-                          type="button"
-                          className={styles.compactRunRow}
-                          title={run.summary}
-                          onClick={() => openRun(run.id)}
-                        >
-                          <span className={styles.compactRunMain}>
-                            <strong>{run.id}</strong>
-                            <span>{run.summary}</span>
-                          </span>
-                          <span className={styles.compactRunMeta}>
-                            <span>{decisionLabel(run.decision)}</span>
-                            <span>{statusLabel(run.status)}</span>
-                            <strong>{clampScore(run.score)}</strong>
-                            <ArrowUpRight size={14} />
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p>{t("noRunsRecordedHint")}</p>
-                  )}
-                </div>
-                <div className={styles.actionGridCompact}>
-                  <button
-                    type="button"
-                    className={styles.actionButton}
-                    disabled={intakeModeMutation.isPending}
-                    onClick={() => intakeModeMutation.mutate(nextIntakeMode)}
-                  >
-                    <Sparkles size={16} />
-                    <span>{t("switchIntakeMode")}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.actionButton}
-                    disabled={!overviewLatestRunId}
-                    onClick={() => openRun(overviewLatestRunId || null)}
-                  >
-                    <ArrowUpRight size={16} />
-                    <span>{t("openLatestRuns")}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.actionButton}
-                    onClick={() => {
-                      setLibraryView("items");
-                      goToSupervisedView("library");
-                    }}
-                  >
-                    <LibraryBig size={16} />
-                    <span>{t("openLibraryQueue")}</span>
-                  </button>
-                </div>
-              </div>
-          </section>
         </div>
       ) : null}
 

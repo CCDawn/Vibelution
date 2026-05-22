@@ -103,11 +103,9 @@
 .overviewGrid {
   display: grid;
   grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.12fr) minmax(380px, 0.96fr);
-  grid-template-rows: max-content max-content;
+  grid-template-rows: max-content;
   grid-auto-rows: max-content;
-  grid-template-areas:
-    "launch run io"
-    "source source io";
+  grid-template-areas: "launch run io";
   gap: 16px;
   align-items: start;
   align-content: start;
@@ -118,20 +116,14 @@
 
 .dashboardLaunch,
 .dashboardRun,
-.dashboardIo,
-.dashboardSource {
+.dashboardIo {
   min-width: 0;
   max-width: 100%;
 }
 
-.sourceSurface {
-  min-width: 0;
-}
-
 .overviewGrid > .launchSurface,
 .overviewGrid > .liveSurface,
-.overviewGrid > .ioSurface,
-.overviewGrid > .dashboardSource {
+.overviewGrid > .ioSurface {
   height: auto;
 }
 
@@ -145,10 +137,6 @@
 
 .dashboardIo {
   grid-area: io;
-}
-
-.dashboardSource {
-  grid-area: source;
 }
 
 .overviewWorkspace {
@@ -1555,11 +1543,10 @@
 @media (max-width: 1500px) {
   .overviewGrid {
     grid-template-columns: minmax(0, 1.1fr) minmax(320px, 1fr);
-    grid-template-rows: max-content max-content max-content;
+    grid-template-rows: max-content max-content;
     grid-template-areas:
       "launch run"
-      "io io"
-      "source source";
+      "io io";
   }
 
   .overviewWorkspace {
@@ -1582,12 +1569,11 @@
 @media (max-width: 1200px) {
   .overviewGrid {
     grid-template-columns: 1fr;
-    grid-template-rows: max-content max-content max-content max-content;
+    grid-template-rows: max-content max-content max-content;
     grid-template-areas:
       "launch"
       "run"
-      "io"
-      "source";
+      "io";
   }
 
   .overviewWorkspace,
