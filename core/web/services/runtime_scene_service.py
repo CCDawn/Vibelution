@@ -24,6 +24,7 @@ LIFECYCLE_PATH = "lifecycle.jsonl"
 CONVERSATIONS_DIR = "conversations"
 AGENT_DIR = "agent"
 ARTIFACTS_DIR = "artifacts"
+EVENTS_DIR = "events"
 MAX_TELEMETRY_TEXT_CHARS = 4_000
 MAX_TELEMETRY_FIELD_TEXT_CHARS = 1_200
 MAX_TELEMETRY_FIELD_ITEMS = 24
@@ -195,6 +196,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
     conversation_logs = _list_conversation_logs(scene_dir)
     agent_logs = _list_agent_logs(scene_dir)
     artifacts = _list_artifacts(scene_dir)
+    event_logs = _list_event_logs(scene_dir)
     package_index = _runtime_scene_package_index(scene_dir, manifest, detail_scene_id)
     return {
         "runtimeSceneId": detail_scene_id,
@@ -223,6 +225,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
         "conversationLogs": conversation_logs,
         "agentLogs": agent_logs,
         "artifacts": artifacts,
+        "eventLogs": event_logs,
         "packageSummary": _runtime_scene_package_summary(
             timeline=timeline,
             lifecycle=lifecycle_events,
@@ -230,6 +233,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
             conversation_logs=conversation_logs,
             agent_logs=agent_logs,
             artifacts=artifacts,
+            event_logs=event_logs,
         ),
     }
 
@@ -1018,6 +1022,10 @@ def _list_artifacts(scene_dir: Path) -> list[dict[str, Any]]:
     return _list_package_files(scene_dir, ARTIFACTS_DIR, label_prefix="Artifact")
 
 
+def _list_event_logs(scene_dir: Path) -> list[dict[str, Any]]:
+    return _list_package_files(scene_dir, EVENTS_DIR, label_prefix="Event stream")
+
+
 def _list_package_files(scene_dir: Path, relative_dir: str, *, label_prefix: str) -> list[dict[str, Any]]:
     root = scene_dir / relative_dir
     items: list[dict[str, Any]] = []
@@ -1047,6 +1055,7 @@ def _runtime_scene_package_summary(
     conversation_logs: list[dict],
     agent_logs: list[dict],
     artifacts: list[dict],
+    event_logs: list[dict],
 ) -> dict[str, Any]:
     severity_summary = _runtime_scene_severity_summary(timeline)
     return {
@@ -1057,6 +1066,7 @@ def _runtime_scene_package_summary(
         "conversationLogCount": len(conversation_logs),
         "agentLogCount": len(agent_logs),
         "artifactCount": len(artifacts),
+        "eventLogCount": len(event_logs),
         "errorCount": severity_summary["errorCount"],
         "warningCount": severity_summary["warningCount"],
     }

@@ -5,6 +5,7 @@ export type RuntimeScenePackageSectionId =
   | "supervised"
   | "selfEvolution"
   | "agent"
+  | "events"
   | "raw"
   | "artifacts";
 
@@ -22,25 +23,55 @@ function byPath(left: RuntimeSceneRawFile, right: RuntimeSceneRawFile) {
 }
 
 function isSupervisedFile(file: RuntimeSceneRawFile) {
-  return file.path.startsWith("agent/supervised_runs/") || file.path.startsWith("artifacts/supervised/");
+  return (
+    file.path.startsWith("agent/supervised_runs/") ||
+    file.path.startsWith("artifacts/supervised/") ||
+    file.path === "events/supervised_run.jsonl"
+  );
 }
 
 function isSelfEvolutionFile(file: RuntimeSceneRawFile) {
-  return file.path.startsWith("agent/self_evolution_runs/") || file.path.startsWith("artifacts/self_evolution/");
+  return (
+    file.path.startsWith("agent/self_evolution_runs/") ||
+    file.path.startsWith("artifacts/self_evolution/") ||
+    file.path === "events/self_evolution_run.jsonl"
+  );
+}
+
+function isConversationEventFile(file: RuntimeSceneRawFile) {
+  return file.path === "events/conversation.jsonl";
+}
+
+function isAgentEventFile(file: RuntimeSceneRawFile) {
+  return ["events/llm.jsonl", "events/tool_executor.jsonl", "events/work_run.jsonl"].includes(file.path);
 }
 
 export function runtimeScenePackageSections(scene: RuntimeSceneDetail): RuntimeScenePackageSection[] {
-  const conversationLogs = [...scene.conversationLogs].sort(byPath);
+  const eventLogs = [...(scene.eventLogs ?? [])];
+  const conversationLogs = [...scene.conversationLogs, ...eventLogs.filter(isConversationEventFile)].sort(byPath);
   const rawFiles = [...scene.rawFiles].sort(byPath);
-  const supervisedLogs = [...scene.agentLogs.filter(isSupervisedFile), ...scene.artifacts.filter(isSupervisedFile)].sort(
-    byPath,
-  );
+  const supervisedLogs = [
+    ...scene.agentLogs.filter(isSupervisedFile),
+    ...scene.artifacts.filter(isSupervisedFile),
+    ...eventLogs.filter(isSupervisedFile),
+  ].sort(byPath);
   const selfEvolutionLogs = [
     ...scene.agentLogs.filter(isSelfEvolutionFile),
     ...scene.artifacts.filter(isSelfEvolutionFile),
+    ...eventLogs.filter(isSelfEvolutionFile),
   ].sort(byPath);
-  const agentLogs = scene.agentLogs
-    .filter((file) => !isSupervisedFile(file) && !isSelfEvolutionFile(file))
+  const agentLogs = [
+    ...scene.agentLogs.filter((file) => !isSupervisedFile(file) && !isSelfEvolutionFile(file)),
+    ...eventLogs.filter(isAgentEventFile),
+  ].sort(byPath);
+  const otherEventLogs = eventLogs
+    .filter(
+      (file) =>
+        !isConversationEventFile(file) &&
+        !isSupervisedFile(file) &&
+        !isSelfEvolutionFile(file) &&
+        !isAgentEventFile(file),
+    )
     .sort(byPath);
   const artifacts = scene.artifacts
     .filter((file) => !isSupervisedFile(file) && !isSelfEvolutionFile(file))
@@ -78,6 +109,14 @@ export function runtimeScenePackageSections(scene: RuntimeSceneDetail): RuntimeS
       emptyZh: "本周期没有其他 Agent 运行子日志。",
       emptyEn: "No other agent runtime child logs were recorded in this cycle.",
       files: agentLogs,
+    },
+    {
+      id: "events",
+      titleZh: "结构化事件流",
+      titleEn: "Structured Events",
+      emptyZh: "本周期没有其他结构化事件流。",
+      emptyEn: "No other structured event streams were recorded in this cycle.",
+      files: otherEventLogs,
     },
     {
       id: "raw",
