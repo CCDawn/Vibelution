@@ -737,11 +737,22 @@ export type EvolutionRun = {
   sourceDecisionPath: string;
   sourceProposalPath: string;
   activeAdvisoryCount: number;
+  caseDiagnostics: EvolutionCaseDiagnostic[];
   canDelete: boolean;
   deleteBlockReason: string;
   runSemantics: SupervisedRunSemantics;
   outcomeSemantics: EvolutionOutcomeSemantics;
   actionStates: Record<string, EvolutionActionState>;
+};
+
+export type EvolutionCaseDiagnostic = {
+  caseId: string;
+  baselineStatus: string;
+  candidateStatus: string;
+  decisionSignal: string;
+  summary: string;
+  metrics: Record<string, unknown>;
+  reasons: string[];
 };
 
 export type EvolutionDatasetOption = {
@@ -1082,6 +1093,7 @@ export type EvolutionProposalDetail = {
     riskReasons: string[];
     decisionReason: string;
     activeAdvisoryCount: number;
+    caseDiagnostics: EvolutionCaseDiagnostic[];
   };
   proposal: {
     proposalId: string | null;

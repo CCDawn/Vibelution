@@ -411,7 +411,7 @@ def _render_empty_state() -> str:
 
 def _render_record(record: SupervisedDashboardRecord) -> str:
     gates = "".join(_render_gate(gate) for gate in record.gates) or "<tr><td colspan=\"3\">无 gate 记录</td></tr>"
-    cases = "".join(_render_case(case) for case in record.case_summaries[:8]) or "<tr><td colspan=\"4\">无 case 记录</td></tr>"
+    cases = "".join(_render_case(case) for case in record.case_summaries[:8]) or "<tr><td colspan=\"5\">无 case 记录</td></tr>"
     risk_items = "".join(f"<li>{_escape(item)}</li>" for item in record.risk_reasons)
     evidence = [
         ("Decision Record", record.decision_path),
@@ -472,7 +472,7 @@ def _render_record(record: SupervisedDashboardRecord) -> str:
       </table>
       <h3>Case 信号</h3>
       <table>
-        <thead><tr><th>case</th><th>baseline</th><th>candidate</th><th>signal</th></tr></thead>
+        <thead><tr><th>case</th><th>baseline</th><th>candidate</th><th>signal</th><th>差异诊断</th></tr></thead>
         <tbody>{cases}</tbody>
       </table>
       <h3>证据路径</h3>
@@ -493,12 +493,14 @@ def _render_gate(gate: dict[str, Any]) -> str:
 
 
 def _render_case(case: dict[str, Any]) -> str:
+    difference_summary = str(case.get("difference_summary") or "-")
     return (
         "<tr>"
         f"<td>{_escape(case.get('case_id') or '-')}</td>"
         f"<td>{_escape(case.get('baseline_status') or '-')}</td>"
         f"<td>{_escape(case.get('candidate_status') or '-')}</td>"
         f"<td>{_escape(case.get('decision_signal') or '-')}</td>"
+        f"<td>{_escape(difference_summary)}</td>"
         "</tr>"
     )
 
