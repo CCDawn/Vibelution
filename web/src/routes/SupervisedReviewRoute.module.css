@@ -2,6 +2,9 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
   color: var(--fg-primary);
 }
 
@@ -101,19 +104,22 @@
   display: grid;
   grid-template-columns: minmax(360px, 0.82fr) minmax(0, 1.58fr);
   gap: 12px;
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 .queuePanel,
 .detailPanel {
   padding: 14px;
-  min-height: 640px;
+  min-height: 0;
 }
 
 .queuePanel {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow: hidden;
 }
 
 .panelHeader,
@@ -613,14 +619,55 @@
   }
 }
 
+@media (min-width: 1281px) and (max-width: 1600px) {
+  .page {
+    overflow: auto;
+    padding-top: 92px;
+    padding-bottom: 18px;
+  }
+
+  .workspace {
+    flex: 0 0 640px;
+    height: 640px;
+    min-height: 0;
+  }
+}
+
 @media (max-width: 1280px) {
+  .page {
+    height: 100%;
+    overflow: auto;
+    padding-top: 130px;
+    padding-bottom: 18px;
+  }
+
   .summaryStrip,
   .factGrid,
   .metricGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .workspace,
+  .workspace {
+    grid-template-columns: 1fr;
+    flex: 0 0 auto;
+    row-gap: 12px;
+    min-height: auto;
+    overflow: visible;
+  }
+
+  .queuePanel {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .queueList {
+    max-height: 420px;
+  }
+
+  .detailPanel {
+    overflow: visible;
+  }
+
   .signalColumns,
   .formGrid {
     grid-template-columns: 1fr;
@@ -636,6 +683,10 @@
 }
 
 @media (max-width: 720px) {
+  .page {
+    padding-top: 172px;
+  }
+
   .summaryStrip,
   .factGrid,
   .metricGrid {
