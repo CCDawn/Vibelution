@@ -53,3 +53,38 @@ export function requireEvolutionRunSnapshot<T extends { runId?: string } | null 
   }
   return snapshot as Exclude<T, null | undefined>;
 }
+
+export function selectRunSnapshotWithRunId<T extends { runId?: string } | null | undefined>(
+  snapshot: T,
+): Exclude<T, null | undefined> | null {
+  const runId = String(snapshot?.runId || "").trim();
+  if (!snapshot || !runId) {
+    return null;
+  }
+  return snapshot as Exclude<T, null | undefined>;
+}
+
+export function parseRunStreamSnapshot<T extends { runId?: string }>(
+  data: string,
+  actionLabel: string,
+): T | null {
+  let payload: { runId?: string; snapshot?: T };
+  try {
+    payload = JSON.parse(data) as { runId?: string; snapshot?: T };
+  } catch {
+    return null;
+  }
+  const envelopeRunId = String(payload.runId || "").trim();
+  if (!envelopeRunId) {
+    return null;
+  }
+  const snapshot = selectRunSnapshotWithRunId(payload.snapshot);
+  if (!snapshot) {
+    return null;
+  }
+  const snapshotRunId = String(snapshot.runId || "").trim();
+  if (envelopeRunId !== snapshotRunId) {
+    return null;
+  }
+  return requireEvolutionRunSnapshot(snapshot, actionLabel);
+}
