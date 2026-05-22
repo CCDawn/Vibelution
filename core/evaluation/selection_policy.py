@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -13,6 +14,30 @@ from typing import Any, Dict, List
 from config import get_config
 
 DEFAULT_OBSERVATION_BUDGET = 3
+_SAFE_PROPOSAL_FILE_STEM_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_WINDOWS_RESERVED_FILE_STEMS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
+
+def _safe_proposal_file_stem(proposal_id: str) -> str:
+    raw = str(proposal_id or "").strip()
+    stem = _SAFE_PROPOSAL_FILE_STEM_RE.sub("-", raw).strip("._-")
+    if not stem:
+        stem = "proposal"
+    base_name = stem.split(".", 1)[0].upper()
+    should_hash = stem != raw or len(stem) > 140 or base_name in _WINDOWS_RESERVED_FILE_STEMS
+    if base_name in _WINDOWS_RESERVED_FILE_STEMS:
+        stem = f"proposal-{stem}"
+    if should_hash:
+        digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:10]
+        stem = f"{stem[:128].rstrip('._-') or 'proposal'}-{digest}"
+    return stem
 
 
 def _record_policy_scene_event(
@@ -83,7 +108,7 @@ def _proposal_path(project_root: Path, candidate_id: str) -> Path:
     evolution = get_config().evolution
     proposals_dir = _resolve_project_path(project_root, evolution.proposals_dir)
     proposals_dir.mkdir(parents=True, exist_ok=True)
-    safe_name = candidate_id.replace(":", "__")
+    safe_name = _safe_proposal_file_stem(candidate_id)
     return proposals_dir / f"{safe_name}.json"
 
 
