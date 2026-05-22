@@ -342,5 +342,7 @@ def _assert_allowed_runtime_log_path(root_id: str, relative_path: str) -> None:
     if root_id != "runtime_logs":
         return
     normalized = str(relative_path or "").strip().replace("\\", "/").lstrip("/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:].lstrip("/")
     if normalized == "runtime_scenes" or normalized.startswith("runtime_scenes/"):
         raise ValueError("Runtime scene bundles must be managed from the runtime scenes surface")
