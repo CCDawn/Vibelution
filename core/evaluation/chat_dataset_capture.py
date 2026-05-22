@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +27,32 @@ from .chat_segmenter import (
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+_SAFE_DATASET_FILE_STEM_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_WINDOWS_RESERVED_FILE_STEMS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
+
+def _safe_candidate_file_stem(candidate_id: str) -> str:
+    raw = str(candidate_id or "").strip()
+    stem = _SAFE_DATASET_FILE_STEM_RE.sub("-", raw).strip("._-")
+    if not stem:
+        stem = "candidate"
+    base_name = stem.split(".", 1)[0].upper()
+    should_hash = stem != raw or len(stem) > 120 or base_name in _WINDOWS_RESERVED_FILE_STEMS
+    if base_name in _WINDOWS_RESERVED_FILE_STEMS:
+        stem = f"candidate-{stem}"
+    if should_hash:
+        digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:10]
+        stem = f"{stem[:108].rstrip('._-') or 'candidate'}-{digest}"
+    return stem
 
 
 @dataclass(frozen=True)
@@ -125,7 +153,7 @@ class ChatDatasetCaptureService:
         if exclusion_reasons:
             return None
 
-        raw_path = self.paths.candidate_dir / f"{segment.segment_id}.json"
+        raw_path = self.paths.candidate_dir / f"{_safe_candidate_file_stem(segment.segment_id)}.json"
         if raw_path.exists():
             return None
 
@@ -312,7 +340,7 @@ def approve_chat_candidate(
         raise ValueError("candidate_payload 缺少 segment")
     segment = ChatSegment(**segment_payload)
     reviewed_at = _now_iso()
-    approved_raw_path = paths.approved_raw_dir / f"{candidate_id}.json"
+    approved_raw_path = paths.approved_raw_dir / f"{_safe_candidate_file_stem(candidate_id)}.json"
     approved_raw_path.parent.mkdir(parents=True, exist_ok=True)
     approved_raw_path.write_text(
         json.dumps(
@@ -383,7 +411,7 @@ def record_negative_chat_candidate(
         raise ValueError("candidate_payload 缺少 segment")
     segment = ChatSegment(**segment_payload)
     reviewed_at = _now_iso()
-    negative_raw_path = paths.negative_raw_dir / f"{candidate_id}.json"
+    negative_raw_path = paths.negative_raw_dir / f"{_safe_candidate_file_stem(candidate_id)}.json"
     negative_raw_path.parent.mkdir(parents=True, exist_ok=True)
     negative_raw_path.write_text(
         json.dumps(
