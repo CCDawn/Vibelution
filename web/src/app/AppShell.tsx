@@ -34,12 +34,6 @@ function linkClassName({ isActive }: { isActive: boolean }) {
   return isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink;
 }
 
-function formatHistoryTarget(value: string | URL | null | undefined): string {
-  if (!value) {
-    return "";
-  }
-  return typeof value === "string" ? value : value.toString();
-}
 
 export function shouldSuppressApiFailureTelemetry(
   failure: FetchJsonFailureReport,
@@ -381,34 +375,6 @@ export function AppShell() {
   }, [emitBrowserTelemetry, location.hash, location.pathname, location.search, navigationType]);
 
   useEffect(() => {
-    const originalPushState = window.history.pushState.bind(window.history) as History["pushState"];
-    const originalReplaceState = window.history.replaceState.bind(window.history) as History["replaceState"];
-
-    const logHistoryMutation = (eventCode: string, targetUrl: string) => {
-      window.setTimeout(() => {
-        emitBrowserTelemetry({
-          phase: "navigation",
-          eventCode,
-          message: `${eventCode} -> ${window.location.pathname || "/"}`,
-          fields: {
-            targetUrl,
-          },
-        });
-      }, 0);
-    };
-
-    window.history.pushState = ((...args: Parameters<History["pushState"]>) => {
-      const result = originalPushState(...args);
-      logHistoryMutation("browser.history.push_state", formatHistoryTarget(args[2]));
-      return result;
-    }) as History["pushState"];
-
-    window.history.replaceState = ((...args: Parameters<History["replaceState"]>) => {
-      const result = originalReplaceState(...args);
-      logHistoryMutation("browser.history.replace_state", formatHistoryTarget(args[2]));
-      return result;
-    }) as History["replaceState"];
-
     function handlePopState() {
       emitBrowserTelemetry({
         phase: "navigation",
@@ -419,8 +385,6 @@ export function AppShell() {
 
     window.addEventListener("popstate", handlePopState);
     return () => {
-      window.history.pushState = originalPushState;
-      window.history.replaceState = originalReplaceState;
       window.removeEventListener("popstate", handlePopState);
     };
   }, [emitBrowserTelemetry]);
