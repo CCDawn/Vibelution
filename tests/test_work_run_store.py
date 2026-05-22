@@ -25,10 +25,22 @@ def test_work_run_store_rejects_unsafe_kind_and_run_id(tmp_path):
     with pytest.raises(ValueError, match="Invalid work run kind"):
         normalize_run_kind("../bad")
 
+    with pytest.raises(ValueError, match="Invalid work run kind"):
+        normalize_run_kind("bad:kind")
+
     with pytest.raises(ValueError, match="missing runId"):
         store.persist_snapshot("chat_turn", {"status": "running"})
 
     assert store.load_snapshot("chat_turn", "../bad") is None
+
+
+def test_work_run_store_rejects_filesystem_unsafe_run_kind_before_persisting(tmp_path):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+
+    with pytest.raises(ValueError, match="Invalid work run kind"):
+        store.persist_snapshot("bad:kind", {"runId": "run_ok", "status": "running"})
+
+    assert not (tmp_path / ".runtime" / "work_runs").exists()
 
 
 def test_work_run_store_rejects_colon_run_ids_without_persisting(tmp_path):
@@ -52,6 +64,27 @@ def test_work_run_store_rejects_colon_run_ids_without_persisting(tmp_path):
     runs_dir = tmp_path / ".runtime" / "work_runs" / "chat_turn" / "runs"
     assert not (runs_dir / "inside.json").exists()
     assert not (runs_dir / "C:inside.json").exists()
+
+
+@pytest.mark.parametrize("run_id", ("run*bad", "run?bad", "run<bad", "run>bad", 'run"bad', "run|bad"))
+def test_work_run_store_rejects_filesystem_unsafe_run_ids_without_persisting(tmp_path, run_id):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+
+    with pytest.raises(ValueError, match="Invalid work run id"):
+        normalize_run_id(run_id)
+
+    with pytest.raises(ValueError, match="Invalid work run id"):
+        store.persist_snapshot(
+            "chat_turn",
+            {
+                "runId": run_id,
+                "runKind": "chat_turn",
+                "status": "running",
+            },
+            active_run_id=run_id,
+        )
+
+    assert not (tmp_path / ".runtime" / "work_runs" / "chat_turn").exists()
 
 
 def test_work_run_store_records_rejected_run_id_failures(tmp_path, monkeypatch):
