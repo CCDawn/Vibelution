@@ -69,7 +69,6 @@ from core.evaluation.supervised_workbench import (
     select_decision_record,
 )
 from core.evaluation.supervised_dashboard import generate_supervised_dashboard
-from core.orchestration.agent_modes import looks_like_explicit_evolution_request
 from core.ui.cli_ui import get_ui
 
 
@@ -254,16 +253,6 @@ class AgentWorkbenchShell:
             if task.lower() in {"/back", "/q", "/quit", "q"}:
                 self._recent_status = "对话会话已结束"
                 return
-            if self._should_route_explicit_evolution_request() and self._looks_like_evolution_request(task):
-                self.ui.console.print(
-                    Panel(
-                        "检测到显式进化请求，已退出 chat 并返回工作台首页。\n如需继续，请从 `5. 进化` 进入。",
-                        title="已返回工作台",
-                        border_style="yellow",
-                    )
-                )
-                self._recent_status = "对话请求已返回工作台首页"
-                return "evolution"
             self.ui.add_chat_message("user", task)
             messages.append(self._make_chat_message("user", task))
             session.messages = list(messages)
@@ -273,16 +262,6 @@ class AgentWorkbenchShell:
                 result = agent.run_single_turn(initial_prompt=task)
             finally:
                 self.ui.stop_live()
-            if isinstance(result, dict) and result.get("evolution_route_requested"):
-                self.ui.console.print(
-                    Panel(
-                        "当前请求更适合走 `进化` 控制台，chat 已退出并返回工作台首页。\n如需继续，请从 `5. 进化` 进入。",
-                        title="已返回工作台",
-                        border_style="yellow",
-                    )
-                )
-                self._recent_status = "agent 请求已返回工作台首页"
-                return "evolution"
             reply = self._chat_reply_text(result)
             tool_calls = self._extract_chat_tool_calls(result)
             self.ui.add_chat_message("assistant", reply, tool_calls=tool_calls)
@@ -290,14 +269,6 @@ class AgentWorkbenchShell:
             session.messages = list(messages)
             self._save_chat_session(session)
             self._recent_status = "对话已完成一轮"
-
-    def _should_route_explicit_evolution_request(self) -> bool:
-        modes_cfg = getattr(getattr(self.config, "agent", None), "modes", None)
-        behavior = str(
-            getattr(modes_cfg, "explicit_evolution_request_behavior", "route_to_workbench")
-            or "route_to_workbench"
-        ).strip().lower()
-        return behavior == "route_to_workbench"
 
     def _chat_reply_text(self, result: Any) -> str:
         if not isinstance(result, dict):
@@ -719,10 +690,6 @@ class AgentWorkbenchShell:
                 continue
             self._recent_status = "已返回进化控制台"
             return
-
-    @staticmethod
-    def _looks_like_evolution_request(text: str) -> bool:
-        return looks_like_explicit_evolution_request(text)
 
     def _run_supervised_evolution(self):
         saved_state = load_workbench_state(PROJECT_ROOT)

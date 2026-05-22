@@ -568,7 +568,6 @@ class ConfigLoader:
             f"{prefix}AGENT_MODES_SUPERVISED_EVOLUTION_ENABLED": "agent.modes.supervised_evolution_enabled",
             f"{prefix}AGENT_MODES_DEFAULT_SHELL_MODE": "agent.modes.default_shell_mode",
             f"{prefix}AGENT_MODES_DEFAULT_HEADLESS_MODE": "agent.modes.default_headless_mode",
-            f"{prefix}AGENT_MODES_EXPLICIT_EVOLUTION_REQUEST_BEHAVIOR": "agent.modes.explicit_evolution_request_behavior",
 
             # === Web Chat 配置 ===
             f"{prefix}WEB_CHAT_MAX_CONTINUATION_TURNS": "web_chat.max_continuation_turns",

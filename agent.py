@@ -92,7 +92,6 @@ from core.orchestration.delegation_governor import DelegationGovernor
 from core.orchestration.agent_modes import (
     AgentMode,
     ModePolicy,
-    looks_like_explicit_evolution_request,
     normalize_agent_mode,
     resolve_mode_policy,
 )
@@ -657,7 +656,6 @@ class SelfEvolvingAgent:
             keep_multi_turn_context=True,
             allow_auto_loop=True,
             capture_chat_dataset_candidates=False,
-            route_explicit_evolution_requests=False,
             reset_context_before_turn=False,
             reset_context_between_cases=False,
             allow_direct_supervised_payload=False,
@@ -901,16 +899,6 @@ class SelfEvolvingAgent:
             _debug_logger.warning(f"chat candidate capture skipped: {type(exc).__name__}: {exc}", tag="CHAT")
 
     def _run_chat_turn(self, user_prompt: str = None, goal_override: str = None) -> bool:
-        policy = self._get_mode_policy()
-        if policy.route_explicit_evolution_requests and looks_like_explicit_evolution_request(user_prompt or ""):
-            self._last_visible_response_text = "当前请求已标记为显式进化请求，请从进化入口继续。"
-            self._last_response_tool_calls = 0
-            self._last_turn_metadata = {
-                "status": "routed",
-                "evolution_route_requested": True,
-                "route_target": "workbench_evolution",
-            }
-            return True
         return self._run_orchestrated_turn(user_prompt=user_prompt, goal_override=goal_override)
 
     def _run_evolution_turn(self, user_prompt: str = None, goal_override: str = None) -> bool:

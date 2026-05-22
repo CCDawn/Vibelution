@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import agent as agent_module
 from agent import SelfEvolvingAgent
-from core.orchestration.agent_modes import AgentMode, looks_like_explicit_evolution_request, resolve_mode_policy
+from core.orchestration.agent_modes import AgentMode, resolve_mode_policy
 
 
 def _make_config():
@@ -18,7 +18,6 @@ def _make_config():
                 supervised_evolution_enabled=True,
                 default_shell_mode="chat",
                 default_headless_mode="self_evolution",
-                explicit_evolution_request_behavior="route_to_workbench",
             ),
         ),
     )
@@ -38,7 +37,7 @@ def test_resolve_mode_policy_keeps_mode_logic_in_core():
     assert supervised.allow_direct_supervised_payload is True
 
 
-def test_chat_mode_routes_explicit_evolution_request_without_running_orchestrator():
+def test_chat_mode_does_not_keyword_route_evolution_mentions():
     agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
     agent.config = _make_config()
     agent.mode = AgentMode.CHAT
@@ -46,14 +45,19 @@ def test_chat_mode_routes_explicit_evolution_request_without_running_orchestrato
     agent._last_visible_response_text = ""
     agent._last_response_tool_calls = 0
     agent._last_turn_metadata = {}
-    agent._run_orchestrated_turn = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("should not run"))
+    calls = []
+    agent._run_orchestrated_turn = lambda **kwargs: calls.append(kwargs) or True
 
-    ok = agent._run_chat_turn(user_prompt="开始自主进化", goal_override=None)
+    ok = agent._run_chat_turn(user_prompt="你现在审查一下监督进化的部分，然后向我汇报审查结果", goal_override=None)
 
     assert ok is True
-    assert looks_like_explicit_evolution_request("开始自主进化") is True
-    assert agent._last_turn_metadata["evolution_route_requested"] is True
-    assert agent._last_turn_metadata["route_target"] == "workbench_evolution"
+    assert calls == [
+        {
+            "user_prompt": "你现在审查一下监督进化的部分，然后向我汇报审查结果",
+            "goal_override": None,
+        }
+    ]
+    assert agent._last_turn_metadata == {}
 
 
 def test_seed_chat_history_seeds_mental_conversation_context():

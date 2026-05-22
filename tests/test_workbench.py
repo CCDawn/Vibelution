@@ -260,18 +260,25 @@ def test_workbench_home_routes_option_five_to_evolution_console(monkeypatch):
     assert len(calls) == 1
 
 
-def test_workbench_chat_route_returns_home_without_auto_opening_evolution_console(monkeypatch):
+def test_workbench_chat_evolution_mention_stays_in_chat(monkeypatch):
     shell = AgentWorkbenchShell(config=SimpleNamespace(avatar=SimpleNamespace(preset="default")))
     fake_ui = _FakeUI()
     shell.ui = fake_ui
-    prompts = iter(["1", "开始自主进化", "q"])
-    calls = []
+    prompts = iter(["1", "开始自主进化", "/back", "q"])
+    evolution_calls = []
+    chat_calls = []
+
+    class DummyAgent:
+        def run_single_turn(self, initial_prompt=None):
+            chat_calls.append(initial_prompt)
+            return {"status": "completed", "summary": "收到"}
 
     monkeypatch.setattr("core.ui.workbench.Prompt.ask", lambda *args, **kwargs: next(prompts))
-    shell._run_evolution_console = lambda agent_factory: calls.append(agent_factory)
+    shell._run_evolution_console = lambda agent_factory: evolution_calls.append(agent_factory)
 
-    assert shell.run(agent_factory=lambda: SimpleNamespace()) == 0
-    assert calls == []
+    assert shell.run(agent_factory=lambda: DummyAgent()) == 0
+    assert chat_calls == ["开始自主进化"]
+    assert evolution_calls == []
     assert shell._recent_status == "已退出工作台"
 
 
@@ -319,46 +326,28 @@ def test_workbench_agent_self_evolution_entry_runs_agent_loop(monkeypatch):
     assert shell._recent_status == "Agent 自进化会话已结束"
 
 
-def test_workbench_chat_redirects_evolution_request(monkeypatch, tmp_path: Path):
+def test_workbench_chat_does_not_keyword_route_evolution_mentions(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("core.ui.workbench.PROJECT_ROOT", tmp_path)
     shell = AgentWorkbenchShell(config=SimpleNamespace(avatar=SimpleNamespace(preset="default")))
     fake_ui = _FakeUI()
     shell.ui = fake_ui
-    prompts = iter(["开始自主进化"])
+    prompts = iter(["你现在审查一下监督进化的部分", "/back"])
     calls = []
 
     class DummyAgent:
         def run_single_turn(self, initial_prompt=None):
             calls.append(initial_prompt)
+            return {"status": "completed", "summary": "ok"}
 
     monkeypatch.setattr("core.ui.workbench.Prompt.ask", lambda *args, **kwargs: next(prompts))
 
     outcome = shell._run_chat(lambda: DummyAgent())
 
     printed = "\n".join(str(getattr(args[0], "renderable", args[0])) for args, _kwargs in fake_ui.console.items)
-    assert "`5. 进化`" in printed
-    assert outcome == "evolution"
-    assert calls == []
-    assert shell._recent_status == "对话请求已返回工作台首页"
-
-
-def test_workbench_chat_respects_agent_route_signal(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr("core.ui.workbench.PROJECT_ROOT", tmp_path)
-    shell = AgentWorkbenchShell(config=SimpleNamespace(avatar=SimpleNamespace(preset="default")))
-    fake_ui = _FakeUI()
-    shell.ui = fake_ui
-    prompts = iter(["这轮请求请你自己判断是否需要切控制台"])
-
-    class DummyAgent:
-        def run_single_turn(self, initial_prompt=None):
-            return {"status": "routed", "evolution_route_requested": True}
-
-    monkeypatch.setattr("core.ui.workbench.Prompt.ask", lambda *args, **kwargs: next(prompts))
-
-    outcome = shell._run_chat(lambda: DummyAgent())
-
-    assert outcome == "evolution"
-    assert shell._recent_status == "agent 请求已返回工作台首页"
+    assert "`5. 进化`" not in printed
+    assert outcome is None
+    assert calls == ["你现在审查一下监督进化的部分"]
+    assert shell._recent_status == "对话会话已结束"
 
 
 def test_workbench_chat_prints_assistant_reply_and_uses_transient_live(monkeypatch, tmp_path: Path):
@@ -406,16 +395,9 @@ def test_workbench_chat_strips_private_reasoning_from_assistant_reply(monkeypatc
     assert fake_ui.chat_messages[1]["content"] == "收到：你好"
 
 
-def test_workbench_chat_reply_only_does_not_pre_route_explicit_evolution_request(monkeypatch, tmp_path: Path):
+def test_workbench_chat_does_not_pre_route_start_evolution_request(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("core.ui.workbench.PROJECT_ROOT", tmp_path)
-    shell = AgentWorkbenchShell(
-        config=SimpleNamespace(
-            avatar=SimpleNamespace(preset="default"),
-            agent=SimpleNamespace(
-                modes=SimpleNamespace(explicit_evolution_request_behavior="reply_only")
-            ),
-        )
-    )
+    shell = AgentWorkbenchShell(config=SimpleNamespace(avatar=SimpleNamespace(preset="default")))
     fake_ui = _FakeUI()
     shell.ui = fake_ui
     prompts = iter(["开始自主进化", "/back"])

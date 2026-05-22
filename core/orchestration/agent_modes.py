@@ -34,7 +34,6 @@ class ModePolicy:
     keep_multi_turn_context: bool
     allow_auto_loop: bool
     capture_chat_dataset_candidates: bool
-    route_explicit_evolution_requests: bool
     reset_context_before_turn: bool
     reset_context_between_cases: bool
     allow_direct_supervised_payload: bool
@@ -67,12 +66,6 @@ def resolve_mode_policy(mode: str | AgentMode | None, config: "AppConfig") -> Mo
     if not is_mode_enabled(normalized, config):
         raise ValueError(f"Agent mode `{normalized.value}` 当前已在配置中禁用")
 
-    explicit_behavior = str(
-        getattr(getattr(config.agent, "modes", None), "explicit_evolution_request_behavior", "route_to_workbench")
-        or "route_to_workbench"
-    ).strip().lower()
-    route_explicit = explicit_behavior == "route_to_workbench"
-
     if normalized == AgentMode.CHAT:
         return ModePolicy(
             mode=normalized,
@@ -80,7 +73,6 @@ def resolve_mode_policy(mode: str | AgentMode | None, config: "AppConfig") -> Mo
             keep_multi_turn_context=True,
             allow_auto_loop=False,
             capture_chat_dataset_candidates=True,
-            route_explicit_evolution_requests=route_explicit,
             reset_context_before_turn=False,
             reset_context_between_cases=False,
             allow_direct_supervised_payload=False,
@@ -94,7 +86,6 @@ def resolve_mode_policy(mode: str | AgentMode | None, config: "AppConfig") -> Mo
             keep_multi_turn_context=True,
             allow_auto_loop=False,
             capture_chat_dataset_candidates=False,
-            route_explicit_evolution_requests=False,
             reset_context_before_turn=True,
             reset_context_between_cases=True,
             allow_direct_supervised_payload=True,
@@ -107,7 +98,6 @@ def resolve_mode_policy(mode: str | AgentMode | None, config: "AppConfig") -> Mo
         keep_multi_turn_context=True,
         allow_auto_loop=True,
         capture_chat_dataset_candidates=False,
-        route_explicit_evolution_requests=False,
         reset_context_before_turn=False,
         reset_context_between_cases=False,
         allow_direct_supervised_payload=False,
@@ -116,33 +106,10 @@ def resolve_mode_policy(mode: str | AgentMode | None, config: "AppConfig") -> Mo
     )
 
 
-def looks_like_explicit_evolution_request(text: str) -> bool:
-    normalized = (text or "").strip().lower()
-    if not normalized:
-        return False
-    markers = (
-        "开始自主进化",
-        "自主进化",
-        "自进化",
-        "监督进化",
-        "进化一下",
-        "触发进化",
-        "trigger_self_restart_tool",
-        "open_evolution_transaction_tool",
-        "close_evolution_transaction_tool",
-        "start self evolution",
-        "self evolve",
-        "self-evolution",
-        "supervised evolution",
-    )
-    return any(marker in normalized for marker in markers)
-
-
 __all__ = [
     "AgentMode",
     "ModePolicy",
     "is_mode_enabled",
-    "looks_like_explicit_evolution_request",
     "normalize_agent_mode",
     "resolve_mode_policy",
 ]
