@@ -1048,7 +1048,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
           />
         </div>
 
-        <div className={styles.fileList}>
+        <div className={styles.packageList}>
           {runtimeScenesQuery.isError ? (
             <div className={styles.panelState}>{describeError(runtimeScenesQuery.error, t("loadFailed"))}</div>
           ) : runtimeScenesQuery.isPending && !runtimeScenesQuery.data ? (
@@ -1073,8 +1073,8 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
                       type="button"
                       className={
                         isSelected
-                          ? `${styles.treeSelectButton} ${styles.treeSelectButtonActive}`
-                          : styles.treeSelectButton
+                          ? `${styles.packageSelectButton} ${styles.packageSelectButtonActive}`
+                          : styles.packageSelectButton
                       }
                       onClick={() => handleToggleSelection(scene.runtimeSceneId)}
                       title={isSelected ? t("clearSelection") : t("selectVisibleRuntimeScenes")}
