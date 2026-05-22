@@ -14,6 +14,7 @@ from core.evaluation.supervised_evolution import (
     load_supervised_bundle,
     run_supervised_evolution_session,
 )
+from core.evaluation.selection_policy import execute_supervised_policy
 from scripts.evolution_harness import HarnessResult
 
 
@@ -213,6 +214,64 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert "runtime(avg):" in rendered
     assert "guarded tools:" in rendered
     assert "policy:" in rendered
+
+
+def test_selection_policy_proposal_path_is_safe_for_unsafe_case_id(tmp_path: Path):
+    bundle_path = tmp_path / "bundle.json"
+    bundle = {
+        "bundle_name": "demo_bundle",
+        "cases": [
+            {
+                "case_id": r"..\escape",
+                "scenario": "transaction",
+                "mode": "single_turn",
+                "baseline_prompt": "baseline",
+                "candidate_prompt": "candidate",
+            }
+        ],
+    }
+    bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
+    case_summary = SimpleNamespace(
+        case_id=r"..\escape",
+        baseline_status="success",
+        candidate_status="success",
+        baseline_reason="baseline ok",
+        candidate_reason="candidate ok",
+        decision_signal="stable_success",
+        difference_summary="stable success",
+        difference_metrics={},
+        difference_reasons=[],
+    )
+    decision = SimpleNamespace(
+        decision="HOLD",
+        session_id="policy_path_safety",
+        bundle_name="demo_bundle",
+        started_at="2026-05-22T00:00:00Z",
+        ended_at="2026-05-22T00:00:01Z",
+        decision_path=str(tmp_path / "decision.json"),
+        reason="hold for observation",
+        score_delta=0.0,
+        case_summaries=[case_summary],
+    )
+
+    record = execute_supervised_policy(
+        decision=decision,
+        bundle=bundle,
+        bundle_path=bundle_path,
+        project_root=tmp_path,
+    )
+
+    proposals_dir = tmp_path / "workspace" / "evolution" / "proposals"
+    assert len(record.proposal_paths) == 1
+    proposal_path = Path(record.proposal_paths[0]).resolve()
+    assert proposal_path.exists()
+    assert proposal_path.is_relative_to(proposals_dir.resolve())
+    assert "\\" not in proposal_path.name
+    assert "/" not in proposal_path.name
+
+    proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
+    assert proposal["case_id"] == r"..\escape"
+    assert proposal["proposal_id"].startswith(r"demo_bundle:..\escape:")
 
 
 def test_run_supervised_evolution_session_records_materialized_prompt(tmp_path: Path):
