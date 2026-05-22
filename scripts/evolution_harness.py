@@ -1682,6 +1682,7 @@ def run_harness(
     keep_worktree: bool,
     scenario: str = "restart",
     progress_callback: Callable[[Dict[str, Any]], None] | None = None,
+    cancel_checker: Callable[[], object] | None = None,
 ) -> HarnessResult:
     harness_id = uuid.uuid4().hex
     started_at = now_iso()
@@ -1745,6 +1746,8 @@ def run_harness(
     restarts_observed = 0
     primary_returncode: Optional[int] = None
     timed_out = False
+    cancelled = False
+    cancel_reason = ""
     restart_observed_at: Optional[float] = None
     post_restart_observation: Dict[str, Any] = {}
     restart_triggered = False
@@ -1756,6 +1759,22 @@ def run_harness(
 
     try:
         while time.time() < deadline:
+            if cancel_checker is not None:
+                cancel_signal = cancel_checker()
+                if cancel_signal:
+                    cancelled = True
+                    cancel_reason = (
+                        str(cancel_signal)
+                        if not isinstance(cancel_signal, bool)
+                        else "监督运行已按请求终止。"
+                    )
+                    terminate_harness_processes(worktree_path)
+                    if process.poll() is None:
+                        try:
+                            process.terminate()
+                        except OSError:
+                            pass
+                    break
             while True:
                 try:
                     stream_name, line = sink.get_nowait()
@@ -1934,15 +1953,18 @@ def run_harness(
         child_first_event_phase=post_restart_observation.get("first_child_event_phase"),
         safe_modify_summary=safe_modify_summary,
     )
-    status, reason = infer_result_status(
-        timed_out=timed_out,
-        restart_expected=expect_restart,
-        restart_reentered=restart_reentered,
-        primary_returncode=primary_returncode,
-        last_observation=last_observation,
-        scenario=scenario,
-        evolution_summary=evolution_summary,
-    )
+    if cancelled:
+        status, reason = "cancelled", cancel_reason or "监督运行已按请求终止。"
+    else:
+        status, reason = infer_result_status(
+            timed_out=timed_out,
+            restart_expected=expect_restart,
+            restart_reentered=restart_reentered,
+            primary_returncode=primary_returncode,
+            last_observation=last_observation,
+            scenario=scenario,
+            evolution_summary=evolution_summary,
+        )
     process_summary = summarize_process_history(
         process_history.values(),
         reentered_agent_pids=reentered_agent_pids,

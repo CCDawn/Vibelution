@@ -21,6 +21,16 @@ DEFAULT_BUNDLE_PATH = Path("workspace/evaluation/bundles") / f"{DEFAULT_BUNDLE_N
 DEFAULT_BUNDLE_TEMPLATE_DIR = Path(__file__).resolve().parent / "bundles"
 ProgressCallback = Callable[[Dict[str, Any]], None]
 CheckpointCallback = Callable[[Dict[str, Any]], None]
+CancelChecker = Callable[[], object]
+
+
+class SupervisedEvolutionCancelled(RuntimeError):
+    """Raised when a supervised session is cancelled by operator control."""
+
+    def __init__(self, reason: str, *, session_id: str = "") -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.session_id = session_id
 
 
 def _workspace_bundle_path(root: Path, bundle_name: str) -> Path:
@@ -765,6 +775,7 @@ def run_supervised_evolution_session(
     promotion_gate_runner: Optional[Callable[..., Any]] = None,
     progress_callback: Optional[ProgressCallback] = None,
     checkpoint_callback: Optional[CheckpointCallback] = None,
+    cancel_checker: Optional[CancelChecker] = None,
 ) -> SupervisedEvolutionDecision:
     root = (project_root or get_workspace().project_root).resolve()
     bundle_path = resolve_supervised_bundle_path(bundle_name, project_root=root)
@@ -873,8 +884,11 @@ def run_supervised_evolution_session(
                     post_restart_observe_seconds=post_restart_observe_seconds,
                     keep_worktree=keep_worktree,
                     progress_callback=emit_live_case_progress,
+                    cancel_checker=cancel_checker,
                 )
             except Exception as exc:
+                if isinstance(exc, SupervisedEvolutionCancelled):
+                    raise
                 _emit_progress(
                     progress_callback,
                     {
@@ -925,6 +939,24 @@ def run_supervised_evolution_session(
                     report_path=report_path,
                 )
             )
+            if result.status == "cancelled":
+                reason = result.reason or "监督运行已按请求终止。"
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "event": "session_cancelled",
+                        "session_id": session_id,
+                        "case_index": case_index,
+                        "case_total": len(cases),
+                        "case_id": case_id,
+                        "role": role,
+                        "scenario": scenario,
+                        "mode": mode,
+                        "reason": reason,
+                        "report_path": str(report_path),
+                    },
+                )
+                raise SupervisedEvolutionCancelled(reason, session_id=session_id)
             _run_checkpoint(
                 checkpoint_callback,
                 {
@@ -1057,6 +1089,7 @@ __all__ = [
     "DecisionGate",
     "RunAggregate",
     "CaseDecisionSummary",
+    "SupervisedEvolutionCancelled",
     "SupervisedEvolutionDecision",
     "SupervisedEvolutionRun",
     "format_decision_record_summary",

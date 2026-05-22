@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -98,7 +99,7 @@ def list_library_items() -> list[dict[str, Any]]:
     records = _load_records(root, limit=LIST_RECORD_LIMIT)
     items: list[dict[str, Any]] = []
     for record in records:
-        if record.gym_proposal_status not in {"active", "superseded", "rolled_back"}:
+        if record.gym_proposal_status not in {"active", "superseded", "rolled_back", "promoted", "expired"}:
             continue
         items.append(_library_item_payload(record, root=root, lang=lang))
     return items
@@ -113,7 +114,7 @@ def list_pending_library_items() -> list[dict[str, Any]]:
     pending: list[dict[str, Any]] = []
     for record in records:
         status = record.gym_proposal_status
-        if status in {"proposed", "applied"} or (record.decision == "PROMOTE" and status == "missing"):
+        if status in {"proposed", "applied", "observing"} or (record.decision == "PROMOTE" and status == "missing"):
             pending.append(_pending_item_payload(record, root=root, lang=lang))
     return pending
 
@@ -127,11 +128,16 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
     decision_path = _resolve_path(record.decision_path, root=root)
     lifecycle = load_gym_promotion_lifecycle(str(decision_path), project_root=root)
     supervised_payload = _load_json_object(record.decision_path, root=root)
-    proposal_payload = _load_json_object(lifecycle.proposal_path, root=root)
+    proposal_path = lifecycle.proposal_path or record.gym_proposal_path
+    proposal_payload = _load_json_object(proposal_path, root=root)
     gym_decision_payload = _load_json_object(lifecycle.gym_decision_path, root=root)
     preview = _review_preview(record, root=root, lang=lang)
     target_label = _target_label(record, gym_decision_payload, proposal_payload)
-    can_delete, delete_block_reason = _delete_state(lifecycle.status or record.gym_proposal_status, lang=lang)
+    proposal_status = _detail_proposal_status(lifecycle.status, record.gym_proposal_status)
+    runtime_effect = lifecycle.runtime_effect or record.gym_runtime_effect
+    target_key = lifecycle.target_key or record.gym_target_key or ""
+    available_actions = list(lifecycle.available_actions or record.gym_available_actions)
+    can_delete, delete_block_reason = _delete_state(proposal_status, lang=lang)
     proposal = _proposal_payload(
         lifecycle=lifecycle,
         record=record,
@@ -156,11 +162,11 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
         "type": _library_type(record),
         "updatedAt": record.ended_at,
         "decision": record.decision,
-        "proposalStatus": lifecycle.status or record.gym_proposal_status,
-        "runtimeEffect": lifecycle.runtime_effect or record.gym_runtime_effect,
-        "targetKey": lifecycle.target_key or record.gym_target_key or "",
+        "proposalStatus": proposal_status,
+        "runtimeEffect": runtime_effect,
+        "targetKey": target_key,
         "targetLabel": target_label,
-        "availableActions": list(lifecycle.available_actions or record.gym_available_actions),
+        "availableActions": available_actions,
         "canDelete": can_delete,
         "deleteBlockReason": delete_block_reason,
         "runSemantics": {
@@ -173,13 +179,13 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
         },
         "outcomeSemantics": _outcome_semantics(
             decision=record.decision,
-            proposal_status=lifecycle.status or record.gym_proposal_status,
-            runtime_effect=lifecycle.runtime_effect or record.gym_runtime_effect,
+            proposal_status=proposal_status,
+            runtime_effect=runtime_effect,
             lang=lang,
         ),
         "actionStates": _proposal_action_states(
-            available_actions=list(lifecycle.available_actions or record.gym_available_actions),
-            proposal_status=lifecycle.status or record.gym_proposal_status,
+            available_actions=available_actions,
+            proposal_status=proposal_status,
             can_delete=can_delete,
             delete_block_reason=delete_block_reason,
             lang=lang,
@@ -197,7 +203,7 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
         "proposal": proposal,
         "paths": {
             "supervisedDecisionPath": str(decision_path),
-            "gymProposalPath": lifecycle.proposal_path or "",
+            "gymProposalPath": proposal_path or "",
             "gymDecisionPath": lifecycle.gym_decision_path or "",
             "traceIndexPath": lifecycle.trace_index_path or "",
             "lineageIndexPath": record.lineage_index_path or "",
@@ -209,7 +215,7 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
 
 
 def delete_proposal(session_id: str, *, project_root: Path | None = None) -> dict[str, Any]:
-    """Delete the supervised decision record and proposal file for one removable proposal."""
+    """Hide one removable proposal from the work surface while preserving audit files."""
 
     lang = get_web_language()
     root = (project_root or PROJECT_ROOT).resolve()
@@ -231,8 +237,17 @@ def delete_proposal(session_id: str, *, project_root: Path | None = None) -> dic
     decision_path = str(((detail.get("paths") or {}).get("supervisedDecisionPath")) or "").strip()
 
     if proposal_path:
-        _delete_file(proposal_path, root=root, deleted_paths=deleted_paths)
-    _delete_file(decision_path, root=root, deleted_paths=deleted_paths, required=True)
+        _tombstone_json_file(proposal_path, root=root, touched_paths=deleted_paths)
+    _tombstone_json_file(
+        decision_path,
+        root=root,
+        touched_paths=deleted_paths,
+        required=True,
+        extra={
+            "session_id": detail["sessionId"],
+            "proposal_path": proposal_path,
+        },
+    )
 
     return {
         "sessionId": detail["sessionId"],
@@ -544,6 +559,10 @@ def _review_preview(record, *, root: Path, lang: str) -> dict[str, str]:
     target_label = _target_label(record, gym_decision_payload, proposal_payload)
     improvement_type = _candidate_text(gym_decision_payload, "improvement_type")
     expected_effect = _candidate_text(gym_decision_payload, "expected_effect")
+    if not improvement_type and proposal_payload:
+        improvement_type = str(proposal_payload.get("decision_signal") or proposal_payload.get("status") or "").strip()
+    if not expected_effect and proposal_payload:
+        expected_effect = str(proposal_payload.get("decision") or "").strip()
     type_label = _improvement_type_label(improvement_type, lang=lang)
     if target_label and improvement_type:
         headline = text_for(
@@ -593,17 +612,33 @@ def _proposal_payload(
     candidate = _candidate_payload(raw_gym_decision)
     target = candidate.get("target") if isinstance(candidate.get("target"), dict) else None
     payload = candidate.get("payload") if isinstance(candidate.get("payload"), dict) else None
+    if not target and isinstance((raw_proposal or {}).get("target"), dict):
+        target = (raw_proposal or {}).get("target")
+    if not payload and raw_proposal:
+        payload = {
+            "candidate_prompt": raw_proposal.get("candidate_prompt"),
+            "baseline_prompt": raw_proposal.get("baseline_prompt"),
+            "decision_signal": raw_proposal.get("decision_signal"),
+            "observation_count": raw_proposal.get("observation_count"),
+            "observation_budget": raw_proposal.get("observation_budget"),
+        }
     return {
-        "proposalId": lifecycle.proposal_id,
-        "episodeId": lifecycle.episode_id,
+        "proposalId": lifecycle.proposal_id or _text_or_none((raw_proposal or {}).get("proposal_id")),
+        "episodeId": lifecycle.episode_id or _text_or_none((raw_proposal or {}).get("session_id")),
         "candidateImprovementId": _text_or_none(candidate.get("improvement_id"))
         or _text_or_none((raw_proposal or {}).get("candidate_improvement_id")),
-        "improvementType": _text_or_none(candidate.get("improvement_type")) or "",
-        "expectedEffect": _text_or_none(candidate.get("expected_effect")) or "",
+        "improvementType": _text_or_none(candidate.get("improvement_type"))
+        or _text_or_none((raw_proposal or {}).get("decision_signal"))
+        or _text_or_none((raw_proposal or {}).get("status"))
+        or "",
+        "expectedEffect": _text_or_none(candidate.get("expected_effect"))
+        or _text_or_none((raw_proposal or {}).get("decision"))
+        or "",
         "targetLabel": target_label,
         "target": target,
         "payload": payload,
         "targetKey": lifecycle.target_key or record.gym_target_key or "",
+        "status": _detail_proposal_status(lifecycle.status, record.gym_proposal_status),
     }
 
 
@@ -696,8 +731,8 @@ def _review_payload(
     evidence_notes = [
         text_for(
             lang,
-            zh="删除工作面条目时，只会删掉监督 Decision Record 和 proposal 文件，不会删除 Gym decision、trace index、ledger 或 activation history。",
-            en="Deleting a work-surface entry only removes the supervised decision record and proposal file. It does not remove the Gym decision, trace index, ledgers, or activation history.",
+            zh="删除工作面条目时，只会给监督 Decision Record 和 proposal 文件打隐藏标记，不会删除审计文件、Gym decision、trace index、ledger 或 activation history。",
+            en="Deleting a work-surface entry only marks the supervised decision record and proposal file as hidden. It does not remove audit files, Gym decisions, trace indexes, ledgers, or activation history.",
         )
     ]
     if lifecycle.trace_index_path:
@@ -718,8 +753,8 @@ def _review_payload(
         "nextAction": _next_action(record, lang=lang),
         "deleteImpact": text_for(
             lang,
-            zh="删除后，这条记录会从运行列表和提案库消失，但审计证据仍然保留。",
-            en="After deletion, this item disappears from the run list and proposal library while the audit evidence stays preserved.",
+            zh="删除后，这条记录会从运行列表和提案库消失，但 Decision Record 与 proposal 文件仍以 tombstone 形式保留。",
+            en="After deletion, this item disappears from the run list and proposal library, while the decision record and proposal file remain as tombstones.",
         ),
         "canDelete": can_delete,
         "deleteBlockReason": delete_block_reason,
@@ -732,9 +767,17 @@ def _run_status(record) -> str:
         return "failed"
     if record.decision == "INCONCLUSIVE":
         return "waiting"
-    if record.gym_proposal_status in {"proposed", "applied"}:
+    if record.gym_proposal_status in {"proposed", "applied", "observing"}:
         return "waiting"
     return "success"
+
+
+def _detail_proposal_status(lifecycle_status: str, record_status: str) -> str:
+    lifecycle_normalized = str(lifecycle_status or "").strip().lower()
+    record_normalized = str(record_status or "").strip().lower()
+    if lifecycle_normalized and lifecycle_normalized != "missing":
+        return lifecycle_normalized
+    return record_normalized or lifecycle_normalized or "missing"
 
 
 def _run_summary(record, baseline_score: int, candidate_score: int) -> str:
@@ -807,6 +850,12 @@ def _library_type(record) -> str:
         return "rolled_back_proposal"
     if record.gym_proposal_status == "superseded":
         return "superseded_proposal"
+    if record.gym_proposal_status == "observing":
+        return "observing_candidate"
+    if record.gym_proposal_status == "expired":
+        return "expired_candidate"
+    if record.gym_proposal_status == "promoted":
+        return "supervised_promoted_candidate"
     return "supervised_record"
 
 
@@ -834,6 +883,24 @@ def _next_action(record, *, lang: str) -> str:
             lang,
             zh="当前已记住为建议基线，但运行时仍未自动生效。",
             en="This proposal is the remembered advisory baseline, but runtime behavior still has not been rewritten automatically.",
+        )
+    if record.gym_proposal_status == "observing":
+        return text_for(
+            lang,
+            zh="候选已进入观察池，继续积累监督样本后再决定是否晋升。",
+            en="The candidate is in the observation pool; collect more supervised samples before promotion.",
+        )
+    if record.gym_proposal_status == "expired":
+        return text_for(
+            lang,
+            zh="候选观察预算已用尽，当前只保留审计证据。",
+            en="The candidate observation budget is exhausted; it remains as audit evidence.",
+        )
+    if record.gym_proposal_status == "promoted":
+        return text_for(
+            lang,
+            zh="候选已由 supervised policy 晋升为 baseline，当前可审计其 lineage。",
+            en="The candidate was promoted by supervised policy and can be audited through lineage.",
         )
     if record.gym_proposal_status == "rolled_back":
         return text_for(
@@ -918,6 +985,49 @@ def _delete_state(status: str, *, lang: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _tombstone_json_file(
+    path_text: str,
+    *,
+    root: Path,
+    touched_paths: list[str],
+    required: bool = False,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    path = _resolve_path(path_text, root=root)
+    if not _is_within_root(path, root=root):
+        raise EvolutionProposalValidationError(f"Refusing to tombstone path outside project root: {path}")
+    if not path.exists():
+        if required:
+            raise EvolutionProposalNotFoundError("Supervised proposal not found.")
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EvolutionProposalValidationError(f"Cannot tombstone proposal file: {path}") from exc
+    if not isinstance(payload, dict):
+        raise EvolutionProposalValidationError(f"Cannot tombstone non-object proposal file: {path}")
+    timestamp = _now_iso()
+    deletion = payload.get("deletion") if isinstance(payload.get("deletion"), dict) else {}
+    deletion.update(
+        {
+            "deleted_at": timestamp,
+            "hidden_from_workbench": True,
+            "preserved_for_audit": True,
+        }
+    )
+    if extra:
+        deletion.update(extra)
+    payload["deletion"] = deletion
+    payload["workbench_deleted_at"] = timestamp
+    payload["hidden_from_workbench"] = True
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    touched_paths.append(str(path))
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
 def _run_state_label(status: str, *, lang: str) -> str:
     normalized = str(status or "").strip().lower() or "idle"
     mapping = {
@@ -947,6 +1057,9 @@ def _proposal_status_label(status: str, *, lang: str) -> str:
         "proposed": text_for(lang, zh="待接纳提案", en="Proposal awaiting apply"),
         "applied": text_for(lang, zh="已接纳提案", en="Applied proposal"),
         "active": text_for(lang, zh="当前建议基线", en="Active advisory baseline"),
+        "observing": text_for(lang, zh="观察池候选", en="Candidate under observation"),
+        "expired": text_for(lang, zh="观察预算已过期", en="Observation budget expired"),
+        "promoted": text_for(lang, zh="已晋升基线", en="Promoted baseline"),
         "rolled_back": text_for(lang, zh="已回滚提案", en="Rolled-back proposal"),
         "superseded": text_for(lang, zh="已被替代", en="Superseded proposal"),
         "missing": text_for(lang, zh="提案缺失", en="Missing proposal"),
@@ -1087,6 +1200,21 @@ def _proposal_status_explanation(status: str, *, lang: str) -> str:
             lang,
             zh="当前状态：proposal 已成为当前建议基线。",
             en="Current state: the proposal is now the active advisory baseline.",
+        ),
+        "observing": text_for(
+            lang,
+            zh="当前状态：候选由 supervised selection policy 放入观察池。",
+            en="Current state: the candidate is in the supervised selection policy observation pool.",
+        ),
+        "expired": text_for(
+            lang,
+            zh="当前状态：候选观察预算已用尽，只保留审计证据。",
+            en="Current state: the candidate exhausted its observation budget and remains as audit evidence.",
+        ),
+        "promoted": text_for(
+            lang,
+            zh="当前状态：候选已由 supervised selection policy 晋升为 baseline。",
+            en="Current state: the candidate was promoted by the supervised selection policy.",
         ),
         "rolled_back": text_for(
             lang,

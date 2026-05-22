@@ -86,6 +86,26 @@ def test_generate_supervised_dashboard_skips_broken_json(tmp_path: Path):
     assert "跳过损坏记录：1" in html
 
 
+def test_generate_supervised_dashboard_hides_tombstoned_decision_without_counting_broken(tmp_path: Path):
+    path = _write_decision(
+        tmp_path,
+        "supervised_hidden",
+        {
+            "hidden_from_workbench": True,
+            "workbench_deleted_at": "2026-05-16T01:00:00Z",
+            "deletion": {"hidden_from_workbench": True, "preserved_for_audit": True},
+        },
+    )
+
+    dashboard = generate_supervised_dashboard(project_root=tmp_path)
+    html = Path(dashboard.html_path).read_text(encoding="utf-8")
+
+    assert path.exists()
+    assert dashboard.session_count == 0
+    assert dashboard.skipped_count == 0
+    assert "supervised_hidden" not in html
+
+
 def test_build_supervised_dashboard_marks_agent_contract():
     html = build_supervised_dashboard(records=[], skipped_count=0)
 
@@ -144,6 +164,52 @@ def test_generate_supervised_dashboard_renders_gym_lifecycle_details(tmp_path: P
     assert "local_transaction_closing_v1" in html
     assert "当轮 advisory context" in html
     assert "active advisory baseline" in html
+
+
+def test_generate_supervised_dashboard_uses_policy_proposal_when_gym_proposal_is_missing(tmp_path: Path):
+    decision_path = _write_decision(
+        tmp_path,
+        "supervised_observing",
+        {
+            "decision": "HOLD",
+            "reason": "baseline 与 candidate 持平，进入观察池",
+        },
+    )
+    proposal_path = tmp_path / "workspace" / "evolution" / "proposals" / "demo__case_1__hash.json"
+    proposal_path.parent.mkdir(parents=True, exist_ok=True)
+    proposal_path.write_text(
+        json.dumps(
+            {
+                "proposal_id": "demo:case_1:hash",
+                "session_id": "supervised_observing",
+                "bundle_name": "demo_bundle",
+                "case_id": "case_1",
+                "target": {"kind": "bundle_prompt_case", "bundle_name": "demo_bundle", "case_id": "case_1"},
+                "decision_signal": "stable_success",
+                "status": "observing",
+                "decision": "HOLD",
+                "decision_path": str(decision_path),
+                "observation_count": 1,
+                "observation_budget": 3,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    payload = json.loads(decision_path.read_text(encoding="utf-8"))
+    payload["policy_action"] = {
+        "lineage_index_path": str(tmp_path / "workspace" / "evolution" / "proposals" / "lineage_index.json"),
+        "proposal_paths": [str(proposal_path)],
+    }
+    decision_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    html = Path(generate_supervised_dashboard(project_root=tmp_path).html_path).read_text(encoding="utf-8")
+
+    assert "supervised_observing" in html
+    assert "observing" in html
+    assert str(proposal_path) in html
+    assert "selection policy proposal" in html
 
 
 def _write_decision(tmp_path: Path, session_id: str, overrides: dict) -> Path:

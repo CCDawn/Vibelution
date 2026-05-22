@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from core.evaluation import (
+    SupervisedEvolutionCancelled,
     build_workbench_state,
     default_bundle_name,
     execute_gym_promotion_action,
@@ -1007,9 +1008,13 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
             keep_worktree=bool(context["keepWorktree"]),
             progress_callback=lambda event: _handle_progress_event(run_id, event),
             checkpoint_callback=lambda checkpoint: _checkpoint_supervised_run(run_id, checkpoint),
+            cancel_checker=lambda: _supervised_run_cancel_reason(run_id),
             project_root=PROJECT_ROOT,
         )
     except _SupervisedRunInterrupted:
+        return
+    except SupervisedEvolutionCancelled as exc:
+        _finish_run_cancelled_from_harness(run_id, exc.reason or str(exc))
         return
     except Exception as exc:
         _mark_run_failed(run_id, f"{type(exc).__name__}: {exc}")
@@ -1018,6 +1023,9 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
     with _RUN_STATE_LOCK:
         state = _RUN_STATES.get(run_id)
         if state is None:
+            return
+        status = str(state.get("status") or "").strip().lower()
+        if status in {"done", "failed", "cancelled"}:
             return
         decision = result.decision
         state["status"] = "done"
@@ -1064,6 +1072,53 @@ def _supervised_run_should_execute(run_id: str) -> bool:
             return False
         status = str(state.get("status") or "").strip().lower()
         return status not in {"done", "failed", "cancelled"} and not bool(state.get("stopRequested"))
+
+
+def _supervised_run_cancel_reason(run_id: str) -> str:
+    with _RUN_STATE_LOCK:
+        state = _RUN_STATES.get(run_id)
+        if state is None or run_id not in _RUN_CONTROLLERS:
+            return "监督运行控制状态已不存在，终止当前执行。"
+        status = str(state.get("status") or "").strip().lower()
+        if status in {"done", "failed", "cancelled"}:
+            return "监督运行已进入终态，终止当前执行。"
+        if bool(state.get("stopRequested")):
+            return text_for(
+                get_web_language(),
+                zh="操作者请求终止这一轮监督任务。",
+                en="The operator requested this supervised run to stop.",
+            )
+    return ""
+
+
+def _finish_run_cancelled_from_harness(run_id: str, reason: str) -> None:
+    lang = get_web_language()
+    with _RUN_STATE_LOCK:
+        state = _RUN_STATES.get(run_id)
+        if state is None:
+            return
+        status = str(state.get("status") or "").strip().lower()
+        if status in {"done", "failed", "cancelled"}:
+            return
+        now = _now_timestamp()
+        _cancel_run_locked(
+            run_id,
+            state,
+            lang=lang,
+            now=now,
+            summary=text_for(
+                lang,
+                zh="监督任务已按请求终止，当前 case 进程已停止。",
+                en="The supervised run was cancelled as requested, and the current case process was stopped.",
+            ),
+            reason=reason
+            or text_for(
+                lang,
+                zh="操作者请求终止这一轮监督任务。",
+                en="The operator requested this supervised run to stop.",
+            ),
+        )
+    _publish_run_snapshot(run_id, terminal=True)
 
 
 def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
@@ -1248,6 +1303,15 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
                 lang,
                 zh="监督运行遇到异常，请查看错误与日志。",
                 en="The supervised run hit an error. Inspect the error and logs.",
+            )
+        elif event_type == "session_cancelled":
+            state["currentPhase"] = "stopping"
+            state["latestMessage"] = _event_summary(event)
+            state["runtimeStatus"] = "stopping"
+            state["currentTask"] = text_for(
+                lang,
+                zh="监督运行正在按请求终止，当前 case 进程已被停止。",
+                en="The supervised run is cancelling as requested, and the current case process has been stopped.",
             )
         if event_type != "role_live":
             scene_event = _event_tail_entry(event, timestamp=state["updatedAt"])
@@ -1816,8 +1880,16 @@ def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -
     event_name = str(item.get("event") or "").strip() or "progress"
     status = str(item.get("status") or "").strip().lower()
     level = "error" if status == "failed" or event_name == "session_error" else "info"
-    outcome = "failed" if level == "error" else "succeeded" if event_name in {"role_finish", "session_finish"} else "observed"
-    lifecycle = event_name in {"session_start", "session_finish", "session_error"}
+    outcome = (
+        "cancelled"
+        if event_name == "session_cancelled"
+        else "failed"
+        if level == "error"
+        else "succeeded"
+        if event_name in {"role_finish", "session_finish"}
+        else "observed"
+    )
+    lifecycle = event_name in {"session_start", "session_finish", "session_error", "session_cancelled"}
     fields = {
         "runId": run_id,
         "event": event_name,
@@ -1861,6 +1933,7 @@ def _event_title(event: dict[str, Any]) -> str:
         "role_start": "Case 开始",
         "role_finish": "Case 完成",
         "session_error": "监督任务异常",
+        "session_cancelled": "监督任务终止",
         "session_finish": "监督任务结束",
     }.get(event_type, event_type or "监督任务更新")
 
@@ -1869,6 +1942,8 @@ def _event_status(event: dict[str, Any]) -> str:
     event_type = str(event.get("event") or "").strip()
     if event_type == "session_error":
         return "failed"
+    if event_type == "session_cancelled":
+        return "cancelled"
     if event_type == "session_finish":
         return "done"
     if event_type == "role_finish":
@@ -1900,6 +1975,11 @@ def _event_summary(event: dict[str, Any]) -> str:
             f"case {event.get('case_index')}/{event.get('case_total')} "
             f"{event.get('case_id')} {event.get('role')} "
             f"{event.get('error_type')}: {event.get('error')}"
+        )
+    if event_type == "session_cancelled":
+        return (
+            f"case {event.get('case_index')}/{event.get('case_total')} "
+            f"{event.get('case_id')} {event.get('role')} cancelled: {event.get('reason')}"
         )
     if event_type == "session_finish":
         return f"decision={event.get('decision')} reason={event.get('reason')}"

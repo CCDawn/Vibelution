@@ -390,6 +390,36 @@ def test_delete_queued_supervised_run_prevents_background_execution(monkeypatch)
     assert service.get_active_supervised_run() is None
 
 
+def test_stop_requested_run_cancels_active_harness_without_waiting_for_checkpoint(monkeypatch):
+    run_id = _seed_running_run()
+    observed: dict[str, object] = {}
+
+    def fake_run_workbench_session(**kwargs):
+        observed["cancel_checker"] = kwargs.get("cancel_checker")
+        service.request_stop_supervised_run(run_id)
+        reason = kwargs["cancel_checker"]()
+        observed["reason"] = reason
+        raise service.SupervisedEvolutionCancelled(str(reason), session_id="cancelled_session")
+
+    monkeypatch.setattr(service, "run_workbench_session", fake_run_workbench_session)
+
+    service._run_supervised_session(
+        {
+            "runId": run_id,
+            "bundleName": "manual_bundle",
+            "keepWorktree": False,
+        }
+    )
+
+    snapshot = service.get_supervised_run_snapshot(run_id)
+    assert callable(observed["cancel_checker"])
+    assert observed["reason"]
+    assert snapshot["status"] == "cancelled"
+    assert snapshot["runtimeStatus"] == "idle"
+    assert snapshot["decision"] == ""
+    assert service.get_active_supervised_run() is None
+
+
 def test_handle_progress_event_updates_current_case_io_snapshot():
     run_id = _seed_running_run()
 

@@ -9,6 +9,7 @@ import pytest
 
 from core.evaluation.supervised_evolution import (
     DEFAULT_BUNDLE_NAME,
+    SupervisedEvolutionCancelled,
     format_decision_record_summary,
     load_supervised_bundle,
     run_supervised_evolution_session,
@@ -379,6 +380,51 @@ def test_run_supervised_evolution_session_forwards_live_case_events(tmp_path: Pa
     assert live_events[0]["transcript"][1]["kind"] == "assistant"
     assert live_events[1]["role"] == "candidate"
     assert live_events[1]["latest_input"] == "candidate"
+
+
+def test_run_supervised_evolution_session_stops_after_cancelled_harness_result(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        """
+{
+  "benchmark": "dry",
+  "bundle_name": "supervised_evolution_dry_run_v1",
+  "cases": [
+    {
+      "case_id": "probe",
+      "scenario": "transaction",
+      "mode": "single_turn",
+      "baseline_prompt": "baseline",
+      "candidate_prompt": "candidate"
+    }
+  ]
+}
+        """.strip(),
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+    events: list[dict] = []
+
+    def fake_runner(**kwargs):
+        calls.append(kwargs["prompt"])
+        return _fake_result("cancelled", "operator stop", kwargs["prompt"])
+
+    with pytest.raises(SupervisedEvolutionCancelled) as exc_info:
+        run_supervised_evolution_session(
+            bundle_name=DEFAULT_BUNDLE_NAME,
+            project_root=tmp_path,
+            harness_runner=fake_runner,
+            progress_callback=events.append,
+        )
+
+    assert str(exc_info.value) == "operator stop"
+    assert calls == ["baseline"]
+    assert events[-1]["event"] == "session_cancelled"
+    assert events[-1]["reason"] == "operator stop"
+    decisions_dir = tmp_path / "workspace" / "supervised_evolution" / "decisions"
+    assert not list(decisions_dir.glob("*.json"))
 
 
 def test_run_supervised_evolution_session_emits_safe_checkpoints(tmp_path: Path):

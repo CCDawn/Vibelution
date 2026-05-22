@@ -45,6 +45,7 @@ from scripts.evolution_harness import (
     summarize_agent_state_file,
     summarize_latest_matching_file,
     summarize_conversation_file,
+    run_harness,
 )
 from core.orchestration.turn_outcome import TurnOutcomeController
 
@@ -197,6 +198,72 @@ def test_should_stop_after_primary_exit_for_non_restart_scenarios():
     assert should_stop_after_primary_exit(expect_restart=False, primary_returncode=1) is True
     assert should_stop_after_primary_exit(expect_restart=False, primary_returncode=None) is False
     assert should_stop_after_primary_exit(expect_restart=True, primary_returncode=0) is False
+
+
+def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeypatch, tmp_path: Path):
+    class FakeStream:
+        def readline(self):
+            return ""
+
+        def close(self):
+            return None
+
+    class FakeProcess:
+        def __init__(self, *args, **kwargs):
+            self.pid = 4321
+            self.stdout = FakeStream()
+            self.stderr = FakeStream()
+            self.returncode = None
+            self.terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+    process = FakeProcess()
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+
+    monkeypatch.setattr(
+        "scripts.evolution_harness.create_checkpoint_snapshot",
+        lambda repo_root, harness_id: type(
+            "Snapshot",
+            (),
+            {
+                "base_head": "abc123",
+                "commit": "abc123",
+                "ref_name": None,
+                "tracked_dirty": False,
+                "untracked_files": [],
+            },
+        )(),
+    )
+    monkeypatch.setattr("scripts.evolution_harness.create_worktree", lambda repo_root, snapshot, harness_id: worktree)
+    monkeypatch.setattr("scripts.evolution_harness.create_harness_config", lambda path: None)
+    monkeypatch.setattr("scripts.evolution_harness.subprocess.Popen", lambda *args, **kwargs: process)
+    monkeypatch.setattr("scripts.evolution_harness.start_stream_reader", lambda *args, **kwargs: type("Thread", (), {"join": lambda self, timeout=None: None})())
+    monkeypatch.setattr("scripts.evolution_harness.terminate_harness_processes", lambda path: process.terminate())
+    monkeypatch.setattr("scripts.evolution_harness.write_report", lambda result, path=None: tmp_path / "report.json")
+    monkeypatch.setattr("scripts.evolution_harness.remove_worktree", lambda repo_root, path: None)
+
+    result = run_harness(
+        repo_root=tmp_path,
+        mode="single_turn",
+        prompt="probe",
+        timeout_seconds=30,
+        expect_restart=False,
+        post_restart_observe_seconds=1,
+        keep_worktree=False,
+        scenario="transaction",
+        cancel_checker=lambda: "operator stop",
+    )
+
+    assert result.status == "cancelled"
+    assert result.reason == "operator stop"
+    assert process.terminated is True
 
 
 def test_should_finish_post_restart_observation_waits_for_meaningful_child_event():
