@@ -19,7 +19,7 @@ WORK_RUNS_DIR = RUNTIME_MANAGER_DIR / "work_runs"
 WRITE_RETRY_TIMEOUT_SECONDS = 5.0
 READ_RETRY_ATTEMPTS = 5
 READ_RETRY_DELAY_SECONDS = 0.05
-_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
 def _now_iso() -> str:
@@ -37,7 +37,9 @@ def normalize_run_kind(kind: str) -> str:
 
 def normalize_run_id(run_id: str) -> str:
     normalized = str(run_id or "").strip()
-    if not normalized or ":" in normalized or "/" in normalized or "\\" in normalized or normalized in {".", ".."}:
+    if not normalized or not _SAFE_NAME_RE.fullmatch(normalized):
+        raise ValueError("Invalid work run id.")
+    if "/" in normalized or "\\" in normalized or normalized in {".", ".."}:
         raise ValueError("Invalid work run id.")
     return normalized
 
