@@ -621,7 +621,10 @@ function Save-RuntimeSceneManifest {
             $package.duration_seconds = $packageIndex.duration_seconds
             $package.search_text = $packageIndex.search_text
             $package.tags = $packageIndex.tags
+            $package.package_index_path = "package_index.json"
             $Manifest.package = $package
+            $packageIndexPath = Get-CurrentRuntimeSceneFilePath "package_index.json"
+            $packageIndex | ConvertTo-Json -Depth 8 | Set-Content -Path $packageIndexPath -Encoding utf8
         } catch {
         }
     }
@@ -797,6 +800,7 @@ function Initialize-RuntimeScene {
             duration_seconds = $packageIndex.duration_seconds
             search_text = $packageIndex.search_text
             tags = $packageIndex.tags
+            package_index_path = "package_index.json"
             timeline_path = "timeline.jsonl"
             lifecycle_path = "lifecycle.jsonl"
             raw_dir = "raw"

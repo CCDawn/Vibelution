@@ -21,6 +21,7 @@ BACKEND_API_RAW_PATH = "raw/backend.api.log"
 BACKEND_COMPONENT = "backend"
 TIMELINE_PATH = "timeline.jsonl"
 LIFECYCLE_PATH = "lifecycle.jsonl"
+PACKAGE_INDEX_PATH = "package_index.json"
 CONVERSATIONS_DIR = "conversations"
 AGENT_DIR = "agent"
 ARTIFACTS_DIR = "artifacts"
@@ -687,6 +688,32 @@ def _save_scene_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _save_runtime_scene_package_index(scene_dir: Path, package_index: dict[str, Any]) -> None:
+    index_path = scene_dir / PACKAGE_INDEX_PATH
+    payload = {
+        "schema_version": package_index["schemaVersion"],
+        "package_id": package_index["packageId"],
+        "display_name": package_index["displayName"],
+        "index_key": package_index["indexKey"],
+        "sortable_timestamp": package_index["sortableTimestamp"],
+        "started_at": package_index["startedAt"],
+        "started_at_local": package_index["startedAtLocal"],
+        "started_date": package_index["startedDate"],
+        "started_time": package_index["startedTime"],
+        "ended_at": package_index["endedAt"],
+        "duration_seconds": package_index["durationSeconds"],
+        "search_text": package_index["searchText"],
+        "tags": package_index["tags"],
+        "timeline_path": TIMELINE_PATH,
+        "lifecycle_path": LIFECYCLE_PATH,
+        "raw_dir": "raw",
+        "conversations_dir": CONVERSATIONS_DIR,
+        "agent_dir": AGENT_DIR,
+        "artifacts_dir": ARTIFACTS_DIR,
+    }
+    index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def _scene_id(scene_dir: Path, manifest: dict) -> str:
     value = str(manifest.get("runtime_scene_id") or "").strip()
     if value:
@@ -1274,6 +1301,7 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
             "duration_seconds": package_index["durationSeconds"],
             "search_text": package_index["searchText"],
             "tags": package_index["tags"],
+            "package_index_path": PACKAGE_INDEX_PATH,
             "timeline_path": TIMELINE_PATH,
             "lifecycle_path": LIFECYCLE_PATH,
             "raw_dir": "raw",
@@ -1284,6 +1312,7 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
         }
     )
     manifest["package"] = package
+    _save_runtime_scene_package_index(scene_dir, package_index)
     _save_scene_manifest(scene_dir, manifest)
 
 
