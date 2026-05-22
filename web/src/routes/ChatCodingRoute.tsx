@@ -49,6 +49,11 @@ import {
   formatContextUsage,
   formatRelativeTime,
 } from "./chatShellFormat";
+import {
+  markSessionDetailRunning,
+  markSessionSummaryRunning,
+  mergeSessionDetailIntoSummaries,
+} from "./chatSessionState";
 import { buildVisiblePanelRows, getPetAvatarPresetKey, getPetAvatarSymbol } from "./chatCompactPanel";
 import {
   clearPendingSelfEvolutionHandoff,
@@ -300,6 +305,15 @@ export function ChatCodingRoute() {
     refetchInterval: 3_000,
     refetchIntervalInBackground: true,
   });
+  const syncSessionDetail = useCallback(
+    (detail: SessionDetail) => {
+      queryClient.setQueryData(queryKeys.session(detail.id), detail);
+      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+        mergeSessionDetailIntoSummaries(sessions, detail),
+      );
+    },
+    [queryClient],
+  );
   const fileTreeQuery = useQuery({
     queryKey: queryKeys.fileTree(),
     queryFn: () => fetchJson<FileTreeNode[]>("/api/files/tree"),
@@ -372,6 +386,12 @@ export function ChatCodingRoute() {
         },
         body: JSON.stringify({ content, mentalModelEnabled }),
       }),
+    onMutate: async (variables) => {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
+      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+        markSessionSummaryRunning(sessions, variables.sessionId),
+      );
+    },
     onSuccess: (nextDetail, variables) => {
       setSessionComposerErrors((current) => ({
         ...current,
@@ -381,7 +401,7 @@ export function ChatCodingRoute() {
         ...current,
         [variables.sessionId]: "",
       }));
-      queryClient.setQueryData(queryKeys.session(variables.sessionId), nextDetail);
+      syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
@@ -406,7 +426,7 @@ export function ChatCodingRoute() {
         ...current,
         [variables.sessionId]: "",
       }));
-      queryClient.setQueryData(queryKeys.session(variables.sessionId), nextDetail);
+      syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
@@ -433,7 +453,7 @@ export function ChatCodingRoute() {
         ...current,
         [nextDetail.id]: "",
       }));
-      queryClient.setQueryData(queryKeys.session(nextDetail.id), nextDetail);
+      syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
@@ -466,7 +486,7 @@ export function ChatCodingRoute() {
         };
       });
       queryClient.removeQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
-      queryClient.setQueryData(queryKeys.session(nextDetail.id), nextDetail);
+      syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
@@ -496,7 +516,7 @@ export function ChatCodingRoute() {
         ...current,
         [variables.sessionId]: "",
       }));
-      queryClient.setQueryData(queryKeys.session(variables.sessionId), nextDetail);
+      syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
@@ -567,7 +587,7 @@ export function ChatCodingRoute() {
       if (payload.type !== "session_detail" || !payload.detail) {
         return;
       }
-      queryClient.setQueryData(queryKeys.session(payload.sessionId), payload.detail);
+      syncSessionDetail(payload.detail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     }
@@ -580,7 +600,7 @@ export function ChatCodingRoute() {
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.close();
     };
-  }, [activeSessionId, queryClient]);
+  }, [activeSessionId, queryClient, syncSessionDetail]);
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {
