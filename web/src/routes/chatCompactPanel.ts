@@ -4,6 +4,18 @@ export type CompactPanelRow = {
   title?: string;
 };
 
+const PET_AVATAR_SYMBOLS: Record<string, string> = {
+  lobster: "LOB",
+  shrimp: "SHR",
+  crab: "CRB",
+  cat: "CAT",
+  chick: "CHK",
+  bunny: "BUN",
+  slime: "SLM",
+  penguin: "PNG",
+  moose: "MOS",
+};
+
 const LOW_VALUE_VALUES = new Set(["", "--", "workspace"]);
 
 export function compactValue(value: string | null | undefined) {
@@ -29,4 +41,13 @@ export function buildVisiblePanelRows(
       title: row.title,
     }))
     .filter((row) => row.label.trim() && !isLowValuePanelText(row.value, lowValueLabels));
+}
+
+export function getPetAvatarSymbol(avatarPreset: string | null | undefined, petName: string | null | undefined) {
+  const presetSymbol = PET_AVATAR_SYMBOLS[String(avatarPreset ?? "").trim().toLowerCase()];
+  if (presetSymbol) {
+    return presetSymbol;
+  }
+
+  return petName?.trim()?.slice(0, 2) || "PET";
 }
