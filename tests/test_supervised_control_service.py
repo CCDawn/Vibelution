@@ -431,6 +431,13 @@ def test_handle_progress_event_updates_current_case_io_snapshot():
                     "content": "compare the candidate behavior",
                 },
                 {
+                    "timestamp": "2026-05-19T12:00:02Z",
+                    "kind": "error",
+                    "label": "llm_error",
+                    "content": "network_error: [SSL: UNEXPECTED_EOF_WHILE_READING]",
+                    "status": "recovered",
+                },
+                {
                     "timestamp": "2026-05-19T12:00:03Z",
                     "kind": "assistant",
                     "label": "assistant",
@@ -448,6 +455,7 @@ def test_handle_progress_event_updates_current_case_io_snapshot():
     assert snapshot["currentCaseIo"]["latestOutput"] == "assistant produced a live update"
     assert snapshot["currentCaseIo"]["latestOutputKind"] == "assistant"
     assert snapshot["currentCaseIo"]["transcript"][0]["kind"] == "input"
+    assert snapshot["currentCaseIo"]["transcript"][1]["status"] == "recovered"
     assert snapshot["latestMessage"] == "assistant produced a live update"
     assert snapshot["eventTail"][-1]["event"] == "role_start"
 

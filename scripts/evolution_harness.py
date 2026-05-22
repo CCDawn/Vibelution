@@ -709,9 +709,19 @@ def build_live_case_io_payload(log_info_dir: Path) -> Dict[str, Any]:
     if not events:
         return {"conversation_path": str(conversation_path)}
 
+    recovered_error_indices = {
+        index
+        for index, event in enumerate(events)
+        if event.get("type") == "error"
+        and any(
+            later.get("type") in {"tool_call", "llm_response"}
+            for later in events[index + 1 :]
+        )
+    }
+
     transcript: List[Dict[str, Any]] = []
     payload_root = conversation_path.parent
-    for event in events:
+    for event_index, event in enumerate(events):
         event_type = str(event.get("type") or "").strip().lower()
         timestamp = str(event.get("timestamp") or "").strip()
         if event_type == "external_request":
@@ -766,26 +776,35 @@ def build_live_case_io_payload(log_info_dir: Path) -> Dict[str, Any]:
         if event_type == "error":
             content = _conversation_error_text(event)
             if content:
-                transcript.append(
-                    {
-                        "timestamp": timestamp,
-                        "kind": "error",
-                        "label": str(event.get("error_type") or "error").strip() or "error",
-                        "content": _truncate_live_case_text(content),
-                    }
-                )
+                error_item = {
+                    "timestamp": timestamp,
+                    "kind": "error",
+                    "label": str(event.get("error_type") or "error").strip() or "error",
+                    "content": _truncate_live_case_text(content),
+                }
+                if event_index in recovered_error_indices and _is_provider_transport_error_text(content):
+                    error_item["status"] = "recovered"
+                transcript.append(error_item)
 
     if not transcript:
         return {"conversation_path": str(conversation_path)}
 
     trimmed = transcript[-LIVE_CASE_TRANSCRIPT_LIMIT:]
     latest_input = next((item["content"] for item in reversed(trimmed) if item["kind"] == "input"), "")
-    latest_output_entry = next(
-        (item for item in reversed(trimmed) if item["kind"] not in {"input", "error"}),
-        None,
-    )
+    latest_non_input = next((item for item in reversed(trimmed) if item["kind"] != "input"), None)
+    if (
+        latest_non_input
+        and latest_non_input["kind"] == "error"
+        and latest_non_input.get("status") != "recovered"
+    ):
+        latest_output_entry = latest_non_input
+    else:
+        latest_output_entry = next(
+            (item for item in reversed(trimmed) if item["kind"] not in {"input", "error"}),
+            None,
+        )
     if latest_output_entry is None:
-        latest_output_entry = next((item for item in reversed(trimmed) if item["kind"] != "input"), None)
+        latest_output_entry = latest_non_input
 
     return {
         "conversation_path": str(conversation_path),

@@ -1215,9 +1215,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     return event.summary;
   }
 
-  function caseIoEntryLabel(kind: string, label: string) {
+  function caseIoEntryLabel(kind: string, label: string, status?: string) {
     const normalizedKind = String(kind || "").trim().toLowerCase();
     const normalizedLabel = String(label || "").trim();
+    const normalizedStatus = String(status || "").trim().toLowerCase();
     if (normalizedKind === "tool") {
       return normalizedLabel || t("ioEntryTool");
     }
@@ -1225,6 +1226,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return t("ioEntryAssistant");
     }
     if (normalizedKind === "error") {
+      if (normalizedStatus === "recovered") {
+        return t("ioEntryRecoveredError");
+      }
       return normalizedLabel || t("ioEntryError");
     }
     return normalizedLabel || t("ioEntryPrompt");
@@ -1848,7 +1852,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             className={styles.ioEntry}
                           >
                             <div className={styles.ioMetaRow}>
-                              <strong>{caseIoEntryLabel(entry.kind, entry.label)}</strong>
+                              <strong>{caseIoEntryLabel(entry.kind, entry.label, entry.status)}</strong>
                               <span className={styles.formHint}>{compactTimestamp(entry.timestamp)}</span>
                             </div>
                             <pre className={styles.ioContent} title={entry.content}>{entry.content}</pre>

@@ -570,6 +570,33 @@ def test_build_live_case_io_payload_keeps_recovered_llm_error_out_of_latest_outp
     assert payload["latest_output_label"] == "close_evolution_transaction_tool"
     assert '"transaction_status":"success"' in payload["latest_output"]
     assert [item["label"] for item in payload["transcript"]].count("llm_error") == 2
+    recovered_errors = [
+        item
+        for item in payload["transcript"]
+        if item["kind"] == "error" and item.get("status") == "recovered"
+    ]
+    assert len(recovered_errors) == 2
+
+
+def test_build_live_case_io_payload_keeps_unrecovered_llm_error_as_current_output(tmp_path: Path):
+    conversation_path = tmp_path / "conversation_demo.jsonl"
+    conversation_path.write_text(
+        "\n".join(
+            [
+                '{"type":"external_request","timestamp":"2026-05-22T10:52:28Z","content":"run probe"}',
+                '{"type":"tool_call","timestamp":"2026-05-22T10:52:34Z","tool_name":"open_evolution_transaction_tool","status":"success","tool_result":"{\\"status\\":\\"success\\"}"}',
+                '{"type":"error","timestamp":"2026-05-22T10:52:44Z","error_type":"llm_error","error_msg":"network_error: [SSL: UNEXPECTED_EOF_WHILE_READING]"}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_live_case_io_payload(tmp_path)
+
+    assert payload["latest_output_kind"] == "error"
+    assert payload["latest_output_label"] == "llm_error"
+    assert "UNEXPECTED_EOF_WHILE_READING" in payload["latest_output"]
+    assert payload["transcript"][-1].get("status") != "recovered"
 
 
 def test_infer_evolution_summary_records_provider_transport_llm_failure():
