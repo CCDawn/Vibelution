@@ -95,6 +95,7 @@ from core.orchestration.agent_modes import (
     normalize_agent_mode,
     resolve_mode_policy,
 )
+from core.orchestration.runtime_goal import build_runtime_goal_packet
 from core.orchestration.round_state import RoundStateController
 from core.orchestration.response_processor import ResponseProcessor, ResponseProcessingResult
 from core.orchestration.response_surface import ResponseSurfaceController
@@ -109,6 +110,25 @@ from core.pet_system import get_pet_system
 
 # 进化测试提示
 EVOLUTION_TEST_PROMPT = "制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"
+
+
+def _record_agent_scene_event(phase: str, event_code: str, *, message: str, fields: Dict[str, Any] | None = None) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "agent",
+            phase,
+            event_code,
+            message=message,
+            level="info",
+            outcome="observed",
+            fields=fields or {},
+        )
+    except Exception:
+        return
+
+
 SUBAGENT_RESULT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
 
 
@@ -925,6 +945,36 @@ class SelfEvolvingAgent:
         self._active_goal = effective_goal
         self._last_turn_metadata = {}
         self.prompt_manager.update_current_goal(effective_goal)
+        runtime_goal_packet = build_runtime_goal_packet(policy, effective_goal)
+        set_goal_packet = getattr(self.prompt_manager, "set_runtime_goal_packet", None)
+        if callable(set_goal_packet):
+            set_goal_packet(runtime_goal_packet)
+        try:
+            logger.log_action("runtime_goal_packet", {
+                "source": runtime_goal_packet.source,
+                "objective_type": runtime_goal_packet.objective_type,
+                "allow_auto_continue": runtime_goal_packet.allow_auto_continue,
+                "allow_file_writes": runtime_goal_packet.allow_file_writes,
+                "allow_git_commit": runtime_goal_packet.allow_git_commit,
+                "allow_evolution_transaction": runtime_goal_packet.allow_evolution_transaction,
+                "allow_subagents": runtime_goal_packet.allow_subagents,
+            })
+        except Exception:
+            pass
+        _record_agent_scene_event(
+            "prompt",
+            "agent.runtime_goal.bound",
+            message="统一 agent 回合已绑定运行目标包。",
+            fields={
+                "source": runtime_goal_packet.source,
+                "objectiveType": runtime_goal_packet.objective_type,
+                "allowAutoContinue": runtime_goal_packet.allow_auto_continue,
+                "allowFileWrites": runtime_goal_packet.allow_file_writes,
+                "allowGitCommit": runtime_goal_packet.allow_git_commit,
+                "allowEvolutionTransaction": runtime_goal_packet.allow_evolution_transaction,
+                "allowSubagents": runtime_goal_packet.allow_subagents,
+            },
+        )
         self._pending_lifecycle_action = None
         context_limit = getattr(
             self,
@@ -1504,9 +1554,19 @@ class SelfEvolvingAgent:
         except Exception:
             pass
         try:
-            logger.log_action("active_components", {"components": components})
+            logger.log_action("active_components", {"requested": components, "applied": after})
         except Exception:
             pass
+        _record_agent_scene_event(
+            "prompt",
+            "prompt.components.selected",
+            message="统一 agent 已选择提示词组件。",
+            fields={
+                "requested": components,
+                "applied": after,
+                "rejected": [component for component in components if component not in after],
+            },
+        )
 
     def _create_round_state(self) -> RoundStateController:
         return RoundStateController(max_iterations=self.config.agent.max_iterations)

@@ -51,6 +51,7 @@ class TestToolMessageFlow:
         processed = SimpleNamespace(active_components=["SOUL", "SPEC"])
         actions = []
         ui_events = []
+        scene_events = []
 
         class DummyUI:
             def add_log(self, text, level="INFO"):
@@ -58,12 +59,19 @@ class TestToolMessageFlow:
 
         monkeypatch.setattr(agent_module.logger, "log_action", lambda action, details=None: actions.append((action, details)))
         monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+        )
 
         agent._apply_active_components_request(processed)
 
         assert agent.prompt_manager.override == ["SOUL", "SPEC"]
         assert ui_events == [("INFO", "Prompt 组件切换: SOUL, SPEC")]
-        assert actions == [("active_components", {"components": ["SOUL", "SPEC"]})]
+        assert actions == [("active_components", {"requested": ["SOUL", "SPEC"], "applied": ["SOUL", "SPEC"]})]
+        assert scene_events[0][0:2] == ("prompt", "prompt.components.selected")
+        assert scene_events[0][2]["fields"]["requested"] == ["SOUL", "SPEC"]
 
     def test_handle_tool_result_uses_tool_message_when_id_present(self):
         messages = []
@@ -2072,23 +2080,34 @@ class TestRuntimeStateMemoryFlow:
         class DummyPromptManager:
             def __init__(self):
                 self.current_goal = ""
+                self.runtime_goal_packet = None
 
             def update_current_goal(self, goal):
                 self.current_goal = goal
+
+            def set_runtime_goal_packet(self, packet):
+                self.runtime_goal_packet = packet
 
             def clear_state_memory(self, persist=True):
                 return None
 
             def build(self):
                 captured["goal_seen_during_build"] = self.current_goal
+                captured["packet_seen_during_build"] = self.runtime_goal_packet
                 raise RuntimeError("stop_after_build")
 
         agent.prompt_manager = DummyPromptManager()
         agent.git_memory = SimpleNamespace(refresh_git_memory=lambda force=False: None)
         agent._sync_runtime_state_memory = lambda: None
         agent._system_prompt_written = False
+        scene_events = []
 
         monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace())
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+        )
         monkeypatch.setattr(
             agent_module,
             "get_session_state",
@@ -2099,6 +2118,10 @@ class TestRuntimeStateMemoryFlow:
             agent.think_and_act("制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。")
 
         assert "trigger_self_restart_tool" in captured["goal_seen_during_build"]
+        assert captured["packet_seen_during_build"].source == "自进化入口"
+        assert captured["packet_seen_during_build"].objective_type == "self_improvement"
+        assert scene_events[0][0:2] == ("prompt", "agent.runtime_goal.bound")
+        assert scene_events[0][2]["fields"]["objectiveType"] == "self_improvement"
 
     def test_think_and_act_uses_goal_override_before_first_prompt_build(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -2108,15 +2131,20 @@ class TestRuntimeStateMemoryFlow:
         class DummyPromptManager:
             def __init__(self):
                 self.current_goal = ""
+                self.runtime_goal_packet = None
 
             def update_current_goal(self, goal):
                 self.current_goal = goal
+
+            def set_runtime_goal_packet(self, packet):
+                self.runtime_goal_packet = packet
 
             def clear_state_memory(self, persist=True):
                 return None
 
             def build(self):
                 captured["goal_seen_during_build"] = self.current_goal
+                captured["packet_seen_during_build"] = self.runtime_goal_packet
                 raise RuntimeError("stop_after_build")
 
         agent.prompt_manager = DummyPromptManager()
@@ -2125,6 +2153,7 @@ class TestRuntimeStateMemoryFlow:
         agent._system_prompt_written = False
 
         monkeypatch.setattr(agent_module, "get_ui", lambda: SimpleNamespace())
+        monkeypatch.setattr(agent_module, "_record_agent_scene_event", lambda *args, **kwargs: None)
         monkeypatch.setattr(
             agent_module,
             "get_session_state",
@@ -2138,6 +2167,7 @@ class TestRuntimeStateMemoryFlow:
             )
 
         assert captured["goal_seen_during_build"] == "分析超时原因"
+        assert captured["packet_seen_during_build"].goal == "分析超时原因"
 
     def test_extract_subagent_primary_goal_prefers_declared_goal(self):
         prompt = (

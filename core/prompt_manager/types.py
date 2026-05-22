@@ -72,3 +72,4 @@ class BuildContext:
     current_goal: Optional[str] = None
     state_memory: str = ""
     prompt_mode: str = "orient"
+    runtime_goal_packet: Any = None

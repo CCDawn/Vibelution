@@ -122,6 +122,30 @@ def make_file_section(
     )
 
 
+def make_runtime_goal_section(ctx: BuildContext) -> SystemPromptSection:
+    """当前运行目标包：统一 agent 的入口目标与能力边界。"""
+
+    def compute() -> Optional[str]:
+        packet = getattr(ctx, "runtime_goal_packet", None)
+        if packet is None:
+            return None
+        render = getattr(packet, "render", None)
+        if callable(render):
+            text = render()
+        else:
+            text = str(packet or "")
+        return text.strip() or None
+
+    return SystemPromptSection(
+        name="RUNTIME_GOAL",
+        compute=compute,
+        cache_break=True,
+        priority=18,
+        description="当前目标、来源、能力边界与完成标准",
+        required=True,
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 静态章节工厂（cache_break=False）
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -486,6 +510,17 @@ def create_default_sections(
 
     # ── 静态章节（由 config.toml [[prompt.sections]] 驱动）──
 
+    common_path = static_root / "COMMON.md"
+    if common_path.exists():
+        sections.append(make_file_section(
+            "COMMON",
+            common_path,
+            priority=8,
+            cache_break=False,
+            description="统一 Agent 通用基座",
+            required=True,
+        ))
+
     for cfg in (section_configs or []):
         section_path = project_root / cfg.path
         if section_path.exists():
@@ -536,4 +571,3 @@ def create_default_sections(
 # ═══════════════════════════════════════════════════════════════════════════════
 # 辅助
 # ═══════════════════════════════════════════════════════════════════════════════
-
