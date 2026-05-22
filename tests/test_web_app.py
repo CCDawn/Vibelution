@@ -1270,8 +1270,14 @@ def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkey
     assert any(item["eventCode"] == "backend.health.succeeded" for item in detail["timeline"])
     assert detail["timeline"][-1]["eventCode"] == "supervisor.unexpected_exit"
     assert any(item["path"] == "raw/backend.stdout.log" for item in detail["rawFiles"])
+    assert [item["path"] for item in detail["eventLogs"]] == [
+        "events/backend.jsonl",
+        "events/frontend.jsonl",
+        "events/supervisor.jsonl",
+    ]
     assert detail["packageSummary"]["schemaVersion"] == 2
     assert detail["packageSummary"]["lifecycleEventCount"] >= 3
+    assert detail["packageSummary"]["eventLogCount"] == 3
     assert detail["packageSummary"]["warningCount"] == 1
     assert detail["packageSummary"]["errorCount"] == 1
     assert detail["lifecycle"][0]["eventCode"] == "backend.health.succeeded" or detail["lifecycle"][0]["eventCode"].startswith("frontend.")
@@ -1287,6 +1293,13 @@ def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkey
     assert "uvicorn started" in content_payload["content"]
     assert content_payload["diagnostics"]["severity"] == "info"
     assert content_payload["diagnostics"]["agentHint"] == "runtime_scenes/scene-a/raw/backend.stdout.log; severity=info"
+
+    event_response = client.get(
+        "/api/logs/runtime-scenes/scene-a/content",
+        params={"path": "events/backend.jsonl"},
+    )
+    assert event_response.status_code == 200
+    assert event_response.json()["relativePath"] == "events/backend.jsonl"
 
     delete_response = client.post(
         "/api/logs/runtime-scenes/delete",
@@ -1318,9 +1331,11 @@ def test_runtime_scene_endpoints_read_timeline_package_without_legacy_events(tmp
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["timeline"][0]["eventCode"] == "frontend.build.started"
-    assert detail["timeline"][-1]["eventCode"] == "backend.health.succeeded"
+    assert any(item["eventCode"] == "backend.health.succeeded" for item in detail["timeline"])
     assert detail["packageSummary"]["eventCount"] >= 3
     assert detail["packageSummary"]["lifecycleEventCount"] >= 3
+    assert detail["packageSummary"]["eventLogCount"] == 0
+    assert detail["eventLogs"] == []
     assert "scene-package-only" in detail["packageIndex"]["searchText"]
 
 

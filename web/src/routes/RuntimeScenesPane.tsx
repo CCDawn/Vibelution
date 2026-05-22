@@ -303,7 +303,8 @@ function runtimeSceneChildLogCount(scene: RuntimeSceneDetail) {
     (scene.packageSummary?.rawLogCount ?? scene.rawFiles.length) +
     (scene.packageSummary?.conversationLogCount ?? scene.conversationLogs.length) +
     (scene.packageSummary?.agentLogCount ?? scene.agentLogs.length) +
-    (scene.packageSummary?.artifactCount ?? scene.artifacts.length)
+    (scene.packageSummary?.artifactCount ?? scene.artifacts.length) +
+    (scene.packageSummary?.eventLogCount ?? scene.eventLogs?.length ?? 0)
   );
 }
 

@@ -163,6 +163,7 @@ export type RuntimeSceneListItem = {
   conversationCount: number;
   agentLogCount: number;
   artifactCount: number;
+  eventLogCount: number;
   errorCount: number;
   warningCount: number;
 };
@@ -247,6 +248,7 @@ export type RuntimeSceneDetail = {
   conversationLogs: RuntimeSceneRawFile[];
   agentLogs: RuntimeSceneRawFile[];
   artifacts: RuntimeSceneRawFile[];
+  eventLogs: RuntimeSceneRawFile[];
   packageSummary: RuntimeScenePackageSummary;
 };
 
