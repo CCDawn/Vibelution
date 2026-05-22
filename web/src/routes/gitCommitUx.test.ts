@@ -26,6 +26,7 @@ describe("gitCommitUx", () => {
   it("explains why commit is blocked before the request is sent", () => {
     expect(getGitCommitBlockReason(0, "feat: change", false)).toBe("no_selection");
     expect(getGitCommitBlockReason(1, "   ", false)).toBe("empty_message");
+    expect(getGitCommitBlockReason(1, "feat: change", false, 1)).toBe("staged_outside_selection");
     expect(getGitCommitBlockReason(1, "feat: change", true)).toBe("committing");
     expect(getGitCommitBlockReason(1, "feat: change", false)).toBeNull();
   });

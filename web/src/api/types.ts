@@ -201,6 +201,7 @@ export type RuntimeScenePackageSummary = {
   conversationLogCount: number;
   agentLogCount: number;
   artifactCount: number;
+  eventLogCount: number;
   errorCount: number;
   warningCount: number;
 };
