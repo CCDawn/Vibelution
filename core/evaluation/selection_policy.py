@@ -52,6 +52,7 @@ class PolicyExecutionRecord:
     promoted_cases: List[str] = field(default_factory=list)
     observation_cases: List[str] = field(default_factory=list)
     rejected_cases: List[str] = field(default_factory=list)
+    case_evidence: List[Dict[str, Any]] = field(default_factory=list)
     proposal_paths: List[str] = field(default_factory=list)
     lineage_index_path: str = ""
 
@@ -157,6 +158,31 @@ def _rollback_supported_for_case(decision: Any, case_summary: Any) -> bool:
     return _run_has_restart_issue(candidate) and not _run_has_restart_issue(baseline)
 
 
+def _case_evidence_payload(
+    case_summary: Any,
+    *,
+    proposal_payload: Dict[str, Any] | None = None,
+    proposal_path: Path | None = None,
+) -> Dict[str, Any]:
+    evidence = {
+        "case_id": str(getattr(case_summary, "case_id", "") or ""),
+        "baseline_status": str(getattr(case_summary, "baseline_status", "") or ""),
+        "candidate_status": str(getattr(case_summary, "candidate_status", "") or ""),
+        "baseline_reason": str(getattr(case_summary, "baseline_reason", "") or ""),
+        "candidate_reason": str(getattr(case_summary, "candidate_reason", "") or ""),
+        "decision_signal": str(getattr(case_summary, "decision_signal", "") or ""),
+        "difference_summary": str(getattr(case_summary, "difference_summary", "") or ""),
+        "difference_metrics": dict(getattr(case_summary, "difference_metrics", {}) or {}),
+        "difference_reasons": list(getattr(case_summary, "difference_reasons", []) or []),
+    }
+    if proposal_payload is not None:
+        evidence["proposal_id"] = str(proposal_payload.get("proposal_id") or "")
+        evidence["proposal_status"] = str(proposal_payload.get("status") or "")
+    if proposal_path is not None:
+        evidence["proposal_path"] = str(proposal_path)
+    return evidence
+
+
 def _write_proposal(
     *,
     proposal_path: Path,
@@ -190,7 +216,14 @@ def _write_proposal(
         "candidate_prompt": str(case_payload.get("candidate_prompt") or ""),
         "baseline_prompt": str(case_payload.get("baseline_prompt") or ""),
         "baseline_prompt_before": str(case_payload.get("baseline_prompt") or ""),
+        "baseline_status": case_summary.baseline_status,
+        "candidate_status": case_summary.candidate_status,
+        "baseline_reason": case_summary.baseline_reason,
+        "candidate_reason": case_summary.candidate_reason,
         "decision_signal": case_summary.decision_signal,
+        "difference_summary": case_summary.difference_summary,
+        "difference_metrics": dict(case_summary.difference_metrics or {}),
+        "difference_reasons": list(case_summary.difference_reasons or []),
         "status": status,
         "decision": decision.decision,
         "decision_path": decision.decision_path,
@@ -307,6 +340,7 @@ def execute_supervised_policy(
     promoted_cases: List[str] = []
     observation_cases: List[str] = []
     rejected_cases: List[str] = []
+    case_evidence: List[Dict[str, Any]] = []
     proposal_paths: List[str] = []
     lineage_index_path = ""
 
@@ -330,7 +364,7 @@ def execute_supervised_policy(
                 continue
             proposal_id = _candidate_id(decision.bundle_name, case_summary.case_id, candidate_prompt)
             proposal_path = _proposal_path(project_root, proposal_id)
-            _write_proposal(
+            proposal_payload = _write_proposal(
                 proposal_path=proposal_path,
                 proposal_id=proposal_id,
                 decision=decision,
@@ -340,6 +374,13 @@ def execute_supervised_policy(
                 registry=registry,
             )
             proposal_paths.append(str(proposal_path))
+            case_evidence.append(
+                _case_evidence_payload(
+                    case_summary,
+                    proposal_payload=proposal_payload,
+                    proposal_path=proposal_path,
+                )
+            )
             case_payload["baseline_prompt"] = candidate_prompt
             promoted_cases.append(case_summary.case_id)
             registry_key = f"{decision.bundle_name}:{case_summary.case_id}"
@@ -392,7 +433,7 @@ def execute_supervised_policy(
                 continue
             proposal_id = _candidate_id(decision.bundle_name, case_summary.case_id, candidate_prompt)
             proposal_path = _proposal_path(project_root, proposal_id)
-            _write_proposal(
+            proposal_payload = _write_proposal(
                 proposal_path=proposal_path,
                 proposal_id=proposal_id,
                 decision=decision,
@@ -402,6 +443,13 @@ def execute_supervised_policy(
                 registry=registry,
             )
             proposal_paths.append(str(proposal_path))
+            case_evidence.append(
+                _case_evidence_payload(
+                    case_summary,
+                    proposal_payload=proposal_payload,
+                    proposal_path=proposal_path,
+                )
+            )
             observation_cases.append(case_summary.case_id)
             _append_jsonl(
                 observation_pool_path,
@@ -441,7 +489,7 @@ def execute_supervised_policy(
                 _candidate_id(decision.bundle_name, case_summary.case_id, candidate_prompt) if candidate_prompt else None
             )
             proposal_path = _proposal_path(project_root, proposal_id or f"{decision.bundle_name}:{case_summary.case_id}:missing")
-            _write_proposal(
+            proposal_payload = _write_proposal(
                 proposal_path=proposal_path,
                 proposal_id=proposal_id or "",
                 decision=decision,
@@ -451,6 +499,13 @@ def execute_supervised_policy(
                 registry=registry,
             )
             proposal_paths.append(str(proposal_path))
+            case_evidence.append(
+                _case_evidence_payload(
+                    case_summary,
+                    proposal_payload=proposal_payload,
+                    proposal_path=proposal_path,
+                )
+            )
             rejected_cases.append(case_summary.case_id)
             _append_jsonl(
                 rollback_pool_path,
@@ -503,7 +558,7 @@ def execute_supervised_policy(
                 _candidate_id(decision.bundle_name, case_summary.case_id, candidate_prompt) if candidate_prompt else None
             )
             proposal_path = _proposal_path(project_root, proposal_id or f"{decision.bundle_name}:{case_summary.case_id}:missing")
-            _write_proposal(
+            proposal_payload = _write_proposal(
                 proposal_path=proposal_path,
                 proposal_id=proposal_id or "",
                 decision=decision,
@@ -513,6 +568,13 @@ def execute_supervised_policy(
                 registry=registry,
             )
             proposal_paths.append(str(proposal_path))
+            case_evidence.append(
+                _case_evidence_payload(
+                    case_summary,
+                    proposal_payload=proposal_payload,
+                    proposal_path=proposal_path,
+                )
+            )
             rejected_cases.append(case_summary.case_id)
             _append_jsonl(
                 rejection_pool_path,
@@ -552,6 +614,7 @@ def execute_supervised_policy(
         promoted_cases=promoted_cases,
         observation_cases=observation_cases,
         rejected_cases=rejected_cases,
+        case_evidence=case_evidence,
         proposal_paths=proposal_paths,
         lineage_index_path=lineage_index_path,
     )
@@ -580,6 +643,7 @@ def execute_supervised_policy(
             "promotedCaseCount": len(record.promoted_cases),
             "observationCaseCount": len(record.observation_cases),
             "rejectedCaseCount": len(record.rejected_cases),
+            "caseEvidenceCount": len(record.case_evidence),
             "proposalCount": len(record.proposal_paths),
             "proposalPaths": record.proposal_paths,
             "lineageIndexPath": record.lineage_index_path,

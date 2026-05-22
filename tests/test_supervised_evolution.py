@@ -188,8 +188,17 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
     assert proposal["status"] == "observing"
     assert proposal["observation_count"] == 1
+    assert proposal["difference_summary"] == decision.case_summaries[0].difference_summary
+    assert proposal["difference_metrics"] == decision.case_summaries[0].difference_metrics
+    assert proposal["difference_reasons"] == decision.case_summaries[0].difference_reasons
+    assert proposal["baseline_status"] == "success"
+    assert proposal["candidate_status"] == "success"
     assert proposal["target"]["kind"] == "bundle_prompt_case"
     assert proposal["lineage"]["parent_baseline_id"] is None
+    policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    assert policy_record["case_evidence"][0]["case_id"] == "probe"
+    assert policy_record["case_evidence"][0]["proposal_status"] == "observing"
+    assert policy_record["case_evidence"][0]["difference_summary"] == decision.case_summaries[0].difference_summary
     lineage_index_path = Path(decision.policy_action["lineage_index_path"])
     assert lineage_index_path.exists()
     lineage_index = json.loads(lineage_index_path.read_text(encoding="utf-8"))
@@ -650,6 +659,12 @@ def test_run_supervised_evolution_session_rolls_back_when_candidate_regresses(tm
     assert proposal_path.exists()
     proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
     assert proposal["status"] == "rolled_back"
+    assert proposal["difference_summary"] == decision.case_summaries[0].difference_summary
+    assert proposal["difference_metrics"] == decision.case_summaries[0].difference_metrics
+    assert proposal["difference_reasons"] == decision.case_summaries[0].difference_reasons
+    policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    assert policy_record["case_evidence"][0]["proposal_status"] == "rolled_back"
+    assert policy_record["case_evidence"][0]["decision_signal"] == decision.case_summaries[0].decision_signal
 
 
 def test_run_supervised_evolution_session_is_inconclusive_when_baseline_and_candidate_share_boundary_issue(
@@ -893,6 +908,12 @@ def test_run_supervised_evolution_session_promotes_candidate_into_bundle(tmp_pat
     assert proposal_path.exists()
     proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
     assert proposal["status"] == "promoted"
+    assert proposal["difference_summary"] == decision.case_summaries[0].difference_summary
+    assert proposal["difference_metrics"] == decision.case_summaries[0].difference_metrics
+    assert proposal["difference_reasons"] == decision.case_summaries[0].difference_reasons
+    policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    assert policy_record["case_evidence"][0]["proposal_status"] == "promoted"
+    assert policy_record["case_evidence"][0]["difference_summary"] == decision.case_summaries[0].difference_summary
     assert proposal["lineage"]["parent_baseline_id"] is None
 
 
@@ -986,6 +1007,12 @@ def test_run_supervised_evolution_session_expires_observing_proposal_after_budge
     proposal_path = Path(decisions[-1].policy_action["proposal_paths"][0])
     proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
     assert proposal["status"] == "expired"
+    assert proposal["difference_summary"] == decisions[-1].case_summaries[0].difference_summary
+    assert proposal["difference_metrics"] == decisions[-1].case_summaries[0].difference_metrics
+    assert proposal["difference_reasons"] == decisions[-1].case_summaries[0].difference_reasons
+    policy_record = json.loads(Path(decisions[-1].policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    assert policy_record["case_evidence"][0]["proposal_status"] == "expired"
+    assert policy_record["case_evidence"][0]["difference_summary"] == decisions[-1].case_summaries[0].difference_summary
     assert proposal["observation_count"] == 4
     assert proposal["observation_budget"] == 3
     assert proposal["expired_at"] == decisions[-1].ended_at
@@ -1141,6 +1168,15 @@ def test_run_supervised_evolution_session_rejects_promotion_when_gym_gate_reject
     assert decision.gates[-1].name == "gym_promotion"
     assert decision.gates[-1].status == "fail"
     assert decision.policy_action["action"] == "REJECT"
+    proposal_path = Path(decision.policy_action["proposal_paths"][0])
+    proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
+    assert proposal["status"] == "rejected"
+    assert proposal["difference_summary"] == decision.case_summaries[0].difference_summary
+    assert proposal["difference_metrics"] == decision.case_summaries[0].difference_metrics
+    assert proposal["difference_reasons"] == decision.case_summaries[0].difference_reasons
+    policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    assert policy_record["case_evidence"][0]["proposal_status"] == "rejected"
+    assert policy_record["case_evidence"][0]["difference_summary"] == decision.case_summaries[0].difference_summary
     assert '"baseline_prompt": "baseline"' in bundle_path.read_text(encoding="utf-8")
 
 
