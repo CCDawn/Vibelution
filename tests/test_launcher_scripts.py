@@ -527,6 +527,90 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_runtime_scene_manifest_writes_package_index_file(tmp_path):
+    scene_dir = tmp_path / "scene"
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($name in @(
+    "ConvertTo-RuntimeSceneIndexToken",
+    "Get-RuntimeSceneTriggerIndexToken",
+    "Get-RuntimeSceneStatusIndexToken",
+    "Get-RuntimeSceneStatusDisplayLabel",
+    "Get-RuntimeSceneTriggerDisplayLabel",
+    "Get-RuntimeScenePackageIndex",
+    "ConvertTo-PlainHashtable",
+    "Save-RuntimeSceneManifest"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$name was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+$script:currentRuntimeSceneDir = {json.dumps(str(scene_dir))}
+function Ensure-CurrentRuntimeSceneSubdirs {{
+    New-Item -ItemType Directory -Path $script:currentRuntimeSceneDir -Force | Out-Null
+}}
+function Get-CurrentRuntimeSceneFilePath {{
+    param([string]$RelativePath)
+    return Join-Path $script:currentRuntimeSceneDir $RelativePath
+}}
+
+Save-RuntimeSceneManifest -Manifest @{{
+    schema_version = 2
+    runtime_scene_id = "scene-a"
+    started_at = "2026-05-18T12:00:00Z"
+    ended_at = "2026-05-18T12:03:00Z"
+    status = "stopped"
+    result = "explicit_stop"
+    stop_reason = "manual stop"
+    trigger = "internal-start"
+}}
+
+$manifest = Get-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$packageIndex = Get-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "package_index.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($manifest.package.package_index_path -ne "package_index.json") {{
+    throw "manifest package does not point to package_index.json."
+}}
+if ($packageIndex.package_id -ne "scene-a") {{
+    throw "package_index package_id did not round-trip."
+}}
+if ($packageIndex.index_key -ne $manifest.package.index_key) {{
+    throw "package_index and manifest package index_key diverged."
+}}
+if ($packageIndex.search_text -match "System\\.Object\\[\\]") {{
+    throw "package_index search_text contains a stringified tag array."
+}}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_closure_record_normalizes_successful_manifest_runtime_manager(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
