@@ -314,4 +314,22 @@ describe("systemStatus", () => {
       ),
     ).toBeNull();
   });
+
+  it.each(["stopped", "closed", "terminated"])(
+    "ignores %s active work snapshots left behind by shutdown",
+    (status) => {
+      expect(
+        deriveActiveWorkIndicator(
+          runtimeWithActiveWork({
+            chat_turn: {
+              runId: `chat-${status}`,
+              runKind: "chat_turn",
+              status,
+              userMessage: "continue after shutdown",
+            },
+          }),
+        ),
+      ).toBeNull();
+    },
+  );
 });

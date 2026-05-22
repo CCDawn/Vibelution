@@ -201,6 +201,9 @@ function isTerminalWorkRunStatus(status: string): boolean {
     "failed",
     "cancelled",
     "canceled",
+    "stopped",
+    "closed",
+    "terminated",
     "error",
   ]).has(status);
 }
