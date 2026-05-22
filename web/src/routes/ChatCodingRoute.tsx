@@ -1,5 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronRight, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import {
+  Apple,
+  Check,
+  ChevronRight,
+  HeartHandshake,
+  MessageCircleHeart,
+  Pencil,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+  X,
+} from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -36,7 +48,7 @@ import {
   formatContextUsage,
   formatRelativeTime,
 } from "./chatShellFormat";
-import { buildVisiblePanelRows, getPetAvatarSymbol } from "./chatCompactPanel";
+import { buildVisiblePanelRows, getPetAvatarPresetKey, getPetAvatarSymbol } from "./chatCompactPanel";
 import {
   clearPendingSelfEvolutionHandoff,
   loadPendingSelfEvolutionHandoff,
@@ -717,7 +729,19 @@ export function ChatCodingRoute() {
             ? t("petCompanionLowEnergy")
             : t("petCompanionStable");
   const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
+  const petAvatarPresetKey = getPetAvatarPresetKey(pet?.avatarPreset);
+  const petAvatarSkinClass = styles[`petShowcaseAvatar_${petAvatarPresetKey}`] ?? styles.petShowcaseAvatar_default;
   const petAvatarSymbol = getPetAvatarSymbol(pet?.avatarPreset, pet?.name);
+  const petInteractionLabels = {
+    group: lang === "zh" ? "宠物互动" : "Pet interactions",
+    pending: lang === "zh" ? "后续接入" : "Coming later",
+    feed: lang === "zh" ? "喂食" : "Feed",
+    talk: lang === "zh" ? "沟通" : "Talk",
+    care: lang === "zh" ? "照看" : "Care",
+    feedTitle: lang === "zh" ? "喂食功能待接入" : "Feed action will be connected later",
+    talkTitle: lang === "zh" ? "沟通功能待接入" : "Talk action will be connected later",
+    careTitle: lang === "zh" ? "照看功能待接入" : "Care action will be connected later",
+  };
   const contextStatusLine = runtimeQuery.isError
     ? describeError(runtimeQuery.error, t("loadFailed"))
     : runtime
@@ -1153,8 +1177,17 @@ export function ChatCodingRoute() {
         <section className={styles.petShowcase} aria-label={t("petSpace")}>
           <div className={styles.petShowcaseStage} aria-hidden="true">
             <div className={styles.petShowcaseAura} />
-            <div className={styles.petShowcaseAvatar}>
-              <span>{petAvatarSymbol}</span>
+            <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinClass}`}>
+              <span className={styles.petShowcaseEarLeft} />
+              <span className={styles.petShowcaseEarRight} />
+              <span className={styles.petShowcaseFace}>
+                <span className={styles.petShowcaseEye} />
+                <span className={styles.petShowcaseMuzzle} />
+                <span className={styles.petShowcaseEye} />
+              </span>
+              <span className={styles.petShowcaseSymbol}>{petAvatarSymbol}</span>
+              <span className={styles.petShowcaseFootLeft} />
+              <span className={styles.petShowcaseFootRight} />
             </div>
           </div>
           <div className={styles.petShowcaseInfo}>
@@ -1166,6 +1199,24 @@ export function ChatCodingRoute() {
             <p className={styles.petShowcaseLine}>
               {petPresetLabel} · {petCompanionLine}
             </p>
+          </div>
+          <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
+            <button type="button" className={styles.petShowcaseAction} disabled title={petInteractionLabels.feedTitle}>
+              <Apple size={14} />
+              <span>{petInteractionLabels.feed}</span>
+            </button>
+            <button type="button" className={styles.petShowcaseAction} disabled title={petInteractionLabels.talkTitle}>
+              <MessageCircleHeart size={14} />
+              <span>{petInteractionLabels.talk}</span>
+            </button>
+            <button type="button" className={styles.petShowcaseAction} disabled title={petInteractionLabels.careTitle}>
+              <HeartHandshake size={14} />
+              <span>{petInteractionLabels.care}</span>
+            </button>
+            <span className={styles.petShowcaseActionHint}>
+              <Sparkles size={13} />
+              <span>{petInteractionLabels.pending}</span>
+            </span>
           </div>
         </section>
       </aside>
