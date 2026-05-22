@@ -149,6 +149,66 @@ def test_browser_profile_cleanup_protects_current_profile(reset_project: Path):
     assert not old.exists()
 
 
+def test_reset_execution_keeps_protected_runtime_targets_out_of_candidate_events(
+    reset_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    current_scene = _seed_scene(reset_project, "20260501T020000Z__current", "current", "stopped")
+    stopped_scene = _seed_scene(reset_project, "20260501T000000Z__stopped", "stopped", "stopped")
+    current_profile = reset_project / ".runtime" / "launcher" / "edge-app-profile"
+    old_profile = reset_project / ".runtime" / "old-test-profile"
+    _write(current_profile / "Default" / "LOCK", "locked")
+    _write(old_profile / "Default" / "Preferences", "{}")
+    _write(
+        reset_project / ".runtime" / "launcher" / "state.json",
+        json.dumps(
+            {
+                "runtimeSceneDir": str(current_scene),
+                "browserProfileDir": str(current_profile),
+            },
+            ensure_ascii=False,
+        ),
+    )
+    events: list[dict] = []
+
+    def capture_reset_event(component: str, phase: str, event_code: str, **kwargs):
+        events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                "fields": kwargs.get("fields") or {},
+            }
+        )
+
+    monkeypatch.setattr(reset_service, "record_runtime_scene_event", capture_reset_event)
+
+    result = reset_service.execute_reset(["stopped_runtime_scenes", "browser_profiles"], confirmed=True)
+
+    assert result["totals"]["deletedCount"] == 2
+    assert result["totals"]["protectedCount"] == 2
+    assert current_scene.exists()
+    assert current_profile.exists()
+    assert not stopped_scene.exists()
+    assert not old_profile.exists()
+    protected_paths = {
+        item["path"]
+        for result_item in result["items"]
+        for item in result_item["protected"]
+    }
+    assert protected_paths == {
+        "logs/runtime_scenes/20260501T020000Z__current",
+        ".runtime/launcher/edge-app-profile",
+    }
+
+    candidate_events = [event for event in events if event["eventCode"].startswith("reset.candidate.")]
+    assert {event["eventCode"] for event in candidate_events} == {"reset.candidate.deleted"}
+    assert {event["fields"]["path"] for event in candidate_events} == {
+        "logs/runtime_scenes/20260501T000000Z__stopped",
+        ".runtime/old-test-profile",
+    }
+
+
 def test_unknown_reset_item_is_rejected(reset_project: Path):
     with pytest.raises(ValueError, match="Unknown reset item id"):
         reset_service.preview_reset(["../workspace"])
