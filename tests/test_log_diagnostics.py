@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from core.web.services import diagnostics_service, log_service, runtime_scene_service
 
 
@@ -139,6 +141,23 @@ def test_log_file_content_returns_user_summary_and_agent_anchor(tmp_path, monkey
     assert diagnostics["topEventTypes"][0] == {"type": "external_request", "count": 1}
     assert "conversation_logs/conversation_debug.jsonl:3" in diagnostics["agentHint"]
     assert "错误筛选" in diagnostics["suggestedNextStep"]
+
+
+def test_runtime_logs_reject_dot_prefixed_runtime_scene_paths(tmp_path, monkeypatch):
+    scene_file = tmp_path / "logs" / "runtime_scenes" / "20260518T120000Z__scene-a" / "manifest.json"
+    scene_file.parent.mkdir(parents=True, exist_ok=True)
+    scene_file.write_text('{"runtime_scene_id":"scene-a"}\n', encoding="utf-8")
+    monkeypatch.setattr(log_service, "PROJECT_ROOT", tmp_path)
+
+    protected_path = "./runtime_scenes/20260518T120000Z__scene-a/manifest.json"
+
+    with pytest.raises(ValueError, match="Runtime scene bundles"):
+        log_service.read_log_file("runtime_logs", protected_path)
+    with pytest.raises(ValueError, match="Runtime scene bundles"):
+        log_service.clear_log_file("runtime_logs", protected_path)
+    with pytest.raises(ValueError, match="Runtime scene bundles"):
+        log_service.delete_log_files("runtime_logs", [protected_path])
+    assert scene_file.read_text(encoding="utf-8") == '{"runtime_scene_id":"scene-a"}\n'
 
 
 def test_runtime_scene_raw_content_returns_same_diagnostics_shape(tmp_path, monkeypatch):
