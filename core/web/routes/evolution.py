@@ -11,6 +11,7 @@ from core.web.services.chat_review_service import (
     ChatReviewCandidateStateError,
     ChatReviewDecisionValidationError,
     approve_chat_review_candidate,
+    bulk_discard_chat_review_candidates,
     get_chat_review_queue,
     reject_chat_review_candidate,
     submit_chat_review_decision,
@@ -104,6 +105,11 @@ class ChatReviewActionPayload(BaseModel):
     reviewerNote: str = ""
 
 
+class ChatReviewBulkDeletePayload(BaseModel):
+    candidateIds: list[str] = Field(default_factory=list)
+    reviewerNote: str = ""
+
+
 @router.get("/evolution/overview")
 def evolution_overview() -> dict:
     return get_evolution_overview()
@@ -155,6 +161,14 @@ def evolution_workbench() -> dict:
 @router.get("/evolution/chat-review")
 def evolution_chat_review() -> dict:
     return get_chat_review_queue()
+
+
+@router.post("/evolution/chat-review/delete")
+def evolution_chat_review_bulk_delete(payload: ChatReviewBulkDeletePayload) -> dict:
+    return bulk_discard_chat_review_candidates(
+        payload.candidateIds,
+        reviewer_note=payload.reviewerNote,
+    )
 
 
 @router.post("/evolution/chat-review/{candidate_id}/approve")

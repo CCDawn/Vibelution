@@ -988,6 +988,19 @@ export type EvolutionChatReviewDecisionResponse = {
   summary: string;
 };
 
+export type EvolutionChatReviewBulkDeleteResponse = {
+  requestedCount: number;
+  discardedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  summary: string;
+  results: Array<{
+    candidateId: string;
+    status: string;
+    reason: string;
+  }>;
+};
+
 export type EvolutionLibraryEntry = {
   id: string;
   title: string;

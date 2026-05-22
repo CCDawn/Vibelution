@@ -1,11 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight, CheckCircle2, LibraryBig, LoaderCircle, Search, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, LibraryBig, LoaderCircle, Search, Square, SquareCheckBig, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
-import { EvolutionChatReviewCandidate, EvolutionChatReviewDecisionResponse, EvolutionChatReviewQueue, EvolutionWorkbench } from "../api/types";
+import {
+  EvolutionChatReviewBulkDeleteResponse,
+  EvolutionChatReviewCandidate,
+  EvolutionChatReviewDecisionResponse,
+  EvolutionChatReviewQueue,
+  EvolutionWorkbench,
+} from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { SupervisedWorkspaceTabs } from "./SupervisedWorkspaceTabs";
 import styles from "./SupervisedReviewRoute.module.css";
@@ -29,6 +35,8 @@ export function SupervisedReviewRoute() {
   const [correctPrinciple, setCorrectPrinciple] = useState("");
   const [idealBehavior, setIdealBehavior] = useState("");
   const [actionFeedback, setActionFeedback] = useState("");
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
+  const [bulkFeedback, setBulkFeedback] = useState("");
 
   const reviewQuery = useQuery({
     queryKey: queryKeys.evolutionChatReview(),
@@ -78,6 +86,33 @@ export function SupervisedReviewRoute() {
     },
   });
 
+  const bulkDeleteMutation = useMutation({
+    mutationFn: () => {
+      return fetchJson<EvolutionChatReviewBulkDeleteResponse>("/api/evolution/chat-review/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          candidateIds: selectedCandidateIds,
+          reviewerNote: "bulk discard from review workspace",
+        }),
+      });
+    },
+    onMutate: () => {
+      setBulkFeedback("");
+      setActionFeedback("");
+    },
+    onSuccess: async (payload) => {
+      setBulkFeedback(payload.summary);
+      setSelectedCandidateIds([]);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionChatReview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkbench() }),
+      ]);
+    },
+  });
+
   const reviewData = reviewQuery.data;
   const items = reviewData?.items ?? EMPTY_REVIEW_ITEMS;
   const positiveDatasetVisible = workbenchQuery.data?.datasets.some(
@@ -111,6 +146,12 @@ export function SupervisedReviewRoute() {
     visibleItems.find((item) => item.candidateId === selectedCandidateId)
     ?? visibleItems[0]
     ?? null;
+  const visiblePendingItems = useMemo(() => {
+    return visibleItems.filter((item) => item.status === "pending");
+  }, [visibleItems]);
+  const visiblePendingIds = useMemo(() => {
+    return visiblePendingItems.map((item) => item.candidateId);
+  }, [visiblePendingItems]);
   const evidenceTurns = useMemo(() => {
     if (!selectedCandidate) {
       return [];
@@ -125,6 +166,11 @@ export function SupervisedReviewRoute() {
       setSelectedCandidateId(visibleItems[0]?.candidateId ?? null);
     }
   }, [selectedCandidateId, visibleItems]);
+
+  useEffect(() => {
+    const visiblePendingSet = new Set(visiblePendingIds);
+    setSelectedCandidateIds((current) => current.filter((candidateId) => visiblePendingSet.has(candidateId)));
+  }, [visiblePendingIds]);
 
   useEffect(() => {
     if (!selectedCandidate) {
@@ -145,7 +191,10 @@ export function SupervisedReviewRoute() {
   }, [selectedCandidate?.candidateId]);
 
   const decisionError = decisionMutation.error?.message ?? "";
+  const bulkError = bulkDeleteMutation.error?.message ?? "";
   const pendingOnlyCount = reviewData?.pendingCount ?? 0;
+  const selectedCount = selectedCandidateIds.length;
+  const visiblePendingCount = visiblePendingItems.length;
   const lifecycle = reviewData?.lifecycle;
 
   function levelLabel(level: string) {
@@ -202,6 +251,19 @@ export function SupervisedReviewRoute() {
       return;
     }
     decisionMutation.mutate();
+  }
+
+  function toggleCandidateSelection(candidateId: string) {
+    setSelectedCandidateIds((current) => {
+      if (current.includes(candidateId)) {
+        return current.filter((item) => item !== candidateId);
+      }
+      return [...current, candidateId];
+    });
+  }
+
+  function selectVisiblePendingItems() {
+    setSelectedCandidateIds(visiblePendingIds);
   }
 
   const reasonOptions = draftDecision === "positive"
@@ -323,6 +385,44 @@ export function SupervisedReviewRoute() {
             <strong>{pendingOnlyCount}</strong>
           </div>
 
+          <div className={styles.bulkToolbar}>
+            <div className={styles.bulkCounter}>
+              <strong>{selectedCount}</strong>
+              <span>{lang === "zh" ? `已选 / 当前待审 ${visiblePendingCount}` : `selected / ${visiblePendingCount} visible pending`}</span>
+            </div>
+            <div className={styles.bulkActions}>
+              <button
+                type="button"
+                className={styles.compactAction}
+                disabled={visiblePendingCount === 0}
+                onClick={selectVisiblePendingItems}
+              >
+                <SquareCheckBig size={14} />
+                {lang === "zh" ? "选择当前待审" : "Select pending"}
+              </button>
+              <button
+                type="button"
+                className={styles.compactAction}
+                disabled={selectedCount === 0}
+                onClick={() => setSelectedCandidateIds([])}
+              >
+                {lang === "zh" ? "清空" : "Clear"}
+              </button>
+              <button
+                type="button"
+                className={`${styles.compactAction} ${styles.dangerAction}`}
+                disabled={selectedCount === 0 || bulkDeleteMutation.isPending}
+                onClick={() => bulkDeleteMutation.mutate()}
+              >
+                {bulkDeleteMutation.isPending ? <LoaderCircle size={14} className={styles.spin} /> : <Trash2 size={14} />}
+                {lang === "zh" ? "丢弃所选" : "Discard selected"}
+              </button>
+            </div>
+          </div>
+
+          {bulkFeedback ? <p className={styles.feedbackText}>{bulkFeedback}</p> : null}
+          {bulkError ? <p className={styles.errorText}>{bulkError}</p> : null}
+
           {visibleItems.length === 0 ? (
             <div className={styles.emptyState}>
               <h3>{lang === "zh" ? "当前没有匹配样本" : "No matching samples"}</h3>
@@ -330,19 +430,50 @@ export function SupervisedReviewRoute() {
             </div>
           ) : (
             <div className={styles.queueList}>
-              {visibleItems.map((item) => (
-                <button
+              {visibleItems.map((item) => {
+                const itemSelected = selectedCandidateIds.includes(item.candidateId);
+                const selectable = item.status === "pending";
+                return (
+                <article
                   key={item.candidateId}
-                  type="button"
+                  role="button"
+                  tabIndex={0}
                   className={
                     selectedCandidate?.candidateId === item.candidateId
                       ? `${styles.queueItem} ${styles.queueItemActive}`
                       : styles.queueItem
                   }
                   onClick={() => setSelectedCandidateId(item.candidateId)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedCandidateId(item.candidateId);
+                    }
+                  }}
                 >
                   <div className={styles.queueItemTop}>
-                    <strong>{item.topicSummary || item.candidateId}</strong>
+                    <div className={styles.queueTitleRow}>
+                      <button
+                        type="button"
+                        className={
+                          itemSelected
+                            ? `${styles.selectionButton} ${styles.selectionButtonActive}`
+                            : styles.selectionButton
+                        }
+                        disabled={!selectable}
+                        title={selectable ? (lang === "zh" ? "加入批量丢弃" : "Select for bulk discard") : (lang === "zh" ? "已处理样本不可批量丢弃" : "Reviewed samples cannot be bulk discarded")}
+                        aria-label={selectable ? (lang === "zh" ? "选择样本" : "Select sample") : (lang === "zh" ? "样本已处理" : "Sample already reviewed")}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (selectable) {
+                            toggleCandidateSelection(item.candidateId);
+                          }
+                        }}
+                      >
+                        {itemSelected ? <SquareCheckBig size={16} /> : <Square size={16} />}
+                      </button>
+                      <strong>{item.topicSummary || item.candidateId}</strong>
+                    </div>
                     <span className={`${styles.statusBadge} ${statusTone(item.status)}`}>{statusLabel(item.status)}</span>
                   </div>
                   <p className={styles.queueHeadline}>{item.structuredSample.promptSeed || "--"}</p>
@@ -355,8 +486,9 @@ export function SupervisedReviewRoute() {
                     <span>{`T${item.startTurn}-${item.endTurn}`}</span>
                     <span>{decisionLabel((item.reviewProfile.suggestedDecision as ReviewDecision) || "positive")}</span>
                   </div>
-                </button>
-              ))}
+                </article>
+                );
+              })}
             </div>
           )}
         </aside>

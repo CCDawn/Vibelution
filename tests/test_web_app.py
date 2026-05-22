@@ -5539,6 +5539,12 @@ def test_chat_review_routes_list_and_approve_candidate(tmp_path, monkeypatch):
 
 def test_chat_review_bulk_delete_discards_pending_candidates(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_review_service, "PROJECT_ROOT", tmp_path)
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        chat_review_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
 
     capture_service = ChatDatasetCaptureService(project_root=tmp_path)
     candidate_a = capture_service.capture_candidate(
@@ -5599,7 +5605,12 @@ def test_chat_review_bulk_delete_discards_pending_candidates(tmp_path, monkeypat
     response = client.post(
         "/api/evolution/chat-review/delete",
         json={
-            "candidateIds": [candidate_a.candidate_id, candidate_b.candidate_id, "missing-candidate"],
+            "candidateIds": [
+                candidate_a.candidate_id,
+                candidate_a.candidate_id,
+                candidate_b.candidate_id,
+                "missing-candidate",
+            ],
             "reviewerNote": "bulk discard from review workspace",
         },
     )
@@ -5628,6 +5639,21 @@ def test_chat_review_bulk_delete_discards_pending_candidates(tmp_path, monkeypat
     paths = resolve_chat_dataset_paths(project_root=tmp_path)
     assert paths.rejected_log_path.exists()
     assert candidate_a.candidate_id in paths.rejected_log_path.read_text(encoding="utf-8")
+    assert len(recorded_scene_events) == 1
+    event_args, event_kwargs = recorded_scene_events[0]
+    assert event_args[:3] == (
+        "chat_review",
+        "bulk_discard",
+        "chat_review.bulk_discard.completed",
+    )
+    assert event_kwargs["fields"]["candidateIds"] == [
+        candidate_a.candidate_id,
+        candidate_b.candidate_id,
+        "missing-candidate",
+    ]
+    assert event_kwargs["fields"]["discardedIds"] == [candidate_a.candidate_id]
+    assert event_kwargs["fields"]["skippedIds"] == [candidate_b.candidate_id, "missing-candidate"]
+    assert event_kwargs["fields"]["failedIds"] == []
 
 
 def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeypatch):

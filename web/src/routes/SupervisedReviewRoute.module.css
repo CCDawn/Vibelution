@@ -1,7 +1,7 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   color: var(--fg-primary);
 }
 
@@ -9,7 +9,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
+  gap: 14px;
   flex-wrap: wrap;
 }
 
@@ -33,21 +33,21 @@
 
 .title {
   margin: 0;
-  font-size: 38px;
+  font-size: 32px;
   line-height: 1.08;
 }
 
 .subtitle {
-  margin: 10px 0 0;
+  margin: 6px 0 0;
   max-width: 780px;
   color: var(--fg-secondary);
-  line-height: 1.6;
+  line-height: 1.45;
 }
 
 .summaryStrip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .summaryCard,
@@ -65,10 +65,10 @@
 }
 
 .summaryCard {
-  padding: 16px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .summaryCard span {
@@ -79,15 +79,15 @@
 }
 
 .summaryCard strong {
-  font-size: 19px;
+  font-size: 17px;
 }
 
 .lifecyclePanel {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px;
+  gap: 12px;
+  padding: 10px 14px;
 }
 
 .lifecyclePills {
@@ -99,15 +99,15 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(300px, 0.92fr) minmax(0, 1.48fr);
-  gap: 16px;
+  grid-template-columns: minmax(360px, 0.82fr) minmax(0, 1.58fr);
+  gap: 12px;
   min-height: 0;
 }
 
 .queuePanel,
 .detailPanel {
-  padding: 18px;
-  min-height: 720px;
+  padding: 14px;
+  min-height: 640px;
 }
 
 .queuePanel {
@@ -128,14 +128,14 @@
 .sectionTitle,
 .detailTitle {
   margin: 0;
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1.2;
 }
 
 .detailLead {
-  margin: 10px 0 0;
+  margin: 6px 0 0;
   color: var(--fg-secondary);
-  line-height: 1.6;
+  line-height: 1.45;
 }
 
 .secondaryPill,
@@ -202,7 +202,8 @@
 .filterButton,
 .decisionButton,
 .primaryAction,
-.secondaryAction {
+.secondaryAction,
+.compactAction {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -225,6 +226,18 @@
   background: rgba(196, 156, 85, 0.16);
   border-color: rgba(196, 156, 85, 0.3);
   color: var(--accent-warm-2);
+}
+
+.compactAction {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.dangerAction {
+  color: rgba(255, 190, 190, 0.98);
+  border-color: rgba(255, 140, 140, 0.22);
+  background: rgba(255, 140, 140, 0.08);
 }
 
 .searchField {
@@ -266,6 +279,35 @@
   font-size: 13px;
 }
 
+.bulkToolbar {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.bulkCounter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--fg-secondary);
+  font-size: 12px;
+}
+
+.bulkCounter strong {
+  color: var(--fg-primary);
+  font-size: 18px;
+}
+
+.bulkActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .queueList,
 .detailPanel {
   min-height: 0;
@@ -287,6 +329,7 @@
   background: var(--surface-card);
   color: inherit;
   text-align: left;
+  cursor: pointer;
   transition: border-color 140ms ease, transform 140ms ease, background 140ms ease;
 }
 
@@ -297,6 +340,7 @@
 }
 
 .queueItemTop,
+.queueTitleRow,
 .queueFooter,
 .signalRow,
 .evidenceTop,
@@ -307,6 +351,43 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+.queueTitleRow {
+  justify-content: flex-start;
+  min-width: 0;
+}
+
+.queueTitleRow strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selectionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  color: var(--fg-tertiary);
+}
+
+.selectionButtonActive {
+  color: var(--accent-warm-2);
+  border-color: rgba(196, 156, 85, 0.34);
+  background: rgba(196, 156, 85, 0.14);
+}
+
+.selectionButton:disabled,
+.compactAction:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
 }
 
 .queueHeadline {
@@ -342,7 +423,7 @@
 .signalColumns,
 .formGrid {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .factGrid {
@@ -359,7 +440,7 @@
 
 .factCard,
 .metricCard {
-  padding: 14px;
+  padding: 12px;
 }
 
 .factCard span,
@@ -381,9 +462,9 @@
 }
 
 .metricCard p {
-  margin: 10px 0 0;
+  margin: 6px 0 0;
   color: var(--fg-secondary);
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 .signalSection,
@@ -392,7 +473,7 @@
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
   background: var(--surface-card-subtle);
-  padding: 14px;
+  padding: 12px;
 }
 
 .signalSection h3,
