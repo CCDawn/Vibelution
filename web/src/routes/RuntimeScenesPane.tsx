@@ -279,6 +279,25 @@ function runtimeSceneSignal(scene: RuntimeSceneDetail, lang: "zh" | "en") {
   };
 }
 
+function runtimeSceneListSignal(scene: RuntimeSceneListItem, lang: "zh" | "en") {
+  const errors = Number(scene.errorCount || 0);
+  const warnings = Number(scene.warningCount || 0);
+  if (errors <= 0 && warnings <= 0) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (errors > 0) {
+    parts.push(lang === "zh" ? `${errors} 个错误` : `${errors} errors`);
+  }
+  if (warnings > 0) {
+    parts.push(lang === "zh" ? `${warnings} 个警告` : `${warnings} warnings`);
+  }
+  return {
+    severity: errors > 0 ? "error" : "warning",
+    label: parts.join(lang === "zh" ? "，" : ", "),
+  };
+}
+
 function runtimeSceneChildLogCount(scene: RuntimeSceneDetail) {
   return (
     (scene.packageSummary?.rawLogCount ?? scene.rawFiles.length) +
@@ -1042,6 +1061,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
               const isActive = activeSceneId === scene.runtimeSceneId;
               const isSelected = selectedSceneIdSet.has(scene.runtimeSceneId);
               const displayName = runtimeSceneDisplayName(scene);
+              const signal = runtimeSceneListSignal(scene, lang);
               return (
                 <div
                   key={scene.runtimeSceneId}
@@ -1067,7 +1087,20 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
                     >
                       <div className={styles.sceneCardHeader}>
                         <strong title={scene.runtimeSceneId}>{displayName}</strong>
-                        <span className={styles.sceneCardStatus}>{statusLabel(scene.status)}</span>
+                        <span className={styles.sceneCardStatusGroup}>
+                          {signal ? (
+                            <span
+                              className={
+                                signal.severity === "error"
+                                  ? `${styles.sceneIssueBadge} ${styles.sceneIssueBadgeError}`
+                                  : `${styles.sceneIssueBadge} ${styles.sceneIssueBadgeWarning}`
+                              }
+                            >
+                              {signal.label}
+                            </span>
+                          ) : null}
+                          <span className={styles.sceneCardStatus}>{statusLabel(scene.status)}</span>
+                        </span>
                       </div>
                       <code className={styles.sceneIndexKey} title={runtimeSceneIndexLabel(scene)}>
                         {runtimeSceneIndexLabel(scene)}

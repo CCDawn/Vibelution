@@ -152,6 +152,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
         agent_logs = _list_agent_logs(scene_dir)
         artifacts = _list_artifacts(scene_dir)
         package_index = _runtime_scene_package_index(scene_dir, manifest, scene_id)
+        severity_summary = _runtime_scene_severity_summary(timeline)
         scenes.append(
             {
                 "runtimeSceneId": scene_id,
@@ -174,6 +175,8 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
                 "conversationCount": len(conversations),
                 "agentLogCount": len(agent_logs),
                 "artifactCount": len(artifacts),
+                "errorCount": severity_summary["errorCount"],
+                "warningCount": severity_summary["warningCount"],
             }
         )
     scenes.sort(key=lambda item: (item["startedAt"], item["directoryName"]), reverse=True)
@@ -1045,7 +1048,7 @@ def _runtime_scene_package_summary(
     agent_logs: list[dict],
     artifacts: list[dict],
 ) -> dict[str, Any]:
-    levels = [str(item.get("level") or "").strip().lower() for item in timeline]
+    severity_summary = _runtime_scene_severity_summary(timeline)
     return {
         "schemaVersion": 2,
         "eventCount": len(timeline),
@@ -1054,9 +1057,68 @@ def _runtime_scene_package_summary(
         "conversationLogCount": len(conversation_logs),
         "agentLogCount": len(agent_logs),
         "artifactCount": len(artifacts),
-        "errorCount": levels.count("error"),
-        "warningCount": levels.count("warning"),
+        "errorCount": severity_summary["errorCount"],
+        "warningCount": severity_summary["warningCount"],
     }
+
+
+def _runtime_scene_severity_summary(events: list[dict]) -> dict[str, int]:
+    error_count = 0
+    warning_count = 0
+    for event in events:
+        severity = _runtime_scene_event_severity(event)
+        if severity == "error":
+            error_count += 1
+        elif severity == "warning":
+            warning_count += 1
+    return {
+        "errorCount": error_count,
+        "warningCount": warning_count,
+    }
+
+
+def _runtime_scene_event_severity(event: dict) -> str:
+    level = str(event.get("level") or "").strip().lower()
+    outcome = str(event.get("outcome") or "").strip().lower()
+    status = str(event.get("status") or "").strip().lower()
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    field_status = str(fields.get("status") or fields.get("resultStatus") or "").strip().lower()
+    field_outcome = str(fields.get("outcome") or "").strip().lower()
+    error_markers = (
+        fields.get("error"),
+        fields.get("errorType"),
+        fields.get("exceptionType"),
+        fields.get("exceptionMessage"),
+        fields.get("failureMessage"),
+    )
+    has_error_marker = any(str(value or "").strip() for value in error_markers)
+
+    if level in {"error", "fatal", "critical"}:
+        return "error"
+    if outcome in {"error", "failed", "failure"} or field_outcome in {"error", "failed", "failure"}:
+        return "error"
+    if status in {"error", "failed"} or field_status in {"error", "failed"}:
+        return "error"
+    if has_error_marker:
+        return "error"
+    if level in {"warning", "warn"}:
+        return "warning"
+    if outcome in {"warning", "warn", "partial", "client_error", "degraded"} or field_outcome in {
+        "warning",
+        "warn",
+        "partial",
+        "client_error",
+        "degraded",
+    }:
+        return "warning"
+    if status in {"warning", "warn", "partial", "degraded"} or field_status in {
+        "warning",
+        "warn",
+        "partial",
+        "degraded",
+    }:
+        return "warning"
+    return "info"
 
 
 def _file_timestamp(path: Path) -> str:

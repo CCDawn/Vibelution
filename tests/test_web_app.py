@@ -270,6 +270,21 @@ def _seed_runtime_scene_bundle(project_root: Path, scene_id: str = "scene-1", st
                     },
                     ensure_ascii=False,
                 ),
+                json.dumps(
+                    {
+                        "runtime_scene_id": scene_id,
+                        "ts": "2026-05-18T12:00:04Z",
+                        "seq": 3,
+                        "component": "frontend",
+                        "phase": "build",
+                        "event_code": "frontend.build.cache_warning",
+                        "level": "warning",
+                        "outcome": "succeeded",
+                        "message": "Frontend build cache was cold.",
+                        "fields": {},
+                    },
+                    ensure_ascii=False,
+                ),
             ]
         )
         + "\n",
@@ -288,6 +303,25 @@ def _seed_runtime_scene_bundle(project_root: Path, scene_id: str = "scene-1", st
                 "outcome": "succeeded",
                 "message": "Backend passed health checks.",
                 "fields": {"pid": 12345, "url": "http://127.0.0.1:8000"},
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (events_dir / "supervisor.jsonl").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:06Z",
+                "seq": 1,
+                "component": "supervisor",
+                "phase": "session",
+                "event_code": "supervisor.unexpected_exit",
+                "level": "info",
+                "outcome": "failed",
+                "message": "Supervisor exited unexpectedly.",
+                "fields": {"errorType": "SupervisorExited"},
             },
             ensure_ascii=False,
         )
@@ -1221,6 +1255,8 @@ def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkey
     assert "手动停止" in scene_a["displayName"]
     assert scenes[0]["eventCount"] >= 3
     assert scenes[0]["rawLogCount"] >= 5
+    assert scene_a["warningCount"] == 1
+    assert scene_a["errorCount"] == 1
 
     detail_response = client.get("/api/logs/runtime-scenes/scene-a")
     assert detail_response.status_code == 200
@@ -1231,10 +1267,13 @@ def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkey
     assert detail["status"] == "stopped"
     assert detail["frontend"]["build_status"] == "success"
     assert detail["timeline"][0]["eventCode"] == "frontend.build.started"
-    assert detail["timeline"][-1]["eventCode"] == "backend.health.succeeded"
+    assert any(item["eventCode"] == "backend.health.succeeded" for item in detail["timeline"])
+    assert detail["timeline"][-1]["eventCode"] == "supervisor.unexpected_exit"
     assert any(item["path"] == "raw/backend.stdout.log" for item in detail["rawFiles"])
     assert detail["packageSummary"]["schemaVersion"] == 2
     assert detail["packageSummary"]["lifecycleEventCount"] >= 3
+    assert detail["packageSummary"]["warningCount"] == 1
+    assert detail["packageSummary"]["errorCount"] == 1
     assert detail["lifecycle"][0]["eventCode"] == "backend.health.succeeded" or detail["lifecycle"][0]["eventCode"].startswith("frontend.")
 
     content_response = client.get(
