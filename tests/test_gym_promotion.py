@@ -12,7 +12,7 @@ from core.gym.promotion import (
     rollback_gym_promotion_proposal,
 )
 from tests.test_gym_runner import RunnerFakeAdapter
-from core.gym import run_gym_collection_episode
+from core.gym import CandidateImprovement, run_gym_collection_episode
 from core.gym.runner import main
 
 
@@ -60,6 +60,38 @@ def test_apply_gym_promotion_proposal_rejects_missing_trace_index(tmp_path: Path
 
     proposal = json.loads(Path(result.promotion_proposal_path).read_text(encoding="utf-8"))
     assert proposal["status"] == "proposed"
+
+
+def test_apply_gym_promotion_proposal_uses_persisted_paths_for_unsafe_ids(tmp_path: Path):
+    class UnsafePathAdapter(RunnerFakeAdapter):
+        def propose_improvement(self, exercise, diagnosis: object) -> CandidateImprovement:
+            return CandidateImprovement(
+                improvement_id=r"..\escape_improvement",
+                improvement_type="policy_patch",
+                target={"exercise_id": exercise.exercise_id},
+                expected_effect="candidate succeeds",
+            )
+
+    result = run_gym_collection_episode(
+        collection_id="foundation_local_stability",
+        project_root=tmp_path,
+        adapter=UnsafePathAdapter(),
+        episode_id=r"..\escape_episode",
+    )
+
+    applied = apply_gym_promotion_proposal(result.promotion_proposal_path, project_root=tmp_path)
+
+    assert applied.status == "applied"
+    assert Path(applied.decision_path).exists()
+    assert Path(applied.trace_index_path).exists()
+    assert Path(applied.decision_path).resolve().is_relative_to(
+        (tmp_path / "workspace" / "gym" / "decisions").resolve()
+    )
+    assert Path(applied.trace_index_path).resolve().is_relative_to(
+        (tmp_path / "workspace" / "gym" / "traces").resolve()
+    )
+    assert applied.episode_id == r"..\escape_episode"
+    assert applied.candidate_improvement_id == r"..\escape_improvement"
 
 
 def test_apply_gym_promotion_proposal_is_idempotent(tmp_path: Path):

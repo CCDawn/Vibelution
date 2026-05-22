@@ -10,7 +10,7 @@ from typing import Optional
 
 from core.infrastructure.workspace_manager import get_workspace
 
-from .episodes import trace_index_path_for_decision
+from .episodes import decision_path_for_episode_id, trace_index_path_for_decision
 from .models import utcnow_iso
 
 
@@ -128,7 +128,7 @@ def apply_gym_promotion_proposal(
     candidate_improvement_id = _required_text(proposal, "candidate_improvement_id")
     proposal_id = _required_text(proposal, "proposal_id")
 
-    decision_path = root / "workspace" / "gym" / "decisions" / f"{episode_id}.json"
+    decision_path = Path(str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=root))).resolve()
     decision = _load_json_object(decision_path, label="Gym decision")
     if str(decision.get("decision") or "").upper() != "PROMOTE":
         raise ValueError("Gym promotion proposal can only be applied for PROMOTE decisions")
@@ -204,9 +204,7 @@ def rollback_gym_promotion_proposal(
         raise ValueError(f"Gym promotion proposal must be applied or active before rollback; got {status or 'missing'}")
 
     episode_id = _required_text(proposal, "episode_id")
-    decision_path = Path(
-        str(proposal.get("decision_path") or root / "workspace" / "gym" / "decisions" / f"{episode_id}.json")
-    ).resolve()
+    decision_path = Path(str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=root))).resolve()
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
     _load_json_object(decision_path, label="Gym decision")
     _validate_trace_index(trace_index_path)
@@ -286,9 +284,7 @@ def activate_gym_promotion_proposal(
     episode_id = _required_text(proposal, "episode_id")
     candidate_improvement_id = _required_text(proposal, "candidate_improvement_id")
     proposal_id = _required_text(proposal, "proposal_id")
-    decision_path = Path(
-        str(proposal.get("decision_path") or root / "workspace" / "gym" / "decisions" / f"{episode_id}.json")
-    ).resolve()
+    decision_path = Path(str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=root))).resolve()
     decision = _load_json_object(decision_path, label="Gym decision")
     if str(decision.get("decision") or "").upper() != "PROMOTE":
         raise ValueError("Gym promotion proposal can only be activated for PROMOTE decisions")
@@ -386,7 +382,9 @@ def _application_from_applied_proposal(
     project_root: Path,
 ) -> GymPromotionApplication:
     episode_id = _required_text(proposal, "episode_id")
-    decision_path = Path(str(proposal.get("decision_path") or project_root / "workspace" / "gym" / "decisions" / f"{episode_id}.json")).resolve()
+    decision_path = Path(
+        str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=project_root))
+    ).resolve()
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
     ledger_path = Path(str(proposal.get("ledger_path") or project_root / "workspace" / "gym" / "applied_promotions.jsonl")).resolve()
     return GymPromotionApplication(
@@ -411,7 +409,7 @@ def _activation_from_active_proposal(
 ) -> GymPromotionActivation:
     episode_id = _required_text(proposal, "episode_id")
     decision_path = Path(
-        str(proposal.get("decision_path") or project_root / "workspace" / "gym" / "decisions" / f"{episode_id}.json")
+        str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=project_root))
     ).resolve()
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
     registry_path = Path(str(proposal.get("activation_registry_path") or project_root / "workspace" / "gym" / "active_promotions.json")).resolve()
@@ -442,7 +440,7 @@ def _rollback_from_rolled_back_proposal(
 ) -> GymPromotionRollback:
     episode_id = _required_text(proposal, "episode_id")
     decision_path = Path(
-        str(proposal.get("decision_path") or project_root / "workspace" / "gym" / "decisions" / f"{episode_id}.json")
+        str(proposal.get("decision_path") or decision_path_for_episode_id(episode_id, project_root=project_root))
     ).resolve()
     trace_index_path = Path(str(proposal.get("trace_index_path") or trace_index_path_for_decision(decision_path))).resolve()
     ledger_path = Path(str(proposal.get("rollback_ledger_path") or project_root / "workspace" / "gym" / "rolled_back_promotions.jsonl")).resolve()
