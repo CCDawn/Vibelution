@@ -365,6 +365,45 @@
   background: var(--surface-panel-strong);
 }
 
+.turnError {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 20px 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--state-error) 24%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-error) 10%, var(--surface-panel-strong));
+  color: var(--fg-primary);
+}
+
+.turnErrorText {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.turnErrorLabel {
+  color: var(--state-error);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.turnErrorType {
+  flex: 0 0 auto;
+  max-width: 220px;
+  color: var(--state-error);
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composerField {
   display: grid;
   gap: 8px;
@@ -546,6 +585,15 @@
 
   .messageCard {
     min-width: min(220px, 100%);
+    max-width: 100%;
+  }
+
+  .turnError {
+    margin-inline: 14px;
+    flex-direction: column;
+  }
+
+  .turnErrorType {
     max-width: 100%;
   }
 }

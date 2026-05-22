@@ -137,12 +137,16 @@ def test_session_failed_result_sanitizes_provider_upstream_error(tmp_path, monke
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
 
     payload = session_service.submit_session_message("session-live", "继续当前对话")
-    assistant = payload["messages"][-1]
 
-    assert assistant["role"] == "assistant"
-    assert "模型服务上游暂时失败" in assistant["content"]
-    assert "litellm.BadGatewayError" not in assistant["content"]
-    assert "provider_protocol_error" not in assistant["content"]
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-1]["content"] == "继续当前对话"
+    assert payload["lastTurnError"] is not None
+    assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
+    assert payload["lastTurnError"]["recoverable"] is True
+    assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
+    assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
+    assert "provider_protocol_error" not in payload["lastTurnError"]["message"]
+    assert all("模型服务上游暂时失败" not in message["content"] for message in payload["messages"])
     assert payload["currentPhase"] == "failed"
 
 
@@ -171,10 +175,13 @@ def test_session_exception_failure_sanitizes_provider_error_and_logs_raw(tmp_pat
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
 
     payload = session_service.submit_session_message("session-live", "继续当前对话")
-    assistant = payload["messages"][-1]
 
-    assert "模型服务上游暂时失败" in assistant["content"]
-    assert "litellm.BadGatewayError" not in assistant["content"]
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["lastTurnError"] is not None
+    assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
+    assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
+    assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
+    assert all("模型服务上游暂时失败" not in message["content"] for message in payload["messages"])
 
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run is not None

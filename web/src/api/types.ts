@@ -599,6 +599,14 @@ export type ConversationMessage = {
   toolCalls?: ToolCall[];
 };
 
+export type SessionTurnError = {
+  message: string;
+  errorType: string;
+  recoverable: boolean;
+  timestamp: string;
+  turnId: string;
+};
+
 export type SessionDetail = SessionSummary & {
   activeTask?: SessionActiveTask | null;
   defaultFileContext: string;
@@ -607,6 +615,7 @@ export type SessionDetail = SessionSummary & {
   changedFiles: string[];
   readFiles: string[];
   messages: ConversationMessage[];
+  lastTurnError?: SessionTurnError | null;
   stopRequested: boolean;
   stopRequestedAt: string;
   stopReason: string;

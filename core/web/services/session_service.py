@@ -51,7 +51,7 @@ from core.ui.chat_state import (
 )
 
 from .i18n import get_web_language, text_for
-from .runtime_scene_service import record_runtime_scene_conversation_event
+from .runtime_scene_service import record_runtime_scene_conversation_event, record_runtime_scene_event
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -556,6 +556,8 @@ def submit_session_message(
         previous_messages = normalize_chat_messages(conversation.get("messages") or [])
         user_entry = _make_chat_message("user", message)
         conversation["messages"] = previous_messages + [user_entry]
+        conversation.pop("last_turn_error", None)
+        conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "running"
         conversation["updated_at"] = user_entry["timestamp"]
         payload["active_conversation_id"] = conversation_id
@@ -675,6 +677,7 @@ def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
     title = str(raw.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip() or DEFAULT_CHAT_CONVERSATION_TITLE
     messages = _normalize_messages(conversation_id, raw.get("messages") or [])
     last_turn_status = str(raw.get("last_turn_status") or "").strip().lower()
+    last_turn_error = _normalize_session_turn_error(raw.get("last_turn_error") or raw.get("lastTurnError"))
     updated_at = (
         str(raw.get("updated_at") or "").strip()
         or _latest_message_timestamp(messages)
@@ -690,6 +693,7 @@ def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
         "workspacePath": workspace_path,
         "messages": messages,
         "lastTurnStatus": last_turn_status,
+        "lastTurnError": last_turn_error,
         "updatedAt": updated_at,
         "activeTask": dict(active_task or {}) if isinstance(active_task, dict) else None,
     }
@@ -805,6 +809,7 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
         "changedFiles": changed_files,
         "readFiles": read_files,
         "messages": detail_messages,
+        "lastTurnError": _session_turn_error_to_api(conversation.get("lastTurnError")),
         "stopRequested": bool(turn_snapshot["stopRequested"]),
         "stopRequestedAt": str(turn_snapshot["stopRequestedAt"] or "").strip(),
         "stopReason": str(turn_snapshot["stopReason"] or "").strip(),
@@ -1042,6 +1047,7 @@ def _make_empty_conversation(session_id: str, *, title: str, timestamp: str) -> 
         "workspace_path": _session_workspace_relative_path(session_id),
         "updated_at": str(timestamp or "").strip() or _now_timestamp(),
         "last_turn_status": "ready",
+        "last_turn_error": None,
         "active_task": None,
         "messages": [],
     }
@@ -1384,6 +1390,46 @@ def _persist_session_turn_result(
         result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else ""
         result_stop_requested = bool(result.get("stop_requested")) if isinstance(result, dict) else False
         stop_requested = result_stop_requested and runtime_stop_requested
+        if _is_provider_failed_result(result):
+            raw_error = _provider_failure_raw_error(result)
+            error_type = _failure_error_type(raw_error)
+            turn_error = _make_session_turn_error(raw_error, lang=lang, error_type=error_type, turn_id=turn_id)
+            timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
+            existing_active_task = _normalize_session_active_task(
+                conversation.get("active_task") or conversation.get("activeTask")
+            )
+            next_active_task = _build_session_active_task(
+                session_id,
+                result,
+                messages,
+                existing_task=existing_active_task,
+            )
+            if next_active_task is not None:
+                conversation["active_task"] = next_active_task
+            conversation["last_turn_status"] = "failed"
+            conversation["last_turn_error"] = turn_error
+            conversation["updated_at"] = timestamp
+            payload["updated_at"] = timestamp
+            save_chat_state(PROJECT_ROOT, payload)
+            _clear_session_live_output(session_id)
+            _persist_chat_turn_work_run(
+                session_id=session_id,
+                turn_id=turn_id,
+                status="failed",
+                summary=str(turn_error.get("message") or ""),
+                error_type=error_type,
+                error=raw_error,
+                finished_at=timestamp,
+                updated_at=timestamp,
+            )
+            _record_session_turn_error(
+                session_id,
+                turn_error,
+                raw_error=raw_error,
+                status="failed",
+                active_task=next_active_task,
+            )
+            return
         assistant_text = (
             text_for(
                 lang,
@@ -1420,6 +1466,8 @@ def _persist_session_turn_result(
         )
         if next_active_task is not None:
             conversation["active_task"] = next_active_task
+        conversation.pop("last_turn_error", None)
+        conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "failed" if result_status == "failed" else "ready"
         conversation["updated_at"] = assistant_entry["timestamp"]
         payload["updated_at"] = assistant_entry["timestamp"]
@@ -1465,8 +1513,36 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
         if conversation is None:
             return
         messages = normalize_chat_messages(conversation.get("messages") or [])
+        if _looks_like_provider_error_text(raw_error):
+            turn_error = _make_session_turn_error(raw_error, lang=lang, error_type=error_type, turn_id=str(context.get("turn_id") or ""))
+            timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
+            conversation["last_turn_status"] = "failed"
+            conversation["last_turn_error"] = turn_error
+            conversation["updated_at"] = timestamp
+            payload["updated_at"] = timestamp
+            save_chat_state(PROJECT_ROOT, payload)
+            _clear_session_live_output(session_id)
+            _persist_chat_turn_work_run(
+                session_id=session_id,
+                turn_id=str(context.get("turn_id") or ""),
+                status="failed",
+                summary=work_run_summary,
+                error_type=error_type,
+                error=raw_error,
+                finished_at=timestamp,
+                updated_at=timestamp,
+            )
+            _record_session_turn_error(
+                session_id,
+                turn_error,
+                raw_error=raw_error,
+                status="failed",
+            )
+            return
         assistant_entry = _make_chat_message("assistant", summary)
         conversation["messages"] = messages + [assistant_entry]
+        conversation.pop("last_turn_error", None)
+        conversation.pop("lastTurnError", None)
         conversation["last_turn_status"] = "failed"
         conversation["updated_at"] = assistant_entry["timestamp"]
         payload["updated_at"] = assistant_entry["timestamp"]
@@ -1575,6 +1651,62 @@ def _record_session_cycle_message(
     except Exception as exc:
         _debug_logger.warning(
             f"runtime scene conversation log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _record_session_turn_error(
+    session_id: str,
+    turn_error: dict[str, Any],
+    *,
+    raw_error: str = "",
+    status: str = "failed",
+    active_task: dict[str, Any] | None = None,
+) -> None:
+    timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
+    error_type = str(turn_error.get("error_type") or turn_error.get("errorType") or "runtime_error").strip()
+    message = {
+        "role": "system",
+        "content": str(turn_error.get("message") or "").strip(),
+        "timestamp": timestamp,
+        "error_type": error_type,
+        "turn_id": str(turn_error.get("turn_id") or turn_error.get("turnId") or "").strip(),
+    }
+    _append_session_workspace_log(
+        session_id,
+        message,
+        event="turn_error",
+        status=status,
+        active_task=active_task,
+    )
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "turn_error",
+            "conversation.turn_error",
+            level="error",
+            outcome=status,
+            message=str(turn_error.get("message") or "Conversation turn failed."),
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "turnId": str(turn_error.get("turn_id") or turn_error.get("turnId") or "").strip(),
+                "errorType": error_type,
+                "recoverable": bool(turn_error.get("recoverable", True)),
+                "rawErrorPreview": trim_lines(raw_error, max_lines=2),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-errors.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "turn_id": str(turn_error.get("turn_id") or turn_error.get("turnId") or "").strip(),
+                "status": status,
+                "error_type": error_type,
+                "message": str(turn_error.get("message") or "").strip(),
+                "recoverable": bool(turn_error.get("recoverable", True)),
+            },
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene turn error log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
 
@@ -1708,6 +1840,41 @@ def _normalize_message_tool_calls(value: Any) -> list[dict[str, Any]]:
     return tool_calls
 
 
+def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    message = trim_lines(value.get("message") or value.get("summary") or "", max_lines=4)
+    if not message:
+        return None
+    return {
+        "message": message,
+        "errorType": str(value.get("errorType") or value.get("error_type") or "runtime_error").strip() or "runtime_error",
+        "recoverable": bool(value.get("recoverable", True)),
+        "timestamp": str(value.get("timestamp") or value.get("createdAt") or value.get("created_at") or "").strip(),
+        "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
+    }
+
+
+def _make_session_turn_error(raw_error: Any, *, lang: str, error_type: str = "", turn_id: str = "") -> dict[str, Any]:
+    normalized_error_type = str(error_type or _failure_error_type(str(raw_error or ""))).strip() or "runtime_error"
+    return {
+        "message": _user_visible_failure_summary(raw_error, lang=lang),
+        "error_type": normalized_error_type,
+        "recoverable": normalized_error_type.startswith("provider_") or normalized_error_type in {"server_error", "network_error"},
+        "timestamp": _now_timestamp(),
+        "turn_id": str(turn_id or "").strip(),
+    }
+
+
+def _session_turn_error_to_api(value: Any) -> dict[str, Any] | None:
+    normalized = _normalize_session_turn_error(value)
+    if normalized is None:
+        return None
+    if not normalized["timestamp"]:
+        normalized["timestamp"] = _now_timestamp()
+    return normalized
+
+
 def _extract_chat_tool_calls(result: Any) -> list[dict[str, Any]]:
     if not isinstance(result, dict):
         return []
@@ -1769,6 +1936,32 @@ def _format_visible_reply(result: Any) -> str:
         zh="本轮没有产生可见回复。",
         en="This turn did not produce a visible reply.",
     )
+
+
+def _is_provider_failed_result(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    status = str(result.get("status") or "").strip().lower()
+    if status not in {"failed", "timeout", "error"}:
+        return False
+    return _looks_like_provider_error_text(_provider_failure_raw_error(result))
+
+
+def _provider_failure_raw_error(result: dict[str, Any]) -> str:
+    candidates = [
+        result.get("error"),
+        result.get("raw_error"),
+        result.get("rawError"),
+        result.get("summary"),
+        result.get("raw_output"),
+        result.get("message"),
+        result.get("blocked_reason"),
+    ]
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if _looks_like_provider_error_text(text):
+            return text
+    return str(result.get("error") or result.get("summary") or result.get("raw_output") or "").strip()
 
 
 def _looks_like_structured_payload(text: str) -> bool:
@@ -2299,6 +2492,19 @@ def _attach_turn_capture_to_result(
 ) -> Any:
     if not isinstance(result, dict):
         return result
+    if _is_provider_failed_result(result):
+        if capture.thought and not result.get("thought") and not result.get("reasoning_content"):
+            result["thought"] = capture.thought
+        if (
+            _is_mental_model_enabled_for_turn(mental_model_enabled)
+            and capture.mental_state
+            and not result.get("state_info")
+            and not result.get("stateInfo")
+        ):
+            result["state_info"] = dict(capture.mental_state)
+        if capture.tool_calls and not result.get("tool_trace") and not result.get("tool_calls"):
+            result["tool_trace"] = list(capture.tool_calls)
+        return result
     if capture.thought and not result.get("thought") and not result.get("reasoning_content"):
         result["thought"] = capture.thought
     visible_result = _visible_reply_candidate(result)
@@ -2602,6 +2808,8 @@ def _visible_reply_candidate(result: dict[str, Any]) -> str:
 
 def _visible_reply_summary_candidate(result: dict[str, Any]) -> str:
     visible = _visible_reply_candidate(result)
+    if visible and _looks_like_provider_error_text(visible):
+        return _user_visible_failure_summary(visible, lang=get_web_language())
     if visible and not _looks_like_structured_payload(visible):
         return visible
     reply = _format_visible_reply(result)
