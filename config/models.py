@@ -407,10 +407,6 @@ class AgentModesConfig(BaseModel):
     supervised_evolution_enabled: bool = Field(default=True, description="是否启用 supervised_evolution 模式")
     default_shell_mode: str = Field(default="chat", description="交互工作台默认模式")
     default_headless_mode: str = Field(default="self_evolution", description="无交互运行默认模式")
-    explicit_evolution_request_behavior: str = Field(
-        default="route_to_workbench",
-        description="chat 模式遇到显式进化请求时的行为",
-    )
 
     @field_validator("default_shell_mode", "default_headless_mode")
     @classmethod
@@ -418,14 +414,6 @@ class AgentModesConfig(BaseModel):
         value = (v or "").strip().lower()
         if value not in VALID_AGENT_MODES:
             raise ValueError(f"mode must be one of: {', '.join(VALID_AGENT_MODES)}")
-        return value
-
-    @field_validator("explicit_evolution_request_behavior")
-    @classmethod
-    def validate_explicit_behavior(cls, v: str) -> str:
-        value = (v or "route_to_workbench").strip().lower()
-        if value not in {"route_to_workbench", "reply_only"}:
-            raise ValueError("explicit_evolution_request_behavior must be route_to_workbench or reply_only")
         return value
 
 class AgentConfig(BaseModel):

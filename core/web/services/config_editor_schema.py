@@ -8,7 +8,6 @@ from typing import Any
 
 RUNTIME_PROFILE_OPTIONS = ["safe_local", "safe_remote", "debug", "ci"]
 AGENT_MODE_OPTIONS = ["chat", "self_evolution", "supervised_evolution"]
-EVOLUTION_REQUEST_BEHAVIOR_OPTIONS = ["route_to_workbench", "reply_only"]
 SEGMENTATION_STRATEGY_OPTIONS = ["task_contiguous"]
 AVATAR_PRESET_OPTIONS = ["lobster", "shrimp", "crab", "cat", "chick", "bunny", "slime", "penguin", "moose"]
 
@@ -98,7 +97,6 @@ FIELD_LABELS = {
         "agent.modes.supervised_evolution_enabled": "启用监督进化模式",
         "agent.modes.default_shell_mode": "工作台默认模式",
         "agent.modes.default_headless_mode": "无交互默认模式",
-        "agent.modes.explicit_evolution_request_behavior": "显式进化请求处理方式",
         "context_compression.keep_recent_steps": "保留最近步骤数",
         "context_compression.max_compressions_per_session": "每会话最大压缩次数",
         "context_compression.effectiveness_threshold": "压缩有效性阈值",
@@ -173,7 +171,6 @@ FIELD_LABELS = {
         "agent.modes.supervised_evolution_enabled": "Enable Supervised Evolution",
         "agent.modes.default_shell_mode": "Default Workbench Mode",
         "agent.modes.default_headless_mode": "Default Headless Mode",
-        "agent.modes.explicit_evolution_request_behavior": "Explicit Evolution Request Behavior",
         "context_compression.keep_recent_steps": "Recent Steps to Keep",
         "context_compression.max_compressions_per_session": "Max Compressions Per Session",
         "context_compression.effectiveness_threshold": "Compression Effectiveness Threshold",
@@ -320,7 +317,6 @@ FIELD_HINTS = {
         "agent.default_mode": "决定默认启动为 chat、自进化还是监督进化。",
         "agent.modes.default_shell_mode": "工作台入口默认采用的 agent mode。",
         "agent.modes.default_headless_mode": "命令行无交互运行时默认采用的 agent mode。",
-        "agent.modes.explicit_evolution_request_behavior": "chat 中遇到显式进化请求时，决定是转交进化入口还是只回复说明。",
         "agent.auto_restart_threshold": "达到阈值后触发热重启。",
         "context_compression.keep_recent_steps": "压缩后仍然保留的最近步骤数。",
         "context_compression.max_compressions_per_session": "单会话允许的最大压缩次数。",
@@ -344,7 +340,6 @@ FIELD_HINTS = {
         "agent.default_mode": "Selects whether the agent defaults to chat, self-evolution, or supervised evolution.",
         "agent.modes.default_shell_mode": "Agent mode used by default when entering the interactive workbench.",
         "agent.modes.default_headless_mode": "Agent mode used by default for non-interactive CLI runs.",
-        "agent.modes.explicit_evolution_request_behavior": "Controls whether chat reroutes explicit evolution requests or only explains the routing.",
         "agent.auto_restart_threshold": "Threshold that triggers hot restart.",
         "context_compression.keep_recent_steps": "How many recent steps survive compression.",
         "context_compression.max_compressions_per_session": "Compression cap per session.",
@@ -441,8 +436,6 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
         return [{"value": value, "label": value} for value in AVATAR_PRESET_OPTIONS]
     if path in {"agent.default_mode", "agent.modes.default_shell_mode", "agent.modes.default_headless_mode"}:
         return [{"value": value, "label": value} for value in AGENT_MODE_OPTIONS]
-    if path == "agent.modes.explicit_evolution_request_behavior":
-        return [{"value": value, "label": value} for value in EVOLUTION_REQUEST_BEHAVIOR_OPTIONS]
     if path == "evolution.chat_dataset.segmentation_strategy":
         return [{"value": value, "label": value} for value in SEGMENTATION_STRATEGY_OPTIONS]
     return []
