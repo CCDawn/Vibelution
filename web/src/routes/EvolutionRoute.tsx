@@ -2164,6 +2164,25 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   </div>
 
                   <div className={styles.detailSection}>
+                    <h3>{t("caseDiagnostics")}</h3>
+                    {selectedRun.caseDiagnostics.length > 0 ? (
+                      <div className={styles.relatedList}>
+                        {selectedRun.caseDiagnostics.slice(0, 3).map((item) => (
+                          <article key={item.caseId || item.summary} className={styles.relatedRow}>
+                            <div className={styles.listRowTop}>
+                              <strong>{item.caseId || "--"}</strong>
+                              <span>{item.decisionSignal || "--"}</span>
+                            </div>
+                            <p>{item.summary}</p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p>{t("noCaseDiagnostics")}</p>
+                    )}
+                  </div>
+
+                  <div className={styles.detailSection}>
                     <h3>{t("outputsWorthPromoting")}</h3>
                     {relatedLibraryItems.length === 0 && relatedPendingItems.length === 0 ? (
                       <p>{t("noPromotionCandidates")}</p>
@@ -2720,6 +2739,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <p>{proposalDetailQuery.data.supervised.decisionReason}</p>
                       {proposalDetailQuery.data.supervised.riskReasons.length > 0 ? (
                         <p>{proposalDetailQuery.data.supervised.riskReasons.join(" / ")}</p>
+                      ) : null}
+                      {proposalDetailQuery.data.supervised.caseDiagnostics.length > 0 ? (
+                        <div className={styles.relatedList}>
+                          {proposalDetailQuery.data.supervised.caseDiagnostics.slice(0, 3).map((item) => (
+                            <article key={item.caseId || item.summary} className={styles.relatedRow}>
+                              <strong>{item.caseId || "--"}</strong>
+                              <span>{item.summary}</span>
+                            </article>
+                          ))}
+                        </div>
                       ) : null}
                     </div>
 

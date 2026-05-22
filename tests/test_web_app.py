@@ -5366,6 +5366,7 @@ def test_evolution_routes_use_real_supervised_records(tmp_path, monkeypatch):
     assert runs_payload[0]["runtimeEffect"] == "not_applied"
     assert runs_payload[0]["outcomeSemantics"]["runtimeEffect"] == "not_applied"
     assert runs_payload[0]["actionStates"]["delete"]["enabled"] is False
+    assert runs_payload[0]["caseDiagnostics"][0]["summary"].startswith("candidate 与 baseline")
     assert any(item["sourceRun"] == "web_active_run" for item in library_payload["items"])
     assert any(item["sourceRun"] == "web_pending_run" for item in library_payload["pending"])
     assert library_payload["items"][0]["proposalStatus"] == "active"
@@ -6113,6 +6114,7 @@ def test_evolution_proposal_detail_route_exposes_review_first_payload(tmp_path, 
     assert payload["proposal"]["proposalId"]
     assert payload["proposal"]["improvementType"]
     assert payload["proposal"]["expectedEffect"]
+    assert payload["supervised"]["caseDiagnostics"][0]["summary"].startswith("candidate 与 baseline")
     assert payload["paths"]["gymProposalPath"] == str(seeded["proposal_path"])
     assert payload["rawProposal"]["status"] == "proposed"
     assert payload["rawGymDecision"]["candidate_improvement"]["improvement_id"]
@@ -6981,6 +6983,9 @@ def _write_supervised_decision_record(project_root: Path, session_id: str, overr
                 "baseline_status": "success",
                 "candidate_status": "success",
                 "decision_signal": "stable_success",
+                "difference_summary": "candidate 与 baseline 同为 success，validation 持平，runtime +1.0s。",
+                "difference_metrics": {"wall_clock_seconds_delta": 1.0},
+                "difference_reasons": ["same_status"],
             }
         ],
         "gates": [],

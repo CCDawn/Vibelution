@@ -143,6 +143,9 @@ class CaseDecisionSummary:
     baseline_reason: str
     candidate_reason: str
     decision_signal: str
+    difference_summary: str = ""
+    difference_metrics: Dict[str, Any] = field(default_factory=dict)
+    difference_reasons: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -333,6 +336,12 @@ def _build_case_summaries(
             signal = "candidate_improved"
         elif baseline_status == candidate_status == "success":
             signal = "stable_success"
+        difference_summary, difference_metrics, difference_reasons = _build_case_difference_diagnostic(
+            baseline=baseline,
+            candidate=candidate,
+            baseline_status=baseline_status,
+            candidate_status=candidate_status,
+        )
         summaries.append(
             CaseDecisionSummary(
                 case_id=case_id,
@@ -341,9 +350,226 @@ def _build_case_summaries(
                 baseline_reason=baseline.reason if baseline else "missing baseline run",
                 candidate_reason=candidate.reason if candidate else "missing candidate run",
                 decision_signal=signal,
+                difference_summary=difference_summary,
+                difference_metrics=difference_metrics,
+                difference_reasons=difference_reasons,
             )
         )
     return summaries
+
+
+def _build_case_difference_diagnostic(
+    *,
+    baseline: Optional[SupervisedEvolutionRun],
+    candidate: Optional[SupervisedEvolutionRun],
+    baseline_status: str,
+    candidate_status: str,
+) -> tuple[str, Dict[str, Any], List[str]]:
+    baseline_metrics = _extract_run_metrics(baseline) if baseline else {}
+    candidate_metrics = _extract_run_metrics(candidate) if candidate else {}
+
+    def metric_delta(key: str, default: float | int = 0) -> float | int:
+        return (candidate_metrics.get(key, default) or default) - (baseline_metrics.get(key, default) or default)
+
+    baseline_transaction_issue = _has_transaction_issue(baseline_metrics)
+    candidate_transaction_issue = _has_transaction_issue(candidate_metrics)
+    baseline_restart_miss = _has_restart_miss(baseline_metrics)
+    candidate_restart_miss = _has_restart_miss(candidate_metrics)
+    baseline_llm_failure = bool(baseline_metrics.get("llm_failure_detected"))
+    candidate_llm_failure = bool(candidate_metrics.get("llm_failure_detected"))
+
+    difference_metrics: Dict[str, Any] = {
+        "baseline_status": baseline_status,
+        "candidate_status": candidate_status,
+        "status_changed": baseline_status != candidate_status,
+        "validation_passed_delta": int(metric_delta("validation_passed")),
+        "validation_failed_delta": int(metric_delta("validation_failed")),
+        "wall_clock_seconds_delta": round(float(metric_delta("wall_clock_seconds", 0.0)), 3),
+        "guarded_tools_delta": int(metric_delta("guarded_tools")),
+        "new_logs_delta": int(metric_delta("new_logs")),
+        "restart_miss_delta": int(candidate_restart_miss) - int(baseline_restart_miss),
+        "transaction_issue_delta": int(candidate_transaction_issue) - int(baseline_transaction_issue),
+        "llm_failure_delta": int(candidate_llm_failure) - int(baseline_llm_failure),
+        "baseline_transaction_issue": baseline_transaction_issue,
+        "candidate_transaction_issue": candidate_transaction_issue,
+        "baseline_restart_miss": baseline_restart_miss,
+        "candidate_restart_miss": candidate_restart_miss,
+        "baseline_llm_failure": baseline_llm_failure,
+        "candidate_llm_failure": candidate_llm_failure,
+        "baseline_llm_failure_category": str(baseline_metrics.get("llm_failure_category") or ""),
+        "candidate_llm_failure_category": str(candidate_metrics.get("llm_failure_category") or ""),
+    }
+    reasons = _build_difference_reasons(difference_metrics, baseline=baseline, candidate=candidate)
+    summary = _format_case_difference_summary(
+        baseline_status=baseline_status,
+        candidate_status=candidate_status,
+        metrics=difference_metrics,
+        baseline=baseline,
+        candidate=candidate,
+    )
+    return summary, difference_metrics, reasons
+
+
+def _has_transaction_issue(metrics: Dict[str, Any]) -> bool:
+    if not metrics:
+        return False
+    return (
+        not bool(metrics.get("transaction_opened"))
+        or not bool(metrics.get("transaction_closed"))
+        or str(metrics.get("transaction_status") or "") not in {"", "success"}
+    )
+
+
+def _has_restart_miss(metrics: Dict[str, Any]) -> bool:
+    if not metrics:
+        return False
+    return bool(metrics.get("restart_expected")) and not bool(metrics.get("restart_reentered"))
+
+
+def _build_difference_reasons(
+    metrics: Dict[str, Any],
+    *,
+    baseline: Optional[SupervisedEvolutionRun],
+    candidate: Optional[SupervisedEvolutionRun],
+) -> List[str]:
+    reasons: List[str] = []
+    if baseline is None:
+        reasons.append("missing_baseline")
+    if candidate is None:
+        reasons.append("missing_candidate")
+    if metrics["status_changed"]:
+        if metrics["baseline_status"] != "success" and metrics["candidate_status"] == "success":
+            reasons.append("status_improved")
+        elif metrics["baseline_status"] == "success" and metrics["candidate_status"] != "success":
+            reasons.append("status_regressed")
+        else:
+            reasons.append("status_changed")
+    else:
+        reasons.append("same_status")
+
+    reason_specs = (
+        ("validation_passed_delta", "validation_passed_increased", "validation_passed_decreased"),
+        ("validation_failed_delta", "validation_failures_increased", "validation_failures_reduced"),
+        ("wall_clock_seconds_delta", "runtime_increased", "runtime_decreased"),
+        ("guarded_tools_delta", "guarded_tools_increased", "guarded_tools_reduced"),
+        ("new_logs_delta", "new_logs_increased", "new_logs_reduced"),
+        ("restart_miss_delta", "restart_misses_increased", "restart_misses_reduced"),
+        ("transaction_issue_delta", "transaction_issues_increased", "transaction_issues_reduced"),
+        ("llm_failure_delta", "llm_failures_increased", "llm_failures_reduced"),
+    )
+    for key, positive_reason, negative_reason in reason_specs:
+        value = float(metrics.get(key) or 0)
+        if value > 0:
+            reasons.append(positive_reason)
+        elif value < 0:
+            reasons.append(negative_reason)
+
+    if metrics["baseline_transaction_issue"] and metrics["candidate_transaction_issue"]:
+        reasons.append("shared_transaction_issue")
+    elif metrics["candidate_transaction_issue"]:
+        reasons.append("candidate_transaction_issue")
+    elif metrics["baseline_transaction_issue"]:
+        reasons.append("baseline_transaction_issue")
+
+    if metrics["baseline_restart_miss"] and metrics["candidate_restart_miss"]:
+        reasons.append("shared_restart_miss")
+    elif metrics["candidate_restart_miss"]:
+        reasons.append("candidate_restart_miss")
+    elif metrics["baseline_restart_miss"]:
+        reasons.append("baseline_restart_miss")
+
+    if metrics["baseline_llm_failure"] and metrics["candidate_llm_failure"]:
+        reasons.append("shared_llm_failure")
+    elif metrics["candidate_llm_failure"]:
+        reasons.append("candidate_llm_failure")
+    elif metrics["baseline_llm_failure"]:
+        reasons.append("baseline_llm_failure")
+    return reasons
+
+
+def _format_case_difference_summary(
+    *,
+    baseline_status: str,
+    candidate_status: str,
+    metrics: Dict[str, Any],
+    baseline: Optional[SupervisedEvolutionRun],
+    candidate: Optional[SupervisedEvolutionRun],
+) -> str:
+    if baseline is None or candidate is None:
+        missing = []
+        if baseline is None:
+            missing.append("baseline")
+        if candidate is None:
+            missing.append("candidate")
+        return (
+            f"缺少 {'/'.join(missing)} 运行，无法完整比较；"
+            f"status {baseline_status} -> {candidate_status}。"
+        )
+
+    if baseline_status != "success" and candidate_status == "success":
+        prefix = "candidate 相比 baseline 改善"
+    elif baseline_status == "success" and candidate_status != "success":
+        prefix = "candidate 相比 baseline 退化"
+    elif baseline_status == candidate_status:
+        prefix = f"candidate 与 baseline 同为 {candidate_status}"
+    else:
+        prefix = f"candidate 与 baseline status {baseline_status} -> {candidate_status}"
+
+    parts = [
+        _format_validation_delta(
+            int(metrics["validation_passed_delta"]),
+            int(metrics["validation_failed_delta"]),
+        ),
+        f"runtime {_format_seconds_delta(float(metrics['wall_clock_seconds_delta']))}",
+        f"guarded tools {_format_count_delta(int(metrics['guarded_tools_delta']))}",
+        f"new logs {_format_count_delta(int(metrics['new_logs_delta']))}",
+    ]
+    issue_parts = _format_difference_issue_parts(metrics)
+    suffix = ("；" + "；".join(issue_parts)) if issue_parts else ""
+    return f"{prefix}，{', '.join(parts)}{suffix}。"
+
+
+def _format_validation_delta(passed_delta: int, failed_delta: int) -> str:
+    if passed_delta == 0 and failed_delta == 0:
+        return "validation 持平"
+    return f"validation passed {_format_count_delta(passed_delta)}/failed {_format_count_delta(failed_delta)}"
+
+
+def _format_seconds_delta(value: float) -> str:
+    if value == 0:
+        return "持平"
+    return f"{value:+.1f}s"
+
+
+def _format_count_delta(value: int) -> str:
+    if value == 0:
+        return "持平"
+    return f"{value:+d}"
+
+
+def _format_difference_issue_parts(metrics: Dict[str, Any]) -> List[str]:
+    parts: List[str] = []
+    if metrics["baseline_transaction_issue"] and metrics["candidate_transaction_issue"]:
+        parts.append("baseline 与 candidate 都存在事务边界异常，无法证明候选退化")
+    elif metrics["candidate_transaction_issue"]:
+        parts.append("candidate 存在事务边界异常")
+    elif metrics["baseline_transaction_issue"]:
+        parts.append("baseline 存在事务边界异常")
+
+    if metrics["baseline_restart_miss"] and metrics["candidate_restart_miss"]:
+        parts.append("双方都有 restart miss")
+    elif metrics["candidate_restart_miss"]:
+        parts.append("candidate restart miss")
+    elif metrics["baseline_restart_miss"]:
+        parts.append("baseline restart miss")
+
+    if metrics["baseline_llm_failure"] and metrics["candidate_llm_failure"]:
+        parts.append("双方都有 LLM failure")
+    elif metrics["candidate_llm_failure"]:
+        parts.append("candidate LLM failure")
+    elif metrics["baseline_llm_failure"]:
+        parts.append("baseline LLM failure")
+    return parts
 
 
 def _evaluate_gates(
@@ -740,7 +966,10 @@ def format_decision_record_summary(decision: SupervisedEvolutionDecision) -> str
         for gate in decision.gates
     ]
     case_lines = [
-        f"- {case.case_id}: {case.baseline_status} -> {case.candidate_status} ({case.decision_signal})"
+        (
+            f"- {case.case_id}: {case.baseline_status} -> {case.candidate_status} "
+            f"({case.decision_signal}) | diff: {case.difference_summary or '-'}"
+        )
         for case in decision.case_summaries[:5]
     ]
     lines = [

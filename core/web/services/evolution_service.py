@@ -199,6 +199,7 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
             "riskReasons": list(record.risk_reasons),
             "decisionReason": record.reason,
             "activeAdvisoryCount": record.advisory_active_count,
+            "caseDiagnostics": _case_diagnostics(record),
         },
         "proposal": proposal,
         "paths": {
@@ -451,6 +452,7 @@ def _run_payload(record) -> dict[str, Any]:
         "sourceDecisionPath": record.decision_path,
         "sourceProposalPath": record.gym_proposal_path or "",
         "activeAdvisoryCount": record.advisory_active_count,
+        "caseDiagnostics": _case_diagnostics(record),
         "canDelete": can_delete,
         "deleteBlockReason": delete_block_reason,
         "runSemantics": {
@@ -475,6 +477,30 @@ def _run_payload(record) -> dict[str, Any]:
             lang=lang,
         ),
     }
+
+
+def _case_diagnostics(record) -> list[dict[str, Any]]:
+    diagnostics: list[dict[str, Any]] = []
+    for case in list(record.case_summaries or []):
+        if not isinstance(case, dict):
+            continue
+        metrics = case.get("difference_metrics") if isinstance(case.get("difference_metrics"), dict) else {}
+        reasons = case.get("difference_reasons") if isinstance(case.get("difference_reasons"), list) else []
+        summary = str(case.get("difference_summary") or "")
+        if not summary and not metrics and not reasons:
+            continue
+        diagnostics.append(
+            {
+                "caseId": str(case.get("case_id") or ""),
+                "baselineStatus": str(case.get("baseline_status") or ""),
+                "candidateStatus": str(case.get("candidate_status") or ""),
+                "decisionSignal": str(case.get("decision_signal") or ""),
+                "summary": summary,
+                "metrics": metrics,
+                "reasons": [str(item) for item in reasons],
+            }
+        )
+    return diagnostics
 
 
 def _library_item_payload(record, *, root: Path, lang: str) -> dict[str, Any]:

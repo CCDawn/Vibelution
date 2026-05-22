@@ -697,6 +697,10 @@ def test_run_supervised_evolution_session_is_inconclusive_when_baseline_and_cand
     assert decision.decision == "INCONCLUSIVE"
     assert decision.score_delta == 0.0
     assert decision.case_summaries[0].decision_signal == "tie"
+    assert "都存在事务边界异常" in decision.case_summaries[0].difference_summary
+    assert decision.case_summaries[0].difference_metrics["baseline_transaction_issue"] is True
+    assert decision.case_summaries[0].difference_metrics["candidate_transaction_issue"] is True
+    assert "shared_transaction_issue" in decision.case_summaries[0].difference_reasons
     assert decision.gates[0].name == "legality"
     assert decision.gates[0].status == "fail"
     assert decision.gates[0].metrics["baseline_transaction_issues"] == 1
@@ -821,6 +825,17 @@ def test_run_supervised_evolution_session_holds_improvement_when_cost_is_too_hig
     assert decision.gates[-1].name == "cost"
     assert decision.gates[-1].status == "hold"
     assert "代价偏高" in decision.gates[-1].reason
+    case = decision.case_summaries[0]
+    assert case.difference_metrics["validation_passed_delta"] == 1
+    assert case.difference_metrics["validation_failed_delta"] == -1
+    assert case.difference_metrics["wall_clock_seconds_delta"] == 10.0
+    assert case.difference_metrics["guarded_tools_delta"] == 7
+    assert case.difference_metrics["new_logs_delta"] == 2
+    assert "candidate 相比 baseline 改善" in case.difference_summary
+    assert "guarded tools +7" in case.difference_summary
+    rendered = format_decision_record_summary(decision)
+    assert "diff:" in rendered
+    assert "runtime +10.0s" in rendered
 
 
 def test_run_supervised_evolution_session_promotes_candidate_into_bundle(tmp_path: Path):
