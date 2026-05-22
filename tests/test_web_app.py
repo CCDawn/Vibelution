@@ -1255,6 +1255,7 @@ def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkey
     assert "手动停止" in scene_a["displayName"]
     assert scenes[0]["eventCount"] >= 3
     assert scenes[0]["rawLogCount"] >= 5
+    assert scene_a["eventLogCount"] == 3
     assert scene_a["warningCount"] == 1
     assert scene_a["errorCount"] == 1
 

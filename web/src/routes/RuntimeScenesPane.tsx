@@ -1110,7 +1110,14 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
                         <span>{lang === "zh" ? "日期" : "Date"} {scene.packageIndex?.startedDate || "-"}</span>
                         <span>{lang === "zh" ? "时间" : "Time"} {scene.packageIndex?.startedTime || "-"}</span>
                         <span>{scene.eventCount} 条事件</span>
-                        <span>{scene.rawLogCount + scene.conversationCount + scene.agentLogCount + scene.artifactCount} 个子日志</span>
+                        <span>
+                          {scene.rawLogCount +
+                            scene.conversationCount +
+                            scene.agentLogCount +
+                            scene.artifactCount +
+                            scene.eventLogCount}{" "}
+                          个子日志
+                        </span>
                       </div>
                       <p className={styles.sceneCardSummary}>
                         {localizeRuntimeSceneText(
