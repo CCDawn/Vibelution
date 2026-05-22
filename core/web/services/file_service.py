@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -104,6 +104,17 @@ def _build_node(path: Path, depth: int) -> dict | None:
 
 
 def _resolve_project_path(relative_path: str) -> Path:
+    raw_path = str(relative_path or "").strip()
+    windows_path = PureWindowsPath(raw_path)
+    posix_path = PurePosixPath(raw_path.replace("\\", "/"))
+    if (
+        not raw_path
+        or windows_path.drive
+        or windows_path.root
+        or posix_path.is_absolute()
+        or any(part == ".." for part in posix_path.parts)
+    ):
+        raise ValueError("Path must stay inside the project root")
     candidate = (PROJECT_ROOT / relative_path).resolve()
     project_root = PROJECT_ROOT.resolve()
     try:
