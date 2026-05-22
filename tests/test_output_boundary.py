@@ -14,6 +14,18 @@ def test_strip_llm_protocol_artifacts_removes_standalone_bracket_control_markers
     assert cleaned == "已经完成项目审查。\n下一步可以提交。"
 
 
+def test_strip_llm_protocol_artifacts_removes_standalone_bare_control_markers():
+    raw = "已经完成项目审查。\noutcome=done\ntask_outcome=success\nstatus=ready\n下一步可以提交。"
+
+    cleaned = strip_llm_protocol_artifacts(raw)
+
+    assert cleaned == "已经完成项目审查。\n下一步可以提交。"
+
+
+def test_strip_llm_protocol_artifacts_removes_lone_bare_done_marker():
+    assert strip_llm_protocol_artifacts("outcome=done") == ""
+
+
 def test_strip_llm_protocol_artifacts_keeps_bracket_markers_inside_normal_text():
     raw = "请在文档中说明 [status=ready] 是一个历史日志样例。"
 
