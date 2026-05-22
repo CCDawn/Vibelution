@@ -545,13 +545,17 @@ $failedRuntimeManager = $script:manifestUpdates[2].runtime_manager
 $startupFailureRuntimeManager = $script:manifestUpdates[3].runtime_manager
 $payload = @{
     success = $successRuntimeManager
+    successSupervisor = $script:manifestUpdates[0].supervisor
     monitor = @{
         result = $script:manifestUpdates[1].result
         stopReason = $script:manifestUpdates[1].stop_reason
         runtimeManager = $monitorRuntimeManager
+        supervisor = $script:manifestUpdates[1].supervisor
     }
     failed = $failedRuntimeManager
+    failedHasSupervisor = $script:manifestUpdates[2].ContainsKey("supervisor")
     startupFailure = $startupFailureRuntimeManager
+    startupFailureHasSupervisor = $script:manifestUpdates[3].ContainsKey("supervisor")
     controlLogPhase = $script:controlFields[0].phase
     controlLogObservedState = $script:controlFields[0].observed_state
 } | ConvertTo-Json -Depth 8 -Compress
@@ -567,14 +571,18 @@ Write-Output $payload
         "observed_state": "closed",
         "phase": "steady",
     }
+    assert payload["successSupervisor"] == {"pid": 0, "status": "stopped"}
     assert payload["monitor"]["result"] == "runtime_manager_stop"
     assert payload["monitor"]["stopReason"] == "runtime manager stop"
     assert payload["monitor"]["runtimeManager"]["observed_state"] == "closed"
     assert payload["monitor"]["runtimeManager"]["phase"] == "steady"
+    assert payload["monitor"]["supervisor"] == {"pid": 0, "status": "stopped"}
     assert payload["failed"]["observed_state"] == "open"
     assert payload["failed"]["phase"] == "closing"
+    assert payload["failedHasSupervisor"] is False
     assert payload["startupFailure"]["observed_state"] == "open"
     assert payload["startupFailure"]["phase"] == "closing"
+    assert payload["startupFailureHasSupervisor"] is False
     assert payload["controlLogObservedState"] == "open"
     assert payload["controlLogPhase"] == "closing"
 
