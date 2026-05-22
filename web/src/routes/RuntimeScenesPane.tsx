@@ -26,6 +26,7 @@ import { FilePreview } from "../components/preview/FilePreview";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
 import styles from "./LogsRoute.module.css";
+import { runtimeScenePackageFiles, runtimeScenePackageSections } from "./runtimeScenePackageSections";
 
 type ActionNotice = {
   tone: "success" | "error";
@@ -245,14 +246,6 @@ function formatDuration(seconds: number | null | undefined, lang: "zh" | "en") {
   return lang === "zh" ? `${minutes} 分 ${rest} 秒` : `${minutes}m ${rest}s`;
 }
 
-function runtimeScenePackageFiles(scene: RuntimeSceneDetail) {
-  return [
-    ...scene.rawFiles,
-    ...scene.conversationLogs,
-    ...scene.agentLogs,
-    ...scene.artifacts,
-  ];
-}
 
 function formatBytes(size: number) {
   const value = Number(size || 0);
@@ -764,7 +757,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
     const filteredTimeline = scene.timeline.filter((event) =>
       matchesSeverityFilter(classifyRuntimeSceneEvent(event), severityFilter),
     );
-    const packageFiles = runtimeScenePackageFiles(scene);
+    const packageSections = runtimeScenePackageSections(scene);
     return (
       <div className={styles.sceneDetailSurface}>
         <div className={styles.sceneDetailHeaderCompact}>
@@ -897,32 +890,46 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
               <div>
                 <h3>{t("runtimeSceneRawLogs")}</h3>
                 <p className={styles.sceneDetailSummary}>
-                  {lang === "zh" ? "选择一个子日志查看诊断摘要和原文" : "Choose a child log for diagnostics and raw content"}
+                  {lang === "zh"
+                    ? "按用途选择日志；空分区表示本周期没有发生对应流程"
+                    : "Choose logs by purpose; empty sections mean that flow did not run in this cycle"}
                 </p>
               </div>
               <div className={styles.sceneHeaderControls}>{severityFilterControl}</div>
             </div>
 
-            <div className={styles.rawFileTabs}>
-              {packageFiles.length === 0 ? (
-                <div className={styles.panelState}>{t("runtimeSceneNoRawLogs")}</div>
-              ) : (
-                packageFiles.map((item) => (
-                  <button
-                    key={item.path}
-                    type="button"
-                    className={
-                      activeRawLogPath === item.path
-                        ? `${styles.rawFileButton} ${styles.rawFileButtonActive}`
-                        : styles.rawFileButton
-                    }
-                    onClick={() => handleOpenRawLog(scene.runtimeSceneId, item.path)}
-                  >
-                    <span>{item.label}</span>
-                    <span>{formatBytes(item.size)}</span>
-                  </button>
-                ))
-              )}
+            <div className={styles.packageSectionList}>
+              {packageSections.map((section) => (
+                <section key={section.id} className={styles.packageSection}>
+                  <div className={styles.packageSectionHeader}>
+                    <h4>{lang === "zh" ? section.titleZh : section.titleEn}</h4>
+                    <span>{section.files.length}</span>
+                  </div>
+                  {section.files.length === 0 ? (
+                    <div className={styles.packageSectionEmpty}>
+                      {lang === "zh" ? section.emptyZh : section.emptyEn}
+                    </div>
+                  ) : (
+                    <div className={styles.rawFileTabs}>
+                      {section.files.map((item) => (
+                        <button
+                          key={item.path}
+                          type="button"
+                          className={
+                            activeRawLogPath === item.path
+                              ? `${styles.rawFileButton} ${styles.rawFileButtonActive}`
+                              : styles.rawFileButton
+                          }
+                          onClick={() => handleOpenRawLog(scene.runtimeSceneId, item.path)}
+                        >
+                          <span>{item.label}</span>
+                          <span>{formatBytes(item.size)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              ))}
             </div>
 
             <div className={styles.sceneRawPreview}>
