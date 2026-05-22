@@ -163,6 +163,8 @@ export type RuntimeSceneListItem = {
   conversationCount: number;
   agentLogCount: number;
   artifactCount: number;
+  errorCount: number;
+  warningCount: number;
 };
 
 export type RuntimeSceneEvent = {

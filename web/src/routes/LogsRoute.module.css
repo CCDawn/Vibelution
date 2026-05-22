@@ -736,6 +736,40 @@
   justify-content: space-between;
 }
 
+.sceneCardStatusGroup {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.sceneIssueBadge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sceneIssueBadgeError {
+  border-color: color-mix(in srgb, var(--danger, #ff6b6b) 42%, transparent);
+  background: color-mix(in srgb, var(--danger, #ff6b6b) 14%, transparent);
+  color: color-mix(in srgb, var(--danger, #ff6b6b) 78%, var(--fg-primary));
+}
+
+.sceneIssueBadgeWarning {
+  border-color: color-mix(in srgb, var(--accent-warm) 36%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 13%, transparent);
+  color: color-mix(in srgb, var(--accent-warm) 72%, var(--fg-primary));
+}
+
 .sceneCardHeader strong,
 .sceneDetailTitle,
 .timelineCode {
