@@ -2466,7 +2466,7 @@ function Write-ManagedSessionClosureRecord {
                 failure_message = [string]$Closure.FailureMessage
             }
         }
-        Update-RuntimeSceneManifest @{
+        $manifestChanges = @{
             status = $finalState.status
             result = $manifestResult
             stop_reason = $manifestReason
@@ -2487,6 +2487,13 @@ function Write-ManagedSessionClosureRecord {
             }
             runtime_manager = $manifestRuntimeManager
         }
+        if ($Success -and $finalState.status -eq "stopped") {
+            $manifestChanges.supervisor = @{
+                status = "stopped"
+                pid = 0
+            }
+        }
+        Update-RuntimeSceneManifest $manifestChanges
     }
 
     Write-LauncherControlLog `
