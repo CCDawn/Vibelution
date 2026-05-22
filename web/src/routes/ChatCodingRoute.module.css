@@ -421,10 +421,10 @@
 .petShowcase {
   position: relative;
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 10px 12px;
   align-items: center;
-  min-height: 98px;
+  min-height: 132px;
   margin-top: auto;
   padding: 10px;
   overflow: hidden;
@@ -439,8 +439,8 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 76px;
-  height: 76px;
+  width: 82px;
+  height: 82px;
   overflow: hidden;
   border: 1px solid rgba(236, 230, 220, 0.08);
   border-radius: 8px;
@@ -449,32 +449,201 @@
 
 .petShowcaseAura {
   position: absolute;
-  width: 58px;
-  height: 58px;
+  width: 66px;
+  height: 66px;
   border-radius: 999px;
   background: radial-gradient(circle, color-mix(in srgb, var(--accent-warm) 36%, transparent), transparent 70%);
   filter: blur(3px);
 }
 
 .petShowcaseAvatar {
+  --pet-body: color-mix(in srgb, var(--accent-warm) 34%, var(--surface-panel-strong));
+  --pet-body-deep: color-mix(in srgb, var(--accent-warm) 58%, var(--surface-card));
+  --pet-mark: rgba(255, 255, 255, 0.22);
+  --pet-feature: var(--surface-page);
   position: relative;
   display: grid;
   place-items: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 999px;
+  width: 58px;
+  height: 58px;
+  border: 1px solid color-mix(in srgb, var(--pet-body-deep) 64%, rgba(255, 255, 255, 0.08));
+  border-radius: 45% 45% 42% 42%;
   background:
-    radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.2), transparent 32%),
-    color-mix(in srgb, var(--accent-warm) 24%, var(--surface-panel-strong));
+    radial-gradient(circle at 36% 22%, var(--pet-mark), transparent 30%),
+    linear-gradient(155deg, color-mix(in srgb, var(--pet-body) 92%, white), var(--pet-body-deep));
   box-shadow: 0 16px 24px rgba(0, 0, 0, 0.28);
-  color: var(--accent-warm-2);
+  color: color-mix(in srgb, var(--accent-warm-2) 70%, white);
   font-family: var(--font-display);
-  font-size: 0.92rem;
+  font-size: 0.68rem;
+  font-weight: 800;
   letter-spacing: 0.03em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.34);
 }
 
-.petShowcaseAvatar span {
+.petShowcaseSymbol {
+  position: relative;
+  z-index: 1;
   transform: translateY(1px);
+}
+
+.petShowcaseEarLeft,
+.petShowcaseEarRight,
+.petShowcaseFootLeft,
+.petShowcaseFootRight,
+.petShowcaseFace,
+.petShowcaseEye,
+.petShowcaseMuzzle {
+  position: absolute;
+  display: block;
+}
+
+.petShowcaseEarLeft,
+.petShowcaseEarRight {
+  z-index: 0;
+  width: 19px;
+  height: 23px;
+  top: -8px;
+  border: 1px solid color-mix(in srgb, var(--pet-body-deep) 70%, rgba(255, 255, 255, 0.08));
+  background: linear-gradient(145deg, var(--pet-body), var(--pet-body-deep));
+}
+
+.petShowcaseEarLeft {
+  left: 7px;
+  border-radius: 80% 32% 64% 36%;
+  transform: rotate(-23deg);
+}
+
+.petShowcaseEarRight {
+  right: 7px;
+  border-radius: 32% 80% 36% 64%;
+  transform: rotate(23deg);
+}
+
+.petShowcaseFace {
+  z-index: 1;
+  inset: 17px 12px auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  transform: none;
+}
+
+.petShowcaseEye {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--pet-feature);
+  opacity: 0.82;
+}
+
+.petShowcaseMuzzle {
+  left: 50%;
+  top: 8px;
+  width: 12px;
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pet-feature) 66%, transparent);
+  transform: translateX(-50%);
+}
+
+.petShowcaseFootLeft,
+.petShowcaseFootRight {
+  z-index: 1;
+  bottom: -4px;
+  width: 17px;
+  height: 10px;
+  border-radius: 999px 999px 6px 6px;
+  background: color-mix(in srgb, var(--pet-body-deep) 74%, black);
+  opacity: 0.9;
+  transform: none;
+}
+
+.petShowcaseFootLeft {
+  left: 11px;
+}
+
+.petShowcaseFootRight {
+  right: 11px;
+}
+
+.petShowcaseAvatar_cat {
+  --pet-body: #d88955;
+  --pet-body-deep: #6c4932;
+  --pet-mark: rgba(255, 233, 205, 0.32);
+}
+
+.petShowcaseAvatar_bunny {
+  --pet-body: #cdbfc9;
+  --pet-body-deep: #71656f;
+  --pet-mark: rgba(255, 255, 255, 0.34);
+  border-radius: 47% 47% 40% 40%;
+}
+
+.petShowcaseAvatar_bunny .petShowcaseEarLeft,
+.petShowcaseAvatar_bunny .petShowcaseEarRight {
+  height: 31px;
+  top: -16px;
+  border-radius: 999px 999px 52% 52%;
+}
+
+.petShowcaseAvatar_penguin {
+  --pet-body: #34434b;
+  --pet-body-deep: #10171d;
+  --pet-mark: rgba(255, 244, 218, 0.9);
+  color: var(--accent-warm-2);
+}
+
+.petShowcaseAvatar_penguin .petShowcaseEarLeft,
+.petShowcaseAvatar_penguin .petShowcaseEarRight {
+  width: 13px;
+  height: 17px;
+  top: 8px;
+}
+
+.petShowcaseAvatar_slime {
+  --pet-body: #7fd4b1;
+  --pet-body-deep: #286f5b;
+  --pet-mark: rgba(230, 255, 246, 0.42);
+  border-radius: 52% 48% 42% 44%;
+}
+
+.petShowcaseAvatar_slime .petShowcaseEarLeft,
+.petShowcaseAvatar_slime .petShowcaseEarRight {
+  display: none;
+}
+
+.petShowcaseAvatar_moose {
+  --pet-body: #a87a49;
+  --pet-body-deep: #4e3725;
+  --pet-mark: rgba(255, 230, 190, 0.3);
+}
+
+.petShowcaseAvatar_moose .petShowcaseEarLeft,
+.petShowcaseAvatar_moose .petShowcaseEarRight {
+  width: 24px;
+  height: 12px;
+  top: -1px;
+  border-radius: 999px 999px 6px 999px;
+}
+
+.petShowcaseAvatar_lobster,
+.petShowcaseAvatar_shrimp,
+.petShowcaseAvatar_crab {
+  --pet-body: #c96954;
+  --pet-body-deep: #703329;
+  --pet-mark: rgba(255, 221, 205, 0.34);
+}
+
+.petShowcaseAvatar_chick {
+  --pet-body: #d6b85d;
+  --pet-body-deep: #7b6230;
+  --pet-mark: rgba(255, 246, 192, 0.34);
+  color: color-mix(in srgb, var(--surface-page) 72%, black);
+}
+
+.petShowcaseAvatar_default {
+  --pet-body: color-mix(in srgb, var(--accent-cool) 36%, var(--accent-warm));
+  --pet-body-deep: color-mix(in srgb, var(--accent-cool) 42%, var(--surface-card));
 }
 
 .petShowcaseInfo {
@@ -518,6 +687,49 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
+}
+
+.petShowcaseActions {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 6px;
+  min-width: 0;
+}
+
+.petShowcaseAction,
+.petShowcaseActionHint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.petShowcaseAction span,
+.petShowcaseActionHint span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.petShowcaseAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.petShowcaseActionHint {
+  color: var(--accent-warm-2);
+  border-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
 }
 
 .centerPane {

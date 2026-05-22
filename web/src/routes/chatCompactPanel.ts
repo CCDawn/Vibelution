@@ -18,6 +18,11 @@ const PET_AVATAR_SYMBOLS: Record<string, string> = {
 
 const LOW_VALUE_VALUES = new Set(["", "--", "workspace"]);
 
+export function getPetAvatarPresetKey(avatarPreset: string | null | undefined) {
+  const normalized = String(avatarPreset ?? "").trim().toLowerCase();
+  return normalized || "default";
+}
+
 export function compactValue(value: string | null | undefined) {
   return String(value ?? "").trim();
 }
@@ -44,7 +49,7 @@ export function buildVisiblePanelRows(
 }
 
 export function getPetAvatarSymbol(avatarPreset: string | null | undefined, petName: string | null | undefined) {
-  const presetSymbol = PET_AVATAR_SYMBOLS[String(avatarPreset ?? "").trim().toLowerCase()];
+  const presetSymbol = PET_AVATAR_SYMBOLS[getPetAvatarPresetKey(avatarPreset)];
   if (presetSymbol) {
     return presetSymbol;
   }
