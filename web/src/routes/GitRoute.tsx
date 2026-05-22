@@ -234,7 +234,12 @@ export function GitRoute() {
   const status = statusQuery.data;
   const upstream = status?.upstream;
   const aheadBehind = upstream?.hasUpstream ? `${upstream.ahead} / ${upstream.behind}` : t("gitNoUpstream");
-  const commitBlockReason = getGitCommitBlockReason(selectedCount, commitMessage, commitMutation.isPending);
+  const commitBlockReason = getGitCommitBlockReason(
+    selectedCount,
+    commitMessage,
+    commitMutation.isPending,
+    stagedOutsideSelection.length,
+  );
   const aiDraftBlockReason = getGitAiDraftBlockReason(selectedCount, generateMessageMutation.isPending);
   const commitDisabled = commitBlockReason !== null;
   const aiDisabled = aiDraftBlockReason !== null;
@@ -243,9 +248,11 @@ export function GitRoute() {
       ? t("gitCommitBlockedNoSelection")
       : commitBlockReason === "empty_message"
         ? t("gitCommitBlockedEmptyMessage")
-        : commitBlockReason === "committing"
-          ? t("gitCommitBlockedCommitting")
-          : "";
+        : commitBlockReason === "staged_outside_selection"
+          ? t("gitCommitBlockedStagedOutsideSelection")
+          : commitBlockReason === "committing"
+            ? t("gitCommitBlockedCommitting")
+            : "";
   const aiDraftBlockReasonText =
     aiDraftBlockReason === "no_selection"
       ? t("gitAiDraftBlockedNoSelection")

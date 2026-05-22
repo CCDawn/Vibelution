@@ -1,18 +1,22 @@
 import type { GitStatusFile } from "../api/types";
 
-export type GitCommitBlockReason = "no_selection" | "empty_message" | "committing" | null;
+export type GitCommitBlockReason = "no_selection" | "empty_message" | "staged_outside_selection" | "committing" | null;
 export type GitAiDraftBlockReason = "no_selection" | "generating" | null;
 
 export function getGitCommitBlockReason(
   selectedCount: number,
   commitMessage: string,
   committing: boolean,
+  stagedOutsideSelectionCount = 0,
 ): GitCommitBlockReason {
   if (committing) {
     return "committing";
   }
   if (selectedCount <= 0) {
     return "no_selection";
+  }
+  if (stagedOutsideSelectionCount > 0) {
+    return "staged_outside_selection";
   }
   if (!commitMessage.trim()) {
     return "empty_message";
