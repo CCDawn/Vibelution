@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 import pytest
 
@@ -108,6 +109,47 @@ def test_commit_git_changes_propagates_git_commit_failure(monkeypatch):
     assert service.calls == [
         ["commit", "-m", "feat: selected git commit", "--", "web/src/routes/GitRoute.tsx"],
     ]
+
+
+def test_commit_git_changes_records_failed_commit_event_without_message(monkeypatch):
+    service = FakeGitService(
+        [changed_file("web/src/routes/GitRoute.tsx")],
+        results={
+            ("commit", "-m", "feat: private failure subject", "--", "web/src/routes/GitRoute.tsx"): failed(
+                "nothing added to commit"
+            ),
+        },
+    )
+    events = []
+    monkeypatch.setattr(git_status_service, "get_git_memory_service", lambda: service)
+    monkeypatch.setattr(
+        git_status_service,
+        "_record_git_scene_event",
+        lambda phase, event_code, **kwargs: events.append(
+            {
+                "phase": phase,
+                "event_code": event_code,
+                **kwargs,
+            }
+        ),
+    )
+
+    with pytest.raises(ValueError, match="nothing added to commit"):
+        git_status_service.commit_git_changes(["web/src/routes/GitRoute.tsx"], "feat: private failure subject")
+
+    commit_events = [event for event in events if event["event_code"] == "git.commit.failed"]
+    assert len(commit_events) == 1
+    assert commit_events[0]["phase"] == "commit"
+    assert commit_events[0]["level"] == "error"
+    assert commit_events[0]["outcome"] == "failed"
+    assert commit_events[0]["fields"]["selectedPaths"] == ["web/src/routes/GitRoute.tsx"]
+    assert commit_events[0]["fields"]["selectedFileCount"] == 1
+    assert "feat: private failure subject" not in json.dumps(events)
+    assert any(
+        event["event_code"] == "git.command.failed"
+        and event["fields"]["args"] == ["commit", "-m", "[redacted]", "--", "web/src/routes/GitRoute.tsx"]
+        for event in events
+    )
 
 
 def test_generate_git_commit_message_cleans_fenced_ai_output(monkeypatch):
