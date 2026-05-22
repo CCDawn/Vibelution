@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import {
   lazy,
   Suspense,
@@ -36,6 +36,7 @@ import {
   formatContextUsage,
   formatRelativeTime,
 } from "./chatShellFormat";
+import { buildVisiblePanelRows } from "./chatCompactPanel";
 import {
   clearPendingSelfEvolutionHandoff,
   loadPendingSelfEvolutionHandoff,
@@ -749,8 +750,22 @@ export function ChatCodingRoute() {
     || detail?.taskSummary
     || runtime?.taskSummary
     || t("preparingShell");
-  const sessionReferenceTime = runtime?.sessionUpdatedAt || detail?.updatedAt || "";
-  const sessionRelativeTime = formatRelativeTime(sessionReferenceTime, Date.now(), locale) || "--";
+  const fileContextValue = detail?.defaultFileContext ?? runtime?.defaultRoute ?? "workspace";
+  const sessionCompactRows = buildVisiblePanelRows(
+    [
+      {
+        label: t("fileContext"),
+        value: fileContextValue,
+        title: fileContextValue,
+      },
+      {
+        label: t("currentTask"),
+        value: currentTaskSummary,
+        title: currentTaskSummary,
+      },
+    ],
+    [t("preparingShell"), t("loadingSession"), t("loadingContext")],
+  );
   const mental = runtime?.mentalState;
   useEffect(() => {
     if (mentalModelToggleHydrated || !runtime) {
@@ -799,6 +814,21 @@ export function ChatCodingRoute() {
       ? `${Math.round((mental?.confidence ?? 0) * 100)}%`
       : "--";
   const mentalRelativeTime = formatRelativeTime(mental?.updatedAt ?? "", Date.now(), locale) || "--";
+  const mentalCompactLine = [
+    mentalSourceLabel,
+    mentalConfidence !== "--" ? `${t("mentalConfidence")} ${mentalConfidence}` : "",
+    mentalRelativeTime !== "--" ? mentalRelativeTime : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const petCompactLine = [
+    petCompanionLine,
+    pet?.heartActive ? t("heartActive") : t("heartIdle"),
+    pet?.inDream ? t("dreamSleeping") : t("dreamAwake"),
+    `${t("tokens")} ${numberFormatter.format(pet?.totalTokens ?? 0)}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const filteredSessions = useMemo(() => {
     const term = sessionFilter.trim().toLowerCase();
@@ -995,105 +1025,112 @@ export function ChatCodingRoute() {
       <aside className={styles.leftRail}>
         <section className={styles.leftBlock}>
           <div className={styles.sectionHeader}>
-            <p className={styles.blockEyebrow}>{t("currentSession")}</p>
+            <div className={styles.sectionIdentity}>
+              <p className={styles.blockEyebrow}>{t("currentSession")}</p>
+              <h3 className={styles.sectionTitle}>{detail?.title ?? runtime?.sessionTitle ?? t("loadingSession")}</h3>
+            </div>
             <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${sessionStateValue}`]}`}>
               {sessionStateLabel}
             </span>
           </div>
-          <h3 className={styles.sectionTitle}>{detail?.title ?? runtime?.sessionTitle ?? t("loadingSession")}</h3>
-          <p className={styles.contextLine}>{sessionStateLine}</p>
-          <div className={styles.taskSummaryBlock}>
-            <span className={styles.taskSummaryLabel}>{t("fileContext")}</span>
-            <p className={styles.taskSummaryValue} title={detail?.defaultFileContext ?? "workspace"}>
-              {detail?.defaultFileContext ?? runtime?.defaultRoute ?? "workspace"}
-            </p>
-          </div>
-          <div className={styles.taskSummaryBlock}>
-            <span className={styles.taskSummaryLabel}>{t("currentTask")}</span>
-            <p className={styles.taskSummaryValue} title={currentTaskSummary}>
-              {currentTaskSummary}
-            </p>
-          </div>
+          <p className={styles.contextLineCompact}>{sessionStateLine}</p>
+          {sessionCompactRows.length > 0 ? (
+            <div className={styles.inlineMetaList}>
+              {sessionCompactRows.map((row) => (
+                <span key={row.label} className={styles.inlineMetaPill} title={row.title ?? row.value}>
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                </span>
+              ))}
+            </div>
+          ) : null}
         </section>
 
         <section className={styles.leftBlock}>
           <div className={styles.sectionHeader}>
-            <p className={styles.blockEyebrow}>{t("mentalState")}</p>
+            <div className={styles.sectionIdentity}>
+              <p className={styles.blockEyebrow}>{t("mentalState")}</p>
+              <p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>
+            </div>
             <span className={`${styles.mentalStateBadge} ${styles[`mentalStateBadge_${mentalCognitiveStateValue}`]}`}>
               {mentalStateLabel}
             </span>
           </div>
-          <p className={styles.contextLine}>{mentalSummary}</p>
-          <div className={styles.taskSummaryBlock}>
-            <span className={styles.taskSummaryLabel}>{t("mentalWhisper")}</span>
-            <p className={styles.taskSummaryValue}>{mentalWhisper}</p>
-          </div>
-          <div className={styles.compactStatGrid}>
-            <div className={styles.compactStat}>
-              <span>{t("state")}</span>
-              <strong>{mentalCognitiveStateLabel}</strong>
+          <p className={styles.contextLineCompact}>{mentalSummary}</p>
+          <p className={styles.oneLineValue} title={mentalWhisper}>
+            <span>{t("mentalWhisper")}</span>
+            {mentalWhisper}
+          </p>
+          <details className={styles.compactDetails}>
+            <summary>
+              <ChevronRight size={14} />
+              <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
+              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
+            </summary>
+            <div className={styles.inlineStatGrid}>
+              <div className={styles.inlineStat}>
+                <span>{t("state")}</span>
+                <strong>{mentalCognitiveStateLabel}</strong>
+              </div>
+              <div className={styles.inlineStat}>
+                <span>{t("mentalConfidence")}</span>
+                <strong>{mentalConfidence}</strong>
+              </div>
+              <div className={styles.inlineStat}>
+                <span>{t("mentalSource")}</span>
+                <strong>{mentalSourceLabel}</strong>
+              </div>
+              <div className={styles.inlineStat}>
+                <span>{t("mentalLastUpdated")}</span>
+                <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
+              </div>
             </div>
-            <div className={styles.compactStat}>
-              <span>{t("mentalConfidence")}</span>
-              <strong>{mentalConfidence}</strong>
-            </div>
-            <div className={styles.compactStat}>
-              <span>{t("mentalSource")}</span>
-              <strong>{mentalSourceLabel}</strong>
-            </div>
-            <div className={styles.compactStat}>
-              <span>{t("mentalLastUpdated")}</span>
-              <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-            </div>
-          </div>
+          </details>
         </section>
 
         <section className={styles.leftBlock}>
           <div className={styles.sectionHeader}>
-            <p className={styles.blockEyebrow}>{t("petSpace")}</p>
+            <div className={styles.sectionIdentity}>
+              <p className={styles.blockEyebrow}>{t("petSpace")}</p>
+              <h3 className={styles.sectionTitle}>{pet?.name ?? t("loadingPetState")}</h3>
+            </div>
             <span className={styles.metricValue}>{t("level")} {pet?.level ?? 0}</span>
           </div>
-          <h3 className={styles.sectionTitle}>{pet?.name ?? t("loadingPetState")}</h3>
-          <p className={styles.contextLine}>{petCompanionLine}</p>
-          <div className={styles.taskSummaryBlock}>
-            <span className={styles.taskSummaryLabel}>{t("preset")}</span>
-            <p className={styles.taskSummaryValue}>{petPresetLabel}</p>
-          </div>
-          <div className={styles.taskSummaryBlock}>
-            <span className={styles.taskSummaryLabel}>{t("petBoundary")}</span>
-            <p className={styles.taskSummaryValue}>{t("petBoundaryLine")}</p>
-          </div>
-          <div className={styles.compactStatGrid}>
-            <div className={styles.compactStat}>
-              <span>{t("tokens")}</span>
-              <strong>{numberFormatter.format(pet?.totalTokens ?? 0)}</strong>
+          <p className={styles.contextLineCompact}>{petCompactLine}</p>
+          <details className={styles.compactDetails}>
+            <summary>
+              <ChevronRight size={14} />
+              <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
+              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
+            </summary>
+            <div className={styles.inlineMetaList}>
+              <span className={styles.inlineMetaPill}>
+                <span>{t("preset")}</span>
+                <strong>{petPresetLabel}</strong>
+              </span>
+              <span className={styles.inlineMetaPill}>
+                <span>{t("dailyTokens")}</span>
+                <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
+              </span>
             </div>
-            <div className={styles.compactStat}>
-              <span>{t("dailyTokens")}</span>
-              <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
-            </div>
-            <div className={styles.compactStat}>
-              <span>{t("heart")}</span>
-              <strong>{pet?.heartActive ? t("heartActive") : t("heartIdle")}</strong>
-            </div>
-            <div className={styles.compactStat}>
-              <span>{t("dream")}</span>
-              <strong>{pet?.inDream ? t("dreamSleeping") : t("dreamAwake")}</strong>
-            </div>
-          </div>
-          <div className={styles.vitalStack}>
-            {petVitals.map((vital) => (
-              <div key={vital.key} className={styles.vitalItem}>
-                <div className={styles.vitalLabelRow}>
-                  <span>{vital.label}</span>
-                  <strong>{vital.value}</strong>
+            <p className={styles.detailNote}>
+              <span>{t("petBoundary")}</span>
+              {t("petBoundaryLine")}
+            </p>
+            <div className={styles.vitalStackCompact}>
+              {petVitals.map((vital) => (
+                <div key={vital.key} className={styles.vitalItemCompact}>
+                  <div className={styles.vitalLabelRow}>
+                    <span>{vital.label}</span>
+                    <strong>{vital.value}</strong>
+                  </div>
+                  <div className={styles.progressTrack}>
+                    <div className={styles.progressFillCool} style={{ width: `${vital.value}%` }} />
+                  </div>
                 </div>
-                <div className={styles.progressTrack}>
-                  <div className={styles.progressFillCool} style={{ width: `${vital.value}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </details>
         </section>
 
         <section className={styles.leftBlock}>
