@@ -37,7 +37,7 @@ def normalize_run_kind(kind: str) -> str:
 
 def normalize_run_id(run_id: str) -> str:
     normalized = str(run_id or "").strip()
-    if not normalized or "/" in normalized or "\\" in normalized or normalized in {".", ".."}:
+    if not normalized or ":" in normalized or "/" in normalized or "\\" in normalized or normalized in {".", ".."}:
         raise ValueError("Invalid work run id.")
     return normalized
 
@@ -220,10 +220,39 @@ class WorkRunStore:
         return payload
 
     def persist_snapshot(self, run_kind: str, snapshot: dict[str, Any], *, active_run_id: str = "") -> dict[str, Any]:
+        raw_run_kind = str(run_kind or "").strip()
+        raw_run_id = str(snapshot.get("runId") or "")
+        raw_status = str(snapshot.get("status") or "").strip()
+        if not raw_run_id.strip():
+            _record_work_run_event(
+                "state",
+                "work_run.snapshot.rejected",
+                run_kind=raw_run_kind,
+                run_id="",
+                status=raw_status,
+                fields={"reason": "missing_run_id"},
+                message="Work run snapshot rejected: missing runId.",
+                outcome="rejected",
+                level="warning",
+                lifecycle=True,
+            )
+            raise ValueError("Work run snapshot is missing runId.")
         try:
-            run_id = normalize_run_id(str(snapshot.get("runId") or ""))
+            run_id = normalize_run_id(raw_run_id)
         except ValueError as exc:
-            raise ValueError("Work run snapshot is missing runId.") from exc
+            _record_work_run_event(
+                "state",
+                "work_run.snapshot.rejected",
+                run_kind=raw_run_kind,
+                run_id=raw_run_id.strip(),
+                status=raw_status,
+                fields={"reason": "invalid_run_id"},
+                message="Work run snapshot rejected: invalid runId.",
+                outcome="rejected",
+                level="warning",
+                lifecycle=True,
+            )
+            raise ValueError("Invalid work run id.") from exc
         payload = json.loads(json.dumps(snapshot, ensure_ascii=False))
         previous_payload = self.load_snapshot(run_kind, run_id)
         previous_signature = (
