@@ -2429,10 +2429,27 @@ function Write-ManagedSessionClosureRecord {
     }
 
     if ($script:currentRuntimeSceneId) {
+        $existingManifest = Get-RuntimeSceneManifest
         $finalState = if ($Success) {
             Get-RuntimeSceneFinalState -Reason $Reason
         } else {
             @{ status = "failed"; result = "shutdown_failed" }
+        }
+        $manifestReason = $Reason
+        $manifestResult = $finalState.result
+        $existingStatus = ""
+        if ($existingManifest -is [System.Collections.IDictionary]) {
+            $existingStatus = [string]$existingManifest["status"]
+        }
+        if ($Success -and $finalState.status -eq "stopped" -and $existingStatus -eq "stopped") {
+            $existingStopReason = [string]$existingManifest["stop_reason"]
+            $existingResult = [string]$existingManifest["result"]
+            if ($existingStopReason) {
+                $manifestReason = $existingStopReason
+            }
+            if ($existingResult) {
+                $manifestResult = $existingResult
+            }
         }
         $manifestRuntimeManager = if ($Success -and $finalState.status -eq "stopped") {
             @{
@@ -2451,8 +2468,8 @@ function Write-ManagedSessionClosureRecord {
         }
         Update-RuntimeSceneManifest @{
             status = $finalState.status
-            result = $finalState.result
-            stop_reason = $Reason
+            result = $manifestResult
+            stop_reason = $manifestReason
             ended_at = (Get-Date).ToUniversalTime().ToString("o")
             backend = @{
                 health_status = if ($Closure.BackendStopped) { "stopped" } else { "failed_to_stop" }

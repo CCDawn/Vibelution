@@ -493,6 +493,7 @@ if ($null -eq $functionAst) {
 $script:currentRuntimeSceneId = "scene-1"
 $launcherControlLogPath = "control.log"
 $script:manifestUpdates = @()
+$script:manifestState = @{}
 $script:controlFields = @()
 function Get-RuntimeSceneFinalState {
     param([string]$Reason)
@@ -504,9 +505,15 @@ function Get-RuntimeSceneFinalState {
 function Get-RuntimeSceneRelativePaths {
     return [pscustomobject]@{ LauncherControl = "raw/launcher-control.log" }
 }
+function Get-RuntimeSceneManifest {
+    return $script:manifestState
+}
 function Update-RuntimeSceneManifest {
     param([hashtable]$Changes)
     $script:manifestUpdates += ,$Changes
+    foreach ($key in $Changes.Keys) {
+        $script:manifestState[$key] = $Changes[$key]
+    }
 }
 function Write-LauncherControlLog {
     param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
@@ -528,14 +535,21 @@ $closingSnapshot = [pscustomobject]@{
 }
 
 Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "runtime manager stop" -Source "launcher_stop" -Success $true
+Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "launcher_start" -Source "desktop_monitor" -Success $true
 Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "desktop monitor shutdown timeout" -Source "desktop_monitor" -Success $false
 Write-ManagedSessionClosureRecord -Closure $closingSnapshot -Reason "startup failure" -Source "launcher_stop" -Success $true
 
 $successRuntimeManager = $script:manifestUpdates[0].runtime_manager
-$failedRuntimeManager = $script:manifestUpdates[1].runtime_manager
-$startupFailureRuntimeManager = $script:manifestUpdates[2].runtime_manager
+$monitorRuntimeManager = $script:manifestUpdates[1].runtime_manager
+$failedRuntimeManager = $script:manifestUpdates[2].runtime_manager
+$startupFailureRuntimeManager = $script:manifestUpdates[3].runtime_manager
 $payload = @{
     success = $successRuntimeManager
+    monitor = @{
+        result = $script:manifestUpdates[1].result
+        stopReason = $script:manifestUpdates[1].stop_reason
+        runtimeManager = $monitorRuntimeManager
+    }
     failed = $failedRuntimeManager
     startupFailure = $startupFailureRuntimeManager
     controlLogPhase = $script:controlFields[0].phase
@@ -553,6 +567,10 @@ Write-Output $payload
         "observed_state": "closed",
         "phase": "steady",
     }
+    assert payload["monitor"]["result"] == "runtime_manager_stop"
+    assert payload["monitor"]["stopReason"] == "runtime manager stop"
+    assert payload["monitor"]["runtimeManager"]["observed_state"] == "closed"
+    assert payload["monitor"]["runtimeManager"]["phase"] == "steady"
     assert payload["failed"]["observed_state"] == "open"
     assert payload["failed"]["phase"] == "closing"
     assert payload["startupFailure"]["observed_state"] == "open"
