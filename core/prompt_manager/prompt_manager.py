@@ -31,6 +31,7 @@ from core.prompt_manager.section_cache import SystemPromptCache
 from core.prompt_manager.sections import (
     create_default_sections,
     make_memory_section,
+    make_runtime_goal_section,
     make_spec_digest_section,
 )
 from core.prompt_manager.builder import (
@@ -179,6 +180,8 @@ class PromptManager:
 
     _DYNAMIC_FILES = {"IDENTITY.md", "USER.md", "DYNAMIC.md", "COMPRESS_SUMMARY.md"}
     _PROTECTED_FLOOR_SECTIONS = [
+        "COMMON",
+        "RUNTIME_GOAL",
         "SOUL",
         "SPEC_DIGEST",
         "MEMORY",
@@ -186,6 +189,8 @@ class PromptManager:
         "LANGUAGE_AWARENESS",
     ]
     _FALLBACK_DEFAULT_SECTIONS = [
+        "COMMON",
+        "RUNTIME_GOAL",
         "SOUL",
         "SPEC_DIGEST",
         "GIT_MEMORY",
@@ -196,7 +201,9 @@ class PromptManager:
         "ENV_INFO",
     ]
     _PREFERRED_SECTION_ORDER = [
+        "COMMON",
         "SOUL",
+        "RUNTIME_GOAL",
         "TASK_CHECKLIST",
         "CODEBASE_MAP",
         "GIT_MEMORY",
@@ -294,6 +301,7 @@ class PromptManager:
         for s in sections:
             self._sections[s.name] = s
 
+        self._sections["RUNTIME_GOAL"] = make_runtime_goal_section(self._build_context)
         self._sections["SPEC_DIGEST"] = make_spec_digest_section(self._build_context)
         # MEMORY 章节：compute 引用 self._build_context
         self._sections["MEMORY"] = make_memory_section(self._build_context)
@@ -792,6 +800,7 @@ class PromptManager:
             return
 
         known = [c for c in components if c in self._sections]
+        known = self._filter_components_for_runtime_goal(known)
         if known:
             self._active_sections_override = known
             from core.logging import debug_logger
@@ -801,6 +810,30 @@ class PromptManager:
             debug_logger.warning(
                 f"[PromptManager] 未知章节: {components}，保持当前不变"
             )
+
+    def set_runtime_goal_packet(self, packet: Any) -> None:
+        """设置统一 agent 本轮目标包，供 RUNTIME_GOAL 动态章节渲染。"""
+
+        self._build_context.runtime_goal_packet = packet
+        self._section_cache.invalidate("RUNTIME_GOAL")
+
+    def get_runtime_goal_packet(self) -> Any:
+        return self._build_context.runtime_goal_packet
+
+    def _filter_components_for_runtime_goal(self, components: List[str]) -> List[str]:
+        packet = self._build_context.runtime_goal_packet
+        if packet is None:
+            return components
+        allowed_fn = getattr(packet, "allowed_components", None)
+        if not callable(allowed_fn):
+            return components
+        allowed = set(allowed_fn(self._sections.keys()))
+        protected = set(self._PROTECTED_FLOOR_SECTIONS)
+        return [
+            component
+            for component in components
+            if component in allowed or component in protected
+        ]
 
     # ------------------------------------------------------------------------
     # 状态记忆

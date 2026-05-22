@@ -29,6 +29,7 @@ from core.prompt_manager import (
     build_simple_system_prompt,
     to_string,
 )
+from core.orchestration.runtime_goal import RuntimeGoalPacket
 
 
 class TestSystemPromptSection:
@@ -172,6 +173,8 @@ class TestPromptManager:
         pm = PromptManager()
         sections = pm.list_sections()
         names = [s["name"] for s in sections]
+        assert "COMMON" in names
+        assert "RUNTIME_GOAL" in names
         assert "SOUL" in names
         assert "SPEC" in names
         assert "SPEC_DIGEST" in names
@@ -214,6 +217,8 @@ class TestBuildAPI:
         result = to_string(sp)
         assert isinstance(result, str)
         assert len(result) > 0
+        assert "## 当前运行目标包" not in result
+        assert "# Vibelution 通用 Agent 基座" in result
         assert "## SPEC 运行时摘要" in result
         assert "# SPEC 开发流程规范" in result
         assert "## 语言状态" in result
@@ -366,11 +371,65 @@ class TestBuildAPI:
         pm = PromptManager()
         sp = pm.build(include=["SOUL"])
         result = to_string(sp)
+        assert "# Vibelution 通用 Agent 基座" in result
         assert "## 语言状态" in result
         assert "## 你的记忆与状态" not in result or isinstance(result, str)
         names = [item["name"] for item in pm.get_last_index()]
-        for name in ["SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "LANGUAGE_AWARENESS"]:
+        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "LANGUAGE_AWARENESS"]:
             assert name in names
+
+    def test_runtime_goal_packet_renders_unified_agent_context(self):
+        pm = PromptManager()
+        packet = RuntimeGoalPacket(
+            goal="修复对话区提示词拼接",
+            source="对话入口",
+            objective_type="user_request",
+            allow_auto_continue=False,
+            allow_file_writes=True,
+            allow_git_commit=True,
+            allow_evolution_transaction=False,
+            allow_subagents=True,
+            completion_standard="完成当前请求并保留会话连续性。",
+            forbidden_actions=("不要切换成另一个 agent。",),
+        )
+
+        pm.set_runtime_goal_packet(packet)
+        sp = pm.build(include=["SOUL"])
+        result = to_string(sp)
+        names = [item["name"] for item in pm.get_last_index()]
+
+        assert "## 当前运行目标包" in result
+        assert "统一主体: 当前运行者始终是同一个 Vibelution agent" in result
+        assert "目标来源: 对话入口" in result
+        assert "目标类型: user_request" in result
+        assert "当前目标: 修复对话区提示词拼接" in result
+        assert "COMMON" in names
+        assert "RUNTIME_GOAL" in names
+
+    def test_runtime_goal_packet_filters_disallowed_component_requests(self):
+        pm = PromptManager()
+        packet = RuntimeGoalPacket(
+            goal="只解释当前日志",
+            source="只读诊断入口",
+            objective_type="readonly_diagnosis",
+            allow_auto_continue=False,
+            allow_file_writes=False,
+            allow_git_commit=False,
+            allow_evolution_transaction=False,
+            allow_subagents=False,
+            completion_standard="只返回诊断结论。",
+        )
+
+        pm.set_runtime_goal_packet(packet)
+        pm.select_components(["CODEBASE_MAP", "GIT_RULES", "SOUL"])
+        sp = pm.build()
+        names = [item["name"] for item in pm.get_last_index()]
+        result = to_string(sp)
+
+        assert "SOUL" in names
+        assert "CODEBASE_MAP" not in names
+        assert "GIT_RULES" not in names
+        assert "## 当前运行目标包" in result
 
     def test_build_subagent_prompt_is_thin_and_structured(self):
         pm = PromptManager()
@@ -430,9 +489,10 @@ class TestBuildAPI:
         pm.select_components(["SOUL"])
         sp = pm.build()
         result = to_string(sp)
+        assert "# Vibelution 通用 Agent 基座" in result
         assert "## 语言状态" in result
         names = [item["name"] for item in pm.get_last_index()]
-        for name in ["SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "LANGUAGE_AWARENESS"]:
+        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "LANGUAGE_AWARENESS"]:
             assert name in names
 
     def test_build_empty_include(self):
@@ -881,7 +941,8 @@ class TestConfigDrivenSections:
             section_configs=[],
         )
         names = {s.name for s in sections}
-        # 没有静态章节
+        # 没有 config 驱动的静态章节；COMMON 是代码内置的统一基座。
+        assert "COMMON" in names
         assert "SOUL" not in names
         assert "SPEC" not in names
         # 动态章节存在
@@ -971,6 +1032,8 @@ class TestFallbackDefaults:
             fallback = pm._load_default_sections_from_config()
 
         assert fallback == [
+            "COMMON",
+            "RUNTIME_GOAL",
             "SOUL",
             "SPEC_DIGEST",
             "GIT_MEMORY",
