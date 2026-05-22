@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildVisiblePanelRows, isLowValuePanelText } from "./chatCompactPanel";
+import { buildVisiblePanelRows, getPetAvatarSymbol, isLowValuePanelText } from "./chatCompactPanel";
 
 describe("chatCompactPanel", () => {
   it("hides empty and workspace-only rows", () => {
@@ -20,5 +20,12 @@ describe("chatCompactPanel", () => {
     );
 
     expect(rows).toEqual([{ label: "当前任务", value: "审查最新日志", title: undefined }]);
+  });
+
+  it("derives compact pet avatar symbols from preset or pet name", () => {
+    expect(getPetAvatarSymbol("cat", "Mika")).toBe("CAT");
+    expect(getPetAvatarSymbol(" PENGUIN ", "Mika")).toBe("PNG");
+    expect(getPetAvatarSymbol("custom", "小鱼")).toBe("小鱼");
+    expect(getPetAvatarSymbol(undefined, "")).toBe("PET");
   });
 });

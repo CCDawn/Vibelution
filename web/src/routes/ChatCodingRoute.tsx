@@ -36,7 +36,7 @@ import {
   formatContextUsage,
   formatRelativeTime,
 } from "./chatShellFormat";
-import { buildVisiblePanelRows } from "./chatCompactPanel";
+import { buildVisiblePanelRows, getPetAvatarSymbol } from "./chatCompactPanel";
 import {
   clearPendingSelfEvolutionHandoff,
   loadPendingSelfEvolutionHandoff,
@@ -717,6 +717,7 @@ export function ChatCodingRoute() {
             ? t("petCompanionLowEnergy")
             : t("petCompanionStable");
   const petPresetLabel = petAvatarPresetLabel(t, pet?.avatarPreset);
+  const petAvatarSymbol = getPetAvatarSymbol(pet?.avatarPreset, pet?.name);
   const contextStatusLine = runtimeQuery.isError
     ? describeError(runtimeQuery.error, t("loadFailed"))
     : runtime
@@ -1147,6 +1148,25 @@ export function ChatCodingRoute() {
               ? `${numberFormatter.format(runtime.contextUsage.used)} / ${numberFormatter.format(runtime.contextUsage.limit)}`
               : t("loadingContext")}
           </p>
+        </section>
+
+        <section className={styles.petShowcase} aria-label={t("petSpace")}>
+          <div className={styles.petShowcaseStage} aria-hidden="true">
+            <div className={styles.petShowcaseAura} />
+            <div className={styles.petShowcaseAvatar}>
+              <span>{petAvatarSymbol}</span>
+            </div>
+          </div>
+          <div className={styles.petShowcaseInfo}>
+            <div className={styles.petShowcaseTop}>
+              <p className={styles.blockEyebrow}>{t("petSpace")}</p>
+              <span>{t("level")} {pet?.level ?? 0}</span>
+            </div>
+            <h3 className={styles.petShowcaseName}>{pet?.name ?? t("loadingPetState")}</h3>
+            <p className={styles.petShowcaseLine}>
+              {petPresetLabel} · {petCompanionLine}
+            </p>
+          </div>
         </section>
       </aside>
 

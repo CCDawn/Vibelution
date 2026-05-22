@@ -19,8 +19,8 @@
 }
 
 .leftRail {
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
   padding: 12px;
   background: var(--surface-panel-muted);
@@ -416,6 +416,108 @@
 
 .progressFillCool {
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent-cool) 70%, transparent), rgba(143, 208, 181, 0.94));
+}
+
+.petShowcase {
+  position: relative;
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 98px;
+  margin-top: auto;
+  padding: 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 20%, var(--border-soft));
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--accent-warm) 20%, transparent), transparent 42%),
+    linear-gradient(135deg, color-mix(in srgb, var(--surface-panel-strong) 90%, transparent), var(--surface-panel));
+}
+
+.petShowcaseStage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  overflow: hidden;
+  border: 1px solid rgba(236, 230, 220, 0.08);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+.petShowcaseAura {
+  position: absolute;
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-warm) 36%, transparent), transparent 70%);
+  filter: blur(3px);
+}
+
+.petShowcaseAvatar {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 35% 25%, rgba(255, 255, 255, 0.2), transparent 32%),
+    color-mix(in srgb, var(--accent-warm) 24%, var(--surface-panel-strong));
+  box-shadow: 0 16px 24px rgba(0, 0, 0, 0.28);
+  color: var(--accent-warm-2);
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  letter-spacing: 0.03em;
+}
+
+.petShowcaseAvatar span {
+  transform: translateY(1px);
+}
+
+.petShowcaseInfo {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.petShowcaseTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.petShowcaseTop span {
+  color: var(--accent-warm-2);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.petShowcaseName {
+  margin: 0;
+  color: var(--fg-primary);
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.petShowcaseLine {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .centerPane {
