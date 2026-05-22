@@ -31,6 +31,7 @@ import { queryKeys } from "../api/queryKeys";
 import {
   FileContent,
   FileTreeNode,
+  PetActionResponse,
   PetSummary,
   RuntimeSummary,
   SessionDetail,
@@ -70,6 +71,7 @@ const KEYBOARD_RESIZE_STEP = 24;
 const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 
 type ResizableSide = "left" | "right";
+type PetInteractionAction = "feed" | "talk" | "care";
 
 type DragState = {
   side: ResizableSide;
@@ -268,6 +270,7 @@ export function ChatCodingRoute() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
+  const [petActionFeedback, setPetActionFeedback] = useState("");
   const [mentalModelEnabledForNextTurn, setMentalModelEnabledForNextTurn] = useState<boolean>(
     () => readStoredMentalModelToggle() ?? true,
   );
@@ -507,6 +510,26 @@ export function ChatCodingRoute() {
     },
   });
 
+  const petActionMutation = useMutation({
+    mutationFn: async ({ action }: { action: PetInteractionAction }) =>
+      fetchJson<PetActionResponse>("/api/pet/actions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+      }),
+    onSuccess: (payload) => {
+      setPetActionFeedback(payload.message);
+      queryClient.setQueryData(queryKeys.petSummary(), payload.summary);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.petSummary() });
+    },
+    onError: (error) => {
+      setPetActionFeedback(describeError(error, lang === "zh" ? "宠物互动失败" : "Pet interaction failed"));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.petSummary() });
+    },
+  });
+
   useEffect(() => {
     if (activeSessionId && sessionDetailQuery.data) {
       hydrateSession(activeSessionId, [], "agent");
@@ -734,13 +757,15 @@ export function ChatCodingRoute() {
   const petAvatarSymbol = getPetAvatarSymbol(pet?.avatarPreset, pet?.name);
   const petInteractionLabels = {
     group: lang === "zh" ? "宠物互动" : "Pet interactions",
-    pending: lang === "zh" ? "后续接入" : "Coming later",
+    pending: petActionMutation.isPending
+      ? lang === "zh" ? "处理中" : "Working"
+      : lang === "zh" ? "即时生效" : "Live",
     feed: lang === "zh" ? "喂食" : "Feed",
     talk: lang === "zh" ? "沟通" : "Talk",
     care: lang === "zh" ? "照看" : "Care",
-    feedTitle: lang === "zh" ? "喂食功能待接入" : "Feed action will be connected later",
-    talkTitle: lang === "zh" ? "沟通功能待接入" : "Talk action will be connected later",
-    careTitle: lang === "zh" ? "照看功能待接入" : "Care action will be connected later",
+    feedTitle: lang === "zh" ? "喂食并刷新宠物状态" : "Feed and refresh pet state",
+    talkTitle: lang === "zh" ? "和宠物沟通并刷新状态" : "Talk and refresh pet state",
+    careTitle: lang === "zh" ? "照看宠物并刷新状态" : "Care and refresh pet state",
   };
   const contextStatusLine = runtimeQuery.isError
     ? describeError(runtimeQuery.error, t("loadFailed"))
@@ -933,6 +958,11 @@ export function ChatCodingRoute() {
     stopTurnMutation.mutate({
       sessionId: activeSessionId,
     });
+  }
+
+  function handlePetInteraction(action: PetInteractionAction) {
+    setPetActionFeedback("");
+    petActionMutation.mutate({ action });
   }
 
   function handleCreateSession() {
@@ -1201,15 +1231,33 @@ export function ChatCodingRoute() {
             </p>
           </div>
           <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
-            <button type="button" className={styles.petShowcaseAction} disabled title={petInteractionLabels.feedTitle}>
+            <button
+              type="button"
+              className={styles.petShowcaseAction}
+              onClick={() => handlePetInteraction("feed")}
+              disabled={petActionMutation.isPending}
+              title={petInteractionLabels.feedTitle}
+            >
               <Apple size={14} />
               <span>{petInteractionLabels.feed}</span>
             </button>
-            <button type="button" className={styles.petShowcaseAction} disabled title={petInteractionLabels.talkTitle}>
+            <button
+              type="button"
+              className={styles.petShowcaseAction}
+              onClick={() => handlePetInteraction("talk")}
+              disabled={petActionMutation.isPending}
+              title={petInteractionLabels.talkTitle}
+            >
               <MessageCircleHeart size={14} />
               <span>{petInteractionLabels.talk}</span>
             </button>
-            <button type="button" className={styles.petShowcaseAction} disabled title={petInteractionLabels.careTitle}>
+            <button
+              type="button"
+              className={styles.petShowcaseAction}
+              onClick={() => handlePetInteraction("care")}
+              disabled={petActionMutation.isPending}
+              title={petInteractionLabels.careTitle}
+            >
               <HeartHandshake size={14} />
               <span>{petInteractionLabels.care}</span>
             </button>
@@ -1218,6 +1266,7 @@ export function ChatCodingRoute() {
               <span>{petInteractionLabels.pending}</span>
             </span>
           </div>
+          {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
         </section>
       </aside>
 
