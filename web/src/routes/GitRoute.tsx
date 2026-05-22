@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, CheckSquare, Clock3, FileText, GitBranch, GitCommitHorizontal, RefreshCw, Square } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -15,11 +15,21 @@ import {
 } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { GitDiffView } from "./GitDiffView";
+import {
+  getGitAiDraftBlockReason,
+  getGitCommitBlockReason,
+  getSelectedGitFiles,
+  getStagedFilesOutsideSelection,
+} from "./gitCommitUx";
+import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./GitRoute.module.css";
 
 type GitFilter = "all" | "staged" | "unstaged" | "untracked" | "deleted";
 
 const FILTERS: GitFilter[] = ["all", "staged", "unstaged", "untracked", "deleted"];
+const GIT_CHANGE_PANEL_WIDTH_KEY = "vibelution.git.change-panel-width";
+const GIT_CHANGE_PANEL_BOUNDS = { min: 260, max: 520 };
+const GIT_CHANGE_PANEL_DEFAULT_WIDTH = 340;
 const FILTER_LABEL_KEYS = {
   all: "gitFilterAll",
   staged: "gitFilterStaged",
@@ -80,6 +90,9 @@ export function GitRoute() {
     tone: "neutral",
     text: "",
   });
+  const [changePanelWidth, setChangePanelWidth] = useState(() =>
+    storedPaneWidth(GIT_CHANGE_PANEL_WIDTH_KEY, GIT_CHANGE_PANEL_DEFAULT_WIDTH, GIT_CHANGE_PANEL_BOUNDS),
+  );
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
   const statusQuery = useQuery({
@@ -108,6 +121,11 @@ export function GitRoute() {
   const activeFile = files.find((file) => file.path === activePath) ?? null;
   const selectedSet = useMemo(() => new Set(selectedPaths), [selectedPaths]);
   const selectedCount = selectedPaths.length;
+  const selectedFiles = useMemo(() => getSelectedGitFiles(files, selectedPaths), [files, selectedPaths]);
+  const stagedOutsideSelection = useMemo(
+    () => getStagedFilesOutsideSelection(files, selectedPaths),
+    [files, selectedPaths],
+  );
   const aiProfileOptions = configQuery.data?.profileCards ?? [];
   const configuredProfileId = configuredGitProfileId(configQuery.data);
   const activeAiProfileId = selectedAiProfileId || configuredProfileId || aiProfileOptions[0]?.profileId || "";
@@ -144,6 +162,10 @@ export function GitRoute() {
     const availablePaths = new Set(files.map((file) => file.path));
     setSelectedPaths((current) => current.filter((path) => availablePaths.has(path)));
   }, [files]);
+
+  useEffect(() => {
+    window.localStorage.setItem(GIT_CHANGE_PANEL_WIDTH_KEY, String(changePanelWidth));
+  }, [changePanelWidth]);
 
   const generateMessageMutation = useMutation({
     mutationFn: (payload: { paths: string[]; profileId: string }) =>
@@ -212,8 +234,72 @@ export function GitRoute() {
   const status = statusQuery.data;
   const upstream = status?.upstream;
   const aheadBehind = upstream?.hasUpstream ? `${upstream.ahead} / ${upstream.behind}` : t("gitNoUpstream");
-  const commitDisabled = selectedCount === 0 || !commitMessage.trim() || commitMutation.isPending;
-  const aiDisabled = selectedCount === 0 || generateMessageMutation.isPending;
+  const commitBlockReason = getGitCommitBlockReason(selectedCount, commitMessage, commitMutation.isPending);
+  const aiDraftBlockReason = getGitAiDraftBlockReason(selectedCount, generateMessageMutation.isPending);
+  const commitDisabled = commitBlockReason !== null;
+  const aiDisabled = aiDraftBlockReason !== null;
+  const commitBlockReasonText =
+    commitBlockReason === "no_selection"
+      ? t("gitCommitBlockedNoSelection")
+      : commitBlockReason === "empty_message"
+        ? t("gitCommitBlockedEmptyMessage")
+        : commitBlockReason === "committing"
+          ? t("gitCommitBlockedCommitting")
+          : "";
+  const aiDraftBlockReasonText =
+    aiDraftBlockReason === "no_selection"
+      ? t("gitAiDraftBlockedNoSelection")
+      : aiDraftBlockReason === "generating"
+        ? t("gitAiDraftBlockedGenerating")
+        : "";
+  const selectedFilePreview = selectedFiles.slice(0, 5);
+  const selectedOverflowCount = Math.max(0, selectedFiles.length - selectedFilePreview.length);
+  const selectedCountText =
+    lang === "zh" ? `已选 ${selectedCount} 个文件` : `${selectedCount} selected file${selectedCount === 1 ? "" : "s"}`;
+  const selectedOverflowText =
+    lang === "zh" ? `另有 ${selectedOverflowCount} 个文件` : `${selectedOverflowCount} more file${selectedOverflowCount === 1 ? "" : "s"}`;
+  const workspaceStyle = useMemo(
+    () =>
+      ({
+        "--git-change-panel-width": `${changePanelWidth}px`,
+      }) as CSSProperties,
+    [changePanelWidth],
+  );
+  const resizeChangePanelLabel = lang === "zh" ? "调整变更列表宽度" : "Resize changed files";
+
+  function beginChangePanelResize(startX: number) {
+    const startWidth = changePanelWidth;
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      setChangePanelWidth(clampPaneWidth(startWidth + moveEvent.clientX - startX, GIT_CHANGE_PANEL_BOUNDS));
+    };
+    const handleEnd = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleEnd);
+  }
+
+  function handleChangePanelResizeStart(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    beginChangePanelResize(event.clientX);
+  }
+
+  function handleChangePanelResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const nextWidth = keyboardPaneWidth(changePanelWidth, event.key, GIT_CHANGE_PANEL_BOUNDS);
+    if (nextWidth === null) {
+      return;
+    }
+    event.preventDefault();
+    setChangePanelWidth(nextWidth);
+  }
 
   return (
     <section className={styles.route}>
@@ -252,7 +338,7 @@ export function GitRoute() {
         <p className={styles.notice}>{status.error || t("gitStatusUnavailable")}</p>
       ) : null}
 
-      <div className={styles.workspace}>
+      <div className={styles.workspace} style={workspaceStyle}>
         <aside className={styles.changePanel}>
           <div className={styles.panelHeader}>
             <div>
@@ -282,29 +368,53 @@ export function GitRoute() {
             </button>
           </div>
           <div className={styles.fileList}>
-            {filteredFiles.map((file) => (
+            {filteredFiles.map((file) => {
+              const isActive = file.path === activePath;
+              const isSelected = selectedSet.has(file.path);
+              const fileCardClassName = [
+                isActive ? styles.fileButtonActive : styles.fileButton,
+                isSelected ? styles.fileButtonSelected : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return (
               <article
                 key={`${file.status}-${file.path}`}
-                className={file.path === activePath ? styles.fileButtonActive : styles.fileButton}
+                className={fileCardClassName}
               >
                 <button
                   type="button"
                   className={styles.fileCheckButton}
-                  aria-label={selectedSet.has(file.path) ? t("gitUnselectFile") : t("gitSelectFileForCommit")}
+                  aria-label={isSelected ? t("gitUnselectFile") : t("gitSelectFileForCommit")}
+                  aria-pressed={isSelected}
                   onClick={() => toggleSelectedPath(file.path)}
                 >
-                  {selectedSet.has(file.path) ? <CheckSquare size={16} /> : <Square size={16} />}
+                  {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
                 </button>
                 <span className={styles.fileStatus}>{file.status}</span>
                 <button type="button" className={styles.fileCopyButton} onClick={() => setActivePath(file.path)}>
                   <strong>{fileName(file.path)}</strong>
-                  <span>{displayPath(file.path)}</span>
+                  <span className={styles.filePathText}>{displayPath(file.path)}</span>
+                  <span className={styles.fileBadgeRow}>
+                    {isActive ? <span className={styles.fileBadgeActive}>{t("gitPreviewing")}</span> : null}
+                    {isSelected ? <span className={styles.fileBadgeSelected}>{t("gitSelectedForCommit")}</span> : null}
+                  </span>
                 </button>
               </article>
-            ))}
+              );
+            })}
             {!filteredFiles.length ? <p className={styles.emptyState}>{t("gitNoMatchingChanges")}</p> : null}
           </div>
         </aside>
+
+        <button
+          type="button"
+          className={styles.resizeHandle}
+          aria-label={resizeChangePanelLabel}
+          title={resizeChangePanelLabel}
+          onPointerDown={handleChangePanelResizeStart}
+          onKeyDown={handleChangePanelResizeKeyDown}
+        />
 
         <main className={styles.diffPanel}>
           {activePath ? (
@@ -339,6 +449,35 @@ export function GitRoute() {
               </div>
               <span className={styles.countPill}>{selectedCount}</span>
             </div>
+            <section className={styles.commitScopeBox} aria-label={t("gitCommitScopeTitle")}>
+              <div className={styles.scopeHeader}>
+                <div>
+                  <span>{t("gitCommitScopeTitle")}</span>
+                  <strong>{selectedCountText}</strong>
+                </div>
+                {selectedCount > 0 ? <span className={styles.scopeReady}>{t("gitSelectedForCommit")}</span> : null}
+              </div>
+              {selectedFilePreview.length ? (
+                <div className={styles.scopeList}>
+                  {selectedFilePreview.map((file) => (
+                    <article key={file.path} className={styles.scopeItem}>
+                      <span>{file.status}</span>
+                      <strong>{displayPath(file.path)}</strong>
+                    </article>
+                  ))}
+                  {selectedOverflowCount ? <p className={styles.scopeMore}>{selectedOverflowText}</p> : null}
+                </div>
+              ) : (
+                <p className={styles.scopeEmpty}>{t("gitCommitScopeEmpty")}</p>
+              )}
+              {stagedOutsideSelection.length ? (
+                <div className={styles.scopeWarning}>
+                  <strong>{t("gitStagedOutsideSelectionTitle")}</strong>
+                  <p>{t("gitStagedOutsideSelectionHint")}</p>
+                  <span>{stagedOutsideSelection.slice(0, 3).map((file) => displayPath(file.path)).join(", ")}</span>
+                </div>
+              ) : null}
+            </section>
             <label className={styles.messageField}>
               <span>{t("gitAiAgentLabel")}</span>
               <select
@@ -367,11 +506,23 @@ export function GitRoute() {
               />
             </label>
             <div className={styles.commitActions}>
-              <button type="button" className={styles.secondaryButton} onClick={generateMessage} disabled={aiDisabled}>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={generateMessage}
+                disabled={aiDisabled}
+                title={aiDraftBlockReasonText || undefined}
+              >
                 <Bot size={15} />
                 {generateMessageMutation.isPending ? t("gitAiGenerating") : t("gitAiGenerateMessage")}
               </button>
-              <button type="button" className={styles.primaryButton} onClick={commitSelected} disabled={commitDisabled}>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={commitSelected}
+                disabled={commitDisabled}
+                title={commitBlockReasonText || undefined}
+              >
                 <GitCommitHorizontal size={15} />
                 {commitMutation.isPending ? t("gitCommitting") : t("gitCommitSelected")}
               </button>
@@ -380,7 +531,12 @@ export function GitRoute() {
               <p className={commitNotice.tone === "error" ? styles.commitNoticeError : styles.commitNotice}>
                 {commitNotice.text}
               </p>
+            ) : commitBlockReasonText ? (
+              <p className={styles.commitBlockReason}>{commitBlockReasonText}</p>
             ) : (
+              <p className={styles.commitReady}>{t("gitCommitReady")}</p>
+            )}
+            {commitNotice.text ? null : (
               <p className={styles.commitHint}>{t("gitCommitHint")}</p>
             )}
           </section>
