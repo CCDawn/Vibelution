@@ -126,10 +126,39 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(520px, 1fr) minmax(280px, 340px);
-  gap: 16px;
+  grid-template-columns: var(--git-change-panel-width, 340px) 12px minmax(520px, 1fr) minmax(280px, 340px);
   min-height: 0;
   padding: 18px 24px 24px;
+}
+
+.resizeHandle {
+  position: relative;
+  min-width: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+
+.resizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(236, 230, 220, 0.08);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.resizeHandle:hover::before,
+.resizeHandle:focus-visible::before {
+  background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
 }
 
 .changePanel,
@@ -235,6 +264,17 @@
   background: var(--surface-active-neutral, rgba(35, 36, 33, 0.96));
 }
 
+.fileButtonSelected {
+  border-color: color-mix(in srgb, var(--state-success) 34%, transparent);
+  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-panel-muted, rgba(21, 24, 27, 0.82)));
+}
+
+.fileButtonActive.fileButtonSelected {
+  box-shadow:
+    inset 3px 0 0 var(--accent-warm),
+    inset 0 0 0 1px color-mix(in srgb, var(--state-success) 24%, transparent);
+}
+
 .fileStatus {
   color: var(--accent-warm-2);
   font-family: var(--font-mono);
@@ -280,7 +320,7 @@
   white-space: nowrap;
 }
 
-.fileCopyButton span,
+.filePathText,
 .commitItem p,
 .emptyState,
 .emptyPreview p {
@@ -290,10 +330,38 @@
   line-height: 1.4;
 }
 
-.fileCopyButton span {
+.filePathText {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.fileBadgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 20px;
+}
+
+.fileBadgeActive,
+.fileBadgeSelected {
+  display: inline-flex;
+  align-items: center;
+  min-height: 19px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.fileBadgeActive {
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.fileBadgeSelected {
+  border: 1px solid color-mix(in srgb, var(--state-success) 28%, transparent);
+  color: var(--state-success);
 }
 
 .diffPanel {
@@ -330,6 +398,108 @@
   gap: 12px;
   padding: 0 0 14px;
   border-bottom: 1px solid var(--border-soft);
+}
+
+.commitScopeBox {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+}
+
+.scopeHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.scopeHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.scopeHeader div > span,
+.scopeEmpty,
+.scopeMore,
+.scopeWarning p,
+.scopeWarning span {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.scopeHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeReady {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--state-success) 26%, transparent);
+  border-radius: 999px;
+  color: var(--state-success);
+  white-space: nowrap;
+}
+
+.scopeList {
+  display: grid;
+  gap: 6px;
+}
+
+.scopeItem {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.scopeItem span {
+  color: var(--accent-warm-2);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.scopeItem strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeWarning {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--state-warning, #d6a84f) 34%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-warning, #d6a84f) 10%, transparent);
+}
+
+.scopeWarning strong {
+  color: var(--state-warning, #d6a84f);
+  font-size: 0.78rem;
+}
+
+.scopeWarning span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .messageField {
@@ -394,7 +564,9 @@
 
 .commitHint,
 .commitNotice,
-.commitNoticeError {
+.commitNoticeError,
+.commitBlockReason,
+.commitReady {
   margin: 0;
   font-size: 0.78rem;
   line-height: 1.45;
@@ -410,6 +582,14 @@
 
 .commitNoticeError {
   color: var(--state-error);
+}
+
+.commitBlockReason {
+  color: var(--accent-warm-2);
+}
+
+.commitReady {
+  color: var(--state-success);
 }
 
 .commitHeader {
@@ -435,11 +615,28 @@
 
 @media (max-width: 1200px) {
   .workspace {
-    grid-template-columns: minmax(280px, 340px) minmax(520px, 1fr);
+    grid-template-columns: var(--git-change-panel-width, 340px) 12px minmax(520px, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(260px, 42vh);
+    row-gap: 14px;
   }
 
   .commitPanel {
-    display: none;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    grid-template-columns: minmax(320px, 0.9fr) minmax(280px, 1.1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .manualCommitPanel {
+    grid-row: 1 / span 2;
+    padding: 0 14px 0 0;
+    border-right: 1px solid var(--border-soft);
+    border-bottom: 0;
+  }
+
+  .commitList {
+    min-height: 0;
   }
 }
 
@@ -453,7 +650,27 @@
     grid-template-columns: 1fr;
   }
 
+  .resizeHandle {
+    display: none;
+  }
+
   .workspace {
+    grid-template-rows: none;
+    gap: 14px;
     min-height: 720px;
+  }
+
+  .commitPanel {
+    grid-column: auto;
+    grid-row: auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto minmax(180px, 1fr);
+  }
+
+  .manualCommitPanel {
+    grid-row: auto;
+    padding: 0 0 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-soft);
   }
 }
