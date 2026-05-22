@@ -112,6 +112,45 @@ def test_run_gym_collection_episode_records_trace_index(tmp_path: Path):
         assert trace_payload["case_id"] == item["case_id"]
 
 
+def test_run_gym_collection_episode_keeps_unsafe_ids_inside_gym_subdirs(tmp_path: Path):
+    class UnsafePathAdapter(RunnerFakeAdapter):
+        def propose_improvement(self, exercise, diagnosis: object) -> CandidateImprovement:
+            return CandidateImprovement(
+                improvement_id=r"..\escape_improvement",
+                improvement_type="policy_patch",
+                target={"exercise_id": exercise.exercise_id},
+                expected_effect="candidate succeeds",
+            )
+
+    result = run_gym_collection_episode(
+        collection_id="foundation_local_stability",
+        project_root=tmp_path,
+        adapter=UnsafePathAdapter(),
+        episode_id=r"..\escape_episode",
+    )
+
+    decisions_dir = (tmp_path / "workspace" / "gym" / "decisions").resolve()
+    proposals_dir = (tmp_path / "workspace" / "gym" / "promotion_proposals").resolve()
+    traces_dir = (tmp_path / "workspace" / "gym" / "traces").resolve()
+    decision_path = Path(result.decision_path).resolve()
+    proposal_path = Path(result.promotion_proposal_path or "").resolve()
+    trace_index_path = Path(result.trace_index_path).resolve()
+
+    assert decision_path.exists()
+    assert proposal_path.exists()
+    assert trace_index_path.exists()
+    assert decision_path.is_relative_to(decisions_dir)
+    assert proposal_path.is_relative_to(proposals_dir)
+    assert trace_index_path.is_relative_to(traces_dir)
+
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
+    assert decision["episode_id"] == r"..\escape_episode"
+    assert decision["candidate_improvement"]["improvement_id"] == r"..\escape_improvement"
+    assert proposal["episode_id"] == r"..\escape_episode"
+    assert proposal["candidate_improvement_id"] == r"..\escape_improvement"
+
+
 def test_run_gym_collection_episode_records_mixed_gate_tiers(tmp_path: Path):
     result = run_gym_collection_episode(
         collection_id="mixed_readiness_gate",
