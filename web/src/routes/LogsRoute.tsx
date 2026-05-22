@@ -38,6 +38,7 @@ import {
 import { FilePreview } from "../components/preview/FilePreview";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { type LogSeverityFilter } from "../logs/logSeverity";
+import { buildLogPackageIndex, logPackageFilePaths, type LogPackageIndexItem } from "./logPackageIndex";
 import { RuntimeScenesPane } from "./RuntimeScenesPane";
 import styles from "./LogsRoute.module.css";
 
@@ -94,64 +95,6 @@ function normalizeRightRailWidth(layoutWidth: number, rightRailWidth: number) {
   return Math.round(clamp(rightRailWidth, MIN_LOG_RIGHT_RAIL_WIDTH, getMaxRightRailWidth(layoutWidth)));
 }
 
-function filterTree(nodes: FileTreeNode[], query: string): FileTreeNode[] {
-  const term = query.trim().toLowerCase();
-  if (!term) {
-    return nodes;
-  }
-  return nodes.flatMap((node) => {
-    const matches = node.name.toLowerCase().includes(term) || node.path.toLowerCase().includes(term);
-    if (node.type === "directory") {
-      const filteredChildren = filterTree(node.children ?? [], query);
-      if (matches) {
-        return [{ ...node, children: node.children ?? [] }];
-      }
-      if (filteredChildren.length > 0) {
-        return [{ ...node, children: filteredChildren }];
-      }
-      return [];
-    }
-    return matches ? [node] : [];
-  });
-}
-
-function findFirstFile(nodes: FileTreeNode[]): string | null {
-  for (const node of nodes) {
-    if (node.type === "file") {
-      return node.path;
-    }
-    const childMatch = findFirstFile(node.children ?? []);
-    if (childMatch) {
-      return childMatch;
-    }
-  }
-  return null;
-}
-
-function treeContainsPath(nodes: FileTreeNode[], targetPath: string): boolean {
-  return nodes.some((node) => {
-    if (node.path === targetPath) {
-      return true;
-    }
-    if (node.type === "directory") {
-      return treeContainsPath(node.children ?? [], targetPath);
-    }
-    return false;
-  });
-}
-
-function collectFilePaths(nodes: FileTreeNode[]): string[] {
-  const paths: string[] = [];
-  for (const node of nodes) {
-    if (node.type === "file") {
-      paths.push(node.path);
-      continue;
-    }
-    paths.push(...collectFilePaths(node.children ?? []));
-  }
-  return paths;
-}
-
 function uniquePaths(items: string[]): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
@@ -181,74 +124,6 @@ function removePathsFromTree(nodes: FileTreeNode[], deletedPaths: Set<string>): 
     });
   }
   return nextNodes;
-}
-
-function renderTree(
-  nodes: FileTreeNode[],
-  activeFilePath: string | null,
-  selectedPaths: Set<string>,
-  onOpenFile: (path: string) => void,
-  onToggleSelection: (path: string) => void,
-  labels: {
-    selectFile: string;
-    deselectFile: string;
-  },
-) {
-  return nodes.map((node) => {
-    if (node.type === "directory") {
-      return (
-        <details key={node.path} className={styles.treeDir} open>
-          <summary>{node.name}</summary>
-          <div className={styles.treeChildren}>
-            {renderTree(
-              node.children ?? [],
-              activeFilePath,
-              selectedPaths,
-              onOpenFile,
-              onToggleSelection,
-              labels,
-            )}
-          </div>
-        </details>
-      );
-    }
-
-    const isActive = activeFilePath === node.path;
-    const isSelected = selectedPaths.has(node.path);
-    const fileName = node.path.split("/").at(-1) ?? node.path;
-    return (
-      <div
-        key={node.path}
-        className={
-          isActive ? `${styles.treeFileRow} ${styles.treeFileRowActive}` : styles.treeFileRow
-        }
-      >
-        <button
-          type="button"
-          className={
-            isSelected
-              ? `${styles.treeSelectButton} ${styles.treeSelectButtonActive}`
-              : styles.treeSelectButton
-          }
-          onClick={() => onToggleSelection(node.path)}
-          title={isSelected ? labels.deselectFile : labels.selectFile}
-          aria-label={`${isSelected ? labels.deselectFile : labels.selectFile} ${fileName}`}
-        >
-          {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-        </button>
-        <button
-          type="button"
-          className={
-            isActive ? `${styles.treeFileButton} ${styles.treeFileButtonActive}` : styles.treeFileButton
-          }
-          onClick={() => onOpenFile(node.path)}
-        >
-          <span className={styles.treeFileName}>{node.name}</span>
-          <span className={styles.treeFilePath}>{node.path}</span>
-        </button>
-      </div>
-    );
-  });
 }
 
 function describeError(error: unknown, fallback: string) {
@@ -406,6 +281,7 @@ export function LogsRoute() {
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [activeRootId, setActiveRootId] = useState<string>("");
   const [openPaths, setOpenPaths] = useState<Record<string, string>>({});
+  const [activePackagesByRoot, setActivePackagesByRoot] = useState<Record<string, string>>({});
   const [selectedLogPathsByRoot, setSelectedLogPathsByRoot] = useState<Record<string, string[]>>({});
   const [fileFilter, setFileFilter] = useState("");
   const [severityFilter, setSeverityFilter] = useState<LogSeverityFilter>("all");
@@ -500,13 +376,26 @@ export function LogsRoute() {
   const activeFilePath = activeRoot ? openPaths[activeRoot.id] ?? "" : "";
   const selectedLogPaths = activeRoot ? selectedLogPathsByRoot[activeRoot.id] ?? [] : [];
   const selectedLogPathSet = useMemo(() => new Set(selectedLogPaths), [selectedLogPaths]);
+  const logPackages = useMemo(
+    () => buildLogPackageIndex(treeQuery.data?.nodes ?? [], fileFilter),
+    [fileFilter, treeQuery.data?.nodes],
+  );
+  const visibleFilePaths = useMemo(() => uniquePaths(logPackageFilePaths(logPackages)), [logPackages]);
+  const activePackageId = activeRoot ? activePackagesByRoot[activeRoot.id] ?? "" : "";
+  const activePackage = useMemo(() => {
+    if (!activePackageId) {
+      return logPackages[0] ?? null;
+    }
+    return logPackages.find((item) => item.id === activePackageId) ?? logPackages[0] ?? null;
+  }, [activePackageId, logPackages]);
 
   useEffect(() => {
     if (isRuntimeScenesRoot || !activeRoot || !treeQuery.data) {
       return;
     }
 
-    const allFilePaths = collectFilePaths(treeQuery.data.nodes);
+    const allPackages = buildLogPackageIndex(treeQuery.data.nodes);
+    const allFilePaths = logPackageFilePaths(allPackages);
     const availablePaths = new Set(allFilePaths);
 
     setSelectedLogPathsByRoot((current) => {
@@ -521,12 +410,34 @@ export function LogsRoute() {
       };
     });
 
+    const currentPackageId = activePackagesByRoot[activeRoot.id] ?? "";
+    const hasCurrentPackage = currentPackageId
+      ? allPackages.some((item) => item.id === currentPackageId)
+      : false;
+    if (!hasCurrentPackage) {
+      setActivePackagesByRoot((current) => {
+        const firstPackageId = allPackages[0]?.id ?? "";
+        if ((current[activeRoot.id] ?? "") === firstPackageId) {
+          return current;
+        }
+        return {
+          ...current,
+          [activeRoot.id]: firstPackageId,
+        };
+      });
+    }
+
+    const selectedPackage =
+      allPackages.find((item) => item.id === (hasCurrentPackage ? currentPackageId : allPackages[0]?.id)) ??
+      allPackages[0] ??
+      null;
+    const packageFiles = selectedPackage?.files ?? [];
     const currentPath = openPaths[activeRoot.id] ?? "";
-    const hasCurrentPath = currentPath ? treeContainsPath(treeQuery.data.nodes, currentPath) : false;
+    const hasCurrentPath = currentPath ? packageFiles.some((file) => file.path === currentPath) : false;
     if (hasCurrentPath) {
       return;
     }
-    const firstFile = findFirstFile(treeQuery.data.nodes) ?? "";
+    const firstFile = packageFiles[0]?.path ?? "";
     setOpenPaths((current) => {
       if ((current[activeRoot.id] ?? "") === firstFile) {
         return current;
@@ -536,7 +447,41 @@ export function LogsRoute() {
         [activeRoot.id]: firstFile,
       };
     });
-  }, [activeRoot, isRuntimeScenesRoot, openPaths, treeQuery.data]);
+  }, [activePackagesByRoot, activeRoot, isRuntimeScenesRoot, openPaths, treeQuery.data]);
+
+  useEffect(() => {
+    if (isRuntimeScenesRoot || !activeRoot || !treeQuery.data) {
+      return;
+    }
+
+    const nextPackage = activePackage ?? null;
+    const nextPackageId = nextPackage?.id ?? "";
+    setActivePackagesByRoot((current) => {
+      if ((current[activeRoot.id] ?? "") === nextPackageId) {
+        return current;
+      }
+      return {
+        ...current,
+        [activeRoot.id]: nextPackageId,
+      };
+    });
+
+    const currentPath = openPaths[activeRoot.id] ?? "";
+    const hasCurrentPath = nextPackage?.files.some((file) => file.path === currentPath) ?? false;
+    if (hasCurrentPath) {
+      return;
+    }
+    const nextPath = nextPackage?.files[0]?.path ?? "";
+    setOpenPaths((current) => {
+      if ((current[activeRoot.id] ?? "") === nextPath) {
+        return current;
+      }
+      return {
+        ...current,
+        [activeRoot.id]: nextPath,
+      };
+    });
+  }, [activePackage, activeRoot, isRuntimeScenesRoot, openPaths, treeQuery.data]);
 
   const contentQuery = useQuery({
     queryKey: queryKeys.logContent(activeRoot?.id ?? "", activeFilePath),
@@ -761,11 +706,6 @@ export function LogsRoute() {
     };
   }, [rightRailDragState]);
 
-  const filteredTree = useMemo(
-    () => filterTree(treeQuery.data?.nodes ?? [], fileFilter),
-    [fileFilter, treeQuery.data?.nodes],
-  );
-  const visibleFilePaths = useMemo(() => uniquePaths(collectFilePaths(filteredTree)), [filteredTree]);
   const layoutStyle = useMemo(
     () =>
       ({
@@ -795,6 +735,26 @@ export function LogsRoute() {
       ...current,
       [activeRoot.id]: path,
     }));
+  }
+
+  function handleOpenPackage(item: LogPackageIndexItem) {
+    if (!activeRoot) {
+      return;
+    }
+    setActivePackagesByRoot((current) => ({
+      ...current,
+      [activeRoot.id]: item.id,
+    }));
+    setOpenPaths((current) => {
+      const firstFile = item.files[0]?.path ?? "";
+      if ((current[activeRoot.id] ?? "") === firstFile) {
+        return current;
+      }
+      return {
+        ...current,
+        [activeRoot.id]: firstFile,
+      };
+    });
   }
 
   function handleToggleSelection(path: string) {
@@ -985,6 +945,12 @@ export function LogsRoute() {
       : `${selectedLogPaths.length} ${t("selectedFiles")}`;
   const destructiveBusy = deleteLogsMutation.isPending;
   const resizeRightRailLabel = lang === "zh" ? "调整右侧日志导航宽度" : "Resize right log navigation";
+  const activePackageTitle = activePackage ? (lang === "zh" ? activePackage.titleZh : activePackage.titleEn) : "";
+  const packageIndexLabel = lang === "zh" ? "日志包索引" : "Log Package Index";
+  const packageFilesLabel = lang === "zh" ? "包内日志" : "Package Logs";
+  const rootPathLabel = lang === "zh" ? "根目录" : "Root";
+  const selectPackageFileLabel = lang === "zh" ? "选择文件" : "Select file";
+  const deselectPackageFileLabel = lang === "zh" ? "取消选择文件" : "Deselect file";
   const severityFilterControl = (
     <div className={styles.filterGroup} role="group" aria-label={t("logSeverityFilter")}>
       {severityFilterOptions.map((option) => {
@@ -1048,7 +1014,10 @@ export function LogsRoute() {
               <div className={styles.sidebarHeader}>
                 <div>
                   <p className={styles.sidebarEyebrow}>{activeRootLabelKey ? t(activeRootLabelKey) : t("navLogs")}</p>
-                  <h2 className={styles.sidebarTitle}>{activeRoot?.path ?? t("loading")}</h2>
+                  <h2 className={styles.sidebarTitle}>{packageIndexLabel}</h2>
+                  <p className={styles.sidebarPath} title={activeRoot?.path}>
+                    {activeRoot?.path ?? t("loading")}
+                  </p>
                 </div>
                 <div className={styles.selectionToolbar}>
                   <span className={styles.selectionPill}>{selectedCountLabel}</span>
@@ -1103,11 +1072,11 @@ export function LogsRoute() {
                   type="text"
                   value={fileFilter}
                   onChange={(event) => setFileFilter(event.target.value)}
-                  placeholder={t("searchLogsPlaceholder")}
+                  placeholder={lang === "zh" ? "搜索日志包或包内文件" : "Search packages or files"}
                 />
               </div>
 
-              <div className={styles.fileList}>
+              <div className={styles.packageList}>
                 {rootsQuery.isError ? (
                   <div className={styles.panelState}>{describeError(rootsQuery.error, t("loadFailed"))}</div>
                 ) : rootsQuery.isPending && !rootsQuery.data ? (
@@ -1120,22 +1089,39 @@ export function LogsRoute() {
                   <div className={styles.panelState}>{describeError(treeQuery.error, t("loadFailed"))}</div>
                 ) : treeQuery.isPending && !treeQuery.data ? (
                   <div className={styles.panelState}>{t("loadingLogs")}</div>
-                ) : filteredTree.length === 0 ? (
+                ) : logPackages.length === 0 ? (
                   <div className={styles.panelState}>
                     {fileFilter.trim() ? t("noLogMatches") : t("noLogsInGroup")}
                   </div>
                 ) : (
-                  renderTree(
-                    filteredTree,
-                    activeFilePath || null,
-                    selectedLogPathSet,
-                    handleOpenFile,
-                    handleToggleSelection,
-                    {
-                      selectFile: lang === "zh" ? "选择文件" : "Select file",
-                      deselectFile: lang === "zh" ? "取消选择文件" : "Deselect file",
-                    },
-                  )
+                  logPackages.map((item) => {
+                    const isActive = activePackage?.id === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={
+                          isActive
+                            ? `${styles.packageButton} ${styles.packageButtonActive}`
+                            : styles.packageButton
+                        }
+                        onClick={() => handleOpenPackage(item)}
+                        aria-pressed={isActive}
+                      >
+                        <span className={styles.packageButtonHeader}>
+                          <span className={styles.packageButtonTitle}>
+                            {lang === "zh" ? item.titleZh : item.titleEn}
+                          </span>
+                          <span className={styles.packageButtonCount}>
+                            {item.fileCount} {lang === "zh" ? "个文件" : "files"}
+                          </span>
+                        </span>
+                        <span className={styles.packageButtonPath} title={item.path || rootPathLabel}>
+                          {item.path || rootPathLabel}
+                        </span>
+                      </button>
+                    );
+                  })
                 )}
               </div>
             </aside>
@@ -1160,7 +1146,9 @@ export function LogsRoute() {
                 <div className={styles.emptySurface}>{t("loadingLogs")}</div>
               ) : !activeRoot.exists ? (
                 <div className={styles.emptySurface}>{t("logsRootMissing")}</div>
-              ) : !activeFilePath ? (
+              ) : !activePackage ? (
+                <div className={styles.emptySurface}>{fileFilter.trim() ? t("noLogMatches") : t("noLogsInGroup")}</div>
+              ) : activePackage.files.length === 0 || !activeFilePath ? (
                 <div className={styles.emptySurface}>{t("selectLogFile")}</div>
               ) : contentQuery.isError ? (
                 <div className={styles.emptySurface}>{describeError(contentQuery.error, t("loadFailed"))}</div>
@@ -1168,6 +1156,59 @@ export function LogsRoute() {
                 <div className={styles.emptySurface}>{t("loadingFilePreview")}</div>
               ) : contentQuery.data ? (
                 <div className={styles.logPreviewStack}>
+                  <section className={styles.packageFilesPanel}>
+                    <div className={styles.packageFilesHeader}>
+                      <div>
+                        <p className={styles.sidebarEyebrow}>{packageFilesLabel}</p>
+                        <h2 className={styles.packageFilesTitle}>{activePackageTitle}</h2>
+                      </div>
+                      <span className={styles.metaPill}>
+                        {activePackage.fileCount} {lang === "zh" ? "个文件" : "files"}
+                      </span>
+                    </div>
+                    <div className={styles.packageFileList}>
+                      {activePackage.files.map((file) => {
+                        const isActive = activeFilePath === file.path;
+                        const isSelected = selectedLogPathSet.has(file.path);
+                        return (
+                          <div
+                            key={file.path}
+                            className={
+                              isActive
+                                ? `${styles.packageFileRow} ${styles.packageFileRowActive}`
+                                : styles.packageFileRow
+                            }
+                          >
+                            <button
+                              type="button"
+                              className={
+                                isSelected
+                                  ? `${styles.packageSelectButton} ${styles.packageSelectButtonActive}`
+                                  : styles.packageSelectButton
+                              }
+                              onClick={() => handleToggleSelection(file.path)}
+                              title={isSelected ? deselectPackageFileLabel : selectPackageFileLabel}
+                              aria-label={`${isSelected ? deselectPackageFileLabel : selectPackageFileLabel} ${file.name}`}
+                            >
+                              {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                            </button>
+                            <button
+                              type="button"
+                              className={
+                                isActive
+                                  ? `${styles.packageFileButton} ${styles.packageFileButtonActive}`
+                                  : styles.packageFileButton
+                              }
+                              onClick={() => handleOpenFile(file.path)}
+                            >
+                              <span className={styles.packageFileName}>{file.name}</span>
+                              <span className={styles.packageFilePath}>{file.path}</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
                   {renderDiagnosticsPanel(contentQuery.data.diagnostics, lang)}
                   <FilePreview
                     file={contentQuery.data}

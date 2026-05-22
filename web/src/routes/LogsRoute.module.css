@@ -312,8 +312,8 @@
 .deleteButton:disabled,
 .copyButton:disabled,
 .clearButton:disabled,
-.treeSelectButton:disabled,
-.treeFileButton:disabled {
+.packageSelectButton:disabled,
+.packageFileButton:disabled {
   cursor: not-allowed;
   opacity: 0.58;
 }
@@ -349,12 +349,20 @@
   font: inherit;
 }
 
-.fileList {
+.packageList {
   overflow: auto;
   display: grid;
   align-content: start;
   gap: 10px;
   padding-right: 4px;
+}
+
+.sidebarPath {
+  margin: 6px 0 0;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .panelState,
@@ -390,7 +398,7 @@
 
 .logPreviewStack {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 14px;
   min-height: 0;
   height: 100%;
@@ -587,37 +595,100 @@
   overflow: auto;
 }
 
-.treeDir {
+.packageButton {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
-  padding: 8px 10px;
-}
-
-.treeDir summary {
+  color: var(--fg-secondary);
+  text-align: left;
   cursor: pointer;
+}
+
+.packageButton:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+}
+
+.packageButtonActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  background: var(--surface-panel-strong);
+  box-shadow: inset 2px 0 0 var(--accent-warm);
+}
+
+.packageButtonHeader,
+.packageFilesHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.packageButtonTitle,
+.packageFilesTitle {
+  min-width: 0;
   color: var(--fg-primary);
+  font-family: var(--font-display);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.treeChildren {
+.packageButtonCount {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.packageButtonPath {
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.packageFilesPanel {
   display: grid;
-  gap: 8px;
-  margin-top: 8px;
-  margin-left: 10px;
+  gap: 10px;
+  min-height: 0;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input);
 }
 
-.treeFileRow {
+.packageFilesTitle {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.packageFileList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+  max-height: 190px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.packageFileRow {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
   align-items: stretch;
+  min-width: 0;
 }
 
-.treeFileRowActive {
+.packageFileRowActive {
   position: relative;
 }
 
-.treeSelectButton {
+.packageSelectButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -631,13 +702,13 @@
   cursor: pointer;
 }
 
-.treeSelectButtonActive {
+.packageSelectButtonActive {
   color: var(--accent-cool);
   border-color: color-mix(in srgb, var(--accent-cool) 26%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
-.treeFileButton {
+.packageFileButton {
   display: grid;
   gap: 3px;
   width: 100%;
@@ -650,17 +721,20 @@
   cursor: pointer;
 }
 
-.treeFileButtonActive {
+.packageFileButtonActive {
   color: var(--fg-primary);
   border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
 }
 
-.treeFileName {
+.packageFileName {
   color: var(--fg-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.treeFilePath {
+.packageFilePath {
   font-size: 0.78rem;
   color: var(--fg-tertiary);
   overflow-wrap: anywhere;
