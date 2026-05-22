@@ -441,9 +441,9 @@ function Get-RuntimeScenePackageIndex {
         $Trigger,
         $Status,
         $Result,
-        $StopReason,
-        $tags
+        $StopReason
     ) | Where-Object { $_ }
+    $searchText += @($tags)
 
     return @{
         schema_version = 1

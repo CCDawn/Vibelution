@@ -460,6 +460,73 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_runtime_scene_package_search_text_expands_tags(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @(
+    "ConvertTo-RuntimeSceneIndexToken",
+    "Get-RuntimeSceneTriggerIndexToken",
+    "Get-RuntimeSceneStatusIndexToken",
+    "Get-RuntimeSceneStatusDisplayLabel",
+    "Get-RuntimeSceneTriggerDisplayLabel",
+    "Get-RuntimeScenePackageIndex"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$index = Get-RuntimeScenePackageIndex `
+    -SceneId "scene-a" `
+    -StartedAt ([datetime]"2026-05-18T12:00:00Z") `
+    -Trigger "internal-start" `
+    -Status "stopped" `
+    -Result "explicit_stop" `
+    -StopReason "manual stop" `
+    -EndedAt "2026-05-18T12:03:00Z"
+
+if ($index.search_text -match "System\\.Object\\[\\]") {
+    throw "search_text contains a stringified tag array."
+}
+foreach ($tag in @("runtime-scene", "workbench-lifecycle", "workbench-start", "manual-stop", "managed")) {
+    if ($index.search_text -notmatch [regex]::Escape($tag)) {
+        throw "search_text is missing tag $tag."
+    }
+}
+if (@($index.tags) -contains "System.Object[]") {
+    throw "tags contains a stringified array."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_closure_record_normalizes_successful_manifest_runtime_manager(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
