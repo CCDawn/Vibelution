@@ -105,6 +105,7 @@ def run_workbench_session(
     keep_worktree: bool,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
     checkpoint_callback: Callable[[dict[str, Any]], None] | None = None,
+    cancel_checker: Callable[[], object] | None = None,
     project_root: Path | None = None,
 ) -> SupervisedWorkbenchRunResult:
     from .supervised_evolution import format_decision_record_summary, run_supervised_evolution_session
@@ -117,6 +118,8 @@ def run_workbench_session(
         kwargs["progress_callback"] = progress_callback
     if checkpoint_callback is not None:
         kwargs["checkpoint_callback"] = checkpoint_callback
+    if cancel_checker is not None:
+        kwargs["cancel_checker"] = cancel_checker
     if project_root is not None:
         kwargs["project_root"] = project_root
     decision = run_supervised_evolution_session(**kwargs)

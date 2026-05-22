@@ -5537,6 +5537,99 @@ def test_chat_review_routes_list_and_approve_candidate(tmp_path, monkeypatch):
     assert "gym_candidate_case" in dataset_entry["allowedDownstreamUses"]
 
 
+def test_chat_review_bulk_delete_discards_pending_candidates(tmp_path, monkeypatch):
+    monkeypatch.setattr(chat_review_service, "PROJECT_ROOT", tmp_path)
+
+    capture_service = ChatDatasetCaptureService(project_root=tmp_path)
+    candidate_a = capture_service.capture_candidate(
+        mode="chat",
+        session_id="session-bulk-a",
+        source_log_path=str(tmp_path / "log_info" / "conversation_session-bulk-a.jsonl"),
+        turns=[
+            ChatTurnRecord(
+                turn_number=1,
+                user_message="继续整理监督评审工作区",
+                assistant_message="我先读取评审队列和样式文件确认现状。",
+                tool_calls=["read_file_tool"],
+                tool_call_count=1,
+            ),
+            ChatTurnRecord(
+                turn_number=2,
+                user_message="把批量删除做好",
+                assistant_message="结论：批量删除应写成软丢弃。下一步我会补接口和测试。",
+                tool_calls=["apply_patch_tool"],
+                tool_call_count=1,
+                had_explicit_conclusion=True,
+                had_next_action=True,
+            ),
+        ],
+    )
+    candidate_b = capture_service.capture_candidate(
+        mode="chat",
+        session_id="session-bulk-b",
+        source_log_path=str(tmp_path / "log_info" / "conversation_session-bulk-b.jsonl"),
+        turns=[
+            ChatTurnRecord(
+                turn_number=1,
+                user_message="复核一个已处理样本",
+                assistant_message="我会先查队列状态再操作。",
+                tool_calls=["read_file_tool"],
+                tool_call_count=1,
+            ),
+            ChatTurnRecord(
+                turn_number=2,
+                user_message="这个作为正例",
+                assistant_message="结论：这个样本具备稳定推进信号。下一步记录为正例。",
+                tool_calls=["apply_patch_tool"],
+                tool_call_count=1,
+                had_explicit_conclusion=True,
+                had_next_action=True,
+            ),
+        ],
+    )
+    assert candidate_a is not None
+    assert candidate_b is not None
+
+    positive_response = client.post(
+        f"/api/evolution/chat-review/{candidate_b.candidate_id}/decision",
+        json={"decision": "positive", "reviewerNote": "keep this handled sample"},
+    )
+    assert positive_response.status_code == 200
+
+    response = client.post(
+        "/api/evolution/chat-review/delete",
+        json={
+            "candidateIds": [candidate_a.candidate_id, candidate_b.candidate_id, "missing-candidate"],
+            "reviewerNote": "bulk discard from review workspace",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["requestedCount"] == 3
+    assert payload["discardedCount"] == 1
+    assert payload["skippedCount"] == 2
+    assert payload["failedCount"] == 0
+    results = {item["candidateId"]: item for item in payload["results"]}
+    assert results[candidate_a.candidate_id]["status"] == "discarded"
+    assert results[candidate_b.candidate_id]["status"] == "skipped"
+    assert results["missing-candidate"]["status"] == "not_found"
+
+    queue_response = client.get("/api/evolution/chat-review")
+    assert queue_response.status_code == 200
+    queue_payload = queue_response.json()
+    assert queue_payload["pendingCount"] == 0
+    assert queue_payload["positiveCount"] == 1
+    assert queue_payload["discardCount"] == 1
+    statuses = {item["candidateId"]: item["status"] for item in queue_payload["items"]}
+    assert statuses[candidate_a.candidate_id] == "discard"
+    assert statuses[candidate_b.candidate_id] == "positive"
+
+    paths = resolve_chat_dataset_paths(project_root=tmp_path)
+    assert paths.rejected_log_path.exists()
+    assert candidate_a.candidate_id in paths.rejected_log_path.read_text(encoding="utf-8")
+
+
 def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeypatch):
     registry_path = tmp_path / "workspace" / "evaluation" / "datasets" / "registry.json"
     registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -5999,6 +6092,62 @@ def test_evolution_proposal_detail_route_exposes_review_first_payload(tmp_path, 
     assert payload["rawGymDecision"]["candidate_improvement"]["improvement_id"]
 
 
+def test_evolution_routes_expose_supervised_policy_observing_proposal(tmp_path, monkeypatch):
+    decision_path = _write_supervised_decision_record(
+        tmp_path,
+        "observing_policy_run",
+        {
+            "decision": "HOLD",
+            "reason": "candidate 持平，进入观察池。",
+        },
+    )
+    proposal_path = tmp_path / "workspace" / "evolution" / "proposals" / "demo__case_1__observing.json"
+    proposal_path.parent.mkdir(parents=True, exist_ok=True)
+    proposal_path.write_text(
+        json.dumps(
+            {
+                "proposal_id": "demo:case_1:observing",
+                "session_id": "observing_policy_run",
+                "bundle_name": "demo_bundle",
+                "case_id": "case_1",
+                "target": {"kind": "bundle_prompt_case", "bundle_name": "demo_bundle", "case_id": "case_1"},
+                "candidate_prompt": "candidate prompt",
+                "baseline_prompt": "baseline prompt",
+                "decision_signal": "stable_success",
+                "status": "observing",
+                "decision": "HOLD",
+                "decision_path": str(decision_path),
+                "observation_count": 1,
+                "observation_budget": 3,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    payload = json.loads(decision_path.read_text(encoding="utf-8"))
+    payload["policy_action"] = {
+        "lineage_index_path": str(tmp_path / "workspace" / "evolution" / "proposals" / "lineage_index.json"),
+        "proposal_paths": [str(proposal_path)],
+    }
+    decision_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+
+    runs_payload = client.get("/api/evolution/runs").json()
+    library_payload = client.get("/api/evolution/library").json()
+    detail_response = client.get("/api/evolution/proposals/observing_policy_run")
+
+    assert runs_payload[0]["proposalStatus"] == "observing"
+    assert runs_payload[0]["sourceProposalPath"] == str(proposal_path)
+    assert any(item["sourceRun"] == "observing_policy_run" for item in library_payload["pending"])
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["proposalStatus"] == "observing"
+    assert detail["paths"]["gymProposalPath"] == str(proposal_path)
+    assert detail["rawProposal"]["proposal_id"] == "demo:case_1:observing"
+    assert detail["proposal"]["proposalId"] == "demo:case_1:observing"
+
+
 def test_evolution_runs_route_exposes_run_delete_state(tmp_path, monkeypatch):
     _seed_supervised_proposal_record(tmp_path, "run_delete_missing", status="missing")
     _seed_supervised_proposal_record(tmp_path, "run_delete_active", status="active")
@@ -6025,8 +6174,15 @@ def test_evolution_delete_proposal_allows_removable_states(tmp_path, monkeypatch
     assert response.status_code == 200
     payload = response.json()
     assert payload["deleted"] is True
-    assert not seeded["decision_path"].exists()
-    assert not seeded["proposal_path"].exists()
+    assert seeded["decision_path"].exists()
+    if status != "missing":
+        assert seeded["proposal_path"].exists()
+    decision_payload = json.loads(seeded["decision_path"].read_text(encoding="utf-8"))
+    assert decision_payload["hidden_from_workbench"] is True
+    assert decision_payload["deletion"]["preserved_for_audit"] is True
+    if status != "missing":
+        proposal_payload = json.loads(seeded["proposal_path"].read_text(encoding="utf-8"))
+        assert proposal_payload["hidden_from_workbench"] is True
 
     runs_payload = client.get("/api/evolution/runs").json()
     library_payload = client.get("/api/evolution/library").json()
@@ -6078,8 +6234,10 @@ def test_evolution_bulk_delete_proposals_reports_mixed_results(tmp_path, monkeyp
     assert result_status["bulk_delete_proposed"] == "deleted"
     assert result_status["bulk_delete_missing"] == "deleted"
     assert result_status["bulk_delete_active"] == "skipped"
-    assert not proposed["decision_path"].exists()
-    assert not missing["decision_path"].exists()
+    assert proposed["decision_path"].exists()
+    assert missing["decision_path"].exists()
+    assert json.loads(proposed["decision_path"].read_text(encoding="utf-8"))["hidden_from_workbench"] is True
+    assert json.loads(missing["decision_path"].read_text(encoding="utf-8"))["hidden_from_workbench"] is True
     assert active["decision_path"].exists()
     assert active["proposal_path"].exists()
 

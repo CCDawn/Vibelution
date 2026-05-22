@@ -96,8 +96,15 @@ def load_dashboard_records(*, project_root: Path, limit: int = 20) -> tuple[list
         if not isinstance(payload, dict):
             skipped_count += 1
             continue
+        if _is_workbench_deleted(payload):
+            continue
         records.append(_record_from_payload(payload, path))
     return records, skipped_count
+
+
+def _is_workbench_deleted(payload: dict[str, Any]) -> bool:
+    deletion = payload.get("deletion") if isinstance(payload.get("deletion"), dict) else {}
+    return bool(payload.get("hidden_from_workbench")) or bool(payload.get("workbench_deleted_at")) or bool(deletion.get("hidden_from_workbench"))
 
 
 def build_supervised_dashboard(
@@ -229,6 +236,7 @@ def build_supervised_dashboard(
 
 
 def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashboardRecord:
+    project_root = path.parents[3]
     policy_action = payload.get("policy_action") if isinstance(payload.get("policy_action"), dict) else {}
     gates = payload.get("gates") if isinstance(payload.get("gates"), list) else []
     case_summaries = payload.get("case_summaries") if isinstance(payload.get("case_summaries"), list) else []
@@ -239,7 +247,18 @@ def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashb
         metrics = gate.get("metrics") if isinstance(gate, dict) and isinstance(gate.get("metrics"), dict) else {}
         gym_proposal_path = gym_proposal_path or metrics.get("promotion_proposal_path")
         gym_decision_path = gym_decision_path or metrics.get("decision_path")
-    lifecycle = load_gym_promotion_lifecycle(payload, project_root=path.parents[3])
+    lifecycle = load_gym_promotion_lifecycle(payload, project_root=project_root)
+    policy_proposal = _load_policy_proposal(payload, project_root=project_root)
+    if lifecycle.status == "missing" and policy_proposal:
+        gym_proposal_path = policy_proposal["path"]
+        gym_decision_path = None
+        lifecycle_status = str(policy_proposal["payload"].get("status") or "unknown")
+        lifecycle_target_key = _policy_target_key(policy_proposal["payload"])
+        lifecycle_note = "该条目来自 supervised selection policy proposal。"
+    else:
+        lifecycle_status = lifecycle.status
+        lifecycle_target_key = lifecycle.target_key
+        lifecycle_note = lifecycle.note or lifecycle.error
     advisory_context = payload.get("advisory_context") if isinstance(payload.get("advisory_context"), dict) else {}
     return SupervisedDashboardRecord(
         session_id=str(payload.get("session_id") or path.stem),
@@ -258,8 +277,8 @@ def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashb
         lineage_index_path=policy_action.get("lineage_index_path"),
         gym_proposal_path=str(gym_proposal_path) if gym_proposal_path else None,
         gym_decision_path=str(gym_decision_path) if gym_decision_path else None,
-        gym_proposal_status=lifecycle.status,
-        gym_target_key=lifecycle.target_key,
+        gym_proposal_status=lifecycle_status,
+        gym_target_key=lifecycle_target_key,
         gym_runtime_effect=lifecycle.runtime_effect,
         gym_agent_consumption=lifecycle.agent_consumption,
         gym_available_actions=lifecycle.available_actions,
@@ -268,12 +287,54 @@ def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashb
         gym_activation_history_path=lifecycle.history_path,
         gym_apply_ledger_path=lifecycle.apply_ledger_path,
         gym_rollback_ledger_path=lifecycle.rollback_ledger_path,
-        gym_note=lifecycle.note or lifecycle.error,
+        gym_note=lifecycle_note,
         advisory_active_count=int(advisory_context.get("active_count") or 0),
         advisory_entries=(
             advisory_context.get("entries") if isinstance(advisory_context.get("entries"), list) else []
         ),
     )
+
+
+def _load_policy_proposal(payload: dict[str, Any], *, project_root: Path) -> dict[str, Any] | None:
+    policy_action = payload.get("policy_action") if isinstance(payload.get("policy_action"), dict) else {}
+    raw_paths = policy_action.get("proposal_paths") if isinstance(policy_action.get("proposal_paths"), list) else []
+    for raw_path in raw_paths:
+        proposal_path = _resolve_project_path(raw_path, project_root=project_root)
+        if proposal_path is None or not proposal_path.exists():
+            continue
+        try:
+            proposal_payload = json.loads(proposal_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(proposal_payload, dict):
+            return {"path": str(proposal_path), "payload": proposal_payload}
+    return None
+
+
+def _resolve_project_path(raw_path: Any, *, project_root: Path) -> Path | None:
+    text = str(raw_path or "").strip()
+    if not text:
+        return None
+    path = Path(text)
+    if path.is_absolute():
+        resolved = path.resolve()
+    else:
+        resolved = (project_root / path).resolve()
+    try:
+        resolved.relative_to(project_root.resolve())
+    except ValueError:
+        return None
+    return resolved
+
+
+def _policy_target_key(payload: dict[str, Any]) -> str | None:
+    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
+    if not target:
+        return None
+    try:
+        return "target:" + json.dumps(target, ensure_ascii=False, sort_keys=True)
+    except TypeError:
+        return str(target)
 
 
 def _assess_risk(payload: dict[str, Any], gates: list[Any]) -> tuple[str, list[str]]:
@@ -455,6 +516,12 @@ def _next_action(record: SupervisedDashboardRecord) -> str:
         return "proposal 已 apply，下一步可 activate 成 advisory baseline，或直接 rollback。"
     if record.gym_proposal_status == "active":
         return "proposal 已成为 active advisory baseline；runtime_effect 仍为 not_applied，可继续观察或 rollback。"
+    if record.gym_proposal_status == "observing":
+        return "候选已进入 selection policy 观察池，继续积累监督样本后再决定是否晋升。"
+    if record.gym_proposal_status == "expired":
+        return "候选观察预算已用尽，当前只保留审计证据。"
+    if record.gym_proposal_status == "promoted":
+        return "候选已由 selection policy 晋升为 baseline，可审计 lineage 后继续观察。"
     if record.gym_proposal_status == "rolled_back":
         return "proposal 已回滚，当前只保留审计证据。"
     if record.gym_proposal_status == "superseded":
