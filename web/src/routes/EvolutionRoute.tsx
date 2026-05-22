@@ -47,7 +47,9 @@ import { SelfEvolutionTrack } from "./SelfEvolutionTrack";
 import { SupervisedWorkspaceTabs } from "./SupervisedWorkspaceTabs";
 import {
   isLiveSupervisedRunStatus,
+  parseRunStreamSnapshot,
   requireEvolutionRunSnapshot,
+  selectRunSnapshotWithRunId,
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
@@ -315,7 +317,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: (runId: string) =>
       fetchJson<EvolutionActiveRun>(`/api/evolution/runs/${runId}/pause`, {
         method: "POST",
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised pause")),
     onSuccess: async (snapshot) => {
       setActionFeedback(snapshot.latestMessage || "");
       setLiveActiveRun(snapshot);
@@ -329,7 +331,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: (runId: string) =>
       fetchJson<EvolutionActiveRun>(`/api/evolution/runs/${runId}/resume`, {
         method: "POST",
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised resume")),
     onSuccess: async (snapshot) => {
       setActionFeedback(snapshot.latestMessage || "");
       setLiveActiveRun(snapshot);
@@ -343,7 +345,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: (runId: string) =>
       fetchJson<EvolutionActiveRun>(`/api/evolution/runs/${runId}/terminate`, {
         method: "POST",
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised terminate")),
     onSuccess: async (snapshot) => {
       setActionFeedback(snapshot.latestMessage || snapshot.reason || "");
       setLiveActiveRun(snapshot);
@@ -401,7 +403,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: (runId: string) =>
       fetchJson<SelfEvolutionActiveRun>(`/api/evolution/self/runs/${runId}/terminate`, {
         method: "POST",
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution terminate")),
     onSuccess: async (snapshot) => {
       setSelfActionFeedback(snapshot.latestMessage || snapshot.stopReason || "");
       setLiveSelfRun(snapshot);
@@ -415,7 +417,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: (runId: string) =>
       fetchJson<SelfEvolutionActiveRun>(`/api/evolution/self/runs/${runId}/pause`, {
         method: "POST",
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution pause")),
     onSuccess: async (snapshot) => {
       setSelfActionFeedback(snapshot.latestMessage || snapshot.stopReason || "");
       setLiveSelfRun(snapshot);
@@ -429,7 +431,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: (runId: string) =>
       fetchJson<SelfEvolutionActiveRun>(`/api/evolution/self/runs/${runId}/resume`, {
         method: "POST",
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution resume")),
     onSuccess: async (snapshot) => {
       setSelfActionFeedback(snapshot.latestMessage || "");
       setLiveSelfRun(snapshot);
@@ -443,7 +445,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     mutationFn: (runId: string) =>
       fetchJson<SelfEvolutionActiveRun>(`/api/evolution/self/runs/${runId}/rollback`, {
         method: "POST",
-      }),
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "self-evolution rollback")),
     onSuccess: async (snapshot) => {
       setSelfActionFeedback(snapshot.rollback?.reason || snapshot.latestMessage || "");
       setLiveSelfRun(snapshot);
@@ -461,7 +463,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     onSuccess: async (payload) => {
       setSelfActionFeedback(payload.message || "");
       if (payload.run) {
-        setLiveSelfRun(payload.run);
+        setLiveSelfRun(requireEvolutionRunSnapshot(payload.run, "self-evolution handoff"));
       }
       await Promise.all([
         invalidateSelfEvolution(),
@@ -519,8 +521,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const overview = overviewQuery.data;
   const workbenchControl = workbenchQuery.data;
   const workbenchState = overview?.workbench ?? workbenchControl?.savedState;
-  const activeRunSnapshot = activeRunQuery.data;
-  const latestSelfRunSnapshot = selfLatestRunQuery.data;
+  const activeRunSnapshot = selectRunSnapshotWithRunId(activeRunQuery.data);
+  const latestSelfRunSnapshot = selectRunSnapshotWithRunId(selfLatestRunQuery.data);
   const latestRun = runs[0] ?? null;
   const selfTrackEnabled = configQuery.data?.modeAvailability.self_evolution ?? false;
   const supervisedTrackEnabled = configQuery.data?.modeAvailability.supervised_evolution ?? true;
@@ -891,8 +893,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
     const source = new EventSource(`/api/evolution/self/runs/${target.runId}/events`);
     const handleSnapshot = (message: MessageEvent) => {
+      const snapshot = parseRunStreamSnapshot<SelfEvolutionActiveRun>(message.data, "self-evolution stream");
+      if (!snapshot) {
+        return;
+      }
       const payload = JSON.parse(message.data) as SelfEvolutionRunStreamEvent;
-      setLiveSelfRun(payload.snapshot);
+      setLiveSelfRun(snapshot);
       if (payload.terminal) {
         void Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfOverview() }),
@@ -926,8 +932,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
     const source = new EventSource("/api/evolution/active-run/events");
     const handleSnapshot = (message: MessageEvent) => {
+      const snapshot = parseRunStreamSnapshot<EvolutionActiveRun>(message.data, "supervised stream");
+      if (!snapshot) {
+        return;
+      }
       const payload = JSON.parse(message.data) as EvolutionActiveRunStreamEvent;
-      setLiveActiveRun(payload.snapshot);
+      setLiveActiveRun(snapshot);
       if (payload.terminal) {
         void Promise.all([
           queryClient.invalidateQueries({ queryKey: queryKeys.evolutionActiveRun() }),

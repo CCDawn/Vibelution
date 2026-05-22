@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { EvolutionActiveRun } from "../api/types";
 import {
+  parseRunStreamSnapshot,
   requireEvolutionRunSnapshot,
+  selectRunSnapshotWithRunId,
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
@@ -38,5 +40,53 @@ describe("evolutionLiveRun", () => {
     expect(() => requireEvolutionRunSnapshot(null, "self-evolution")).toThrow("self-evolution");
     expect(() => requireEvolutionRunSnapshot({} as EvolutionActiveRun, "self-evolution")).toThrow("runId");
     expect(() => requireEvolutionRunSnapshot({ runId: "   " } as EvolutionActiveRun, "supervised")).toThrow("runId");
+  });
+
+  it("uses the action label when rejecting control action payloads", () => {
+    expect(() => requireEvolutionRunSnapshot({} as EvolutionActiveRun, "self-evolution pause")).toThrow(
+      "self-evolution pause response did not include a runId.",
+    );
+    expect(() => requireEvolutionRunSnapshot({} as EvolutionActiveRun, "supervised terminate")).toThrow(
+      "supervised terminate response did not include a runId.",
+    );
+  });
+
+  it("ignores query snapshots without a run id before updating live state", () => {
+    expect(selectRunSnapshotWithRunId(run("run-1", "running"))?.runId).toBe("run-1");
+    expect(selectRunSnapshotWithRunId(null)).toBeNull();
+    expect(selectRunSnapshotWithRunId({} as EvolutionActiveRun)).toBeNull();
+    expect(selectRunSnapshotWithRunId({ runId: "   " } as EvolutionActiveRun)).toBeNull();
+  });
+
+  it("parses only SSE snapshot payloads whose run id matches the event envelope", () => {
+    expect(
+      parseRunStreamSnapshot<EvolutionActiveRun>(
+        JSON.stringify({
+          runId: "run-1",
+          snapshot: run("run-1", "running"),
+        }),
+        "supervised SSE",
+      )?.runId,
+    ).toBe("run-1");
+
+    expect(parseRunStreamSnapshot<EvolutionActiveRun>("not-json", "supervised SSE")).toBeNull();
+    expect(
+      parseRunStreamSnapshot<EvolutionActiveRun>(
+        JSON.stringify({
+          snapshot: run("run-1", "running"),
+        }),
+        "supervised SSE",
+      ),
+    ).toBeNull();
+    expect(parseRunStreamSnapshot<EvolutionActiveRun>(JSON.stringify({ runId: "run-1", snapshot: {} }), "supervised SSE")).toBeNull();
+    expect(
+      parseRunStreamSnapshot<EvolutionActiveRun>(
+        JSON.stringify({
+          runId: "run-1",
+          snapshot: run("run-2", "running"),
+        }),
+        "supervised SSE",
+      ),
+    ).toBeNull();
   });
 });
