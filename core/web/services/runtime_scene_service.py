@@ -152,6 +152,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
         conversations = _list_conversation_logs(scene_dir)
         agent_logs = _list_agent_logs(scene_dir)
         artifacts = _list_artifacts(scene_dir)
+        event_logs = _list_event_logs(scene_dir)
         package_index = _runtime_scene_package_index(scene_dir, manifest, scene_id)
         severity_summary = _runtime_scene_severity_summary(timeline)
         scenes.append(
@@ -176,6 +177,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
                 "conversationCount": len(conversations),
                 "agentLogCount": len(agent_logs),
                 "artifactCount": len(artifacts),
+                "eventLogCount": len(event_logs),
                 "errorCount": severity_summary["errorCount"],
                 "warningCount": severity_summary["warningCount"],
             }
