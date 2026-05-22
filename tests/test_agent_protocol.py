@@ -24,6 +24,7 @@ from core.prompt_manager import build_restart_focus_state_memory
 from core.orchestration.agent_modes import AgentMode, ModePolicy
 from core.orchestration.delegation_governor import DelegationGovernor
 from core.orchestration.round_state import RoundStateController
+from core.orchestration.runtime_goal import RuntimeGoalPacket
 from core.orchestration.response_processor import ResponseProcessor
 from core.orchestration.response_surface import ResponseSurfaceController
 from core.orchestration.turn_outcome import TurnOutcomeController
@@ -1770,6 +1771,40 @@ class TestToolMessageFlow:
         assert captured["_cancel_checker"]() == "操作者请求停止当前轮。"
         assert outcome["delegated"] is True
         assert outcome["useful"] is False
+
+    def test_maybe_delegate_respects_runtime_goal_subagent_boundary(self, monkeypatch):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        packet = RuntimeGoalPacket(
+            goal="运行监督评测 case",
+            source="监督进化入口",
+            objective_type="evaluation_case",
+            allow_auto_continue=False,
+            allow_file_writes=True,
+            allow_git_commit=False,
+            allow_evolution_transaction=True,
+            allow_subagents=False,
+            completion_standard="按给定 case 产生可比较证据。",
+        )
+        agent.prompt_manager = SimpleNamespace(get_runtime_goal_packet=lambda: packet)
+        agent._get_delegation_governor = MagicMock(side_effect=AssertionError("delegation should be blocked"))
+        scene_events = []
+        monkeypatch.setattr(
+            agent_module,
+            "_record_agent_scene_event",
+            lambda phase, event_code, **kwargs: scene_events.append((phase, event_code, kwargs)),
+        )
+
+        outcome = agent._maybe_delegate(
+            goal="分析监督 case 中的日志差异",
+            iteration=2,
+            total_tool_calls=4,
+            messages=[],
+        )
+
+        assert outcome is None
+        agent._get_delegation_governor.assert_not_called()
+        assert scene_events[0][0:2] == ("delegation", "agent.delegation.blocked")
+        assert scene_events[0][2]["fields"]["reason"] == "runtime_goal_disallows_subagents"
 
     def test_apply_delegation_result_surfaces_timeout_instead_of_parse_failure(self, monkeypatch):
         captured = {"finish": []}
