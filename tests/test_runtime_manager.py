@@ -508,6 +508,42 @@ def test_reject_pending_commands_for_shutdown_removes_stale_open_from_inbox(tmp_
     assert result["stateVersion"] == 44
 
 
+def test_prepare_daemon_shutdown_records_rejected_pending_commands(monkeypatch):
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
+    monkeypatch.setattr(daemon, "terminate_process_descendants", lambda *args, **kwargs: {"terminated": []})
+    monkeypatch.setattr(daemon, "load_state", lambda: {"stateVersion": 45})
+    monkeypatch.setattr(
+        daemon,
+        "reject_pending_commands_for_shutdown",
+        lambda shutdown_state=None: {
+            "count": 2,
+            "items": [
+                {"commandId": "cmd-open", "type": "open_workbench", "status": "completed"},
+                {"commandId": "cmd-bad", "type": "restart_workbench", "status": "failed", "error": "locked"},
+            ],
+        },
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    cleanup = daemon._prepare_daemon_shutdown()
+
+    assert cleanup["rejectedPendingCommands"]["count"] == 2
+    assert events == [
+        (
+            "daemon.shutdown.rejected_pending_commands",
+            {
+                "count": 2,
+                "commands": [
+                    {"commandId": "cmd-open", "type": "open_workbench", "status": "completed"},
+                    {"commandId": "cmd-bad", "type": "restart_workbench", "status": "failed"},
+                ],
+            },
+        )
+    ]
+
+
 def test_handle_command_reports_exception_type(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     monkeypatch.setattr(daemon, "load_state", lambda: {"command": {}, "workbench": {}})
