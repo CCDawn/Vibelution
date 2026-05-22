@@ -726,10 +726,25 @@
   opacity: 0.72;
 }
 
+.petShowcaseAction:not(:disabled):hover {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
 .petShowcaseActionHint {
   color: var(--accent-warm-2);
   border-color: color-mix(in srgb, var(--accent-warm) 20%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+}
+
+.petShowcaseFeedback {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--accent-warm-2);
+  font-size: 0.78rem;
+  line-height: 1.32;
+  overflow-wrap: anywhere;
 }
 
 .centerPane {

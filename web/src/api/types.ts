@@ -1503,6 +1503,12 @@ export type PetSummary = {
   statusLine: string;
 };
 
+export type PetActionResponse = {
+  action: string;
+  message: string;
+  summary: PetSummary;
+};
+
 export type ResetSummary = {
   warning: string;
   mode: "custom" | string;
