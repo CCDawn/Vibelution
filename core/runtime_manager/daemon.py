@@ -16,7 +16,7 @@ from typing import Any
 from core.runtime_manager.evolution_store import build_evolution_summary
 from core.web.services import self_evolution_control_service, supervised_control_service
 
-from .command_queue import claim_next_command, complete_command, recover_processing_queue
+from .command_queue import claim_next_command, complete_command, recover_processing_queue, reject_pending_commands_for_shutdown
 from .constants import (
     DAEMON_LOOP_INTERVAL_SECONDS,
     DAEMON_STDERR_PATH,
@@ -411,9 +411,27 @@ def _close_active_evolution_runs_for_shutdown() -> list[dict[str, Any]]:
 def _prepare_daemon_shutdown() -> dict[str, Any]:
     closed_runs = _close_active_evolution_runs_for_shutdown()
     descendants = terminate_process_descendants(os.getpid(), exclude_pids={os.getpid()}, timeout_seconds=5.0)
+    rejected_commands = reject_pending_commands_for_shutdown(shutdown_state=load_state())
+    if int(rejected_commands.get("count") or 0) > 0:
+        _append_event(
+            "daemon.shutdown.rejected_pending_commands",
+            {
+                "count": int(rejected_commands.get("count") or 0),
+                "commands": [
+                    {
+                        "commandId": str(item.get("commandId") or ""),
+                        "type": str(item.get("type") or ""),
+                        "status": str(item.get("status") or ""),
+                    }
+                    for item in list(rejected_commands.get("items") or [])
+                    if isinstance(item, dict)
+                ],
+            },
+        )
     return {
         "closedEvolutionRuns": closed_runs,
         "descendantCleanup": descendants,
+        "rejectedPendingCommands": rejected_commands,
     }
 
 
@@ -447,6 +465,12 @@ class RuntimeManagerDaemon:
                         if shutdown_cleanup.get("closedEvolutionRuns"):
                             result["closedEvolutionRuns"] = shutdown_cleanup["closedEvolutionRuns"]
                         result["descendantCleanup"] = shutdown_cleanup.get("descendantCleanup")
+                        result["rejectedPendingCommands"] = shutdown_cleanup.get("rejectedPendingCommands")
+                        state = load_state()
+                        if isinstance(state, dict):
+                            state["runtimeState"] = "stopping"
+                            state["managerPid"] = self._pid
+                            save_state(state)
                         _append_event("daemon.stopped", {"commandId": str(result.get("commandId") or "")})
                     complete_command(path, result)
                     if bool(result.get("stopDaemon")):
@@ -475,6 +499,7 @@ class RuntimeManagerDaemon:
                 "activeType": command_type,
                 "requestedBy": requested_by,
                 "startedAt": now_iso(),
+                "stopManager": command_type == "close_workbench" and bool(args.get("stopManager")),
             }
         )
         state = self._reconcile_observation(state)
@@ -526,8 +551,12 @@ class RuntimeManagerDaemon:
                 "activeType": "",
                 "requestedBy": "",
                 "startedAt": "",
+                "stopManager": False,
             }
         )
+        if ok and isinstance(result_data, dict) and bool(result_data.get("stopDaemon")):
+            state["runtimeState"] = "stopping"
+            state["managerPid"] = self._pid
         if ok:
             state["lastError"] = {"scope": "", "message": "", "at": ""}
         else:

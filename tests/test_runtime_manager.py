@@ -5,6 +5,7 @@ import sys
 import pytest
 
 from core.runtime_manager import cli as runtime_cli
+from core.runtime_manager import command_queue
 from core.runtime_manager import daemon
 from core.runtime_manager import constants
 from core.runtime_manager import evolution_store
@@ -330,6 +331,181 @@ def test_run_forever_cleans_descendants_before_completing_stop_daemon(monkeypatc
     assert order[:3] == ["cleanup", "daemon.stopped", "complete:991"]
     assert order[-3:] == ["clear_pid", "exit:0", "clear_pid"]
     assert exit_info.value.code == 0
+
+
+def test_run_forever_marks_runtime_stopping_before_stop_result(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    saved_states: list[dict] = []
+
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(daemon, "recover_processing_queue", lambda: None)
+    monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "running",
+            "startedAt": "2026-05-18T01:00:00+00:00",
+            "command": {},
+            "workbench": {},
+        },
+    )
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T08:00:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(json.loads(json.dumps(state))) or state)
+    monkeypatch.setattr(
+        daemon,
+        "claim_next_command",
+        lambda: (
+            "cmd-path",
+            {
+                "commandId": "cmd-stop",
+                "type": "close_workbench",
+                "requestedBy": "test",
+                "args": {"stopManager": True},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_handle_command",
+        lambda payload: {
+            "commandId": payload["commandId"],
+            "accepted": True,
+            "completed": True,
+            "ok": True,
+            "message": "closed",
+            "stopDaemon": True,
+        },
+    )
+    monkeypatch.setattr(daemon, "_prepare_daemon_shutdown", lambda: {"closedEvolutionRuns": [], "descendantCleanup": {}})
+    monkeypatch.setattr(daemon, "complete_command", lambda path, result: None)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
+    monkeypatch.setattr(daemon, "clear_pid", lambda pid: None)
+
+    def fake_exit(code: int = 0):
+        raise SystemExit(code)
+
+    monkeypatch.setattr(daemon, "_exit_current_process", fake_exit)
+
+    with pytest.raises(SystemExit):
+        runtime_daemon.run_forever()
+
+    assert any(state.get("runtimeState") == "stopping" for state in saved_states)
+
+
+def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 42,
+            "runtimeState": "stopping",
+            "command": {
+                "activeCommandId": "",
+                "activeType": "",
+                "stopManager": False,
+            },
+        },
+    )
+
+    command = command_queue.submit_command("open_workbench", args={"reason": "launcher_start"}, requested_by="launcher_ps")
+    result_path = results_dir / f"{command['commandId']}.json"
+
+    assert list(inbox_dir.glob("*.json")) == []
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    assert result["ok"] is False
+    assert result["errorType"] == "RuntimeManagerStoppingError"
+    assert result["runtimeManagerStopping"] is True
+    assert result["stateVersion"] == 42
+
+
+def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 43,
+            "runtimeState": "running",
+            "command": {
+                "activeCommandId": "cmd-active-close",
+                "activeType": "close_workbench",
+                "stopManager": True,
+            },
+        },
+    )
+
+    command = command_queue.submit_command(
+        "close_workbench",
+        args={"reason": "launcher_stop", "stopManager": True},
+        requested_by="launcher_ps",
+    )
+    result = json.loads((results_dir / f"{command['commandId']}.json").read_text(encoding="utf-8"))
+
+    assert list(inbox_dir.glob("*.json")) == []
+    assert result["ok"] is True
+    assert result["runtimeManagerStopping"] is True
+    assert result["message"] == "Runtime manager shutdown is already in progress."
+
+
+def test_reject_pending_commands_for_shutdown_removes_stale_open_from_inbox(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    command_path = inbox_dir / "cmd-open.json"
+    command_path.write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-open",
+                "type": "open_workbench",
+                "requestedBy": "launcher_ps",
+                "args": {"reason": "launcher_start"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+
+    cleanup = command_queue.reject_pending_commands_for_shutdown(shutdown_state={"stateVersion": 44})
+
+    assert cleanup["count"] == 1
+    assert cleanup["items"] == [{"commandId": "cmd-open", "type": "open_workbench", "status": "completed"}]
+    assert list(inbox_dir.glob("*.json")) == []
+    result = json.loads((results_dir / "cmd-open.json").read_text(encoding="utf-8"))
+    assert result["ok"] is False
+    assert result["errorType"] == "RuntimeManagerStoppingError"
+    assert result["stateVersion"] == 44
 
 
 def test_handle_command_reports_exception_type(monkeypatch):
