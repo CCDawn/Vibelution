@@ -18,6 +18,7 @@ from .constants import (
     RESULTS_DIR,
     ensure_runtime_manager_dirs,
 )
+from .state_store import load_pid, load_state
 
 
 def _command_timestamp() -> str:
@@ -53,6 +54,10 @@ def submit_command(
     requested_by: str = "unknown",
 ) -> dict[str, Any]:
     command = build_command(command_type, args=args, requested_by=requested_by)
+    shutdown_state = _shutdown_in_progress_state()
+    if shutdown_state is not None:
+        _complete_rejected_shutdown_command(command, shutdown_state=shutdown_state)
+        return command
     _atomic_write_json(INBOX_DIR / f"{command['commandId']}.json", command)
     return command
 
@@ -108,3 +113,115 @@ def complete_command(path: Path, result: dict[str, Any]) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def reject_pending_commands_for_shutdown(*, shutdown_state: dict[str, Any] | None = None) -> dict[str, Any]:
+    state = shutdown_state if isinstance(shutdown_state, dict) else load_state()
+    rejected: list[dict[str, Any]] = []
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload = {}
+        command = payload if isinstance(payload, dict) else {}
+        command_id = str(command.get("commandId") or path.stem).strip() or path.stem
+        command["commandId"] = command_id
+        try:
+            _complete_rejected_shutdown_command(command, shutdown_state=state)
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            rejected.append(
+                {
+                    "commandId": command_id,
+                    "type": str(command.get("type") or ""),
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        rejected.append(
+            {
+                "commandId": command_id,
+                "type": str(command.get("type") or ""),
+                "status": "completed",
+            }
+        )
+    return {
+        "count": len(rejected),
+        "items": rejected,
+    }
+
+
+def _shutdown_in_progress_state() -> dict[str, Any] | None:
+    manager_pid = load_pid()
+    if not _process_is_alive(manager_pid):
+        return None
+    state = load_state()
+    if not isinstance(state, dict):
+        return None
+    if str(state.get("runtimeState") or "").strip().lower() == "stopping":
+        return state
+    command = state.get("command") if isinstance(state.get("command"), dict) else {}
+    if not str(command.get("activeCommandId") or "").strip():
+        return None
+    if str(command.get("activeType") or "").strip() != "close_workbench":
+        return None
+    if not bool(command.get("stopManager")):
+        return None
+    return state
+
+
+def _complete_rejected_shutdown_command(command: dict[str, Any], *, shutdown_state: dict[str, Any]) -> None:
+    command_type = str(command.get("type") or "").strip()
+    args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    duplicate_shutdown = command_type == "close_workbench" and bool(args.get("stopManager"))
+    message = (
+        "Runtime manager shutdown is already in progress."
+        if duplicate_shutdown
+        else "Runtime manager is shutting down; command was not queued."
+    )
+    result: dict[str, Any] = {
+        "commandId": str(command.get("commandId") or "").strip(),
+        "accepted": True,
+        "completed": True,
+        "ok": duplicate_shutdown,
+        "message": message,
+        "stateVersion": int(shutdown_state.get("stateVersion") or 0),
+        "runtimeManagerStopping": True,
+    }
+    if not duplicate_shutdown:
+        result["errorType"] = "RuntimeManagerStoppingError"
+    _atomic_write_json(RESULTS_DIR / f"{command['commandId']}.json", result)
+
+
+def _process_is_alive(pid: int) -> bool:
+    normalized_pid = int(pid or 0)
+    if normalized_pid <= 0:
+        return False
+    if os.name == "nt":
+        return _process_is_alive_windows(normalized_pid)
+    try:
+        os.kill(normalized_pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _process_is_alive_windows(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(process_query_limited_information, False, int(pid))
+    if not handle:
+        return False
+    try:
+        exit_code = wintypes.DWORD()
+        if kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)) == 0:
+            return False
+        return int(exit_code.value) == still_active
+    finally:
+        kernel32.CloseHandle(handle)
