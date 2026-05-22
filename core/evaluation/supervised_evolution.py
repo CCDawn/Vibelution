@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import re
 import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -22,6 +24,15 @@ DEFAULT_BUNDLE_TEMPLATE_DIR = Path(__file__).resolve().parent / "bundles"
 ProgressCallback = Callable[[Dict[str, Any]], None]
 CheckpointCallback = Callable[[Dict[str, Any]], None]
 CancelChecker = Callable[[], object]
+_SAFE_REPORT_FILE_STEM_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_WINDOWS_RESERVED_FILE_STEMS = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 
 
 class SupervisedEvolutionCancelled(RuntimeError):
@@ -31,6 +42,21 @@ class SupervisedEvolutionCancelled(RuntimeError):
         super().__init__(reason)
         self.reason = reason
         self.session_id = session_id
+
+
+def _safe_report_file_stem(value: str) -> str:
+    raw = str(value or "").strip()
+    stem = _SAFE_REPORT_FILE_STEM_RE.sub("-", raw).strip("._-")
+    if not stem:
+        stem = "report"
+    base_name = stem.split(".", 1)[0].upper()
+    should_hash = stem != raw or len(stem) > 120 or base_name in _WINDOWS_RESERVED_FILE_STEMS
+    if base_name in _WINDOWS_RESERVED_FILE_STEMS:
+        stem = f"report-{stem}"
+    if should_hash:
+        digest = hashlib.sha256(raw.encode("utf-8", errors="replace")).hexdigest()[:10]
+        stem = f"{stem[:108].rstrip('._-') or 'report'}-{digest}"
+    return stem
 
 
 def _workspace_bundle_path(root: Path, bundle_name: str) -> Path:
@@ -1137,7 +1163,7 @@ def run_supervised_evolution_session(
             report_path = None
             session_dir = dirs["sessions"] / session_id
             session_dir.mkdir(parents=True, exist_ok=True)
-            report_name = f"{case_id}_{role}.json"
+            report_name = f"{_safe_report_file_stem(f'{case_id}_{role}')}.json"
             report_path = session_dir / report_name
             report_path.write_text(json.dumps(asdict(result), ensure_ascii=False, indent=2), encoding="utf-8")
             _emit_progress(

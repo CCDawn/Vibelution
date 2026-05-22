@@ -274,6 +274,52 @@ def test_selection_policy_proposal_path_is_safe_for_unsafe_case_id(tmp_path: Pat
     assert proposal["proposal_id"].startswith(r"demo_bundle:..\escape:")
 
 
+def test_supervised_run_report_paths_are_safe_for_unsafe_case_id(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "benchmark": "dry",
+                "bundle_name": "supervised_evolution_dry_run_v1",
+                "cases": [
+                    {
+                        "case_id": r"..\escape",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "baseline",
+                        "candidate_prompt": "candidate",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_runner(**kwargs):
+        return _fake_result("success", f"{kwargs['prompt']} ok", kwargs["prompt"])
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    session_dir = tmp_path / "workspace" / "supervised_evolution" / "sessions" / decision.session_id
+    for run in [*decision.baseline_runs, *decision.candidate_runs]:
+        report_path = Path(run.report_path).resolve()
+        assert report_path.exists()
+        assert report_path.is_relative_to(session_dir.resolve())
+        assert "\\" not in report_path.name
+        assert "/" not in report_path.name
+        assert run.case_id == r"..\escape"
+
+    persisted = json.loads(Path(decision.decision_path).read_text(encoding="utf-8"))
+    assert persisted["baseline_runs"][0]["case_id"] == r"..\escape"
+    assert persisted["candidate_runs"][0]["case_id"] == r"..\escape"
+
+
 def test_run_supervised_evolution_session_records_materialized_prompt(tmp_path: Path):
     bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
     bundle_dir.mkdir(parents=True, exist_ok=True)
