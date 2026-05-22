@@ -725,7 +725,6 @@
 .timelineFields,
 .timelineRawRefs,
 .sceneRawHeader,
-.rawFileTabs,
 .sceneMetricGrid {
   display: flex;
   flex-wrap: wrap;
@@ -1043,22 +1042,80 @@
   justify-content: space-between;
 }
 
-.rawFileTabs {
-  gap: 8px;
-  max-height: 118px;
+.packageSectionList {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
   overflow: auto;
   padding-right: 4px;
+}
+
+.packageSection {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.packageSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.packageSectionHeader h4 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.packageSectionHeader span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-panel-strong);
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+}
+
+.packageSectionEmpty {
+  padding: 8px 10px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.rawFileTabs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
 }
 
 .rawFileButton {
   display: grid;
   gap: 3px;
-  min-width: 150px;
+  min-width: 0;
   padding: 8px 10px;
   text-align: left;
   color: var(--fg-secondary);
   cursor: pointer;
   font-size: 0.78rem;
+}
+
+.rawFileButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .rawFileButtonActive {
