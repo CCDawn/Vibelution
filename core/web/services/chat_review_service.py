@@ -23,6 +23,7 @@ from core.evaluation.chat_dataset_capture import (
 from core.evaluation.chat_review_queue import get_review_item, list_review_items, normalize_review_status
 
 from .i18n import get_web_language, text_for
+from .runtime_scene_service import record_runtime_scene_event
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -209,6 +210,110 @@ def reject_chat_review_candidate(
     )
 
 
+def bulk_discard_chat_review_candidates(
+    candidate_ids: list[str],
+    *,
+    reviewer_note: str = "",
+    reason_code: str = "bulk_delete",
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    root = (project_root or PROJECT_ROOT).resolve()
+    paths = resolve_chat_dataset_paths(project_root=root)
+    normalized_ids = _dedupe_candidate_ids(candidate_ids)
+    results: list[dict[str, str]] = []
+
+    for candidate_id in normalized_ids:
+        item = get_review_item(candidate_id, paths.review_queue_path)
+        if item is None:
+            results.append(
+                {
+                    "candidateId": candidate_id,
+                    "status": "not_found",
+                    "reason": text_for(get_web_language(), zh="未找到该样本。", en="Candidate not found."),
+                }
+            )
+            continue
+
+        status = _status(item)
+        if status != "pending":
+            results.append(
+                {
+                    "candidateId": candidate_id,
+                    "status": "skipped",
+                    "reason": text_for(
+                        get_web_language(),
+                        zh=f"样本已经是 {status} 状态。",
+                        en=f"Candidate is already {status}.",
+                    ),
+                }
+            )
+            continue
+
+        try:
+            payload = _load_candidate_payload_for_discard(item)
+            discard_chat_candidate(
+                candidate_payload=payload,
+                project_root=root,
+                reviewer_note=reviewer_note,
+                reason_code=reason_code,
+            )
+        except Exception as exc:  # noqa: BLE001 - per-item failure should not abort the whole batch.
+            results.append(
+                {
+                    "candidateId": candidate_id,
+                    "status": "failed",
+                    "reason": str(exc) or exc.__class__.__name__,
+                }
+            )
+            continue
+
+        results.append(
+            {
+                "candidateId": candidate_id,
+                "status": "discarded",
+                "reason": text_for(
+                    get_web_language(),
+                    zh="已丢弃并保留审计记录。",
+                    en="Discarded with an audit record.",
+                ),
+            }
+        )
+
+    discarded_count = sum(1 for item in results if item["status"] == "discarded")
+    skipped_count = sum(1 for item in results if item["status"] in {"skipped", "not_found"})
+    failed_count = sum(1 for item in results if item["status"] == "failed")
+    payload = {
+        "requestedCount": len(normalized_ids),
+        "discardedCount": discarded_count,
+        "skippedCount": skipped_count,
+        "failedCount": failed_count,
+        "results": results,
+        "summary": text_for(
+            get_web_language(),
+            zh=f"已丢弃 {discarded_count} 个待审样本，跳过 {skipped_count} 个，失败 {failed_count} 个。",
+            en=f"Discarded {discarded_count} pending samples, skipped {skipped_count}, failed {failed_count}.",
+        ),
+    }
+    _record_chat_review_scene_event(
+        "bulk_discard",
+        "chat_review.bulk_discard.completed",
+        message="Bulk discarded chat review candidates.",
+        level="warning" if failed_count else "info",
+        outcome="failed" if failed_count and not discarded_count else "completed",
+        fields={
+            "requestedCount": len(normalized_ids),
+            "discardedCount": discarded_count,
+            "skippedCount": skipped_count,
+            "failedCount": failed_count,
+            "candidateIds": normalized_ids,
+            "discardedIds": [item["candidateId"] for item in results if item["status"] == "discarded"],
+            "skippedIds": [item["candidateId"] for item in results if item["status"] in {"skipped", "not_found"}],
+            "failedIds": [item["candidateId"] for item in results if item["status"] == "failed"],
+        },
+    )
+    return payload
+
+
 def _get_pending_candidate(candidate_id: str, *, project_root: Path) -> dict[str, Any]:
     paths = resolve_chat_dataset_paths(project_root=project_root)
     item = get_review_item(str(candidate_id or "").strip(), paths.review_queue_path)
@@ -226,6 +331,53 @@ def _get_pending_candidate(candidate_id: str, *, project_root: Path) -> dict[str
             )
         )
     return item
+
+
+def _dedupe_candidate_ids(candidate_ids: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_id in candidate_ids or []:
+        candidate_id = str(raw_id or "").strip()
+        if not candidate_id or candidate_id in seen:
+            continue
+        seen.add(candidate_id)
+        normalized.append(candidate_id)
+    return normalized
+
+
+def _load_candidate_payload_for_discard(item: dict[str, Any]) -> dict[str, Any]:
+    raw_excerpt_path = str(item.get("raw_excerpt_path") or "").strip()
+    if raw_excerpt_path:
+        try:
+            return load_candidate_payload(raw_excerpt_path)
+        except Exception:
+            fallback = dict(item)
+            fallback.setdefault("raw_excerpt_path", raw_excerpt_path)
+            return fallback
+    return dict(item)
+
+
+def _record_chat_review_scene_event(
+    phase: str,
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_review",
+            phase,
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+        )
+    except Exception:
+        return
 
 
 def _status(item: dict[str, Any]) -> str:
@@ -434,6 +586,7 @@ __all__ = [
     "ChatReviewCandidateStateError",
     "ChatReviewDecisionValidationError",
     "approve_chat_review_candidate",
+    "bulk_discard_chat_review_candidates",
     "get_chat_review_queue",
     "reject_chat_review_candidate",
     "submit_chat_review_decision",
