@@ -31,7 +31,7 @@ type Notice = {
 const COPY = {
   zh: {
     title: "Reset 清理面",
-    subtitle: "只从后端白名单中选择清理项。保护区不会出现在勾选列表里，运行中的现场和当前浏览器 profile 会自动跳过。",
+    subtitle: "只从后端白名单中选择清理项。Agent 记忆现在作为高风险可选项单独出现，动态提示词和项目记忆仍固定保护，运行中的现场和当前浏览器 profile 会自动跳过。",
     inventory: "清理项",
     selected: "已选",
     selectAll: "全选可清理",
@@ -68,7 +68,7 @@ const COPY = {
   },
   en: {
     title: "Reset Cleanup",
-    subtitle: "Choose only from backend allow-list items. Protected zones never appear as checkboxes, and live scenes/current browser profile are skipped automatically.",
+    subtitle: "Choose only from backend allow-list items. Agent memory now appears as a separate high-risk item, dynamic prompts and project memory stay protected, and live scenes/current browser profile are skipped automatically.",
     inventory: "Cleanup items",
     selected: "selected",
     selectAll: "Select cleanable",

@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -34,22 +35,70 @@ def _seed_scene(project_root: Path, directory_name: str, scene_id: str, status: 
     return scene_dir
 
 
-def test_reset_summary_uses_allow_list_and_protects_memory(reset_project: Path):
+def test_reset_summary_includes_memory_as_optional_item(reset_project: Path):
+    _write(reset_project / "workspace" / "agent_brain.db", "db")
     _write(reset_project / "workspace" / "memory" / "long-term.md", "keep")
-    _write(reset_project / "workspace" / "prompts" / "dynamic.md", "keep")
+    _write(reset_project / "workspace" / "prompts" / "STATE_MEMORY.md", "state")
+    _write(reset_project / "workspace" / "prompts" / "DYNAMIC.md", "dynamic")
     _write(reset_project / "workspace" / "chat" / "chat_state.json", "{}")
     _write(reset_project / "web" / "dist" / "index.html", "<html></html>")
 
     summary = reset_service.get_reset_summary()
 
     item_ids = {item["id"] for item in summary["items"]}
+    assert "memory" in item_ids
     assert "chat_history" in item_ids
     assert "web_dist" in item_ids
     assert "workspace" not in item_ids
     assert summary["presets"] == []
     protected_paths = {path for group in summary["protected"] for path in group["paths"]}
-    assert "workspace/memory/" in protected_paths
-    assert "workspace/prompts/" in protected_paths
+    assert "workspace/agent_brain.db" not in protected_paths
+    assert "workspace/memory/" not in protected_paths
+    assert "workspace/prompts/" not in protected_paths
+    assert "workspace/prompts/STATE_MEMORY.md" not in protected_paths
+    assert "workspace/prompts/DYNAMIC.md" in protected_paths
+    assert ".docs/project-memory/" in protected_paths
+
+
+def test_preview_and_execute_memory_cleanup(reset_project: Path):
+    db_file = reset_project / "workspace" / "agent_brain.db"
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(db_file)) as conn:
+        conn.execute(
+            "CREATE TABLE LongTermMemory (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE GitCommit (commit_sha TEXT PRIMARY KEY, subject TEXT)"
+        )
+        conn.execute("INSERT INTO LongTermMemory (content) VALUES ('remember')")
+        conn.execute("INSERT INTO GitCommit (commit_sha, subject) VALUES ('abc123', 'keep')")
+    memory_file = _write(reset_project / "workspace" / "memory" / "long-term.md", "keep")
+    state_memory_file = _write(reset_project / "workspace" / "prompts" / "STATE_MEMORY.md", "state")
+    dynamic_prompt_file = _write(reset_project / "workspace" / "prompts" / "DYNAMIC.md", "keep")
+    _write(reset_project / "workspace" / "chat" / "chat_state.json", "{}")
+
+    preview = reset_service.preview_reset(["memory"])
+
+    assert preview["totals"]["deleteCount"] == 3
+    preview_paths = {item["path"] for item in preview["items"][0]["deleteCandidates"]}
+    assert preview_paths == {
+        "workspace/agent_brain.db",
+        "workspace/memory",
+        "workspace/prompts/STATE_MEMORY.md",
+    }
+
+    result = reset_service.execute_reset(["memory"], confirmed=True)
+
+    assert result["totals"]["deletedCount"] == 3
+    assert db_file.exists()
+    with sqlite3.connect(str(db_file)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM LongTermMemory").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM GitCommit").fetchone()[0] == 1
+    assert not memory_file.exists()
+    assert state_memory_file.exists()
+    assert state_memory_file.read_text(encoding="utf-8") == ""
+    assert dynamic_prompt_file.exists()
+    assert (reset_project / "workspace" / "chat" / "chat_state.json").exists()
 
 
 def test_preview_is_non_destructive_and_reports_candidates(reset_project: Path):
@@ -69,7 +118,9 @@ def test_execute_selected_items_deletes_only_allow_list_targets(reset_project: P
     _write(reset_project / "log_info" / "conversation_001.jsonl", "{}\n")
     _write(reset_project / "logs" / "agent_realtime.log", "runtime")
     _write(reset_project / "logs" / "runtime_scenes" / "keep" / "raw.log", "scene")
+    _write(reset_project / "workspace" / "agent_brain.db", "db")
     _write(reset_project / "workspace" / "memory" / "long-term.md", "keep")
+    _write(reset_project / "workspace" / "prompts" / "STATE_MEMORY.md", "state")
     _write(reset_project / "workspace" / "prompts" / "dynamic.md", "keep")
     _write(reset_project / "workspace" / "supervised_evolution" / "decision.json", "{}")
 
@@ -79,7 +130,9 @@ def test_execute_selected_items_deletes_only_allow_list_targets(reset_project: P
     assert not (reset_project / "log_info" / "conversation_001.jsonl").exists()
     assert not (reset_project / "logs" / "agent_realtime.log").exists()
     assert (reset_project / "logs" / "runtime_scenes" / "keep" / "raw.log").exists()
+    assert (reset_project / "workspace" / "agent_brain.db").exists()
     assert (reset_project / "workspace" / "memory" / "long-term.md").exists()
+    assert (reset_project / "workspace" / "prompts" / "STATE_MEMORY.md").exists()
     assert (reset_project / "workspace" / "prompts" / "dynamic.md").exists()
     assert (reset_project / "workspace" / "supervised_evolution" / "decision.json").exists()
 
