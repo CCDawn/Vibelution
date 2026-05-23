@@ -223,19 +223,32 @@ def make_tools_index_section(project_root: Path) -> SystemPromptSection:
 def make_git_rules_section(project_root: Path) -> SystemPromptSection:
     """Git 提交规则摘要 — 从工作流文档提炼运行时提醒。"""
     workflow_path = project_root / "workspace" / "prompts" / "GIT_WORKFLOW.md"
+    fallback_path = project_root / "core" / "core_prompt" / "GIT_WORKFLOW.md"
+
+    def _read_rules_source() -> Optional[str]:
+        for path in (workflow_path, fallback_path):
+            if not path.exists():
+                continue
+            try:
+                return path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+        return None
 
     def compute() -> Optional[str]:
-        if not workflow_path.exists():
+        content = _read_rules_source()
+        if not content:
             return None
         try:
-            return _build_git_rules_summary(workflow_path.read_text(encoding="utf-8"))
+            return _build_git_rules_summary(content)
         except Exception:
             return None
 
     is_empty = True
-    if workflow_path.exists():
+    content = _read_rules_source()
+    if content:
         try:
-            is_empty = not bool(_build_git_rules_summary(workflow_path.read_text(encoding="utf-8")))
+            is_empty = not bool(_build_git_rules_summary(content))
         except Exception:
             is_empty = True
 
@@ -292,8 +305,8 @@ def make_env_info_section(project_root: Path) -> SystemPromptSection:
             f"- 操作系统: {os_name} ({platform.version()}) [{platform.machine()}]",
             *command_discipline(os_name),
             f"- 项目根目录: {project_root}",
-            f"- 静态提示词位置: core/core_prompt/",
-            f"- 动态提示词位置: workspace/prompts/",
+            "- 静态提示词位置: core/core_prompt/",
+            "- 动态提示词位置: workspace/prompts/",
         ])
 
     return SystemPromptSection(
