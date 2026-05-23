@@ -64,6 +64,7 @@ from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 
 from core.llm import get_llm_client, discover_model, doctor_llm_profile
+from core.llm import LLMError
 
 # 导入工具
 from tools import Key_Tools
@@ -1476,10 +1477,15 @@ class SelfEvolvingAgent:
                     raise
                 except Exception as e:
                     attempt += 1
+                    llm_error_details = dict(getattr(e, "details", {}) or {}) if isinstance(e, LLMError) else {}
+                    reported_attempt = int(llm_error_details.get("attempt") or attempt or 1)
+                    reported_max_attempts = int(
+                        llm_error_details.get("max_attempts") or MAX_CONSECUTIVE_FAILURES
+                    )
                     recovery = plan_llm_recovery(
                         e,
-                        attempt=attempt,
-                        max_attempts=MAX_CONSECUTIVE_FAILURES,
+                        attempt=reported_attempt,
+                        max_attempts=reported_max_attempts,
                         config=getattr(self, "config", None),
                         role="primary",
                         current_profile_id=getattr(getattr(self, "_base_llm", None), "profile_id", None),
@@ -1491,8 +1497,8 @@ class SelfEvolvingAgent:
                     self._last_llm_error_retryable = is_retryable
                     self._last_llm_recovery_action = recovery.action
                     self._last_llm_error_message = f"{category}: {user_msg}".strip(": ")
-                    self._last_llm_failure_attempts = attempt
-                    self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
+                    self._last_llm_failure_attempts = reported_attempt
+                    self._last_llm_failure_max_attempts = reported_max_attempts
                     disable_streaming_for_retry = disable_streaming_for_retry or recovery.disable_streaming
                     disable_tools_for_retry = disable_tools_for_retry or recovery.disable_tools
                     fallback_profile_id_for_retry = (
@@ -1511,8 +1517,8 @@ class SelfEvolvingAgent:
                         "disable_tools_next_attempt": disable_tools_for_retry,
                         "request_context_compression": recovery.request_context_compression,
                         "fallback_profile_id": recovery.fallback_profile_id,
-                        "attempt": attempt,
-                        "max_attempts": MAX_CONSECUTIVE_FAILURES,
+                        "attempt": reported_attempt,
+                        "max_attempts": reported_max_attempts,
                         "model": getattr(self.config.llm, "model_name", ""),
                         "provider": getattr(self.config.llm, "provider", ""),
                         "api_base": getattr(self.config.llm, "api_base", ""),
@@ -1542,6 +1548,9 @@ class SelfEvolvingAgent:
                         traceback=llm_error_traceback,
                         details=error_details,
                     )
+
+                    if isinstance(e, LLMError):
+                        return None
 
                     if recovery.request_context_compression:
                         request_compression(

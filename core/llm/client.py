@@ -91,6 +91,19 @@ def _llm_retry_event_fields(
     }
 
 
+def _with_retry_details(llm_error: LLMError, *, attempt: int, max_attempts: int) -> LLMError:
+    details = dict(getattr(llm_error, "details", {}) or {})
+    details.update(
+        {
+            "attempt": int(attempt),
+            "max_attempts": int(max_attempts),
+            "retry_budget_exhausted": int(attempt) >= int(max_attempts),
+        }
+    )
+    llm_error.details = details
+    return llm_error
+
+
 def _default_completion_backend(payload: Dict[str, Any]) -> Any:
     try:
         from litellm import completion
@@ -412,6 +425,7 @@ class LLMClient:
                 return self._backend(payload)
             except Exception as exc:
                 llm_error = classify_exception(exc)
+                llm_error = _with_retry_details(llm_error, attempt=attempt, max_attempts=max_attempts)
                 last_error = llm_error
                 error_category = llm_error.category
                 fields = _llm_retry_event_fields(
@@ -544,6 +558,7 @@ class LLMClient:
                 return
             except Exception as exc:
                 llm_error = classify_exception(exc)
+                llm_error = _with_retry_details(llm_error, attempt=attempt, max_attempts=max_attempts)
                 if emitted:
                     _record_llm_scene_event(
                         "stream",
