@@ -11,6 +11,9 @@ from config import AppConfig
 from .recovery import LLMRecoveryDecision
 
 
+_PROVIDER_RETRY_ACTIONS = {"retry_with_backoff", "retry_after_backoff"}
+
+
 def attach_recovery_fallback(
     decision: LLMRecoveryDecision,
     *,
@@ -78,10 +81,12 @@ def _score_candidate(
     current_profile,
     current_provider,
 ) -> int:
+    profile_id = str(getattr(profile, "profile_id", "") or "")
     score = 1
     if provider.provider_id != current_provider.provider_id:
         score += 2
-    if profile.profile_id.startswith("fallback"):
+    explicit_fallback = profile_id.startswith("fallback")
+    if explicit_fallback:
         score += 1
 
     if action in {"disable_tools", "disable_tools_and_retry_without_streaming"}:
@@ -103,8 +108,10 @@ def _score_candidate(
         score += 5 + min(context_window // 1000, 1000)
         return score
 
-    if action in {"retry_with_backoff", "retry_after_backoff"}:
+    if action in _PROVIDER_RETRY_ACTIONS:
         if provider.provider_id == current_provider.provider_id:
+            return 0
+        if not explicit_fallback:
             return 0
         return score
 

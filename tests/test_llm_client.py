@@ -976,6 +976,32 @@ def test_recovery_decision_attaches_fallback_profile():
     assert enriched.fallback_profile_id == "fallback_backup"
 
 
+def test_provider_retry_does_not_use_compression_profile_as_fallback():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.remote_main.kind": "relay",
+            "llm.providers.remote_main.api_key": "test-key",
+            "llm.providers.remote_main.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.compression.provider_id": "remote_main",
+            "llm.profiles.compression.model": "gpt-5.5",
+            "llm.profiles.compression.streaming": False,
+        }
+    )
+
+    fallback = select_recovery_profile(
+        config,
+        current_profile_id="primary",
+        action="retry_with_backoff",
+    )
+
+    assert fallback is None
+
+
 def test_context_recovery_uses_larger_context_profile_only():
     config = make_config(
         **{
