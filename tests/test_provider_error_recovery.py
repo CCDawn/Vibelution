@@ -166,6 +166,83 @@ def test_session_failed_result_sanitizes_provider_upstream_error(tmp_path, monke
     assert payload["currentPhase"] == "failed"
 
 
+def test_session_provider_failure_circuit_breaker_stops_continuation_and_logs_event(tmp_path, monkeypatch):
+    _seed_session(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_WORK_RUN_STORE",
+        session_service.WorkRunStore(tmp_path / ".runtime" / "runtime-manager" / "work_runs"),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: type("Cfg", (), {"max_continuation_turns": 4})(),
+    )
+    recorded_events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    provider_error = (
+        'server_error: litellm.ServiceUnavailableError: ServiceUnavailableError: OpenAIException - '
+        '{"error":{"message":"Service temporarily unavailable","type":"api_error"}}'
+    )
+    calls = []
+
+    class ProviderFailingAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            calls.append(initial_prompt)
+            return {
+                "status": "failed",
+                "summary": provider_error,
+                "raw_output": provider_error,
+                "error": provider_error,
+                "outcome": "blocked",
+                "tool_call_count": 0,
+                "tool_trace": [],
+                "llm_failure": {
+                    "category": "server_error",
+                    "retryable": True,
+                    "recovery_action": "retry_with_backoff",
+                    "attempts": 5,
+                    "max_attempts": 5,
+                    "consecutive_failures": 1,
+                    "stop_reason": "provider unavailable",
+                },
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ProviderFailingAgent())
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
+
+    payload = session_service.submit_session_message("session-live", "请用一句话回复 ping")
+
+    assert calls == ["请用一句话回复 ping"]
+    assert payload["currentPhase"] == "failed"
+    assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
+    latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
+    assert latest_run is not None
+    assert latest_run["status"] == "failed"
+    assert latest_run["errorType"] == "provider_upstream_error"
+
+    circuit_events = [
+        kwargs
+        for args, kwargs in recorded_events
+        if len(args) >= 3 and args[2] == "conversation.turn_circuit_breaker"
+    ]
+    assert circuit_events
+    fields = circuit_events[-1]["fields"]
+    assert fields["llmFailureCategory"] == "server_error"
+    assert fields["attempts"] == 5
+    assert fields["maxAttempts"] == 5
+    assert fields["continuationTurn"] == 1
+
+
 def test_session_exception_failure_sanitizes_provider_error_and_logs_raw(tmp_path, monkeypatch):
     _seed_session(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
