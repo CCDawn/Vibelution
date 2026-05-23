@@ -7,11 +7,14 @@ from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
 from core.web.services.session_service import (
+    SessionChatReviewCandidateExistsError,
     SessionBusyError,
     SessionNotFoundError,
     SessionValidationError,
+    create_chat_review_candidate_from_session,
     create_chat_session,
     delete_chat_session,
+    edit_and_resubmit_session_message,
     get_session_detail,
     list_sessions,
     request_stop_session_turn,
@@ -29,6 +32,10 @@ class SessionMessagePayload(BaseModel):
     mentalModelEnabled: bool | None = None
     turnMode: str = ""
     writeIntent: bool | None = None
+
+
+class SessionMessageEditPayload(SessionMessagePayload):
+    messageId: str = ""
 
 
 class SessionUpdatePayload(BaseModel):
@@ -106,9 +113,40 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload) -> d
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/sessions/{session_id}/messages/edit-resubmit", status_code=status.HTTP_202_ACCEPTED)
+def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPayload) -> dict:
+    try:
+        return edit_and_resubmit_session_message(
+            session_id,
+            payload.messageId,
+            payload.content,
+            mental_model_enabled=payload.mentalModelEnabled,
+            turn_mode=payload.turnMode,
+            write_intent=payload.writeIntent,
+        )
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/sessions/{session_id}/stop", status_code=status.HTTP_202_ACCEPTED)
 def session_stop_turn(session_id: str) -> dict:
     try:
         return request_stop_session_turn(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/sessions/{session_id}/chat-review-candidate", status_code=status.HTTP_201_CREATED)
+def session_create_chat_review_candidate(session_id: str) -> dict:
+    try:
+        return create_chat_review_candidate_from_session(session_id)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (SessionBusyError, SessionChatReviewCandidateExistsError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

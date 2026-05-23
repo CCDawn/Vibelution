@@ -285,6 +285,120 @@
   white-space: nowrap;
 }
 
+.featurePresetBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.featurePresetScope {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: var(--accent-cool);
+  font-size: 0.72rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.featurePresetGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.featureToggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: center;
+  min-width: 0;
+  min-height: 58px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 74%, transparent);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.featureToggle:hover {
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-card) 88%, var(--accent-cool) 8%);
+}
+
+.featureToggle:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 70%, white);
+  outline-offset: 2px;
+}
+
+.featureToggleActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-card));
+  color: var(--fg-primary);
+}
+
+.featureToggleText {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.featureToggleText strong,
+.featureToggleText span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.featureToggleText strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  line-height: 1.15;
+  white-space: nowrap;
+}
+
+.featureToggleText span {
+  display: -webkit-box;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.featureToggleState {
+  align-self: start;
+  min-width: 34px;
+  padding: 3px 5px;
+  border-radius: 999px;
+  background: rgba(236, 230, 220, 0.06);
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.featureToggleActive .featureToggleState {
+  background: color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  color: var(--accent-cool);
+}
+
+.featurePresetNote {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .compactDetails {
   margin-top: 8px;
   padding-top: 6px;
@@ -760,7 +874,6 @@
   display: flex;
   gap: 8px;
   padding: 14px 16px 0;
-  border-bottom: 1px solid var(--border-strong);
   overflow-x: auto;
   align-items: flex-end;
 }
@@ -779,7 +892,6 @@
   color: var(--fg-primary);
   background: var(--surface-panel-strong);
   border-color: var(--border-soft);
-  border-bottom-color: transparent;
 }
 
 .fileTab {
@@ -795,7 +907,6 @@
 .fileTabActive {
   background: var(--surface-panel-strong);
   border-color: var(--border-soft);
-  border-bottom-color: transparent;
 }
 
 .fileTabButton,
@@ -835,6 +946,26 @@
   min-height: 0;
   background: var(--surface-panel-strong);
   overflow: hidden;
+}
+
+.conversationFrame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inlineNotice {
+  margin: 10px 14px 0;
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--state-error) 24%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--state-error) 10%, transparent);
+  color: var(--state-error);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .emptySurface {
@@ -963,6 +1094,17 @@
   line-height: 1.5;
 }
 
+.panelNotice {
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--state-error) 24%, var(--border-soft));
+  border-radius: 7px;
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 10%, transparent);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 .sessionItem {
   position: relative;
   display: grid;
@@ -1082,13 +1224,21 @@
   opacity: 0.45;
 }
 
+.sessionItemNotice,
 .sessionItemError {
   grid-column: 1 / -1;
   margin: 0;
-  color: var(--state-error);
   font-size: 0.82rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+.sessionItemNotice {
+  color: var(--state-success);
+}
+
+.sessionItemError {
+  color: var(--state-error);
 }
 
 .treeDir {

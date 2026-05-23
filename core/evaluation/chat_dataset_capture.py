@@ -129,29 +129,37 @@ class ChatDatasetCaptureService:
         session_id: str,
         source_log_path: str,
         turns: Sequence[ChatTurnRecord],
+        require_auto_capture: bool = True,
+        apply_quality_filters: bool = True,
+        min_turns: int | None = None,
+        max_turns: int | None = None,
     ) -> ChatDatasetCandidate | None:
         capture = self.config.evolution.chat_dataset
-        if not self.should_capture_mode(mode):
+        if require_auto_capture:
+            if not self.should_capture_mode(mode):
+                return None
+        elif not capture.enabled:
             return None
 
         segment = build_latest_task_segment(
             turns,
             session_id=session_id,
             mode=mode,
-            min_turns=capture.min_turns,
-            max_turns=capture.max_turns,
+            min_turns=min_turns if min_turns is not None else capture.min_turns,
+            max_turns=max_turns if max_turns is not None else capture.max_turns,
         )
         if segment is None:
             return None
 
         quality_signals = collect_quality_signals(segment)
-        exclusion_reasons = collect_exclusion_reasons(
-            segment,
-            exclude_pure_chitchat=bool(capture.exclude_pure_chitchat),
-            require_tool_call_or_analysis_or_conclusion=bool(capture.require_tool_call_or_analysis_or_conclusion),
-        )
-        if exclusion_reasons:
-            return None
+        if apply_quality_filters:
+            exclusion_reasons = collect_exclusion_reasons(
+                segment,
+                exclude_pure_chitchat=bool(capture.exclude_pure_chitchat),
+                require_tool_call_or_analysis_or_conclusion=bool(capture.require_tool_call_or_analysis_or_conclusion),
+            )
+            if exclusion_reasons:
+                return None
 
         raw_path = self.paths.candidate_dir / f"{_safe_candidate_file_stem(segment.segment_id)}.json"
         if raw_path.exists():

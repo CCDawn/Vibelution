@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Apple,
+  BookPlus,
   Check,
   ChevronRight,
   HeartHandshake,
@@ -34,11 +35,14 @@ import {
   PetActionResponse,
   PetSummary,
   RuntimeSummary,
+  SessionChatReviewCandidateResponse,
   SessionDetail,
   SessionSummary,
   SessionStreamEvent,
+  ConversationMessage,
 } from "../api/types";
 import { ConversationView } from "../components/conversation/ConversationView";
+import type { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -50,9 +54,12 @@ import {
   formatRelativeTime,
 } from "./chatShellFormat";
 import {
+  deriveSessionDetailQueryErrorState,
+  deriveSessionListQueryErrorState,
   markSessionDetailRunning,
   markSessionSummaryRunning,
   mergeSessionDetailIntoSummaries,
+  shouldAcceptSessionStreamEvent,
 } from "./chatSessionState";
 import { buildVisiblePanelRows, getPetAvatarPresetKey, getPetAvatarSymbol } from "./chatCompactPanel";
 import {
@@ -77,12 +84,47 @@ const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 
 type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
+type FeaturePresetKey = "mentalModel" | "planningMode" | "goalMode" | "toolBoost";
 
 type DragState = {
   side: ResizableSide;
   startX: number;
   startLeftWidth: number;
   startRightWidth: number;
+};
+
+const CHAT_FEATURE_PRESETS: Array<{
+  key: FeaturePresetKey;
+  labelKey: TranslationKey;
+  hintKey: TranslationKey;
+}> = [
+  {
+    key: "mentalModel",
+    labelKey: "chatFeatureMentalModel",
+    hintKey: "chatFeatureMentalModelHint",
+  },
+  {
+    key: "planningMode",
+    labelKey: "chatFeaturePlanningMode",
+    hintKey: "chatFeaturePlanningModeHint",
+  },
+  {
+    key: "goalMode",
+    labelKey: "chatFeatureGoalMode",
+    hintKey: "chatFeatureGoalModeHint",
+  },
+  {
+    key: "toolBoost",
+    labelKey: "chatFeatureToolBoost",
+    hintKey: "chatFeatureToolBoostHint",
+  },
+];
+
+const DEFAULT_CHAT_FEATURE_PRESETS: Record<FeaturePresetKey, boolean> = {
+  mentalModel: true,
+  planningMode: false,
+  goalMode: false,
+  toolBoost: false,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -272,6 +314,7 @@ export function ChatCodingRoute() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
+  const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionStreamConnected, setSessionStreamConnected] = useState(false);
@@ -281,6 +324,9 @@ export function ChatCodingRoute() {
   );
   const [mentalModelToggleHydrated, setMentalModelToggleHydrated] = useState<boolean>(
     () => readStoredMentalModelToggle() !== null,
+  );
+  const [featurePresetState, setFeaturePresetState] = useState<Record<FeaturePresetKey, boolean>>(
+    DEFAULT_CHAT_FEATURE_PRESETS,
   );
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const requestedSessionId = useMemo(() => {
@@ -430,6 +476,61 @@ export function ChatCodingRoute() {
     },
   });
 
+  const editResubmitMutation = useMutation({
+    mutationFn: async (
+      {
+        sessionId,
+        messageId,
+        content,
+        mentalModelEnabled,
+      }: {
+        sessionId: string;
+        messageId: string;
+        content: string;
+        mentalModelEnabled: boolean;
+      },
+    ) =>
+      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/messages/edit-resubmit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ messageId, content, mentalModelEnabled }),
+      }),
+    onMutate: async (variables) => {
+      queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
+      queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions(), (sessions) =>
+        markSessionSummaryRunning(sessions, variables.sessionId),
+      );
+    },
+    onSuccess: (nextDetail, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+      }));
+      setSessionDrafts((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+      }));
+      setSessionEditTargets((current) => {
+        const { [variables.sessionId]: _removed, ...remaining } = current;
+        return remaining;
+      });
+      syncSessionDetail(nextDetail);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+    onError: (error, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(error, t("editResubmitFailed")),
+      }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+  });
+
   const stopTurnMutation = useMutation({
     mutationFn: async ({ sessionId }: { sessionId: string }) =>
       fetchJson<SessionDetail>(`/api/sessions/${sessionId}/stop`, {
@@ -544,6 +645,34 @@ export function ChatCodingRoute() {
     },
   });
 
+  const addSessionToReviewMutation = useMutation({
+    mutationFn: async ({ sessionId }: { sessionId: string }) =>
+      fetchJson<SessionChatReviewCandidateResponse>(
+        `/api/sessions/${sessionId}/chat-review-candidate`,
+        {
+          method: "POST",
+        },
+      ),
+    onSuccess: (payload, variables) => {
+      const detail = payload.summary
+        ? `${t("addSessionToReviewSucceeded")} ${payload.summary}`
+        : t("addSessionToReviewSucceeded");
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: detail,
+        __sessions__: "",
+      }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.evolutionChatReview() });
+    },
+    onError: (error, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(error, t("addSessionToReviewFailed")),
+      }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.evolutionChatReview() });
+    },
+  });
+
   const petActionMutation = useMutation({
     mutationFn: async ({ action }: { action: PetInteractionAction }) =>
       fetchJson<PetActionResponse>("/api/pet/actions", {
@@ -598,7 +727,7 @@ export function ChatCodingRoute() {
       } catch {
         return;
       }
-      if (payload.type !== "session_detail" || !payload.detail) {
+      if (!shouldAcceptSessionStreamEvent(payload, activeSessionId)) {
         return;
       }
       syncSessionDetail(payload.detail);
@@ -731,13 +860,26 @@ export function ChatCodingRoute() {
   const runtime = runtimeQuery.data;
   const pet = petQuery.data;
   const detail = sessionDetailQuery.data;
+  const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError);
+  const sessionsErrorState = deriveSessionListQueryErrorState(sessionsQuery.data, sessionsQuery.isError);
+  const sessionDetailErrorMessage = sessionDetailQuery.isError
+    ? describeError(sessionDetailQuery.error, t("loadFailed"))
+    : "";
+  const sessionsErrorMessage = sessionsQuery.isError
+    ? describeError(sessionsQuery.error, t("loadFailed"))
+    : "";
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
   const activeComposerError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
+  const activeEditTarget = activeSessionId ? sessionEditTargets[activeSessionId] ?? null : null;
   const submitMutationMatchesActiveSession =
     submitTurnMutation.variables?.sessionId === activeSessionId;
+  const editResubmitMutationMatchesActiveSession =
+    editResubmitMutation.variables?.sessionId === activeSessionId;
   const stopMutationMatchesActiveSession =
     stopTurnMutation.variables?.sessionId === activeSessionId;
-  const submitPending = submitTurnMutation.isPending && submitMutationMatchesActiveSession;
+  const submitPending =
+    (submitTurnMutation.isPending && submitMutationMatchesActiveSession)
+    || (editResubmitMutation.isPending && editResubmitMutationMatchesActiveSession);
   const sessionRunning = isRunningPhase(detail?.currentPhase);
   const sessionStopping = isStoppingPhase(detail?.currentPhase) || Boolean(detail?.stopRequested);
   const sessionBusy = isBusyPhase(detail?.currentPhase);
@@ -753,9 +895,11 @@ export function ChatCodingRoute() {
       ? t("loadingSession")
       : sessionStopping
         ? t("sessionStoppingPlaceholder")
-      : sessionBusy
-        ? t("sessionBusyPlaceholder")
-        : t("messageInputPlaceholder");
+        : sessionBusy
+          ? t("sessionBusyPlaceholder")
+          : activeEditTarget
+            ? t("editMessagePlaceholder")
+          : t("messageInputPlaceholder");
   const contextPercent = contextUsagePercent(
     runtime?.contextUsage.used ?? 0,
     runtime?.contextUsage.limit ?? 0,
@@ -819,8 +963,8 @@ export function ChatCodingRoute() {
     }
   })();
   const sessionStateLine = runtime?.sessionStateLine
-    ?? (sessionDetailQuery.isError
-      ? describeError(sessionDetailQuery.error, t("loadFailed"))
+    ?? (sessionDetailErrorState.blockingError
+      ? sessionDetailErrorMessage
       : detail?.taskSummary || t("preparingShell"));
   const activeTask = detail?.activeTask ?? null;
   const sessionStateValue = String(runtime?.sessionState ?? detail?.currentPhase ?? "idle")
@@ -978,11 +1122,55 @@ export function ChatCodingRoute() {
     if (!content || composerDisabled) {
       return;
     }
+    if (activeEditTarget) {
+      editResubmitMutation.mutate({
+        sessionId: activeSessionId,
+        messageId: activeEditTarget.messageId,
+        content,
+        mentalModelEnabled: mentalModelEnabledForNextTurn,
+      });
+      return;
+    }
     submitTurnMutation.mutate({
       sessionId: activeSessionId,
       content,
       mentalModelEnabled: mentalModelEnabledForNextTurn,
     });
+  }
+
+  function handleEditUserMessage(message: ConversationMessage) {
+    if (!activeSessionId || sessionBusy) {
+      return;
+    }
+    setSessionEditTargets((current) => ({
+      ...current,
+      [activeSessionId]: {
+        messageId: message.id,
+        original: message.content,
+      },
+    }));
+    setSessionDrafts((current) => ({
+      ...current,
+      [activeSessionId]: message.content,
+    }));
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [activeSessionId]: "",
+    }));
+  }
+
+  function handleCancelEditMessage() {
+    if (!activeSessionId) {
+      return;
+    }
+    setSessionEditTargets((current) => {
+      const { [activeSessionId]: _removed, ...remaining } = current;
+      return remaining;
+    });
+    setSessionDrafts((current) => ({
+      ...current,
+      [activeSessionId]: "",
+    }));
   }
 
   function handleStopTurn() {
@@ -1017,6 +1205,23 @@ export function ChatCodingRoute() {
       __sessions__: "",
     }));
     deleteSessionMutation.mutate({ sessionId: session.id });
+  }
+
+  function handleAddSessionToReview(session: SessionSummary) {
+    if (isBusyPhase(session.currentPhase || session.status)) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: t("addSessionToReviewBusy"),
+        __sessions__: "",
+      }));
+      return;
+    }
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [session.id]: "",
+      __sessions__: "",
+    }));
+    addSessionToReviewMutation.mutate({ sessionId: session.id });
   }
 
   function beginRenameSession(session: SessionSummary) {
@@ -1100,6 +1305,13 @@ export function ChatCodingRoute() {
     setChatPanelWidths({ rightPanelWidth: Math.round(delta) });
   }
 
+  const toggleFeaturePreset = useCallback((key: FeaturePresetKey) => {
+    setFeaturePresetState((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  }, []);
+
   const layoutStyle = useMemo(
     () =>
       ({
@@ -1133,6 +1345,39 @@ export function ChatCodingRoute() {
               ))}
             </div>
           ) : null}
+        </section>
+
+        <section className={`${styles.leftBlock} ${styles.featurePresetBlock}`}>
+          <div className={styles.sectionHeader}>
+            <div className={styles.sectionIdentity}>
+              <p className={styles.blockEyebrow}>{t("chatFeaturePanel")}</p>
+              <h3 className={styles.sectionTitle}>{t("chatFeaturePanelTitle")}</h3>
+            </div>
+            <span className={styles.featurePresetScope}>{t("chatFeaturePanelScope")}</span>
+          </div>
+          <div className={styles.featurePresetGrid}>
+            {CHAT_FEATURE_PRESETS.map((item) => {
+              const enabled = featurePresetState[item.key];
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  className={enabled ? `${styles.featureToggle} ${styles.featureToggleActive}` : styles.featureToggle}
+                  aria-pressed={enabled}
+                  onClick={() => toggleFeaturePreset(item.key)}
+                >
+                  <span className={styles.featureToggleText}>
+                    <strong>{t(item.labelKey)}</strong>
+                    <span>{t(item.hintKey)}</span>
+                  </span>
+                  <span className={styles.featureToggleState}>
+                    {enabled ? t("chatFeatureEnabled") : t("chatFeatureDisabled")}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className={styles.featurePresetNote}>{t("chatFeaturePanelFrontendOnlyHint")}</p>
         </section>
 
         <section className={styles.leftBlock}>
@@ -1362,40 +1607,54 @@ export function ChatCodingRoute() {
         <div className={styles.centerSurface}>
           {!activeSessionId && !sessionsQuery.isPending ? (
             <div className={styles.emptySurface}>{t("noSessionsYet")}</div>
-          ) : sessionDetailQuery.isError ? (
+          ) : sessionDetailErrorState.blockingError ? (
             <div className={styles.emptySurface}>
-              {describeError(sessionDetailQuery.error, t("loadFailed"))}
+              {sessionDetailErrorMessage}
             </div>
           ) : workspace.activeTab === "agent" ? (
             detail ? (
-              <ConversationView
-                sessionId={activeSessionId ?? detail.id}
-                title={detail.title}
-                phase={detail.currentPhase}
-                messages={detail.messages}
-                assistantDisplayName={pet?.name}
-                userDisplayName={runtime?.userName}
-                taskSummary={currentTaskSummary}
-                defaultFileContext={detail.defaultFileContext}
-                showHeader={false}
-                showSessionOverview={false}
-                composerValue={activeDraft}
-                composerPlaceholder={composerPlaceholder}
-                composerDisabled={composerDisabled}
-                composerActionDisabled={composerActionDisabled}
-                composerActionMode={composerStopMode ? "stop" : "send"}
-                composerPending={composerPending}
-                composerError={activeComposerError}
-                turnError={detail.lastTurnError}
-                mentalModelEnabled={mentalModelEnabledForNextTurn}
-                mentalModelOptionDisabled={!activeSessionId}
-                stopLabel={t("stop")}
-                stopPendingLabel={t("stopPending")}
-                onComposerChange={handleComposerChange}
-                onMentalModelEnabledChange={handleMentalModelEnabledChange}
-                onSubmit={handleSubmitTurn}
-                onStop={handleStopTurn}
-              />
+              <div className={styles.conversationFrame}>
+                {sessionDetailErrorState.transientError ? (
+                  <div className={styles.inlineNotice} role="status">
+                    {sessionDetailErrorMessage}
+                  </div>
+                ) : null}
+                <ConversationView
+                  sessionId={activeSessionId ?? detail.id}
+                  title={detail.title}
+                  phase={detail.currentPhase}
+                  messages={detail.messages}
+                  assistantDisplayName={pet?.name}
+                  userDisplayName={runtime?.userName}
+                  taskSummary={currentTaskSummary}
+                  defaultFileContext={detail.defaultFileContext}
+                  showHeader={false}
+                  showSessionOverview={false}
+                  composerValue={activeDraft}
+                  composerPlaceholder={composerPlaceholder}
+                  composerDisabled={composerDisabled}
+                  composerActionDisabled={composerActionDisabled}
+                  composerActionMode={composerStopMode ? "stop" : "send"}
+                  composerPending={composerPending}
+                  composerError={activeComposerError}
+                  composerModeNotice={activeEditTarget ? t("editMessageModeNotice") : ""}
+                  cancelComposerModeLabel={t("cancelEditMessage")}
+                  turnError={detail.lastTurnError}
+                  mentalModelEnabled={mentalModelEnabledForNextTurn}
+                  mentalModelOptionDisabled={!activeSessionId}
+                  stopLabel={t("stop")}
+                  stopPendingLabel={t("stopPending")}
+                  editingMessageId={activeEditTarget?.messageId}
+                  editUserMessageLabel={t("editAndResendMessage")}
+                  editUserMessageDisabled={sessionBusy || submitPending}
+                  onComposerChange={handleComposerChange}
+                  onMentalModelEnabledChange={handleMentalModelEnabledChange}
+                  onEditUserMessage={handleEditUserMessage}
+                  onCancelComposerMode={activeEditTarget ? handleCancelEditMessage : undefined}
+                  onSubmit={handleSubmitTurn}
+                  onStop={handleStopTurn}
+                />
+              </div>
             ) : (
               <div className={styles.emptySurface}>{t("loadingSession")}</div>
             )
@@ -1489,8 +1748,11 @@ export function ChatCodingRoute() {
             {sessionComposerErrors.__sessions__ ? (
               <div className={styles.panelState}>{sessionComposerErrors.__sessions__}</div>
             ) : null}
-            {sessionsQuery.isError ? (
-              <div className={styles.panelState}>{describeError(sessionsQuery.error, t("loadFailed"))}</div>
+            {sessionsErrorState.transientError ? (
+              <div className={styles.panelNotice} role="status">{sessionsErrorMessage}</div>
+            ) : null}
+            {sessionsErrorState.blockingError ? (
+              <div className={styles.panelState}>{sessionsErrorMessage}</div>
             ) : sessionsQuery.isPending && !sessionsQuery.data ? (
               <div className={styles.panelState}>{t("loadingSession")}</div>
             ) : filteredSessions.length === 0 ? (
@@ -1503,11 +1765,16 @@ export function ChatCodingRoute() {
                   deleteSessionMutation.isPending &&
                   deleteSessionMutation.variables?.sessionId === session.id;
                 const deleteDisabled = deletePending || isBusyPhase(session.currentPhase || session.status);
+                const addToReviewPending =
+                  addSessionToReviewMutation.isPending &&
+                  addSessionToReviewMutation.variables?.sessionId === session.id;
+                const addToReviewDisabled = addToReviewPending || isBusyPhase(session.currentPhase || session.status);
                 const renamePending =
                   renameSessionMutation.isPending &&
                   renameSessionMutation.variables?.sessionId === session.id;
                 const isEditingTitle = editingSessionId === session.id;
                 const itemError = sessionComposerErrors[session.id] ?? "";
+                const itemIsNotice = itemError.startsWith(t("addSessionToReviewSucceeded"));
                 return (
                   <div
                     key={session.id}
@@ -1589,6 +1856,22 @@ export function ChatCodingRoute() {
                         <button
                           type="button"
                           className={styles.sessionIconButton}
+                          onClick={() => handleAddSessionToReview(session)}
+                          disabled={addToReviewDisabled}
+                          title={
+                            addToReviewPending
+                              ? t("addingSessionToReview")
+                              : addToReviewDisabled
+                                ? t("addSessionToReviewBusy")
+                                : t("addSessionToReview")
+                          }
+                          aria-label={`${t("addSessionToReview")} ${session.title}`}
+                        >
+                          <BookPlus size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.sessionIconButton}
                           onClick={() => beginRenameSession(session)}
                           title={t("renameSession")}
                           aria-label={`${t("renameSession")} ${session.title}`}
@@ -1607,7 +1890,11 @@ export function ChatCodingRoute() {
                         </button>
                       </div>
                     )}
-                    {itemError ? <p className={styles.sessionItemError}>{itemError}</p> : null}
+                    {itemError ? (
+                      <p className={itemIsNotice ? styles.sessionItemNotice : styles.sessionItemError}>
+                        {itemError}
+                      </p>
+                    ) : null}
                   </div>
                 );
               })

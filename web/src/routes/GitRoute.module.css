@@ -8,19 +8,28 @@
 
 .header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 22px 24px 16px;
+  gap: var(--route-topbar-gap);
+  min-width: 0;
+  padding: var(--route-topbar-padding);
   border-bottom: 1px solid var(--border-strong);
   background: var(--surface-header, rgba(22, 25, 28, 0.78));
 }
 
+.header > div {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
 .eyebrow,
 .panelEyebrow {
-  margin: 0 0 6px;
+  margin: 0 0 2px;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -28,14 +37,21 @@
 .title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.6rem;
+  font-size: var(--route-topbar-title-size);
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .subtitle {
-  margin: 10px 0 0;
-  max-width: 78ch;
+  min-width: 0;
+  margin: 0;
+  max-width: none;
   color: var(--fg-secondary);
-  line-height: 1.5;
+  font-size: var(--route-topbar-subtitle-size);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .refreshButton,
@@ -80,8 +96,8 @@
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  padding: 16px 24px 0;
+  gap: var(--route-summary-gap);
+  padding: 10px 14px 0;
 }
 
 .summaryCard,
@@ -95,28 +111,28 @@
 
 .summaryCard {
   display: grid;
-  gap: 6px;
+  gap: 3px;
   min-width: 0;
-  padding: 13px 14px;
+  padding: var(--route-summary-padding);
 }
 
 .summaryCard span {
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
 }
 
 .summaryCard strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 1rem;
+  font-size: 0.92rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .notice {
-  margin: 12px 24px 0;
-  padding: 10px 12px;
+  margin: 8px 14px 0;
+  padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--state-error) 32%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--state-error) 12%, transparent);
@@ -128,7 +144,7 @@
   display: grid;
   grid-template-columns: var(--git-change-panel-width, 340px) 12px minmax(520px, 1fr) minmax(280px, 340px);
   min-height: 0;
-  padding: 18px 24px 24px;
+  padding: var(--route-workspace-padding);
 }
 
 .resizeHandle {
@@ -643,6 +659,18 @@
 @media (max-width: 860px) {
   .route {
     overflow: auto;
+  }
+
+  .header > div {
+    grid-template-columns: 1fr;
+  }
+
+  .title {
+    white-space: normal;
+  }
+
+  .subtitle {
+    white-space: normal;
   }
 
   .summaryGrid,

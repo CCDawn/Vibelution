@@ -37,10 +37,14 @@ def classify_exception(exc: Exception) -> LLMError:
         or "bad gateway" in lower
         or "internalservererror" in lower_type
         or "internalservererror" in lower
+        or "serviceunavailableerror" in lower_type
+        or "serviceunavailableerror" in lower
         or "upstream_error" in lower
         or "upstream request failed" in lower
         or "service unavailable" in lower
+        or "temporarily unavailable" in lower
         or "gateway timeout" in lower
+        or "api_error" in lower
     ):
         return LLMError("server_error", exc_msg or "provider 服务异常", retryable=True)
     if "duplicate tool_call id" in lower or ("tool" in lower and "schema" in lower):

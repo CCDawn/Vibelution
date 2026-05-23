@@ -39,7 +39,12 @@ from core.runtime_manager.work_run_leases import (
     check_lease_conflicts,
 )
 
-from .evolution_service import get_run, get_workbench_state_payload
+from .evolution_service import (
+    get_run,
+    get_workbench_state_payload,
+    manual_governance_block_reason,
+    manual_governance_enabled,
+)
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
@@ -946,6 +951,20 @@ def execute_supervised_action(session_id: str, action: str) -> dict[str, Any]:
     """Execute a proposal lifecycle action for a finished supervised run."""
 
     lang = get_web_language()
+    if not manual_governance_enabled():
+        _record_supervised_scene_event(
+            "action",
+            "supervised_run.proposal_action.blocked_by_mode",
+            message="Supervised proposal action blocked by automatic review mode.",
+            level="warning",
+            outcome="blocked",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "action": str(action or "").strip().lower(),
+                "intakeMode": "auto",
+            },
+        )
+        raise SupervisedRunActionError(manual_governance_block_reason(lang=lang))
     active = get_active_supervised_run()
     if active is not None and str(active.get("status") or "").strip().lower() in _ACTIVE_RUN_STATUSES:
         raise SupervisedRunBusyError(
@@ -1798,6 +1817,10 @@ def _dataset_payload(item: dict[str, Any]) -> dict[str, Any]:
         "bundleName": str(item.get("bundle_name") or "").strip(),
         "available": bool(item.get("available")),
         "runnable": bool(item.get("runnable")),
+        "effective": bool(item.get("effective")),
+        "caseCount": item.get("case_count"),
+        "usabilityStatus": str(item.get("usability_status") or "").strip(),
+        "usabilityReason": str(item.get("usability_reason") or "").strip(),
         "adapterStatus": str(item.get("adapter_status") or "").strip(),
         "description": str(item.get("description") or "").strip(),
         "sourcePath": str(item.get("source_path") or "").strip(),

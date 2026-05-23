@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
+import {
+  clampPaneSize,
+  clampPaneWidth,
+  keyboardPaneHeight,
+  keyboardPaneWidth,
+  storedPaneSize,
+  storedPaneWidth,
+} from "./resizablePane";
 
 function stubWindowStorage(values: Record<string, string>) {
   vi.stubGlobal("window", {
@@ -39,6 +46,16 @@ describe("resizablePane", () => {
     expect(keyboardPaneWidth(360, "Home", { min: 240, max: 520 })).toBe(240);
     expect(keyboardPaneWidth(360, "End", { min: 240, max: 520 })).toBe(520);
     expect(keyboardPaneWidth(360, "Enter", { min: 240, max: 520 })).toBeNull();
+  });
+
+  it("maps keyboard actions to height changes", () => {
+    expect(clampPaneSize(180, { min: 240, max: 700 })).toBe(240);
+    expect(storedPaneSize("vibelution.test-pane", 360, { min: 240, max: 700 })).toBe(360);
+    expect(keyboardPaneHeight(420, "ArrowDown", { min: 240, max: 700 })).toBe(444);
+    expect(keyboardPaneHeight(420, "ArrowUp", { min: 240, max: 700 })).toBe(396);
+    expect(keyboardPaneHeight(420, "Home", { min: 240, max: 700 })).toBe(240);
+    expect(keyboardPaneHeight(420, "End", { min: 240, max: 700 })).toBe(700);
+    expect(keyboardPaneHeight(420, "ArrowRight", { min: 240, max: 700 })).toBeNull();
   });
 
   it("supports inverted keyboard direction for right-side panes", () => {

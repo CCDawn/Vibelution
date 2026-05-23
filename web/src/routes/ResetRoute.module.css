@@ -8,18 +8,27 @@
 
 .header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 22px 24px 16px;
+  gap: var(--route-topbar-gap);
+  min-width: 0;
+  padding: var(--route-topbar-padding);
   border-bottom: 1px solid var(--border-strong);
   background: var(--surface-header);
 }
 
+.header > div:first-child {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
 .eyebrow {
-  margin: 0 0 6px;
+  margin: 0 0 2px;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -27,14 +36,21 @@
 .title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.6rem;
+  font-size: var(--route-topbar-title-size);
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .subtitle {
-  margin: 10px 0 0;
-  max-width: 82ch;
+  min-width: 0;
+  margin: 0;
+  max-width: none;
   color: var(--fg-secondary);
-  line-height: 1.5;
+  font-size: var(--route-topbar-subtitle-size);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .headerActions {
@@ -47,7 +63,7 @@
 .selectionPill {
   display: inline-flex;
   align-items: center;
-  min-height: 34px;
+  min-height: 30px;
   padding: 0 10px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
   border-radius: 999px;
@@ -65,7 +81,7 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 36px;
+  min-height: 34px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
@@ -74,7 +90,7 @@
 }
 
 .iconButton {
-  width: 36px;
+  width: 34px;
 }
 
 .secondaryButton,
@@ -115,8 +131,8 @@
 
 .successNotice,
 .errorNotice {
-  margin: 12px 24px 0;
-  padding: 10px 12px;
+  margin: 8px 14px 0;
+  padding: 8px 10px;
   border-radius: 8px;
   font-size: 0.86rem;
 }
@@ -138,7 +154,7 @@
   grid-template-columns: minmax(520px, 1fr) minmax(340px, 430px);
   gap: 16px;
   min-height: 0;
-  padding: 18px 24px 24px;
+  padding: var(--route-workspace-padding);
 }
 
 .inventoryPanel,
@@ -447,6 +463,15 @@
   .actionBar {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .header > div:first-child {
+    grid-template-columns: 1fr;
+  }
+
+  .title,
+  .subtitle {
+    white-space: normal;
   }
 
   .workspace {

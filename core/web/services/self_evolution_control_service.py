@@ -45,6 +45,7 @@ from .session_service import (
     submit_session_message,
 )
 from .supervised_control_service import get_active_supervised_run
+from .supervised_worktree_evolution_service import get_active_supervised_worktree_run
 from .workbench_contract_service import get_workbench_contract
 
 
@@ -329,6 +330,15 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
                 lang,
                 zh="当前已有监督任务在运行，请等监督任务结束后再启动自进化。",
                 en="A supervised run is already active. Wait for it to finish before launching self evolution.",
+            )
+        )
+    active_supervised_worktree = get_active_supervised_worktree_run()
+    if _supervised_run_blocks_self_evolution(active_supervised_worktree):
+        raise SelfEvolutionRunBusyError(
+            text_for(
+                lang,
+                zh="当前已有监督工作树进化在运行，请等这一轮结束后再启动自进化。",
+                en="A supervised worktree evolution run is already active. Wait for it to finish before launching self evolution.",
             )
         )
 
@@ -1399,6 +1409,9 @@ def _raise_if_self_lease_conflict(*, lang: str) -> None:
     supervised_active = _load_active_work_run_snapshot("supervised")
     if supervised_active is not None:
         active_runs.append(supervised_active)
+    supervised_worktree_active = get_active_supervised_worktree_run()
+    if supervised_worktree_active is not None:
+        active_runs.append(supervised_worktree_active)
     decision = check_lease_conflicts(
         WorkRunLeaseRequest(
             run_kind="self_evolution_run",

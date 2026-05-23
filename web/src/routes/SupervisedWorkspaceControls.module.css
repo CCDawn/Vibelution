@@ -1,0 +1,45 @@
+.intakeControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-panel);
+}
+
+.controlLabel {
+  padding: 0 6px 0 8px;
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+}
+
+.intakeSegmented {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.intakeButton {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-secondary);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.intakeButton:hover:not(:disabled) {
+  color: var(--fg-primary);
+  background: var(--surface-card-hover);
+}
+
+.intakeButton:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.intakeButtonActive {
+  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
+  color: var(--accent-warm-2);
+}

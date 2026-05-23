@@ -13,6 +13,7 @@ from uuid import uuid4
 
 from .constants import (
     DEFAULT_COMMAND_WAIT_SECONDS,
+    EVENTS_PATH,
     INBOX_DIR,
     PROCESSING_DIR,
     RESULTS_DIR,
@@ -56,6 +57,16 @@ def submit_command(
     command = build_command(command_type, args=args, requested_by=requested_by)
     shutdown_state = _shutdown_in_progress_state()
     if shutdown_state is not None:
+        _append_queue_event(
+            "command_queue.command_rejected_shutdown",
+            {
+                "commandId": str(command.get("commandId") or ""),
+                "type": str(command.get("type") or ""),
+                "requestedBy": str(command.get("requestedBy") or ""),
+                "stateVersion": int(shutdown_state.get("stateVersion") or 0),
+                "managerPid": int(shutdown_state.get("managerPid") or 0),
+            },
+        )
         _complete_rejected_shutdown_command(command, shutdown_state=shutdown_state)
         return command
     _atomic_write_json(INBOX_DIR / f"{command['commandId']}.json", command)
@@ -159,6 +170,18 @@ def _shutdown_in_progress_state() -> dict[str, Any] | None:
     state = load_state()
     if not isinstance(state, dict):
         return None
+    if not _state_belongs_to_current_manager(state, manager_pid):
+        if _state_mentions_runtime_manager_shutdown(state):
+            _append_queue_event(
+                "command_queue.stale_shutdown_state_ignored",
+                {
+                    "stateVersion": int(state.get("stateVersion") or 0),
+                    "stateManagerPid": int(state.get("managerPid") or 0),
+                    "currentManagerPid": int(manager_pid or 0),
+                    "runtimeState": str(state.get("runtimeState") or ""),
+                },
+            )
+        return None
     if str(state.get("runtimeState") or "").strip().lower() == "stopping":
         return state
     command = state.get("command") if isinstance(state.get("command"), dict) else {}
@@ -169,6 +192,39 @@ def _shutdown_in_progress_state() -> dict[str, Any] | None:
     if not bool(command.get("stopManager")):
         return None
     return state
+
+
+def _state_belongs_to_current_manager(state: dict[str, Any], manager_pid: int) -> bool:
+    try:
+        state_manager_pid = int(state.get("managerPid") or 0)
+    except (TypeError, ValueError):
+        state_manager_pid = 0
+    return state_manager_pid > 0 and state_manager_pid == int(manager_pid or 0)
+
+
+def _state_mentions_runtime_manager_shutdown(state: dict[str, Any]) -> bool:
+    if str(state.get("runtimeState") or "").strip().lower() == "stopping":
+        return True
+    command = state.get("command") if isinstance(state.get("command"), dict) else {}
+    return (
+        str(command.get("activeCommandId") or "").strip() != ""
+        and str(command.get("activeType") or "").strip() == "close_workbench"
+        and bool(command.get("stopManager"))
+    )
+
+
+def _append_queue_event(event_type: str, payload: dict[str, Any]) -> None:
+    try:
+        ensure_runtime_manager_dirs()
+        event = {
+            "type": event_type,
+            "at": datetime.now(UTC).isoformat(),
+            "payload": payload,
+        }
+        with EVENTS_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def _complete_rejected_shutdown_command(command: dict[str, Any], *, shutdown_state: dict[str, Any]) -> None:

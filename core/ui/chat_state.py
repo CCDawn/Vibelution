@@ -61,9 +61,10 @@ def normalize_chat_message(item: Any) -> dict[str, Any] | None:
     mental_snapshot = item.get("mental_snapshot")
     if mental_snapshot is None:
         mental_snapshot = item.get("mentalSnapshot")
+    tool_calls = normalize_chat_tool_calls(item.get("tool_calls") or item.get("tools") or [])
     if role == "user" and not content:
         return None
-    if role == "assistant" and not content and not thought and not isinstance(mental_snapshot, dict):
+    if role == "assistant" and not content and not thought and not isinstance(mental_snapshot, dict) and not tool_calls:
         return None
     timestamp = str(item.get("timestamp") or "").strip() or datetime.now().isoformat(timespec="seconds")
     normalized: dict[str, Any] = {
@@ -75,7 +76,6 @@ def normalize_chat_message(item: Any) -> dict[str, Any] | None:
         normalized["thought"] = thought
     if isinstance(mental_snapshot, dict) and mental_snapshot:
         normalized["mental_snapshot"] = dict(mental_snapshot)
-    tool_calls = normalize_chat_tool_calls(item.get("tool_calls") or item.get("tools") or [])
     if tool_calls:
         normalized["tool_calls"] = tool_calls
     return normalized

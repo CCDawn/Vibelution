@@ -193,62 +193,51 @@ function renderDiagnosticsPanel(diagnostics: LogDiagnostics, lang: "zh" | "en") 
         : "None"
       : `${lang === "zh" ? "第" : "Line "}${diagnostics.firstSignalLine}${lang === "zh" ? " 行" : ""}`;
   return (
-    <section className={styles.diagnosticsPanel}>
-      <div className={styles.diagnosticsHeader}>
-        <div>
-          <p className={styles.sidebarEyebrow}>{lang === "zh" ? "诊断摘要" : "Diagnostic Summary"}</p>
-          <h2 className={styles.sidebarTitle}>
-            {lang === "zh" ? "先看这里，再读原文" : "Start here, then inspect raw log"}
-          </h2>
-        </div>
+    <details className={styles.diagnosticsPanel}>
+      <summary className={styles.diagnosticsSummaryRow}>
         <span className={severityClassName(diagnostics.severity)}>
           {severityLabel(diagnostics.severity, lang)}
         </span>
-      </div>
-      <p className={styles.diagnosticsSummary}>{diagnostics.userSummary}</p>
-      <div className={styles.diagnosticMetricGrid}>
-        <span>
+        <span className={styles.diagnosticsSummaryText}>{diagnostics.userSummary}</span>
+        <span className={styles.diagnosticsInlineMetrics}>
           <strong>{diagnostics.errorCount}</strong>
-          {lang === "zh" ? " 错误" : " errors"}
-        </span>
-        <span>
+          {lang === "zh" ? " 错" : " err"}
           <strong>{diagnostics.warningCount}</strong>
-          {lang === "zh" ? " 警告" : " warnings"}
-        </span>
-        <span>
+          {lang === "zh" ? " 警" : " warn"}
           <strong>{diagnostics.lineCount}</strong>
           {lang === "zh" ? " 行" : " lines"}
         </span>
-        <span>
-          <strong>{diagnostics.structuredEventCount}</strong>
-          {lang === "zh" ? " 结构事件" : " structured"}
+        <span className={styles.diagnosticsExpandLabel}>
+          {lang === "zh" ? "展开诊断" : "Details"}
         </span>
-      </div>
-      <div className={styles.diagnosticHintGrid}>
-        <article>
-          <span>{lang === "zh" ? "首个信号" : "First signal"}</span>
-          <strong>{firstSignalLabel}</strong>
-          {diagnostics.firstSignalPreview ? <p>{diagnostics.firstSignalPreview}</p> : null}
-        </article>
-        <article>
-          <span>{lang === "zh" ? "建议动作" : "Suggested next step"}</span>
-          <p>{diagnostics.suggestedNextStep}</p>
-        </article>
-        <article>
-          <span>{lang === "zh" ? "Agent 排查锚点" : "Agent investigation anchor"}</span>
-          <code>{diagnostics.agentHint}</code>
-        </article>
-      </div>
-      {diagnostics.topEventTypes.length > 0 ? (
-        <div className={styles.eventTypeList}>
-          {diagnostics.topEventTypes.map((item) => (
-            <span key={`${item.type}:${item.count}`} className={styles.metaPill}>
-              {item.type} × {item.count}
-            </span>
-          ))}
+      </summary>
+      <div className={styles.diagnosticsDetails}>
+        <div className={styles.diagnosticHintGrid}>
+          <article>
+            <span>{lang === "zh" ? "首个信号" : "First signal"}</span>
+            <strong>{firstSignalLabel}</strong>
+            {diagnostics.firstSignalPreview ? <p>{diagnostics.firstSignalPreview}</p> : null}
+          </article>
+          <article>
+            <span>{lang === "zh" ? "建议动作" : "Suggested next step"}</span>
+            <p>{diagnostics.suggestedNextStep}</p>
+          </article>
+          <article>
+            <span>{lang === "zh" ? "Agent 排查锚点" : "Agent investigation anchor"}</span>
+            <code>{diagnostics.agentHint}</code>
+          </article>
         </div>
-      ) : null}
-    </section>
+        {diagnostics.topEventTypes.length > 0 ? (
+          <div className={styles.eventTypeList}>
+            {diagnostics.topEventTypes.map((item) => (
+              <span key={`${item.type}:${item.count}`} className={styles.metaPill}>
+                {item.type} × {item.count}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </details>
   );
 }
 
@@ -945,7 +934,6 @@ export function LogsRoute() {
       : `${selectedLogPaths.length} ${t("selectedFiles")}`;
   const destructiveBusy = deleteLogsMutation.isPending;
   const resizeRightRailLabel = lang === "zh" ? "调整右侧日志导航宽度" : "Resize right log navigation";
-  const activePackageTitle = activePackage ? (lang === "zh" ? activePackage.titleZh : activePackage.titleEn) : "";
   const packageIndexLabel = lang === "zh" ? "日志包索引" : "Log Package Index";
   const packageFilesLabel = lang === "zh" ? "包内日志" : "Package Logs";
   const rootPathLabel = lang === "zh" ? "根目录" : "Root";
@@ -1160,7 +1148,7 @@ export function LogsRoute() {
                     <div className={styles.packageFilesHeader}>
                       <div>
                         <p className={styles.sidebarEyebrow}>{packageFilesLabel}</p>
-                        <h2 className={styles.packageFilesTitle}>{activePackageTitle}</h2>
+                        <h2 className={styles.packageFilesTitle}>{lang === "zh" ? "文件选择" : "File picker"}</h2>
                       </div>
                       <span className={styles.metaPill}>
                         {activePackage.fileCount} {lang === "zh" ? "个文件" : "files"}
@@ -1209,7 +1197,6 @@ export function LogsRoute() {
                       })}
                     </div>
                   </section>
-                  {renderDiagnosticsPanel(contentQuery.data.diagnostics, lang)}
                   <FilePreview
                     file={contentQuery.data}
                     changed={false}
@@ -1218,6 +1205,7 @@ export function LogsRoute() {
                     highlightAsLog
                     severityFilter={severityFilter}
                   />
+                  {renderDiagnosticsPanel(contentQuery.data.diagnostics, lang)}
                 </div>
               ) : (
                 <div className={styles.emptySurface}>{t("loadingFilePreview")}</div>

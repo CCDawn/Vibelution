@@ -291,6 +291,45 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
         source = resolve_source_path(spec, root)
         bundle_path = root / "workspace" / "evaluation" / "bundles" / f"{spec.bundle_name}.json"
         available = spec.kind == "supervised_bundle" or bool(source and source.exists())
+        case_count: Optional[int] = None
+        validation_error = ""
+        if spec.kind == "supervised_bundle":
+            try:
+                source_bundle = resolve_supervised_bundle_path(spec.bundle_name, project_root=root)
+                payload = json.loads(source_bundle.read_text(encoding="utf-8"))
+                case_count = len(list(payload.get("cases") or []))
+            except Exception as exc:  # pragma: no cover - defensive status reporting
+                validation_error = str(exc)
+                case_count = 0
+        elif source and source.exists():
+            try:
+                case_count = sum(1 for _ in _iter_jsonl(source))
+            except Exception as exc:
+                validation_error = str(exc)
+                case_count = 0
+
+        if validation_error:
+            usability_status = "invalid"
+            usability_reason = validation_error
+        elif not spec.runnable and spec.adapter_status == "requires_swe_harness":
+            usability_status = "requires_external_harness"
+            if not available:
+                usability_reason = "需要接入外部 SWE harness，且当前源文件不存在。"
+            else:
+                usability_reason = "需要接入外部 SWE harness 后才能真实判分。"
+        elif not available:
+            usability_status = "missing_source"
+            usability_reason = "数据集源文件不存在。"
+        elif not spec.runnable:
+            usability_status = "blocked"
+            usability_reason = spec.adapter_status or "当前适配器阻止运行。"
+        elif case_count == 0:
+            usability_status = "empty"
+            usability_reason = "数据集当前没有可物化 case。"
+        else:
+            usability_status = "ready"
+            usability_reason = "数据集已有可运行 case。"
+        effective = usability_status == "ready"
         rows.append(
             {
                 "name": spec.name,
@@ -298,6 +337,10 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 "bundle_name": spec.bundle_name,
                 "runnable": spec.runnable,
                 "available": available,
+                "effective": effective,
+                "case_count": case_count,
+                "usability_status": usability_status,
+                "usability_reason": usability_reason,
                 "adapter_status": spec.adapter_status,
                 "source_path": str(source) if source else None,
                 "source_exists": bool(source and source.exists()),

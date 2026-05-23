@@ -155,8 +155,8 @@ const SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY = "vibelution.config.sidebar.indexColl
 const SIDEBAR_WIDTH_DEFAULT = 320;
 const SIDEBAR_WIDTH_MIN = 280;
 const SIDEBAR_WIDTH_MAX = 520;
-const SIDEBAR_HEIGHT_MIN = 420;
-const SIDEBAR_VIEWPORT_OFFSET = 44;
+const SIDEBAR_HEIGHT_MIN = 360;
+const SIDEBAR_VIEWPORT_OFFSET = 28;
 
 function clampValue(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -221,7 +221,7 @@ export const CONFIG_COPY = {
     sourceTitle: "配置源",
     sourceBody: "当前页面直接读取 config.toml，保存时也只写回这一个文件。",
     runtimeTitle: "运行时与界面",
-    runtimeBody: "语言、默认入口和引入方式可以在这里修改，确认后页面会立即展示本次修改。",
+    runtimeBody: "语言、默认入口和治理模式可以在这里修改，确认后页面会立即展示本次修改。",
     profilesTitle: "任务模型",
     profilesBody: "查看每个任务当前使用的模型、服务商和密钥状态；需要修改时先点编辑，确认后页面立即展示本次修改。",
     modelsTitle: "模型库编辑",
@@ -246,7 +246,7 @@ export const CONFIG_COPY = {
     saveConfig: "保存到 config.toml",
     applying: "保存中",
     interfaceLanguage: "界面语言",
-    intakeMode: "引入方式",
+    intakeMode: "模式",
     languageChinese: "中文",
     languageEnglish: "English",
     groupOverviewSaveTitle: "总览与保存",
@@ -402,7 +402,7 @@ export const CONFIG_COPY = {
     sourceTitle: "Config Source",
     sourceBody: "This page reads config.toml directly and writes back to that same file when saved.",
     runtimeTitle: "Runtime and Interface",
-    runtimeBody: "Language, default route, and intake mode changes are shown here immediately after confirmation.",
+    runtimeBody: "Language, default route, and governance mode changes are shown here immediately after confirmation.",
     profilesTitle: "Task Models",
     profilesBody: "Review the model, provider, and key state used by each task. Click edit, then confirm to update the page immediately.",
     modelsTitle: "Model Library",
@@ -427,7 +427,7 @@ export const CONFIG_COPY = {
     saveConfig: "Save to config.toml",
     applying: "Saving",
     interfaceLanguage: "Interface language",
-    intakeMode: "Intake mode",
+    intakeMode: "Mode",
     languageChinese: "Chinese",
     languageEnglish: "English",
     groupOverviewSaveTitle: "Overview and Save",
@@ -1312,7 +1312,7 @@ function ConfigSectionEditor({
   function renderFieldView(fieldValue: unknown, absolutePath: string) {
     const meta = metaMap[absolutePath];
     return (
-      <article key={absolutePath} className={styles.treeFieldCard}>
+      <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView}`}>
         <div className={styles.treeFieldHead}>
           <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath)}</span>
           {meta?.badge ? <span className={styles.inlineBadge}>{meta.badge}</span> : null}
@@ -1429,7 +1429,7 @@ function ConfigSectionEditor({
     }
 
     return (
-      <article key={absolutePath} className={styles.treeFieldCard}>
+      <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardEdit}`}>
         {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
         {control}
       </article>
@@ -2286,9 +2286,9 @@ export function ConfigRoute() {
 
   function intakeLabel(mode: string) {
     if (mode === "auto") {
-      return currentLanguage === "en" ? "auto" : "自动";
+      return currentLanguage === "en" ? "automatic review" : "自动审查";
     }
-    return currentLanguage === "en" ? "manual review" : "人工审核";
+    return currentLanguage === "en" ? "manual operation" : "手工操作";
   }
 
   if (!draftConfig && workspaceQuery.isLoading) {

@@ -1,4 +1,4 @@
-import { SessionDetail, SessionSummary } from "../api/types";
+import { SessionDetail, SessionStreamEvent, SessionSummary } from "../api/types";
 
 export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary {
   return {
@@ -66,4 +66,38 @@ export function markSessionDetailRunning(detail: SessionDetail | undefined): Ses
     lastTurnError: null,
     updatedAt: new Date().toISOString(),
   };
+}
+
+export function deriveSessionDetailQueryErrorState(
+  detail: SessionDetail | undefined,
+  isError: boolean,
+): { blockingError: boolean; transientError: boolean } {
+  return {
+    blockingError: isError && !detail,
+    transientError: isError && Boolean(detail),
+  };
+}
+
+export function deriveSessionListQueryErrorState(
+  sessions: SessionSummary[] | undefined,
+  isError: boolean,
+): { blockingError: boolean; transientError: boolean } {
+  const hasUsableData = Boolean(sessions?.length);
+  return {
+    blockingError: isError && !hasUsableData,
+    transientError: isError && hasUsableData,
+  };
+}
+
+export function shouldAcceptSessionStreamEvent(
+  payload: SessionStreamEvent | undefined,
+  activeSessionId: string | null | undefined,
+): payload is SessionStreamEvent {
+  return Boolean(
+    payload
+      && payload.type === "session_detail"
+      && payload.detail
+      && payload.sessionId === activeSessionId
+      && payload.detail.id === activeSessionId,
+  );
 }

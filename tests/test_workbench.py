@@ -576,6 +576,24 @@ def test_build_chat_state_normalizes_tool_call_names():
     assert message["tool_calls"] == ["read_file_tool", "run_test_for_tool"]
 
 
+def test_build_chat_state_keeps_tool_only_assistant_messages():
+    state = build_chat_state(
+        [
+            {
+                "role": "assistant",
+                "content": "<state",
+                "timestamp": "2026-05-01T12:00:02",
+                "tool_calls": [{"name": "read_file_tool"}, "run_test_for_tool"],
+            }
+        ]
+    )
+
+    message = state["conversations"][0]["messages"][0]
+    assert message["role"] == "assistant"
+    assert message["content"] == ""
+    assert message["tool_calls"] == ["read_file_tool", "run_test_for_tool"]
+
+
 def test_workbench_chat_falls_back_to_structured_reply_when_visible_text_is_missing(monkeypatch, tmp_path: Path):
     monkeypatch.setattr("core.ui.workbench.PROJECT_ROOT", tmp_path)
     shell = AgentWorkbenchShell(config=SimpleNamespace(avatar=SimpleNamespace(preset="default")))

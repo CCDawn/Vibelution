@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldSuppressApiFailureTelemetry, shouldThrottleApiFailureTelemetry } from "./AppShell";
+import {
+  buildShutdownRequestedTelemetry,
+  shouldSuppressApiFailureTelemetry,
+  shouldThrottleApiFailureTelemetry,
+} from "./AppShell";
 
 describe("api failure telemetry", () => {
   it("suppresses expected failures while shutdown is in progress", () => {
@@ -76,5 +80,17 @@ describe("api failure telemetry", () => {
     expect(shouldThrottleApiFailureTelemetry(failure, state, 1_000)).toBe(false);
     expect(shouldThrottleApiFailureTelemetry(failure, state, 2_000)).toBe(true);
     expect(shouldThrottleApiFailureTelemetry(failure, state, 17_000)).toBe(false);
+  });
+
+  it("builds an explicit user-action telemetry event for shutdown requests", () => {
+    expect(buildShutdownRequestedTelemetry()).toMatchObject({
+      phase: "shutdown",
+      eventCode: "browser.user_action.shutdown_requested",
+      level: "info",
+      fields: {
+        action: "shutdown",
+        source: "app_shell",
+      },
+    });
   });
 });

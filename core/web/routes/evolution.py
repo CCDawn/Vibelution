@@ -18,6 +18,7 @@ from core.web.services.chat_review_service import (
 )
 from core.web.services.evolution_service import (
     EvolutionProposalDeleteBlockedError,
+    EvolutionProposalEditBlockedError,
     EvolutionProposalNotFoundError,
     EvolutionProposalValidationError,
     get_evolution_overview,
@@ -27,6 +28,7 @@ from core.web.services.evolution_service import (
     list_runs,
     delete_proposal,
     bulk_delete_proposals,
+    update_proposal,
 )
 from core.web.services.self_evolution_service import (
     SelfEvolutionHistoryDeleteError,
@@ -67,6 +69,18 @@ from core.web.services.supervised_control_service import (
     start_supervised_run,
     stream_active_supervised_run_events,
 )
+from core.web.services.supervised_worktree_evolution_service import (
+    SupervisedWorktreeRunActionError,
+    SupervisedWorktreeRunBusyError,
+    SupervisedWorktreeRunNotFoundError,
+    SupervisedWorktreeRunValidationError,
+    execute_supervised_worktree_action,
+    get_active_supervised_worktree_run,
+    get_supervised_worktree_run,
+    list_supervised_worktree_runs,
+    start_supervised_worktree_run,
+    stream_supervised_worktree_run_events,
+)
 
 
 router = APIRouter(tags=["evolution"])
@@ -86,6 +100,33 @@ class SupervisedRunActionPayload(BaseModel):
 
 class ProposalBulkDeletePayload(BaseModel):
     sessionIds: list[str] = Field(default_factory=list)
+
+
+class SupervisedWorktreeRunStartPayload(BaseModel):
+    sourceKind: str = "bundle"
+    datasetName: str = ""
+    datasetLimit: int | None = None
+    bundleName: str = ""
+    keepWorktree: bool = True
+    mode: str = "auto"
+    executionMode: str = "simulation"
+    confirmRealLlmCost: bool = False
+    uiRoute: str = "/evolution"
+    clientAction: str = "start_supervised_worktree_run"
+
+
+class SupervisedWorktreeRunActionPayload(BaseModel):
+    action: str = ""
+    force: bool = False
+
+
+class ProposalUpdatePayload(BaseModel):
+    improvementType: str | None = None
+    expectedEffect: str | None = None
+    summary: str | None = None
+    candidatePrompt: str | None = None
+    baselinePrompt: str | None = None
+    editNote: str | None = None
 
 
 class SelfEvolutionRunStartPayload(BaseModel):
@@ -134,6 +175,33 @@ def evolution_proposal_detail(session_id: str) -> dict:
         return get_proposal_detail(session_id)
     except EvolutionProposalNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/evolution/proposals/{session_id}")
+def evolution_update_proposal(session_id: str, payload: ProposalUpdatePayload) -> dict:
+    updates = {}
+    if payload.improvementType is not None:
+        updates["improvement_type"] = payload.improvementType
+    if payload.expectedEffect is not None:
+        updates["expected_effect"] = payload.expectedEffect
+    if payload.summary is not None:
+        updates["summary"] = payload.summary
+    if payload.candidatePrompt is not None:
+        updates["candidate_prompt"] = payload.candidatePrompt
+    if payload.baselinePrompt is not None:
+        updates["baseline_prompt"] = payload.baselinePrompt
+    try:
+        return update_proposal(
+            session_id,
+            updates,
+            edit_note=payload.editNote or "",
+        )
+    except EvolutionProposalNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EvolutionProposalEditBlockedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EvolutionProposalValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/evolution/proposals/{session_id}")
@@ -229,6 +297,64 @@ def evolution_active_run_events() -> StreamingResponse:
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/evolution/worktree-runs")
+def evolution_worktree_runs() -> list[dict]:
+    return list_supervised_worktree_runs()
+
+
+@router.get("/evolution/worktree-runs/active")
+def evolution_worktree_active_run() -> dict | None:
+    return get_active_supervised_worktree_run()
+
+
+@router.post("/evolution/worktree-runs", status_code=status.HTTP_202_ACCEPTED)
+def evolution_start_worktree_run(payload: SupervisedWorktreeRunStartPayload) -> dict:
+    try:
+        data = payload.model_dump()
+        data["requestSource"] = "api:evolution.worktree-runs"
+        data["initiator"] = "user"
+        return start_supervised_worktree_run(data)
+    except SupervisedWorktreeRunBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SupervisedWorktreeRunValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/evolution/worktree-runs/{run_id}")
+def evolution_worktree_run(run_id: str) -> dict:
+    snapshot = get_supervised_worktree_run(run_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Supervised worktree run not found")
+    return snapshot
+
+
+@router.get("/evolution/worktree-runs/{run_id}/events")
+def evolution_worktree_run_events(run_id: str) -> StreamingResponse:
+    snapshot = get_supervised_worktree_run(run_id)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Supervised worktree run not found")
+    return StreamingResponse(
+        stream_supervised_worktree_run_events(run_id, initial_snapshot=snapshot),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@router.post("/evolution/worktree-runs/{run_id}/actions")
+def evolution_worktree_run_action(run_id: str, payload: SupervisedWorktreeRunActionPayload) -> dict:
+    try:
+        return execute_supervised_worktree_action(run_id, payload.action, force=payload.force)
+    except SupervisedWorktreeRunNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SupervisedWorktreeRunValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SupervisedWorktreeRunActionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/evolution/runs", status_code=status.HTTP_202_ACCEPTED)

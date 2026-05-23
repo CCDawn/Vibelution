@@ -50,9 +50,9 @@ export function shouldSuppressApiFailureTelemetry(
     return true;
   }
   if (
-    failure.failureKind === "network"
-    && API_FAILURE_BACKGROUND_METHODS.has(failure.method.toUpperCase())
-    && (visibilityState === "hidden" || visibilityState === "prerender")
+    failure.failureKind === "network" &&
+    API_FAILURE_BACKGROUND_METHODS.has(failure.method.toUpperCase()) &&
+    (visibilityState === "hidden" || visibilityState === "prerender")
   ) {
     return true;
   }
@@ -83,6 +83,19 @@ export function shouldThrottleApiFailureTelemetry(
     }
   }
   return false;
+}
+
+export function buildShutdownRequestedTelemetry(): BrowserTelemetryEventInput {
+  return {
+    phase: "shutdown",
+    eventCode: "browser.user_action.shutdown_requested",
+    message: "User requested workbench shutdown.",
+    level: "info",
+    fields: {
+      action: "shutdown",
+      source: "app_shell",
+    },
+  };
 }
 
 export function AppShell() {
@@ -216,7 +229,6 @@ export function AppShell() {
     unmanaged: t("systemRuntime_unmanaged"),
     failed: t("systemRuntime_failed"),
   }[runtimeControllerState];
-
   const emitBrowserTelemetry = useCallback((
     payload: BrowserTelemetryEventInput,
     options?: { preferBeacon?: boolean },
@@ -247,6 +259,7 @@ export function AppShell() {
       setShutdownOpen(true);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(shutdownBody);
+      emitBrowserTelemetry(buildShutdownRequestedTelemetry(), { preferBeacon: true });
 
       const payload = await fetchJson<ShutdownResponse>("/api/runtime/shutdown", {
         method: "POST",
@@ -266,7 +279,7 @@ export function AppShell() {
 
     shutdownPromiseRef.current = task;
     return task;
-  }, [shutdownBody, shutdownErrorBody, shutdownHeading]);
+  }, [emitBrowserTelemetry, shutdownBody, shutdownErrorBody, shutdownHeading]);
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {
@@ -749,6 +762,9 @@ export function AppShell() {
           )}
           <NavLink to="/logs" className={linkClassName}>
             {t("navLogs")}
+          </NavLink>
+          <NavLink to="/tools" className={linkClassName}>
+            {t("navTools")}
           </NavLink>
           <NavLink to="/git" className={linkClassName}>
             {t("navGit")}

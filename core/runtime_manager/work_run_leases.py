@@ -130,6 +130,8 @@ def default_leases_for_run_kind(run_kind: str) -> list[str]:
         return [READONLY_CHAT_LEASE]
     if kind == "supervised_evolution_run":
         return [EVALUATION_LEASE]
+    if kind == "supervised_worktree_evolution_run":
+        return [EVALUATION_LEASE, WORKTREE_WRITE_LEASE]
     if kind == "self_evolution_run":
         return [EVOLUTION_TRANSACTION_LEASE, WORKTREE_WRITE_LEASE, MEMORY_WRITE_LEASE]
     if kind == "proposal_action":
@@ -163,6 +165,8 @@ def run_kind_from_snapshot(snapshot: dict[str, Any]) -> str:
         return "self_evolution_run"
     if run_id.startswith("web-supervised-"):
         return "supervised_evolution_run"
+    if run_id.startswith("swte-"):
+        return "supervised_worktree_evolution_run"
     if run_id.startswith("chat-turn-"):
         return "chat_turn"
     return ""

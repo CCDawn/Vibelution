@@ -62,6 +62,7 @@ SAFE_MODIFY_PROBE_CONTENT = (
     "    return HARNESS_SAFE_MODIFY_MARKER\n"
 )
 HARNESS_MANAGED_DIRTY_PATHS = {"config.harness.toml"}
+HARNESS_REQUIRED_PACKAGES = ("litellm", "ruff")
 DEFAULT_SAFE_MODIFY_PROMPT = (
     "执行一轮安全修改/回滚演化探针："
     "1) 调用 open_evolution_transaction_tool 开账，summary 写“harness safe modify probe”；"
@@ -236,6 +237,9 @@ def mirror_venv_into_worktree(repo_root: Path, worktree_path: Path) -> None:
             symlinks=True,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
         )
+        if not is_python_executable_usable(resolve_venv_python(target)):
+            shutil.rmtree(target, ignore_errors=True)
+            build_synthetic_venv(worktree_path)
     except Exception:
         # 最差兜底：至少复制 python 入口，避免 environment smoke 直接因 .venv 缺失挂掉
         if os.name == "nt":
@@ -244,6 +248,9 @@ def mirror_venv_into_worktree(repo_root: Path, worktree_path: Path) -> None:
             dst_python = target / "bin" / "python"
         dst_python.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_python, dst_python)
+        if not is_python_executable_usable(dst_python):
+            shutil.rmtree(target, ignore_errors=True)
+            build_synthetic_venv(worktree_path)
 
 
 def build_synthetic_venv(worktree_path: Path) -> None:
@@ -266,6 +273,58 @@ def build_synthetic_venv(worktree_path: Path) -> None:
         errors="replace",
         check=True,
     )
+    install_missing_harness_packages(resolve_venv_python(target), worktree_path=worktree_path)
+
+
+def resolve_venv_python(venv_path: Path) -> Path:
+    if os.name == "nt":
+        return venv_path / "Scripts" / "python.exe"
+    return venv_path / "bin" / "python"
+
+
+def install_missing_harness_packages(python_executable: Path, *, worktree_path: Path) -> None:
+    missing = [
+        package
+        for package in HARNESS_REQUIRED_PACKAGES
+        if not _python_module_available(python_executable, package)
+    ]
+    if not missing:
+        return
+    subprocess.run(
+        [
+            str(python_executable),
+            "-m",
+            "pip",
+            "install",
+            *missing,
+        ],
+        cwd=str(worktree_path),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+
+
+def _python_module_available(python_executable: Path, module_name: str) -> bool:
+    try:
+        proc = subprocess.run(
+            [
+                str(python_executable),
+                "-c",
+                f"import importlib.util; raise SystemExit(0 if importlib.util.find_spec({module_name!r}) else 1)",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
 
 
 def create_harness_config(worktree_path: Path) -> Optional[Path]:
@@ -488,9 +547,26 @@ def resolve_python_executable(repo_root: Path) -> str:
         venv_python = repo_root / ".venv" / "Scripts" / "python.exe"
     else:
         venv_python = repo_root / ".venv" / "bin" / "python"
-    if venv_python.exists():
+    if venv_python.exists() and is_python_executable_usable(venv_python):
         return str(venv_python)
     return sys.executable
+
+
+def is_python_executable_usable(path: Path) -> bool:
+    try:
+        proc = subprocess.run(
+            [str(path), "-c", "import sys; print(sys.version_info[0])"],
+            cwd=str(path.parent),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0
 
 
 def build_agent_command(

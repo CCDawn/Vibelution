@@ -1,44 +1,52 @@
 .page {
   display: grid;
-  gap: 18px;
-  padding: 22px;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  padding: 14px;
+  overflow: auto;
 }
 
 .hero,
 .metricCard,
 .card {
-  border-radius: 12px;
+  border-radius: 8px;
   border: 1px solid var(--border-soft);
   background: var(--surface-panel);
 }
 
 .hero {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
-  gap: 20px;
-  padding: 22px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: var(--route-topbar-padding);
+}
+
+.hero > div:last-child {
+  min-width: 0;
 }
 
 .avatarPanel {
-  display: grid;
-  justify-items: center;
-  align-content: center;
-  gap: 10px;
-  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-radius: 8px;
   background: var(--surface-panel-strong);
-  padding: 18px;
+  padding: 8px 10px;
 }
 
 .avatarOrb {
-  width: 94px;
-  height: 94px;
+  width: 40px;
+  height: 40px;
   border-radius: 999px;
   display: grid;
   place-items: center;
   background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
   color: var(--accent-warm-2);
   font-family: var(--font-display);
-  font-size: 2.2rem;
+  font-size: 1.2rem;
 }
 
 .avatarMeta,
@@ -47,11 +55,20 @@
   color: var(--fg-secondary);
 }
 
+.avatarMeta {
+  margin: 0;
+  max-width: 120px;
+  overflow: hidden;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .eyebrow,
 .cardTitle {
-  margin: 0 0 8px;
+  margin: 0 0 4px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -59,13 +76,22 @@
 .title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 2rem;
+  font-size: var(--route-topbar-title-size);
+  line-height: 1.1;
+}
+
+.statusLine {
+  margin: 3px 0 0;
+  overflow: hidden;
+  font-size: var(--route-topbar-subtitle-size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metricGrid,
 .statusGrid {
   display: grid;
-  gap: 14px;
+  gap: 8px;
 }
 
 .metricGrid {
@@ -74,21 +100,22 @@
 
 .metricCard,
 .card {
-  padding: 18px;
+  padding: 12px;
 }
 
 .metricCard {
   display: grid;
-  gap: 6px;
+  gap: 3px;
 }
 
 .metricCard span {
   color: var(--fg-secondary);
+  font-size: 0.78rem;
 }
 
 .metricCard strong {
   color: var(--fg-primary);
-  font-size: 1.4rem;
+  font-size: 1rem;
 }
 
 .statusGrid {
@@ -97,12 +124,13 @@
 
 .statList {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   color: var(--fg-secondary);
+  font-size: 0.86rem;
 }
 
 .progressTrack {
-  height: 12px;
+  height: 9px;
   border-radius: 999px;
   overflow: hidden;
   background: var(--surface-panel-strong);
@@ -116,12 +144,31 @@
 .badgeRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .badge {
-  padding: 7px 10px;
+  padding: 6px 9px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
+}
+
+@media (max-width: 860px) {
+  .metricGrid,
+  .statusGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .hero,
+  .metricGrid,
+  .statusGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .statusLine {
+    white-space: normal;
+  }
 }

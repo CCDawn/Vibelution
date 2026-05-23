@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, CheckCircle2, LibraryBig, LoaderCircle, Search, Square, SquareCheckBig, Trash2, TriangleAlert } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -13,7 +13,8 @@ import {
   EvolutionWorkbench,
 } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
-import { SupervisedWorkspaceTabs } from "./SupervisedWorkspaceTabs";
+import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
+import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./SupervisedReviewRoute.module.css";
 
 type ReviewDecision = "positive" | "negative" | "discard";
@@ -21,6 +22,9 @@ type ReviewFilter = "all" | "pending" | "positive" | "negative" | "discard";
 
 const REVIEW_FILTERS: ReviewFilter[] = ["all", "pending", "positive", "negative", "discard"];
 const EMPTY_REVIEW_ITEMS: EvolutionChatReviewCandidate[] = [];
+const REVIEW_QUEUE_WIDTH_KEY = "vibelution.supervised-review.queue-width";
+const REVIEW_QUEUE_BOUNDS = { min: 320, max: 560 };
+const REVIEW_QUEUE_DEFAULT_WIDTH = 380;
 
 export function SupervisedReviewRoute() {
   const { lang, t, statusLabel } = useAppI18n();
@@ -37,6 +41,9 @@ export function SupervisedReviewRoute() {
   const [actionFeedback, setActionFeedback] = useState("");
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([]);
   const [bulkFeedback, setBulkFeedback] = useState("");
+  const [queuePanelWidth, setQueuePanelWidth] = useState(() =>
+    storedPaneWidth(REVIEW_QUEUE_WIDTH_KEY, REVIEW_QUEUE_DEFAULT_WIDTH, REVIEW_QUEUE_BOUNDS),
+  );
 
   const reviewQuery = useQuery({
     queryKey: queryKeys.evolutionChatReview(),
@@ -190,12 +197,24 @@ export function SupervisedReviewRoute() {
     setIdealBehavior(selectedCandidate.reviewDecision.idealBehavior || "");
   }, [selectedCandidate?.candidateId]);
 
+  useEffect(() => {
+    window.localStorage.setItem(REVIEW_QUEUE_WIDTH_KEY, String(queuePanelWidth));
+  }, [queuePanelWidth]);
+
   const decisionError = decisionMutation.error?.message ?? "";
   const bulkError = bulkDeleteMutation.error?.message ?? "";
   const pendingOnlyCount = reviewData?.pendingCount ?? 0;
   const selectedCount = selectedCandidateIds.length;
   const visiblePendingCount = visiblePendingItems.length;
   const lifecycle = reviewData?.lifecycle;
+  const workspaceStyle = useMemo(
+    () =>
+      ({
+        "--review-queue-width": `${queuePanelWidth}px`,
+      }) as CSSProperties,
+    [queuePanelWidth],
+  );
+  const resizeQueueLabel = lang === "zh" ? "调整样本列表宽度" : "Resize sample list";
 
   function levelLabel(level: string) {
     if (level === "high") {
@@ -266,6 +285,40 @@ export function SupervisedReviewRoute() {
     setSelectedCandidateIds(visiblePendingIds);
   }
 
+  function beginQueueResize(startX: number) {
+    const startWidth = queuePanelWidth;
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      setQueuePanelWidth(clampPaneWidth(startWidth + moveEvent.clientX - startX, REVIEW_QUEUE_BOUNDS));
+    };
+    const handleEnd = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleEnd);
+  }
+
+  function handleQueueResizeStart(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    beginQueueResize(event.clientX);
+  }
+
+  function handleQueueResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const nextWidth = keyboardPaneWidth(queuePanelWidth, event.key, REVIEW_QUEUE_BOUNDS);
+    if (nextWidth === null) {
+      return;
+    }
+    event.preventDefault();
+    setQueuePanelWidth(nextWidth);
+  }
+
   const reasonOptions = draftDecision === "positive"
     ? [
       { value: "grounded_workflow", label: lang === "zh" ? "过程扎实" : "Grounded workflow" },
@@ -294,7 +347,7 @@ export function SupervisedReviewRoute() {
         </div>
 
         <div className={styles.toolbarControls}>
-          <SupervisedWorkspaceTabs activeView="review" />
+          <SupervisedWorkspaceControls activeView="review" />
         </div>
       </section>
 
@@ -346,7 +399,7 @@ export function SupervisedReviewRoute() {
         </div>
       </section>
 
-      <div className={styles.workspace}>
+      <div className={styles.workspace} style={workspaceStyle}>
         <aside className={styles.queuePanel}>
           <div className={styles.panelHeader}>
             <div>
@@ -492,6 +545,15 @@ export function SupervisedReviewRoute() {
             </div>
           )}
         </aside>
+
+        <button
+          type="button"
+          className={styles.resizeHandle}
+          aria-label={resizeQueueLabel}
+          title={resizeQueueLabel}
+          onPointerDown={handleQueueResizeStart}
+          onKeyDown={handleQueueResizeKeyDown}
+        />
 
         <section className={styles.detailPanel}>
           {selectedCandidate ? (
