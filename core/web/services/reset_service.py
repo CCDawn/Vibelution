@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -19,6 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MAX_PREVIEW_PATHS = 120
 MAX_SUMMARY_SCAN_ITEMS = 80_000
 RUNNING_SCENE_STATUSES = {"running", "starting", "queued", "stopping"}
+MEMORY_DB_TABLES = ("LongTermMemory", "TaskLog", "ErrorArchive", "CodebaseKnowledge")
 
 
 @dataclass(frozen=True)
@@ -96,10 +98,10 @@ def get_reset_summary() -> dict:
             "reason": text_for(lang, zh="配置不是垃圾内容，不提供重置勾选。", en="Config is not cleanup residue."),
         },
         {
-            "id": "memory",
-            "label": text_for(lang, zh="长期记忆与动态提示词", en="Long-term memory and dynamic prompts"),
-            "paths": ["workspace/agent_brain.db", "workspace/memory/", "workspace/prompts/"],
-            "reason": text_for(lang, zh="按需求固定保护。", en="Protected by reset policy."),
+            "id": "dynamic-prompts",
+            "label": text_for(lang, zh="动态提示词与身份提示词", en="Dynamic and identity prompts"),
+            "paths": ["workspace/prompts/DYNAMIC.md", "workspace/prompts/IDENTITY.md", "workspace/prompts/USER.md", "workspace/prompts/CODEBASE_MAP.md"],
+            "reason": text_for(lang, zh="这些提示词不是记忆重置目标，Reset 只会清空 STATE_MEMORY.md。", en="These prompts are not memory reset targets; Reset only clears STATE_MEMORY.md."),
         },
         {
             "id": "evolution",
@@ -123,8 +125,8 @@ def get_reset_summary() -> dict:
     return {
         "warning": text_for(
             lang,
-            zh="Reset 现在只允许从后端白名单中自选清理项。长期记忆、动态提示词、监督进化、自进化和 Gym 证据固定保护。",
-            en="Reset now only accepts user-selected backend allow-list items. Long-term memory, prompts, supervised/self evolution, and Gym evidence are fixed protected zones.",
+            zh="Reset 现在只允许从后端白名单中自选清理项。Agent 记忆可作为高风险项单独选择；动态提示词、监督进化、自进化、Gym 证据和项目记忆固定保护。",
+            en="Reset now only accepts user-selected backend allow-list items. Agent memory can be selected as a high-risk item; dynamic prompts, supervised/self evolution, Gym evidence, and project memory stay protected.",
         ),
         "mode": "custom",
         "items": items,
@@ -213,6 +215,19 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             default_selected=False,
             collector=_collect_chat_history,
             executor=_execute_chat_history,
+        ),
+        ResetItemDefinition(
+            id="memory",
+            name_zh="Agent 记忆",
+            name_en="Agent memory",
+            description_zh="重置 agent_brain.db 中的记忆表、workspace/memory/ 与 STATE_MEMORY.md；保留动态提示词、进化证据和项目记忆。",
+            description_en="Reset memory tables in agent_brain.db, workspace/memory/, and STATE_MEMORY.md while preserving dynamic prompts, evolution evidence, and project memory.",
+            detail_zh="workspace/agent_brain.db 记忆表、workspace/memory/、workspace/prompts/STATE_MEMORY.md",
+            detail_en="workspace/agent_brain.db memory tables, workspace/memory/, workspace/prompts/STATE_MEMORY.md",
+            risk="high",
+            default_selected=False,
+            collector=_collect_memory,
+            executor=_execute_memory,
         ),
         ResetItemDefinition(
             id="conversation_logs",
@@ -424,6 +439,80 @@ def _execute_item(definition: ResetItemDefinition, lang: str) -> dict:
 def _collect_chat_history() -> list[ResetCandidate]:
     path = chat_state_path(PROJECT_ROOT)
     return [_candidate_for_path(path, kind="file", action="reset", missing=not path.exists())]
+
+
+def _collect_memory() -> list[ResetCandidate]:
+    candidates = [
+        _candidate_for_path(
+            PROJECT_ROOT / "workspace" / "agent_brain.db",
+            kind="database",
+            action="reset",
+            note_zh="清空 agent_brain.db 中的记忆表，保留数据库结构和 Git/进化状态表。",
+            note_en="Clear memory tables in agent_brain.db while preserving schema and Git/evolution state tables.",
+        ),
+        _candidate_for_path(PROJECT_ROOT / "workspace" / "memory", kind="directory"),
+        _candidate_for_path(PROJECT_ROOT / "workspace" / "prompts" / "STATE_MEMORY.md", kind="file", action="reset"),
+    ]
+    return _dedupe_candidates(candidates)
+
+
+def _execute_memory(candidate: ResetCandidate) -> ResetActionResult:
+    relative = _relative_path(candidate.path)
+    if relative == "workspace/agent_brain.db":
+        return _execute_memory_database_reset(candidate)
+    if relative == "workspace/prompts/STATE_MEMORY.md":
+        return _execute_state_memory_reset(candidate)
+    return _execute_delete_candidate(candidate)
+
+
+def _execute_memory_database_reset(candidate: ResetCandidate) -> ResetActionResult:
+    if not candidate.path.exists():
+        result = ResetActionResult("skipped", candidate.path, candidate.kind, candidate.action, "missing")
+        _record_reset_candidate_event(result)
+        return result
+    try:
+        with sqlite3.connect(str(candidate.path)) as conn:
+            cursor = conn.cursor()
+            existing = {
+                str(row[0])
+                for row in cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            cleared = [table for table in MEMORY_DB_TABLES if table in existing]
+            for table in cleared:
+                cursor.execute(f"DELETE FROM {table}")
+            conn.commit()
+    except sqlite3.Error as exc:
+        result = ResetActionResult("failed", candidate.path, candidate.kind, candidate.action, str(exc))
+        _record_reset_candidate_event(result)
+        return result
+    message = f"reset memory tables: {', '.join(cleared)}" if cleared else "no memory tables found"
+    result = ResetActionResult("deleted", candidate.path, candidate.kind, candidate.action, message)
+    _record_reset_candidate_event(result)
+    return result
+
+
+def _execute_state_memory_reset(candidate: ResetCandidate) -> ResetActionResult:
+    try:
+        from core.prompt_manager import get_prompt_manager
+
+        prompt_manager = get_prompt_manager()
+        dynamic_root = str(prompt_manager.get_status().get("dynamic_root") or "").strip()
+        if dynamic_root and _same_path(Path(dynamic_root), candidate.path.parent):
+            prompt_manager.clear_state_memory(persist=False)
+    except Exception:
+        pass
+    try:
+        candidate.path.parent.mkdir(parents=True, exist_ok=True)
+        candidate.path.write_text("", encoding="utf-8")
+    except OSError as exc:
+        result = ResetActionResult("failed", candidate.path, candidate.kind, candidate.action, str(exc))
+        _record_reset_candidate_event(result)
+        return result
+    result = ResetActionResult("deleted", candidate.path, candidate.kind, candidate.action, "reset to empty state memory")
+    _record_reset_candidate_event(result)
+    return result
 
 
 def _execute_chat_history(candidate: ResetCandidate) -> ResetActionResult:

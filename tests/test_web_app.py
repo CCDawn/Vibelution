@@ -7894,8 +7894,11 @@ def test_reset_summary_shape():
     assert "chat_history" in item_ids
     assert "web_dist" in item_ids
     protected_paths = {path for group in payload["protected"] for path in group["paths"]}
-    assert "workspace/memory/" in protected_paths
-    assert "workspace/prompts/" in protected_paths
+    assert "workspace/agent_brain.db" not in protected_paths
+    assert "workspace/memory/" not in protected_paths
+    assert "workspace/prompts/" not in protected_paths
+    assert "workspace/prompts/DYNAMIC.md" in protected_paths
+    assert ".docs/project-memory/" in protected_paths
 
 
 def _seed_supervised_proposal_record(project_root: Path, session_id: str, *, status: str) -> dict[str, Path]:
