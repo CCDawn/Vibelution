@@ -220,7 +220,7 @@ export function ConversationView({
     [messages],
   );
   const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(messages), [messages]);
-  const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0 || Boolean(lastMessageTimestamp);
+  const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
   const operationLabels = useMemo(
     () => ({
@@ -529,11 +529,14 @@ export function ConversationView({
                 <div className={styles.turnAvatar} aria-hidden="true">
                   {message.role === "assistant" ? <Sparkles size={18} /> : userLabel.slice(0, 1).toUpperCase()}
                 </div>
-                <div className={styles.turnContent}>
+            <div className={styles.turnContent}>
                   <div className={styles.turnMeta}>
-                    <span className={styles.turnSpeaker}>
-                      {message.role === "assistant" ? assistantLabel : userLabel}
-                    </span>
+                    <div className={styles.turnMetaIdentity}>
+                      <span className={styles.turnSpeaker}>
+                        {message.role === "assistant" ? assistantLabel : userLabel}
+                      </span>
+                      {isEditingMessage ? <span className={styles.turnEditBadge}>{t("editMessage")}</span> : null}
+                    </div>
                     <span className={styles.turnMetaActions}>
                       {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
                       {message.role === "user" && onEditUserMessage ? (
@@ -604,18 +607,16 @@ export function ConversationView({
 
                   {hasResponseBlock(message) ? (
                     <section className={styles.responseSection}>
-                      {operations.length > 0 ? (
-                        <button
-                          type="button"
-                          className={styles.responseToggle}
-                          aria-expanded={responseExpanded}
-                          onClick={() => toggleSection(message.id, "response", true)}
-                          title={responseExpanded ? t("responseHidden") : t("responseVisible")}
-                        >
-                          {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                          <span>{t("responseLabel")}</span>
-                        </button>
-                      ) : null}
+                      <button
+                        type="button"
+                        className={styles.responseToggle}
+                        aria-expanded={responseExpanded}
+                        onClick={() => toggleSection(message.id, "response", true)}
+                        title={responseExpanded ? t("responseHidden") : t("responseVisible")}
+                      >
+                        {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        <span>{t("responseLabel")}</span>
+                      </button>
                       {responseExpanded ? (
                         <div className={styles.responseBody}>
                           <p className={styles.messageBody}>{message.content}</p>
@@ -631,9 +632,15 @@ export function ConversationView({
       </div>
 
       {!isAtBottom ? (
-        <button type="button" className={styles.backToBottomButton} onClick={scrollToBottom} title={t("backToBottom")}>
+        <button
+          type="button"
+          className={styles.backToBottomButton}
+          onClick={scrollToBottom}
+          title={t("backToBottom")}
+          aria-label={t("backToBottom")}
+        >
           <ArrowDown size={16} />
-          <span>{t("newContent")}</span>
+          <span>{t("backToBottom")}</span>
         </button>
       ) : null}
 
@@ -652,6 +659,9 @@ export function ConversationView({
           {composerError ? <p className={styles.composerError}>{composerError}</p> : null}
           {composerModeNotice ? (
             <div className={styles.composerModeNotice} role="status">
+              <span className={styles.composerModeNoticeIcon} aria-hidden="true">
+                <Pencil size={14} />
+              </span>
               <span>{composerModeNotice}</span>
               {onCancelComposerMode ? (
                 <button type="button" onClick={onCancelComposerMode}>

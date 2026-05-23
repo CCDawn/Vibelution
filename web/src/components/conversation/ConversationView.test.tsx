@@ -67,6 +67,21 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Answer");
   });
 
+  it("keeps the response toggle visible even when a message has no tool block", () => {
+    const html = renderConversation([
+      {
+        id: "message-assistant",
+        role: "assistant",
+        content: "Answer",
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+    ]);
+
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain("回答");
+    expect(html).toContain("Answer");
+  });
+
   it("marks the active edit target and disables edit controls while busy", () => {
     const html = renderConversation(
       [
@@ -87,6 +102,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('aria-pressed="true"');
     expect(html).toContain("disabled");
     expect(html).toContain("Original prompt");
+    expect(html).toContain("编辑消息");
   });
 });
 
