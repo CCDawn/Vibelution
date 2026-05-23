@@ -42,6 +42,7 @@ import {
   ConversationMessage,
 } from "../api/types";
 import { ConversationView } from "../components/conversation/ConversationView";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import type { TranslationKey } from "../i18n/dictionary";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -332,37 +333,24 @@ export function ChatCodingRoute() {
   const requestedSessionId = useMemo(() => {
     return new URLSearchParams(location.search).get("session") ?? "";
   }, [location.search]);
-  const [pageVisible, setPageVisible] = useState(
-    () => (typeof document === "undefined" ? true : document.visibilityState === "visible"),
-  );
-
-  useEffect(() => {
-    function handleVisibilityChange() {
-      setPageVisible(document.visibilityState === "visible");
-    }
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, []);
+  const pageVisible = usePageVisibility();
 
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
-    refetchInterval: pageVisible ? 5_000 : false,
+    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
     refetchIntervalInBackground: false,
   });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
     queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
-    refetchInterval: pageVisible ? 10_000 : false,
+    refetchInterval: resolvePollingInterval(pageVisible, 10_000),
     refetchIntervalInBackground: false,
   });
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
     queryFn: () => fetchJson<SessionSummary[]>("/api/sessions"),
-    refetchInterval: pageVisible ? 3_000 : false,
+    refetchInterval: resolvePollingInterval(pageVisible, 3_000),
     refetchIntervalInBackground: false,
   });
   const syncSessionDetail = useCallback(
@@ -377,7 +365,7 @@ export function ChatCodingRoute() {
   const fileTreeQuery = useQuery({
     queryKey: queryKeys.fileTree(),
     queryFn: () => fetchJson<FileTreeNode[]>("/api/files/tree"),
-    refetchInterval: pageVisible ? 10_000 : false,
+    refetchInterval: resolvePollingInterval(pageVisible, 10_000),
     refetchIntervalInBackground: false,
   });
 
@@ -423,7 +411,7 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
     queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${activeSessionId}`),
-    refetchInterval: activeSessionId && pageVisible ? (sessionStreamConnected ? false : 3_000) : false,
+    refetchInterval: activeSessionId ? resolvePollingInterval(pageVisible, sessionStreamConnected ? false : 3_000) : false,
     refetchIntervalInBackground: false,
   });
 
@@ -1778,6 +1766,7 @@ export function ChatCodingRoute() {
                 return (
                   <div
                     key={session.id}
+                    aria-current={activeSessionId === session.id ? "true" : undefined}
                     className={
                       activeSessionId === session.id
                         ? `${styles.sessionItem} ${styles.sessionItemActive}`
@@ -1787,24 +1776,29 @@ export function ChatCodingRoute() {
                     {isEditingTitle ? (
                       <div className={styles.sessionItemMain}>
                         <div className={styles.sessionItemTop}>
-                          <input
-                            className={styles.sessionTitleInput}
-                            value={editingSessionTitle}
-                            maxLength={120}
-                            autoFocus
-                            onChange={(event) => setEditingSessionTitle(event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                submitRenameSession(session);
-                              }
-                              if (event.key === "Escape") {
-                                event.preventDefault();
-                                cancelRenameSession();
-                              }
-                            }}
-                            aria-label={t("renameSession")}
-                          />
+                          <div className={styles.sessionItemIdentity}>
+                            <input
+                              className={styles.sessionTitleInput}
+                              value={editingSessionTitle}
+                              maxLength={120}
+                              autoFocus
+                              onChange={(event) => setEditingSessionTitle(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  submitRenameSession(session);
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  cancelRenameSession();
+                                }
+                              }}
+                              aria-label={t("renameSession")}
+                            />
+                            {activeSessionId === session.id ? (
+                              <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span>
+                            ) : null}
+                          </div>
                           <span className={styles.sessionState}>{statusLabel(session.status)}</span>
                         </div>
                         <p className={styles.sessionItemSummary} title={session.taskSummary}>
@@ -1817,9 +1811,15 @@ export function ChatCodingRoute() {
                         type="button"
                         className={styles.sessionItemMain}
                         onClick={() => setActiveSession(session.id)}
+                        aria-current={activeSessionId === session.id ? "true" : undefined}
                       >
                         <div className={styles.sessionItemTop}>
-                          <span className={styles.sessionItemTitle}>{session.title}</span>
+                          <div className={styles.sessionItemIdentity}>
+                            <span className={styles.sessionItemTitle}>{session.title}</span>
+                            {activeSessionId === session.id ? (
+                              <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span>
+                            ) : null}
+                          </div>
                           <span className={styles.sessionState}>{statusLabel(session.status)}</span>
                         </div>
                         <p className={styles.sessionItemSummary} title={session.taskSummary}>

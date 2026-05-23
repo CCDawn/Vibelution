@@ -150,10 +150,10 @@
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
-  padding: 20px 24px 12px;
+  padding: 20px 24px 18px;
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 14px;
 }
 
 .emptyState {
@@ -184,10 +184,14 @@
 
 .turnEditing .turnContent {
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--accent-warm) 9%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent-warm) 74%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent),
+    color-mix(in srgb, var(--accent-warm) 7%, transparent);
+  box-shadow:
+    inset 3px 0 0 color-mix(in srgb, var(--accent-warm) 82%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent-warm) 10%, transparent);
 }
 
 .turnAvatar {
@@ -216,7 +220,7 @@
 .turnContent {
   display: grid;
   min-width: 0;
-  gap: 12px;
+  gap: 10px;
 }
 
 .userTurn .turnContent {
@@ -238,6 +242,13 @@
   min-width: 0;
   color: var(--fg-tertiary);
   font-size: 0.84rem;
+}
+
+.turnMetaIdentity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .turnMetaActions {
@@ -288,6 +299,19 @@
   font-size: 1.02rem;
   font-weight: 760;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.turnEditBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
+  font-size: 0.72rem;
+  font-weight: 700;
   white-space: nowrap;
 }
 
@@ -429,6 +453,11 @@
   display: grid;
   gap: 12px;
   min-width: 0;
+}
+
+.responseSection:not(:has(.responseToggle)) .responseBody {
+  padding-top: 0;
+  border-top: 0;
 }
 
 .responseToggle {
@@ -802,6 +831,17 @@
   font-size: 0.82rem;
 }
 
+.composerModeNoticeIcon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: var(--accent-cool);
+}
+
 .composerModeNotice button {
   flex: 0 0 auto;
   border: none;
@@ -867,7 +907,7 @@
 .backToBottomButton {
   position: absolute;
   right: 28px;
-  bottom: 92px;
+  bottom: 110px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -885,6 +925,14 @@
   background: var(--surface-panel-strong);
 }
 
+.backToBottomButton span {
+  white-space: nowrap;
+}
+
+.backToBottomButton svg {
+  flex: 0 0 auto;
+}
+
 @media (max-width: 1280px) {
   .summaryGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -894,6 +942,11 @@
 @media (max-width: 760px) {
   .timeline {
     padding-inline: 14px;
+  }
+
+  .backToBottomButton {
+    right: 16px;
+    bottom: 100px;
   }
 
   .messageCard {

@@ -949,8 +949,8 @@
 }
 
 .conversationFrame {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -1123,6 +1123,12 @@
   box-shadow: inset 2px 0 0 var(--accent-warm);
 }
 
+.sessionItem[aria-current="true"] {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent 36%),
+    var(--surface-panel);
+}
+
 .sessionItemMain {
   min-width: 0;
   padding: 0;
@@ -1144,10 +1150,31 @@
   gap: 10px;
 }
 
+.sessionItemIdentity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .sessionItemTitle {
   font-family: var(--font-display);
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.sessionCurrentBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .sessionTitleInput {
