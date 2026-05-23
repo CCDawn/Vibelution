@@ -18,12 +18,11 @@
 - 渐进式压缩：分多次小压缩而非一次性大压缩
 """
 
-import json
 import logging
 import os
 import time
-from typing import Optional, List, Dict, Any, Tuple, Callable
-from dataclasses import dataclass, field
+from typing import List, Dict, Any, Tuple
+from dataclasses import dataclass
 from collections import deque
 from datetime import datetime
 from enum import IntEnum
@@ -335,17 +334,35 @@ def estimate_tokens_precise(text: str) -> int:
         return 0
     if not isinstance(text, str):
         return 0
-    
-    # 中文字符
-    chinese = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
-    # CJK 扩展
-    cjk_ext = sum(1 for c in text if '\u3400' <= c <= '\u4dbf')
-    # 英文和数字
-    ascii_text = sum(1 for c in text if c.isascii() and not c.isspace())
-    # 空白字符
-    whitespace = sum(1 for c in text if c in ' \t\n\r')
-    # 其他
-    other = len(text) - chinese - cjk_ext - ascii_text - whitespace
+
+    if text.isascii() and not any(c in text for c in "\v\f\x1c\x1d\x1e\x1f"):
+        whitespace = (
+            text.count(" ")
+            + text.count("\t")
+            + text.count("\n")
+            + text.count("\r")
+        )
+        ascii_text = len(text) - whitespace
+        base_tokens = ascii_text / 4 + whitespace / 6
+        return int(base_tokens * 1.2) + 50
+
+    chinese = 0
+    cjk_ext = 0
+    ascii_text = 0
+    whitespace = 0
+    other = 0
+
+    for c in text:
+        if '\u4e00' <= c <= '\u9fff':
+            chinese += 1
+        elif '\u3400' <= c <= '\u4dbf':
+            cjk_ext += 1
+        elif c.isascii() and not c.isspace():
+            ascii_text += 1
+        elif c in ' \t\n\r':
+            whitespace += 1
+        else:
+            other += 1
     
     # 估算（中文约1.5字符=1 token，英文约4字符=1 token）
     # 增加 1.2x 安全系数，避免低估
@@ -816,8 +833,6 @@ class EnhancedTokenCompressor:
 
         # 回退到原有的摘要生成逻辑
         summary_parts = []
-        remaining = max_chars - 50  # 留空间给前缀和省略号
-
         # 收集工具调用
         tool_calls = []
         for msg in messages:
@@ -868,8 +883,6 @@ class EnhancedTokenCompressor:
     ) -> str:
         """使用 LLM 生成摘要"""
         from langchain_core.messages import SystemMessage
-        from langchain_core.prompts import ChatPromptTemplate
-        
         # 构建消息历史文本
         history_text = self._format_messages_for_summary(messages)
         
