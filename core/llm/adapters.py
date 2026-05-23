@@ -71,6 +71,14 @@ def _is_responses_prefixed_model(model: str) -> bool:
     return "responses" in parts[:2]
 
 
+def _model_segments(model: str) -> List[str]:
+    return [part.strip().lower() for part in str(model or "").split("/") if part.strip()]
+
+
+def _is_gpt5_family_model(model: str) -> bool:
+    return any(part.startswith("gpt-5") for part in _model_segments(model))
+
+
 class ProviderAdapter:
     """Base adapter for provider/model specific payload quirks."""
 
@@ -133,7 +141,23 @@ class ProviderAdapter:
         host = urlparse(str(self.provider.base_url or "").strip()).hostname or ""
         return "deepseek.com" in host.lower()
 
+    def uses_openai_gpt5_chat_constraints(self) -> bool:
+        openai_like = (
+            self.kind in {"openai", "azure"}
+            or self.kind in _OPENAI_COMPAT_PROVIDER_KINDS
+            or self.compat_mode in {"openai", "openai_compatible"}
+            or self.litellm_model_name().strip().lower().startswith(("openai/", "azure/"))
+        )
+        return openai_like and _is_gpt5_family_model(self.profile.model)
+
+    def payload_temperature(self) -> float:
+        if self.uses_openai_gpt5_chat_constraints():
+            return 1.0
+        return float(self.profile.temperature)
+
     def supports_explicit_tool_choice(self) -> bool:
+        if self.uses_openai_gpt5_chat_constraints():
+            return False
         return True
 
 

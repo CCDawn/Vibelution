@@ -729,6 +729,41 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
     return messages
 
 
+def _history_messages_for_agent_seed(items: Any) -> list[dict[str, Any]]:
+    """Build the prompt history view without transient runtime failure notices."""
+
+    filtered: list[dict[str, Any]] = []
+    for item in normalize_chat_messages(items or []):
+        if _should_omit_message_from_agent_history(item):
+            continue
+        filtered.append(item)
+    return filtered
+
+
+def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
+    role = str(message.get("role") or "").strip().lower()
+    if role != "assistant":
+        return False
+    content = str(message.get("content") or "").strip()
+    if not content:
+        return True
+    if _looks_like_provider_error_text(content):
+        return True
+    return _looks_like_runtime_failure_notice(content)
+
+
+def _looks_like_runtime_failure_notice(text: Any) -> bool:
+    value = str(text or "").strip().lower()
+    if not value:
+        return False
+    notices = (
+        "上一轮运行已被中断，当前会话已恢复为可继续状态",
+        "模型服务上游暂时失败，本轮没有完成",
+        "the previous turn was interrupted. this session is ready to continue",
+        "the model provider failed upstream, so this turn did not complete",
+    )
+    return any(notice in value for notice in notices)
+
 def _sanitize_message_content(role: str, content: Any) -> str:
     text = str(content or "").strip()
     if str(role or "").strip().lower() != "assistant":
@@ -1253,7 +1288,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
-                history_messages = list(context.get("history_messages") or [])
+                history_messages = _history_messages_for_agent_seed(context.get("history_messages") or [])
                 if callable(restore) and history_messages:
                     restore(history_messages)
 
