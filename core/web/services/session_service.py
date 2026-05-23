@@ -1747,6 +1747,14 @@ def _run_session_continuation_loop(
 
         result = agent.run_single_turn(initial_prompt=prompt)
         last_visible_result = _remember_continuation_visible_result(result, last_visible_result)
+        if _is_provider_failed_result(result):
+            _record_session_turn_circuit_breaker_event(
+                session_id,
+                result,
+                turn_index=turn_index,
+                max_turns=max_turns,
+            )
+            return _annotate_continuation_result(result, turn_index, max_turns, reached_limit=False)
         if _is_session_turn_terminal(result):
             result = _merge_continuation_visible_result(result, last_visible_result)
             return _annotate_continuation_result(result, turn_index, max_turns, reached_limit=False)
@@ -2117,6 +2125,57 @@ def _record_session_turn_error(
         )
 
 
+def _record_session_turn_circuit_breaker_event(
+    session_id: str,
+    result: Any,
+    *,
+    turn_index: int,
+    max_turns: int,
+) -> None:
+    if not isinstance(result, dict):
+        return
+    llm_failure = result.get("llm_failure") if isinstance(result.get("llm_failure"), dict) else {}
+    raw_error = _provider_failure_raw_error(result)
+    error_type = _failure_error_type(raw_error)
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "turn_circuit_breaker",
+            "conversation.turn_circuit_breaker",
+            level="error",
+            outcome="failed",
+            message="Chat turn stopped after provider failure budget was exhausted.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "errorType": error_type,
+                "llmFailureCategory": str(llm_failure.get("category") or "").strip(),
+                "retryable": bool(llm_failure.get("retryable", True)),
+                "attempts": _coerce_nonnegative_int(llm_failure.get("attempts") or 0),
+                "maxAttempts": _coerce_nonnegative_int(llm_failure.get("max_attempts") or 0),
+                "consecutiveFailures": _coerce_nonnegative_int(llm_failure.get("consecutive_failures") or 0),
+                "continuationTurn": max(0, int(turn_index or 0)),
+                "maxContinuationTurns": max(0, int(max_turns or 0)),
+                "stopReason": trim_lines(llm_failure.get("stop_reason") or "", max_lines=2),
+                "rawErrorPreview": trim_lines(raw_error, max_lines=2),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-circuit-breaker.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "error_type": error_type,
+                "llm_failure": dict(llm_failure),
+                "continuation_turn": max(0, int(turn_index or 0)),
+                "max_continuation_turns": max(0, int(max_turns or 0)),
+                "raw_error": trim_lines(raw_error, max_lines=6),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene circuit breaker log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
 def _record_session_message_edit_resubmit_event(
     session_id: str,
     *,
@@ -2444,7 +2503,20 @@ def _failure_error_type(raw_error: str, *, exc: Exception | None = None) -> str:
     value = str(raw_error or "").strip().lower()
     exc_type = type(exc).__name__ if exc is not None else ""
     if _looks_like_provider_error_text(value):
-        if "upstream_error" in value or "badgateway" in value or "bad gateway" in value:
+        if any(
+            marker in value
+            for marker in (
+                "upstream_error",
+                "badgateway",
+                "bad gateway",
+                "server_error",
+                "serviceunavailable",
+                "service unavailable",
+                "temporarily unavailable",
+                "api_error",
+                "gateway timeout",
+            )
+        ):
             return "provider_upstream_error"
         if "provider_protocol_error" in value:
             return "provider_protocol_error"

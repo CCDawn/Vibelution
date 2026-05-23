@@ -2228,6 +2228,12 @@ class TestRuntimeStateMemoryFlow:
             iteration=2,
         )
         assert controller.should_stop_after_llm_failure(
+            category="server_error",
+            retryable=True,
+            consecutive_failures=1,
+            iteration=1,
+        )
+        assert controller.should_stop_after_llm_failure(
             category="auth_error",
             retryable=False,
             consecutive_failures=1,

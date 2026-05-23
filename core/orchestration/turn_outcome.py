@@ -51,6 +51,8 @@ class TurnOutcomeController:
     ) -> Optional[str]:
         if category and not retryable:
             return f"遇到不可重试错误 `{category}`，当前轮次直接结束。"
+        if category in {"server_error", "rate_limit"} and consecutive_failures >= 1:
+            return f"模型 provider 暂时不可用（`{category}`），本轮已用尽单次调用重试预算，直接失败收口。"
         if category == "network_error" and consecutive_failures >= 2 and iteration >= 2:
             return "网络失败已连续出现，当前轮次提前结束，等待下一轮再恢复。"
         if category == "timeout" and consecutive_failures >= 3 and iteration >= 2:
@@ -290,7 +292,7 @@ class TurnOutcomeController:
         return LifecycleDecision()
 
     def finalize_round(self, *, round_state) -> TurnFinalization:
-        last_turn_failed = round_state.consecutive_failures >= self.max_consecutive_failures
+        last_turn_failed = round_state.consecutive_failures > 0
         turn_success = round_state.finish_success(last_turn_failed)
         return TurnFinalization(
             last_turn_failed=last_turn_failed,

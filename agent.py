@@ -253,6 +253,8 @@ class SelfEvolvingAgent:
         self._last_llm_error_retryable: bool = False
         self._last_llm_recovery_action: Optional[str] = None
         self._last_llm_error_message: str = ""
+        self._last_llm_failure_attempts: int = 0
+        self._last_llm_failure_max_attempts: int = 0
         self._last_visible_response_text: str = ""
         self._last_response_tool_calls: int = 0
         self._recent_tool_outputs: List[str] = []
@@ -963,6 +965,8 @@ class SelfEvolvingAgent:
         effective_goal = (goal_override or user_prompt or "").strip() or user_prompt
         self._active_goal = effective_goal
         self._last_turn_metadata = {}
+        self._last_llm_failure_attempts = 0
+        self._last_llm_failure_max_attempts = 0
         self.prompt_manager.update_current_goal(effective_goal)
         runtime_goal_packet = build_runtime_goal_packet(policy, effective_goal)
         set_goal_packet = getattr(self.prompt_manager, "set_runtime_goal_packet", None)
@@ -1139,6 +1143,19 @@ class SelfEvolvingAgent:
                     )
                     if stop_reason:
                         ui.add_log(stop_reason, "WARN")
+                        self._last_turn_metadata = {
+                            **dict(getattr(self, "_last_turn_metadata", {}) or {}),
+                            "llm_failure": {
+                                "category": self._last_llm_error_category or "",
+                                "retryable": bool(self._last_llm_error_retryable),
+                                "recovery_action": self._last_llm_recovery_action or "",
+                                "message": self._last_llm_error_message or "",
+                                "consecutive_failures": consecutive_failures,
+                                "attempts": self._last_llm_failure_attempts,
+                                "max_attempts": self._last_llm_failure_max_attempts,
+                                "stop_reason": stop_reason,
+                            },
+                        }
                         break
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                         ui.add_log(
@@ -1369,6 +1386,8 @@ class SelfEvolvingAgent:
         self._last_llm_error_retryable = False
         self._last_llm_recovery_action = None
         self._last_llm_error_message = ""
+        self._last_llm_failure_attempts = 0
+        self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
         clean_messages = []
         for msg in messages:
             if isinstance(msg, AIMessage):
@@ -1472,6 +1491,8 @@ class SelfEvolvingAgent:
                     self._last_llm_error_retryable = is_retryable
                     self._last_llm_recovery_action = recovery.action
                     self._last_llm_error_message = f"{category}: {user_msg}".strip(": ")
+                    self._last_llm_failure_attempts = attempt
+                    self._last_llm_failure_max_attempts = MAX_CONSECUTIVE_FAILURES
                     disable_streaming_for_retry = disable_streaming_for_retry or recovery.disable_streaming
                     disable_tools_for_retry = disable_tools_for_retry or recovery.disable_tools
                     fallback_profile_id_for_retry = (
@@ -1764,6 +1785,8 @@ class SelfEvolvingAgent:
         self._recent_tool_records = []
         self._last_turn_metadata = {}
         self._last_llm_error_message = ""
+        self._last_llm_failure_attempts = 0
+        self._last_llm_failure_max_attempts = 0
         session = get_session_state()
         ok = False
         try:
@@ -1816,6 +1839,9 @@ class SelfEvolvingAgent:
             }
             if error_message:
                 result["error"] = error_message
+            llm_failure = getattr(self, "_last_turn_metadata", {}).get("llm_failure")
+            if isinstance(llm_failure, dict) and llm_failure:
+                result["llm_failure"] = dict(llm_failure)
             if parsed_payload:
                 result.update(parsed_payload)
                 result.setdefault("raw_output", summary)
