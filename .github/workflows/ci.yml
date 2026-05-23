@@ -37,6 +37,7 @@ jobs:
         run: python -m pip install --upgrade pip ruff
 
       - name: Detect changed Python files
+        if: github.event_name == 'pull_request'
         id: changed-python
         uses: tj-actions/changed-files@v46
         with:
@@ -44,12 +45,16 @@ jobs:
             **/*.py
 
       - name: Run ruff on changed Python files
-        if: steps.changed-python.outputs.any_changed == 'true'
+        if: github.event_name == 'pull_request' && steps.changed-python.outputs.any_changed == 'true'
         run: python -m ruff check ${{ steps.changed-python.outputs.all_changed_files }}
 
       - name: Skip when no Python files changed
-        if: steps.changed-python.outputs.any_changed != 'true'
+        if: github.event_name == 'pull_request' && steps.changed-python.outputs.any_changed != 'true'
         run: echo "No Python files changed; skipping ruff."
+
+      - name: Skip changed-file lint outside pull requests
+        if: github.event_name != 'pull_request'
+        run: echo "Skipping changed-file ruff on push/workflow_dispatch to avoid long-range main diff lint."
 
   python-tests:
     name: Python Tests (Windows, py${{ matrix.python-version }})

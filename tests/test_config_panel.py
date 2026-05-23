@@ -100,6 +100,20 @@ def _provider(
     }
 
 
+def _set_subagent_explorer_deepseek(public_config: dict) -> None:
+    public_config["llm"]["profiles"]["subagent_explorer"]["provider"] = _provider(
+        "deepseek",
+        "https://api.deepseek.com",
+        "DEEPSEEK_API_KEY",
+        compat_mode="openai",
+        context_window=64000,
+    )
+    public_config["llm"]["profiles"]["subagent_explorer"]["model"] = "deepseek-v4-pro"
+    public_config["llm"]["profiles"]["subagent_explorer"]["api_key_env"] = (
+        "VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY"
+    )
+
+
 def test_public_llm_shape_is_inline_provider_only():
     public_config = load_public_config()
     llm = public_config["llm"]
@@ -672,13 +686,18 @@ def test_delete_generated_profile_model_clears_matching_profiles():
     public_config["llm"]["profiles"]["primary"]["model"] = "gpt-5.4"
     public_config["llm"]["profiles"]["mental_model"]["provider"] = provider.copy()
     public_config["llm"]["profiles"]["mental_model"]["model"] = "gpt-5.4"
+    explorer_model_before = public_config["llm"]["profiles"]["subagent_explorer"]["model"]
 
-    generated = next(item for item in list_llm_model_options(public_config) if item["source"] == "profile")
+    generated = next(
+        item
+        for item in list_llm_model_options(public_config)
+        if item["source"] == "profile" and item["model"] == "gpt-5.4"
+    )
     deleted = delete_llm_model(public_config, generated["model_id"])
 
     assert deleted["llm"]["profiles"]["primary"]["model"] == ""
     assert deleted["llm"]["profiles"]["mental_model"]["model"] == ""
-    assert deleted["llm"]["profiles"]["subagent_explorer"]["model"] == "deepseek-v4-pro"
+    assert deleted["llm"]["profiles"]["subagent_explorer"]["model"] == explorer_model_before
     assert not any(item["model_id"] == generated["model_id"] for item in list_llm_model_options(deleted))
     build_effective_config(deleted)
 
@@ -741,6 +760,7 @@ def test_build_effective_config_accepts_reasoning_chat_with_reasoning_content():
 
 def test_llm_connection_uses_selected_profile_inline_provider(monkeypatch):
     public_config = load_public_config()
+    _set_subagent_explorer_deepseek(public_config)
     calls = []
 
     def fake_http_probe(provider, profile):
@@ -759,6 +779,7 @@ def test_llm_connection_uses_selected_profile_inline_provider(monkeypatch):
 
 def test_llm_connection_returns_route_diagnostics(monkeypatch):
     public_config = load_public_config()
+    _set_subagent_explorer_deepseek(public_config)
     monkeypatch.setenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", "model-secret")
 
     def fake_http_probe(provider, profile, api_key=None):
@@ -777,6 +798,7 @@ def test_llm_connection_returns_route_diagnostics(monkeypatch):
 
 def test_llm_connection_prefers_pending_draft_api_key(monkeypatch):
     public_config = load_public_config()
+    _set_subagent_explorer_deepseek(public_config)
 
     def fake_http_probe(provider, profile, api_key=None):
         assert api_key == "draft-secret"
