@@ -335,14 +335,26 @@ def test_infer_result_status_rejects_restart_when_safe_modify_missing_even_if_re
     assert "未创建目标文件" in reason
 
 
-def test_resolve_python_executable_prefers_repo_venv(tmp_path: Path):
+def test_resolve_python_executable_prefers_usable_repo_venv(monkeypatch, tmp_path: Path):
     python_path = tmp_path / ".venv" / "Scripts" / "python.exe"
     python_path.parent.mkdir(parents=True)
     python_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr("scripts.evolution_harness.is_python_executable_usable", lambda path: path == python_path)
 
     resolved = resolve_python_executable(tmp_path)
 
     assert resolved == str(python_path)
+
+
+def test_resolve_python_executable_falls_back_when_repo_venv_is_broken(monkeypatch, tmp_path: Path):
+    python_path = tmp_path / ".venv" / "Scripts" / "python.exe"
+    python_path.parent.mkdir(parents=True)
+    python_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr("scripts.evolution_harness.is_python_executable_usable", lambda path: False)
+
+    resolved = resolve_python_executable(tmp_path)
+
+    assert resolved == sys.executable
 
 
 def test_build_synthetic_venv_invokes_current_python(monkeypatch, tmp_path: Path):
@@ -360,12 +372,39 @@ def test_build_synthetic_venv_invokes_current_python(monkeypatch, tmp_path: Path
         return Result()
 
     monkeypatch.setattr("scripts.evolution_harness.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.evolution_harness._python_module_available", lambda *_: True)
 
     build_synthetic_venv(tmp_path)
 
     assert calls
     assert calls[0][0][:4] == [sys.executable, "-m", "venv", "--system-site-packages"]
     assert calls[0][0][-1] == str(tmp_path / ".venv")
+
+
+def test_build_synthetic_venv_installs_missing_harness_packages(monkeypatch, tmp_path: Path):
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if cmd[:3] == [sys.executable, "-m", "venv"]:
+            python_path = tmp_path / ".venv" / "Scripts" / "python.exe"
+            python_path.parent.mkdir(parents=True, exist_ok=True)
+            python_path.write_text("python", encoding="utf-8")
+
+        class Result:
+            returncode = 0
+
+        return Result()
+
+    monkeypatch.setattr("scripts.evolution_harness.subprocess.run", fake_run)
+    monkeypatch.setattr("scripts.evolution_harness._python_module_available", lambda *_: False)
+
+    build_synthetic_venv(tmp_path)
+
+    pip_installs = [call[0] for call in calls if call[0][1:4] == ["-m", "pip", "install"]]
+    assert pip_installs
+    assert "litellm" in pip_installs[0]
+    assert "ruff" in pip_installs[0]
 
 
 def test_create_harness_config_overrides_runtime_section(tmp_path: Path):
@@ -408,11 +447,38 @@ def test_mirror_venv_into_worktree_copies_venv_without_junction(monkeypatch, tmp
     source_package = repo_root / ".venv" / "Lib" / "site-packages" / "annotated_types"
     source_package.mkdir(parents=True)
     worktree.mkdir()
+    monkeypatch.setattr("scripts.evolution_harness.is_python_executable_usable", lambda *_: True)
 
     mirror_venv_into_worktree(repo_root, worktree)
 
     assert (worktree / ".venv" / "Scripts" / "python.exe").exists()
     assert (worktree / ".venv" / "Lib" / "site-packages" / "annotated_types").exists()
+
+
+def test_mirror_venv_into_worktree_rebuilds_when_copied_venv_is_unusable(monkeypatch, tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    source_python = repo_root / ".venv" / "Scripts" / "python.exe"
+    source_python.parent.mkdir(parents=True)
+    source_python.write_text("python", encoding="utf-8")
+    source_package = repo_root / ".venv" / "Lib" / "site-packages" / "annotated_types"
+    source_package.mkdir(parents=True)
+    worktree.mkdir()
+    rebuilt = []
+
+    def fake_build(target: Path):
+        rebuilt.append(target)
+        python_path = target / ".venv" / "Scripts" / "python.exe"
+        python_path.parent.mkdir(parents=True, exist_ok=True)
+        python_path.write_text("usable", encoding="utf-8")
+
+    monkeypatch.setattr("scripts.evolution_harness.is_python_executable_usable", lambda *_: False)
+    monkeypatch.setattr("scripts.evolution_harness.build_synthetic_venv", fake_build)
+
+    mirror_venv_into_worktree(repo_root, worktree)
+
+    assert rebuilt == [worktree]
+    assert (worktree / ".venv" / "Scripts" / "python.exe").read_text(encoding="utf-8") == "usable"
 
 
 def test_mirror_venv_into_worktree_copies_python_fallback(monkeypatch, tmp_path: Path):
@@ -424,6 +490,7 @@ def test_mirror_venv_into_worktree_copies_python_fallback(monkeypatch, tmp_path:
     worktree.mkdir()
 
     monkeypatch.setattr("scripts.evolution_harness.shutil.copytree", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("copy failed")))
+    monkeypatch.setattr("scripts.evolution_harness.is_python_executable_usable", lambda *_: True)
 
     mirror_venv_into_worktree(repo_root, worktree)
 

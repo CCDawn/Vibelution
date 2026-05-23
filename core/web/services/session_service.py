@@ -95,6 +95,10 @@ class SessionValidationError(ValueError):
     """Raised when an incoming session turn payload is invalid."""
 
 
+class SessionChatReviewCandidateExistsError(RuntimeError):
+    """Raised when the session snapshot is already queued for chat review."""
+
+
 def _safe_session_workspace_token(session_id: str) -> str:
     raw = str(session_id or "").strip()
     token = _SESSION_WORKSPACE_SAFE_CHARS.sub("-", raw).strip("._-")
@@ -430,6 +434,135 @@ def delete_chat_session(session_id: str) -> dict:
     return get_session_detail(next_active_id) or {}
 
 
+def create_chat_review_candidate_from_session(session_id: str) -> dict:
+    """Create a pending supervised review candidate from a persisted chat session."""
+
+    lang = get_web_language()
+    conversation_id = str(session_id or "").strip()
+    if not conversation_id:
+        raise SessionValidationError(text_for(lang, zh="会话 ID 不能为空。", en="Session id is required."))
+
+    _, conversations = _load_conversations()
+    conversation = next(
+        (item for item in conversations if str(item.get("id") or "").strip() == conversation_id),
+        None,
+    )
+    if conversation is None:
+        raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+
+    stop_requested = _is_session_stop_requested(conversation_id)
+    if _is_session_running(conversation_id) or stop_requested:
+        _record_session_chat_review_candidate_event(
+            "blocked",
+            session_id=conversation_id,
+            outcome="busy",
+            level="warning",
+            fields={"stopRequested": bool(stop_requested)},
+        )
+        raise SessionBusyError(
+            text_for(
+                lang,
+                zh="当前会话仍在运行或停止中，结束后再添加到监督评审队列。",
+                en="This session is still running or stopping. Add it to review after the turn closes.",
+            )
+        )
+
+    messages = normalize_chat_messages(conversation.get("messages") or [])
+    turns = _build_chat_turn_records_from_messages(messages)
+    if len(turns) < 1:
+        _record_session_chat_review_candidate_event(
+            "blocked",
+            session_id=conversation_id,
+            outcome="no_complete_turn",
+            level="warning",
+            fields={"messageCount": len(messages), "turnCount": len(turns)},
+        )
+        raise SessionValidationError(
+            text_for(
+                lang,
+                zh="这个会话还没有完整的用户-助手轮次，不能加入监督评审队列。",
+                en="This session does not have a complete user-assistant turn yet.",
+            )
+        )
+
+    service = ChatDatasetCaptureService(project_root=PROJECT_ROOT)
+    try:
+        candidate = service.capture_candidate(
+            mode="chat",
+            session_id=conversation_id,
+            source_log_path=_resolve_chat_source_log_path(),
+            turns=turns,
+            require_auto_capture=False,
+            apply_quality_filters=False,
+            min_turns=1,
+            max_turns=len(turns),
+        )
+    except Exception as exc:
+        _record_session_chat_review_candidate_event(
+            "failed",
+            session_id=conversation_id,
+            outcome="failed",
+            level="error",
+            fields={
+                "messageCount": len(messages),
+                "turnCount": len(turns),
+                "errorType": exc.__class__.__name__,
+            },
+        )
+        raise
+
+    if candidate is None:
+        capture_enabled = bool(getattr(service.config.evolution.chat_dataset, "enabled", False))
+        _record_session_chat_review_candidate_event(
+            "blocked",
+            session_id=conversation_id,
+            outcome="duplicate" if capture_enabled else "capture_disabled",
+            level="warning",
+            fields={"messageCount": len(messages), "turnCount": len(turns)},
+        )
+        if not capture_enabled:
+            raise SessionValidationError(
+                text_for(
+                    lang,
+                    zh="当前配置未启用 chat 数据采集，不能加入监督评审队列。",
+                    en="Chat dataset capture is disabled in the current configuration.",
+                )
+            )
+        raise SessionChatReviewCandidateExistsError(
+            text_for(
+                lang,
+                zh="这段会话快照已经生成过监督评审样本，刷新评审工作区即可查看当前状态。",
+                en="This session snapshot already has a supervised review sample. Refresh the review workspace to see its current state.",
+            )
+        )
+
+    _record_session_chat_review_candidate_event(
+        "created",
+        session_id=conversation_id,
+        outcome="created",
+        fields={
+            "candidateId": candidate.candidate_id,
+            "turnCount": candidate.turn_count,
+            "qualitySignals": candidate.quality_signals,
+            "rawExcerptPath": candidate.raw_excerpt_path,
+        },
+    )
+    return {
+        "candidateId": candidate.candidate_id,
+        "status": "pending",
+        "sessionId": candidate.session_id,
+        "topicSummary": candidate.topic_summary,
+        "turnCount": candidate.turn_count,
+        "qualitySignals": candidate.quality_signals,
+        "rawExcerptPath": candidate.raw_excerpt_path,
+        "summary": text_for(
+            lang,
+            zh="已加入监督进化会话评审队列，等待人工判定正例、负例或丢弃。",
+            en="Added to the supervised chat review queue for human review.",
+        ),
+    }
+
+
 def request_stop_session_turn(session_id: str) -> dict:
     """Interrupt one active web chat turn and persist the partial run surface."""
 
@@ -447,7 +580,7 @@ def request_stop_session_turn(session_id: str) -> dict:
 
     controller = _get_session_turn_control(conversation_id)
     if controller is None:
-        controller = _create_session_turn_control(conversation_id)
+        controller = _restore_missing_session_turn_control(conversation_id)
         _set_session_running(conversation_id, True, turn_id=controller.turn_id)
 
     controller.request_stop(
@@ -467,6 +600,54 @@ def request_stop_session_turn(session_id: str) -> dict:
     _clear_session_turn_control(conversation_id, turn_id=controller.turn_id)
     _publish_session_detail_snapshot(conversation_id)
     return get_session_detail(conversation_id) or detail
+
+
+def _restore_missing_session_turn_control(session_id: str) -> SessionTurnControl:
+    """Recreate a lost stop controller without changing the active run identity."""
+
+    active_turn_id = _active_chat_turn_id_for_session(session_id)
+    if active_turn_id:
+        _record_missing_session_turn_control_recovery(session_id, active_turn_id, reused_active_run=True)
+        return _create_session_turn_control(session_id, turn_id=active_turn_id)
+    _record_missing_session_turn_control_recovery(session_id, "", reused_active_run=False)
+    return _create_session_turn_control(session_id)
+
+
+def _active_chat_turn_id_for_session(session_id: str) -> str:
+    active = _WORK_RUN_STORE.load_active_snapshot("chat_turn")
+    if not isinstance(active, dict):
+        return ""
+    if str(active.get("sessionId") or "").strip() != str(session_id or "").strip():
+        return ""
+    status = str(active.get("status") or active.get("currentPhase") or "").strip().lower()
+    if status not in {"queued", "running", "stopping", "paused"}:
+        return ""
+    return str(active.get("runId") or "").strip()
+
+
+def _record_missing_session_turn_control_recovery(
+    session_id: str,
+    turn_id: str,
+    *,
+    reused_active_run: bool,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "turn_control_recovery",
+            "conversation.turn_control_recovered",
+            level="warning",
+            outcome="reused_active_run" if reused_active_run else "created_new_turn",
+            message="Recovered a missing web chat turn controller.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "reusedActiveRun": bool(reused_active_run),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def stream_session_events(session_id: str, initial_detail: dict[str, Any] | None = None):
@@ -609,6 +790,132 @@ def submit_session_message(
     return get_session_detail(conversation_id) or {}
 
 
+def edit_and_resubmit_session_message(
+    session_id: str,
+    message_id: str,
+    content: str,
+    mental_model_enabled: bool | None = None,
+    *,
+    turn_mode: str = "",
+    write_intent: bool | None = None,
+) -> dict:
+    """Replace a historical user message, truncate later turns, and start a new turn."""
+
+    lang = get_web_language()
+    conversation_id = str(session_id or "").strip()
+    target_message_id = str(message_id or "").strip()
+    message = str(content or "").strip()
+    if not conversation_id:
+        raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+    if not target_message_id:
+        raise SessionValidationError(text_for(lang, zh="请选择要重新编辑的消息。", en="Choose a message to edit."))
+    if not message:
+        raise SessionValidationError(
+            text_for(lang, zh="请输入重新发送的消息。", en="Enter the edited message before sending.")
+        )
+
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, conversation_id)
+        if conversation is None:
+            raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+        _ensure_conversation_workspace_metadata(conversation)
+
+        if _is_session_running(conversation_id):
+            raise SessionBusyError(
+                text_for(
+                    lang,
+                    zh="当前会话仍在运行，请等这一轮结束后再重新编辑发送。",
+                    en="This session is still running. Wait for the current turn to finish before editing and resending.",
+                )
+            )
+
+        previous_messages = normalize_chat_messages(conversation.get("messages") or [])
+        target_index = _find_user_message_index_by_api_id(conversation_id, previous_messages, target_message_id)
+        if target_index < 0:
+            raise SessionValidationError(
+                text_for(lang, zh="只能重新编辑历史用户消息。", en="Only historical user messages can be edited and resent.")
+            )
+
+        active_task = _normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
+        requested_leases = infer_chat_turn_leases(
+            {
+                "content": message,
+                "mode": turn_mode,
+                "writeIntent": write_intent,
+                "activeTask": active_task,
+            }
+        )
+        lease_decision = _check_chat_turn_lease_decision(requested_leases)
+        if not lease_decision.allowed:
+            raise SessionBusyError(_localize_lease_conflict(lease_decision.reason, lang=lang))
+
+        original_entry = dict(previous_messages[target_index])
+        user_entry = _make_chat_message("user", message)
+        edited_messages = previous_messages[:target_index] + [user_entry]
+        conversation["messages"] = edited_messages
+        conversation.pop("last_turn_error", None)
+        conversation.pop("lastTurnError", None)
+        conversation["last_turn_status"] = "running"
+        conversation["updated_at"] = user_entry["timestamp"]
+        payload["active_conversation_id"] = conversation_id
+        payload["updated_at"] = user_entry["timestamp"]
+        save_chat_state(PROJECT_ROOT, payload)
+        turn_control = _create_session_turn_control(conversation_id)
+        _set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
+        _persist_chat_turn_work_run(
+            session_id=conversation_id,
+            turn_id=turn_control.turn_id,
+            status="running",
+            leases=requested_leases,
+            user_message=message,
+            started_at=user_entry["timestamp"],
+            updated_at=user_entry["timestamp"],
+        )
+
+    _record_session_message_edit_resubmit_event(
+        conversation_id,
+        target_message_id=target_message_id,
+        turn_id=turn_control.turn_id,
+        truncated_count=max(0, len(previous_messages) - target_index - 1),
+        original_content=original_entry.get("content") or "",
+        edited_content=message,
+    )
+    _record_session_cycle_message(
+        conversation_id,
+        user_entry,
+        event="user_message_edited_resubmitted",
+        status="running",
+    )
+    _publish_session_detail_snapshot(conversation_id)
+
+    context = {
+        "session_id": conversation_id,
+        "turn_id": turn_control.turn_id,
+        "turn_control": turn_control,
+        "user_message": message,
+        "history_messages": edited_messages[:target_index],
+        "mental_model_enabled": mental_model_enabled,
+    }
+    try:
+        _schedule_session_turn(context)
+    except Exception as exc:
+        _persist_chat_turn_work_run(
+            session_id=conversation_id,
+            turn_id=turn_control.turn_id,
+            status="failed",
+            leases=requested_leases,
+            user_message=message,
+            summary=f"{type(exc).__name__}: {exc}",
+        )
+        _set_session_running(conversation_id, False)
+        _clear_session_turn_control(conversation_id)
+        _persist_session_turn_failure(conversation_id, context, exc)
+        _publish_session_detail_snapshot(conversation_id)
+        raise
+    return get_session_detail(conversation_id) or {}
+
+
 def _load_conversations() -> tuple[str, list[dict[str, Any]]]:
     payload = load_chat_state(PROJECT_ROOT)
     payload = _repair_stale_running_conversations(payload)
@@ -659,11 +966,58 @@ def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, An
         conversation["messages"] = messages + [stop_message]
         conversation["last_turn_status"] = "ready"
         conversation["updated_at"] = stop_message["timestamp"]
+        _release_stale_chat_turn_work_run(
+            session_id=conversation_id,
+            finished_at=str(stop_message["timestamp"] or now),
+            summary=str(stop_message.get("content") or ""),
+        )
         changed = True
     if changed:
         payload["updated_at"] = now or _now_timestamp()
         save_chat_state(PROJECT_ROOT, payload)
     return payload
+
+
+def _release_stale_chat_turn_work_run(*, session_id: str, finished_at: str, summary: str) -> None:
+    """Clear a persisted active chat_turn when its in-memory worker is gone."""
+
+    active = _WORK_RUN_STORE.load_active_snapshot("chat_turn")
+    if not isinstance(active, dict):
+        return
+    active_session_id = str(active.get("sessionId") or "").strip()
+    if active_session_id and active_session_id != session_id:
+        return
+    run_id = str(active.get("runId") or "").strip()
+    if not run_id:
+        return
+    status = str(active.get("status") or active.get("currentPhase") or "").strip().lower()
+    if status not in {"queued", "running", "stopping", "paused"}:
+        return
+    _persist_chat_turn_work_run(
+        session_id=session_id,
+        turn_id=run_id,
+        status="stopped",
+        summary=summary,
+        finished_at=finished_at,
+        updated_at=finished_at,
+    )
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "turn_recovery",
+            "conversation.turn_recovered",
+            level="warning",
+            outcome="stopped",
+            message=summary or "Stale chat turn recovered.",
+            fields={
+                "sessionId": session_id,
+                "turnId": run_id,
+                "previousStatus": status,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
@@ -710,7 +1064,8 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
         content = _sanitize_message_content(role, raw.get("content") or "")
         thought = _normalize_message_thought(raw, role=role)
         mental_snapshot = _normalize_mental_snapshot(raw.get("mental_snapshot") or raw.get("mentalSnapshot"))
-        if not content and not thought and mental_snapshot is None:
+        tool_calls = _normalize_message_tool_calls(raw.get("tool_calls") or raw.get("toolCalls") or raw.get("tools") or [])
+        if not content and not thought and mental_snapshot is None and not tool_calls:
             continue
         entry: dict[str, Any] = {
             "id": f"{conversation_id}-message-{index}",
@@ -722,7 +1077,6 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["thought"] = thought
         if mental_snapshot is not None:
             entry["mentalSnapshot"] = mental_snapshot
-        tool_calls = _normalize_message_tool_calls(raw.get("tool_calls") or raw.get("toolCalls") or raw.get("tools") or [])
         if tool_calls:
             entry["toolCalls"] = tool_calls
         messages.append(entry)
@@ -763,6 +1117,23 @@ def _looks_like_runtime_failure_notice(text: Any) -> bool:
         "the model provider failed upstream, so this turn did not complete",
     )
     return any(notice in value for notice in notices)
+
+
+def _find_user_message_index_by_api_id(
+    conversation_id: str,
+    messages: list[dict[str, Any]],
+    message_id: str,
+) -> int:
+    normalized_target = str(message_id or "").strip()
+    if not normalized_target:
+        return -1
+    for index, item in enumerate(list(messages or []), start=1):
+        role = str(item.get("role") or "").strip().lower()
+        api_id = str(item.get("id") or f"{conversation_id}-message-{index}").strip()
+        if api_id == normalized_target and role == "user":
+            return index - 1
+    return -1
+
 
 def _sanitize_message_content(role: str, content: Any) -> str:
     text = str(content or "").strip()
@@ -1746,6 +2117,48 @@ def _record_session_turn_error(
         )
 
 
+def _record_session_message_edit_resubmit_event(
+    session_id: str,
+    *,
+    target_message_id: str,
+    turn_id: str,
+    truncated_count: int,
+    original_content: str,
+    edited_content: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "message_edit_resubmit",
+            "conversation.message_edited_resubmitted",
+            level="info",
+            outcome="accepted",
+            message="Historical user message edited and resubmitted.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "messageId": str(target_message_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "truncatedMessageCount": max(0, int(truncated_count or 0)),
+                "originalPreview": trim_lines(original_content, max_lines=2),
+                "editedPreview": trim_lines(edited_content, max_lines=2),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-edits.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "message_id": str(target_message_id or "").strip(),
+                "turn_id": str(turn_id or "").strip(),
+                "truncated_message_count": max(0, int(truncated_count or 0)),
+                "original_preview": trim_lines(original_content, max_lines=2),
+                "edited_preview": trim_lines(edited_content, max_lines=2),
+            },
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene message edit log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
 def _append_session_workspace_log(
     session_id: str,
     message: dict[str, Any],
@@ -1976,6 +2389,11 @@ def _format_visible_reply(result: Any) -> str:
 def _is_provider_failed_result(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
+    if any(
+        _looks_like_provider_error_text(result.get(key))
+        for key in ("error", "raw_error", "rawError")
+    ):
+        return True
     status = str(result.get("status") or "").strip().lower()
     if status not in {"failed", "timeout", "error"}:
         return False
@@ -2674,6 +3092,39 @@ def _capture_session_chat_candidate(session_id: str, messages: list[dict[str, An
         _debug_logger.warning(f"web chat candidate capture skipped: {type(exc).__name__}: {exc}", tag="CHAT")
 
 
+def _record_session_chat_review_candidate_event(
+    phase: str,
+    *,
+    session_id: str,
+    outcome: str,
+    level: str = "info",
+    fields: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_review",
+            f"session_candidate_{phase}",
+            f"chat_review.session_candidate.{phase}",
+            level=level,
+            outcome=outcome,
+            message="Session chat review candidate event.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "source": "manual_session_action",
+                **(fields or {}),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-chat-review.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "phase": phase,
+                "outcome": outcome,
+                **(fields or {}),
+            },
+        )
+    except Exception:
+        return
+
+
 def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> list[ChatTurnRecord]:
     turns: list[ChatTurnRecord] = []
     pending_user_message = ""
@@ -3127,11 +3578,11 @@ def _task_status_from_result_contract(
     return "idle"
 
 
-def _create_session_turn_control(session_id: str) -> SessionTurnControl:
+def _create_session_turn_control(session_id: str, *, turn_id: str = "") -> SessionTurnControl:
     with _SESSION_TURN_CONTROLS_LOCK:
         control = SessionTurnControl(
             session_id=session_id,
-            turn_id=f"{session_id}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
+            turn_id=str(turn_id or "").strip() or f"{session_id}-{datetime.now().strftime('%Y%m%d%H%M%S%f')}",
         )
         _SESSION_TURN_CONTROLS[session_id] = control
         return control

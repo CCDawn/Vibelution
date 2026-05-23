@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SupervisedWorkspaceTabs.module.css";
 
-type SupervisedWorkspaceView = "live" | "runs" | "library" | "review";
+export type SupervisedWorkspaceView = "live" | "runs" | "library" | "review";
 
 type SupervisedWorkspaceTabsProps = {
   activeView: SupervisedWorkspaceView;

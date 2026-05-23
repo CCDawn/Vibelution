@@ -28,6 +28,7 @@ from .session_service import (
     load_chat_turn_work_run_summary,
     request_stop_session_turn,
 )
+from .runtime_scene_service import record_runtime_scene_event
 from .workbench_contract_service import get_workbench_contract
 
 
@@ -139,6 +140,11 @@ def request_runtime_shutdown() -> dict[str, object]:
     """Request the local workbench backend to stop."""
 
     lang = get_web_language()
+    _record_shutdown_event(
+        "runtime.shutdown.requested",
+        message="Runtime shutdown requested from web UI.",
+        fields={"source": "web_ui"},
+    )
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
     if _can_use_managed_launcher_shutdown():
@@ -148,6 +154,16 @@ def request_runtime_shutdown() -> dict[str, object]:
                 "close_workbench",
                 args={"reason": "web_close_button", "source": "web_ui", "stopManager": True},
                 requested_by="web_ui",
+            )
+            _record_shutdown_event(
+                "runtime.shutdown.accepted",
+                message="Runtime shutdown queued through runtime manager.",
+                outcome="accepted",
+                fields=_shutdown_event_fields(
+                    mode="runtime_manager",
+                    stopped_chat_turns=stopped_chat_turns,
+                    stopped_evolution_runs=stopped_evolution_runs,
+                ),
             )
             return {
                 "accepted": True,
@@ -162,6 +178,16 @@ def request_runtime_shutdown() -> dict[str, object]:
             }
         except Exception:
             _spawn_managed_launcher_shutdown()
+            _record_shutdown_event(
+                "runtime.shutdown.accepted",
+                message="Runtime shutdown fell back to managed launcher stop.",
+                outcome="accepted",
+                fields=_shutdown_event_fields(
+                    mode="managed_fallback",
+                    stopped_chat_turns=stopped_chat_turns,
+                    stopped_evolution_runs=stopped_evolution_runs,
+                ),
+            )
             return {
                 "accepted": True,
                 "mode": "managed_fallback",
@@ -175,6 +201,16 @@ def request_runtime_shutdown() -> dict[str, object]:
             }
 
     _schedule_local_backend_exit()
+    _record_shutdown_event(
+        "runtime.shutdown.accepted",
+        message="Runtime shutdown scheduled local backend exit.",
+        outcome="accepted",
+        fields=_shutdown_event_fields(
+            mode="local",
+            stopped_chat_turns=stopped_chat_turns,
+            stopped_evolution_runs=stopped_evolution_runs,
+        ),
+    )
     return {
         "accepted": True,
         "mode": "local",
@@ -186,6 +222,60 @@ def request_runtime_shutdown() -> dict[str, object]:
         "chatTurns": stopped_chat_turns,
         "evolutionRuns": stopped_evolution_runs,
     }
+
+
+def _record_shutdown_event(
+    event_code: str,
+    *,
+    message: str,
+    outcome: str = "observed",
+    level: str = "info",
+    fields: dict[str, object] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "runtime",
+            "shutdown",
+            event_code,
+            message=message,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _shutdown_event_fields(
+    *,
+    mode: str,
+    stopped_chat_turns: list[dict[str, object]],
+    stopped_evolution_runs: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "source": "web_ui",
+        "mode": mode,
+        "chatTurnCount": len(stopped_chat_turns),
+        "evolutionRunCount": len(stopped_evolution_runs),
+        "chatTurnStatuses": _status_counts(stopped_chat_turns),
+        "evolutionRunStatuses": _status_counts(stopped_evolution_runs),
+        "evolutionRunKinds": sorted(
+            {
+                str(item.get("kind") or "").strip()
+                for item in stopped_evolution_runs
+                if str(item.get("kind") or "").strip()
+            }
+        ),
+    }
+
+
+def _status_counts(items: list[dict[str, object]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        status = str(item.get("status") or "unknown").strip() or "unknown"
+        counts[status] = counts.get(status, 0) + 1
+    return counts
 
 
 def _can_use_managed_launcher_shutdown() -> bool:
@@ -313,6 +403,7 @@ def _stop_active_evolution_runs_before_shutdown() -> list[dict[str, object]]:
     for kind, stopper in (
         ("self_evolution_run", _force_cancel_self_evolution_for_shutdown),
         ("supervised_evolution_run", _force_cancel_supervised_evolution_for_shutdown),
+        ("supervised_worktree_evolution_run", _force_cancel_supervised_worktree_evolution_for_shutdown),
     ):
         try:
             snapshots = stopper(reason)
@@ -351,22 +442,32 @@ def _force_cancel_supervised_evolution_for_shutdown(reason: str) -> list[dict[st
     return list(supervised_control_service.force_cancel_active_supervised_runs_for_shutdown(reason))
 
 
+def _force_cancel_supervised_worktree_evolution_for_shutdown(reason: str) -> list[dict[str, object]]:
+    from . import supervised_worktree_evolution_service
+
+    return list(supervised_worktree_evolution_service.force_cancel_active_supervised_worktree_runs_for_shutdown(reason))
+
+
 def _work_run_summary() -> dict[str, dict[str, dict | None]]:
     chat = load_chat_turn_work_run_summary()
     self_active = _safe_load_evolution_work_run("self", active=True)
     self_latest = _safe_load_evolution_work_run("self", active=False)
     supervised_active = _safe_load_evolution_work_run("supervised", active=True)
     supervised_latest = _safe_load_evolution_work_run("supervised", active=False)
+    supervised_worktree_active = _safe_load_supervised_worktree_work_run(active=True)
+    supervised_worktree_latest = _safe_load_supervised_worktree_work_run(active=False)
     return {
         "active": {
             "chat_turn": chat.get("active"),
             "self_evolution_run": self_active,
             "supervised_evolution_run": supervised_active,
+            "supervised_worktree_evolution_run": supervised_worktree_active,
         },
         "latest": {
             "chat_turn": chat.get("latest"),
             "self_evolution_run": self_latest,
             "supervised_evolution_run": supervised_latest,
+            "supervised_worktree_evolution_run": supervised_worktree_latest,
         },
     }
 
@@ -395,6 +496,33 @@ def _decorate_evolution_work_run_snapshot(payload: dict, *, kind: str) -> dict:
     if leases:
         decorated["leases"] = leases
     return decorated
+
+
+def _safe_load_supervised_worktree_work_run(*, active: bool) -> dict | None:
+    try:
+        from . import supervised_worktree_evolution_service
+
+        payload = (
+            supervised_worktree_evolution_service.get_active_supervised_worktree_run()
+            if active
+            else _latest_supervised_worktree_snapshot()
+        )
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    decorated = dict(payload)
+    leases = leases_for_snapshot(decorated)
+    if leases:
+        decorated["leases"] = leases
+    return decorated
+
+
+def _latest_supervised_worktree_snapshot() -> dict | None:
+    from . import supervised_worktree_evolution_service
+
+    runs = supervised_worktree_evolution_service.list_supervised_worktree_runs(limit=1)
+    return runs[0] if runs else None
 
 
 def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:

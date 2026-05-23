@@ -8,19 +8,28 @@
 
 .header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 22px 24px 16px;
+  gap: var(--route-topbar-gap);
+  min-width: 0;
+  padding: var(--route-topbar-padding);
   border-bottom: 1px solid var(--border-strong);
   background: var(--surface-header);
 }
 
+.header > div:first-child {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
 .eyebrow,
 .sidebarEyebrow {
-  margin: 0 0 6px;
+  margin: 0 0 2px;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -32,32 +41,40 @@
 }
 
 .title {
-  font-size: 1.6rem;
+  font-size: var(--route-topbar-title-size);
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
 .subtitle {
-  margin: 10px 0 0;
-  max-width: 68ch;
+  min-width: 0;
+  margin: 0;
+  max-width: none;
   color: var(--fg-secondary);
-  line-height: 1.5;
+  font-size: var(--route-topbar-subtitle-size);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .headerMeta {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .metaPill {
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
+  min-height: 28px;
+  padding: 0 9px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
   background: var(--surface-panel);
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
 }
 
 .rootButton {
@@ -398,42 +415,86 @@
 
 .logPreviewStack {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 14px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 10px;
   min-height: 0;
   height: 100%;
 }
 
 .diagnosticsPanel {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 0;
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--surface-input);
 }
 
-.diagnosticsHeader {
+.diagnosticsSummaryRow {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  cursor: pointer;
+  list-style: none;
 }
 
-.diagnosticsSummary {
-  margin: 0;
+.diagnosticsSummaryRow::-webkit-details-marker {
+  display: none;
+}
+
+.diagnosticsSummaryText {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.diagnosticsInlineMetrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.diagnosticsInlineMetrics strong {
   color: var(--fg-primary);
-  line-height: 1.5;
+}
+
+.diagnosticsExpandLabel {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.diagnosticsPanel[open] .diagnosticsExpandLabel {
+  color: var(--fg-secondary);
+}
+
+.diagnosticsDetails {
+  display: grid;
+  gap: 10px;
+  padding: 0 10px 10px;
 }
 
 .diagnosticPill {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
-  padding: 6px 10px;
+  min-height: 24px;
+  padding: 0 8px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
 }
 
 .diagnosticPillError {
@@ -454,27 +515,10 @@
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
 }
 
-.diagnosticMetricGrid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.diagnosticMetricGrid span,
 .diagnosticHintGrid article {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
-}
-
-.diagnosticMetricGrid span {
-  padding: 10px;
-  color: var(--fg-secondary);
-  font-size: 0.82rem;
-}
-
-.diagnosticMetricGrid strong {
-  color: var(--fg-primary);
 }
 
 .diagnosticHintGrid {
@@ -654,26 +698,33 @@
 
 .packageFilesPanel {
   display: grid;
+  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  align-items: stretch;
   gap: 10px;
   min-height: 0;
-  padding: 14px;
+  max-height: 92px;
+  padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-input);
 }
 
+.packageFilesPanel .packageFilesHeader {
+  align-content: start;
+}
+
 .packageFilesTitle {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.96rem;
 }
 
 .packageFileList {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  display: flex;
   gap: 8px;
-  max-height: 190px;
-  overflow: auto;
-  padding-right: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 2px 4px 0;
 }
 
 .packageFileRow {
@@ -681,6 +732,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: 8px;
   align-items: stretch;
+  flex: 0 0 clamp(220px, 24vw, 320px);
   min-width: 0;
 }
 
@@ -712,7 +764,8 @@
   display: grid;
   gap: 3px;
   width: 100%;
-  padding: 10px;
+  min-height: 50px;
+  padding: 7px 10px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: var(--surface-panel-strong);
@@ -1298,14 +1351,40 @@
 
   .sceneDetailHeader,
   .sceneDetailHeaderCompact,
-  .sceneInfoGrid {
+  .sceneInfoGrid,
+  .diagnosticHintGrid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .packageFilesPanel {
+    grid-template-columns: minmax(0, 1fr);
+    max-height: none;
+  }
+
+  .diagnosticsSummaryRow {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .diagnosticsSummaryText {
+    flex-basis: 100%;
+    order: 3;
+    white-space: normal;
   }
 }
 
 @media (max-width: 640px) {
   .header {
     flex-direction: column;
+  }
+
+  .header > div:first-child {
+    grid-template-columns: 1fr;
+  }
+
+  .title,
+  .subtitle {
+    white-space: normal;
   }
 
   .headerMeta {

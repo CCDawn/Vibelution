@@ -393,6 +393,84 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_native_commands_are_hidden_and_python_checks_use_helper(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$nativeCommandAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Invoke-NativeCommand"
+}, $true)
+if ($null -eq $nativeCommandAst) {
+    throw "Invoke-NativeCommand was not found."
+}
+$nativeCommandText = $nativeCommandAst.Extent.Text
+if ($nativeCommandText -notmatch "Start-Process") {
+    throw "Invoke-NativeCommand does not spawn through Start-Process."
+}
+if ($nativeCommandText -notmatch "-WindowStyle\\s+Hidden") {
+    throw "Invoke-NativeCommand does not hide spawned native windows."
+}
+if ($nativeCommandText -notmatch "RedirectStandardOutput" -or $nativeCommandText -notmatch "RedirectStandardError") {
+    throw "Invoke-NativeCommand does not capture native output."
+}
+
+$testPythonAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Test-PythonRuntime"
+}, $true)
+if ($null -eq $testPythonAst) {
+    throw "Test-PythonRuntime was not found."
+}
+$testPythonText = $testPythonAst.Extent.Text
+if ($testPythonText -match '&\\s+\\$CommandPath') {
+    throw "Test-PythonRuntime still invokes python directly."
+}
+if ($testPythonText -notmatch "Invoke-NativeCommand" -or $testPythonText -notmatch "SuppressOutput") {
+    throw "Test-PythonRuntime does not use the hidden native helper."
+}
+
+$depsAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Ensure-ProjectPythonDependencies"
+}, $true)
+if ($null -eq $depsAst) {
+    throw "Ensure-ProjectPythonDependencies was not found."
+}
+$depsText = $depsAst.Extent.Text
+if ($depsText -match '&\\s+\\$installTarget\\.FilePath') {
+    throw "Python dependency install still invokes pip directly."
+}
+if ($depsText -notmatch "Invoke-NativeCommand") {
+    throw "Python dependency install does not use the hidden native helper."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_runtime_manager_client_forwards_expected_command_flags(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -452,6 +530,44 @@ if ($closeArgs -notcontains "--stop-manager") { throw "close_workbench did not f
 if ($closeArgs -contains "--no-browser") { throw "close_workbench forwarded --no-browser unexpectedly." }
 if ($statusArgs -contains "command") { throw "status used command mode unexpectedly." }
 if ($statusArgs -notcontains "status") { throw "status did not invoke runtime manager status." }
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_runtime_manager_client_failure_exits_launcher(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$scriptText = $ast.EndBlock.Extent.Text
+    if ($scriptText -notmatch '\\$clientExitCode\\s*=\\s*Invoke-RuntimeManagerClient') {
+        throw "Runtime-manager client action return code is not captured."
+    }
+    if ($scriptText -notmatch 'if\\s*\\(\\s*\\$clientExitCode\\s+-ne\\s+0\\s*\\)') {
+        throw "Runtime-manager client non-zero return code is not checked."
+    }
+    if ($scriptText -notmatch 'exit\\s+\\$clientExitCode') {
+        throw "Runtime-manager client non-zero return code is not propagated."
+    }
 Write-Output "ok"
 """,
     )
@@ -555,6 +671,11 @@ foreach ($name in @(
     "Get-RuntimeSceneStatusDisplayLabel",
     "Get-RuntimeSceneTriggerDisplayLabel",
     "Get-RuntimeScenePackageIndex",
+    "Get-RuntimeScenePackageSummary",
+    "Get-RuntimeSceneJsonlEventCount",
+    "Get-RuntimeSceneSeverityCounts",
+    "Get-RuntimeSceneEventSeverity",
+    "Get-RuntimeSceneChildFileCount",
     "ConvertTo-PlainHashtable",
     "Save-RuntimeSceneManifest"
 )) {{
@@ -577,6 +698,20 @@ function Get-CurrentRuntimeSceneFilePath {{
     param([string]$RelativePath)
     return Join-Path $script:currentRuntimeSceneDir $RelativePath
 }}
+New-Item -ItemType Directory -Path (Join-Path $script:currentRuntimeSceneDir "agent/supervised_runs") -Force | Out-Null
+Set-Content -Path (Join-Path $script:currentRuntimeSceneDir "agent/supervised_runs/run-a.jsonl") -Value '{{}}' -Encoding UTF8
+New-Item -ItemType Directory -Path (Join-Path $script:currentRuntimeSceneDir "agent/self_evolution_runs") -Force | Out-Null
+Set-Content -Path (Join-Path $script:currentRuntimeSceneDir "agent/self_evolution_runs/run-b.jsonl") -Value '{{}}' -Encoding UTF8
+Set-Content -Path (Join-Path $script:currentRuntimeSceneDir "timeline.jsonl") -Value @(
+    '{{"level":"info","outcome":"observed","fields":{{}}}}',
+    '{{"level":"warning","outcome":"degraded","fields":{{}}}}',
+    '{{"level":"warning","outcome":"retrying","fields":{{"errorType":"network_error","error":"temporary transport failure"}}}}',
+    '{{"level":"error","outcome":"failed","fields":{{"errorType":"RuntimeError"}}}}'
+) -Encoding UTF8
+Set-Content -Path (Join-Path $script:currentRuntimeSceneDir "lifecycle.jsonl") -Value @(
+    '{{"phase":"startup","level":"info","outcome":"observed","fields":{{}}}}',
+    '{{"phase":"shutdown","level":"info","outcome":"succeeded","fields":{{}}}}'
+) -Encoding UTF8
 
 Save-RuntimeSceneManifest -Manifest @{{
     schema_version = 2
@@ -591,8 +726,12 @@ Save-RuntimeSceneManifest -Manifest @{{
 
 $manifest = Get-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $packageIndex = Get-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "package_index.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$summary = Get-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "summary.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($manifest.package.package_index_path -ne "package_index.json") {{
     throw "manifest package does not point to package_index.json."
+}}
+if ($manifest.package.summary_path -ne "summary.json") {{
+    throw "manifest package does not point to summary.json."
 }}
 if ($packageIndex.package_id -ne "scene-a") {{
     throw "package_index package_id did not round-trip."
@@ -602,6 +741,45 @@ if ($packageIndex.index_key -ne $manifest.package.index_key) {{
 }}
 if ($packageIndex.search_text -match "System\\.Object\\[\\]") {{
     throw "package_index search_text contains a stringified tag array."
+}}
+if ($summary.package_id -ne "scene-a") {{
+    throw "summary package_id did not round-trip."
+}}
+if ($summary.primary_files.package_index -ne "package_index.json") {{
+    throw "summary does not point to package_index.json."
+}}
+if ($summary.primary_files.timeline -ne "timeline.jsonl" -or $summary.primary_files.lifecycle -ne "lifecycle.jsonl") {{
+    throw "summary does not point to lifecycle entry files."
+}}
+if ($summary.sections.supervised_evolution.path -ne "agent/supervised_runs") {{
+    throw "summary missing supervised evolution section."
+}}
+if ($summary.sections.supervised_evolution.worktree_path -ne "agent/supervised_worktree_runs") {{
+    throw "summary missing supervised worktree evolution section."
+}}
+if ($summary.sections.self_evolution.path -ne "agent/self_evolution_runs") {{
+    throw "summary missing self evolution section."
+}}
+if ($summary.event_counts.supervised_evolution_logs -ne 1) {{
+    throw "summary supervised evolution log count is wrong."
+}}
+if ($summary.event_counts.self_evolution_logs -ne 1) {{
+    throw "summary self evolution log count is wrong."
+}}
+if ($summary.event_counts.timeline_events -ne 4) {{
+    throw "summary timeline event count should count jsonl rows."
+}}
+if ($summary.event_counts.lifecycle_events -ne 2) {{
+    throw "summary lifecycle event count should count jsonl rows."
+}}
+if ($summary.event_counts.errors -ne 1) {{
+    throw "summary error count should reflect timeline event severity."
+}}
+if ($summary.event_counts.warnings -ne 2) {{
+    throw "summary warning count should preserve explicit warning level before error markers."
+}}
+if ($summary.diagnostic_entrypoint.recommended_order[0] -ne "summary.json") {{
+    throw "summary diagnostic order does not start from summary.json."
 }}
 Write-Output "ok"
 """,
@@ -949,6 +1127,110 @@ Write-Output $payload
     assert payload["stops"] == []
     assert payload["getStateCalls"] == 2
     assert "launcher.supervisor.backend_pid.reconciled" in payload["controlEvents"]
+
+
+def test_launcher_supervisor_preserves_requested_shutdown_reason_on_backend_exit(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "ConvertTo-PlainHashtable",
+    "Get-ObjectPropertyValue",
+    "Get-RuntimeManagerWorkbenchReason",
+    "Run-SupervisorLoop"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:getStateCalls = 0
+$script:stops = @()
+$script:notes = @()
+function Get-State {
+    $script:getStateCalls += 1
+    if ($script:getStateCalls -gt 1) {
+        return $null
+    }
+    return [pscustomobject]@{
+        sessionId = "session-1"
+        backendPid = 1111
+        browserManaged = $true
+    }
+}
+function Get-ManagedBackendLiveness {
+    param([int]$TrackedPid = 0)
+    return [pscustomobject]@{
+        Alive = $false
+        Healthy = $false
+        TrackedPid = $TrackedPid
+        TrackedPidAlive = $false
+        CandidatePids = @()
+    }
+}
+function Get-RuntimeManagerWorkbench {
+    return [pscustomobject]@{
+        desiredState = "closed"
+        observedState = "open"
+        phase = "closing"
+        lastReason = "web_close_button"
+        lastSource = "web_ui"
+    }
+}
+function Get-ManagedBrowserWindowProcesses {
+    return @([pscustomobject]@{ Id = 3333; MainWindowHandle = 1 })
+}
+function Stop-ManagedSession {
+    param([string]$Reason = "")
+    $script:stops += $Reason
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+}
+function Write-Note {
+    param([string]$Message)
+    $script:notes += $Message
+}
+function Start-Sleep { param([int]$Milliseconds, [int]$Seconds) }
+
+Run-SupervisorLoop -ManagedSessionId "session-1"
+
+$payload = @{
+    stops = @($script:stops)
+    notes = @($script:notes)
+    getStateCalls = $script:getStateCalls
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["stops"] == ["web_close_button"]
+    assert "backend exited unexpectedly" not in json.dumps(payload, ensure_ascii=False)
+    assert payload["getStateCalls"] == 1
 
 
 def test_desktop_entry_maps_open_to_start_then_monitor(tmp_path):

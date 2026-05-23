@@ -11,10 +11,13 @@ import {
   Play,
   Sparkles,
   Square,
+  Save,
+  Pencil,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -31,8 +34,10 @@ import {
   EvolutionProposalBulkDeleteResponse,
   EvolutionProposalDeleteResponse,
   EvolutionProposalDetail,
+  EvolutionProposalUpdateResponse,
   EvolutionLibraryEntry,
   EvolutionLibraryPayload,
+  SupervisedWorktreeRun,
   SelfEvolutionActiveRun,
   SelfEvolutionHistoryDeleteResponse,
   SelfEvolutionHandoffResponse,
@@ -44,7 +49,7 @@ import {
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SelfEvolutionTrack } from "./SelfEvolutionTrack";
-import { SupervisedWorkspaceTabs } from "./SupervisedWorkspaceTabs";
+import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import {
   isLiveSupervisedRunStatus,
   parseRunStreamSnapshot,
@@ -53,6 +58,14 @@ import {
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
+import {
+  clampPaneSize,
+  clampPaneWidth,
+  keyboardPaneHeight,
+  keyboardPaneWidth,
+  storedPaneSize,
+  storedPaneWidth,
+} from "./resizablePane";
 import { savePendingSelfEvolutionHandoff } from "./selfEvolutionHandoff";
 import styles from "./EvolutionRoute.module.css";
 
@@ -85,6 +98,30 @@ const LIBRARY_STATUS_FILTERS: LibraryStatusFilter[] = [
 ];
 const EMPTY_RUNS: EvolutionRun[] = [];
 const EMPTY_LIBRARY_ENTRIES: EvolutionLibraryEntry[] = [];
+const EVOLUTION_RUNS_QUEUE_WIDTH_KEY = "vibelution.evolution.runs-queue-width";
+const EVOLUTION_RUNS_QUEUE_BOUNDS = { min: 300, max: 520 };
+const EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH = 380;
+const EVOLUTION_LIBRARY_LIST_WIDTH_KEY = "vibelution.evolution.library-list-width";
+const EVOLUTION_LIBRARY_LIST_BOUNDS = { min: 280, max: 520 };
+const EVOLUTION_LIBRARY_LIST_DEFAULT_WIDTH = 360;
+const EVOLUTION_LIVE_LAUNCH_WIDTH_KEY = "vibelution.evolution.live-launch-width";
+const EVOLUTION_LIVE_LAUNCH_BOUNDS = { min: 320, max: 520 };
+const EVOLUTION_LIVE_LAUNCH_DEFAULT_WIDTH = 360;
+const EVOLUTION_LIVE_RUN_WIDTH_KEY = "vibelution.evolution.live-run-width";
+const EVOLUTION_LIVE_RUN_BOUNDS = { min: 320, max: 560 };
+const EVOLUTION_LIVE_RUN_DEFAULT_WIDTH = 380;
+const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
+const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
+const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 440;
+
+type ProposalEditDraft = {
+  improvementType: string;
+  expectedEffect: string;
+  summary: string;
+  candidatePrompt: string;
+  baselinePrompt: string;
+  editNote: string;
+};
 
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -144,6 +181,44 @@ function formatTurnRange(startTurn: number, endTurn: number) {
   return "--";
 }
 
+function datasetUsabilityLabel(
+  dataset: { effective?: boolean; usabilityStatus?: string; adapterStatus?: string; caseCount?: number | null },
+  lang: string,
+) {
+  const status = String(dataset.usabilityStatus || "").trim();
+  const caseCount = typeof dataset.caseCount === "number" ? dataset.caseCount : null;
+  if (dataset.effective) {
+    return lang === "zh" ? `可用 ${caseCount ?? 0} 例` : `usable ${caseCount ?? 0} cases`;
+  }
+  if (status === "empty") {
+    return lang === "zh" ? "空数据" : "empty";
+  }
+  if (status === "missing_source") {
+    return lang === "zh" ? "缺源文件" : "missing source";
+  }
+  if (status === "requires_external_harness") {
+    return lang === "zh" ? "需外部 harness" : "needs harness";
+  }
+  if (status === "invalid") {
+    return lang === "zh" ? "格式异常" : "invalid";
+  }
+  if (status === "blocked") {
+    return String(dataset.adapterStatus || status || "blocked");
+  }
+  return String(dataset.adapterStatus || status || (lang === "zh" ? "不可用" : "unavailable"));
+}
+
+function proposalEditDraftFromDetail(detail: EvolutionProposalDetail): ProposalEditDraft {
+  return {
+    improvementType: detail.proposal.improvementType || "",
+    expectedEffect: detail.proposal.expectedEffect || "",
+    summary: detail.proposal.summary || detail.review.changeSummary || "",
+    candidatePrompt: detail.proposal.candidatePrompt || "",
+    baselinePrompt: detail.proposal.baselinePrompt || "",
+    editNote: detail.proposal.editNote || "",
+  };
+}
+
 export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps) {
   const {
     lang,
@@ -184,6 +259,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [bundleNameInput, setBundleNameInput] = useState("");
   const [keepWorktree, setKeepWorktree] = useState(false);
   const [liveActiveRun, setLiveActiveRun] = useState<EvolutionActiveRun | null>(null);
+  const [worktreeRunFeedback, setWorktreeRunFeedback] = useState("");
   const [selfGoalInput, setSelfGoalInput] = useState("");
   const [selfGoalInitialized, setSelfGoalInitialized] = useState(false);
   const [liveSelfRun, setLiveSelfRun] = useState<SelfEvolutionActiveRun | null>(null);
@@ -191,6 +267,51 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [selfActionFeedback, setSelfActionFeedback] = useState("");
   const [runRecordsFeedback, setRunRecordsFeedback] = useState("");
   const [libraryFeedback, setLibraryFeedback] = useState("");
+  const [proposalEditOpen, setProposalEditOpen] = useState(false);
+  const [proposalEditDraft, setProposalEditDraft] = useState<ProposalEditDraft>({
+    improvementType: "",
+    expectedEffect: "",
+    summary: "",
+    candidatePrompt: "",
+    baselinePrompt: "",
+    editNote: "",
+  });
+  const [proposalEditFeedback, setProposalEditFeedback] = useState("");
+  const [runsQueueWidth, setRunsQueueWidth] = useState(() =>
+    storedPaneWidth(
+      EVOLUTION_RUNS_QUEUE_WIDTH_KEY,
+      EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH,
+      EVOLUTION_RUNS_QUEUE_BOUNDS,
+    ),
+  );
+  const [libraryListWidth, setLibraryListWidth] = useState(() =>
+    storedPaneWidth(
+      EVOLUTION_LIBRARY_LIST_WIDTH_KEY,
+      EVOLUTION_LIBRARY_LIST_DEFAULT_WIDTH,
+      EVOLUTION_LIBRARY_LIST_BOUNDS,
+    ),
+  );
+  const [liveLaunchWidth, setLiveLaunchWidth] = useState(() =>
+    storedPaneWidth(
+      EVOLUTION_LIVE_LAUNCH_WIDTH_KEY,
+      EVOLUTION_LIVE_LAUNCH_DEFAULT_WIDTH,
+      EVOLUTION_LIVE_LAUNCH_BOUNDS,
+    ),
+  );
+  const [liveRunWidth, setLiveRunWidth] = useState(() =>
+    storedPaneWidth(
+      EVOLUTION_LIVE_RUN_WIDTH_KEY,
+      EVOLUTION_LIVE_RUN_DEFAULT_WIDTH,
+      EVOLUTION_LIVE_RUN_BOUNDS,
+    ),
+  );
+  const [liveIoHeight, setLiveIoHeight] = useState(() =>
+    storedPaneSize(
+      EVOLUTION_LIVE_IO_HEIGHT_KEY,
+      EVOLUTION_LIVE_IO_DEFAULT_HEIGHT,
+      EVOLUTION_LIVE_IO_HEIGHT_BOUNDS,
+    ),
+  );
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -233,6 +354,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchIntervalInBackground: true,
     enabled: supervisedTrackQueriesEnabled,
   });
+  const worktreeActiveRunQuery = useQuery({
+    queryKey: queryKeys.evolutionWorktreeActiveRun(),
+    queryFn: () => fetchJson<SupervisedWorktreeRun | null>("/api/evolution/worktree-runs/active"),
+    refetchInterval: 4_000,
+    refetchIntervalInBackground: true,
+    enabled: supervisedTrackQueriesEnabled,
+  });
   const selfOverviewQuery = useQuery({
     queryKey: queryKeys.evolutionSelfOverview(),
     queryFn: () => fetchJson<SelfEvolutionOverview>("/api/evolution/self/overview"),
@@ -253,23 +381,6 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     refetchInterval: 8_000,
     refetchIntervalInBackground: true,
     enabled: selfTrackQueriesEnabled && (configQuery.data ? configQuery.data.modeAvailability.self_evolution : true),
-  });
-  const intakeModeMutation = useMutation({
-    mutationFn: (intakeMode: "manual_review" | "auto") =>
-      fetchJson<ConfigSummary>("/api/config/intake-mode", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ intakeMode }),
-      }),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-      ]);
-    },
   });
   const startRunMutation = useMutation({
     mutationFn: () =>
@@ -298,6 +409,41 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
         queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
+      ]);
+    },
+  });
+  const startWorktreeRunMutation = useMutation({
+    onMutate: () => {
+      setWorktreeRunFeedback("");
+    },
+    mutationFn: () =>
+      fetchJson<SupervisedWorktreeRun>("/api/evolution/worktree-runs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sourceKind,
+          datasetName: sourceKind === "dataset" ? datasetName : "",
+          datasetLimit:
+            sourceKind === "dataset" && datasetLimitInput.trim()
+              ? Number(datasetLimitInput.trim())
+              : null,
+          bundleName: sourceKind === "bundle" ? bundleNameInput : "",
+          keepWorktree: true,
+          mode: currentIntakeMode === "auto" ? "auto" : "manual",
+          executionMode: "simulation",
+          confirmRealLlmCost: false,
+          uiRoute: `${location.pathname}${location.search}`,
+          clientAction: "start_supervised_worktree_run",
+        }),
+      }),
+    onSuccess: async (snapshot) => {
+      setWorktreeRunFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeActiveRun() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeRuns() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
       ]);
     },
   });
@@ -522,6 +668,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const workbenchControl = workbenchQuery.data;
   const workbenchState = overview?.workbench ?? workbenchControl?.savedState;
   const activeRunSnapshot = selectRunSnapshotWithRunId(activeRunQuery.data);
+  const activeWorktreeRun = worktreeActiveRunQuery.data ?? null;
   const latestSelfRunSnapshot = selectRunSnapshotWithRunId(selfLatestRunQuery.data);
   const latestRun = runs[0] ?? null;
   const selfTrackEnabled = configQuery.data?.modeAvailability.self_evolution ?? false;
@@ -561,6 +708,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? liveActiveRun
     : null);
   const runLocked = Boolean(runningRun && isLiveSupervisedRunStatus(runningRun.status));
+  const worktreeRunLocked = Boolean(
+    activeWorktreeRun
+    && ["queued", "running", "paused", "stopping"].includes(String(activeWorktreeRun.status || "").toLowerCase()),
+  );
   const monitoredRunStatus = String(monitoredRun?.status || "").toLowerCase();
   const monitoredCaseTranscript = monitoredRun?.currentCaseIo?.transcript ?? [];
   const monitoredCaseHasOutput = Boolean(
@@ -591,6 +742,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? terminateRunMutation.error?.message
     ?? deleteRunMutation.error?.message
     ?? startRunMutation.error?.message
+    ?? startWorktreeRunMutation.error?.message
     ?? "";
   const monitoredSelfRun = latestSelfRunSnapshot ?? liveSelfRun;
   const lockedSelfRun =
@@ -668,6 +820,29 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       && Boolean(selectedProposalRunId),
     refetchInterval: 8_000,
     refetchIntervalInBackground: true,
+  });
+  const updateProposalMutation = useMutation({
+    mutationFn: ({ sessionId, draft }: { sessionId: string; draft: ProposalEditDraft }) =>
+      fetchJson<EvolutionProposalUpdateResponse>(`/api/evolution/proposals/${sessionId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(draft),
+      }),
+    onSuccess: async (payload) => {
+      setProposalEditFeedback(payload.summary);
+      setProposalEditDraft(proposalEditDraftFromDetail(payload.proposal));
+      if (payload.updated) {
+        setProposalEditOpen(false);
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionProposal(payload.sessionId) }),
+      ]);
+    },
   });
   const deleteProposalMutation = useMutation({
     mutationFn: (sessionId: string) =>
@@ -787,6 +962,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ]);
     },
   });
+
+  useEffect(() => {
+    if (!proposalDetailQuery.data) {
+      return;
+    }
+    setProposalEditDraft(proposalEditDraftFromDetail(proposalDetailQuery.data));
+    setProposalEditOpen(false);
+    setProposalEditFeedback("");
+  }, [proposalDetailQuery.data?.sessionId]);
 
   useEffect(() => {
     if (formInitialized || !workbenchControl) {
@@ -970,6 +1154,26 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     });
   }, [visibleLibraryEntries]);
 
+  useEffect(() => {
+    window.localStorage.setItem(EVOLUTION_RUNS_QUEUE_WIDTH_KEY, String(runsQueueWidth));
+  }, [runsQueueWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem(EVOLUTION_LIBRARY_LIST_WIDTH_KEY, String(libraryListWidth));
+  }, [libraryListWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem(EVOLUTION_LIVE_LAUNCH_WIDTH_KEY, String(liveLaunchWidth));
+  }, [liveLaunchWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem(EVOLUTION_LIVE_RUN_WIDTH_KEY, String(liveRunWidth));
+  }, [liveRunWidth]);
+
+  useEffect(() => {
+    window.localStorage.setItem(EVOLUTION_LIVE_IO_HEIGHT_KEY, String(liveIoHeight));
+  }, [liveIoHeight]);
+
   const filteredRuns = useMemo(() => {
     if (runFilter === "all") {
       return runs;
@@ -1002,6 +1206,34 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     : libraryFilteredEmpty
       ? t("noProposalMatches")
       : t("chooseProposalDetail");
+  const runsWorkspaceStyle = useMemo(
+    () =>
+      ({
+        "--evolution-runs-queue-width": `${runsQueueWidth}px`,
+      }) as CSSProperties,
+    [runsQueueWidth],
+  );
+  const libraryWorkspaceStyle = useMemo(
+    () =>
+      ({
+        "--evolution-library-list-width": `${libraryListWidth}px`,
+      }) as CSSProperties,
+    [libraryListWidth],
+  );
+  const liveWorkspaceStyle = useMemo(
+    () =>
+      ({
+        "--evolution-live-launch-width": `${liveLaunchWidth}px`,
+        "--evolution-live-run-width": `${liveRunWidth}px`,
+        "--evolution-live-io-height": `${liveIoHeight}px`,
+      }) as CSSProperties,
+    [liveIoHeight, liveLaunchWidth, liveRunWidth],
+  );
+  const resizeLiveLaunchLabel = lang === "zh" ? "调整启动卡片宽度" : "Resize launch card";
+  const resizeLiveRunLabel = lang === "zh" ? "调整当前任务卡片宽度" : "Resize active run card";
+  const resizeLiveIoLabel = lang === "zh" ? "调整 CASE 输出高度" : "Resize case output height";
+  const resizeRunsQueueLabel = lang === "zh" ? "调整运行列表宽度" : "Resize run list";
+  const resizeLibraryListLabel = lang === "zh" ? "调整提案列表宽度" : "Resize proposal list";
 
   const selectedRun = useMemo(() => {
     return filteredRuns.find((run) => run.id === selectedRunId) ?? filteredRuns[0] ?? null;
@@ -1303,6 +1535,27 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     deleteProposalMutation.mutate(sessionId);
   }
 
+  function beginProposalEdit(detail: EvolutionProposalDetail) {
+    setProposalEditDraft(proposalEditDraftFromDetail(detail));
+    setProposalEditFeedback("");
+    setProposalEditOpen(true);
+  }
+
+  function cancelProposalEdit(detail: EvolutionProposalDetail) {
+    setProposalEditDraft(proposalEditDraftFromDetail(detail));
+    setProposalEditFeedback("");
+    setProposalEditOpen(false);
+  }
+
+  function updateProposalEditDraft(field: keyof ProposalEditDraft, value: string) {
+    setProposalEditDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  function triggerProposalUpdate(sessionId: string) {
+    setProposalEditFeedback("");
+    updateProposalMutation.mutate({ sessionId, draft: proposalEditDraft });
+  }
+
   function triggerBulkDelete() {
     if (selectedProposalRunIds.length === 0) {
       return;
@@ -1315,6 +1568,135 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     setLibrarySearchInput("");
     setLibraryStatusFilter("all");
     setLibraryDeleteFilter("all");
+  }
+
+  function beginPaneResize(
+    startX: number,
+    startWidth: number,
+    bounds: typeof EVOLUTION_RUNS_QUEUE_BOUNDS,
+    setWidth: (value: number) => void,
+    inverted = false,
+  ) {
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      const delta = moveEvent.clientX - startX;
+      setWidth(clampPaneWidth(startWidth + (inverted ? -delta : delta), bounds));
+    };
+    const handleEnd = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleEnd);
+  }
+
+  function beginPaneHeightResize(
+    startY: number,
+    startHeight: number,
+    bounds: typeof EVOLUTION_LIVE_IO_HEIGHT_BOUNDS,
+    setHeight: (value: number) => void,
+  ) {
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      setHeight(clampPaneSize(startHeight + moveEvent.clientY - startY, bounds));
+    };
+    const handleEnd = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleEnd);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleEnd);
+  }
+
+  function handleRunsResizeStart(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    beginPaneResize(event.clientX, runsQueueWidth, EVOLUTION_RUNS_QUEUE_BOUNDS, setRunsQueueWidth);
+  }
+
+  function handleRunsResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const nextWidth = keyboardPaneWidth(runsQueueWidth, event.key, EVOLUTION_RUNS_QUEUE_BOUNDS);
+    if (nextWidth === null) {
+      return;
+    }
+    event.preventDefault();
+    setRunsQueueWidth(nextWidth);
+  }
+
+  function handleLiveLaunchResizeStart(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    beginPaneResize(event.clientX, liveLaunchWidth, EVOLUTION_LIVE_LAUNCH_BOUNDS, setLiveLaunchWidth);
+  }
+
+  function handleLiveLaunchResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const nextWidth = keyboardPaneWidth(liveLaunchWidth, event.key, EVOLUTION_LIVE_LAUNCH_BOUNDS);
+    if (nextWidth === null) {
+      return;
+    }
+    event.preventDefault();
+    setLiveLaunchWidth(nextWidth);
+  }
+
+  function handleLiveRunResizeStart(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    beginPaneResize(event.clientX, liveRunWidth, EVOLUTION_LIVE_RUN_BOUNDS, setLiveRunWidth, true);
+  }
+
+  function handleLiveRunResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const nextWidth = keyboardPaneWidth(liveRunWidth, event.key, EVOLUTION_LIVE_RUN_BOUNDS, true);
+    if (nextWidth === null) {
+      return;
+    }
+    event.preventDefault();
+    setLiveRunWidth(nextWidth);
+  }
+
+  function handleLiveIoResizeStart(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    beginPaneHeightResize(event.clientY, liveIoHeight, EVOLUTION_LIVE_IO_HEIGHT_BOUNDS, setLiveIoHeight);
+  }
+
+  function handleLiveIoResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const nextHeight = keyboardPaneHeight(liveIoHeight, event.key, EVOLUTION_LIVE_IO_HEIGHT_BOUNDS);
+    if (nextHeight === null) {
+      return;
+    }
+    event.preventDefault();
+    setLiveIoHeight(nextHeight);
+  }
+
+  function handleLibraryResizeStart(event: PointerEvent<HTMLButtonElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    beginPaneResize(event.clientX, libraryListWidth, EVOLUTION_LIBRARY_LIST_BOUNDS, setLibraryListWidth);
+  }
+
+  function handleLibraryResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    const nextWidth = keyboardPaneWidth(libraryListWidth, event.key, EVOLUTION_LIBRARY_LIST_BOUNDS);
+    if (nextWidth === null) {
+      return;
+    }
+    event.preventDefault();
+    setLibraryListWidth(nextWidth);
   }
 
   function renderReviewList(lines: string[]) {
@@ -1372,30 +1754,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           ) : null}
 
           {activeTrack === "supervised" ? (
-            <>
-              <SupervisedWorkspaceTabs activeView={evolutionView} />
-
-              <div className={styles.intakeControl}>
-                <span className={styles.controlLabel}>{t("intakeMode")}</span>
-                <div className={styles.intakeSegmented}>
-                  {(["manual_review", "auto"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={
-                        currentIntakeMode === mode
-                          ? `${styles.intakeButton} ${styles.intakeButtonActive}`
-                          : styles.intakeButton
-                      }
-                      disabled={intakeModeMutation.isPending}
-                      onClick={() => intakeModeMutation.mutate(mode)}
-                    >
-                      {intakeModeLabel(mode)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
+            <SupervisedWorkspaceControls
+              activeView={evolutionView}
+              overviewIntakeMode={overview?.intakeMode}
+              configIntakeMode={configQuery.data?.intakeMode}
+            />
           ) : null}
         </div>
       </section>
@@ -1435,7 +1798,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "live" ? (
-        <div className={styles.overviewGrid}>
+        <div className={styles.overviewGrid} style={liveWorkspaceStyle}>
           <section className={`${styles.surface} ${styles.launchSurface} ${styles.dashboardLaunch}`}>
             <div className={styles.surfaceHeaderCompact}>
               <div>
@@ -1494,7 +1857,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         >
                           {workbenchControl?.datasets.map((item) => (
                             <option key={item.name} value={item.name}>
-                              {item.name} [{item.runnable ? "ready" : item.adapterStatus}]
+                              {item.name} [{datasetUsabilityLabel(item, lang)}]
                             </option>
                           ))}
                         </select>
@@ -1517,10 +1880,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <div className={styles.listRowTop}>
                           <strong>{selectedDataset.bundleName}</strong>
                           <span className={styles.secondaryPill}>
-                            {selectedDataset.runnable ? "ready" : selectedDataset.adapterStatus}
+                            {datasetUsabilityLabel(selectedDataset, lang)}
                           </span>
                         </div>
                         <p>{selectedDataset.description}</p>
+                        <div className={styles.metaRow}>
+                          <span>{lang === "zh" ? "样本数" : "Cases"}</span>
+                          <span>{selectedDataset.caseCount ?? "--"}</span>
+                        </div>
+                        {selectedDataset.usabilityReason ? (
+                          <div className={styles.metaRow}>
+                            <span>{lang === "zh" ? "状态" : "Status"}</span>
+                            <span>{selectedDataset.usabilityReason}</span>
+                          </div>
+                        ) : null}
                         <div className={styles.metaRow}>
                           <span>{lang === "zh" ? "来源" : "Source"}</span>
                           <span>{selectedDataset.sourceTrack || "--"}</span>
@@ -1589,19 +1962,56 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <button
                     type="button"
                     className={styles.inlineAction}
-                    disabled={runLocked || startRunMutation.isPending || (sourceKind === "bundle" && !selectedBundleExists)}
+                    disabled={
+                      runLocked
+                      || worktreeRunLocked
+                      || startRunMutation.isPending
+                      || (sourceKind === "bundle" && !selectedBundleExists)
+                    }
                     onClick={() => startRunMutation.mutate()}
                   >
                     {startRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
                     {t("startSupervisedRun")}
                   </button>
+                  <button
+                    type="button"
+                    className={styles.inlineAction}
+                    disabled={
+                      runLocked
+                      || worktreeRunLocked
+                      || startWorktreeRunMutation.isPending
+                      || (sourceKind === "bundle" && !selectedBundleExists)
+                    }
+                    onClick={() => startWorktreeRunMutation.mutate()}
+                    title={t("startClosedLoopHint")}
+                  >
+                    {startWorktreeRunMutation.isPending ? <LoaderCircle size={15} /> : <Sparkles size={15} />}
+                    {t("startClosedLoopRun")}
+                  </button>
                 </div>
-                {runLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
+                {activeWorktreeRun ? (
+                  <div className={styles.closedLoopStatus}>
+                    <span className={styles.secondaryPill}>{t("closedLoopActive")}</span>
+                    <strong>{activeWorktreeRun.status || "--"}</strong>
+                    <span>{activeWorktreeRun.latestMessage || activeWorktreeRun.phase || "--"}</span>
+                  </div>
+                ) : null}
+                {worktreeRunFeedback ? <p className={styles.noticeText}>{worktreeRunFeedback}</p> : null}
+                {runLocked || worktreeRunLocked ? <p className={styles.noticeText}>{t("runningLockHint")}</p> : null}
                 {supervisedControlError ? (
                   <p className={styles.errorText}>{supervisedControlError}</p>
                 ) : null}
               </div>
           </section>
+
+          <button
+            type="button"
+            className={`${styles.resizeHandle} ${styles.liveResizeHandle} ${styles.liveResizeHandleLaunch}`}
+            aria-label={resizeLiveLaunchLabel}
+            title={resizeLiveLaunchLabel}
+            onPointerDown={handleLiveLaunchResizeStart}
+            onKeyDown={handleLiveLaunchResizeKeyDown}
+          />
 
           <section className={`${styles.surface} ${styles.liveSurface} ${styles.dashboardRun}`}>
               <div className={styles.surfaceHeaderCompact}>
@@ -1803,6 +2213,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               )}
           </section>
 
+          <button
+            type="button"
+            className={`${styles.resizeHandle} ${styles.liveResizeHandle} ${styles.liveResizeHandleRun}`}
+            aria-label={resizeLiveRunLabel}
+            title={resizeLiveRunLabel}
+            onPointerDown={handleLiveRunResizeStart}
+            onKeyDown={handleLiveRunResizeKeyDown}
+          />
+
           <section className={`${styles.surface} ${styles.ioSurface} ${styles.dashboardIo}`}>
               <div className={styles.surfaceHeaderCompact}>
                 <div>
@@ -1824,53 +2243,64 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
               </div>
 
-              {monitoredCaseHasVisibleIo ? (
-                <div className={styles.ioStack}>
-                  {monitoredRun?.currentCasePrompt ? (
-                    <details className={`${styles.rawBlock} ${styles.collapsibleEvidence}`}>
-                      <summary>{t("currentCasePrompt")}</summary>
-                      <pre className={styles.ioContent}>{monitoredRun.currentCasePrompt}</pre>
-                    </details>
-                  ) : null}
+              <div className={styles.liveIoPane}>
+                {monitoredCaseHasVisibleIo ? (
+                  <div className={styles.ioStack}>
+                    {monitoredRun?.currentCasePrompt ? (
+                      <details className={`${styles.rawBlock} ${styles.collapsibleEvidence}`}>
+                        <summary>{t("currentCasePrompt")}</summary>
+                        <pre className={styles.ioContent}>{monitoredRun.currentCasePrompt}</pre>
+                      </details>
+                    ) : null}
 
-                  <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
-                    <h3>{currentCaseOutputLabel(monitoredRun)}</h3>
-                    {monitoredRun?.currentCaseIo?.latestOutput ? (
-                      <div className={`${styles.rawBlock} ${styles.primaryEvidenceBlock}`}>
-                        <pre className={styles.ioContent}>{monitoredRun.currentCaseIo.latestOutput}</pre>
-                      </div>
-                    ) : (
-                      <p className={styles.noticeText}>{t("caseIoWaiting")}</p>
-                    )}
-                  </div>
+                    <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
+                      <h3>{currentCaseOutputLabel(monitoredRun)}</h3>
+                      {monitoredRun?.currentCaseIo?.latestOutput ? (
+                        <div className={`${styles.rawBlock} ${styles.primaryEvidenceBlock}`}>
+                          <pre className={styles.ioContent}>{monitoredRun.currentCaseIo.latestOutput}</pre>
+                        </div>
+                      ) : (
+                        <p className={styles.noticeText}>{t("caseIoWaiting")}</p>
+                      )}
+                    </div>
 
-                  <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
-                    <h3>{t("currentCaseTranscript")}</h3>
-                    {monitoredCaseTranscript.length > 0 ? (
-                      <div className={styles.ioTranscript}>
-                        {monitoredCaseTranscript.map((entry, index) => (
-                          <article
-                            key={`${entry.timestamp}-${entry.kind}-${entry.label}-${index}`}
-                            className={styles.ioEntry}
-                          >
-                            <div className={styles.ioMetaRow}>
-                              <strong>{caseIoEntryLabel(entry.kind, entry.label, entry.status)}</strong>
-                              <span className={styles.formHint}>{compactTimestamp(entry.timestamp)}</span>
-                            </div>
-                            <pre className={styles.ioContent} title={entry.content}>{entry.content}</pre>
-                          </article>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className={styles.noticeText}>{t("caseIoWaiting")}</p>
-                    )}
+                    <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
+                      <h3>{t("currentCaseTranscript")}</h3>
+                      {monitoredCaseTranscript.length > 0 ? (
+                        <div className={styles.ioTranscript}>
+                          {monitoredCaseTranscript.map((entry, index) => (
+                            <article
+                              key={`${entry.timestamp}-${entry.kind}-${entry.label}-${index}`}
+                              className={styles.ioEntry}
+                            >
+                              <div className={styles.ioMetaRow}>
+                                <strong>{caseIoEntryLabel(entry.kind, entry.label, entry.status)}</strong>
+                                <span className={styles.formHint}>{compactTimestamp(entry.timestamp)}</span>
+                              </div>
+                              <pre className={styles.ioContent} title={entry.content}>{entry.content}</pre>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className={styles.noticeText}>{t("caseIoWaiting")}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className={styles.ioWaitingState}>
-                  <p className={styles.noticeText}>{t("noCurrentCaseIo")}</p>
-                </div>
-              )}
+                ) : (
+                  <div className={styles.ioWaitingState}>
+                    <p className={styles.noticeText}>{t("noCurrentCaseIo")}</p>
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                className={styles.liveIoResizeHandle}
+                aria-label={resizeLiveIoLabel}
+                title={resizeLiveIoLabel}
+                onPointerDown={handleLiveIoResizeStart}
+                onKeyDown={handleLiveIoResizeKeyDown}
+              />
           </section>
 
         </div>
@@ -1930,7 +2360,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             </div>
           </section>
 
-          <div className={styles.runsWorkspace}>
+          <div className={styles.runsWorkspace} style={runsWorkspaceStyle}>
             <section className={`${styles.surface} ${styles.runQueuePanel}`}>
               <div className={styles.panelHeader}>
                 <div>
@@ -2066,6 +2496,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
               )}
             </section>
+
+            <button
+              type="button"
+              className={styles.resizeHandle}
+              aria-label={resizeRunsQueueLabel}
+              title={resizeRunsQueueLabel}
+              onPointerDown={handleRunsResizeStart}
+              onKeyDown={handleRunsResizeKeyDown}
+            />
 
             <section className={`${styles.surface} ${styles.runDetailPanel}`}>
               {selectedRun ? (
@@ -2325,8 +2764,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       ) : null}
 
       {activeTrack === "supervised" && evolutionView === "library" ? (
-        <div className={styles.viewStack}>
-          <div className={styles.overviewWorkspace}>
+        <div className={`${styles.viewStack} ${styles.libraryViewStack}`}>
+          <div className={styles.librarySummaryBar}>
             <section className={`${styles.surface} ${styles.summarySurface}`}>
               <div className={styles.surfaceHeaderCompact}>
                 <div>
@@ -2458,7 +2897,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
             </section>
           </div>
 
-          <div className={styles.masterDetail}>
+          <div className={styles.masterDetail} style={libraryWorkspaceStyle}>
             <section className={`${styles.surface} ${styles.listPanel}`}>
               <>
                 <div className={styles.bulkToolbar}>
@@ -2643,6 +3082,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </>
             </section>
 
+            <button
+              type="button"
+              className={styles.resizeHandle}
+              aria-label={resizeLibraryListLabel}
+              title={resizeLibraryListLabel}
+              onPointerDown={handleLibraryResizeStart}
+              onKeyDown={handleLibraryResizeKeyDown}
+            />
+
             <section className={`${styles.surface} ${styles.detailPanel}`}>
               {selectedProposalSummary ? (
                 proposalDetailQuery.data ? (
@@ -2663,6 +3111,125 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <h3>{t("reviewHeadline")}</h3>
                       <p className={styles.reviewLead}>{proposalDetailQuery.data.review.headline}</p>
                       <p>{proposalDetailQuery.data.review.changeSummary}</p>
+                    </div>
+
+                    <div className={styles.detailSection}>
+                      <div className={styles.sectionHeadingRow}>
+                        <h3>{t("editProposalTitle")}</h3>
+                        {proposalEditOpen ? (
+                          <div className={styles.actionRow}>
+                            <button
+                              type="button"
+                              className={styles.inlineAction}
+                              disabled={updateProposalMutation.isPending}
+                              onClick={() => cancelProposalEdit(proposalDetailQuery.data)}
+                            >
+                              <X size={15} />
+                              {t("cancelEdit")}
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.inlineAction}
+                              disabled={!proposalDetailQuery.data.canEdit || updateProposalMutation.isPending}
+                              onClick={() => triggerProposalUpdate(proposalDetailQuery.data.sourceRun)}
+                            >
+                              <Save size={15} />
+                              {updateProposalMutation.isPending ? t("saving") : t("saveProposalEdit")}
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className={styles.inlineAction}
+                            disabled={!proposalDetailQuery.data.canEdit}
+                            onClick={() => beginProposalEdit(proposalDetailQuery.data)}
+                          >
+                            <Pencil size={15} />
+                            {t("editProposal")}
+                          </button>
+                        )}
+                      </div>
+                      {!proposalDetailQuery.data.canEdit ? (
+                        <p className={styles.noticeText}>{proposalDetailQuery.data.editBlockReason || t("proposalEditLocked")}</p>
+                      ) : null}
+                      {proposalDetailQuery.data.proposal.editedAt ? (
+                        <p className={styles.noticeText}>
+                          {t("proposalEditedAt")}: {compactTimestamp(proposalDetailQuery.data.proposal.editedAt)}
+                        </p>
+                      ) : null}
+                      {proposalEditOpen ? (
+                        <div className={styles.proposalEditGrid}>
+                          <label className={styles.formField}>
+                            <span>{t("proposalImprovementType")}</span>
+                            <input
+                              className={styles.textInput}
+                              value={proposalEditDraft.improvementType}
+                              onChange={(event) => updateProposalEditDraft("improvementType", event.target.value)}
+                            />
+                          </label>
+                          <label className={styles.formField}>
+                            <span>{t("proposalExpectedEffect")}</span>
+                            <textarea
+                              className={styles.textArea}
+                              rows={3}
+                              value={proposalEditDraft.expectedEffect}
+                              onChange={(event) => updateProposalEditDraft("expectedEffect", event.target.value)}
+                            />
+                          </label>
+                          <label className={styles.formField}>
+                            <span>{t("proposalDraftSummary")}</span>
+                            <textarea
+                              className={styles.textArea}
+                              rows={3}
+                              value={proposalEditDraft.summary}
+                              onChange={(event) => updateProposalEditDraft("summary", event.target.value)}
+                            />
+                          </label>
+                          <label className={styles.formField}>
+                            <span>{t("proposalCandidatePrompt")}</span>
+                            <textarea
+                              className={styles.textArea}
+                              rows={6}
+                              value={proposalEditDraft.candidatePrompt}
+                              onChange={(event) => updateProposalEditDraft("candidatePrompt", event.target.value)}
+                            />
+                          </label>
+                          <label className={styles.formField}>
+                            <span>{t("proposalBaselinePrompt")}</span>
+                            <textarea
+                              className={styles.textArea}
+                              rows={5}
+                              value={proposalEditDraft.baselinePrompt}
+                              onChange={(event) => updateProposalEditDraft("baselinePrompt", event.target.value)}
+                            />
+                          </label>
+                          <label className={styles.formField}>
+                            <span>{t("proposalEditNote")}</span>
+                            <input
+                              className={styles.textInput}
+                              value={proposalEditDraft.editNote}
+                              onChange={(event) => updateProposalEditDraft("editNote", event.target.value)}
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <div className={styles.relatedList}>
+                          <article className={styles.relatedRow}>
+                            <strong>{t("proposalImprovementType")}</strong>
+                            <span>{proposalDetailQuery.data.proposal.improvementType || "--"}</span>
+                          </article>
+                          <article className={styles.relatedRow}>
+                            <strong>{t("proposalExpectedEffect")}</strong>
+                            <span>{proposalDetailQuery.data.proposal.expectedEffect || "--"}</span>
+                          </article>
+                          <article className={styles.relatedRow}>
+                            <strong>{t("proposalDraftSummary")}</strong>
+                            <span>{proposalDetailQuery.data.proposal.summary || proposalDetailQuery.data.review.changeSummary || "--"}</span>
+                          </article>
+                        </div>
+                      )}
+                      {proposalEditFeedback ? <p className={styles.feedbackText}>{proposalEditFeedback}</p> : null}
+                      {updateProposalMutation.error ? <p className={styles.errorText}>{updateProposalMutation.error.message}</p> : null}
                     </div>
 
                     <div className={styles.detailSection}>

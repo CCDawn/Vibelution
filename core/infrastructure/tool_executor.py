@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import time
+import json
 from typing import Dict, Callable, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
@@ -79,6 +80,76 @@ def _summarize_tool_result(result: Any) -> dict[str, Any]:
         "resultPreview": text[:320],
         "resultLength": len(text),
     }
+
+
+def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any]:
+    text = str(result or "")
+    fields: dict[str, Any] = {"semanticStatus": "succeeded"}
+    if tool_name == "cli_tool":
+        if "[EXEC FAILURE" in text or "[执行失败" in text:
+            return {
+                "eventCode": "tool.execute.failed",
+                "level": "error",
+                "outcome": "failed",
+                "lifecycle": True,
+                "fields": {**fields, "semanticStatus": "failed"},
+            }
+        if "[WARNING" in text or "[警告" in text or "[跨平台警告]" in text:
+            return {
+                "eventCode": "tool.execute.degraded",
+                "level": "warning",
+                "outcome": "degraded",
+                "lifecycle": False,
+                "fields": {**fields, "semanticStatus": "degraded"},
+            }
+    if tool_name == "python_lint_tool":
+        lint_payload = _parse_json_object(text)
+        issue_count = _coerce_int(lint_payload.get("issue_count") or lint_payload.get("issueCount"))
+        lint_status = str(lint_payload.get("status") or "").strip().lower()
+        fields.update(
+            {
+                "lintStatus": lint_status,
+                "issueCount": issue_count,
+            }
+        )
+        if lint_status and lint_status not in {"ok", "success", "passed"}:
+            return {
+                "eventCode": "tool.execute.failed",
+                "level": "error",
+                "outcome": "failed",
+                "lifecycle": True,
+                "fields": {**fields, "semanticStatus": "failed"},
+            }
+        if issue_count > 0:
+            return {
+                "eventCode": "tool.execute.degraded",
+                "level": "warning",
+                "outcome": "degraded",
+                "lifecycle": False,
+                "fields": {**fields, "semanticStatus": "degraded"},
+            }
+    return {
+        "eventCode": "tool.execute.succeeded",
+        "level": "info",
+        "outcome": "succeeded",
+        "lifecycle": False,
+        "fields": fields,
+    }
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _coerce_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 class ToolExecutor:
@@ -428,18 +499,22 @@ class ToolExecutor:
             })
 
             self._record_runtime_signals(tool_name, tool_args, result)
+            semantic = _classify_tool_semantic_result(tool_name, result)
             _record_tool_scene_event(
                 "execute",
-                "tool.execute.succeeded",
+                str(semantic.get("eventCode") or "tool.execute.succeeded"),
                 tool_name=tool_name,
                 message=f"Tool executed: {tool_name}",
-                outcome="succeeded",
+                level=str(semantic.get("level") or "info"),
+                outcome=str(semantic.get("outcome") or "succeeded"),
                 fields={
                     **_summarize_tool_args(tool_args),
                     **_summarize_tool_result(result),
+                    **(semantic.get("fields") if isinstance(semantic.get("fields"), dict) else {}),
                     "durationMs": int((time.monotonic() - started_at) * 1000),
                     "timeoutSeconds": timeout,
                 },
+                lifecycle=bool(semantic.get("lifecycle")),
             )
 
             # ── 自动更新代码库地图（检测文件修改工具）──

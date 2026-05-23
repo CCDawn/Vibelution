@@ -11,6 +11,7 @@
 
 import os
 import sys
+import json
 import pytest
 import threading
 import time
@@ -338,6 +339,75 @@ class TestToolExecutorErrorHandling:
             assert events[-1]["passed"] is True
         finally:
             bus.unsubscribe_by_id(callback_id)
+
+    def test_cli_exec_failure_records_failed_runtime_scene_event(self, executor, monkeypatch):
+        events = []
+
+        def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+            events.append(
+                {
+                    "component": component,
+                    "phase": phase,
+                    "eventCode": event_code,
+                    **kwargs,
+                }
+            )
+            return {"accepted": True}
+
+        monkeypatch.setattr(
+            "core.web.services.runtime_scene_service.record_runtime_scene_event",
+            fake_record_runtime_scene_event,
+        )
+        executor.register_tool(
+            "cli_tool",
+            lambda command="", timeout=60: "[EXEC FAILURE] exit=1\npytest failed",
+            timeout=5,
+        )
+
+        result, action = executor.execute("cli_tool", {"command": "pytest tests/test_demo.py -q"})
+
+        assert action is None
+        assert "[EXEC FAILURE]" in str(result)
+        event = events[-1]
+        assert event["eventCode"] == "tool.execute.failed"
+        assert event["level"] == "error"
+        assert event["outcome"] == "failed"
+        assert event["fields"]["semanticStatus"] == "failed"
+
+    def test_python_lint_issue_count_records_warning_runtime_scene_event(self, executor, monkeypatch):
+        events = []
+
+        def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+            events.append(
+                {
+                    "component": component,
+                    "phase": phase,
+                    "eventCode": event_code,
+                    **kwargs,
+                }
+            )
+            return {"accepted": True}
+
+        monkeypatch.setattr(
+            "core.web.services.runtime_scene_service.record_runtime_scene_event",
+            fake_record_runtime_scene_event,
+        )
+        executor.register_tool(
+            "python_lint_tool",
+            lambda file_path="": json.dumps({"status": "ok", "issue_count": 2, "issues": ["E1", "E2"]}),
+            timeout=5,
+        )
+
+        result, action = executor.execute("python_lint_tool", {"file_path": "agent.py"})
+
+        assert action is None
+        assert '"issue_count": 2' in str(result)
+        event = events[-1]
+        assert event["eventCode"] == "tool.execute.degraded"
+        assert event["level"] == "warning"
+        assert event["outcome"] == "degraded"
+        assert event["fields"]["semanticStatus"] == "degraded"
+        assert event["fields"]["issueCount"] == 2
 
     def test_cli_pipe_pattern_short_circuits_within_same_turn(self, executor):
         """同轮同类 pipe 模式被拦截后，第二次应直接短路。"""

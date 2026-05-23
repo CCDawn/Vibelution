@@ -22,6 +22,7 @@ BACKEND_COMPONENT = "backend"
 TIMELINE_PATH = "timeline.jsonl"
 LIFECYCLE_PATH = "lifecycle.jsonl"
 PACKAGE_INDEX_PATH = "package_index.json"
+SUMMARY_PATH = "summary.json"
 CONVERSATIONS_DIR = "conversations"
 AGENT_DIR = "agent"
 ARTIFACTS_DIR = "artifacts"
@@ -714,6 +715,139 @@ def _save_runtime_scene_package_index(scene_dir: Path, package_index: dict[str, 
     index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _save_runtime_scene_summary(scene_dir: Path, manifest: dict[str, Any], package_index: dict[str, Any]) -> None:
+    summary_path = scene_dir / SUMMARY_PATH
+    payload = _runtime_scene_summary_payload(scene_dir, manifest, package_index)
+    summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _runtime_scene_summary_payload(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    package_index: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "package_id": package_index["packageId"],
+        "display_name": package_index["displayName"],
+        "index_key": package_index["indexKey"],
+        "status": str(manifest.get("status") or "unknown"),
+        "result": str(manifest.get("result") or ""),
+        "stop_reason": str(manifest.get("stop_reason") or ""),
+        "trigger": str(manifest.get("trigger") or ""),
+        "started_at": package_index["startedAt"],
+        "started_at_local": package_index["startedAtLocal"],
+        "started_date": package_index["startedDate"],
+        "started_time": package_index["startedTime"],
+        "ended_at": package_index["endedAt"],
+        "duration_seconds": package_index["durationSeconds"],
+        "event_counts": _runtime_scene_summary_counts(scene_dir),
+        "primary_files": {
+            "summary": SUMMARY_PATH,
+            "package_index": PACKAGE_INDEX_PATH,
+            "manifest": "manifest.json",
+            "timeline": TIMELINE_PATH,
+            "lifecycle": LIFECYCLE_PATH,
+        },
+        "sections": _runtime_scene_summary_sections(),
+        "diagnostic_entrypoint": {
+            "first_read": SUMMARY_PATH,
+            "purpose": "Agent first-read summary for reconstructing this lifecycle package before opening child logs.",
+            "recommended_order": [
+                SUMMARY_PATH,
+                PACKAGE_INDEX_PATH,
+                TIMELINE_PATH,
+                LIFECYCLE_PATH,
+                "conversations/",
+                "agent/turns.jsonl",
+                "agent/tool_calls.jsonl",
+                "agent/supervised_runs/",
+                "agent/supervised_worktree_runs/",
+                "agent/self_evolution_runs/",
+                "raw/",
+                "artifacts/",
+            ],
+        },
+        "generated_at": _now_utc(),
+    }
+
+
+def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:
+    timeline = _read_scene_timeline(scene_dir)
+    lifecycle = _read_scene_lifecycle(scene_dir, timeline)
+    raw_files = _list_raw_files(scene_dir)
+    conversation_logs = _list_conversation_logs(scene_dir)
+    agent_logs = _list_agent_logs(scene_dir)
+    artifacts = _list_artifacts(scene_dir)
+    event_logs = _list_event_logs(scene_dir)
+    severity = _runtime_scene_severity_summary(timeline)
+    return {
+        "timeline_events": len(timeline),
+        "lifecycle_events": len(lifecycle),
+        "raw_logs": len(raw_files),
+        "conversation_logs": len(conversation_logs),
+        "agent_logs": len(agent_logs),
+        "artifacts": len(artifacts),
+        "event_logs": len(event_logs),
+        "supervised_evolution_logs": _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_runs")
+        + _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_worktree_runs"),
+        "self_evolution_logs": _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/self_evolution_runs"),
+        "errors": severity["errorCount"],
+        "warnings": severity["warningCount"],
+    }
+
+
+def _count_runtime_scene_files(scene_dir: Path, relative_path: str) -> int:
+    target = scene_dir / relative_path
+    if target.is_file():
+        return 1
+    if not target.is_dir():
+        return 0
+    return sum(1 for item in target.rglob("*") if item.is_file())
+
+
+def _runtime_scene_summary_sections() -> dict[str, dict[str, str]]:
+    return {
+        "lifecycle": {
+            "path": LIFECYCLE_PATH,
+            "purpose": "Workbench startup, shutdown, recovery, supervision, and lifecycle state changes.",
+        },
+        "timeline": {
+            "path": TIMELINE_PATH,
+            "purpose": "Merged chronological event stream for the whole runtime scene package.",
+        },
+        "raw": {
+            "path": "raw",
+            "purpose": "Raw launcher, backend, frontend, browser, supervisor, and API output.",
+        },
+        "conversations": {
+            "path": CONVERSATIONS_DIR,
+            "purpose": "Per-session user, assistant, tool-call, and chat-review conversation breadcrumbs.",
+        },
+        "agent": {
+            "path": AGENT_DIR,
+            "purpose": "Agent turn and tool-call child logs used to diagnose reasoning and execution flow.",
+        },
+        "supervised_evolution": {
+            "path": f"{AGENT_DIR}/supervised_runs",
+            "worktree_path": f"{AGENT_DIR}/supervised_worktree_runs",
+            "purpose": "Supervised evolution run, candidate, review, selection, promotion, and rollback breadcrumbs when present.",
+        },
+        "self_evolution": {
+            "path": f"{AGENT_DIR}/self_evolution_runs",
+            "purpose": "Unsupervised self-evolution run, checkpoint, reflection, guard, and validation breadcrumbs when present.",
+        },
+        "artifacts": {
+            "path": ARTIFACTS_DIR,
+            "purpose": "Reports, generated files, snapshots, and other run artifacts referenced by events.",
+        },
+        "events": {
+            "path": EVENTS_DIR,
+            "purpose": "Component-specific structured event streams backing the merged timeline.",
+        },
+    }
+
+
 def _scene_id(scene_dir: Path, manifest: dict) -> str:
     value = str(manifest.get("runtime_scene_id") or "").strip()
     if value:
@@ -1181,7 +1315,37 @@ def _resolve_current_runtime_scene_dir() -> Path | None:
 
     if not scene_dir.exists() or not scene_dir.is_dir():
         return None
+    manifest = _load_scene_manifest(scene_dir)
+    if not _is_current_runtime_scene_manifest(scene_dir, manifest, launcher_state):
+        return None
     return scene_dir
+
+
+def _is_current_runtime_scene_manifest(scene_dir: Path, manifest: dict[str, Any], launcher_state: dict[str, Any]) -> bool:
+    status = str(manifest.get("status") or "").strip().lower()
+    if status and status not in {"running", "starting", "queued", "opening", "stopping", "closing"}:
+        return False
+
+    target_scene_id = str(launcher_state.get("runtimeSceneId") or "").strip()
+    if target_scene_id and _scene_id(scene_dir, manifest) != target_scene_id:
+        return False
+
+    manifest_project_root = str(
+        manifest.get("project_root")
+        or manifest.get("projectRoot")
+        or ((manifest.get("project") or {}) if isinstance(manifest.get("project"), dict) else {}).get("root")
+        or ""
+    ).strip()
+    if manifest_project_root and not _same_path(manifest_project_root, PROJECT_ROOT):
+        return False
+    return True
+
+
+def _same_path(left: str | Path, right: str | Path) -> bool:
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except OSError:
+        return str(left).strip().replace("\\", "/").rstrip("/").lower() == str(right).strip().replace("\\", "/").rstrip("/").lower()
 
 
 def _resolve_scene_dir(scene_id: str) -> Path:
@@ -1302,6 +1466,7 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
             "search_text": package_index["searchText"],
             "tags": package_index["tags"],
             "package_index_path": PACKAGE_INDEX_PATH,
+            "summary_path": SUMMARY_PATH,
             "timeline_path": TIMELINE_PATH,
             "lifecycle_path": LIFECYCLE_PATH,
             "raw_dir": "raw",
@@ -1313,6 +1478,7 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
     )
     manifest["package"] = package
     _save_runtime_scene_package_index(scene_dir, package_index)
+    _save_runtime_scene_summary(scene_dir, manifest, package_index)
     _save_scene_manifest(scene_dir, manifest)
 
 

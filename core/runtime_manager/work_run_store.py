@@ -268,7 +268,17 @@ class WorkRunStore:
         self.save_run_index(run_kind, active_run_id=active_run_id, latest_run_id=run_id, emit_event=False)
         status = str(payload.get("status") or "").strip()
         phase = str(payload.get("phase") or payload.get("currentPhase") or "").strip()
-        lifecycle_status = status in {"queued", "running", "paused", "stopping", "done", "failed", "cancelled"}
+        lifecycle_status = status in {
+            "queued",
+            "running",
+            "paused",
+            "stopping",
+            "done",
+            "completed",
+            "stopped",
+            "failed",
+            "cancelled",
+        }
         lifecycle_changed = previous_signature != current_signature
         _record_work_run_event(
             "state",

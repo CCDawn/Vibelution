@@ -122,6 +122,7 @@ def test_openai_gpt5_payload_sanitizes_temperature_and_tool_choice():
     assert "tools" in payload
     assert "tool_choice" not in payload
 
+
 def test_responses_transport_routes_openai_compatible_model_through_responses_bridge():
     config = make_config(
         **{
@@ -316,6 +317,139 @@ def test_invoke_failure_records_category_without_masking_provider_error(monkeypa
     assert recorded[-1][1]["message"] == "LLM invoke failed: provider_protocol_error"
     assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
     assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
+
+
+def test_invoke_retries_retryable_timeout_up_to_profile_limit(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+            "llm.profiles.primary.retry_policy.backoff_base_seconds": 0.1,
+        }
+    )
+    recorded = []
+    attempts = {"count": 0}
+
+    def backend(_payload):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise TimeoutError("provider timeout")
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    message = client.invoke([{"role": "user", "content": "ping"}])
+
+    assert message.content == "ok"
+    assert attempts["count"] == 3
+    retry_events = [item for item in recorded if item[0][1] == "llm.invoke.failed.retrying"]
+    assert [event[1]["fields"]["attempt"] for event in retry_events] == [1, 2]
+    assert [event[1]["fields"]["nextAttempt"] for event in retry_events] == [2, 3]
+
+
+def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+            "llm.profiles.primary.retry_policy.backoff_base_seconds": 0.1,
+        }
+    )
+    recorded = []
+    attempts = {"count": 0}
+
+    def failing_before_first_chunk():
+        raise TimeoutError("stream timeout")
+        yield {"choices": [{"delta": {"content": "unreachable"}}]}
+
+    def backend(_payload):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            return failing_before_first_chunk()
+        return iter([{"choices": [{"delta": {"content": "ok"}}]}])
+
+    monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert attempts["count"] == 3
+    assert [event.type for event in events] == ["text_delta", "done"]
+    assert events[0].text == "ok"
+    retry_events = [item for item in recorded if item[0][1] == "llm.stream.failed.retrying"]
+    assert [event[1]["fields"]["attempt"] for event in retry_events] == [1, 2]
+
+
+def test_stream_does_not_replay_after_partial_output(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+        }
+    )
+    attempts = {"count": 0}
+
+    def partial_then_failure():
+        yield {"choices": [{"delta": {"content": "partial"}}]}
+        raise TimeoutError("stream timeout")
+
+    def backend(_payload):
+        attempts["count"] += 1
+        return partial_then_failure()
+
+    monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
+
+    client = LLMClient(config=config, backend=backend)
+    with pytest.raises(LLMError) as raised:
+        list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert raised.value.category == "timeout"
+    assert attempts["count"] == 1
+
+
+def test_invoke_does_not_retry_non_retryable_protocol_error(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.retry_policy.max_attempts": 5,
+        }
+    )
+    attempts = {"count": 0}
+
+    def backend(_payload):
+        attempts["count"] += 1
+        raise Exception("400 bad_request invalid params")
+
+    monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
+
+    client = LLMClient(config=config, backend=backend)
+    with pytest.raises(LLMError) as raised:
+        client.invoke([{"role": "user", "content": "ping"}])
+
+    assert raised.value.category == "provider_protocol_error"
+    assert attempts["count"] == 1
 
 
 def test_stream_failure_records_category_without_masking_provider_error(monkeypatch):

@@ -69,6 +69,21 @@ def test_ssl_eof_is_retryable_network_error():
     assert decision.action == "retry_with_backoff"
 
 
+def test_service_temporarily_unavailable_is_retryable_server_error():
+    error = Exception(
+        'litellm.ServiceUnavailableError: ServiceUnavailableError: OpenAIException - '
+        '{"error":{"message":"Service temporarily unavailable","type":"api_error"}}'
+    )
+
+    normalized = classify_exception(error)
+    decision = plan_recovery(error, attempt=1, max_attempts=5)
+
+    assert normalized.category == "server_error"
+    assert normalized.retryable is True
+    assert decision.category == "server_error"
+    assert decision.action == "retry_with_backoff"
+
+
 def test_stream_upstream_failure_records_retryable_server_error(monkeypatch):
     config = _make_config(
         **{
@@ -86,6 +101,7 @@ def test_stream_upstream_failure_records_retryable_server_error(monkeypatch):
             'litellm.BadGatewayError: BadGatewayError: OpenAIException - {"error":{"message":"Upstream request failed","type":"upstream_error"}}'
         )
 
+    monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
     monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
 
     client = LLMClient(config=config, backend=backend)
@@ -188,6 +204,54 @@ def test_session_exception_failure_sanitizes_provider_error_and_logs_raw(tmp_pat
     assert latest_run["status"] == "failed"
     assert latest_run["errorType"] == "provider_upstream_error"
     assert "litellm.BadGatewayError" in latest_run["error"]
+
+
+def test_session_completed_result_with_provider_error_is_not_persisted_as_assistant_message(tmp_path, monkeypatch):
+    _seed_session(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_WORK_RUN_STORE",
+        session_service.WorkRunStore(tmp_path / ".runtime" / "runtime-manager" / "work_runs"),
+    )
+
+    provider_error = (
+        'provider_protocol_error: litellm.BadRequestError: DeepseekException - '
+        '{"error":{"message":"The `reasoning_content` in the thinking mode must be passed back to the API.",'
+        '"type":"invalid_request_error"}}'
+    )
+
+    class CompletedButErroredAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+                "raw_output": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+                "error": provider_error,
+                "outcome": "blocked",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: CompletedButErroredAgent())
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
+
+    payload = session_service.submit_session_message("session-live", "继续当前对话")
+
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["lastTurnError"] is not None
+    assert payload["lastTurnError"]["errorType"] == "provider_protocol_error"
+    assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
+    assert all("模型服务上游暂时失败" not in message["content"] for message in payload["messages"])
+
+    latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
+    assert latest_run is not None
+    assert latest_run["status"] == "failed"
+    assert latest_run["errorType"] == "provider_protocol_error"
+    assert "reasoning_content" in latest_run["error"]
 
 
 def test_session_history_seed_filters_provider_error_and_recovery_notices(tmp_path, monkeypatch):

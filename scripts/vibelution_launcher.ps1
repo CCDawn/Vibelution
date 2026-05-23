@@ -229,7 +229,7 @@ function Invoke-RuntimeManagerClient {
         if ($exitCode -ne 0) {
             throw "Runtime manager status failed with exit code $exitCode."
         }
-        return
+        return 0
     }
 
     if (-not $CommandType) {
@@ -259,6 +259,7 @@ function Invoke-RuntimeManagerClient {
     if ($exitCode -ne 0) {
         throw "Runtime manager command '$CommandType' failed with exit code $exitCode."
     }
+    return 0
 }
 
 function Ensure-Directories {
@@ -462,6 +463,255 @@ function Get-RuntimeScenePackageIndex {
     }
 }
 
+function Get-RuntimeScenePackageSummary {
+    param(
+        [hashtable]$Manifest,
+        [hashtable]$PackageIndex
+    )
+
+    $status = [string]$Manifest.status
+    if (-not $status) {
+        $status = "unknown"
+    }
+
+    $timelineEvents = Get-RuntimeSceneJsonlEventCount -RelativePath "timeline.jsonl"
+    $lifecycleEvents = Get-RuntimeSceneJsonlEventCount -RelativePath "lifecycle.jsonl"
+    $severity = Get-RuntimeSceneSeverityCounts -RelativePath "timeline.jsonl"
+    $supervisedLogCount = (Get-RuntimeSceneChildFileCount -RelativePath "agent/supervised_runs") + (Get-RuntimeSceneChildFileCount -RelativePath "agent/supervised_worktree_runs")
+    $selfEvolutionLogCount = Get-RuntimeSceneChildFileCount -RelativePath "agent/self_evolution_runs"
+
+    return @{
+        schema_version = 1
+        package_id = [string]$PackageIndex.package_id
+        display_name = [string]$PackageIndex.display_name
+        index_key = [string]$PackageIndex.index_key
+        status = $status
+        result = [string]$Manifest.result
+        stop_reason = [string]$Manifest.stop_reason
+        trigger = [string]$Manifest.trigger
+        started_at = [string]$PackageIndex.started_at
+        started_at_local = [string]$PackageIndex.started_at_local
+        started_date = [string]$PackageIndex.started_date
+        started_time = [string]$PackageIndex.started_time
+        ended_at = [string]$PackageIndex.ended_at
+        duration_seconds = $PackageIndex.duration_seconds
+        event_counts = @{
+            timeline_events = $timelineEvents
+            lifecycle_events = $lifecycleEvents
+            raw_logs = Get-RuntimeSceneChildFileCount -RelativePath "raw"
+            conversation_logs = Get-RuntimeSceneChildFileCount -RelativePath "conversations"
+            agent_logs = Get-RuntimeSceneChildFileCount -RelativePath "agent"
+            artifacts = Get-RuntimeSceneChildFileCount -RelativePath "artifacts"
+            event_logs = Get-RuntimeSceneChildFileCount -RelativePath "events"
+            supervised_evolution_logs = $supervisedLogCount
+            self_evolution_logs = $selfEvolutionLogCount
+            errors = $severity.Errors
+            warnings = $severity.Warnings
+        }
+        primary_files = @{
+            summary = "summary.json"
+            package_index = "package_index.json"
+            manifest = "manifest.json"
+            timeline = "timeline.jsonl"
+            lifecycle = "lifecycle.jsonl"
+        }
+        sections = @{
+            lifecycle = @{
+                path = "lifecycle.jsonl"
+                purpose = "Workbench startup, shutdown, recovery, supervision, and lifecycle state changes."
+            }
+            timeline = @{
+                path = "timeline.jsonl"
+                purpose = "Merged chronological event stream for the whole runtime scene package."
+            }
+            raw = @{
+                path = "raw"
+                purpose = "Raw launcher, backend, frontend, browser, supervisor, and API output."
+            }
+            conversations = @{
+                path = "conversations"
+                purpose = "Per-session user, assistant, tool-call, and chat-review conversation breadcrumbs."
+            }
+            agent = @{
+                path = "agent"
+                purpose = "Agent turn and tool-call child logs used to diagnose reasoning and execution flow."
+            }
+            supervised_evolution = @{
+                path = "agent/supervised_runs"
+                worktree_path = "agent/supervised_worktree_runs"
+                purpose = "Supervised evolution run, candidate, review, selection, promotion, and rollback breadcrumbs when present."
+            }
+            self_evolution = @{
+                path = "agent/self_evolution_runs"
+                purpose = "Unsupervised self-evolution run, checkpoint, reflection, guard, and validation breadcrumbs when present."
+            }
+            artifacts = @{
+                path = "artifacts"
+                purpose = "Reports, generated files, snapshots, and other run artifacts referenced by events."
+            }
+            events = @{
+                path = "events"
+                purpose = "Component-specific structured event streams backing the merged timeline."
+            }
+        }
+        diagnostic_entrypoint = @{
+            first_read = "summary.json"
+            purpose = "Agent first-read summary for reconstructing this lifecycle package before opening child logs."
+            recommended_order = @(
+                "summary.json",
+                "package_index.json",
+                "timeline.jsonl",
+                "lifecycle.jsonl",
+                "conversations/",
+                "agent/turns.jsonl",
+                "agent/tool_calls.jsonl",
+                "agent/supervised_runs/",
+                "agent/supervised_worktree_runs/",
+                "agent/self_evolution_runs/",
+                "raw/",
+                "artifacts/"
+            )
+        }
+        generated_at = (Get-Date).ToUniversalTime().ToString("o")
+    }
+}
+
+function Get-RuntimeSceneJsonlEventCount {
+    param([string]$RelativePath)
+
+    if (-not $script:currentRuntimeSceneDir) {
+        return 0
+    }
+    try {
+        $target = Get-CurrentRuntimeSceneFilePath $RelativePath
+        if (-not (Test-Path -LiteralPath $target)) {
+            return 0
+        }
+        $item = Get-Item -LiteralPath $target -ErrorAction Stop
+        if ($item.PSIsContainer) {
+            return 0
+        }
+        return @(
+            Get-Content -LiteralPath $target -Encoding UTF8 -ErrorAction Stop |
+                Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+        ).Count
+    } catch {
+        return 0
+    }
+}
+
+function Get-RuntimeSceneSeverityCounts {
+    param([string]$RelativePath)
+
+    $counts = @{
+        Errors = 0
+        Warnings = 0
+    }
+    if (-not $script:currentRuntimeSceneDir) {
+        return $counts
+    }
+    try {
+        $target = Get-CurrentRuntimeSceneFilePath $RelativePath
+        if (-not (Test-Path -LiteralPath $target)) {
+            return $counts
+        }
+        foreach ($line in Get-Content -LiteralPath $target -Encoding UTF8 -ErrorAction Stop) {
+            if ([string]::IsNullOrWhiteSpace([string]$line)) {
+                continue
+            }
+            try {
+                $event = $line | ConvertFrom-Json -ErrorAction Stop
+            } catch {
+                continue
+            }
+            $severity = Get-RuntimeSceneEventSeverity -Event $event
+            if ($severity -eq "error") {
+                $counts.Errors += 1
+            } elseif ($severity -eq "warning") {
+                $counts.Warnings += 1
+            }
+        }
+    } catch {
+        return $counts
+    }
+    return $counts
+}
+
+function Get-RuntimeSceneEventSeverity {
+    param($Event)
+
+    $payload = ConvertTo-PlainHashtable $Event
+    $level = ([string]$(if ($payload.ContainsKey("level")) { $payload["level"] } else { "" })).Trim().ToLowerInvariant()
+    $outcome = ([string]$(if ($payload.ContainsKey("outcome")) { $payload["outcome"] } else { "" })).Trim().ToLowerInvariant()
+    $status = ([string]$(if ($payload.ContainsKey("status")) { $payload["status"] } else { "" })).Trim().ToLowerInvariant()
+    $fieldStatus = ""
+    $fieldOutcome = ""
+    $hasErrorMarker = $false
+    if ($payload.ContainsKey("fields") -and $null -ne $payload["fields"]) {
+        $fields = ConvertTo-PlainHashtable $payload["fields"]
+        $fieldStatusRaw = ""
+        if ($fields.ContainsKey("status")) {
+            $fieldStatusRaw = $fields["status"]
+        } elseif ($fields.ContainsKey("resultStatus")) {
+            $fieldStatusRaw = $fields["resultStatus"]
+        }
+        $fieldStatus = ([string]$fieldStatusRaw).Trim().ToLowerInvariant()
+        $fieldOutcome = ([string]$(if ($fields.ContainsKey("outcome")) { $fields["outcome"] } else { "" })).Trim().ToLowerInvariant()
+        foreach ($name in @("error", "errorType", "exceptionType", "exceptionMessage", "failureMessage")) {
+            if ($fields.ContainsKey($name) -and -not [string]::IsNullOrWhiteSpace([string]$fields[$name])) {
+                $hasErrorMarker = $true
+                break
+            }
+        }
+    }
+
+    if (@("warning", "warn") -contains $level) {
+        return "warning"
+    }
+    if (@("error", "fatal", "critical") -contains $level) {
+        return "error"
+    }
+    if (@("error", "failed", "failure") -contains $outcome -or @("error", "failed", "failure") -contains $fieldOutcome) {
+        return "error"
+    }
+    if (@("error", "failed") -contains $status -or @("error", "failed") -contains $fieldStatus) {
+        return "error"
+    }
+    if (@("warning", "warn", "partial", "client_error", "degraded") -contains $outcome -or @("warning", "warn", "partial", "client_error", "degraded") -contains $fieldOutcome) {
+        return "warning"
+    }
+    if (@("warning", "warn", "partial", "degraded") -contains $status -or @("warning", "warn", "partial", "degraded") -contains $fieldStatus) {
+        return "warning"
+    }
+    if ($hasErrorMarker) {
+        return "error"
+    }
+    return "info"
+}
+
+function Get-RuntimeSceneChildFileCount {
+    param([string]$RelativePath)
+
+    if (-not $script:currentRuntimeSceneDir) {
+        return 0
+    }
+    try {
+        $target = Get-CurrentRuntimeSceneFilePath $RelativePath
+        if (-not (Test-Path $target)) {
+            return 0
+        }
+        $item = Get-Item -LiteralPath $target -ErrorAction Stop
+        if (-not $item.PSIsContainer) {
+            return 1
+        }
+        return @(
+            Get-ChildItem -LiteralPath $target -File -Recurse -ErrorAction SilentlyContinue
+        ).Count
+    } catch {
+        return 0
+    }
+}
+
 function New-RuntimeSceneId {
     return ([guid]::NewGuid().ToString("N")).Substring(0, 12)
 }
@@ -622,9 +872,13 @@ function Save-RuntimeSceneManifest {
             $package.search_text = $packageIndex.search_text
             $package.tags = $packageIndex.tags
             $package.package_index_path = "package_index.json"
+            $package.summary_path = "summary.json"
             $Manifest.package = $package
             $packageIndexPath = Get-CurrentRuntimeSceneFilePath "package_index.json"
             $packageIndex | ConvertTo-Json -Depth 8 | Set-Content -Path $packageIndexPath -Encoding utf8
+            $summary = Get-RuntimeScenePackageSummary -Manifest $Manifest -PackageIndex $packageIndex
+            $summaryPath = Get-CurrentRuntimeSceneFilePath "summary.json"
+            $summary | ConvertTo-Json -Depth 12 | Set-Content -Path $summaryPath -Encoding utf8
         } catch {
         }
     }
@@ -801,6 +1055,7 @@ function Initialize-RuntimeScene {
             search_text = $packageIndex.search_text
             tags = $packageIndex.tags
             package_index_path = "package_index.json"
+            summary_path = "summary.json"
             timeline_path = "timeline.jsonl"
             lifecycle_path = "lifecycle.jsonl"
             raw_dir = "raw"
@@ -1277,34 +1532,55 @@ function Invoke-NativeCommand {
         [Parameter(Mandatory = $true)]
         [string]$CommandPath,
         [string[]]$ArgumentList = @(),
-        [string]$RedirectPath = ""
+        [string]$RedirectPath = "",
+        [switch]$SuppressOutput
     )
 
-    $previousErrorActionPreference = $ErrorActionPreference
-    $nativePreferenceDefined = Test-Path Variable:PSNativeCommandUseErrorActionPreference
-    $previousNativePreference = $null
-    if ($nativePreferenceDefined) {
-        $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+    Ensure-Directories
+    $token = [guid]::NewGuid().ToString("N")
+    $stdoutPath = Join-Path $launcherDir "native-command-$token.out.log"
+    $stderrPath = Join-Path $launcherDir "native-command-$token.err.log"
+
+    if ($RedirectPath) {
+        $redirectDir = Split-Path -Parent $RedirectPath
+        if ($redirectDir -and -not (Test-Path $redirectDir)) {
+            New-Item -ItemType Directory -Path $redirectDir -Force | Out-Null
+        }
     }
 
     try {
-        $ErrorActionPreference = "Continue"
-        if ($nativePreferenceDefined) {
-            $PSNativeCommandUseErrorActionPreference = $false
-        }
+        $proc = Start-Process `
+            -FilePath $CommandPath `
+            -ArgumentList $ArgumentList `
+            -WorkingDirectory (Get-Location).Path `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -PassThru
+
+        $proc.WaitForExit()
+
+        $stdout = if (Test-Path $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
+        $stderr = if (Test-Path $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
 
         if ($RedirectPath) {
-            & $CommandPath @ArgumentList *>> $RedirectPath
-        } else {
-            & $CommandPath @ArgumentList
+            foreach ($content in @($stdout, $stderr)) {
+                if ($content) {
+                    Add-Content -LiteralPath $RedirectPath -Value $content -Encoding utf8
+                }
+            }
+        } elseif (-not $SuppressOutput) {
+            if ($stdout) {
+                [Console]::Out.Write($stdout)
+            }
+            if ($stderr) {
+                [Console]::Error.Write($stderr)
+            }
         }
 
-        return $LASTEXITCODE
+        return [int]$proc.ExitCode
     } finally {
-        if ($nativePreferenceDefined) {
-            $PSNativeCommandUseErrorActionPreference = $previousNativePreference
-        }
-        $ErrorActionPreference = $previousErrorActionPreference
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -1382,8 +1658,11 @@ function Test-PythonRuntime {
     )
 
     try {
-        & $CommandPath @PrefixArgs -c "import fastapi, uvicorn" *> $null
-        return $LASTEXITCODE -eq 0
+        $exitCode = Invoke-NativeCommand `
+            -CommandPath $CommandPath `
+            -ArgumentList @($PrefixArgs + @("-c", "import fastapi, uvicorn")) `
+            -SuppressOutput
+        return $exitCode -eq 0
     } catch {
         return $false
     }
@@ -1498,8 +1777,9 @@ function Ensure-ProjectPythonDependencies {
                 -Outcome "started" `
                 -Fields @{ reason = $installReason; attempt = $attempt; max_attempts = $maxInstallAttempts }
         }
-        & $installTarget.FilePath @($installTarget.PrefixArgs + @("-m", "pip", "install", "--disable-pip-version-check", "-r", $requirementsPath))
-        $installExitCode = $LASTEXITCODE
+        $installExitCode = Invoke-NativeCommand `
+            -CommandPath $installTarget.FilePath `
+            -ArgumentList @($installTarget.PrefixArgs + @("-m", "pip", "install", "--disable-pip-version-check", "-r", $requirementsPath))
         if ($installExitCode -eq 0) {
             break
         }
@@ -2825,8 +3105,16 @@ function Run-SupervisorLoop {
         $browserWindowCount = @(Get-ManagedBrowserWindowProcesses).Count
 
         if (-not $backendAlive) {
-            Write-Note "Supervisor detected backend exit. Closing the managed app window."
-            Stop-ManagedSession -Reason "backend exited unexpectedly"
+            $workbench = Get-RuntimeManagerWorkbench
+            $desiredState = [string](Get-ObjectPropertyValue -Object $workbench -Name "desiredState" -Default "")
+            if ($desiredState -eq "closed") {
+                $closureReason = Get-RuntimeManagerWorkbenchReason -Workbench $workbench -Fallback "workbench closed"
+                Write-Note "Supervisor detected backend exit after shutdown was requested. Closing the managed app window."
+                Stop-ManagedSession -Reason $closureReason
+            } else {
+                Write-Note "Supervisor detected backend exit. Closing the managed app window."
+                Stop-ManagedSession -Reason "backend exited unexpectedly"
+            }
             return
         }
 
@@ -3022,22 +3310,26 @@ function Invoke-DesktopLifecycleMonitor {
 
 $runtimeManagerClientActions = @("toggle", "start", "stop", "restart", "status")
 if ($runtimeManagerClientActions -contains $Action) {
+    $clientExitCode = 0
     switch ($Action) {
         "toggle" {
-            Invoke-RuntimeManagerClient -Mode "command" -CommandType "toggle_workbench" -Reason "launcher_toggle" -ForwardNoBrowser:$NoBrowser
+            $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "toggle_workbench" -Reason "launcher_toggle" -ForwardNoBrowser:$NoBrowser
         }
         "start" {
-            Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser:$NoBrowser
+            $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "open_workbench" -Reason "launcher_start" -ForwardNoBrowser:$NoBrowser
         }
         "stop" {
-            Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop" -StopManager
+            $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop" -StopManager
         }
         "restart" {
-            Invoke-RuntimeManagerClient -Mode "command" -CommandType "restart_workbench" -Reason "launcher_restart" -ForwardNoBrowser:$NoBrowser
+            $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "restart_workbench" -Reason "launcher_restart" -ForwardNoBrowser:$NoBrowser
         }
         "status" {
-            Invoke-RuntimeManagerClient -Mode "status"
+            $clientExitCode = Invoke-RuntimeManagerClient -Mode "status"
         }
+    }
+    if ($clientExitCode -ne 0) {
+        exit $clientExitCode
     }
     return
 }

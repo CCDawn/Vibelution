@@ -1,12 +1,12 @@
 .page {
-  --control-height: 40px;
-  --control-radius: 10px;
+  --control-height: 36px;
+  --control-radius: 8px;
   display: grid;
   grid-template-columns: var(--sidebar-width, 320px) minmax(0, 1fr);
-  gap: 18px;
+  gap: 14px;
   height: 100%;
   min-height: 0;
-  padding: 20px 22px 24px;
+  padding: 14px;
   overflow: auto;
 }
 
@@ -33,10 +33,10 @@
   top: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 18px;
-  min-height: 420px;
-  max-height: calc(100dvh - 44px);
+  gap: 12px;
+  padding: 14px;
+  min-height: 360px;
+  max-height: calc(100dvh - 28px);
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -46,11 +46,11 @@
 .sidebarIntro,
 .sidebarStatus {
   display: grid;
-  gap: 8px;
+  gap: 5px;
 }
 
 .sidebarStatus {
-  padding: 12px 14px;
+  padding: 10px;
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
   background: var(--surface-card-muted);
@@ -67,7 +67,8 @@
 .title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.55rem;
+  font-size: var(--route-topbar-title-size);
+  line-height: 1.1;
 }
 
 .subtitle,
@@ -80,13 +81,21 @@
 .applyCopy p {
   margin: 0;
   color: var(--fg-secondary);
-  line-height: 1.55;
+  line-height: 1.38;
+}
+
+.sidebarIntro .subtitle {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--route-topbar-subtitle-size);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .sectionNav {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 5px;
   overflow: visible;
   padding-right: 4px;
 }
@@ -96,8 +105,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 30px;
+  padding: 0 10px;
   border: 1px solid var(--border-hairline);
   border-radius: var(--control-radius);
   background: var(--surface-card-muted);
@@ -131,23 +140,23 @@
 .sidebarMetrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .metricCard {
   display: grid;
-  gap: 6px;
-  padding: 12px;
+  gap: 4px;
+  padding: 9px;
 }
 
 .metricCard span {
   color: var(--fg-tertiary);
-  font-size: 0.8rem;
+  font-size: 0.74rem;
 }
 
 .metricCard strong {
   color: var(--fg-primary);
-  font-size: 1rem;
+  font-size: 0.92rem;
 }
 
 .statusBadge,
@@ -191,12 +200,12 @@
 .content {
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 10px;
   min-width: 0;
 }
 
 .notice {
-  padding: 12px 14px;
+  padding: 9px 11px;
   border-radius: 8px;
   border: 1px solid var(--border-hairline);
   background: var(--surface-card-muted);
@@ -218,8 +227,8 @@
 .loadingSurface,
 .formSurface {
   display: grid;
-  gap: 16px;
-  padding: 18px;
+  gap: 10px;
+  padding: 10px 12px;
   scroll-margin-top: 84px;
 }
 
@@ -229,10 +238,12 @@
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
 }
 
 .sectionHeaderMain {
+  display: grid;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -240,16 +251,16 @@
   display: flex;
   align-items: center;
   justify-content: end;
-  gap: 10px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
 .sectionHeaderMeta {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0 12px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
   border: 1px solid var(--border-hairline);
   border-radius: 999px;
   background: var(--surface-card-subtle);
@@ -265,8 +276,8 @@
 .sectionToolbarGroup {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px;
+  gap: 4px;
+  padding: 3px;
   border: 1px solid var(--border-hairline);
   border-radius: 999px;
   background: var(--surface-card-subtle);
@@ -276,7 +287,7 @@
 
 .sectionTitle,
 .cardTitle {
-  margin: 6px 0 0;
+  margin: 2px 0 0;
   color: var(--fg-primary);
 }
 
@@ -292,11 +303,11 @@
 }
 
 .sectionTitle {
-  font-size: 1.06rem;
+  font-size: 1rem;
 }
 
 .cardTitle {
-  font-size: 1rem;
+  font-size: 0.96rem;
   font-weight: 600;
 }
 
@@ -314,30 +325,30 @@
 .logHelperGrid,
 .toggleGrid {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .hashGrid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: minmax(360px, 1.6fr) minmax(180px, 0.7fr);
 }
 
 .matrixGrid,
 .diagnosticsGrid,
 .healthSummaryGrid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .logHelperGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .profileGrid,
 .modelGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 
 .toggleGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 
 .detailCard,
@@ -346,8 +357,25 @@
 .profileCard,
 .modelCard {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
+}
+
+.detailCard {
+  align-content: center;
+  min-height: 64px;
+}
+
+.detailCard > span {
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.detailCard > strong {
+  color: var(--fg-primary);
+  font-size: 0.98rem;
+  overflow-wrap: anywhere;
 }
 
 .logHelperCard {
@@ -581,10 +609,10 @@
   justify-content: center;
   gap: 8px;
   min-height: var(--control-height);
-  padding: 0 14px;
+  padding: 0 10px;
   border-radius: var(--control-radius);
   font: inherit;
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   font-weight: 600;
   line-height: 1;
   white-space: nowrap;
@@ -651,7 +679,7 @@
 }
 
 .segmentButton {
-  min-height: 34px;
+  min-height: 30px;
   border: 0;
   background: transparent;
   color: var(--fg-secondary);
@@ -675,7 +703,7 @@
 
 .rawToml {
   margin: 0;
-  padding: 14px;
+  padding: 10px;
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
   background: var(--surface-code);
@@ -686,7 +714,7 @@
 .formGrid,
 .formGridWide {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .formGrid {
@@ -700,7 +728,7 @@
 .field,
 .toggleField {
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .field span,
@@ -725,18 +753,20 @@
   border-radius: var(--control-radius);
   background: var(--surface-input);
   color: var(--fg-primary);
-  padding: 10px 12px;
+  padding: 8px 10px;
   font: inherit;
 }
 
 .field input,
 .field select {
-  min-height: 42px;
+  min-height: var(--control-height);
 }
 
 .toggleField {
-  min-height: 100%;
-  padding: 11px 12px;
+  display: flex;
+  align-items: center;
+  min-height: var(--control-height);
+  padding: 8px 10px;
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
   background: var(--surface-card-muted);
@@ -756,8 +786,8 @@
 .sidebarNavPanel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 4px;
+  gap: 9px;
+  padding-top: 2px;
   border-top: 1px solid var(--border-hairline);
 }
 
@@ -769,18 +799,19 @@
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .sidebarPanelIntro {
   display: grid;
-  gap: 4px;
+  gap: 2px;
+  min-width: 0;
 }
 
 .sidebarPanelActions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   justify-content: end;
 }
@@ -794,9 +825,9 @@
 }
 
 .compactButton {
-  min-height: 34px;
-  padding: 0 12px;
-  font-size: 0.84rem;
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 0.8rem;
 }
 
 .toolbarButton {
@@ -876,11 +907,12 @@
 .treeGrid,
 .treeStack {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .treeGrid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  align-items: start;
 }
 
 .treeWide {
@@ -898,14 +930,28 @@
 .treeObjectBlock,
 .treeNestedBlock {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 8px;
+  padding: 9px;
 }
 
 .treeFieldCard {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 9px;
+}
+
+.treeFieldCardView {
+  grid-template-columns: minmax(108px, 0.42fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 40px;
+  padding: 7px 9px;
+}
+
+.treeFieldCardEdit {
+  align-content: start;
+  gap: 6px;
+  padding: 8px 9px;
 }
 
 .treeToggle,
@@ -920,6 +966,7 @@
 
 .treeToggle {
   width: 100%;
+  min-height: 34px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -933,13 +980,25 @@
 
 .treeToggleLabel {
   display: flex;
-  align-items: start;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
+}
+
+.treeToggleLabel > div {
+  display: grid;
+  gap: 2px;
   min-width: 0;
 }
 
 .treeFieldHead {
   align-items: center;
+}
+
+.treeFieldCardView .treeFieldHead {
+  min-width: 0;
+  justify-content: start;
+  gap: 6px;
 }
 
 .treeToggleIcon,
@@ -956,26 +1015,57 @@
 .treeFieldLabel,
 .treeNestedHeader strong {
   color: var(--fg-primary);
-  font-size: 0.9rem;
+  font-size: 0.86rem;
   font-weight: 600;
+}
+
+.treeFieldCardView .treeFieldLabel,
+.treeToggle .cardTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .treeHint {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
-  line-height: 1.5;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.treeFieldCardView .treeHint,
+.treeToggle .treeHint {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.treeFieldCardView .treeHint {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  -webkit-line-clamp: 2;
+}
+
+.treeToggle .treeHint {
+  -webkit-line-clamp: 1;
 }
 
 .treeFieldValue {
   color: var(--fg-secondary);
   overflow-wrap: anywhere;
-  line-height: 1.55;
+  line-height: 1.35;
+  font-size: 0.86rem;
+}
+
+.treeFieldCardView .treeFieldValue {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
 }
 
 .treeBody {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .profileCard,
@@ -1013,7 +1103,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 16px 18px;
+  padding: 10px 12px;
   flex-wrap: wrap;
 }
 
@@ -1034,7 +1124,7 @@
   .logHelperGrid,
   .diagnosticsGrid,
   .formGridWide {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
 }
 
@@ -1057,13 +1147,12 @@
     display: none;
   }
 
-  .profileGrid,
-  .modelGrid,
-  .logHelperGrid,
-  .formGrid,
-  .toggleGrid,
+  .formGrid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+
   .treeGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   }
 
   .logHelperHeader {
@@ -1097,10 +1186,21 @@
   .logHelperMetaGrid,
   .profileGrid,
   .modelGrid,
+  .logHelperGrid,
+  .formGrid,
   .formGridWide,
   .toggleGrid,
   .treeGrid {
     grid-template-columns: 1fr;
+  }
+
+  .treeFieldCardView {
+    grid-template-columns: 1fr;
+  }
+
+  .treeFieldCardView .treeFieldValue {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .applyBar {

@@ -1,24 +1,25 @@
 .page {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 18px;
+  gap: 10px;
   height: 100%;
   min-height: 0;
-  padding: 20px 22px 24px;
+  padding: 10px 14px 14px;
   overflow: hidden;
 }
 
 .toolbar {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
-  gap: 18px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
 .toolbarIntro {
   display: grid;
-  gap: 6px;
+  gap: 2px;
+  min-width: 260px;
 }
 
 .eyebrow {
@@ -32,20 +33,24 @@
 .title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.55rem;
+  font-size: 1.32rem;
+  line-height: 1.08;
 }
 
 .subtitle {
   margin: 0;
   max-width: 58ch;
   color: var(--fg-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toolbarControls {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
@@ -64,8 +69,8 @@
 .segmentButton,
 .intakeButton,
 .filterButton {
-  min-height: 34px;
-  padding: 0 12px;
+  min-height: 30px;
+  padding: 0 10px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -81,9 +86,9 @@
 }
 
 .controlLabel {
-  padding: 0 8px 0 10px;
+  padding: 0 6px 0 8px;
   color: var(--fg-secondary);
-  font-size: 0.86rem;
+  font-size: 0.8rem;
 }
 
 .intakeSegmented {
@@ -102,15 +107,20 @@
 
 .overviewGrid {
   display: grid;
-  grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.12fr) minmax(380px, 0.96fr);
-  grid-template-rows: max-content;
-  grid-auto-rows: max-content;
-  grid-template-areas: "launch run io";
-  gap: 16px;
-  align-items: start;
-  align-content: start;
+  grid-template-columns:
+    var(--evolution-live-launch-width, 360px)
+    12px
+    minmax(560px, 1fr)
+    12px
+    var(--evolution-live-run-width, 380px);
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-rows: minmax(0, 1fr);
+  grid-template-areas: "launch resize-launch io resize-run run";
+  align-items: stretch;
+  align-content: stretch;
   min-height: 0;
-  overflow: auto;
+  height: 100%;
+  overflow: hidden;
   padding-right: 4px;
 }
 
@@ -124,19 +134,31 @@
 .overviewGrid > .launchSurface,
 .overviewGrid > .liveSurface,
 .overviewGrid > .ioSurface {
-  height: auto;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
 }
 
 .dashboardLaunch {
   grid-area: launch;
 }
 
+.liveResizeHandleLaunch {
+  grid-area: resize-launch;
+}
+
 .dashboardRun {
   grid-area: run;
 }
 
+.liveResizeHandleRun {
+  grid-area: resize-run;
+}
+
 .dashboardIo {
   grid-area: io;
+  grid-template-rows: auto minmax(0, var(--evolution-live-io-height, 440px)) 12px minmax(0, 1fr);
+  overflow: hidden !important;
 }
 
 .overviewWorkspace {
@@ -440,6 +462,19 @@
   gap: 6px;
 }
 
+.proposalEditGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.sectionHeadingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
 .formField label,
 .formHint,
 .checkboxLabel {
@@ -448,7 +483,8 @@
 }
 
 .textInput,
-.selectInput {
+.selectInput,
+.textArea {
   min-height: 40px;
   padding: 0 12px;
   border: 1px solid rgba(236, 230, 220, 0.08);
@@ -458,9 +494,17 @@
 }
 
 .textInput:focus,
-.selectInput:focus {
+.selectInput:focus,
+.textArea:focus {
   outline: 1px solid color-mix(in srgb, var(--accent-warm) 26%, transparent);
   border-color: color-mix(in srgb, var(--accent-warm) 26%, transparent);
+}
+
+.textArea {
+  min-height: 86px;
+  padding: 10px 12px;
+  resize: vertical;
+  line-height: 1.5;
 }
 
 .checkboxRow {
@@ -662,10 +706,10 @@
 .summarySurface {
   display: grid;
   align-content: start;
-  gap: 14px;
+  gap: 10px;
   height: 100%;
   min-height: 0;
-  padding: 16px 18px 18px;
+  padding: 12px 14px 14px;
 }
 
 .chatReviewSurface .runListScrollable {
@@ -674,9 +718,9 @@
 
 .surfaceHeaderCompact {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -687,6 +731,31 @@
 .controlFooter {
   display: grid;
   gap: 10px;
+}
+
+.closedLoopStatus {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.closedLoopStatus strong,
+.closedLoopStatus span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.closedLoopStatus > span:last-child {
+  color: var(--fg-secondary);
+  font-size: 0.84rem;
 }
 
 .monitorSummary {
@@ -924,6 +993,42 @@
   min-height: 0;
 }
 
+.liveIoPane {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.liveIoResizeHandle {
+  position: relative;
+  min-height: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: row-resize;
+  outline: none;
+  touch-action: none;
+}
+
+.liveIoResizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 3px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: rgba(236, 230, 220, 0.08);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.liveIoResizeHandle:hover::before,
+.liveIoResizeHandle:focus-visible::before {
+  background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+}
+
 .ioTranscript {
   display: grid;
   gap: 8px;
@@ -1003,6 +1108,76 @@
   padding-right: 4px;
 }
 
+.libraryViewStack {
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
+.librarySummaryBar {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.08fr) minmax(360px, 1fr) minmax(420px, 1.2fr);
+  gap: 8px;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.librarySummaryBar .summarySurface {
+  gap: 7px;
+  padding: 9px 11px;
+}
+
+.librarySummaryBar .surfaceHeaderCompact {
+  align-items: center;
+}
+
+.librarySummaryBar .sectionTitle {
+  margin-top: 2px;
+  font-size: 0.98rem;
+}
+
+.librarySummaryBar .summaryMetricStrip,
+.librarySummaryBar .statusMetricGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.librarySummaryBar .stripItem,
+.librarySummaryBar .metricTile {
+  min-height: 42px;
+  padding: 6px 8px;
+}
+
+.librarySummaryBar .noticeText,
+.librarySummaryBar .statusLead {
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.librarySummaryBar .relatedList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.librarySummaryBar .relatedRow {
+  min-height: 36px;
+  padding: 6px 8px;
+}
+
+.librarySummaryBar .actionRow {
+  gap: 6px;
+}
+
+.librarySummaryBar .inlineAction {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.82rem;
+}
+
 .runsHeaderSurface {
   display: grid;
   gap: 12px;
@@ -1034,9 +1209,9 @@
 .runsCommandStrip {
   display: grid;
   grid-template-columns: minmax(220px, 0.42fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: 10px;
   align-items: end;
-  padding: 12px 14px;
+  padding: 10px 12px;
 }
 
 .runsCommandHeader {
@@ -1051,7 +1226,7 @@
 .runsCommandMetrics {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .compactFact {
@@ -1059,8 +1234,8 @@
   align-content: center;
   gap: 3px;
   min-width: 0;
-  min-height: 48px;
-  padding: 8px 9px;
+  min-height: 42px;
+  padding: 7px 8px;
   border-radius: 8px;
   border: 1px solid var(--border-hairline);
   background: var(--surface-card-subtle);
@@ -1085,10 +1260,39 @@
 
 .runsWorkspace {
   display: grid;
-  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: var(--evolution-runs-queue-width, 380px) 12px minmax(0, 1fr);
   align-items: stretch;
   min-height: 0;
+}
+
+.resizeHandle {
+  position: relative;
+  min-width: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+
+.resizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(236, 230, 220, 0.08);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.resizeHandle:hover::before,
+.resizeHandle:focus-visible::before {
+  background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
 }
 
 .panelHeader {
@@ -1150,9 +1354,13 @@
 
 .masterDetail {
   display: grid;
-  grid-template-columns: minmax(290px, 360px) minmax(0, 1fr);
-  gap: 16px;
+  grid-template-columns: var(--evolution-library-list-width, 360px) 12px minmax(0, 1fr);
   min-height: 0;
+}
+
+.libraryViewStack .masterDetail {
+  height: 100%;
+  overflow: hidden;
 }
 
 .listPanel,
@@ -1160,6 +1368,11 @@
   min-height: 0;
   overflow: auto;
   padding: 16px;
+}
+
+.libraryViewStack .listPanel,
+.libraryViewStack .detailPanel {
+  padding: 12px;
 }
 
 .detailSectionCompact {
@@ -1256,6 +1469,11 @@
   background: var(--surface-card-muted);
 }
 
+.libraryViewStack .proposalCard {
+  gap: 8px;
+  padding: 10px 12px;
+}
+
 .selectionBar {
   display: flex;
   align-items: center;
@@ -1317,6 +1535,10 @@
 .detailTitle {
   margin: 6px 0 0;
   font-size: 1.28rem;
+}
+
+.libraryViewStack .detailTitle {
+  font-size: 1.08rem;
 }
 
 .runDetailOverview {
@@ -1416,6 +1638,12 @@
   border-top: 1px solid var(--border-hairline);
 }
 
+.libraryViewStack .detailSection {
+  gap: 6px;
+  padding-top: 10px;
+  margin-top: 10px;
+}
+
 .detailSection h3 {
   margin: 0;
   font-size: 0.92rem;
@@ -1427,6 +1655,25 @@
 .relatedList {
   display: grid;
   gap: 10px;
+}
+
+.libraryViewStack .detailPanel > .relatedList,
+.libraryViewStack .detailSection > .relatedList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.libraryViewStack .relatedRow {
+  gap: 4px;
+  min-height: 48px;
+  padding: 9px 10px;
+}
+
+.libraryViewStack .relatedRow strong,
+.libraryViewStack .relatedRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detailFactGrid {
@@ -1540,17 +1787,32 @@
   text-align: center;
 }
 
-@media (max-width: 1500px) {
+@media (max-width: 1360px) {
   .overviewGrid {
     grid-template-columns: minmax(0, 1.1fr) minmax(320px, 1fr);
-    grid-template-rows: max-content max-content;
+    grid-template-rows: minmax(320px, var(--evolution-live-io-height, 440px)) minmax(0, 1fr);
     grid-template-areas:
-      "launch run"
-      "io io";
+      "io io"
+      "launch run";
+    gap: 16px;
+    overflow: auto;
+  }
+
+  .liveResizeHandle {
+    display: none;
   }
 
   .overviewWorkspace {
     grid-template-columns: minmax(0, 1.2fr) minmax(320px, 1fr);
+  }
+
+  .librarySummaryBar {
+    grid-template-columns: 1fr;
+  }
+
+  .librarySummaryBar .summarySurface {
+    grid-template-columns: minmax(220px, auto) minmax(0, 1fr);
+    align-items: center;
   }
 
   .statusSurface {
@@ -1569,11 +1831,15 @@
 @media (max-width: 1200px) {
   .overviewGrid {
     grid-template-columns: 1fr;
-    grid-template-rows: max-content max-content max-content;
+    grid-template-rows:
+      minmax(320px, var(--evolution-live-io-height, 440px))
+      minmax(320px, 1fr)
+      minmax(320px, 1fr);
     grid-template-areas:
+      "io"
       "launch"
-      "run"
-      "io";
+      "run";
+    overflow: auto;
   }
 
   .overviewWorkspace,
@@ -1582,13 +1848,28 @@
   .runsWorkspace,
   .runsCommandStrip,
   .masterDetail,
+  .librarySummaryBar .summarySurface,
   .controlSurface {
     grid-template-columns: 1fr;
+  }
+
+  .libraryViewStack {
+    height: auto;
+    overflow: auto;
+  }
+
+  .libraryViewStack .masterDetail {
+    height: auto;
+    overflow: visible;
   }
 
   .compactFieldGrid,
   .filterRow {
     grid-template-columns: 1fr;
+  }
+
+  .resizeHandle {
+    display: none;
   }
 }
 
@@ -1615,6 +1896,14 @@
   }
 
   .runDetailOverview {
+    grid-template-columns: 1fr;
+  }
+
+  .librarySummaryBar .summaryMetricStrip,
+  .librarySummaryBar .statusMetricGrid,
+  .librarySummaryBar .relatedList,
+  .libraryViewStack .detailPanel > .relatedList,
+  .libraryViewStack .detailSection > .relatedList {
     grid-template-columns: 1fr;
   }
 }

@@ -400,12 +400,14 @@ def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path,
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
     results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
     for path in (inbox_dir, processing_dir, results_dir):
         path.mkdir(parents=True)
 
     monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
     monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
     monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
     monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
     monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
     monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
@@ -415,6 +417,7 @@ def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path,
         lambda: {
             "stateVersion": 42,
             "runtimeState": "stopping",
+            "managerPid": 9912,
             "command": {
                 "activeCommandId": "",
                 "activeType": "",
@@ -432,18 +435,67 @@ def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path,
     assert result["errorType"] == "RuntimeManagerStoppingError"
     assert result["runtimeManagerStopping"] is True
     assert result["stateVersion"] == 42
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.command_rejected_shutdown"
+    assert event["payload"]["managerPid"] == 9912
 
 
-def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_path, monkeypatch):
+def test_submit_command_ignores_stale_shutdown_state_from_previous_runtime_manager(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
     results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
     for path in (inbox_dir, processing_dir, results_dir):
         path.mkdir(parents=True)
 
     monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
     monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
     monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 99,
+            "runtimeState": "stopping",
+            "managerPid": 7711,
+            "command": {
+                "activeCommandId": "cmd-old-close",
+                "activeType": "close_workbench",
+                "stopManager": True,
+            },
+        },
+    )
+
+    command = command_queue.submit_command("open_workbench", args={"reason": "launcher_start"}, requested_by="launcher_ps")
+
+    queued = list(inbox_dir.glob("*.json"))
+    assert len(queued) == 1
+    assert queued[0].name == f"{command['commandId']}.json"
+    assert list(results_dir.glob("*.json")) == []
+    queued_payload = json.loads(queued[0].read_text(encoding="utf-8"))
+    assert queued_payload["type"] == "open_workbench"
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.stale_shutdown_state_ignored"
+    assert event["payload"]["stateManagerPid"] == 7711
+    assert event["payload"]["currentManagerPid"] == 9912
+
+
+def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
     monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
     monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
     monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
@@ -453,6 +505,7 @@ def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_pa
         lambda: {
             "stateVersion": 43,
             "runtimeState": "running",
+            "managerPid": 9912,
             "command": {
                 "activeCommandId": "cmd-active-close",
                 "activeType": "close_workbench",
@@ -1267,6 +1320,82 @@ def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, 
     assert payload["count"] == 1
     assert payload["items"][0]["pid"] == 49780
     assert payload["items"][0]["port"] == 8001
+
+
+def test_residual_process_payload_reports_unmanaged_frontend_dev_server(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 51517,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": ["python", "-m", "http.server", "5173", "-d", "frontend"],
+                        "cwd": str(repo),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 51518,
+                        "ppid": 1,
+                        "name": "node.exe",
+                        "cmdline": ["node", "node_modules/.bin/vite", "--host", "127.0.0.1"],
+                        "cwd": str(repo),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo)
+
+    assert payload["count"] == 2
+    assert {item["kind"] for item in payload["items"]} == {"unmanaged_frontend_dev_server"}
+    assert {item["pid"] for item in payload["items"]} == {51517, 51518}
+    assert {item["port"] for item in payload["items"]} == {5173}
+
+
+def test_residual_process_payload_ignores_inline_diagnostics_mentioning_frontend_tools(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 51519,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": [
+                            "python",
+                            "-c",
+                            "print('diagnose http.server vite 5173 frontend')",
+                        ],
+                        "cwd": str(repo),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo)
+
+    assert payload == {"count": 0, "items": []}
 
 
 def test_residual_process_payload_ignores_adjacent_repo_prefix_match(monkeypatch, tmp_path):

@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { SessionDetail, SessionSummary } from "../api/types";
 import {
+  deriveSessionDetailQueryErrorState,
+  deriveSessionListQueryErrorState,
   markSessionSummaryRunning,
   markSessionDetailRunning,
   mergeSessionDetailIntoSummaries,
   sessionSummaryFromDetail,
+  shouldAcceptSessionStreamEvent,
 } from "./chatSessionState";
 
 function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
@@ -75,6 +78,33 @@ describe("chatSessionState", () => {
     expect(merged[1].id).toBe("older-session");
   });
 
+  it("adds a newly returned active detail to the top without dropping existing summaries", () => {
+    const olderSession = makeSummary({ id: "older-session", title: "旧会话", status: "ready", currentPhase: "ready" });
+    const merged = mergeSessionDetailIntoSummaries(
+      [olderSession],
+      makeDetail({ id: "new-session", title: "新会话", taskSummary: "刚创建" }),
+    );
+
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({
+      id: "new-session",
+      title: "新会话",
+      taskSummary: "刚创建",
+      status: "running",
+      currentPhase: "running",
+    });
+    expect(merged[1]).toEqual(olderSession);
+  });
+
+  it("only marks the requested session summary as running", () => {
+    const olderSession = makeSummary({ id: "older-session", title: "旧会话", status: "ready", currentPhase: "ready" });
+    const marked = markSessionSummaryRunning([makeSummary(), olderSession], "session-live");
+
+    expect(marked?.[0].status).toBe("running");
+    expect(marked?.[0].currentPhase).toBe("running");
+    expect(marked?.[1]).toEqual(olderSession);
+  });
+
   it("marks the active summary as running during submit before list refetch finishes", () => {
     const marked = markSessionSummaryRunning([makeSummary()], "session-live");
 
@@ -100,5 +130,73 @@ describe("chatSessionState", () => {
     expect(marked?.status).toBe("running");
     expect(marked?.currentPhase).toBe("running");
     expect(marked?.lastTurnError).toBeNull();
+  });
+
+  it("keeps stale detail visible when a refetch fails", () => {
+    expect(deriveSessionDetailQueryErrorState(makeDetail(), true)).toEqual({
+      blockingError: false,
+      transientError: true,
+    });
+  });
+
+  it("only blocks detail rendering when a failed query has no cached detail", () => {
+    expect(deriveSessionDetailQueryErrorState(undefined, true)).toEqual({
+      blockingError: true,
+      transientError: false,
+    });
+  });
+
+  it("keeps stale session list visible when a list refetch fails", () => {
+    expect(deriveSessionListQueryErrorState([makeSummary()], true)).toEqual({
+      blockingError: false,
+      transientError: true,
+    });
+  });
+
+  it("only blocks session list rendering when no cached sessions exist", () => {
+    expect(deriveSessionListQueryErrorState([], true)).toEqual({
+      blockingError: true,
+      transientError: false,
+    });
+  });
+
+  it("accepts stream detail events only for the active session", () => {
+    const activeDetail = makeDetail({ id: "session-live" });
+    const staleDetail = makeDetail({ id: "older-session", title: "旧会话" });
+
+    expect(
+      shouldAcceptSessionStreamEvent(
+        {
+          type: "session_detail",
+          sessionId: "session-live",
+          detail: activeDetail,
+        },
+        "session-live",
+      ),
+    ).toBe(true);
+
+    expect(
+      shouldAcceptSessionStreamEvent(
+        {
+          type: "session_detail",
+          sessionId: "older-session",
+          detail: staleDetail,
+        },
+        "session-live",
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects malformed stream events even if their detail looks current", () => {
+    expect(
+      shouldAcceptSessionStreamEvent(
+        {
+          type: "session_detail",
+          sessionId: "older-session",
+          detail: makeDetail({ id: "session-live" }),
+        },
+        "session-live",
+      ),
+    ).toBe(false);
   });
 });

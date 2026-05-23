@@ -11,6 +11,7 @@ import { LogsRoute } from "../routes/LogsRoute";
 import { PetRoute } from "../routes/PetRoute";
 import { ResetRoute } from "../routes/ResetRoute";
 import { SupervisedReviewRoute } from "../routes/SupervisedReviewRoute";
+import { ToolsRoute } from "../routes/ToolsRoute";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
 
@@ -69,6 +70,7 @@ export const router = createBrowserRouter([
         ),
       },
       { path: "evolution", element: <LegacyEvolutionRedirect /> },
+      { path: "tools", element: <ToolsRoute /> },
       { path: "git", element: <GitRoute /> },
       { path: "logs", element: <LogsRoute /> },
       { path: "pet", element: <PetRoute /> },

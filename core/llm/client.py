@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, SystemMessage, ToolMessage
 
@@ -43,6 +43,52 @@ def _record_llm_scene_event(
         )
     except Exception:
         return
+
+
+def _retry_policy_max_attempts(profile: Any) -> int:
+    retry_policy = getattr(profile, "retry_policy", None)
+    try:
+        return max(1, min(5, int(getattr(retry_policy, "max_attempts", 5) or 5)))
+    except Exception:
+        return 5
+
+
+def _retry_policy_backoff_seconds(profile: Any, attempt: int) -> float:
+    retry_policy = getattr(profile, "retry_policy", None)
+    try:
+        base = float(getattr(retry_policy, "backoff_base_seconds", 2.0) or 2.0)
+    except Exception:
+        base = 2.0
+    return max(0.1, base) * (2 ** max(0, attempt - 1))
+
+
+def _llm_retry_event_fields(
+    *,
+    role: str,
+    profile_id: str,
+    provider: str,
+    model: str,
+    message_count: int,
+    tool_count: int,
+    metadata: Optional[Dict[str, Any]],
+    attempt: int,
+    max_attempts: int,
+    llm_error: LLMError,
+) -> Dict[str, Any]:
+    return {
+        "role": role,
+        "profileId": profile_id,
+        "provider": provider,
+        "model": model,
+        "messageCount": message_count,
+        "toolCount": tool_count,
+        "metadata": metadata or {},
+        "attempt": attempt,
+        "maxAttempts": max_attempts,
+        "errorType": llm_error.category,
+        "retryable": llm_error.retryable,
+        "error": str(llm_error),
+    }
 
 
 def _default_completion_backend(payload: Dict[str, Any]) -> Any:
@@ -284,32 +330,14 @@ class LLMClient:
     def invoke(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> AIMessage:
         start = time.time()
         payload = self._build_payload(messages, tools=tools, stream=False)
-        try:
-            response = self._backend(payload)
-        except Exception as exc:
-            llm_error = classify_exception(exc)
-            error_category = llm_error.category
-            _record_llm_scene_event(
-                "invoke",
-                "llm.invoke.failed",
-                message=f"LLM invoke failed: {error_category}",
-                level="error",
-                outcome="failed",
-                fields={
-                    "role": self.role,
-                    "profileId": self.profile_id,
-                    "provider": self.provider.kind,
-                    "model": self.profile.model,
-                    "messageCount": len(messages or []),
-                    "toolCount": len(tools or self.bound_tools or []),
-                    "metadata": metadata or {},
-                    "errorType": error_category,
-                    "retryable": llm_error.retryable,
-                    "error": str(llm_error),
-                },
-                lifecycle=True,
-            )
-            raise llm_error from exc
+        response = self._invoke_backend_with_retry(
+            payload,
+            phase="invoke",
+            event_code="llm.invoke.failed",
+            message_count=len(messages or []),
+            tool_count=len(tools or self.bound_tools or []),
+            metadata=metadata,
+        )
         latency_ms = int((time.time() - start) * 1000)
         message = self._choice_message(response)
         tool_calls = extract_message_tool_calls(message)
@@ -367,6 +395,130 @@ class LLMClient:
             "metadata": metadata or {},
         }
 
+    def _invoke_backend_with_retry(
+        self,
+        payload: Dict[str, Any],
+        *,
+        phase: str,
+        event_code: str,
+        message_count: int,
+        tool_count: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        max_attempts = _retry_policy_max_attempts(self.profile)
+        last_error: LLMError | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return self._backend(payload)
+            except Exception as exc:
+                llm_error = classify_exception(exc)
+                last_error = llm_error
+                error_category = llm_error.category
+                fields = _llm_retry_event_fields(
+                    role=self.role,
+                    profile_id=self.profile_id,
+                    provider=self.provider.kind,
+                    model=self.profile.model,
+                    message_count=message_count,
+                    tool_count=tool_count,
+                    metadata=metadata,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    llm_error=llm_error,
+                )
+                if not llm_error.retryable or attempt >= max_attempts:
+                    _record_llm_scene_event(
+                        phase,
+                        event_code,
+                        message=f"LLM {phase} failed{' before iterator' if phase == 'stream' else ''}: {error_category}",
+                        level="error",
+                        outcome="failed",
+                        fields=fields,
+                        lifecycle=True,
+                    )
+                    raise llm_error from exc
+                wait_seconds = _retry_policy_backoff_seconds(self.profile, attempt)
+                _record_llm_scene_event(
+                    phase,
+                    f"{event_code}.retrying",
+                    message=f"LLM {phase} retrying after {error_category}.",
+                    level="warning",
+                    outcome="retrying",
+                    fields={**fields, "nextAttempt": attempt + 1, "waitSeconds": wait_seconds},
+                    lifecycle=True,
+                )
+                time.sleep(wait_seconds)
+        if last_error is not None:
+            raise last_error
+        raise LLMError("provider_protocol_error", "LLM backend failed before returning a response.", retryable=False)
+
+    def _record_llm_retry_or_failure(
+        self,
+        *,
+        phase: str,
+        event_code: str,
+        message: str,
+        message_count: int,
+        tool_count: int,
+        metadata: Optional[Dict[str, Any]],
+        attempt: int,
+        max_attempts: int,
+        llm_error: LLMError,
+    ) -> bool:
+        fields = _llm_retry_event_fields(
+            role=self.role,
+            profile_id=self.profile_id,
+            provider=self.provider.kind,
+            model=self.profile.model,
+            message_count=message_count,
+            tool_count=tool_count,
+            metadata=metadata,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            llm_error=llm_error,
+        )
+        if not llm_error.retryable or attempt >= max_attempts:
+            _record_llm_scene_event(
+                phase,
+                event_code,
+                message=f"{message}: {llm_error.category}",
+                level="error",
+                outcome="failed",
+                fields=fields,
+                lifecycle=True,
+            )
+            return False
+        wait_seconds = _retry_policy_backoff_seconds(self.profile, attempt)
+        _record_llm_scene_event(
+            phase,
+            f"{event_code}.retrying",
+            message=f"LLM {phase} retrying after {llm_error.category}.",
+            level="warning",
+            outcome="retrying",
+            fields={**fields, "nextAttempt": attempt + 1, "waitSeconds": wait_seconds},
+            lifecycle=True,
+        )
+        time.sleep(wait_seconds)
+        return True
+
+    def _stream_attempt(
+        self,
+        payload: Dict[str, Any],
+        *,
+        message_count: int,
+        tool_count: int,
+    ) -> Tuple[Iterator[StreamChunk], Callable[[], bool]]:
+        iterator = self._backend(payload)
+        emitted = False
+
+        def events() -> Iterator[StreamChunk]:
+            nonlocal emitted
+            for event in self.adapter.stream_normalizer().events(iterator):
+                emitted = True
+                yield event
+
+        return events(), lambda: emitted
+
     def stream_events(
         self,
         messages: List[Any],
@@ -375,56 +527,58 @@ class LLMClient:
     ) -> Iterator[StreamChunk]:
         """Yield normalized stream events independent of LangChain chunks."""
         payload = self._build_payload(messages, tools=tools, stream=True)
-        try:
-            iterator = self._backend(payload)
-        except Exception as exc:
-            llm_error = classify_exception(exc)
-            error_category = llm_error.category
-            _record_llm_scene_event(
-                "stream",
-                "llm.stream.failed",
-                message=f"LLM stream failed before iterator: {error_category}",
-                level="error",
-                outcome="failed",
-                fields={
-                    "role": self.role,
-                    "profileId": self.profile_id,
-                    "provider": self.provider.kind,
-                    "model": self.profile.model,
-                    "messageCount": len(messages or []),
-                    "toolCount": len(tools or self.bound_tools or []),
-                    "errorType": error_category,
-                    "retryable": llm_error.retryable,
-                    "error": str(llm_error),
-                },
-                lifecycle=True,
-            )
-            raise llm_error from exc
-        try:
-            yield from self.adapter.stream_normalizer().events(iterator)
-        except Exception as exc:
-            llm_error = classify_exception(exc)
-            error_category = llm_error.category
-            _record_llm_scene_event(
-                "stream",
-                "llm.stream.failed",
-                message=f"LLM stream failed: {error_category}",
-                level="error",
-                outcome="failed",
-                fields={
-                    "role": self.role,
-                    "profileId": self.profile_id,
-                    "provider": self.provider.kind,
-                    "model": self.profile.model,
-                    "messageCount": len(messages or []),
-                    "toolCount": len(tools or self.bound_tools or []),
-                    "errorType": error_category,
-                    "retryable": llm_error.retryable,
-                    "error": str(llm_error),
-                },
-                lifecycle=True,
-            )
-            raise llm_error from exc
+        message_count = len(messages or [])
+        tool_count = len(tools or self.bound_tools or [])
+        max_attempts = _retry_policy_max_attempts(self.profile)
+        for attempt in range(1, max_attempts + 1):
+            emitted = False
+            try:
+                events, emitted_fn = self._stream_attempt(
+                    payload,
+                    message_count=message_count,
+                    tool_count=tool_count,
+                )
+                for event in events:
+                    emitted = emitted_fn()
+                    yield event
+                return
+            except Exception as exc:
+                llm_error = classify_exception(exc)
+                if emitted:
+                    _record_llm_scene_event(
+                        "stream",
+                        "llm.stream.failed",
+                        message=f"LLM stream failed: {llm_error.category}",
+                        level="error",
+                        outcome="failed",
+                        fields=_llm_retry_event_fields(
+                            role=self.role,
+                            profile_id=self.profile_id,
+                            provider=self.provider.kind,
+                            model=self.profile.model,
+                            message_count=message_count,
+                            tool_count=tool_count,
+                            metadata=None,
+                            attempt=attempt,
+                            max_attempts=max_attempts,
+                            llm_error=llm_error,
+                        ),
+                        lifecycle=True,
+                    )
+                    raise llm_error from exc
+                should_retry = self._record_llm_retry_or_failure(
+                    phase="stream",
+                    event_code="llm.stream.failed",
+                    message="LLM stream failed before iterator",
+                    message_count=message_count,
+                    tool_count=tool_count,
+                    metadata=None,
+                    attempt=attempt,
+                    max_attempts=max_attempts,
+                    llm_error=llm_error,
+                )
+                if not should_retry:
+                    raise llm_error from exc
 
     def stream(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> Iterator[AIMessageChunk]:
         response_metadata = self._response_metadata(metadata)

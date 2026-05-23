@@ -108,6 +108,31 @@ def test_ensure_dataset_registry_bootstraps_generated_and_chat_sources(tmp_path:
     assert (tmp_path / "workspace" / "evaluation" / "datasets" / "chat_reviewed_multiturn.jsonl").exists()
 
 
+def test_dataset_status_distinguishes_effective_empty_missing_and_harness(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    custom_path = tmp_path / "workspace" / "evaluation" / "datasets" / "custom_prompt_tasks.jsonl"
+    custom_path.parent.mkdir(parents=True, exist_ok=True)
+    custom_path.write_text(
+        json.dumps({"case_id": "ready", "prompt": "Run a tiny task."}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    rows = list_dataset_status(tmp_path)
+    by_name = {item["name"]: item for item in rows}
+
+    assert by_name["custom_prompt_jsonl"]["effective"] is True
+    assert by_name["custom_prompt_jsonl"]["case_count"] == 1
+    assert by_name["custom_prompt_jsonl"]["usability_status"] == "ready"
+    assert by_name["generated_cases"]["effective"] is False
+    assert by_name["generated_cases"]["case_count"] == 0
+    assert by_name["generated_cases"]["usability_status"] == "empty"
+    assert by_name["humaneval_jsonl"]["effective"] is False
+    assert by_name["humaneval_jsonl"]["usability_status"] == "missing_source"
+    assert by_name["swe_bench_lite"]["effective"] is False
+    assert by_name["swe_bench_lite"]["usability_status"] == "requires_external_harness"
+    assert "源文件不存在" in by_name["swe_bench_lite"]["usability_reason"]
+
+
 def test_materialize_builtin_supervised_bundle(tmp_path: Path):
     result = materialize_dataset_bundle("supervised_dry_run", project_root=tmp_path)
 

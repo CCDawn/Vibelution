@@ -346,6 +346,93 @@ export type GitCommitResponse = {
   files: string[];
 };
 
+export type ToolRegistrySource = "built_in" | "generated" | string;
+
+export type ToolTestPolicy = {
+  mode: string;
+  callable: boolean;
+  runtimeCall: boolean;
+  simulated: boolean;
+  reason: string;
+  argsPreview: Record<string, unknown>;
+};
+
+export type ToolAgentCompatibility = {
+  status: string;
+  callable: boolean;
+  message: string;
+  toolCall: {
+    id: string;
+    name: string;
+    args: Record<string, unknown>;
+  };
+  argsParsed: Record<string, unknown>;
+  messageType: string;
+  resultPreview: string;
+};
+
+export type ToolTestTimeout = {
+  timedOut: boolean;
+  timeoutSeconds: number;
+  durationMs: number;
+};
+
+export type ToolRegistryItem = {
+  id: string;
+  name: string;
+  description: string;
+  source: ToolRegistrySource;
+  status: string;
+  enabled: boolean;
+  validated: boolean;
+  llmVisible: boolean;
+  runtimeActive: boolean;
+  deleteAllowed: boolean;
+  blockReason: string;
+  validationError: string;
+  argsSchema: Record<string, unknown>;
+  testPolicy: ToolTestPolicy;
+  responseTemplate?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ToolRegistryPayload = {
+  schemaVersion: number;
+  mode: string;
+  storagePath: string;
+  counts: {
+    total: number;
+    builtIn: number;
+    generated: number;
+    llmVisible: number;
+    runtimeActive: number;
+    enabledGenerated: number;
+    invalidGenerated: number;
+  };
+  tools: ToolRegistryItem[];
+};
+
+export type GeneratedToolDeleteResponse = {
+  deleted: boolean;
+  toolId: string;
+  summary: string;
+};
+
+export type ToolTestResponse = {
+  toolId: string;
+  source: string;
+  status: string;
+  called: boolean;
+  callable: boolean;
+  message: string;
+  resultPreview: string;
+  argsUsed: Record<string, unknown>;
+  testPolicy: ToolTestPolicy;
+  agentCompatibility: ToolAgentCompatibility;
+  timeout: ToolTestTimeout;
+};
+
 export type LogTreeResponse = {
   root: LogRoot;
   nodes: FileTreeNode[];
@@ -628,6 +715,17 @@ export type SessionStreamEvent = {
   detail: SessionDetail;
 };
 
+export type SessionChatReviewCandidateResponse = {
+  candidateId: string;
+  status: string;
+  sessionId: string;
+  topicSummary: string;
+  turnCount: number;
+  qualitySignals: string[];
+  rawExcerptPath: string;
+  summary: string;
+};
+
 export type FileTreeNode = {
   name: string;
   path: string;
@@ -774,6 +872,10 @@ export type EvolutionDatasetOption = {
   bundleName: string;
   available: boolean;
   runnable: boolean;
+  effective: boolean;
+  caseCount: number | null;
+  usabilityStatus: string;
+  usabilityReason: string;
   adapterStatus: string;
   description: string;
   sourcePath: string;
@@ -884,6 +986,73 @@ export type EvolutionRunDeleteResponse = {
   activeRunId: string;
   latestRunId: string;
   summary: string;
+};
+
+export type SupervisedWorktreeRun = {
+  runId: string;
+  runKind: string;
+  status: string;
+  phase: string;
+  runtimeStatus: string;
+  outcome: string;
+  mode: string;
+  executionMode: string;
+  sourceKind: string;
+  datasetName: string;
+  datasetLimit: number | null;
+  bundleName: string;
+  keepWorktree: boolean;
+  startRequest?: {
+    requestSource?: string;
+    uiRoute?: string;
+    initiator?: string;
+    clientAction?: string;
+  };
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string;
+  latestMessage: string;
+  costEstimate: {
+    caseCount: number;
+    evaluationCalls: number;
+    selfEditCalls: number;
+    modelCalls: number;
+    estimatedInputTokens: number;
+    estimatedOutputTokens: number;
+    estimatedTotalTokens: number;
+    note: string;
+  };
+  decision: {
+    mode?: string;
+    baselineScore?: number;
+    candidateScore?: number;
+    scoreDelta?: number;
+    recommendedAction?: string;
+    reason?: string;
+    highRisk?: boolean;
+  };
+  mergeAnalysis: {
+    status?: string;
+    mergeAllowed?: boolean;
+    reason?: string;
+    blockers?: string[];
+    overlapFiles?: string[];
+    highRiskFiles?: string[];
+    changedFiles?: Array<{
+      path: string;
+      status: string;
+      changeType: string;
+      highRisk: boolean;
+    }>;
+  };
+  actionStates: Record<string, EvolutionActionState>;
+};
+
+export type SupervisedWorktreeRunStreamEvent = {
+  type: "supervised_worktree_run";
+  runId: string;
+  snapshot: SupervisedWorktreeRun;
+  terminal?: boolean;
 };
 
 export type SelfEvolutionRunStreamEvent = {
@@ -1084,6 +1253,8 @@ export type EvolutionProposalDetail = {
   availableActions: string[];
   canDelete: boolean;
   deleteBlockReason: string;
+  canEdit: boolean;
+  editBlockReason: string;
   runSemantics: SupervisedRunSemantics;
   outcomeSemantics: EvolutionOutcomeSemantics;
   actionStates: Record<string, EvolutionActionState>;
@@ -1115,6 +1286,12 @@ export type EvolutionProposalDetail = {
     candidateImprovementId: string | null;
     improvementType: string;
     expectedEffect: string;
+    summary: string;
+    candidatePrompt: string;
+    baselinePrompt: string;
+    editNote: string;
+    editedAt: string;
+    editedBy: string;
     targetLabel: string;
     target: Record<string, unknown> | null;
     payload: Record<string, unknown> | null;
@@ -1130,6 +1307,14 @@ export type EvolutionProposalDetail = {
   rawProposal: Record<string, unknown> | null;
   rawGymDecision: Record<string, unknown> | null;
   rawSupervisedDecision: Record<string, unknown> | null;
+};
+
+export type EvolutionProposalUpdateResponse = {
+  sessionId: string;
+  updated: boolean;
+  changedFields: string[];
+  summary: string;
+  proposal: EvolutionProposalDetail;
 };
 
 export type EvolutionProposalDeleteResponse = {

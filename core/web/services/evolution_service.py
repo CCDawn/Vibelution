@@ -23,6 +23,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 LIST_RECORD_LIMIT = 24
 DETAIL_RECORD_LIMIT = 400
 BLOCKED_DELETE_STATUSES = {"active", "applied"}
+MANUAL_GOVERNANCE_MODE = "manual_review"
+BLOCKED_EDIT_STATUSES = {"applied", "active", "rolled_back", "superseded", "promoted"}
 
 
 class EvolutionProposalNotFoundError(Exception):
@@ -33,8 +35,111 @@ class EvolutionProposalDeleteBlockedError(Exception):
     """Raised when a supervised proposal is not deletable in its current state."""
 
 
+class EvolutionProposalEditBlockedError(Exception):
+    """Raised when a supervised proposal cannot be edited in its current state."""
+
+
 class EvolutionProposalValidationError(Exception):
     """Raised when a supervised proposal references unsafe or invalid paths."""
+
+
+def _governance_mode() -> str:
+    return str(get_workbench_contract().get("intakeMode") or MANUAL_GOVERNANCE_MODE).strip() or MANUAL_GOVERNANCE_MODE
+
+
+def manual_governance_enabled() -> bool:
+    """Return whether supervised proposal/user governance actions are allowed."""
+
+    return _governance_mode() == MANUAL_GOVERNANCE_MODE
+
+
+def manual_governance_block_reason(*, lang: str | None = None) -> str:
+    active_lang = lang or get_web_language()
+    return text_for(
+        active_lang,
+        zh="当前为自动审查模式，候选池手工治理动作已锁定。切换到手工操作后才能接纳、激活、回滚或删除候选。",
+        en=(
+            "Automatic review mode is active, so manual candidate governance is locked. "
+            "Switch to manual operation before applying, activating, rolling back, or deleting candidates."
+        ),
+    )
+
+
+def _proposal_edit_status_block_reason(status: str, *, lang: str) -> str:
+    normalized = str(status or "").strip().lower() or "missing"
+    if normalized == "missing":
+        return text_for(
+            lang,
+            zh="proposal 文件缺失，当前不能编辑。需要先重新生成或恢复提案文件。",
+            en="The proposal file is missing, so it cannot be edited. Regenerate or restore the proposal file first.",
+        )
+    if normalized == "invalid":
+        return text_for(
+            lang,
+            zh="proposal 文件不是有效 JSON，当前不能通过工作台编辑。",
+            en="The proposal file is not valid JSON, so it cannot be edited from the workbench.",
+        )
+    if normalized in BLOCKED_EDIT_STATUSES:
+        return text_for(
+            lang,
+            zh="该提案已经进入治理链路或历史状态，不能再修改草稿内容。",
+            en="This proposal is already in the governance chain or a historical state, so its draft content cannot be edited.",
+        )
+    return ""
+
+
+def _record_manual_governance_block(action: str, *, session_id: str = "") -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "evolution_governance",
+            "policy",
+            "evolution.manual_governance.blocked",
+            message="Manual supervised governance action blocked by automatic review mode.",
+            level="warning",
+            outcome="blocked",
+            fields={
+                "action": str(action or "").strip(),
+                "sessionId": str(session_id or "").strip(),
+                "intakeMode": _governance_mode(),
+            },
+        )
+    except Exception:
+        return
+
+
+def _record_proposal_edit_event(
+    event_code: str,
+    *,
+    session_id: str,
+    proposal_path: str = "",
+    changed_fields: list[str] | None = None,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "succeeded",
+    reason: str = "",
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "evolution_governance",
+            "proposal_edit",
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "proposalPath": str(proposal_path or "").strip(),
+                "changedFields": list(changed_fields or []),
+                "reason": str(reason or "").strip(),
+                "intakeMode": _governance_mode(),
+            },
+        )
+    except Exception:
+        return
 
 
 def get_evolution_overview() -> dict[str, Any]:
@@ -136,8 +241,20 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
     proposal_status = _detail_proposal_status(lifecycle.status, record.gym_proposal_status)
     runtime_effect = lifecycle.runtime_effect or record.gym_runtime_effect
     target_key = lifecycle.target_key or record.gym_target_key or ""
-    available_actions = list(lifecycle.available_actions or record.gym_available_actions)
+    manual_enabled = manual_governance_enabled()
+    mode_block_reason = "" if manual_enabled else manual_governance_block_reason(lang=lang)
+    available_actions = list(lifecycle.available_actions or record.gym_available_actions) if manual_enabled else []
     can_delete, delete_block_reason = _delete_state(proposal_status, lang=lang)
+    if not manual_enabled:
+        can_delete = False
+        delete_block_reason = mode_block_reason
+    can_edit, edit_block_reason = _edit_state(
+        proposal_status,
+        proposal_payload=proposal_payload,
+        manual_enabled=manual_enabled,
+        mode_block_reason=mode_block_reason,
+        lang=lang,
+    )
     proposal = _proposal_payload(
         lifecycle=lifecycle,
         record=record,
@@ -152,6 +269,7 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
         preview=preview,
         can_delete=can_delete,
         delete_block_reason=delete_block_reason,
+        mode_block_reason=mode_block_reason,
         lang=lang,
     )
 
@@ -169,6 +287,8 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
         "availableActions": available_actions,
         "canDelete": can_delete,
         "deleteBlockReason": delete_block_reason,
+        "canEdit": can_edit,
+        "editBlockReason": edit_block_reason,
         "runSemantics": {
             "runStatus": _run_status(record),
             "runStatusLabel": _run_state_label(_run_status(record), lang=lang),
@@ -189,6 +309,7 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
             can_delete=can_delete,
             delete_block_reason=delete_block_reason,
             lang=lang,
+            mode_block_reason=mode_block_reason,
         ),
         "review": review,
         "supervised": {
@@ -219,6 +340,9 @@ def delete_proposal(session_id: str, *, project_root: Path | None = None) -> dic
     """Hide one removable proposal from the work surface while preserving audit files."""
 
     lang = get_web_language()
+    if not manual_governance_enabled():
+        _record_manual_governance_block("delete", session_id=session_id)
+        raise EvolutionProposalDeleteBlockedError(manual_governance_block_reason(lang=lang))
     root = (project_root or PROJECT_ROOT).resolve()
     detail = get_proposal_detail(session_id, project_root=root)
     if not bool(detail.get("canDelete")):
@@ -332,6 +456,112 @@ def bulk_delete_proposals(session_ids: list[str], *, project_root: Path | None =
     }
 
 
+def update_proposal(
+    session_id: str,
+    updates: dict[str, Any],
+    *,
+    edit_note: str = "",
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    """Persist manual draft edits to one proposal while preserving supervised evidence."""
+
+    lang = get_web_language()
+    root = (project_root or PROJECT_ROOT).resolve()
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise EvolutionProposalNotFoundError("Supervised proposal not found.")
+    if not manual_governance_enabled():
+        reason = manual_governance_block_reason(lang=lang)
+        _record_proposal_edit_event(
+            "evolution.proposal_edit.blocked",
+            session_id=normalized_session_id,
+            message="Proposal edit blocked by automatic review mode.",
+            level="warning",
+            outcome="blocked",
+            reason=reason,
+        )
+        raise EvolutionProposalEditBlockedError(reason)
+
+    detail = get_proposal_detail(normalized_session_id, project_root=root)
+    proposal_path_text = str(((detail.get("paths") or {}).get("gymProposalPath")) or "").strip()
+    status = str(detail.get("proposalStatus") or "").strip().lower()
+    block_reason = _proposal_edit_status_block_reason(status, lang=lang)
+    if block_reason:
+        _record_proposal_edit_event(
+            "evolution.proposal_edit.blocked",
+            session_id=normalized_session_id,
+            proposal_path=proposal_path_text,
+            message="Proposal edit blocked by proposal state.",
+            level="warning",
+            outcome="blocked",
+            reason=block_reason,
+        )
+        raise EvolutionProposalEditBlockedError(block_reason)
+    if not proposal_path_text:
+        reason = text_for(lang, zh="当前监督记录没有 proposal 文件路径，不能编辑。", en="This supervised record has no proposal file path to edit.")
+        raise EvolutionProposalEditBlockedError(reason)
+
+    proposal_path = _resolve_path(proposal_path_text, root=root)
+    if not _is_within_root(proposal_path, root=root):
+        raise EvolutionProposalValidationError(f"Refusing to edit proposal path outside project root: {proposal_path}")
+    if not proposal_path.exists():
+        reason = _proposal_edit_status_block_reason("missing", lang=lang)
+        raise EvolutionProposalEditBlockedError(reason)
+
+    proposal_payload = _load_required_json_object(proposal_path, root=root, label="proposal")
+    changed_fields = _apply_proposal_manual_edits(
+        proposal_payload,
+        updates,
+        effective_values=detail.get("proposal") if isinstance(detail.get("proposal"), dict) else {},
+    )
+    if not changed_fields:
+        return {
+            "sessionId": normalized_session_id,
+            "updated": False,
+            "changedFields": [],
+            "summary": text_for(lang, zh="没有检测到提案内容变化。", en="No proposal content changes were detected."),
+            "proposal": detail,
+        }
+
+    timestamp = _now_iso()
+    audit_entry = {
+        "edited_at": timestamp,
+        "edited_by": "workbench",
+        "edit_note": _trim_text(str(edit_note or ""), limit=500),
+        "changed_fields": changed_fields,
+    }
+    history = proposal_payload.get("manual_edit_history")
+    if not isinstance(history, list):
+        history = []
+    history.append(audit_entry)
+    proposal_payload["manual_edit_history"] = history[-50:]
+    proposal_payload["edited_at"] = timestamp
+    proposal_payload["edited_by"] = "workbench"
+    proposal_payload["edit_note"] = audit_entry["edit_note"]
+    proposal_payload["manual_edit_fields"] = changed_fields
+    proposal_path.write_text(json.dumps(proposal_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    _record_proposal_edit_event(
+        "evolution.proposal_edit.saved",
+        session_id=normalized_session_id,
+        proposal_path=str(proposal_path),
+        changed_fields=changed_fields,
+        message="Manual supervised proposal draft edits saved.",
+    )
+    refreshed = get_proposal_detail(normalized_session_id, project_root=root)
+    return {
+        "sessionId": normalized_session_id,
+        "updated": True,
+        "changedFields": changed_fields,
+        "summary": text_for(
+            lang,
+            zh=f"已保存提案修改：{', '.join(changed_fields)}。",
+            en=f"Saved proposal edits: {', '.join(changed_fields)}.",
+        ),
+        "proposal": refreshed,
+    }
+
+
 def _build_current_status(latest_run: dict[str, Any] | None, lang: str) -> dict[str, Any]:
     if latest_run is None:
         next_action = text_for(
@@ -408,7 +638,7 @@ def get_workbench_state_payload(*, project_root: Path | None = None) -> dict[str
     source = str(state.get("source") or "").strip().lower()
     if source not in {"bundle", "dataset"}:
         source = "unknown"
-    runnable_datasets = sum(1 for item in datasets if item.get("available") and item.get("runnable"))
+    runnable_datasets = sum(1 for item in datasets if item.get("effective"))
     blocked_datasets = len(datasets) - runnable_datasets
     return {
         "source": source,
@@ -424,12 +654,17 @@ def get_workbench_state_payload(*, project_root: Path | None = None) -> dict[str
 
 def _run_payload(record) -> dict[str, Any]:
     lang = get_web_language()
+    manual_enabled = manual_governance_enabled()
+    mode_block_reason = "" if manual_enabled else manual_governance_block_reason(lang=lang)
     can_delete, delete_block_reason = _delete_state(record.gym_proposal_status, lang=lang)
+    if not manual_enabled:
+        can_delete = False
+        delete_block_reason = mode_block_reason
     baseline_score = _score(record.baseline_success_rate)
     candidate_score = _score(record.candidate_success_rate)
     delta_score = candidate_score - baseline_score
     run_status = _run_status(record)
-    available_actions = list(record.gym_available_actions)
+    available_actions = list(record.gym_available_actions) if manual_enabled else []
     return {
         "id": record.session_id,
         "score": candidate_score,
@@ -475,6 +710,7 @@ def _run_payload(record) -> dict[str, Any]:
             can_delete=can_delete,
             delete_block_reason=delete_block_reason,
             lang=lang,
+            mode_block_reason=mode_block_reason,
         ),
     }
 
@@ -505,8 +741,13 @@ def _case_diagnostics(record) -> list[dict[str, Any]]:
 
 def _library_item_payload(record, *, root: Path, lang: str) -> dict[str, Any]:
     preview = _review_preview(record, root=root, lang=lang)
+    manual_enabled = manual_governance_enabled()
+    mode_block_reason = "" if manual_enabled else manual_governance_block_reason(lang=lang)
     can_delete, delete_block_reason = _delete_state(record.gym_proposal_status, lang=lang)
-    available_actions = list(record.gym_available_actions)
+    if not manual_enabled:
+        can_delete = False
+        delete_block_reason = mode_block_reason
+    available_actions = list(record.gym_available_actions) if manual_enabled else []
     return {
         "id": record.session_id,
         "title": _proposal_title(record),
@@ -537,14 +778,20 @@ def _library_item_payload(record, *, root: Path, lang: str) -> dict[str, Any]:
             can_delete=can_delete,
             delete_block_reason=delete_block_reason,
             lang=lang,
+            mode_block_reason=mode_block_reason,
         ),
     }
 
 
 def _pending_item_payload(record, *, root: Path, lang: str) -> dict[str, Any]:
     preview = _review_preview(record, root=root, lang=lang)
+    manual_enabled = manual_governance_enabled()
+    mode_block_reason = "" if manual_enabled else manual_governance_block_reason(lang=lang)
     can_delete, delete_block_reason = _delete_state(record.gym_proposal_status, lang=lang)
-    available_actions = list(record.gym_available_actions)
+    if not manual_enabled:
+        can_delete = False
+        delete_block_reason = mode_block_reason
+    available_actions = list(record.gym_available_actions) if manual_enabled else []
     return {
         "id": record.session_id,
         "title": _proposal_title(record),
@@ -575,6 +822,7 @@ def _pending_item_payload(record, *, root: Path, lang: str) -> dict[str, Any]:
             can_delete=can_delete,
             delete_block_reason=delete_block_reason,
             lang=lang,
+            mode_block_reason=mode_block_reason,
         ),
     }
 
@@ -648,23 +896,70 @@ def _proposal_payload(
             "observation_count": raw_proposal.get("observation_count"),
             "observation_budget": raw_proposal.get("observation_budget"),
         }
+    draft = _proposal_editable_draft(
+        raw_proposal=raw_proposal,
+        candidate=candidate,
+        payload=payload,
+    )
     return {
         "proposalId": lifecycle.proposal_id or _text_or_none((raw_proposal or {}).get("proposal_id")),
         "episodeId": lifecycle.episode_id or _text_or_none((raw_proposal or {}).get("session_id")),
         "candidateImprovementId": _text_or_none(candidate.get("improvement_id"))
         or _text_or_none((raw_proposal or {}).get("candidate_improvement_id")),
-        "improvementType": _text_or_none(candidate.get("improvement_type"))
-        or _text_or_none((raw_proposal or {}).get("decision_signal"))
-        or _text_or_none((raw_proposal or {}).get("status"))
-        or "",
-        "expectedEffect": _text_or_none(candidate.get("expected_effect"))
-        or _text_or_none((raw_proposal or {}).get("decision"))
-        or "",
+        "improvementType": draft["improvementType"],
+        "expectedEffect": draft["expectedEffect"],
+        "summary": draft["summary"],
+        "candidatePrompt": draft["candidatePrompt"],
+        "baselinePrompt": draft["baselinePrompt"],
+        "editNote": draft["editNote"],
+        "editedAt": _text_or_none((raw_proposal or {}).get("edited_at")) or "",
+        "editedBy": _text_or_none((raw_proposal or {}).get("edited_by")) or "",
         "targetLabel": target_label,
         "target": target,
         "payload": payload,
         "targetKey": lifecycle.target_key or record.gym_target_key or "",
         "status": _detail_proposal_status(lifecycle.status, record.gym_proposal_status),
+    }
+
+
+def _proposal_editable_draft(
+    *,
+    raw_proposal: dict[str, Any] | None,
+    candidate: dict[str, Any],
+    payload: dict[str, Any] | None,
+) -> dict[str, str]:
+    proposal = raw_proposal or {}
+    candidate_payload = payload or {}
+    manual = proposal.get("manual_overrides") if isinstance(proposal.get("manual_overrides"), dict) else {}
+    return {
+        "improvementType": _first_text(
+            manual.get("improvement_type"),
+            candidate.get("improvement_type"),
+            proposal.get("decision_signal"),
+            proposal.get("status"),
+        ),
+        "expectedEffect": _first_text(
+            manual.get("expected_effect"),
+            candidate.get("expected_effect"),
+            proposal.get("decision"),
+        ),
+        "summary": _first_text(
+            manual.get("summary"),
+            proposal.get("difference_summary"),
+            proposal.get("reason"),
+            proposal.get("decision"),
+        ),
+        "candidatePrompt": _first_text(
+            manual.get("candidate_prompt"),
+            proposal.get("candidate_prompt"),
+            candidate_payload.get("candidate_prompt"),
+        ),
+        "baselinePrompt": _first_text(
+            manual.get("baseline_prompt"),
+            proposal.get("baseline_prompt"),
+            candidate_payload.get("baseline_prompt"),
+        ),
+        "editNote": _first_text(proposal.get("edit_note")),
     }
 
 
@@ -676,6 +971,7 @@ def _review_payload(
     preview: dict[str, str],
     can_delete: bool,
     delete_block_reason: str,
+    mode_block_reason: str,
     lang: str,
 ) -> dict[str, Any]:
     improvement_type = str(proposal.get("improvementType") or "").strip()
@@ -734,10 +1030,10 @@ def _review_payload(
             )
         )
 
-    current_state = [
-        _proposal_status_explanation(lifecycle.status or record.gym_proposal_status, lang=lang),
-        _runtime_effect_explanation(lifecycle.runtime_effect or record.gym_runtime_effect, lang=lang),
-        text_for(
+    if mode_block_reason:
+        action_state_summary = mode_block_reason
+    else:
+        action_state_summary = text_for(
             lang,
             zh=(
                 f"当前可执行动作：{', '.join(lifecycle.available_actions)}。"
@@ -749,7 +1045,11 @@ def _review_payload(
                 if lifecycle.available_actions
                 else "No further proposal actions are available right now; this is review or audit only."
             ),
-        ),
+        )
+    current_state = [
+        _proposal_status_explanation(lifecycle.status or record.gym_proposal_status, lang=lang),
+        _runtime_effect_explanation(lifecycle.runtime_effect or record.gym_runtime_effect, lang=lang),
+        action_state_summary,
     ]
     if lifecycle.note:
         current_state.append(lifecycle.note)
@@ -1011,6 +1311,24 @@ def _delete_state(status: str, *, lang: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _edit_state(
+    status: str,
+    *,
+    proposal_payload: dict[str, Any] | None,
+    manual_enabled: bool,
+    mode_block_reason: str,
+    lang: str,
+) -> tuple[bool, str]:
+    if not manual_enabled:
+        return False, mode_block_reason
+    if not isinstance(proposal_payload, dict):
+        return False, _proposal_edit_status_block_reason("missing", lang=lang)
+    block_reason = _proposal_edit_status_block_reason(status, lang=lang)
+    if block_reason:
+        return False, block_reason
+    return True, ""
+
+
 def _tombstone_json_file(
     path_text: str,
     *,
@@ -1133,6 +1451,7 @@ def _proposal_action_states(
     can_delete: bool,
     delete_block_reason: str,
     lang: str,
+    mode_block_reason: str = "",
 ) -> dict[str, dict[str, Any]]:
     normalized_actions = {str(item or "").strip().lower() for item in available_actions}
     normalized_status = str(proposal_status or "").strip().lower() or "missing"
@@ -1142,6 +1461,15 @@ def _proposal_action_states(
 
     def disabled_state(reason: str) -> dict[str, Any]:
         return {"enabled": False, "reason": reason}
+
+    if mode_block_reason:
+        blocked = disabled_state(mode_block_reason)
+        return {
+            "apply": blocked,
+            "activate": blocked,
+            "rollback": blocked,
+            "delete": blocked,
+        }
 
     apply_state = (
         enabled_state()
@@ -1317,6 +1645,17 @@ def _load_json_object(path_value: str | Path | None, *, root: Path) -> dict[str,
     return payload if isinstance(payload, dict) else None
 
 
+def _load_required_json_object(path_value: str | Path, *, root: Path, label: str) -> dict[str, Any]:
+    path = _resolve_path(path_value, root=root)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EvolutionProposalValidationError(f"Cannot load {label} JSON file: {path}") from exc
+    if not isinstance(payload, dict):
+        raise EvolutionProposalValidationError(f"Cannot edit non-object {label} JSON file: {path}")
+    return payload
+
+
 def _resolve_path(path_value: str | Path, *, root: Path) -> Path:
     path = Path(path_value)
     if not path.is_absolute():
@@ -1378,3 +1717,72 @@ def _trim_text(value: str, *, limit: int) -> str:
 def _text_or_none(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _clean_multiline_text(value: Any, *, limit: int) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(text) > limit:
+        text = text[:limit].rstrip()
+    return text
+
+
+def _apply_proposal_manual_edits(
+    proposal_payload: dict[str, Any],
+    updates: dict[str, Any],
+    *,
+    effective_values: dict[str, Any],
+) -> list[str]:
+    manual = proposal_payload.get("manual_overrides")
+    if not isinstance(manual, dict):
+        manual = {}
+    field_limits = {
+        "improvement_type": 120,
+        "expected_effect": 1200,
+        "summary": 1600,
+        "candidate_prompt": 12000,
+        "baseline_prompt": 12000,
+    }
+    changed: list[str] = []
+    for field, limit in field_limits.items():
+        if field not in updates:
+            continue
+        next_value = _clean_multiline_text(updates.get(field), limit=limit)
+        previous_value = _clean_multiline_text(
+            _proposal_effective_edit_value(field, proposal_payload, effective_values),
+            limit=limit,
+        )
+        if next_value == previous_value:
+            continue
+        if next_value:
+            manual[field] = next_value
+        else:
+            manual.pop(field, None)
+        changed.append(field)
+    proposal_payload["manual_overrides"] = manual
+    return changed
+
+
+def _proposal_effective_edit_value(
+    field: str,
+    proposal_payload: dict[str, Any],
+    effective_values: dict[str, Any],
+) -> Any:
+    mapping = {
+        "improvement_type": "improvementType",
+        "expected_effect": "expectedEffect",
+        "summary": "summary",
+        "candidate_prompt": "candidatePrompt",
+        "baseline_prompt": "baselinePrompt",
+    }
+    key = mapping.get(field, "")
+    if key:
+        return effective_values.get(key)
+    return proposal_payload.get(field)

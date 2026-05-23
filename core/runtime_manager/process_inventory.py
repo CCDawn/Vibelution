@@ -16,6 +16,9 @@ except Exception:  # pragma: no cover - dependency fallback for degraded install
     psutil = None  # type: ignore[assignment]
 
 
+RESIDUAL_RUNTIME_KINDS = {"unmanaged_workbench", "unmanaged_frontend_dev_server"}
+
+
 @dataclass(frozen=True)
 class RuntimeProcess:
     pid: int
@@ -65,6 +68,9 @@ def list_repo_runtime_processes(
         kind = _classify_repo_runtime_process(command_line=command_line, cwd=cwd, project_root=root)
         if not kind:
             continue
+        port = _extract_port_from_command_line(command_line)
+        if port == 0 and kind == "unmanaged_frontend_dev_server":
+            port = 5173
         processes.append(
             RuntimeProcess(
                 pid=pid,
@@ -73,7 +79,7 @@ def list_repo_runtime_processes(
                 name=str(info.get("name") or ""),
                 command_line=command_line,
                 cwd=cwd,
-                port=_extract_port_from_command_line(command_line),
+                port=port,
             )
         )
 
@@ -92,12 +98,24 @@ def list_unmanaged_workbench_processes(
     ]
 
 
+def list_residual_runtime_processes(
+    *,
+    project_root: Path | str = PROJECT_ROOT,
+    exclude_pids: Iterable[int] | None = None,
+) -> list[RuntimeProcess]:
+    return [
+        item
+        for item in list_repo_runtime_processes(project_root=project_root, exclude_pids=exclude_pids)
+        if item.kind in RESIDUAL_RUNTIME_KINDS
+    ]
+
+
 def residual_process_payload(
     *,
     project_root: Path | str = PROJECT_ROOT,
     exclude_pids: Iterable[int] | None = None,
 ) -> dict[str, Any]:
-    items = list_unmanaged_workbench_processes(project_root=project_root, exclude_pids=exclude_pids)
+    items = list_residual_runtime_processes(project_root=project_root, exclude_pids=exclude_pids)
     return {
         "count": len(items),
         "items": [item.to_dict() for item in items],
@@ -121,7 +139,7 @@ def terminate_unmanaged_workbench_processes(
         }
 
     excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
-    candidates = list_unmanaged_workbench_processes(project_root=project_root, exclude_pids=excluded)
+    candidates = list_residual_runtime_processes(project_root=project_root, exclude_pids=excluded)
     target_pids = _target_process_tree_pids(candidates, excluded=excluded)
     if not target_pids:
         return {
@@ -148,7 +166,7 @@ def terminate_unmanaged_workbench_processes(
         psutil.wait_procs(alive, timeout=1.0)
 
     time.sleep(0.05)
-    remaining = list_unmanaged_workbench_processes(project_root=project_root, exclude_pids=excluded)
+    remaining = list_residual_runtime_processes(project_root=project_root, exclude_pids=excluded)
     remaining_pids = {item.pid for item in remaining}
     return {
         "supported": True,
@@ -262,9 +280,48 @@ def _classify_repo_runtime_process(*, command_line: str, cwd: str, project_root:
     normalized = command_line.replace("\\", "/").lower()
     if "scripts/web_workbench.py" in normalized:
         return "unmanaged_workbench"
+    if _looks_like_frontend_dev_server(normalized):
+        return "unmanaged_frontend_dev_server"
     if "core.runtime_manager.cli" in normalized and _has_token(normalized, "daemon"):
         return "runtime_manager_daemon"
     return ""
+
+
+def _looks_like_frontend_dev_server(normalized_command_line: str) -> bool:
+    parts = normalized_command_line.split()
+    if _contains_python_inline_command(parts):
+        return False
+    if "http.server" in parts and "frontend" in parts:
+        return True
+    if any(_looks_like_vite_invocation(part) for part in parts):
+        return True
+    if any(_looks_like_package_runner(part) for part in parts) and "dev" in parts:
+        return True
+    return False
+
+
+def _contains_python_inline_command(parts: list[str]) -> bool:
+    for index, part in enumerate(parts):
+        if part == "-c" and any(_looks_like_python_executable(previous) for previous in parts[:index]):
+            return True
+    return False
+
+
+def _looks_like_python_executable(part: str) -> bool:
+    normalized = str(part or "").replace("\\", "/").lower()
+    return normalized in {"python", "python.exe", "py", "py.exe"} or normalized.endswith("/python.exe")
+
+
+def _looks_like_vite_invocation(part: str) -> bool:
+    normalized = str(part or "").replace("\\", "/").lower().strip('"')
+    return normalized in {"vite", "vite.cmd"} or normalized.endswith("/vite") or normalized.endswith("/vite.cmd")
+
+
+def _looks_like_package_runner(part: str) -> bool:
+    normalized = str(part or "").replace("\\", "/").lower().strip('"')
+    return normalized in {"npm", "npm.cmd", "pnpm", "pnpm.cmd", "yarn", "yarn.cmd"} or normalized.endswith(
+        ("/npm", "/npm.cmd", "/pnpm", "/pnpm.cmd", "/yarn", "/yarn.cmd")
+    )
 
 
 def _is_project_owned(*, command_line: str, cwd: str, project_root: Path) -> bool:
@@ -312,7 +369,19 @@ def _extract_port_from_command_line(command_line: str) -> int:
             except ValueError:
                 return 0
             return port if 0 < port < 65536 else 0
+        if _is_port_candidate(part):
+            previous = parts[index - 1].lower() if index > 0 else ""
+            if previous in {"http.server", "serve", "server"}:
+                return int(part)
     return 0
+
+
+def _is_port_candidate(value: str) -> bool:
+    try:
+        port = int(str(value or "").strip())
+    except ValueError:
+        return False
+    return 0 < port < 65536
 
 
 def _target_process_tree_pids(candidates: list[RuntimeProcess], *, excluded: set[int]) -> set[int]:

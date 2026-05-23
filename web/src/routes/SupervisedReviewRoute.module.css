@@ -1,7 +1,7 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -10,24 +10,27 @@
 
 .toolbar {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .toolbarIntro {
   max-width: 760px;
+  min-width: 260px;
 }
 
 .toolbarControls {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .eyebrow {
-  margin: 0 0 6px;
+  margin: 0 0 2px;
   color: var(--accent-warm-2);
   font-size: 12px;
   text-transform: uppercase;
@@ -36,21 +39,24 @@
 
 .title {
   margin: 0;
-  font-size: 32px;
+  font-size: 25px;
   line-height: 1.08;
 }
 
 .subtitle {
-  margin: 6px 0 0;
+  margin: 3px 0 0;
   max-width: 780px;
   color: var(--fg-secondary);
-  line-height: 1.45;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .summaryStrip {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .summaryCard,
@@ -68,10 +74,10 @@
 }
 
 .summaryCard {
-  padding: 12px 14px;
+  padding: 8px 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
 }
 
 .summaryCard span {
@@ -82,15 +88,15 @@
 }
 
 .summaryCard strong {
-  font-size: 17px;
+  font-size: 15px;
 }
 
 .lifecyclePanel {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 8px 10px;
 }
 
 .lifecyclePills {
@@ -102,11 +108,40 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(360px, 0.82fr) minmax(0, 1.58fr);
-  gap: 12px;
+  grid-template-columns: var(--review-queue-width, 380px) 12px minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+
+.resizeHandle {
+  position: relative;
+  min-width: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  outline: none;
+  touch-action: none;
+}
+
+.resizeHandle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(236, 230, 220, 0.08);
+  transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+.resizeHandle:hover::before,
+.resizeHandle:focus-visible::before {
+  background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
 }
 
 .queuePanel,
@@ -671,6 +706,10 @@
   .signalColumns,
   .formGrid {
     grid-template-columns: 1fr;
+  }
+
+  .resizeHandle {
+    display: none;
   }
 
   .lifecyclePanel {

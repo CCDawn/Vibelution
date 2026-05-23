@@ -1,14 +1,29 @@
-import { ArrowDown, BrainCircuit, ChevronDown, ChevronRight } from "lucide-react";
+import {
+  ArrowDown,
+  BrainCircuit,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CircleDot,
+  ExternalLink,
+  Pencil,
+  Search,
+  Sparkles,
+  TerminalSquare,
+  Wrench,
+} from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ConversationMessage, MentalStateSnapshot, SessionTurnError } from "../../api/types";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
-  hasMentalBlock,
+  buildConversationOperations,
+  ConversationOperation,
+  ConversationOperationKind,
+} from "./conversationOperations";
+import {
   hasResponseBlock,
-  hasThoughtBlock,
-  hasToolBlock,
   hasUserContent,
 } from "./messageSections";
 import styles from "./ConversationView.module.css";
@@ -50,8 +65,15 @@ type ConversationViewProps = {
   submitPendingLabel?: string;
   stopLabel?: string;
   stopPendingLabel?: string;
+  editingMessageId?: string;
+  editUserMessageLabel?: string;
+  editUserMessageDisabled?: boolean;
+  composerModeNotice?: string;
+  cancelComposerModeLabel?: string;
   onComposerChange: (value: string) => void;
   onMentalModelEnabledChange?: (enabled: boolean) => void;
+  onEditUserMessage?: (message: ConversationMessage) => void;
+  onCancelComposerMode?: () => void;
   onSubmit: () => void;
   onStop?: () => void;
 };
@@ -87,15 +109,24 @@ export function ConversationView({
   submitPendingLabel,
   stopLabel,
   stopPendingLabel,
+  editingMessageId,
+  editUserMessageLabel,
+  editUserMessageDisabled,
+  composerModeNotice,
+  cancelComposerModeLabel,
   onComposerChange,
   onMentalModelEnabledChange,
+  onEditUserMessage,
+  onCancelComposerMode,
   onSubmit,
   onStop,
 }: ConversationViewProps) {
   const { lang, t, statusLabel } = useAppI18n();
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const initializedSessionRef = useRef("");
   const atBottomRef = useRef(true);
+  const lastComposerFocusSignalRef = useRef("");
   const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
   const [isAtBottom, setIsAtBottom] = useState(true);
   const previousStreamingRef = useRef<Record<string, boolean>>({});
@@ -167,6 +198,13 @@ export function ConversationView({
   );
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0 || Boolean(lastMessageTimestamp);
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
+  const operationLabels = useMemo(
+    () => ({
+      thought: t("thoughtProcess"),
+      mental: t("mentalProcess"),
+    }),
+    [t],
+  );
 
   function formatTimestamp(timestamp: string) {
     if (!timestamp) {
@@ -223,6 +261,21 @@ export function ConversationView({
     timeline.addEventListener("scroll", handleScroll);
     return () => timeline.removeEventListener("scroll", handleScroll);
   }, [sessionId]);
+
+  useEffect(() => {
+    const focusSignal = String(editingMessageId || "").trim();
+    if (!focusSignal || focusSignal === lastComposerFocusSignalRef.current || composerDisabled) {
+      return;
+    }
+    lastComposerFocusSignalRef.current = focusSignal;
+    const input = composerInputRef.current;
+    if (!input) {
+      return;
+    }
+    input.focus();
+    const cursorPosition = input.value.length;
+    input.setSelectionRange(cursorPosition, cursorPosition);
+  }, [composerDisabled, editingMessageId]);
 
   useEffect(() => {
     const previous = previousStreamingRef.current;
@@ -300,6 +353,71 @@ export function ConversationView({
     setIsAtBottom(true);
   }
 
+  function formatDuration(seconds: number | null) {
+    if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
+      return "";
+    }
+    if (seconds < 10) {
+      return `${seconds.toFixed(1)}s`;
+    }
+    return `${Math.round(seconds)}s`;
+  }
+
+  function operationIcon(kind: ConversationOperationKind, label: string) {
+    const normalized = label.trim().toLowerCase();
+    if (kind === "thought") {
+      return <Sparkles size={17} />;
+    }
+    if (kind === "mental") {
+      return <BrainCircuit size={17} />;
+    }
+    if (normalized.includes("search") || normalized.includes("搜索")) {
+      return <Search size={17} />;
+    }
+    if (normalized.includes("http") || normalized.includes("访问") || normalized.includes("open")) {
+      return <ExternalLink size={17} />;
+    }
+    if (
+      normalized.includes("exec")
+      || normalized.includes("command")
+      || normalized.includes("shell")
+      || normalized.includes("powershell")
+      || normalized.includes("npm")
+      || normalized.includes("pytest")
+      || normalized.includes("命令")
+    ) {
+      return <TerminalSquare size={17} />;
+    }
+    return <Wrench size={17} />;
+  }
+
+  function operationStatusIcon(operation: ConversationOperation) {
+    const status = operation.status.trim().toLowerCase();
+    if (["done", "success", "completed", "succeeded"].includes(status)) {
+      return <CheckCircle2 size={14} />;
+    }
+    return <CircleDot size={14} />;
+  }
+
+  function operationLabel(operation: ConversationOperation) {
+    if (operation.kind !== "tool") {
+      return operation.label;
+    }
+    const normalized = operation.label.trim();
+    if (!normalized) {
+      return t("toolProcess");
+    }
+    if (
+      normalized.startsWith("搜索")
+      || normalized.startsWith("访问")
+      || normalized.toLowerCase().startsWith("search ")
+      || normalized.toLowerCase().startsWith("open ")
+    ) {
+      return normalized;
+    }
+    return normalized;
+  }
+
   return (
     <div className={styles.surface}>
       {showHeader ? (
@@ -369,182 +487,122 @@ export function ConversationView({
         {messages.length === 0 ? (
           <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
         ) : (
-          messages.map((message) => (
-            <article
-              key={message.id}
-              className={
-                message.role === "assistant"
-                  ? `${styles.messageCard} ${styles.assistantCard}`
-                  : `${styles.messageCard} ${styles.userCard}`
-              }
-            >
-              <div className={styles.messageMeta}>
-                <span>{message.role === "assistant" ? assistantLabel : userLabel}</span>
-                {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-              </div>
-              {hasUserContent(message) ? (
-                <p className={styles.messageBody}>{message.content}</p>
-              ) : null}
+          messages.map((message) => {
+            const operations = buildConversationOperations(message, operationLabels);
+            const toolsExpanded = getExpansionState(message.id, "tools", Boolean(message.streaming));
+            const responseExpanded = getExpansionState(message.id, "response", true);
+            const isEditingMessage = message.role === "user" && message.id === editingMessageId;
+            const turnClassName = [
+              message.role === "assistant" ? styles.assistantTurn : styles.userTurn,
+              isEditingMessage ? styles.turnEditing : "",
+            ].filter(Boolean).join(" ");
+            const editDisabled = Boolean(editUserMessageDisabled);
+            return (
+              <article
+                key={message.id}
+                className={turnClassName}
+              >
+                <div className={styles.turnAvatar} aria-hidden="true">
+                  {message.role === "assistant" ? <Sparkles size={18} /> : userLabel.slice(0, 1).toUpperCase()}
+                </div>
+                <div className={styles.turnContent}>
+                  <div className={styles.turnMeta}>
+                    <span className={styles.turnSpeaker}>
+                      {message.role === "assistant" ? assistantLabel : userLabel}
+                    </span>
+                    <span className={styles.turnMetaActions}>
+                      {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
+                      {message.role === "user" && onEditUserMessage ? (
+                        <button
+                          type="button"
+                          className={
+                            isEditingMessage
+                              ? `${styles.turnIconButton} ${styles.turnIconButtonActive}`
+                              : styles.turnIconButton
+                          }
+                          onClick={() => onEditUserMessage(message)}
+                          disabled={editDisabled}
+                          aria-pressed={isEditingMessage}
+                          title={editDisabled ? composerPlaceholder : editUserMessageLabel ?? t("editMessage")}
+                          aria-label={editUserMessageLabel ?? t("editMessage")}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                      ) : null}
+                    </span>
+                  </div>
 
-              {hasThoughtBlock(message) ? (
-                <section className={styles.sectionBlock}>
-                  <button
-                    type="button"
-                    className={styles.sectionToggle}
-                    aria-expanded={getExpansionState(message.id, "thought", Boolean(message.streaming))}
-                    onClick={() => toggleSection(message.id, "thought", Boolean(message.streaming))}
-                    title={
-                      getExpansionState(message.id, "thought", Boolean(message.streaming))
-                        ? t("thoughtProcessVisible")
-                        : t("thoughtProcessHidden")
-                    }
-                  >
-                    {getExpansionState(message.id, "thought", Boolean(message.streaming)) ? (
-                      <ChevronDown size={16} />
-                    ) : (
-                      <ChevronRight size={16} />
-                    )}
-                    <BrainCircuit size={16} />
-                    <span>{t("thoughtProcess")}</span>
-                  </button>
-                  {getExpansionState(message.id, "thought", Boolean(message.streaming)) ? (
-                    <div className={styles.sectionPanel}>
-                      <p className={styles.messageBody}>{message.thought?.trim()}</p>
-                    </div>
+                  {hasUserContent(message) ? (
+                    <p className={styles.userMessageBody}>{message.content}</p>
                   ) : null}
-                </section>
-              ) : null}
 
-              {hasMentalBlock(message) ? (
-                <section className={styles.sectionBlock}>
-                  <button
-                    type="button"
-                    className={styles.sectionToggle}
-                    aria-expanded={getExpansionState(message.id, "mental", Boolean(message.streaming))}
-                    onClick={() => toggleSection(message.id, "mental", Boolean(message.streaming))}
-                    title={
-                      getExpansionState(message.id, "mental", Boolean(message.streaming))
-                        ? t("mentalProcessVisible")
-                        : t("mentalProcessHidden")
-                    }
-                  >
-                    {getExpansionState(message.id, "mental", Boolean(message.streaming)) ? (
-                      <ChevronDown size={16} />
-                    ) : (
-                      <ChevronRight size={16} />
-                    )}
-                    <BrainCircuit size={16} />
-                    <span>{t("mentalProcess")}</span>
-                  </button>
-                  {getExpansionState(message.id, "mental", Boolean(message.streaming)) ? (
-                    <div className={styles.sectionPanel}>
-                      <div className={styles.mentalSnapshot}>
-                        <div className={styles.thoughtSectionHeader}>
-                          <span className={styles.thoughtSectionLabel}>{t("mentalState")}</span>
-                          {(message.mentalSnapshot?.mood || cognitiveStateLabel(message.mentalSnapshot)) ? (
-                            <span className={styles.thoughtMetaPill}>
-                              {message.mentalSnapshot?.mood?.trim() || cognitiveStateLabel(message.mentalSnapshot)}
-                            </span>
-                          ) : null}
+                  {operations.length > 0 ? (
+                    <section className={styles.operationGroup}>
+                      <button
+                        type="button"
+                        className={styles.operationSummary}
+                        aria-expanded={toolsExpanded}
+                        onClick={() => toggleSection(message.id, "tools", Boolean(message.streaming))}
+                        title={toolsExpanded ? t("toolProcessVisible") : t("toolProcessHidden")}
+                      >
+                        <Wrench size={18} />
+                        <span>{t("conversationOperationsExecuted").replace("{count}", String(operations.length))}</span>
+                        {toolsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
+                      {toolsExpanded ? (
+                        <div className={styles.operationTimeline}>
+                          {operations.map((operation) => {
+                            const duration = formatDuration(operation.durationSeconds);
+                            return (
+                              <div key={operation.id} className={styles.operationItem}>
+                                <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
+                                  {operationIcon(operation.kind, operation.label)}
+                                </span>
+                                <div className={styles.operationText}>
+                                  <span className={styles.operationName}>{operationLabel(operation)}</span>
+                                  {operation.summary ? (
+                                    <span className={styles.operationSummaryText}>{operation.summary}</span>
+                                  ) : null}
+                                </div>
+                                <span className={styles.operationStatus}>
+                                  {operationStatusIcon(operation)}
+                                  <span>{statusLabel(operation.status)}</span>
+                                </span>
+                                {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
+                                <ChevronRight className={styles.operationChevron} size={16} />
+                              </div>
+                            );
+                          })}
                         </div>
-                        {(message.mentalSnapshot?.summary || message.mentalSnapshot?.feeling) ? (
-                          <p className={styles.mentalSummary}>
-                            {message.mentalSnapshot?.summary?.trim()
-                              || message.mentalSnapshot?.feeling?.trim()
-                              || t("mentalStatePending")}
-                          </p>
-                        ) : null}
-                        {message.mentalSnapshot?.whisper?.trim() ? (
-                          <p className={styles.mentalWhisper}>
-                            <span className={styles.thoughtSectionLabel}>{t("mentalWhisper")}</span>
-                            {message.mentalSnapshot.whisper.trim()}
-                          </p>
-                        ) : null}
-                        <div className={styles.thoughtMetaRow}>
-                          {message.mentalSnapshot?.cognitiveState?.trim() ? (
-                            <span className={styles.thoughtMetaPill}>
-                              {t("mentalCognitiveState")} {cognitiveStateLabel(message.mentalSnapshot)}
-                            </span>
-                          ) : null}
-                          {Number.isFinite(message.mentalSnapshot?.confidence)
-                            && (message.mentalSnapshot?.confidence ?? 0) > 0 ? (
-                              <span className={styles.thoughtMetaPill}>
-                                {t("mentalConfidence")} {Math.round((message.mentalSnapshot?.confidence ?? 0) * 100)}%
-                              </span>
-                            ) : null}
-                          {message.mentalSnapshot?.source ? (
-                            <span className={styles.thoughtMetaPill}>{message.mentalSnapshot.source}</span>
-                          ) : null}
+                      ) : null}
+                    </section>
+                  ) : null}
+
+                  {hasResponseBlock(message) ? (
+                    <section className={styles.responseSection}>
+                      {operations.length > 0 ? (
+                        <button
+                          type="button"
+                          className={styles.responseToggle}
+                          aria-expanded={responseExpanded}
+                          onClick={() => toggleSection(message.id, "response", true)}
+                          title={responseExpanded ? t("responseHidden") : t("responseVisible")}
+                        >
+                          {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          <span>{t("responseLabel")}</span>
+                        </button>
+                      ) : null}
+                      {responseExpanded ? (
+                        <div className={styles.responseBody}>
+                          <p className={styles.messageBody}>{message.content}</p>
                         </div>
-                        {message.mentalSnapshot?.intervention ? (
-                          <p className={styles.mentalIntervention}>{message.mentalSnapshot.intervention}</p>
-                        ) : null}
-                      </div>
-                    </div>
+                      ) : null}
+                    </section>
                   ) : null}
-                </section>
-              ) : null}
-
-              {hasToolBlock(message) ? (
-                <section className={styles.sectionBlock}>
-                  <button
-                    type="button"
-                    className={styles.sectionToggle}
-                    aria-expanded={getExpansionState(message.id, "tools", Boolean(message.streaming))}
-                    onClick={() => toggleSection(message.id, "tools", Boolean(message.streaming))}
-                    title={
-                      getExpansionState(message.id, "tools", Boolean(message.streaming))
-                        ? t("toolProcessVisible")
-                        : t("toolProcessHidden")
-                    }
-                  >
-                    {getExpansionState(message.id, "tools", Boolean(message.streaming)) ? (
-                      <ChevronDown size={16} />
-                    ) : (
-                      <ChevronRight size={16} />
-                    )}
-                    <span>{t("toolProcess")}</span>
-                  </button>
-                  {getExpansionState(message.id, "tools", Boolean(message.streaming)) ? (
-                    <div className={styles.sectionPanel}>
-                      <div className={styles.toolRow}>
-                        {message.toolCalls?.map((toolCall, index) => (
-                          <span key={`${message.id}-${toolCall.name}-${index}`} className={styles.toolPill}>
-                            {toolCall.name} · {statusLabel(toolCall.status)}
-                            {toolCall.summary ? ` · ${toolCall.summary}` : ""}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </section>
-              ) : null}
-
-              {hasResponseBlock(message) ? (
-                <section className={styles.sectionBlock}>
-                  <button
-                    type="button"
-                    className={styles.sectionToggle}
-                    aria-expanded={getExpansionState(message.id, "response", true)}
-                    onClick={() => toggleSection(message.id, "response", true)}
-                    title={getExpansionState(message.id, "response", true) ? t("responseHidden") : t("responseVisible")}
-                  >
-                    {getExpansionState(message.id, "response", true) ? (
-                      <ChevronDown size={16} />
-                    ) : (
-                      <ChevronRight size={16} />
-                    )}
-                    <span>{t("responseLabel")}</span>
-                  </button>
-                  {getExpansionState(message.id, "response", true) ? (
-                    <div className={styles.sectionPanel}>
-                      <p className={styles.messageBody}>{message.content}</p>
-                    </div>
-                  ) : null}
-                </section>
-              ) : null}
-            </article>
-          ))
+                </div>
+              </article>
+            );
+          })
         )}
       </div>
 
@@ -568,6 +626,16 @@ export function ConversationView({
       <div className={styles.composer}>
         <div className={styles.composerField}>
           {composerError ? <p className={styles.composerError}>{composerError}</p> : null}
+          {composerModeNotice ? (
+            <div className={styles.composerModeNotice} role="status">
+              <span>{composerModeNotice}</span>
+              {onCancelComposerMode ? (
+                <button type="button" onClick={onCancelComposerMode}>
+                  {cancelComposerModeLabel ?? t("cancelEditMessage")}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {showMentalModelOption ? (
             <div className={styles.composerOptions} aria-label={t("composerOptions")}>
               <label className={styles.optionToggle}>
@@ -587,6 +655,7 @@ export function ConversationView({
             </div>
           ) : null}
           <textarea
+            ref={composerInputRef}
             className={styles.input}
             value={composerValue}
             disabled={composerDisabled}
