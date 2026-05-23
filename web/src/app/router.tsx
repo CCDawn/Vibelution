@@ -8,6 +8,7 @@ import { GitRoute } from "../routes/GitRoute";
 import { HomeRedirect } from "../routes/HomeRedirect";
 import { LegacyEvolutionRedirect } from "../routes/LegacyEvolutionRedirect";
 import { LogsRoute } from "../routes/LogsRoute";
+import { MemoryRoute } from "../routes/MemoryRoute";
 import { PetRoute } from "../routes/PetRoute";
 import { ResetRoute } from "../routes/ResetRoute";
 import { SupervisedReviewRoute } from "../routes/SupervisedReviewRoute";
@@ -72,6 +73,7 @@ export const router = createBrowserRouter([
       { path: "evolution", element: <LegacyEvolutionRedirect /> },
       { path: "tools", element: <ToolsRoute /> },
       { path: "git", element: <GitRoute /> },
+      { path: "memory", element: <MemoryRoute /> },
       { path: "logs", element: <LogsRoute /> },
       { path: "pet", element: <PetRoute /> },
       { path: "reset", element: <ResetRoute /> },

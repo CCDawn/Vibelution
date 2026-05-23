@@ -26,6 +26,7 @@ import {
   type SystemStatusTone,
 } from "./systemStatus";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
+import { resolvePollingInterval } from "./pollingPolicy";
 import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import styles from "./AppShell.module.css";
@@ -123,12 +124,20 @@ export function AppShell() {
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
   });
-  const runtimeRefetchInterval = shutdownOpen || shutdownRequested ? 1_000 : 5_000;
+  const runtimeRefetchInterval = resolvePollingInterval(
+    frontendVisible,
+    shutdownOpen || shutdownRequested ? 1_000 : 5_000,
+    {
+      backgroundMs: shutdownOpen || shutdownRequested ? 1_000 : 30_000,
+      force: shutdownOpen || shutdownRequested,
+    },
+  );
+  const gitRefetchInterval = resolvePollingInterval(frontendVisible, 6_000, { backgroundMs: 60_000 });
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
     refetchInterval: runtimeRefetchInterval,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
   });
   const backendHealthQuery = useQuery({
     queryKey: queryKeys.backendHealth(),
@@ -137,15 +146,15 @@ export function AppShell() {
         cache: "no-store",
       }),
     refetchInterval: runtimeRefetchInterval,
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: false,
     staleTime: 0,
     retry: false,
   });
   const gitStatusQuery = useQuery({
     queryKey: queryKeys.gitStatus(),
     queryFn: () => fetchJson<GitStatusSummary>("/api/git/status"),
-    refetchInterval: 6_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: gitRefetchInterval,
+    refetchIntervalInBackground: false,
   });
 
   const workbench = runtimeQuery.data?.workbench;
@@ -687,6 +696,11 @@ export function AppShell() {
     },
   ];
   const rightStatusCards = systemStatusCards.filter((item) => item.id !== "time");
+  const statusPriority = { failed: 0, caution: 1, running: 2, idle: 3 } satisfies Record<SystemStatusTone, number>;
+  const primaryStatusCard = rightStatusCards.reduce((selected, item) =>
+    statusPriority[item.tone] < statusPriority[selected.tone] ? item : selected,
+  rightStatusCards[0]);
+  const statusSummaryTitle = rightStatusCards.map((item) => `${item.label}: ${item.value}`).join(" · ");
 
   return (
     <div className={styles.shell} data-theme={theme}>
@@ -769,6 +783,9 @@ export function AppShell() {
           <NavLink to="/git" className={linkClassName}>
             {t("navGit")}
           </NavLink>
+          <NavLink to="/memory" className={linkClassName}>
+            {t("navMemory")}
+          </NavLink>
         </nav>
 
         <div className={styles.topActions}>
@@ -821,15 +838,17 @@ export function AppShell() {
               </div>
             </div>
           </div>
-          <div className={styles.statusCluster} tabIndex={0} aria-label={t("systemStatusGuide")}>
-            <div className={styles.statusChipRow}>
-              {rightStatusCards.map((item) => (
-                <span key={item.id} className={styles.statusBadge}>
-                  <span className={`${styles.statusDot} ${styles[`status_${item.tone}`]}`} />
-                  <span className={styles.statusBadgeLabel}>{item.label}</span>
-                  <strong className={styles.statusBadgeValue}>{item.value}</strong>
-                </span>
-              ))}
+          <div
+            className={styles.statusCluster}
+            tabIndex={0}
+            aria-label={t("systemStatusGuide")}
+            title={statusSummaryTitle}
+          >
+            <div className={styles.statusSummaryChip}>
+              <span className={`${styles.statusDot} ${styles[`status_${primaryStatusCard.tone}`]}`} />
+              <span className={styles.statusBadgeLabel}>{primaryStatusCard.label}</span>
+              <strong className={styles.statusBadgeValue}>{primaryStatusCard.value}</strong>
+              <span className={styles.statusSummaryCount}>{rightStatusCards.length}</span>
             </div>
             <div className={styles.statusGuidePanel} role="note" aria-live="polite">
               <div className={styles.statusGuideHeader}>

@@ -27,6 +27,7 @@ import {
   SelfEvolutionOverview,
   SelfEvolutionTransaction,
 } from "../api/types";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { ConversationView } from "../components/conversation/ConversationView";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -81,7 +82,6 @@ type ConversationTaskSummary = {
 };
 
 const WORKTREE_PAGE_SIZE = 10;
-const PET_PLACEHOLDER_ART = "https://commons.wikimedia.org/wiki/Special:FilePath/Lobster%20%28NIH%20BioArt%20624%29.png";
 const SELF_SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.self.sidebar.width";
 
 function formatRate(value: number | null | undefined) {
@@ -226,17 +226,18 @@ export function SelfEvolutionTrack({
     const saved = Number(window.localStorage.getItem(SELF_SIDEBAR_WIDTH_STORAGE_KEY) || "");
     return Number.isFinite(saved) ? Math.max(280, Math.min(420, saved)) : 320;
   });
+  const pageVisible = usePageVisibility();
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
     queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 10_000),
+    refetchIntervalInBackground: false,
   });
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
+    refetchIntervalInBackground: false,
   });
   const pet = petQuery.data;
   const runtime = runtimeQuery.data;
@@ -612,11 +613,11 @@ export function SelfEvolutionTrack({
 
               <div className={styles.petAvatarStage}>
                 <div className={styles.petAvatarHalo} />
-                <img
-                  src={PET_PLACEHOLDER_ART}
-                  alt={pet?.name ?? "pet"}
-                  className={styles.petAvatarImage}
-                />
+                <div className={styles.petAvatarMark} aria-label={pet?.name ?? "pet"} role="img">
+                  <span className={styles.petAvatarClaw} />
+                  <span className={styles.petAvatarBody} />
+                  <span className={styles.petAvatarClaw} />
+                </div>
                 <div className={styles.petAvatarBadge}>{petPresetLabel} {t("preset")}</div>
               </div>
 

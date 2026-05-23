@@ -13,6 +13,7 @@ import {
   GitStatusFile,
   GitStatusSummary,
 } from "../api/types";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { GitDiffView } from "./GitDiffView";
 import {
@@ -93,19 +94,20 @@ export function GitRoute() {
   const [changePanelWidth, setChangePanelWidth] = useState(() =>
     storedPaneWidth(GIT_CHANGE_PANEL_WIDTH_KEY, GIT_CHANGE_PANEL_DEFAULT_WIDTH, GIT_CHANGE_PANEL_BOUNDS),
   );
+  const pageVisible = usePageVisibility();
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
   const statusQuery = useQuery({
     queryKey: queryKeys.gitStatus(),
     queryFn: () => fetchJson<GitStatusSummary>("/api/git/status?limit=500"),
-    refetchInterval: 6_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 6_000),
+    refetchIntervalInBackground: false,
   });
   const commitsQuery = useQuery({
     queryKey: queryKeys.gitCommits(),
     queryFn: () => fetchJson<GitCommitsResponse>("/api/git/commits?limit=20"),
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 30_000),
+    refetchIntervalInBackground: false,
   });
   const configQuery = useQuery({
     queryKey: queryKeys.configWorkspace(),

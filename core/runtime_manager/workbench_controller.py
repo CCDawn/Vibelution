@@ -188,6 +188,7 @@ def observe_workbench() -> dict[str, Any]:
     launcher_state = _load_launcher_state()
     url = str(launcher_state.get("url") or DEFAULT_URL).strip() or DEFAULT_URL
     state_backend_pid = int(launcher_state.get("backendPid") or 0)
+    backend_launch_pid = int(launcher_state.get("backendLaunchPid") or 0)
     browser_launch_pid = int(launcher_state.get("browserLaunchPid") or 0)
     browser_window_pid = int(launcher_state.get("browserWindowPid") or 0)
     browser_managed = bool(launcher_state.get("browserManaged", True))
@@ -219,6 +220,7 @@ def observe_workbench() -> dict[str, Any]:
         "launcherStatePresent": bool(launcher_state),
         "sessionId": str(launcher_state.get("sessionId") or "").strip(),
         "backendPid": backend_pid,
+        "backendLaunchPid": backend_launch_pid,
         "browserLaunchPid": browser_launch_pid,
         "browserWindowPid": browser_window_pid,
         "browserManaged": browser_managed,

@@ -9,6 +9,7 @@ export const queryKeys = {
   session: (id: string) => ["sessions", id] as const,
   fileTree: () => ["files", "tree"] as const,
   fileContent: (path: string) => ["files", "content", path] as const,
+  memoryOverview: () => ["memory", "overview"] as const,
   logRoots: () => ["logs", "roots"] as const,
   logTree: (root: string) => ["logs", "tree", root] as const,
   logContent: (root: string, path: string) => ["logs", "content", root, path] as const,

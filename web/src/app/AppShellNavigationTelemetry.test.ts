@@ -89,7 +89,7 @@ describe("AppShell navigation telemetry", () => {
     expect(
       collectNavLinksUsingDocumentReload(
         source,
-        new Set(["/chat", "/supervised-evolution", "/self-evolution", "/logs", "/tools", "/git", "/config"]),
+        new Set(["/chat", "/supervised-evolution", "/self-evolution", "/logs", "/tools", "/git", "/memory", "/config"]),
       ),
     ).toEqual([]);
   });
