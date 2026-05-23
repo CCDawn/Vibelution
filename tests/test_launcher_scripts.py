@@ -421,15 +421,30 @@ $nativeCommandAst = $ast.Find({
 if ($null -eq $nativeCommandAst) {
     throw "Invoke-NativeCommand was not found."
 }
+$hiddenProcessAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Invoke-HiddenProcessCapture"
+}, $true)
+if ($null -eq $hiddenProcessAst) {
+    throw "Invoke-HiddenProcessCapture was not found."
+}
+$hiddenProcessText = $hiddenProcessAst.Extent.Text
+if ($hiddenProcessText -notmatch 'CreateNoWindow\\s*=\\s*\\$true') {
+    throw "Invoke-HiddenProcessCapture does not force CreateNoWindow."
+}
+if ($hiddenProcessText -notmatch 'UseShellExecute\\s*=\\s*\\$false') {
+    throw "Invoke-HiddenProcessCapture does not avoid shell execution."
+}
+if ($hiddenProcessText -notmatch 'ProcessWindowStyle\\]::Hidden') {
+    throw "Invoke-HiddenProcessCapture does not set hidden window style."
+}
+if ($hiddenProcessText -notmatch "RedirectStandardOutput" -or $hiddenProcessText -notmatch "RedirectStandardError") {
+    throw "Invoke-HiddenProcessCapture does not capture native output."
+}
 $nativeCommandText = $nativeCommandAst.Extent.Text
-if ($nativeCommandText -notmatch "Start-Process") {
-    throw "Invoke-NativeCommand does not spawn through Start-Process."
-}
-if ($nativeCommandText -notmatch "-WindowStyle\\s+Hidden") {
-    throw "Invoke-NativeCommand does not hide spawned native windows."
-}
-if ($nativeCommandText -notmatch "RedirectStandardOutput" -or $nativeCommandText -notmatch "RedirectStandardError") {
-    throw "Invoke-NativeCommand does not capture native output."
+if ($nativeCommandText -notmatch "Invoke-HiddenProcessCapture") {
+    throw "Invoke-NativeCommand does not use the no-window process helper."
 }
 
 $testPythonAst = $ast.Find({
@@ -503,7 +518,14 @@ if ($null -eq $functionAst) {
 . ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:calls = @()
+$script:dependencyCalls = 0
+function Ensure-ProjectPythonDependencies {
+    $script:dependencyCalls += 1
+}
 function Resolve-PythonRuntime {
+    if ($script:dependencyCalls -le 0) {
+        throw "Resolve-PythonRuntime was called before dependency repair."
+    }
     return [pscustomobject]@{ FilePath = "python-test"; PrefixArgs = @() }
 }
 function Invoke-HiddenNativeCommand {
@@ -530,6 +552,7 @@ if ($closeArgs -notcontains "--stop-manager") { throw "close_workbench did not f
 if ($closeArgs -contains "--no-browser") { throw "close_workbench forwarded --no-browser unexpectedly." }
 if ($statusArgs -contains "command") { throw "status used command mode unexpectedly." }
 if ($statusArgs -notcontains "status") { throw "status did not invoke runtime manager status." }
+if ($script:dependencyCalls -ne 3) { throw "runtime manager client did not repair dependencies before each command." }
 Write-Output "ok"
 """,
     )
