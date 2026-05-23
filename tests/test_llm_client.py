@@ -89,6 +89,39 @@ def test_litellm_payload_prefixes_relay_openai_compatible_model():
     assert payload["model"] == "openai/gpt-5.5"
 
 
+def test_openai_gpt5_payload_sanitizes_temperature_and_tool_choice():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.temperature": 0.7,
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [{"role": "user", "content": "ping"}],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read one file",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    )
+
+    assert payload["model"] == "openai/gpt-5.5"
+    assert payload["temperature"] == 1.0
+    assert "tools" in payload
+    assert "tool_choice" not in payload
+
 def test_responses_transport_routes_openai_compatible_model_through_responses_bridge():
     config = make_config(
         **{

@@ -220,7 +220,7 @@ class LLMClient:
         payload = {
             "model": self.adapter.litellm_model_name(),
             "messages": self.adapter.messages(normalized_messages),
-            "temperature": self.profile.temperature,
+            "temperature": self.adapter.payload_temperature(),
             "max_tokens": self.profile.max_output_tokens,
             "timeout": self.profile.timeout,
             "stream": stream,
