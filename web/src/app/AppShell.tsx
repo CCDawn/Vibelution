@@ -34,20 +34,55 @@ function linkClassName({ isActive }: { isActive: boolean }) {
   return isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink;
 }
 
+const API_FAILURE_TELEMETRY_THROTTLE_MS = 15_000;
+const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
 
 export function shouldSuppressApiFailureTelemetry(
   failure: FetchJsonFailureReport,
   options: {
     shutdownRequested: boolean;
     runtimeControllerState: string;
+    visibilityState?: DocumentVisibilityState | string;
   },
 ): boolean {
-  const { shutdownRequested, runtimeControllerState } = options;
+  const { shutdownRequested, runtimeControllerState, visibilityState } = options;
   if (shutdownRequested || runtimeControllerState === "closing") {
+    return true;
+  }
+  if (
+    failure.failureKind === "network"
+    && API_FAILURE_BACKGROUND_METHODS.has(failure.method.toUpperCase())
+    && (visibilityState === "hidden" || visibilityState === "prerender")
+  ) {
     return true;
   }
   return failure.status === 403
     && (failure.endpoint === "/api/control-token" || failure.endpoint === "/api/runtime/browser-telemetry");
+}
+
+export function shouldThrottleApiFailureTelemetry(
+  failure: FetchJsonFailureReport,
+  state: Map<string, number>,
+  nowMs = Date.now(),
+  windowMs = API_FAILURE_TELEMETRY_THROTTLE_MS,
+): boolean {
+  const key = [
+    failure.method.toUpperCase(),
+    failure.endpoint,
+    failure.failureKind,
+    failure.status ?? "network",
+  ].join(" ");
+  const previous = state.get(key);
+  if (previous !== undefined && nowMs - previous < windowMs) {
+    return true;
+  }
+  state.set(key, nowMs);
+  for (const [entryKey, seenAt] of state) {
+    if (nowMs - seenAt > windowMs * 4) {
+      state.delete(entryKey);
+    }
+  }
+  return false;
 }
 
 export function AppShell() {
@@ -70,6 +105,7 @@ export function AppShell() {
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(`page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+  const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -180,7 +216,6 @@ export function AppShell() {
     unmanaged: t("systemRuntime_unmanaged"),
     failed: t("systemRuntime_failed"),
   }[runtimeControllerState];
-  const suppressApiFailureTelemetry = shutdownRequested || runtimeControllerState === "closing";
 
   const emitBrowserTelemetry = useCallback((
     payload: BrowserTelemetryEventInput,
@@ -251,7 +286,11 @@ export function AppShell() {
       if (shouldSuppressApiFailureTelemetry(failure, {
         shutdownRequested,
         runtimeControllerState,
+        visibilityState: typeof document === "undefined" ? "visible" : document.visibilityState,
       })) {
+        return;
+      }
+      if (shouldThrottleApiFailureTelemetry(failure, apiFailureTelemetrySeenRef.current)) {
         return;
       }
       emitBrowserTelemetry({
@@ -269,7 +308,7 @@ export function AppShell() {
       });
     });
     return () => setFetchJsonFailureReporter(null);
-  }, [emitBrowserTelemetry, suppressApiFailureTelemetry]);
+  }, [emitBrowserTelemetry, runtimeControllerState, shutdownRequested]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -682,7 +721,7 @@ export function AppShell() {
 
         <nav className={styles.nav}>
           {chatEnabled ? (
-            <NavLink to="/chat" className={linkClassName} reloadDocument>
+            <NavLink to="/chat" className={linkClassName}>
               {t("navChat")}
             </NavLink>
           ) : (
@@ -691,7 +730,7 @@ export function AppShell() {
             </span>
           )}
           {supervisedEvolutionEnabled ? (
-            <NavLink to="/supervised-evolution" className={linkClassName} reloadDocument>
+            <NavLink to="/supervised-evolution" className={linkClassName}>
               {t("navSupervisedEvolution")}
             </NavLink>
           ) : (
@@ -700,7 +739,7 @@ export function AppShell() {
             </span>
           )}
           {selfEvolutionEnabled ? (
-            <NavLink to="/self-evolution" className={linkClassName} reloadDocument>
+            <NavLink to="/self-evolution" className={linkClassName}>
               {t("navSelfEvolution")}
             </NavLink>
           ) : (
@@ -708,10 +747,10 @@ export function AppShell() {
               {t("navSelfEvolution")}
             </span>
           )}
-          <NavLink to="/logs" className={linkClassName} reloadDocument>
+          <NavLink to="/logs" className={linkClassName}>
             {t("navLogs")}
           </NavLink>
-          <NavLink to="/git" className={linkClassName} reloadDocument>
+          <NavLink to="/git" className={linkClassName}>
             {t("navGit")}
           </NavLink>
         </nav>
@@ -867,7 +906,6 @@ export function AppShell() {
             className={styles.actionIconButton}
             aria-label={t("navConfig")}
             title={t("navConfig")}
-            reloadDocument
           >
             <Settings size={16} />
           </NavLink>

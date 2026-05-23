@@ -41,8 +41,8 @@ function getStringAttributeValue(attribute: ts.JsxAttribute): string | null {
   return null;
 }
 
-function collectNavLinksMissingDocumentReload(source: ts.SourceFile, paths: Set<string>): string[] {
-  const missing: string[] = [];
+function collectNavLinksUsingDocumentReload(source: ts.SourceFile, paths: Set<string>): string[] {
+  const usingReload: string[] = [];
 
   function visit(node: ts.Node) {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
@@ -64,8 +64,8 @@ function collectNavLinksMissingDocumentReload(source: ts.SourceFile, paths: Set<
             hasReloadDocument = true;
           }
         }
-        if (toPath && paths.has(toPath) && !hasReloadDocument) {
-          missing.push(toPath);
+        if (toPath && paths.has(toPath) && hasReloadDocument) {
+          usingReload.push(toPath);
         }
       }
     }
@@ -73,7 +73,7 @@ function collectNavLinksMissingDocumentReload(source: ts.SourceFile, paths: Set<
   }
 
   visit(source);
-  return missing;
+  return usingReload;
 }
 
 describe("AppShell navigation telemetry", () => {
@@ -83,11 +83,11 @@ describe("AppShell navigation telemetry", () => {
     expect(collectHistoryMonkeyPatches(source)).toEqual([]);
   });
 
-  it("uses document-level navigation for global page switches", () => {
+  it("uses client-side navigation for global page switches", () => {
     const source = ts.createSourceFile("AppShell.tsx", appShellSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
     expect(
-      collectNavLinksMissingDocumentReload(
+      collectNavLinksUsingDocumentReload(
         source,
         new Set(["/chat", "/supervised-evolution", "/self-evolution", "/logs", "/tools", "/git", "/config"]),
       ),

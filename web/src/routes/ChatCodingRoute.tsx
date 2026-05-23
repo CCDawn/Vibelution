@@ -286,24 +286,38 @@ export function ChatCodingRoute() {
   const requestedSessionId = useMemo(() => {
     return new URLSearchParams(location.search).get("session") ?? "";
   }, [location.search]);
+  const [pageVisible, setPageVisible] = useState(
+    () => (typeof document === "undefined" ? true : document.visibilityState === "visible"),
+  );
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      setPageVisible(document.visibilityState === "visible");
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
     queryFn: () => fetchJson<RuntimeSummary>("/api/runtime/summary"),
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: pageVisible ? 5_000 : false,
+    refetchIntervalInBackground: false,
   });
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
     queryFn: () => fetchJson<PetSummary>("/api/pet/summary"),
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: pageVisible ? 10_000 : false,
+    refetchIntervalInBackground: false,
   });
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
     queryFn: () => fetchJson<SessionSummary[]>("/api/sessions"),
-    refetchInterval: 3_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: pageVisible ? 3_000 : false,
+    refetchIntervalInBackground: false,
   });
   const syncSessionDetail = useCallback(
     (detail: SessionDetail) => {
@@ -317,8 +331,8 @@ export function ChatCodingRoute() {
   const fileTreeQuery = useQuery({
     queryKey: queryKeys.fileTree(),
     queryFn: () => fetchJson<FileTreeNode[]>("/api/files/tree"),
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: pageVisible ? 10_000 : false,
+    refetchIntervalInBackground: false,
   });
 
   useEffect(() => {
@@ -363,8 +377,8 @@ export function ChatCodingRoute() {
     queryKey: queryKeys.session(activeSessionId ?? "none"),
     enabled: Boolean(activeSessionId),
     queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${activeSessionId}`),
-    refetchInterval: activeSessionId ? (sessionStreamConnected ? false : 3_000) : false,
-    refetchIntervalInBackground: true,
+    refetchInterval: activeSessionId && pageVisible ? (sessionStreamConnected ? false : 3_000) : false,
+    refetchIntervalInBackground: false,
   });
 
   const submitTurnMutation = useMutation({
@@ -557,7 +571,7 @@ export function ChatCodingRoute() {
   }, [activeSessionId, hydrateSession, sessionDetailQuery.data]);
 
   useEffect(() => {
-    if (!activeSessionId || typeof EventSource === "undefined") {
+    if (!activeSessionId || !pageVisible || typeof EventSource === "undefined") {
       setSessionStreamConnected(false);
       return;
     }
@@ -600,7 +614,7 @@ export function ChatCodingRoute() {
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.close();
     };
-  }, [activeSessionId, queryClient, syncSessionDetail]);
+  }, [activeSessionId, pageVisible, queryClient, syncSessionDetail]);
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {
