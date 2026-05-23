@@ -333,28 +333,32 @@ def test_run_forever_cleans_descendants_before_completing_stop_daemon(monkeypatc
     assert exit_info.value.code == 0
 
 
-def test_run_forever_marks_runtime_stopping_before_stop_result(monkeypatch):
+def test_run_forever_marks_runtime_stopping_then_finalizes_idle_before_exit(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     saved_states: list[dict] = []
+    loaded_state = {
+        "runtimeState": "running",
+        "startedAt": "2026-05-18T01:00:00+00:00",
+        "command": {},
+        "workbench": {},
+    }
 
     monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
     monkeypatch.setattr(daemon, "recover_processing_queue", lambda: None)
     monkeypatch.setattr(daemon, "save_pid", lambda pid: None)
-    monkeypatch.setattr(
-        daemon,
-        "load_state",
-        lambda: {
-            "runtimeState": "running",
-            "startedAt": "2026-05-18T01:00:00+00:00",
-            "command": {},
-            "workbench": {},
-        },
-    )
+    monkeypatch.setattr(daemon, "load_state", lambda: json.loads(json.dumps(loaded_state)))
     monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T08:00:00+00:00")
     monkeypatch.setattr(daemon, "observe_workbench", lambda: {"observedState": "closed"})
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
-    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(json.loads(json.dumps(state))) or state)
+
+    def fake_save_state(state):
+        loaded_state.clear()
+        loaded_state.update(json.loads(json.dumps(state)))
+        saved_states.append(json.loads(json.dumps(state)))
+        return state
+
+    monkeypatch.setattr(daemon, "save_state", fake_save_state)
     monkeypatch.setattr(
         daemon,
         "claim_next_command",
@@ -394,6 +398,13 @@ def test_run_forever_marks_runtime_stopping_before_stop_result(monkeypatch):
         runtime_daemon.run_forever()
 
     assert any(state.get("runtimeState") == "stopping" for state in saved_states)
+    assert saved_states[-1]["runtimeState"] == "idle"
+    assert saved_states[-1]["managerPid"] == 0
+    assert saved_states[-1]["daemonRunning"] is False
+    assert saved_states[-1]["lastStoppedManagerPid"] == runtime_daemon._pid
+    assert saved_states[-1]["workbench"]["desiredState"] == "closed"
+    assert saved_states[-1]["workbench"]["observedState"] == "closed"
+    assert saved_states[-1]["workbench"]["phase"] == "steady"
 
 
 def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path, monkeypatch):
@@ -742,6 +753,28 @@ def test_ensure_daemon_running_keeps_current_source_signature(monkeypatch):
     assert daemon.ensure_daemon_running() is False
 
 
+def test_ensure_daemon_running_prefers_pythonw_for_background_daemon(tmp_path, monkeypatch):
+    python_exe = tmp_path / "Scripts" / "python.exe"
+    pythonw_exe = tmp_path / "Scripts" / "pythonw.exe"
+    python_exe.parent.mkdir()
+    python_exe.write_text("", encoding="utf-8")
+    pythonw_exe.write_text("", encoding="utf-8")
+    running_checks = iter([False, True])
+    popen_calls = []
+
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: next(running_checks))
+    monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", tmp_path / "daemon.out.log")
+    monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", tmp_path / "daemon.err.log")
+    monkeypatch.setattr(daemon.subprocess, "Popen", lambda args, **kwargs: popen_calls.append(args))
+
+    assert daemon.ensure_daemon_running(python_executable=str(python_exe)) is True
+
+    assert popen_calls == [[str(pythonw_exe.resolve()), "-m", "core.runtime_manager.cli", "daemon"]]
+
+
 def test_load_launcher_state_supports_utf8_bom(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / "state.json"
     launcher_state_path.write_text(
@@ -780,6 +813,47 @@ def test_observe_workbench_drops_stale_backend_pid(monkeypatch):
     assert observation["backendPid"] == 0
     assert observation["backendAlive"] is False
     assert observation["backendObserved"] is False
+
+
+def test_observe_workbench_reports_backend_launch_pid(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "backendPid": 25744,
+            "backendLaunchPid": 43460,
+            "browserLaunchPid": 39880,
+            "browserWindowPid": 39880,
+            "browserManaged": True,
+            "sessionId": "managed-browser",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: pid in {25744, 39880})
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 25744)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "open"
+    assert observation["backendPid"] == 25744
+    assert observation["backendLaunchPid"] == 43460
+
+
+def test_snapshot_residual_excluded_pids_includes_backend_launch_tree_root():
+    excluded = daemon._snapshot_residual_excluded_pids(
+        {
+            "backendPid": 25744,
+            "backendLaunchPid": 43460,
+            "backendPortOwnerPid": 25744,
+            "browserLaunchPid": 39880,
+            "browserWindowPid": 39880,
+        },
+        manager_pid=45904,
+    )
+
+    assert {25744, 43460, 39880, 45904}.issubset(excluded)
 
 
 def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch):
@@ -1320,6 +1394,86 @@ def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, 
     assert payload["count"] == 1
     assert payload["items"][0]["pid"] == 49780
     assert payload["items"][0]["port"] == 8001
+
+
+def test_residual_process_payload_ignores_descendants_of_active_backend(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 13492,
+                        "ppid": 1,
+                        "name": "cmd.exe",
+                        "cmdline": [
+                            "cmd.exe",
+                            "/d",
+                            "/s",
+                            "/c",
+                            str(repo / ".venv" / "Scripts" / "pythonw.exe"),
+                            "scripts/web_workbench.py",
+                            "--port",
+                            "8000",
+                            "--no-browser",
+                        ],
+                        "cwd": str(repo),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 31408,
+                        "ppid": 13492,
+                        "name": "pythonw.exe",
+                        "cmdline": [
+                            str(repo / ".venv" / "Scripts" / "pythonw.exe"),
+                            "scripts/web_workbench.py",
+                            "--port",
+                            "8000",
+                            "--no-browser",
+                        ],
+                        "cwd": str(repo),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 41160,
+                        "ppid": 31408,
+                        "name": "pythonw.exe",
+                        "cmdline": [
+                            "pythonw.exe",
+                            "scripts/web_workbench.py",
+                            "--port",
+                            "8000",
+                            "--no-browser",
+                        ],
+                        "cwd": str(repo),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 49780,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
+                        "cwd": str(repo),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo, exclude_pids={13492, 31408})
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["pid"] == 49780
 
 
 def test_residual_process_payload_reports_unmanaged_frontend_dev_server(monkeypatch, tmp_path):

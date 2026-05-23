@@ -23,6 +23,7 @@ import {
   RuntimeSceneListItem,
 } from "../api/types";
 import { FilePreview } from "../components/preview/FilePreview";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
 import styles from "./LogsRoute.module.css";
@@ -415,12 +416,13 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
       ? clamp(saved, MIN_RUNTIME_SCENES_SIDEBAR_WIDTH, MAX_RUNTIME_SCENES_SIDEBAR_WIDTH)
       : DEFAULT_RUNTIME_SCENES_SIDEBAR_WIDTH;
   });
+  const pageVisible = usePageVisibility();
 
   const runtimeScenesQuery = useQuery({
     queryKey: queryKeys.runtimeScenes(),
     queryFn: () => fetchJson<RuntimeSceneListItem[]>("/api/logs/runtime-scenes"),
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 10_000),
+    refetchIntervalInBackground: false,
   });
 
   const filteredScenes = useMemo(
@@ -443,8 +445,8 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
     queryKey: queryKeys.runtimeScene(activeSceneId),
     enabled: Boolean(activeSceneId),
     queryFn: () => fetchJson<RuntimeSceneDetail>(`/api/logs/runtime-scenes/${encodeURIComponent(activeSceneId)}`),
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
+    refetchIntervalInBackground: false,
   });
 
   const activeRawLogPath =
@@ -475,8 +477,8 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
       fetchJson<LogFileContent>(
         `/api/logs/runtime-scenes/${encodeURIComponent(activeSceneId)}/content?path=${encodeURIComponent(activeRawLogPath)}`,
       ),
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
+    refetchIntervalInBackground: false,
   });
 
   const deleteRuntimeScenesMutation = useMutation({

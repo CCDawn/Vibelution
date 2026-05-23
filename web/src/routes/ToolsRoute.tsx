@@ -10,6 +10,7 @@ import {
   ToolRegistryPayload,
   ToolTestResponse,
 } from "../api/types";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./ToolsRoute.module.css";
@@ -118,12 +119,13 @@ export function ToolsRoute() {
     text: "",
   });
   const [testResult, setTestResult] = useState<ToolTestResponse | null>(null);
+  const pageVisible = usePageVisibility();
 
   const toolsQuery = useQuery({
     queryKey: queryKeys.tools(),
     queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
   });
 
   const refresh = () => {

@@ -121,11 +121,17 @@ Function IsAllowedAction(value)
 End Function
 
 Sub SetLauncherEnvironment()
-    Dim env, venvPython
+    Dim env, venvPython, venvPythonw
     Set env = shell.Environment("PROCESS")
+    venvPythonw = fso.BuildPath(projectDir, ".venv\Scripts\pythonw.exe")
     venvPython = fso.BuildPath(projectDir, ".venv\Scripts\python.exe")
-    If fso.FileExists(venvPython) Then
+
+    If fso.FileExists(venvPythonw) Then
+        env("VIBELUTION_PYTHON_EXE") = venvPythonw
+        WriteLog "desktop_entry_vbs.python_runtime.selected", "info", "Using windowless Python runtime for desktop launch.", "path=" & venvPythonw
+    ElseIf fso.FileExists(venvPython) Then
         env("VIBELUTION_PYTHON_EXE") = venvPython
+        WriteLog "desktop_entry_vbs.python_runtime.selected", "warning", "Windowless Python runtime was not found; falling back to console Python.", "path=" & venvPython
     End If
 End Sub
 

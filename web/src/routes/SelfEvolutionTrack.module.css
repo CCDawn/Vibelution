@@ -352,13 +352,41 @@
   filter: blur(4px);
 }
 
-.petAvatarImage {
+.petAvatarMark {
   position: relative;
-  width: min(72%, 220px);
-  height: auto;
-  object-fit: contain;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   animation: petFloat 4s ease-in-out infinite;
   filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.35));
+}
+
+.petAvatarBody {
+  width: 104px;
+  height: 138px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
+  border-radius: 48% 48% 42% 42%;
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.34) 0 7px, transparent 8px),
+    radial-gradient(circle at 66% 28%, rgba(255, 255, 255, 0.34) 0 7px, transparent 8px),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-warm) 46%, #ef6250), color-mix(in srgb, var(--accent-warm) 20%, #82342d));
+}
+
+.petAvatarClaw {
+  width: 44px;
+  height: 58px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, transparent);
+  border-radius: 60% 42% 58% 46%;
+  background: color-mix(in srgb, var(--accent-warm) 34%, #b73f35);
+}
+
+.petAvatarClaw:first-child {
+  transform: rotate(-18deg);
+}
+
+.petAvatarClaw:last-child {
+  transform: rotate(18deg);
 }
 
 .petAvatarBadge {

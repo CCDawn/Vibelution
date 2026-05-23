@@ -46,6 +46,7 @@ import {
   SelfEvolutionOverview,
   SelfEvolutionTransaction,
 } from "../api/types";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SelfEvolutionTrack } from "./SelfEvolutionTrack";
@@ -242,6 +243,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const evolutionView = forcedView ?? (rawEvolutionView === "overview" ? "live" : rawEvolutionView);
   const selfTrackQueriesEnabled = forcedTrack === "self" || forcedTrack === undefined;
   const supervisedTrackQueriesEnabled = forcedTrack !== "self";
+  const pageVisible = usePageVisibility();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runFilter, setRunFilter] = useState<RunFilter>("all");
   const [libraryView, setLibraryView] = useState<LibraryView>("items");
@@ -315,71 +317,71 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
   });
 
   const runsQuery = useQuery({
     queryKey: queryKeys.evolutionRuns(),
     queryFn: () => fetchJson<EvolutionRun[]>("/api/evolution/runs"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
   const libraryQuery = useQuery({
     queryKey: queryKeys.evolutionLibrary(),
     queryFn: () => fetchJson<EvolutionLibraryPayload>("/api/evolution/library"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
   const workbenchQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
     queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
   const overviewQuery = useQuery({
     queryKey: queryKeys.evolutionOverview(),
     queryFn: () => fetchJson<EvolutionOverview>("/api/evolution/overview"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
   const activeRunQuery = useQuery({
     queryKey: queryKeys.evolutionActiveRun(),
     queryFn: () => fetchJson<EvolutionActiveRun | null>("/api/evolution/active-run"),
-    refetchInterval: 4_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
   const worktreeActiveRunQuery = useQuery({
     queryKey: queryKeys.evolutionWorktreeActiveRun(),
     queryFn: () => fetchJson<SupervisedWorktreeRun | null>("/api/evolution/worktree-runs/active"),
-    refetchInterval: 4_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled,
   });
   const selfOverviewQuery = useQuery({
     queryKey: queryKeys.evolutionSelfOverview(),
     queryFn: () => fetchJson<SelfEvolutionOverview>("/api/evolution/self/overview"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled && (configQuery.data ? configQuery.data.modeAvailability.self_evolution : true),
   });
   const selfLatestRunQuery = useQuery({
     queryKey: queryKeys.evolutionSelfLatestRun(),
     queryFn: () => fetchJson<SelfEvolutionActiveRun | null>("/api/evolution/self/latest-run"),
-    refetchInterval: 4_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled && (configQuery.data ? configQuery.data.modeAvailability.self_evolution : true),
   });
   const selfTransactionsQuery = useQuery({
     queryKey: queryKeys.evolutionSelfTransactions(),
     queryFn: () => fetchJson<SelfEvolutionTransaction[]>("/api/evolution/self/transactions"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
     enabled: selfTrackQueriesEnabled && (configQuery.data ? configQuery.data.modeAvailability.self_evolution : true),
   });
   const startRunMutation = useMutation({
@@ -818,8 +820,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       activeTrack === "supervised"
       && evolutionView === "library"
       && Boolean(selectedProposalRunId),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
   });
   const updateProposalMutation = useMutation({
     mutationFn: ({ sessionId, draft }: { sessionId: string; draft: ProposalEditDraft }) =>
@@ -1059,6 +1061,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [latestSelfRunSnapshot]);
 
   useEffect(() => {
+    if (!pageVisible) {
+      return;
+    }
     const target = monitoredSelfRun;
     if (!target || !isSelfRunExecutingStatus(target.status || "")) {
       return;
@@ -1098,9 +1103,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       source.removeEventListener("self_evolution_run", handleSnapshot as EventListener);
       source.close();
     };
-  }, [monitoredSelfRun?.runId, monitoredSelfRun?.status, queryClient]);
+  }, [monitoredSelfRun?.runId, monitoredSelfRun?.status, pageVisible, queryClient]);
 
   useEffect(() => {
+    if (!pageVisible) {
+      return;
+    }
     const target = selectSupervisedRunStreamTarget(activeRunSnapshot, liveActiveRun);
     if (!target) {
       return;
@@ -1136,7 +1144,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       source.removeEventListener("supervised_run", handleSnapshot as EventListener);
       source.close();
     };
-  }, [activeRunSnapshot?.runId, activeRunSnapshot?.status, liveActiveRun?.runId, liveActiveRun?.status, queryClient]);
+  }, [
+    activeRunSnapshot?.runId,
+    activeRunSnapshot?.status,
+    liveActiveRun?.runId,
+    liveActiveRun?.status,
+    pageVisible,
+    queryClient,
+  ]);
 
   useEffect(() => {
     const visibleIds = new Set(

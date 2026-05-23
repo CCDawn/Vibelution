@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import { ConfigSummary, EvolutionOverview } from "../api/types";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SupervisedWorkspaceControls.module.css";
 import { SupervisedWorkspaceTabs, type SupervisedWorkspaceView } from "./SupervisedWorkspaceTabs";
@@ -34,6 +35,7 @@ export function SupervisedWorkspaceControls({
   const queryClient = useQueryClient();
   const shouldFetchConfig = configIntakeMode == null;
   const shouldFetchOverview = overviewIntakeMode == null;
+  const pageVisible = usePageVisibility();
 
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
@@ -44,8 +46,8 @@ export function SupervisedWorkspaceControls({
     queryKey: queryKeys.evolutionOverview(),
     queryFn: () => fetchJson<EvolutionOverview>("/api/evolution/overview"),
     enabled: shouldFetchOverview,
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
   });
   const intakeModeMutation = useMutation({
     mutationFn: (intakeMode: IntakeMode) =>

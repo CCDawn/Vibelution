@@ -218,6 +218,18 @@ def _creation_flags() -> int:
     return flags
 
 
+def _prefer_windowless_python(python_executable: str) -> str:
+    """Prefer pythonw.exe for background Windows daemons when it is available."""
+
+    candidate = Path(str(python_executable or "")).resolve()
+    if os.name != "nt" or candidate.name.lower() != "python.exe":
+        return str(candidate)
+    sibling = candidate.with_name("pythonw.exe")
+    if sibling.exists():
+        return str(sibling)
+    return str(candidate)
+
+
 def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
     current_pid = load_pid()
     if _is_process_alive(current_pid):
@@ -232,7 +244,7 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
         _terminate_daemon_process(current_pid)
 
     ensure_runtime_manager_dirs()
-    python_cmd = python_executable or sys.executable
+    python_cmd = _prefer_windowless_python(python_executable or sys.executable)
     with DAEMON_STDOUT_PATH.open("a", encoding="utf-8") as stdout_handle, DAEMON_STDERR_PATH.open(
         "a", encoding="utf-8"
     ) as stderr_handle:
@@ -339,7 +351,7 @@ def load_runtime_snapshot() -> dict[str, Any]:
 
 def _snapshot_residual_excluded_pids(observation: dict[str, Any], manager_pid: int = 0) -> set[int]:
     excluded = {os.getpid(), int(manager_pid or 0)}
-    for key in ("backendPid", "backendPortOwnerPid", "browserLaunchPid", "browserWindowPid"):
+    for key in ("backendPid", "backendLaunchPid", "backendPortOwnerPid", "browserLaunchPid", "browserWindowPid"):
         try:
             value = int(observation.get(key) or 0)
         except (TypeError, ValueError):
@@ -435,6 +447,48 @@ def _prepare_daemon_shutdown() -> dict[str, Any]:
     }
 
 
+def _finalize_daemon_stopped_state(*, manager_pid: int) -> None:
+    state = load_state()
+    if not isinstance(state, dict):
+        state = default_state()
+    workbench = state.setdefault("workbench", {})
+    workbench.update(
+        {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+            "backendPid": 0,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerTrusted": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "failureMessage": "",
+            "statusLine": "Workbench is closed.",
+        }
+    )
+    state.setdefault("command", {}).update(
+        {
+            "activeCommandId": "",
+            "activeType": "",
+            "requestedBy": "",
+            "startedAt": "",
+            "stopManager": False,
+        }
+    )
+    state["runtimeState"] = "idle"
+    state["managerPid"] = 0
+    state["daemonRunning"] = False
+    state["lastStoppedAt"] = now_iso()
+    state["lastStoppedManagerPid"] = int(manager_pid)
+    save_state(state)
+
+
 class RuntimeManagerDaemon:
     def __init__(self) -> None:
         self._pid = os.getpid()
@@ -474,6 +528,7 @@ class RuntimeManagerDaemon:
                         _append_event("daemon.stopped", {"commandId": str(result.get("commandId") or "")})
                     complete_command(path, result)
                     if bool(result.get("stopDaemon")):
+                        _finalize_daemon_stopped_state(manager_pid=self._pid)
                         clear_pid(self._pid)
                         _exit_current_process(0)
                         return

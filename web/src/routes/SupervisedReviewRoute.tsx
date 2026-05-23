@@ -12,6 +12,7 @@ import {
   EvolutionChatReviewQueue,
   EvolutionWorkbench,
 } from "../api/types";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
@@ -44,18 +45,19 @@ export function SupervisedReviewRoute() {
   const [queuePanelWidth, setQueuePanelWidth] = useState(() =>
     storedPaneWidth(REVIEW_QUEUE_WIDTH_KEY, REVIEW_QUEUE_DEFAULT_WIDTH, REVIEW_QUEUE_BOUNDS),
   );
+  const pageVisible = usePageVisibility();
 
   const reviewQuery = useQuery({
     queryKey: queryKeys.evolutionChatReview(),
     queryFn: () => fetchJson<EvolutionChatReviewQueue>("/api/evolution/chat-review"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
   });
   const workbenchQuery = useQuery({
     queryKey: queryKeys.evolutionWorkbench(),
     queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
-    refetchInterval: 8_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
+    refetchIntervalInBackground: false,
   });
 
   const decisionMutation = useMutation({

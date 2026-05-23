@@ -53,6 +53,7 @@ def list_repo_runtime_processes(
 
     root = _resolve_project_root(project_root)
     excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
+    raw_processes: list[dict[str, Any]] = []
     processes: list[RuntimeProcess] = []
 
     for proc in psutil.process_iter(["pid", "ppid", "name", "cmdline", "cwd"]):
@@ -60,6 +61,11 @@ def list_repo_runtime_processes(
             info = proc.info
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+        raw_processes.append(dict(info))
+
+    excluded = _expand_excluded_process_tree(raw_processes, excluded)
+
+    for info in raw_processes:
         pid = int(info.get("pid") or 0)
         if pid <= 0 or pid in excluded:
             continue
@@ -84,6 +90,26 @@ def list_repo_runtime_processes(
         )
 
     return sorted(processes, key=lambda item: (item.kind, item.pid))
+
+
+def _expand_excluded_process_tree(processes: list[dict[str, Any]], excluded: set[int]) -> set[int]:
+    expanded = set(excluded)
+    children_by_parent: dict[int, list[int]] = {}
+    for info in processes:
+        pid = int(info.get("pid") or 0)
+        parent_pid = int(info.get("ppid") or 0)
+        if pid > 0 and parent_pid > 0:
+            children_by_parent.setdefault(parent_pid, []).append(pid)
+
+    queue = list(expanded)
+    while queue:
+        parent_pid = queue.pop()
+        for child_pid in children_by_parent.get(parent_pid, []):
+            if child_pid in expanded:
+                continue
+            expanded.add(child_pid)
+            queue.append(child_pid)
+    return expanded
 
 
 def list_unmanaged_workbench_processes(

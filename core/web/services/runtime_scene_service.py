@@ -33,6 +33,21 @@ MAX_TELEMETRY_FIELD_ITEMS = 24
 BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS = 60.0
 MAX_CONVERSATION_TEXT_CHARS = 20_000
 REDACTED_FIELD_VALUE = "[redacted]"
+LIFECYCLE_INDEX_PHASES = {
+    "session",
+    "startup",
+    "shutdown",
+    "build",
+    "health",
+    "supervision",
+    "dependencies",
+    "python_dependencies",
+    "window",
+    "api",
+    "desktop_monitor",
+    "lifecycle",
+    "navigation",
+}
 SENSITIVE_FIELD_KEYWORDS = (
     "authorization",
     "api_key",
@@ -55,6 +70,7 @@ RAW_LABELS = {
     "raw/backend.stderr.log": "Backend stderr",
     BACKEND_API_RAW_PATH: "Backend API events",
     "raw/supervisor.log": "Supervisor log",
+    "raw/supervisor.stderr.log": "Supervisor stderr",
     "raw/browser.log": "Browser log",
     BROWSER_TELEMETRY_RAW_PATH: "Browser telemetry",
     TIMELINE_PATH: "Unified timeline",
@@ -1104,8 +1120,7 @@ def _read_scene_lifecycle(scene_dir: Path, fallback_timeline: list[dict] | None 
     return [
         item
         for item in list(fallback_timeline or [])
-        if str(item.get("phase") or "").strip().lower()
-        in {"session", "startup", "shutdown", "build", "health", "supervision"}
+        if str(item.get("phase") or "").strip().lower() in LIFECYCLE_INDEX_PHASES
         or str(item.get("eventCode") or "").startswith("runtime.scene.")
     ]
 
@@ -1410,7 +1425,7 @@ def _is_lifecycle_event(payload: dict[str, Any]) -> bool:
     component = str(payload.get("component") or "").strip().lower()
     if event_code.startswith("runtime.scene."):
         return True
-    if phase in {"session", "startup", "shutdown", "build", "health", "supervision"}:
+    if phase in LIFECYCLE_INDEX_PHASES:
         return True
     return component in {"launcher", "supervisor"} and phase in {"session", "shutdown"}
 

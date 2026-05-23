@@ -12,6 +12,50 @@ export type DomainAvailability = {
   config: boolean;
 };
 
+export type MemoryItem = {
+  id: string;
+  title: string;
+  kind: string;
+  source: string;
+  path: string;
+  updatedAt: string;
+  agentVisible: boolean;
+  inPrompt: boolean;
+  usedBy: string[];
+  summary: string;
+  content: string;
+  contentType: string;
+  contentTruncated: boolean;
+  exists: boolean;
+};
+
+export type MemorySection = {
+  id: string;
+  title: string;
+  sourceKind: string;
+  visibility: string;
+  agentVisibility: string;
+  sourcePath: string;
+  sourceApi: string;
+  updatedAt: string;
+  summary: string;
+  items: MemoryItem[];
+};
+
+export type MemoryOverview = {
+  schemaVersion: number;
+  generatedAt: string;
+  projectRoot: string;
+  summary: {
+    sectionCount: number;
+    itemCount: number;
+    agentVisibleCount: number;
+    runtimeInjectedCount: number;
+    warnings: string[];
+  };
+  sections: MemorySection[];
+};
+
 export type LogRoot = {
   id: string;
   path: string;

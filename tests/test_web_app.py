@@ -34,6 +34,7 @@ from core.web.services import (
     evolution_service,
     git_status_service,
     log_service,
+    memory_service,
     runtime_service,
     runtime_scene_service,
     session_service,
@@ -232,6 +233,7 @@ def _seed_runtime_scene_bundle(project_root: Path, scene_id: str = "scene-1", st
                     "pid": 444,
                     "status": "stopped",
                     "log_path": "raw/supervisor.log",
+                    "stderr_path": "raw/supervisor.stderr.log",
                 },
             },
             ensure_ascii=False,
@@ -335,6 +337,7 @@ def _seed_runtime_scene_bundle(project_root: Path, scene_id: str = "scene-1", st
     (raw_dir / "backend.stdout.log").write_text("uvicorn started\n", encoding="utf-8")
     (raw_dir / "backend.stderr.log").write_text("", encoding="utf-8")
     (raw_dir / "supervisor.log").write_text("supervisor ok\n", encoding="utf-8")
+    (raw_dir / "supervisor.stderr.log").write_text("", encoding="utf-8")
     (raw_dir / "browser.log").write_text("browser open\n", encoding="utf-8")
     timeline_payloads = [
         line
@@ -777,6 +780,106 @@ def test_git_status_endpoint_reports_unavailable(monkeypatch):
     assert payload["summary"] == "Git unavailable: not a git repository"
     assert payload["error"] == "not a git repository"
     assert payload["files"] == []
+
+
+def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypatch):
+    project_memory = tmp_path / ".docs" / "project-memory"
+    lanes_dir = project_memory / "lanes"
+    lanes_dir.mkdir(parents=True)
+    memory_payload = {
+        "project": {"name": "Vibelution"},
+        "summary": {"currentPhase": "phase", "focus": "memory overview"},
+        "lanes": [{"id": "web-workbench-surface"}],
+        "recentUpdates": [{"title": "one"}],
+    }
+    (project_memory / "memory.json").write_text(json.dumps(memory_payload, ensure_ascii=False), encoding="utf-8")
+    (project_memory / "INDEX.md").write_text("| 类目 | 数量 |\n|---|---:|\n| 最近更新 | 2 |\n", encoding="utf-8")
+    (project_memory / "profile.json").write_text('{"density":"compact"}', encoding="utf-8")
+    (project_memory / "inbox.json").write_text("[]", encoding="utf-8")
+    (lanes_dir / "web-workbench-surface.json").write_text(
+        json.dumps(
+            {"title": "Web 工作台", "focus": "memory page", "recentUpdates": [{"title": "lane update"}]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (project_memory / "overview.html").write_text("<html>memory</html>", encoding="utf-8")
+    (tmp_path / "PROJECT_MEMORY.html").write_text("<html>root</html>", encoding="utf-8")
+
+    runtime_memory = tmp_path / "workspace" / "memory"
+    runtime_memory.mkdir(parents=True)
+    (runtime_memory / "memory.json").write_text('{"core_wisdom":["keep focus"]}', encoding="utf-8")
+    (runtime_memory / "tasks.json").write_text('{"tasks":[]}', encoding="utf-8")
+
+    prompt_dir = tmp_path / "workspace" / "prompts"
+    prompt_dir.mkdir(parents=True)
+    (prompt_dir / "STATE_MEMORY.md").write_text("Current prompt memory.", encoding="utf-8")
+    (prompt_dir / "DYNAMIC.md").write_text("Dynamic prompt note.", encoding="utf-8")
+
+    db_path = tmp_path / "workspace" / "agent_brain.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE LongTermMemory (id INTEGER PRIMARY KEY, content TEXT, updated_at TEXT)")
+        conn.execute(
+            "INSERT INTO LongTermMemory (content, updated_at) VALUES (?, ?)",
+            ("lesson", "2026-05-23T10:00:00Z"),
+        )
+        conn.execute("CREATE TABLE EvolutionTransaction (id INTEGER PRIMARY KEY, status TEXT, updated_at TEXT)")
+        conn.execute(
+            "INSERT INTO EvolutionTransaction (status, updated_at) VALUES (?, ?)",
+            ("closed", "2026-05-23T11:00:00Z"),
+        )
+
+    (tmp_path / "workspace" / "chat").mkdir(parents=True)
+    (tmp_path / "workspace" / "chat" / "chat_state.json").write_text('{"sessions":[]}', encoding="utf-8")
+    session_memory = tmp_path / "workspace" / "sessions" / "session-1" / "memory"
+    session_memory.mkdir(parents=True)
+    (session_memory / "memory.json").write_text('{"session":"one"}', encoding="utf-8")
+    (tmp_path / "workspace" / "gym").mkdir(parents=True)
+    (tmp_path / "workspace" / "gym" / "active_promotions.json").write_text("[]", encoding="utf-8")
+    supervised_root = tmp_path / "workspace" / "supervised_evolution"
+    (supervised_root / "decisions").mkdir(parents=True)
+    (supervised_root / "workbench_state.json").write_text('{"dataset":"demo"}', encoding="utf-8")
+    (supervised_root / "history.jsonl").write_text('{"run":"one"}\n', encoding="utf-8")
+    (supervised_root / "decisions" / "decision.json").write_text('{"decision":"hold"}', encoding="utf-8")
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / "20260523T100000Z__memory"
+    scene_dir.mkdir(parents=True)
+    (scene_dir / "manifest.json").write_text('{"title":"memory run","status":"stopped"}', encoding="utf-8")
+
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/memory/overview")
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    sections = {section["id"]: section for section in payload["sections"]}
+    assert payload["schemaVersion"] == 1
+    assert payload["projectRoot"] == str(tmp_path.resolve())
+    assert payload["summary"]["sectionCount"] == 9
+    assert set(sections) == {
+        "project-memory",
+        "runtime-memory",
+        "prompt-memory",
+        "workspace-database",
+        "git-memory",
+        "chat-session-memory",
+        "self-evolution-memory",
+        "supervised-evolution-memory",
+        "runtime-scene-evidence",
+    }
+    assert not any("计数不一致" in item for item in payload["summary"]["warnings"])
+    prompt_items = {item["title"]: item for item in sections["prompt-memory"]["items"]}
+    assert prompt_items["STATE_MEMORY.md"]["agentVisible"] is True
+    assert prompt_items["STATE_MEMORY.md"]["inPrompt"] is True
+    assert prompt_items["STATE_MEMORY.md"]["content"] == "Current prompt memory."
+    assert prompt_items["DYNAMIC.md"]["inPrompt"] is False
+    git_items = {item["id"]: item for item in sections["git-memory"]["items"]}
+    assert git_items["git-working-tree"]["agentVisible"] is True
+    assert git_items["git-working-tree"]["inPrompt"] is True
+    assert "GIT_MEMORY" in sections["git-memory"]["agentVisibility"]
+    sqlite_items = {item["id"]: item for item in sections["workspace-database"]["items"]}
+    assert '"count": 1' in sqlite_items["sqlite-longtermmemory"]["content"]
+    assert any("tools.memory_tools" in item["usedBy"] for item in sections["runtime-memory"]["items"])
 
 
 def test_git_commits_endpoint_exposes_recent_commits(monkeypatch):
@@ -1469,6 +1572,58 @@ def test_runtime_scene_event_helper_records_structured_lifecycle_event(tmp_path,
     assert manifest["package"]["lifecycle_path"] == "lifecycle.jsonl"
 
 
+def test_runtime_scene_lifecycle_fallback_indexes_operational_phases(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-lifecycle-fallback", status="running")
+    timeline_path = scene_dir / "timeline.jsonl"
+    timeline_path.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "runtime_scene_id": "scene-lifecycle-fallback",
+                    "ts": f"2026-05-18T12:00:{index:02d}Z",
+                    "seq": index,
+                    "component": component,
+                    "phase": phase,
+                    "event_code": event_code,
+                    "level": "info",
+                    "outcome": "observed",
+                    "message": event_code,
+                    "fields": {},
+                },
+                ensure_ascii=False,
+            )
+            for index, (component, phase, event_code) in enumerate(
+                [
+                    ("frontend", "dependencies", "frontend.dependencies.current"),
+                    ("launcher", "python_dependencies", "backend.dependencies.current"),
+                    ("browser", "window", "browser.window.opened"),
+                    ("backend", "api", "backend.api.request"),
+                    ("browser_page", "lifecycle", "browser.visibility.changed"),
+                    ("browser_page", "navigation", "browser.route.changed"),
+                    ("browser_page", "focus", "browser.focus.changed"),
+                ],
+                start=1,
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    lifecycle_path = scene_dir / "lifecycle.jsonl"
+    lifecycle_path.unlink()
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    detail = runtime_scene_service.get_runtime_scene_detail("scene-lifecycle-fallback")
+
+    lifecycle_codes = [event["eventCode"] for event in detail["lifecycle"]]
+    assert "frontend.dependencies.current" in lifecycle_codes
+    assert "backend.dependencies.current" in lifecycle_codes
+    assert "browser.window.opened" in lifecycle_codes
+    assert "backend.api.request" in lifecycle_codes
+    assert "browser.visibility.changed" in lifecycle_codes
+    assert "browser.route.changed" in lifecycle_codes
+    assert "browser.focus.changed" not in lifecycle_codes
+
+
 def test_runtime_scene_event_helper_rejects_stopped_launcher_scene(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-stopped", status="stopped")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
@@ -2093,6 +2248,19 @@ def test_runtime_browser_visibility_noise_stays_in_raw_log(tmp_path, monkeypatch
         "browser.visibility.changed",
         "browser.route.changed",
     ]
+    lifecycle_events = [
+        json.loads(line)
+        for line in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    browser_lifecycle_events = [
+        event for event in lifecycle_events
+        if event.get("component") == "browser_page"
+    ]
+    assert [event["event_code"] for event in browser_lifecycle_events] == [
+        "browser.visibility.changed",
+        "browser.route.changed",
+    ]
 
     manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["browser"]["visibility_state"] == "hidden"
@@ -2139,6 +2307,8 @@ def test_backend_api_runtime_event_records_mutating_request(tmp_path, monkeypatc
     assert api_event["fields"]["pathTemplate"] == "/api/runtime/shutdown"
     assert api_event["fields"]["statusCode"] == 202
     assert api_event["raw_refs"] == [{"path": "raw/backend.api.log", "tail_lines": 80}]
+    lifecycle_text = (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8")
+    assert "backend.api.request" in lifecycle_text
 
     manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["backend"]["api_log_path"] == "raw/backend.api.log"

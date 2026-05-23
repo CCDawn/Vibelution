@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -140,6 +141,10 @@ def _run_desktop_entry_with_fake_launcher(
     project_dir = tmp_path / "project"
     scripts_dir = project_dir / "scripts"
     scripts_dir.mkdir(parents=True)
+    venv_scripts_dir = project_dir / ".venv" / "Scripts"
+    venv_scripts_dir.mkdir(parents=True)
+    (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
+    (venv_scripts_dir / "pythonw.exe").write_text("windowless python", encoding="utf-8")
     shutil.copyfile(DESKTOP_ENTRY_SCRIPT, scripts_dir / "vibelution_desktop_entry.ps1")
     (scripts_dir / "vibelution_launcher.ps1").write_text(
         """
@@ -158,6 +163,7 @@ $payload = @{
     action = $Action
     noBrowser = [bool]$NoBrowser
     argv = @($args)
+    pythonExe = $env:VIBELUTION_PYTHON_EXE
 } | ConvertTo-Json -Depth 8 -Compress
 Add-Content -LiteralPath (Join-Path $logDir "fake-launcher-calls.jsonl") -Value $payload -Encoding utf8
 """.strip(),
@@ -192,6 +198,10 @@ def _run_vbs_desktop_entry_with_fake_powershell_entry(
     project_dir = tmp_path / "project"
     scripts_dir = project_dir / "scripts"
     scripts_dir.mkdir(parents=True)
+    venv_scripts_dir = project_dir / ".venv" / "Scripts"
+    venv_scripts_dir.mkdir(parents=True)
+    (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
+    (venv_scripts_dir / "pythonw.exe").write_text("windowless python", encoding="utf-8")
     shutil.copyfile(DESKTOP_ENTRY_VBS, scripts_dir / "vibelution_desktop_entry.vbs")
     (scripts_dir / "vibelution_desktop_entry.ps1").write_text(
         """
@@ -210,6 +220,7 @@ $payload = @{
     action = $Action
     noBrowser = [bool]$NoBrowser
     argv = @($args)
+    pythonExe = $env:VIBELUTION_PYTHON_EXE
 } | ConvertTo-Json -Depth 8 -Compress
 Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value $payload -Encoding utf8
 """.strip(),
@@ -240,6 +251,22 @@ def _run_launcher_ast_harness(tmp_path: Path, harness_source: str) -> subprocess
         str(harness_path),
         "-LauncherPath",
         str(LAUNCHER_SCRIPT),
+    ]
+    return subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
+
+
+def _run_desktop_entry_ast_harness(tmp_path: Path, harness_source: str) -> subprocess.CompletedProcess[str]:
+    harness_path = tmp_path / "desktop-entry-ast-harness.ps1"
+    harness_path.write_text(harness_source.strip(), encoding="utf-8")
+    command = [
+        _powershell_exe(),
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(harness_path),
+        "-DesktopEntryPath",
+        str(DESKTOP_ENTRY_SCRIPT),
     ]
     return subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
 
@@ -486,6 +513,390 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_background_processes_are_started_without_windows(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$hiddenBackgroundAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-HiddenBackgroundProcess"
+}, $true)
+if ($null -eq $hiddenBackgroundAst) {
+    throw "Start-HiddenBackgroundProcess was not found."
+}
+$hiddenBackgroundText = $hiddenBackgroundAst.Extent.Text
+if ($hiddenBackgroundText -notmatch 'CreateNoWindow\\s*=\\s*\\$true') {
+    throw "Start-HiddenBackgroundProcess does not force CreateNoWindow."
+}
+if ($hiddenBackgroundText -notmatch 'UseShellExecute\\s*=\\s*\\$false') {
+    throw "Start-HiddenBackgroundProcess does not avoid shell execution."
+}
+if ($hiddenBackgroundText -notmatch 'ProcessWindowStyle\\]::Hidden') {
+    throw "Start-HiddenBackgroundProcess does not set hidden window style."
+}
+
+$redirectedAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-RedirectedBackgroundProcess"
+}, $true)
+if ($null -eq $redirectedAst) {
+    throw "Start-RedirectedBackgroundProcess was not found."
+}
+$redirectedText = $redirectedAst.Extent.Text
+if ($redirectedText -match "cmd.exe" -or $redirectedText -match "ComSpec" -or $redirectedText -match "/c") {
+    throw "Redirected background process still shells out through cmd."
+}
+if ($redirectedText -match "Start-Process") {
+    throw "Redirected background process still uses Start-Process."
+}
+if ($redirectedText -notmatch 'StartHiddenRedirected') {
+    throw "Redirected background process does not use the Win32 no-window redirected starter."
+}
+if ($redirectedText -notmatch 'ConvertTo-ProcessArgumentString') {
+    throw "Redirected background process does not construct an explicit command line."
+}
+if ($source -notmatch 'CREATE_NO_WINDOW' -or $source -notmatch 'STARTF_USESTDHANDLES') {
+    throw "Redirected background process does not force no-window inherited file handles."
+}
+if ($redirectedText -notmatch 'distinct stdout and stderr log paths') {
+    throw "Redirected background process does not guard against same-file stdout/stderr redirection."
+}
+
+foreach ($functionName in @("Start-ManagedBackend", "Start-Supervisor")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    $functionText = $functionAst.Extent.Text
+    if ($functionText -match "Start-Process") {
+        throw "$functionName still uses Start-Process."
+    }
+    if ($functionText -notmatch "Start-RedirectedBackgroundProcess") {
+        throw "$functionName does not use the redirected no-window helper."
+    }
+}
+
+$saveStateAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Save-SessionState"
+}, $true)
+if ($null -eq $saveStateAst) {
+    throw "Save-SessionState was not found."
+}
+$saveStateText = $saveStateAst.Extent.Text
+if ($saveStateText -notmatch 'backendLaunchPid\\s*=\\s*\\$BackendLaunchPid') {
+    throw "Save-SessionState does not persist backendLaunchPid."
+}
+if ($saveStateText -notmatch 'supervisorStderr\\s*=\\s*if \\(\\$script:currentRuntimeSceneDir\\)') {
+    throw "Save-SessionState does not persist supervisorStderr."
+}
+$managedSessionText = ($ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-ManagedSession"
+}, $true)).Extent.Text
+if ($managedSessionText -notmatch 'BackendLaunchPid\\s+\\$backendProc\\.LauncherPid') {
+    throw "Start-ManagedSession does not save the backend launcher PID."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_runtime_scene_lifecycle_event_classifier_indexes_operational_phases(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Test-RuntimeSceneLifecycleEvent"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Test-RuntimeSceneLifecycleEvent was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+foreach ($phase in @(
+    "session",
+    "startup",
+    "shutdown",
+    "build",
+    "health",
+    "supervision",
+    "dependencies",
+    "python_dependencies",
+    "window",
+    "api",
+    "desktop_monitor",
+    "lifecycle",
+    "navigation"
+)) {
+    $payload = @{
+        component = "probe"
+        phase = $phase
+        event_code = "probe.$phase"
+    }
+    if (-not (Test-RuntimeSceneLifecycleEvent -Payload $payload)) {
+        throw "Lifecycle classifier did not index phase '$phase'."
+    }
+}
+
+if (-not (Test-RuntimeSceneLifecycleEvent -Payload @{ component = "runtime"; phase = "misc"; event_code = "runtime.scene.ready" })) {
+    throw "Lifecycle classifier did not index runtime.scene events."
+}
+if (Test-RuntimeSceneLifecycleEvent -Payload @{ component = "browser_page"; phase = "focus"; event_code = "browser.focus.changed" }) {
+    throw "Lifecycle classifier indexes browser focus noise."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_redirected_background_process_runs_without_visible_shell_wrapper(tmp_path):
+    stdout_path = tmp_path / "redirected.out.log"
+    stderr_path = tmp_path / "redirected.err.log"
+    powershell_exe = _powershell_exe()
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($name in @(
+    "ConvertTo-ProcessArgument",
+    "ConvertTo-ProcessArgumentString",
+    "Ensure-HiddenRedirectedProcessApi",
+    "Start-RedirectedBackgroundProcess"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$name was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+Set-Variable -Name projectDir -Value {json.dumps(str(tmp_path))} -Scope Script
+$proc = Start-RedirectedBackgroundProcess `
+    -CommandPath {json.dumps(powershell_exe)} `
+    -ArgumentList @(
+        "-NoProfile",
+        "-Command",
+        "[Console]::Out.WriteLine('stdout-ok'); [Console]::Error.WriteLine('stderr-ok'); Start-Sleep -Milliseconds 300"
+    ) `
+    -WorkingDirectory {json.dumps(str(tmp_path))} `
+    -StdoutPath {json.dumps(str(stdout_path))} `
+    -StderrPath {json.dumps(str(stderr_path))}
+$proc.WaitForExit(10000) | Out-Null
+if (-not $proc.HasExited) {{
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    throw "Redirected process did not exit."
+}}
+if ($proc.ProcessName -match "cmd") {{
+    throw "Redirected process returned a cmd wrapper PID."
+}}
+$stdout = Get-Content -Raw -LiteralPath {json.dumps(str(stdout_path))}
+$stderr = Get-Content -Raw -LiteralPath {json.dumps(str(stderr_path))}
+if ($stdout -notmatch "stdout-ok") {{
+    throw "Redirected stdout log was not written."
+}}
+if ($stderr -notmatch "stderr-ok") {{
+    throw "Redirected stderr log was not written."
+}}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_redirected_background_process_preserves_python_arguments(tmp_path):
+    stdout_path = tmp_path / "python-redirected.out.log"
+    stderr_path = tmp_path / "python-redirected.err.log"
+    python_exe = str(Path(sys.executable))
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($name in @(
+    "ConvertTo-ProcessArgument",
+    "ConvertTo-ProcessArgumentString",
+    "Ensure-HiddenRedirectedProcessApi",
+    "Start-RedirectedBackgroundProcess"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$name was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+Set-Variable -Name projectDir -Value {json.dumps(str(tmp_path))} -Scope Script
+$proc = Start-RedirectedBackgroundProcess `
+    -CommandPath {json.dumps(python_exe)} `
+    -ArgumentList @(
+        "-c",
+        "import sys; print('args-ok:' + '|'.join(sys.argv[1:]))",
+        "alpha",
+        "beta value"
+    ) `
+    -WorkingDirectory {json.dumps(str(tmp_path))} `
+    -StdoutPath {json.dumps(str(stdout_path))} `
+    -StderrPath {json.dumps(str(stderr_path))}
+$proc.WaitForExit(10000) | Out-Null
+if (-not $proc.HasExited) {{
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    throw "Redirected Python process did not exit."
+}}
+$stdout = Get-Content -Raw -LiteralPath {json.dumps(str(stdout_path))}
+if ($stdout -notmatch "args-ok:alpha\\|beta value") {{
+    throw "Redirected Python arguments were not preserved: $stdout"
+}}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_desktop_entry_launcher_actions_are_no_window_and_monitor_is_skipped(tmp_path):
+    result = _run_desktop_entry_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopEntryPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $DesktopEntryPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Desktop entry script parse failed: $($parseErrors[0].Message)"
+}
+
+$launcherActionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Invoke-HiddenLauncherAction"
+}, $true)
+if ($null -eq $launcherActionAst) {
+    throw "Invoke-HiddenLauncherAction was not found."
+}
+$launcherActionText = $launcherActionAst.Extent.Text
+if ($launcherActionText -match "Start-Process") {
+    throw "Desktop entry still uses Start-Process for launcher actions."
+}
+if ($launcherActionText -notmatch 'CreateNoWindow\\s*=\\s*\\$true') {
+    throw "Desktop entry launcher action does not force CreateNoWindow."
+}
+if ($launcherActionText -notmatch 'UseShellExecute\\s*=\\s*\\$false') {
+    throw "Desktop entry launcher action does not avoid shell execution."
+}
+if ($launcherActionText -notmatch "RedirectStandardOutput" -or $launcherActionText -notmatch "RedirectStandardError") {
+    throw "Desktop entry launcher action does not capture output."
+}
+if ($source -match 'Invoke-HiddenLauncherAction\\s+-LauncherAction\\s+"monitor"') {
+    throw "Desktop entry still attaches the launcher monitor automatically."
+}
+if ($source -notmatch "desktop_entry.monitor.skipped") {
+    throw "Desktop entry does not log skipped monitor behavior."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_runtime_manager_client_forwards_expected_command_flags(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -649,6 +1060,9 @@ $index = Get-RuntimeScenePackageIndex `
 
 if ($index.search_text -match "System\\.Object\\[\\]") {
     throw "search_text contains a stringified tag array."
+}
+if ($index.display_name -notmatch "工作台启动" -or $index.display_name -notmatch "手动停止") {
+    throw "display_name is not user-readable Chinese."
 }
 foreach ($tag in @("runtime-scene", "workbench-lifecycle", "workbench-start", "manual-stop", "managed")) {
     if ($index.search_text -notmatch [regex]::Escape($tag)) {
@@ -1256,57 +1670,118 @@ Write-Output $payload
     assert payload["getStateCalls"] == 1
 
 
-def test_desktop_entry_maps_open_to_start_then_monitor(tmp_path):
+def test_desktop_entry_maps_open_to_start_without_monitor(tmp_path):
     calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="open")
 
-    assert [call["action"] for call in calls] == ["start", "monitor"]
-    assert [call["noBrowser"] for call in calls] == [False, False]
+    assert calls == [
+        {
+            "action": "start",
+            "argv": [],
+            "noBrowser": False,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]
 
 
 def test_desktop_entry_maps_close_to_stop_without_monitor(tmp_path):
     calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="close")
 
-    assert calls == [{"action": "stop", "argv": [], "noBrowser": False}]
+    assert calls == [
+        {
+            "action": "stop",
+            "argv": [],
+            "noBrowser": False,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]
 
 
-def test_desktop_entry_runs_restart_then_monitor(tmp_path):
+def test_desktop_entry_runs_restart_without_monitor(tmp_path):
     calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="restart")
 
-    assert [call["action"] for call in calls] == ["restart", "monitor"]
-    assert [call["noBrowser"] for call in calls] == [False, False]
+    assert calls == [
+        {
+            "action": "restart",
+            "argv": [],
+            "noBrowser": False,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]
 
 
 def test_desktop_entry_status_does_not_attach_monitor(tmp_path):
     calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="status")
 
-    assert calls == [{"action": "status", "argv": [], "noBrowser": False}]
+    assert calls == [
+        {
+            "action": "status",
+            "argv": [],
+            "noBrowser": False,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]
 
 
 def test_desktop_entry_forwards_no_browser_and_skips_monitor(tmp_path):
     calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="open", no_browser=True)
 
-    assert calls == [{"action": "start", "argv": [], "noBrowser": True}]
+    assert calls == [
+        {
+            "action": "start",
+            "argv": [],
+            "noBrowser": True,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]
 
 
 def test_vbs_desktop_entry_accepts_named_action_arguments(tmp_path):
     calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action", "close"])
 
-    assert calls == [{"action": "close", "argv": [], "noBrowser": False}]
+    assert calls == [
+        {
+            "action": "close",
+            "argv": [],
+            "noBrowser": False,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]
 
 
 def test_vbs_desktop_entry_accepts_powershell_style_no_browser_switch(tmp_path):
     calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["open", "-NoBrowser"])
 
-    assert calls == [{"action": "open", "argv": [], "noBrowser": True}]
+    assert calls == [
+        {
+            "action": "open",
+            "argv": [],
+            "noBrowser": True,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]
 
 
 def test_vbs_desktop_entry_accepts_colon_action_argument(tmp_path):
     calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action:status"])
 
-    assert calls == [{"action": "status", "argv": [], "noBrowser": False}]
+    assert calls == [
+        {
+            "action": "status",
+            "argv": [],
+            "noBrowser": False,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]
 
 
 def test_vbs_desktop_entry_accepts_equals_action_argument(tmp_path):
     calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["--action=restart", "--no-browser"])
 
-    assert calls == [{"action": "restart", "argv": [], "noBrowser": True}]
+    assert calls == [
+        {
+            "action": "restart",
+            "argv": [],
+            "noBrowser": True,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+        }
+    ]

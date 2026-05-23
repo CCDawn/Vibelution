@@ -36,6 +36,7 @@ import {
   LogTreeResponse,
 } from "../api/types";
 import { FilePreview } from "../components/preview/FilePreview";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { type LogSeverityFilter } from "../logs/logSeverity";
 import { buildLogPackageIndex, logPackageFilePaths, type LogPackageIndexItem } from "./logPackageIndex";
@@ -296,12 +297,13 @@ export function LogsRoute() {
       ? clamp(saved, MIN_LOG_RIGHT_RAIL_WIDTH, MAX_LOG_RIGHT_RAIL_WIDTH)
       : DEFAULT_LOG_RIGHT_RAIL_WIDTH;
   });
+  const pageVisible = usePageVisibility();
 
   const rootsQuery = useQuery({
     queryKey: queryKeys.logRoots(),
     queryFn: () => fetchJson<LogRoot[]>("/api/logs/roots"),
-    refetchInterval: 10_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 10_000),
+    refetchIntervalInBackground: false,
   });
 
   const requestedRootId = useMemo(() => {
@@ -358,8 +360,8 @@ export function LogsRoute() {
     enabled: Boolean(activeRoot?.id) && !isRuntimeScenesRoot,
     queryFn: () =>
       fetchJson<LogTreeResponse>(`/api/logs/tree?root=${encodeURIComponent(activeRoot?.id ?? "")}`),
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
+    refetchIntervalInBackground: false,
   });
 
   const activeFilePath = activeRoot ? openPaths[activeRoot.id] ?? "" : "";
@@ -479,8 +481,8 @@ export function LogsRoute() {
       fetchJson<LogFileContent>(
         `/api/logs/content?root=${encodeURIComponent(activeRoot?.id ?? "")}&path=${encodeURIComponent(activeFilePath)}`,
       ),
-    refetchInterval: 5_000,
-    refetchIntervalInBackground: true,
+    refetchInterval: resolvePollingInterval(pageVisible, 5_000),
+    refetchIntervalInBackground: false,
   });
 
   const clearLogMutation = useMutation({

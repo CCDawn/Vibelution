@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$preferredPythonwExe = Join-Path $projectDir ".venv\Scripts\pythonw.exe"
 $preferredPythonExe = Join-Path $projectDir ".venv\Scripts\python.exe"
 $launcherPythonOverride = $env:VIBELUTION_PYTHON_EXE
 $requirementsPath = Join-Path $projectDir "requirements.txt"
@@ -344,26 +345,38 @@ function Get-RuntimeSceneStatusDisplayLabel {
     $normalizedStopReason = ([string]$StopReason).Trim().ToLowerInvariant()
     if ($normalizedStatus -eq "stopped" -and ($normalizedResult -or $normalizedStopReason)) {
         switch ($normalizedResult) {
-            "explicit_stop" { return "manual stop" }
-            "explicit stop" { return "manual stop" }
-            "browser_window_closed" { return "window closed" }
-            "startup_failed" { return "startup failed" }
-            "backend_exited" { return "backend exited" }
+            "explicit_stop" { return "手动停止" }
+            "explicit stop" { return "手动停止" }
+            "browser_window_closed" { return "窗口关闭" }
+            "app window closed" { return "窗口关闭" }
+            "startup_failed" { return "启动失败" }
+            "backend_exited" { return "后端退出" }
+            "runtime_manager_stop" { return "运行管理器停止" }
+            "runtime manager stop" { return "运行管理器停止" }
             default {
                 if ($normalizedStopReason) {
-                    return $normalizedStopReason -replace "[-_]+", " "
+                    switch ($normalizedStopReason) {
+                        "runtime_manager_stop" { return "运行管理器停止" }
+                        "runtime manager stop" { return "运行管理器停止" }
+                        "manual stop" { return "手动停止" }
+                        "explicit_stop" { return "手动停止" }
+                        "explicit stop" { return "手动停止" }
+                        default { return $normalizedStopReason -replace "[-_]+", " " }
+                    }
                 }
                 return $normalizedResult -replace "[-_]+", " "
             }
         }
     }
     switch ($normalizedStatus) {
-        "running" { return "running" }
-        "starting" { return "starting" }
-        "queued" { return "queued" }
-        "stopping" { return "stopping" }
-        "stopped" { return "stopped" }
-        "failed" { return "failed" }
+        "running" { return "运行中" }
+        "starting" { return "启动中" }
+        "queued" { return "等待中" }
+        "stopping" { return "停止中" }
+        "stopped" { return "已停止" }
+        "failed" { return "失败" }
+        "success" { return "成功" }
+        "succeeded" { return "成功" }
         default {
             if ($normalizedStatus) {
                 return $normalizedStatus -replace "[-_]+", " "
@@ -378,18 +391,18 @@ function Get-RuntimeSceneTriggerDisplayLabel {
 
     $normalized = ([string]$Trigger).Trim().ToLowerInvariant()
     switch ($normalized) {
-        "start" { return "workbench start" }
-        "internal-start" { return "workbench start" }
-        "restart" { return "workbench restart" }
-        "internal-restart" { return "workbench restart" }
-        "open" { return "workbench open" }
-        "stop" { return "workbench stop" }
-        "shutdown" { return "workbench shutdown" }
+        "start" { return "工作台启动" }
+        "internal-start" { return "工作台启动" }
+        "restart" { return "工作台重启" }
+        "internal-restart" { return "工作台重启" }
+        "open" { return "打开工作台" }
+        "stop" { return "关闭工作台" }
+        "shutdown" { return "关闭工作台" }
         default {
             if ($normalized) {
                 return $normalized -replace "[-_]+", " "
             }
-            return "workbench run"
+            return "工作台运行"
         }
     }
 }
@@ -780,6 +793,7 @@ function Get-RuntimeSceneRelativePaths {
         BackendStdout = "raw/backend.stdout.log"
         BackendStderr = "raw/backend.stderr.log"
         Supervisor = "raw/supervisor.log"
+        SupervisorStderr = "raw/supervisor.stderr.log"
         Browser = "raw/browser.log"
         LauncherControl = "raw/launcher-control.log"
     }
@@ -958,7 +972,21 @@ function Test-RuntimeSceneLifecycleEvent {
     if ($eventCode.StartsWith("runtime.scene.")) {
         return $true
     }
-    if (@("session", "startup", "shutdown", "build", "health", "supervision") -contains $phase) {
+    if (@(
+        "session",
+        "startup",
+        "shutdown",
+        "build",
+        "health",
+        "supervision",
+        "dependencies",
+        "python_dependencies",
+        "window",
+        "api",
+        "desktop_monitor",
+        "lifecycle",
+        "navigation"
+    ) -contains $phase) {
         return $true
     }
     return (@("launcher", "supervisor") -contains $component) -and (@("session", "shutdown") -contains $phase)
@@ -1453,6 +1481,12 @@ function Stop-ProcessesById {
         if (-not $processId) {
             continue
         }
+        $childPids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $processId" -ErrorAction SilentlyContinue | ForEach-Object {
+            [int]$_.ProcessId
+        })
+        if ($childPids.Count -gt 0) {
+            Stop-ProcessesById -ProcessIds $childPids
+        }
         Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     }
 }
@@ -1609,6 +1643,227 @@ function Invoke-HiddenProcessCapture {
     }
 }
 
+function Start-HiddenBackgroundProcess {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$WorkingDirectory = $projectDir
+    )
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo.FileName = $FilePath
+    $process.StartInfo.Arguments = ConvertTo-ProcessArgumentString -ArgumentList $ArgumentList
+    $process.StartInfo.WorkingDirectory = $WorkingDirectory
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+
+    if (-not $process.Start()) {
+        throw "Failed to start hidden background process: $FilePath"
+    }
+
+    return $process
+}
+
+function Ensure-HiddenRedirectedProcessApi {
+    if ("VibelutionLauncher.HiddenRedirectedProcess" -as [type]) {
+        return
+    }
+
+    Add-Type @"
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+
+namespace VibelutionLauncher {
+    public static class HiddenRedirectedProcess {
+        private const uint GENERIC_WRITE = 0x40000000;
+        private const uint FILE_SHARE_READ = 0x00000001;
+        private const uint FILE_SHARE_WRITE = 0x00000002;
+        private const uint CREATE_ALWAYS = 2;
+        private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+        private const uint STARTF_USESTDHANDLES = 0x00000100;
+        private const uint STARTF_USESHOWWINDOW = 0x00000001;
+        private const ushort SW_HIDE = 0;
+        private const uint CREATE_NO_WINDOW = 0x08000000;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct SECURITY_ATTRIBUTES {
+            public int nLength;
+            public IntPtr lpSecurityDescriptor;
+            [MarshalAs(UnmanagedType.Bool)]
+            public bool bInheritHandle;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct STARTUPINFO {
+            public int cb;
+            public string lpReserved;
+            public string lpDesktop;
+            public string lpTitle;
+            public int dwX;
+            public int dwY;
+            public int dwXSize;
+            public int dwYSize;
+            public int dwXCountChars;
+            public int dwYCountChars;
+            public int dwFillAttribute;
+            public int dwFlags;
+            public ushort wShowWindow;
+            public ushort cbReserved2;
+            public IntPtr lpReserved2;
+            public IntPtr hStdInput;
+            public IntPtr hStdOutput;
+            public IntPtr hStdError;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROCESS_INFORMATION {
+            public IntPtr hProcess;
+            public IntPtr hThread;
+            public int dwProcessId;
+            public int dwThreadId;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool CreateProcess(
+            string lpApplicationName,
+            string lpCommandLine,
+            IntPtr lpProcessAttributes,
+            IntPtr lpThreadAttributes,
+            bool bInheritHandles,
+            uint dwCreationFlags,
+            IntPtr lpEnvironment,
+            string lpCurrentDirectory,
+            ref STARTUPINFO lpStartupInfo,
+            out PROCESS_INFORMATION lpProcessInformation);
+
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern IntPtr CreateFile(
+            string lpFileName,
+            uint dwDesiredAccess,
+            uint dwShareMode,
+            ref SECURITY_ATTRIBUTES lpSecurityAttributes,
+            uint dwCreationDisposition,
+            uint dwFlagsAndAttributes,
+            IntPtr hTemplateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr hObject);
+
+        private static IntPtr OpenInheritableWriteHandle(string path) {
+            SECURITY_ATTRIBUTES attributes = new SECURITY_ATTRIBUTES();
+            attributes.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES));
+            attributes.lpSecurityDescriptor = IntPtr.Zero;
+            attributes.bInheritHandle = true;
+            IntPtr handle = CreateFile(
+                path,
+                GENERIC_WRITE,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                ref attributes,
+                CREATE_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL,
+                IntPtr.Zero);
+            if (handle == new IntPtr(-1)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to open redirected process log file: " + path);
+            }
+            return handle;
+        }
+
+        public static int StartHiddenRedirected(string applicationName, string commandLine, string workingDirectory, string stdoutPath, string stderrPath) {
+            IntPtr stdoutHandle = IntPtr.Zero;
+            IntPtr stderrHandle = IntPtr.Zero;
+            PROCESS_INFORMATION processInformation = new PROCESS_INFORMATION();
+            try {
+                stdoutHandle = OpenInheritableWriteHandle(stdoutPath);
+                stderrHandle = OpenInheritableWriteHandle(String.IsNullOrWhiteSpace(stderrPath) ? stdoutPath : stderrPath);
+
+                STARTUPINFO startupInfo = new STARTUPINFO();
+                startupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFO));
+                startupInfo.dwFlags = (int)(STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW);
+                startupInfo.wShowWindow = SW_HIDE;
+                startupInfo.hStdInput = IntPtr.Zero;
+                startupInfo.hStdOutput = stdoutHandle;
+                startupInfo.hStdError = stderrHandle;
+
+                bool started = CreateProcess(
+                    applicationName,
+                    commandLine,
+                    IntPtr.Zero,
+                    IntPtr.Zero,
+                    true,
+                    CREATE_NO_WINDOW,
+                    IntPtr.Zero,
+                    workingDirectory,
+                    ref startupInfo,
+                    out processInformation);
+                if (!started) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to start hidden redirected process: " + applicationName);
+                }
+                return processInformation.dwProcessId;
+            } finally {
+                if (processInformation.hThread != IntPtr.Zero) {
+                    CloseHandle(processInformation.hThread);
+                }
+                if (processInformation.hProcess != IntPtr.Zero) {
+                    CloseHandle(processInformation.hProcess);
+                }
+                if (stdoutHandle != IntPtr.Zero) {
+                    CloseHandle(stdoutHandle);
+                }
+                if (stderrHandle != IntPtr.Zero && stderrHandle != stdoutHandle) {
+                    CloseHandle(stderrHandle);
+                }
+            }
+        }
+    }
+}
+"@
+}
+
+function Start-RedirectedBackgroundProcess {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CommandPath,
+        [string[]]$ArgumentList = @(),
+        [Parameter(Mandatory = $true)]
+        [string]$StdoutPath,
+        [string]$StderrPath = "",
+        [string]$WorkingDirectory = $projectDir
+    )
+
+    foreach ($logPath in @($StdoutPath, $StderrPath)) {
+        if (-not $logPath) {
+            continue
+        }
+        $logDir = Split-Path -Parent $logPath
+        if ($logDir -and -not (Test-Path -LiteralPath $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
+    }
+
+    if ($StderrPath -and $StderrPath -eq $StdoutPath) {
+        throw "Redirected background processes require distinct stdout and stderr log paths."
+    }
+
+    if (-not $StderrPath) {
+        $StderrPath = $StdoutPath
+    }
+
+    Ensure-HiddenRedirectedProcessApi
+    $commandLine = ConvertTo-ProcessArgumentString -ArgumentList @(@($CommandPath) + @($ArgumentList))
+    $processId = [VibelutionLauncher.HiddenRedirectedProcess]::StartHiddenRedirected(
+        $CommandPath,
+        $commandLine,
+        $WorkingDirectory,
+        $StdoutPath,
+        $StderrPath
+    )
+    return Get-Process -Id $processId -ErrorAction Stop
+}
+
 function Invoke-NativeCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -1750,25 +2005,42 @@ function Test-PythonRuntime {
 
 function Get-ProjectPythonCandidates {
     $venvCandidates = New-Object System.Collections.Generic.List[object]
+    $seenPaths = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
 
-    if ($launcherPythonOverride -and (Test-Path $launcherPythonOverride)) {
+    function Add-PythonCandidate {
+        param(
+            [string]$Path,
+            [string]$Label
+        )
+
+        if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+            return
+        }
+
+        $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
+        $fileName = [System.IO.Path]::GetFileName($resolvedPath)
+        if ($fileName -ieq "python.exe") {
+            $pythonwSibling = Join-Path ([System.IO.Path]::GetDirectoryName($resolvedPath)) "pythonw.exe"
+            if (Test-Path -LiteralPath $pythonwSibling) {
+                $resolvedPath = (Resolve-Path -LiteralPath $pythonwSibling).Path
+                $Label = "$Label windowless"
+            }
+        }
+
+        if (-not $seenPaths.Add($resolvedPath)) {
+            return
+        }
+
         [void]$venvCandidates.Add([pscustomobject]@{
-            FilePath = (Resolve-Path $launcherPythonOverride).Path
+            FilePath = $resolvedPath
             PrefixArgs = @()
-            Label = "launcher virtual environment"
+            Label = $Label
         })
     }
 
-    if (Test-Path $preferredPythonExe) {
-        $resolvedPreferredPythonExe = (Resolve-Path $preferredPythonExe).Path
-        if (-not @($venvCandidates | Where-Object { $_.FilePath -eq $resolvedPreferredPythonExe })) {
-            [void]$venvCandidates.Add([pscustomobject]@{
-                FilePath = $resolvedPreferredPythonExe
-                PrefixArgs = @()
-                Label = "project venv"
-            })
-        }
-    }
+    Add-PythonCandidate -Path $launcherPythonOverride -Label "launcher virtual environment"
+    Add-PythonCandidate -Path $preferredPythonwExe -Label "project venv windowless"
+    Add-PythonCandidate -Path $preferredPythonExe -Label "project venv"
 
     return $venvCandidates.ToArray()
 }
@@ -2389,14 +2661,12 @@ function Start-ManagedBackend {
             -Outcome "started" `
             -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label }
     }
-    $proc = Start-Process `
-        -FilePath $PythonRuntime.FilePath `
+    $proc = Start-RedirectedBackgroundProcess `
+        -CommandPath $PythonRuntime.FilePath `
         -ArgumentList @($PythonRuntime.PrefixArgs + @("scripts/web_workbench.py", "--host", $bindHost, "--port", "$port", "--no-browser")) `
         -WorkingDirectory $projectDir `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $backendStdoutLog `
-        -RedirectStandardError $backendStderrLog `
-        -PassThru
+        -StdoutPath $backendStdoutLog `
+        -StderrPath $backendStderrLog
 
     if ($script:currentRuntimeSceneId) {
         Update-RuntimeSceneManifest @{ backend = @{ pid = $proc.Id; health_status = "starting" } }
@@ -2523,19 +2793,23 @@ function Start-Supervisor {
         throw "PowerShell executable was not found at $powershellExe"
     }
 
-    $supervisorLog = if ($script:currentRuntimeSceneId) {
+    $supervisorStdoutLog = if ($script:currentRuntimeSceneId) {
         Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).Supervisor
     } else {
         Join-Path $launcherDir "supervisor.log"
     }
+    $supervisorStderrLog = if ($script:currentRuntimeSceneId) {
+        Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).SupervisorStderr
+    } else {
+        Join-Path $launcherDir "supervisor.stderr.log"
+    }
 
-    $proc = Start-Process `
-        -FilePath $powershellExe `
-        -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath, "supervise", "-SessionId", $ManagedSessionId) `
+    $proc = Start-RedirectedBackgroundProcess `
+        -CommandPath $powershellExe `
+        -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $PSCommandPath, "-Action", "supervise", "-SessionId", $ManagedSessionId) `
         -WorkingDirectory $projectDir `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput $supervisorLog `
-        -PassThru
+        -StdoutPath $supervisorStdoutLog `
+        -StderrPath $supervisorStderrLog
 
     if ($script:currentRuntimeSceneId) {
         Update-RuntimeSceneManifest @{ supervisor = @{ pid = $proc.Id; status = "running" } }
@@ -2587,6 +2861,7 @@ function Save-SessionState {
     param(
         [string]$ManagedSessionId,
         [int]$BackendPid,
+        [int]$BackendLaunchPid,
         [pscustomobject]$PythonRuntime,
         [string]$BrowserExecutable,
         [int]$BrowserLaunchPid,
@@ -2603,6 +2878,7 @@ function Save-SessionState {
         port = $port
         url = $url
         backendPid = $BackendPid
+        backendLaunchPid = $BackendLaunchPid
         backendStdout = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.BackendStdout } else { $null }
         backendStderr = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.BackendStderr } else { $null }
         pythonCommand = if ($PythonRuntime) { $PythonRuntime.FilePath } else { $null }
@@ -2614,7 +2890,7 @@ function Save-SessionState {
         browserWindowPid = $BrowserWindowPid
         supervisorPid = $SupervisorPid
         supervisorStdout = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.Supervisor } else { $null }
-        supervisorStderr = $null
+        supervisorStderr = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.SupervisorStderr } else { $null }
         runtimeSceneId = $script:currentRuntimeSceneId
         runtimeSceneDir = $script:currentRuntimeSceneDir
         startedAt = (Get-Date).ToString("o")
@@ -2684,6 +2960,7 @@ function Adopt-Or-FocusSession {
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
             -BackendPid $Snapshot.BackendPid `
+            -BackendLaunchPid $Snapshot.BackendPid `
             -PythonRuntime $null `
             -BrowserExecutable $null `
             -BrowserLaunchPid 0 `
@@ -3065,6 +3342,7 @@ function Start-ManagedSession {
             Save-SessionState `
                 -ManagedSessionId $managedSessionId `
                 -BackendPid $backendProc.Id `
+                -BackendLaunchPid $backendProc.LauncherPid `
                 -PythonRuntime $pythonRuntime `
                 -BrowserExecutable $null `
                 -BrowserLaunchPid 0 `
@@ -3088,6 +3366,7 @@ function Start-ManagedSession {
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
             -BackendPid $backendProc.Id `
+            -BackendLaunchPid $backendProc.LauncherPid `
             -PythonRuntime $pythonRuntime `
             -BrowserExecutable $browserExecutable `
             -BrowserLaunchPid $browserInfo.LaunchPid `
@@ -3100,6 +3379,7 @@ function Start-ManagedSession {
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
             -BackendPid $backendProc.Id `
+            -BackendLaunchPid $backendProc.LauncherPid `
             -PythonRuntime $pythonRuntime `
             -BrowserExecutable $browserExecutable `
             -BrowserLaunchPid $browserInfo.LaunchPid `
