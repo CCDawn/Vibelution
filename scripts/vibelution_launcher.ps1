@@ -216,6 +216,7 @@ function Invoke-RuntimeManagerClient {
         [switch]$StopManager
     )
 
+    Ensure-ProjectPythonDependencies
     $pythonRuntime = Resolve-PythonRuntime
     $pythonArgs = @()
     if ($pythonRuntime.PrefixArgs) {
@@ -1527,6 +1528,87 @@ function Resolve-NpmCommand {
     return $npm.Source
 }
 
+function ConvertTo-ProcessArgument {
+    param([AllowNull()][string]$Value)
+
+    $text = [string]$Value
+    if ($text.Length -eq 0) {
+        return '""'
+    }
+    if ($text -notmatch '[\s"]') {
+        return $text
+    }
+
+    $result = '"'
+    $backslashes = 0
+    foreach ($char in $text.ToCharArray()) {
+        if ($char -eq '\') {
+            $backslashes += 1
+            continue
+        }
+        if ($char -eq '"') {
+            if ($backslashes -gt 0) {
+                $result += ('\' * ($backslashes * 2))
+                $backslashes = 0
+            }
+            $result += '\"'
+            continue
+        }
+        if ($backslashes -gt 0) {
+            $result += ('\' * $backslashes)
+            $backslashes = 0
+        }
+        $result += $char
+    }
+    if ($backslashes -gt 0) {
+        $result += ('\' * ($backslashes * 2))
+    }
+    $result += '"'
+    return $result
+}
+
+function ConvertTo-ProcessArgumentString {
+    param([string[]]$ArgumentList = @())
+
+    return (@($ArgumentList) | ForEach-Object { ConvertTo-ProcessArgument -Value $_ }) -join " "
+}
+
+function Invoke-HiddenProcessCapture {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$WorkingDirectory = $projectDir
+    )
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo.FileName = $FilePath
+    $process.StartInfo.Arguments = ConvertTo-ProcessArgumentString -ArgumentList $ArgumentList
+    $process.StartInfo.WorkingDirectory = $WorkingDirectory
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+
+    if (-not $process.Start()) {
+        throw "Failed to start hidden process: $FilePath"
+    }
+
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+    $stdoutTask.Wait()
+    $stderrTask.Wait()
+
+    return [pscustomobject]@{
+        ProcessId = [int]$process.Id
+        ExitCode = [int]$process.ExitCode
+        Stdout = [string]$stdoutTask.Result
+        Stderr = [string]$stderrTask.Result
+    }
+}
+
 function Invoke-NativeCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -1549,19 +1631,18 @@ function Invoke-NativeCommand {
     }
 
     try {
-        $proc = Start-Process `
+        $result = Invoke-HiddenProcessCapture `
             -FilePath $CommandPath `
             -ArgumentList $ArgumentList `
-            -WorkingDirectory (Get-Location).Path `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath `
-            -PassThru
-
-        $proc.WaitForExit()
-
-        $stdout = if (Test-Path $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
-        $stderr = if (Test-Path $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
+            -WorkingDirectory (Get-Location).Path
+        $stdout = $result.Stdout
+        $stderr = $result.Stderr
+        if ($stdout) {
+            [System.IO.File]::WriteAllText($stdoutPath, $stdout, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        }
+        if ($stderr) {
+            [System.IO.File]::WriteAllText($stderrPath, $stderr, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        }
 
         if ($RedirectPath) {
             foreach ($content in @($stdout, $stderr)) {
@@ -1578,7 +1659,7 @@ function Invoke-NativeCommand {
             }
         }
 
-        return [int]$proc.ExitCode
+        return [int]$result.ExitCode
     } finally {
         Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
@@ -1597,19 +1678,18 @@ function Invoke-HiddenNativeCommand {
     $stderrPath = Join-Path $launcherDir "runtime-manager-client-$token.err.log"
 
     try {
-        $proc = Start-Process `
+        $result = Invoke-HiddenProcessCapture `
             -FilePath $CommandPath `
             -ArgumentList $ArgumentList `
-            -WorkingDirectory $projectDir `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $stdoutPath `
-            -RedirectStandardError $stderrPath `
-            -PassThru
-
-        $proc.WaitForExit()
-
-        $stdout = if (Test-Path $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Raw } else { "" }
-        $stderr = if (Test-Path $stderrPath) { Get-Content -LiteralPath $stderrPath -Raw } else { "" }
+            -WorkingDirectory $projectDir
+        $stdout = $result.Stdout
+        $stderr = $result.Stderr
+        if ($stdout) {
+            [System.IO.File]::WriteAllText($stdoutPath, $stdout, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        }
+        if ($stderr) {
+            [System.IO.File]::WriteAllText($stderrPath, $stderr, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        }
 
         if ($stdout) {
             [Console]::Out.Write($stdout)
@@ -1618,7 +1698,7 @@ function Invoke-HiddenNativeCommand {
             [Console]::Error.Write($stderr)
         }
 
-        $exitCode = [int]$proc.ExitCode
+        $exitCode = [int]$result.ExitCode
         if ($exitCode -ne 0) {
             Write-LauncherControlLog `
                 -Event "launcher.runtime_manager_client.failed" `

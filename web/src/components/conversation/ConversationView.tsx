@@ -28,6 +28,41 @@ import {
 } from "./messageSections";
 import styles from "./ConversationView.module.css";
 
+export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
+  return messages
+    .map((message) => {
+      const mentalSnapshot = message.mentalSnapshot;
+      const mentalSignal = mentalSnapshot
+        ? [
+            mentalSnapshot.mood,
+            mentalSnapshot.feeling,
+            mentalSnapshot.whisper,
+            mentalSnapshot.summary,
+            mentalSnapshot.cognitiveState,
+            mentalSnapshot.confidence,
+            mentalSnapshot.sampleSize,
+            mentalSnapshot.interventionCount,
+            mentalSnapshot.updatedAt,
+            mentalSnapshot.source,
+            mentalSnapshot.intervention ?? "",
+            JSON.stringify(mentalSnapshot.metrics ?? {}),
+          ].join(":")
+        : "";
+      const toolSignal = (message.toolCalls ?? [])
+        .map((toolCall) => [toolCall.name, toolCall.status, toolCall.summary ?? ""].join(":"))
+        .join("|");
+      return [
+        message.id,
+        message.content.length,
+        message.thought?.length ?? 0,
+        toolSignal,
+        mentalSignal,
+        message.streaming ? 1 : 0,
+      ].join(":");
+    })
+    .join("|");
+}
+
 type ConversationViewProps = {
   sessionId: string;
   title: string;
@@ -184,18 +219,7 @@ export function ConversationView({
         .find((message) => (message.toolCalls?.length ?? 0) > 0)?.toolCalls ?? [],
     [messages],
   );
-  const timelineScrollSignal = useMemo(
-    () =>
-      messages
-        .map(
-          (message) =>
-            `${message.id}:${message.content.length}:${message.thought?.length ?? 0}:${
-              message.toolCalls?.length ?? 0
-            }:${message.streaming ? 1 : 0}`,
-        )
-        .join("|"),
-    [messages],
-  );
+  const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(messages), [messages]);
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0 || Boolean(lastMessageTimestamp);
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
   const operationLabels = useMemo(
