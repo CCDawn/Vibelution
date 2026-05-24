@@ -6,6 +6,10 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+from config import AppConfig
+from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
+from core.evaluation.chat_review_queue import get_review_item
+from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.ui.workbench import AgentWorkbenchShell
 
@@ -766,6 +770,93 @@ def test_workbench_evolution_history_menu_shows_self_evolution_evidence(monkeypa
     assert "worktree: ready" in printed
     assert "audit: ready" in printed
     assert shell._recent_status == "已返回进化控制台"
+
+
+def test_workbench_chat_dataset_review_uses_positive_negative_discard_terms(monkeypatch, tmp_path):
+    import core.ui.workbench as workbench_module
+
+    config = AppConfig()
+
+    def create_candidate(session_id: str, user_message: str):
+        service = ChatDatasetCaptureService(project_root=tmp_path, config=config)
+        candidate = service.capture_candidate(
+            mode="chat",
+            session_id=session_id,
+            source_log_path=str(tmp_path / "log_info" / f"{session_id}.jsonl"),
+            turns=[
+                ChatTurnRecord(
+                    turn_number=1,
+                    user_message=user_message,
+                    assistant_message="先分析上下文，再给出可验证结论。",
+                    tool_calls=["read_file_tool"],
+                    tool_call_count=1,
+                    had_explicit_conclusion=True,
+                    had_next_action=True,
+                ),
+                ChatTurnRecord(
+                    turn_number=2,
+                    user_message="继续",
+                    assistant_message="已完成复查，结论可以保留。",
+                    tool_calls=["pytest"],
+                    tool_call_count=1,
+                    had_explicit_conclusion=True,
+                    had_next_action=True,
+                ),
+            ],
+        )
+        assert candidate is not None
+        return candidate
+
+    positive_candidate = create_candidate("positive-session", "保留这段成功对话")
+    negative_candidate = create_candidate("negative-session", "这段有错误模式")
+    discard_candidate = create_candidate("discard-session", "这段信息太薄")
+    paths = resolve_chat_dataset_paths(project_root=tmp_path, config=config)
+
+    prompts = iter(
+        [
+            "1",
+            "1",
+            "positive note",
+            "1",
+            "2",
+            "negative note",
+            "skipped_analysis",
+            "reasoning",
+            "先定位失败原因",
+            "展示可验证结论",
+            "1",
+            "3",
+            "discard note",
+            "q",
+        ]
+    )
+    shell = AgentWorkbenchShell(config=config)
+    fake_ui = _FakeUI()
+    shell.ui = fake_ui
+    monkeypatch.setattr(workbench_module, "PROJECT_ROOT", tmp_path, raising=False)
+    monkeypatch.setattr(workbench_module.Prompt, "ask", lambda *args, **kwargs: next(prompts))
+
+    shell._run_chat_dataset_review()
+
+    positive = get_review_item(positive_candidate.candidate_id, paths.review_queue_path)
+    negative = get_review_item(negative_candidate.candidate_id, paths.review_queue_path)
+    discarded = get_review_item(discard_candidate.candidate_id, paths.review_queue_path)
+    printed = "\n".join(str(getattr(args[0], "renderable", args[0])) for args, _kwargs in fake_ui.console.items)
+
+    assert positive is not None and positive["status"] == "positive"
+    assert negative is not None and negative["status"] == "negative"
+    assert discarded is not None and discarded["status"] == "discard"
+    assert negative["reason_code"] == "skipped_analysis"
+    assert negative["error_type"] == "reasoning"
+    assert negative["correct_principle"] == "先定位失败原因"
+    assert negative["ideal_behavior"] == "展示可验证结论"
+    assert "positive:" in printed
+    assert "negative:" in printed
+    assert "discard:" in printed
+    assert "approved:" not in printed
+    assert "rejected:" not in printed
+    assert "已 discard 候选" in printed
+    assert shell._recent_status == "当前没有待审核 chat 候选"
 
 
 def test_workbench_supervised_evolution_prints_progress_events(monkeypatch):
