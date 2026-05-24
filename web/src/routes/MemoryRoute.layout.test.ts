@@ -55,6 +55,43 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('forcedView === "manage"');
   });
 
+  it("shows a priority review queue on the default memory overview", () => {
+    expect(routeSource).toContain("priorityReviewPairs");
+    expect(routeSource).toContain("memoryPairPriority");
+    expect(routeSource).toContain("reviewReasonLabels(copy, item)");
+    expect(routeSource).toContain("memoryPairActionTarget(pair)");
+    expect(routeSource).toContain("styles.reviewQueuePanel");
+    expect(routeSource).toContain("styles.reviewQueueList");
+    expect(routeSource).toContain("styles.reviewReasonPill");
+    expect(routeSource).toContain("copy.reviewQueue");
+    expect(routeSource).toContain("copy.reviewQueueHint");
+    expect(routeSource).toContain("copy.auditMemory");
+    expect(routeSource).toContain("copy.manageMemoryAction");
+    expect(routeSource).toContain("reasonDisabled");
+    expect(routeSource).toContain("reasonOverridden");
+    expect(routeSource).toContain("reasonMissing");
+    expect(routeSource).toContain("reasonTruncated");
+    expect(routeSource).toContain("reasonInPrompt");
+    expect(routeSource).toContain("reasonAgentVisible");
+    expect(routeSource).toContain("reasonUserManaged");
+  });
+
+  it("makes memory management bulk selection and edit preview visible", () => {
+    expect(routeSource).toContain("selectedMemoryKeys");
+    expect(routeSource).toContain("bulkActionPending");
+    expect(routeSource).toContain("toggleVisibleMemorySelection");
+    expect(routeSource).toContain("runBulkMemoryAction");
+    expect(routeSource).toContain("styles.bulkActionBar");
+    expect(routeSource).toContain("styles.itemSelectionRow");
+    expect(routeSource).toContain("styles.itemContentButton");
+    expect(routeSource).toContain("renderMemoryList(flatVisibleItems, copy.noMatches, false, true)");
+    expect(routeSource).toContain("copy.selectedCount");
+    expect(routeSource).toContain("copy.bulkDisable");
+    expect(routeSource).toContain("copy.bulkRestore");
+    expect(routeSource).toContain("styles.editPreviewPanel");
+    expect(routeSource).toContain("styles.editPreviewGrid");
+  });
+
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
     expect(routeSource).toContain("activeItem.agentVisible");
     expect(routeSource).toContain("activeItem.inPrompt");
