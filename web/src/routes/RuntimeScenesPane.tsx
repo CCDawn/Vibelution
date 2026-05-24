@@ -198,6 +198,78 @@ function renderDiagnosticsPanel(diagnostics: LogDiagnostics, lang: "zh" | "en") 
   );
 }
 
+function renderPackageDiagnosisPanel(
+  scene: RuntimeSceneDetail,
+  lang: "zh" | "en",
+  handleOpenRawLog: (sceneId: string, path: string) => void,
+) {
+  const diagnosis = scene.packageDiagnosis;
+  if (!diagnosis) {
+    return null;
+  }
+  const firstSignal = diagnosis.firstSignal;
+  const firstSignalLabel = firstSignal?.eventCode
+    ? `${formatTimestamp(firstSignal.timestamp, lang)} · ${localizeRuntimeSceneText(firstSignal.component, lang)} · ${
+        firstSignal.eventCode
+      }`
+    : lang === "zh"
+      ? "未发现错误或警告信号"
+      : "No error or warning signal";
+  const keyEntries = diagnosis.keyEntries ?? [];
+  const recommendedOrder = diagnosis.recommendedOrder ?? [];
+  return (
+    <section className={styles.packageDiagnosisPanel}>
+      <div className={styles.packageDiagnosisHeader}>
+        <div>
+          <p className={styles.sidebarEyebrow}>{lang === "zh" ? "日志包诊断" : "Package Diagnosis"}</p>
+          <h3>{lang === "zh" ? "先判断周期，再打开证据" : "Assess cycle, then open evidence"}</h3>
+        </div>
+        <span className={severityClassName(diagnosis.severity)}>{severityLabel(diagnosis.severity, lang)}</span>
+      </div>
+      <p className={styles.packageDiagnosisSummary}>{diagnosis.userSummary}</p>
+      <div className={styles.packageDiagnosisGrid}>
+        <article>
+          <span>{lang === "zh" ? "首个信号" : "First signal"}</span>
+          <strong>{firstSignalLabel}</strong>
+          {firstSignal?.message ? <p>{localizeRuntimeSceneText(firstSignal.message, lang)}</p> : null}
+        </article>
+        <article>
+          <span>{lang === "zh" ? "Agent 下一步" : "Agent next step"}</span>
+          <p>{diagnosis.agentNextStep}</p>
+        </article>
+      </div>
+      <div className={styles.packageDiagnosisEntries}>
+        <div>
+          <span>{lang === "zh" ? "推荐阅读顺序" : "Reading order"}</span>
+          <div className={styles.packageReadingOrder}>
+            {recommendedOrder.slice(0, 8).map((path, index) => (
+              <code key={`${path}-${index}`}>{path}</code>
+            ))}
+          </div>
+        </div>
+        {keyEntries.length > 0 ? (
+          <div>
+            <span>{lang === "zh" ? "关键入口" : "Key entries"}</span>
+            <div className={styles.packageKeyEntries}>
+              {keyEntries.slice(0, 6).map((entry) => (
+                <button
+                  key={entry.path}
+                  type="button"
+                  className={styles.packageKeyEntryButton}
+                  onClick={() => handleOpenRawLog(scene.runtimeSceneId, entry.path)}
+                >
+                  <strong>{localizeRuntimeSceneText(entry.label, lang)}</strong>
+                  <span>{entry.path}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function formatTimestamp(value: string, lang: "zh" | "en") {
   const text = String(value || "").trim();
   if (!text) {
@@ -338,6 +410,22 @@ const runtimeSceneTokenZhMap: Record<string, string> = {
   window: "窗口",
   browser_window_closed: "应用窗口已关闭",
   "app window closed": "应用窗口已关闭",
+  "Lifecycle package summary": "日志包摘要",
+  "Package index": "包索引",
+  "Unified timeline": "统一时间线",
+  "Lifecycle events": "生命周期事件",
+  "First signal evidence": "首个信号证据",
+  "Frontend build log": "前端构建日志",
+  "Backend stdout": "后端标准输出",
+  "Backend stderr": "后端错误输出",
+  "Browser log": "浏览器日志",
+  "Supervisor log": "监督器日志",
+  "Supervisor stderr": "监督器错误输出",
+  "Conversation child log": "对话子日志",
+  "Agent child log": "Agent 子日志",
+  "Component event stream": "组件事件流",
+  "Raw log": "原始日志",
+  Artifact: "产物",
 };
 
 const runtimeSceneFieldZhMap: Record<string, string> = {
@@ -797,6 +885,8 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
             {previewActions}
           </div>
         </div>
+
+        {renderPackageDiagnosisPanel(scene, lang, handleOpenRawLog)}
 
         <div className={styles.sceneEvidenceStrip}>
           <span>

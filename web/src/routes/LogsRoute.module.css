@@ -1039,6 +1039,136 @@
   color: var(--fg-primary);
 }
 
+.packageDiagnosisPanel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.packageDiagnosisHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.packageDiagnosisHeader h3,
+.packageDiagnosisSummary,
+.packageDiagnosisGrid p {
+  margin: 0;
+}
+
+.packageDiagnosisHeader h3 {
+  color: var(--fg-primary);
+  font-size: 0.96rem;
+  line-height: 1.25;
+}
+
+.packageDiagnosisSummary {
+  color: var(--fg-secondary);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.packageDiagnosisGrid,
+.packageDiagnosisEntries {
+  display: grid;
+  gap: 10px;
+}
+
+.packageDiagnosisGrid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+}
+
+.packageDiagnosisGrid article,
+.packageDiagnosisEntries > div {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.packageDiagnosisGrid span,
+.packageDiagnosisEntries span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+}
+
+.packageDiagnosisGrid strong,
+.packageDiagnosisGrid p {
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.packageReadingOrder,
+.packageKeyEntries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.packageReadingOrder code {
+  max-width: 100%;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: var(--accent-cool);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.packageKeyEntryButton {
+  display: grid;
+  gap: 3px;
+  min-width: min(220px, 100%);
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.packageKeyEntryButton:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+}
+
+.packageKeyEntryButton strong,
+.packageKeyEntryButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packageKeyEntryButton strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.packageKeyEntryButton span {
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
 .sceneTechnicalDetails {
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -1352,7 +1482,8 @@
   .sceneDetailHeader,
   .sceneDetailHeaderCompact,
   .sceneInfoGrid,
-  .diagnosticHintGrid {
+  .diagnosticHintGrid,
+  .packageDiagnosisGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 
