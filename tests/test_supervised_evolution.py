@@ -76,6 +76,12 @@ def _fake_result(status: str, reason: str, worktree_name: str) -> HarnessResult:
     )
 
 
+def _fake_result_with_summary(status: str, reason: str, worktree_name: str, **summary_overrides) -> HarnessResult:
+    result = _fake_result(status, reason, worktree_name)
+    result.evolution_summary.update(summary_overrides)
+    return result
+
+
 def _fake_promotion_gate(decision: str = "PROMOTE"):
     return SimpleNamespace(
         collection_id="mixed_readiness_gate",
@@ -369,7 +375,27 @@ def test_run_supervised_evolution_session_records_dynamic_and_impossible_case_sc
 
     def fake_runner(**kwargs):
         worktree_name = str(kwargs["prompt"]).replace(" ", "_")
-        return _fake_result("success", "ok", worktree_name)
+        if "dynamic" in str(kwargs["prompt"]):
+            return _fake_result_with_summary(
+                "success",
+                "ok",
+                worktree_name,
+                final_state={
+                    "calendar_event": "rescheduled",
+                    "verified_after_change": True,
+                    "extra_runtime_detail": "ignored",
+                },
+            )
+        return _fake_result_with_summary(
+            "success",
+            "ok",
+            worktree_name,
+            infeasible_outcome={
+                "status": "infeasible",
+                "reason": "missing_permission",
+                "reported_to_user": True,
+            },
+        )
 
     decision = run_supervised_evolution_session(
         bundle_name=DEFAULT_BUNDLE_NAME,
@@ -383,25 +409,39 @@ def test_run_supervised_evolution_session_records_dynamic_and_impossible_case_sc
 
     assert dynamic.case_type == "dynamic_replanning"
     assert "dynamic_replanning_case" in dynamic.failure_taxonomy
-    assert "post_adaptation_verification_missing" in dynamic.failure_taxonomy
+    assert "post_adaptation_verification_missing" not in dynamic.failure_taxonomy
     assert dynamic.intake_provenance["case_type"] == "dynamic_replanning"
     assert dynamic.intake_provenance["provenance"]["source_trace_id"] == "dynamic_trace_001"
     assert dynamic.intake_provenance["expected_final_state"]["verified_after_change"] is True
     assert dynamic.intake_provenance["dynamic_events"][0]["event"] == "deadline_changed"
+    assert dynamic.intake_provenance["expected_outcome_verification"]["candidate"]["status"] == "matched"
+    assert dynamic.intake_provenance["expected_outcome_verification"]["candidate"]["actual_source"] == "evolution_summary.final_state"
     assert dynamic.score_breakdown["basis"]["source"] == "derived_from_harness_metrics"
+    assert dynamic.score_breakdown["candidate"]["expected_outcome_score"] == 1.0
     assert Path(dynamic.evidence_paths["baseline_report_path"]).exists()
+    assert dynamic.evidence_paths["expected_outcome_verification_sources"]["candidate"] == "evolution_summary.final_state"
 
     assert impossible.case_type == "impossible_task"
     assert "impossible_task_case" in impossible.failure_taxonomy
     assert impossible.intake_provenance["case_type"] == "impossible_task"
     assert impossible.intake_provenance["provenance"]["source_trace_id"] == "impossible_trace_001"
     assert impossible.intake_provenance["expected_infeasible_outcome"]["status"] == "infeasible"
+    assert impossible.intake_provenance["expected_outcome_verification"]["candidate"]["status"] == "matched"
+    assert impossible.score_breakdown["candidate"]["expected_outcome_score"] == 1.0
     assert Path(impossible.evidence_paths["candidate_report_path"]).exists()
 
     policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
     policy_by_case = {case["case_id"]: case for case in policy_record["case_evidence"]}
     assert policy_by_case["dynamic_calendar_change"]["case_type"] == "dynamic_replanning"
+    assert (
+        policy_by_case["dynamic_calendar_change"]["intake_provenance"]["expected_outcome_verification"]["candidate"]["status"]
+        == "matched"
+    )
     assert policy_by_case["impossible_missing_permission"]["case_type"] == "impossible_task"
+    assert (
+        policy_by_case["impossible_missing_permission"]["intake_provenance"]["expected_outcome_verification"]["candidate"]["status"]
+        == "matched"
+    )
 
     proposal_payloads = [
         json.loads(Path(path).read_text(encoding="utf-8"))
@@ -409,7 +449,86 @@ def test_run_supervised_evolution_session_records_dynamic_and_impossible_case_sc
     ]
     proposal_by_case = {proposal["case_id"]: proposal for proposal in proposal_payloads}
     assert proposal_by_case["dynamic_calendar_change"]["case_type"] == "dynamic_replanning"
+    assert (
+        proposal_by_case["dynamic_calendar_change"]["intake_provenance"]["expected_outcome_verification"]["candidate"]["status"]
+        == "matched"
+    )
     assert proposal_by_case["impossible_missing_permission"]["case_type"] == "impossible_task"
+    assert (
+        proposal_by_case["impossible_missing_permission"]["intake_provenance"]["expected_outcome_verification"]["candidate"]["status"]
+        == "matched"
+    )
+
+
+def test_run_supervised_evolution_session_scores_expected_outcome_mismatch(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "benchmark": "dry",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "cases": [
+                    {
+                        "case_id": "dynamic_candidate_mismatch",
+                        "case_type": "dynamic_replanning",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "baseline dynamic",
+                        "candidate_prompt": "candidate dynamic",
+                        "provenance": {
+                            "source": "stt_arena_fixture",
+                            "source_trace_id": "dynamic_trace_mismatch",
+                        },
+                        "dynamic_events": [{"at_turn": 2, "event": "deadline_changed"}],
+                        "expected_final_state": {
+                            "calendar_event": "rescheduled",
+                            "verified_after_change": True,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_runner(**kwargs):
+        if kwargs["prompt"] == "baseline dynamic":
+            return _fake_result_with_summary(
+                "success",
+                "baseline ok",
+                "baseline_dynamic",
+                final_state={"calendar_event": "rescheduled", "verified_after_change": True},
+            )
+        return _fake_result_with_summary(
+            "success",
+            "candidate ok",
+            "candidate_dynamic",
+            final_state={"calendar_event": "not_rescheduled", "verified_after_change": False},
+        )
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    case_summary = decision.case_summaries[0]
+    verification = case_summary.intake_provenance["expected_outcome_verification"]
+
+    assert verification["baseline"]["status"] == "matched"
+    assert verification["candidate"]["status"] == "mismatch"
+    assert verification["candidate"]["mismatch_paths"] == ["calendar_event", "verified_after_change"]
+    assert "candidate_expected_final_state_mismatch" in case_summary.failure_taxonomy
+    assert "post_adaptation_verification_missing" not in case_summary.failure_taxonomy
+    assert case_summary.score_breakdown["baseline"]["expected_outcome_score"] == 1.0
+    assert case_summary.score_breakdown["candidate"]["expected_outcome_score"] == 0.0
+    assert case_summary.score_breakdown["delta"]["expected_outcome_score"] == -1.0
+    assert case_summary.score_breakdown["candidate"]["semantic_score"] == 0.0
+    assert case_summary.score_breakdown["candidate"]["overall_score"] < case_summary.score_breakdown["baseline"]["overall_score"]
 
 
 def test_supervised_run_report_paths_are_safe_for_unsafe_case_id(tmp_path: Path):

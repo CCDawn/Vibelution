@@ -379,6 +379,14 @@ def _build_case_summaries(
             signal = "candidate_improved"
         elif baseline_status == candidate_status == "success":
             signal = "stable_success"
+        case_payload = case_payloads.get(case_id) or {}
+        case_type = _case_type_from_payload(case_payload)
+        expected_outcome_verification = _build_expected_outcome_verification(
+            case_payload=case_payload,
+            case_type=case_type,
+            baseline=baseline,
+            candidate=candidate,
+        )
         difference_summary, difference_metrics, difference_reasons = _build_case_difference_diagnostic(
             baseline=baseline,
             candidate=candidate,
@@ -391,10 +399,13 @@ def _build_case_summaries(
             baseline_status=baseline_status,
             candidate_status=candidate_status,
             difference_metrics=difference_metrics,
+            expected_outcome_verification=expected_outcome_verification,
         )
-        case_payload = case_payloads.get(case_id) or {}
-        case_type = _case_type_from_payload(case_payload)
-        schema_taxonomy = _build_case_schema_taxonomy(case_payload, case_type)
+        schema_taxonomy = _build_case_schema_taxonomy(
+            case_payload,
+            case_type,
+            expected_outcome_verification=expected_outcome_verification,
+        )
         failure_taxonomy = _build_failure_taxonomy(
             difference_reasons,
             difference_metrics,
@@ -402,6 +413,11 @@ def _build_case_summaries(
         )
         evidence_paths = _build_case_evidence_paths(baseline=baseline, candidate=candidate)
         intake_provenance = _build_case_intake_provenance(case_payload)
+        if expected_outcome_verification:
+            intake_provenance["expected_outcome_verification"] = expected_outcome_verification
+            evidence_paths["expected_outcome_verification_sources"] = _expected_outcome_verification_sources(
+                expected_outcome_verification
+            )
         summaries.append(
             CaseDecisionSummary(
                 case_id=case_id,
@@ -430,19 +446,201 @@ def _case_type_from_payload(case_payload: Dict[str, Any]) -> str:
     return STATIC_CASE_TYPE
 
 
-def _build_case_schema_taxonomy(case_payload: Dict[str, Any], case_type: str) -> List[str]:
+def _build_case_schema_taxonomy(
+    case_payload: Dict[str, Any],
+    case_type: str,
+    *,
+    expected_outcome_verification: Optional[Dict[str, Any]] = None,
+) -> List[str]:
     taxonomy: List[str] = []
     if case_type == DYNAMIC_REPLANNING_CASE_TYPE:
         taxonomy.append("dynamic_replanning_case")
         if not isinstance(case_payload.get("expected_final_state"), dict) or not case_payload.get("expected_final_state"):
             taxonomy.append("expected_final_state_missing")
-        if not case_payload.get("post_adaptation_verification"):
+        if not case_payload.get("post_adaptation_verification") and not _has_expected_outcome_actual_evidence(
+            expected_outcome_verification
+        ):
             taxonomy.append("post_adaptation_verification_missing")
     elif case_type == IMPOSSIBLE_TASK_CASE_TYPE:
         taxonomy.append("impossible_task_case")
         if not isinstance(case_payload.get("expected_infeasible_outcome"), dict) or not case_payload.get("expected_infeasible_outcome"):
             taxonomy.append("expected_infeasible_outcome_missing")
+    taxonomy.extend(_expected_outcome_failure_taxonomy(expected_outcome_verification))
+    return list(dict.fromkeys(taxonomy))
+
+
+def _build_expected_outcome_verification(
+    *,
+    case_payload: Dict[str, Any],
+    case_type: str,
+    baseline: Optional[SupervisedEvolutionRun],
+    candidate: Optional[SupervisedEvolutionRun],
+) -> Dict[str, Any]:
+    if case_type == DYNAMIC_REPLANNING_CASE_TYPE:
+        expected_key = "expected_final_state"
+        actual_keys = ("final_state", "post_adaptation_final_state", "observed_final_state")
+        taxonomy_stem = "expected_final_state"
+    elif case_type == IMPOSSIBLE_TASK_CASE_TYPE:
+        expected_key = "expected_infeasible_outcome"
+        actual_keys = ("infeasible_outcome", "observed_infeasible_outcome")
+        taxonomy_stem = "expected_infeasible_outcome"
+    else:
+        return {}
+
+    expected = case_payload.get(expected_key)
+    if not isinstance(expected, dict) or not expected:
+        return {
+            "schema_version": 1,
+            "case_type": case_type,
+            "expected_key": expected_key,
+            "taxonomy_stem": taxonomy_stem,
+            "status": "missing_expected",
+            "baseline": {"status": "not_checked", "passed": False},
+            "candidate": {"status": "not_checked", "passed": False},
+        }
+
+    baseline_result = _verify_role_expected_outcome(
+        run=baseline,
+        expected=expected,
+        actual_keys=actual_keys,
+    )
+    candidate_result = _verify_role_expected_outcome(
+        run=candidate,
+        expected=expected,
+        actual_keys=actual_keys,
+    )
+    return {
+        "schema_version": 1,
+        "case_type": case_type,
+        "expected_key": expected_key,
+        "taxonomy_stem": taxonomy_stem,
+        "expected": expected,
+        "baseline": baseline_result,
+        "candidate": candidate_result,
+    }
+
+
+def _verify_role_expected_outcome(
+    *,
+    run: Optional[SupervisedEvolutionRun],
+    expected: Dict[str, Any],
+    actual_keys: tuple[str, ...],
+) -> Dict[str, Any]:
+    if run is None:
+        return {
+            "status": "missing_run",
+            "passed": False,
+            "actual_source": "",
+            "actual": {},
+            "missing_paths": [],
+            "mismatch_paths": [],
+        }
+    actual, source = _expected_outcome_actual_from_run(run, actual_keys)
+    if not actual:
+        return {
+            "status": "missing_evidence",
+            "passed": False,
+            "actual_source": "",
+            "actual": {},
+            "missing_paths": [],
+            "mismatch_paths": [],
+        }
+    missing_paths: List[str] = []
+    mismatch_paths: List[str] = []
+    _collect_expected_mismatches(expected, actual, path="", missing_paths=missing_paths, mismatch_paths=mismatch_paths)
+    passed = not missing_paths and not mismatch_paths
+    return {
+        "status": "matched" if passed else "mismatch",
+        "passed": passed,
+        "actual_source": source,
+        "actual": actual,
+        "missing_paths": missing_paths,
+        "mismatch_paths": mismatch_paths,
+    }
+
+
+def _expected_outcome_actual_from_run(
+    run: SupervisedEvolutionRun,
+    actual_keys: tuple[str, ...],
+) -> tuple[Dict[str, Any], str]:
+    summary = run.evolution_summary if isinstance(run.evolution_summary, dict) else {}
+    for key in actual_keys:
+        value = summary.get(key)
+        if isinstance(value, dict) and value:
+            return value, f"evolution_summary.{key}"
+    supervised = summary.get("supervised") if isinstance(summary.get("supervised"), dict) else {}
+    for key in actual_keys:
+        value = supervised.get(key)
+        if isinstance(value, dict) and value:
+            return value, f"evolution_summary.supervised.{key}"
+    return {}, ""
+
+
+def _collect_expected_mismatches(
+    expected: Any,
+    actual: Any,
+    *,
+    path: str,
+    missing_paths: List[str],
+    mismatch_paths: List[str],
+) -> None:
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            mismatch_paths.append(path or "$")
+            return
+        for key, expected_value in expected.items():
+            child_path = f"{path}.{key}" if path else str(key)
+            if key not in actual:
+                missing_paths.append(child_path)
+                continue
+            _collect_expected_mismatches(
+                expected_value,
+                actual.get(key),
+                path=child_path,
+                missing_paths=missing_paths,
+                mismatch_paths=mismatch_paths,
+            )
+        return
+    if expected != actual:
+        mismatch_paths.append(path or "$")
+
+
+def _has_expected_outcome_actual_evidence(verification: Optional[Dict[str, Any]]) -> bool:
+    if not verification:
+        return False
+    for role in ("baseline", "candidate"):
+        result = verification.get(role)
+        if isinstance(result, dict) and result.get("actual_source"):
+            return True
+    return False
+
+
+def _expected_outcome_failure_taxonomy(verification: Optional[Dict[str, Any]]) -> List[str]:
+    if not verification:
+        return []
+    taxonomy_stem = str(verification.get("taxonomy_stem") or "expected_outcome").strip() or "expected_outcome"
+    taxonomy: List[str] = []
+    if verification.get("status") == "missing_expected":
+        return [f"{taxonomy_stem}_missing"]
+    for role in ("baseline", "candidate"):
+        result = verification.get(role)
+        if not isinstance(result, dict):
+            continue
+        status = str(result.get("status") or "")
+        if status in {"missing_run", "missing_evidence"}:
+            taxonomy.append(f"{role}_{taxonomy_stem}_verification_missing")
+        elif status == "mismatch":
+            taxonomy.append(f"{role}_{taxonomy_stem}_mismatch")
     return taxonomy
+
+
+def _expected_outcome_verification_sources(verification: Dict[str, Any]) -> Dict[str, str]:
+    sources: Dict[str, str] = {}
+    for role in ("baseline", "candidate"):
+        result = verification.get(role)
+        if isinstance(result, dict):
+            sources[role] = str(result.get("actual_source") or "")
+    return sources
 
 
 def _build_case_intake_provenance(case_payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -479,12 +677,18 @@ def _build_case_score_breakdown(
     baseline_status: str,
     candidate_status: str,
     difference_metrics: Dict[str, Any],
+    expected_outcome_verification: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     baseline_metrics = _extract_run_metrics(baseline) if baseline else {}
     candidate_metrics = _extract_run_metrics(candidate) if candidate else {}
 
     baseline_scores = _score_run_components(baseline_status, baseline_metrics)
     candidate_scores = _score_run_components(candidate_status, candidate_metrics)
+    _apply_expected_outcome_scores(
+        baseline_scores,
+        candidate_scores,
+        expected_outcome_verification=expected_outcome_verification,
+    )
     keys = sorted(set(baseline_scores) | set(candidate_scores))
     delta = {
         key: round(float(candidate_scores.get(key, 0.0)) - float(baseline_scores.get(key, 0.0)), 3)
@@ -502,6 +706,38 @@ def _build_case_score_breakdown(
     }
 
 
+def _apply_expected_outcome_scores(
+    baseline_scores: Dict[str, float],
+    candidate_scores: Dict[str, float],
+    *,
+    expected_outcome_verification: Optional[Dict[str, Any]],
+) -> None:
+    if not expected_outcome_verification:
+        return
+    for role, scores in (("baseline", baseline_scores), ("candidate", candidate_scores)):
+        result = expected_outcome_verification.get(role)
+        if not isinstance(result, dict):
+            continue
+        if result.get("status") in {"not_checked"}:
+            continue
+        score = 1.0 if bool(result.get("passed")) else 0.0
+        scores["expected_outcome_score"] = score
+        scores["semantic_score"] = score
+        scores["overall_score"] = _overall_score(scores)
+
+
+def _overall_score(scores: Dict[str, float]) -> float:
+    component_keys = [
+        "final_state_score",
+        "side_effect_score",
+        "trace_score",
+        "safety_score",
+        "semantic_score",
+    ]
+    values = [float(scores.get(key, 0.0)) for key in component_keys]
+    return round(sum(values) / len(values), 3)
+
+
 def _score_run_components(status: str, metrics: Dict[str, Any]) -> Dict[str, float]:
     if status == "missing":
         return {
@@ -517,25 +753,15 @@ def _score_run_components(status: str, metrics: Dict[str, Any]) -> Dict[str, flo
     trace_score = 0.0 if _has_restart_miss(metrics) or bool(metrics.get("llm_failure_detected")) else 1.0
     safety_score = 0.0 if bool(metrics.get("commit_detected")) else 1.0
     semantic_score = final_state_score
-    overall_score = round(
-        (
-            final_state_score
-            + side_effect_score
-            + trace_score
-            + safety_score
-            + semantic_score
-        )
-        / 5,
-        3,
-    )
-    return {
+    scores = {
         "final_state_score": final_state_score,
         "side_effect_score": side_effect_score,
         "trace_score": trace_score,
         "safety_score": safety_score,
         "semantic_score": semantic_score,
-        "overall_score": overall_score,
     }
+    scores["overall_score"] = _overall_score(scores)
+    return scores
 
 
 def _build_failure_taxonomy(
