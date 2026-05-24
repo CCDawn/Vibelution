@@ -1,3 +1,4 @@
+import base64
 import copy
 import json
 import shutil
@@ -2716,6 +2717,12 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     (tmp_path / "core" / "web" / "services" / "session_service.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
 
     class DummyAgent:
         def seed_chat_history(self, messages):
@@ -2755,8 +2762,8 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     monkeypatch.setattr(session_service, "create_chat_agent", lambda: DummyAgent())
     monkeypatch.setattr(
         session_service,
-        "_schedule_session_turn",
-        lambda context: session_service._run_session_turn(context),
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
     )
 
     response = client.post(
@@ -2791,6 +2798,238 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     assert payload["activeTask"]["latestSummary"] == "已完成网页对话提交接线。"
     assert payload["activeTask"]["changedFiles"] == ["core/web/services/session_service.py"]
     assert payload["activeTask"]["verificationStatus"] == "passed"
+    turn_events = [
+        (args[2], kwargs)
+        for args, kwargs in recorded_scene_events
+        if len(args) >= 3 and str(args[2]).startswith("conversation.turn.")
+    ]
+    event_codes = [event_code for event_code, _kwargs in turn_events]
+    for expected in [
+        "conversation.turn.started",
+        "conversation.turn.scheduled",
+        "conversation.turn.worker_started",
+        "conversation.turn.ui_capture_started",
+        "conversation.turn.agent_created",
+        "conversation.turn.history_seeded",
+        "conversation.turn.agent_turn_started",
+        "conversation.turn.agent_turn_returned",
+        "conversation.turn.terminal_result",
+        "conversation.turn.capture_attached",
+        "conversation.turn.result_persisted",
+        "conversation.turn.worker_finished",
+    ]:
+        assert expected in event_codes
+    persisted_event = next(kwargs for event_code, kwargs in turn_events if event_code == "conversation.turn.result_persisted")
+    assert persisted_event["outcome"] == "completed"
+    assert persisted_event["fields"]["sessionId"] == "session-live"
+    assert persisted_event["fields"]["assistantTextLength"] == len("已完成网页对话提交接线。")
+    assert persisted_event["child_log_path"] == "conversations/session-live-turns.jsonl"
+
+
+def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    content = "修复中文编码：runtime circuit breaker validation ping"
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": content},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-1]["content"] == content
+
+    state = load_chat_state(tmp_path)
+    persisted = state["conversations"][0]["messages"][-1]
+    assert persisted["role"] == "user"
+    assert persisted["content"] == content
+
+    workspace_log = tmp_path / "workspace" / "sessions" / "session-live" / "logs" / "conversation.jsonl"
+    log_records = [json.loads(line) for line in workspace_log.read_text(encoding="utf-8").splitlines()]
+    assert log_records[-1]["content"] == content
+
+
+def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    content = "请继续检查中文输入链路"
+    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "???????:runtime circuit breaker validation ping", "contentUtf8Base64": encoded},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-1]["content"] == content
+    state = load_chat_state(tmp_path)
+    assert state["conversations"][0]["messages"][-1]["content"] == content
+
+
+def test_submit_session_message_rejects_encoding_replacement_pollution(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "???????:runtime circuit breaker validation ping"},
+    )
+
+    assert response.status_code == 422
+    assert "编码损坏" in response.json()["detail"]
+    state = load_chat_state(tmp_path)
+    assert [item["content"] for item in state["conversations"][0]["messages"]] == [
+        "继续前端开发",
+        "<think>internal</think>\n\n已经接到真实状态了。",
+    ]
+
+
+def test_submit_session_message_ignores_non_meaningful_user_message_for_prompt_and_task(tmp_path, monkeypatch):
+    (tmp_path / "web" / "src" / "routes").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "web" / "src" / "routes" / "ChatCodingRoute.tsx").write_text("export {};\n", encoding="utf-8")
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "session-live-coding-task",
+            "kind": "coding",
+            "status": "reading",
+            "title": "继续前端开发",
+            "goal": "继续前端开发",
+            "read_files": ["web/src/routes/ChatCodingRoute.tsx"],
+            "default_file_context": "web/src/routes/ChatCodingRoute.tsx",
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    recorded_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    captured: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            captured["seeded"] = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            captured["prompt"] = initial_prompt
+            return {
+                "status": "completed",
+                "summary": "继续前端开发",
+                "raw_output": "继续前端开发",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "?"},
+    )
+
+    assert response.status_code == 202
+    assert captured["prompt"] == "继续前端开发"
+    assert all(item["content"] != "?" for item in captured["seeded"])
+    payload = response.json()
+    assert payload["activeTask"]["goal"] == "继续前端开发"
+    assert payload["activeTask"]["title"] == "继续前端开发"
+    event_codes = [args[2] for args, _kwargs in recorded_events]
+    assert "conversation.user_message_filtered" in event_codes
+
+
+def test_submit_session_message_continue_uses_previous_meaningful_goal_not_punctuation(tmp_path, monkeypatch):
+    (tmp_path / "core" / "web" / "services").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "core" / "web" / "services" / "session_service.py").write_text("pass\n", encoding="utf-8")
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "session-live-coding-task",
+            "kind": "coding",
+            "status": "reading",
+            "title": "修复对话消息流程",
+            "goal": "修复对话消息流程",
+            "read_files": ["core/web/services/session_service.py"],
+            "default_file_context": "core/web/services/session_service.py",
+        },
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"].append(
+        {"role": "user", "content": "?", "timestamp": "2026-05-18T11:57:00"}
+    )
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    captured: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            captured["seeded"] = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            captured["prompt"] = initial_prompt
+            return {
+                "status": "completed",
+                "summary": "修复对话消息流程",
+                "raw_output": "修复对话消息流程",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续"},
+    )
+
+    assert response.status_code == 202
+    assert captured["prompt"] == "继续完成上一任务：修复对话消息流程"
+    assert all(item["content"] != "?" for item in captured["seeded"])
+
+
+def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallback(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    content = "编辑后保留中文"
+    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={
+            "messageId": "session-live-message-1",
+            "content": "???????:runtime circuit breaker validation ping",
+            "contentUtf8Base64": encoded,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-1]["content"] == content
+    state = load_chat_state(tmp_path)
+    assert state["conversations"][0]["messages"][-1]["content"] == content
 
 
 def test_edit_resubmit_session_message_truncates_following_history_and_starts_turn(tmp_path, monkeypatch):
@@ -2906,6 +3145,119 @@ def test_chat_turn_registers_as_work_run_until_finished(tmp_path, monkeypatch):
     latest_chat = finished_summary["workRuns"]["latest"]["chat_turn"]
     assert latest_chat["runId"] == turn_id
     assert latest_chat["status"] == "completed"
+
+
+def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "解释当前状态"},
+    )
+
+    assert response.status_code == 202
+    started_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn", "conversation.turn.started")
+    ]
+    assert started_events
+    fields = started_events[-1][1]["fields"]
+    active_chat = session_service.load_chat_turn_work_run_summary()["active"]
+    assert fields["sessionId"] == "session-live"
+    assert fields["turnId"] == active_chat["runId"]
+    assert fields["leaseCount"] == 1
+
+
+def test_edit_resubmit_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={"messageId": "session-live-message-1", "content": "编辑后的需求"},
+    )
+
+    assert response.status_code == 202
+    started_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn", "conversation.turn.started")
+    ]
+    assert started_events
+    fields = started_events[-1][1]["fields"]
+    active_chat = session_service.load_chat_turn_work_run_summary()["active"]
+    assert fields["sessionId"] == "session-live"
+    assert fields["turnId"] == active_chat["runId"]
+    assert fields["userMessageChars"] == len("编辑后的需求")
+
+
+def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    class DummyAgent:
+        def set_turn_interrupt_checker(self, checker):
+            self.checker = checker
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "已解释当前状态。",
+                "raw_output": "已解释当前状态。",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda workspace_path=None: DummyAgent())
+    turn_control = session_service._create_session_turn_control("session-live")
+    session_service._set_session_running("session-live", True, turn_id=turn_control.turn_id, leases=["readonly_chat"])
+    try:
+        session_service._run_session_turn(
+            {
+                "session_id": "session-live",
+                "turn_id": turn_control.turn_id,
+                "turn_control": turn_control,
+                "user_message": "解释当前状态",
+                "history_messages": [],
+                "mental_model_enabled": False,
+            }
+        )
+    finally:
+        session_service._set_session_running("session-live", False, turn_id=turn_control.turn_id)
+        session_service._clear_session_turn_control("session-live", turn_id=turn_control.turn_id)
+
+    agent_created_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn_agent_created", "conversation.turn.agent_created")
+    ]
+    assert agent_created_events
+    fields = agent_created_events[-1][1]["fields"]
+    assert fields["sessionId"] == "session-live"
+    assert fields["turnId"] == turn_control.turn_id
+    assert fields["agentType"] == "DummyAgent"
 
 
 def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
@@ -3146,6 +3498,12 @@ def test_submit_session_message_rejects_blank_message_without_mutating_session(t
 def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
 
     def fail_schedule(context):
         raise RuntimeError("scheduler unavailable")
@@ -3170,6 +3528,10 @@ def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypa
     assert latest_run["errorType"] == "RuntimeError"
     assert latest_run["userMessage"] == "继续检查调度失败恢复"
     assert "scheduler unavailable" in latest_run["error"]
+    event_codes = [args[2] for args, _kwargs in recorded_scene_events if len(args) >= 3]
+    assert "conversation.turn.started" in event_codes
+    assert "conversation.turn.scheduled" in event_codes
+    assert "conversation.turn.failure_persisted" in event_codes
 
 
 def test_submit_session_message_write_intent_rejects_self_evolution_lease(tmp_path, monkeypatch):
