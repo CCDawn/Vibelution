@@ -1,6 +1,6 @@
 .route {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--surface-page, rgba(18, 20, 22, 0.74));
@@ -94,6 +94,91 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--route-summary-gap);
   padding: 10px 14px 0;
+}
+
+.agentScopeBar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+}
+
+.scopeCopy {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.scopeCopy strong {
+  color: var(--fg-primary);
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeCopy span {
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scopeSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 210px;
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+}
+
+.scopeSelect select {
+  min-width: 132px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  color: var(--fg-primary);
+}
+
+.scopeStats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+}
+
+.scopeStats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-input-strong, rgba(14, 17, 20, 0.72));
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.scopeStats strong {
+  color: var(--fg-primary);
+  font-weight: 650;
 }
 
 .summaryCard,
@@ -663,11 +748,25 @@
   }
 
   .summaryGrid,
+  .agentScopeBar,
+  .scopeCopy,
   .workspace,
   .readinessPanel,
   .resultSummaryGrid,
   .metaGrid {
     grid-template-columns: 1fr;
+  }
+
+  .scopeSelect {
+    width: 100%;
+  }
+
+  .scopeSelect select {
+    width: 100%;
+  }
+
+  .scopeStats {
+    justify-content: flex-start;
   }
 
   .workspace {

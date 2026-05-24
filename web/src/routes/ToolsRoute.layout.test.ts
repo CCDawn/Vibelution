@@ -15,7 +15,7 @@ describe("ToolsRoute layout contract", () => {
 
     expect(readinessIndex).toBeGreaterThan(0);
     expect(schemaIndex).toBeGreaterThan(readinessIndex);
-    expect(routeSource).toContain("toolReadinessCards(activeTool, t)");
+    expect(routeSource).toContain("toolReadinessCards(activeTool, activeScopeState");
     expect(routeSource).toContain("readinessTone");
   });
 
@@ -25,6 +25,15 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("styles.resultSummaryGrid");
     expect(routeSource).toContain("testResultSummaryCards(testResult, t)");
     expect(routeSource).toContain("styles.resultCard");
+  });
+
+  it("supports agent-scoped tool lists and test requests", () => {
+    expect(routeSource).toContain("activeAgentScopeId");
+    expect(routeSource).toContain("toolsQuery.data?.agentScopes");
+    expect(routeSource).toContain("styles.agentScopeBar");
+    expect(routeSource).toContain("scopeStateForTool(tool, activeAgentScopeId)");
+    expect(routeSource).toContain("JSON.stringify({ args: {}, agentScope: payload.agentScopeId })");
+    expect(routeSource).toContain("testMutation.mutate({ toolId: activeTool.id, agentScopeId: activeAgentScope.id })");
   });
 
   it("keeps test controls and result panels in normal document flow", () => {

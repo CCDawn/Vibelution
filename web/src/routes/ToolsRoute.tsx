@@ -6,6 +6,8 @@ import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
   GeneratedToolDeleteResponse,
+  ToolAgentScopeState,
+  ToolAgentScopeSummary,
   ToolRegistryItem,
   ToolRegistryPayload,
   ToolTestResponse,
@@ -23,6 +25,7 @@ const FILTERS: ToolFilter[] = ["all", "built_in", "generated", "llm", "enabled"]
 const TOOLS_LEFT_PANEL_WIDTH_KEY = "vibelution.tools.left-panel-width";
 const TOOLS_LEFT_PANEL_BOUNDS = { min: 260, max: 520 };
 const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
+const MAIN_AGENT_SCOPE_ID = "main_agent";
 
 function displaySource(source: string, lang: string) {
   if (source === "built_in") {
@@ -45,6 +48,19 @@ function statusTone(tool: ToolRegistryItem) {
     return "enabled";
   }
   return "idle";
+}
+
+function scopeStateForTool(tool: ToolRegistryItem, scopeId: string): ToolAgentScopeState {
+  return (
+    tool.agentScopes?.[scopeId] ?? {
+      visible: true,
+      callable: tool.runtimeActive,
+      llmVisible: tool.llmVisible,
+      runtimeActive: tool.runtimeActive,
+      testable: tool.testPolicy.callable,
+      blockReason: tool.blockReason || tool.validationError || "",
+    }
+  );
 }
 
 function schemaPreview(tool: ToolRegistryItem) {
@@ -121,25 +137,25 @@ function readinessTone(ready: boolean) {
   return ready ? "ready" : "blocked";
 }
 
-function toolReadinessCards(tool: ToolRegistryItem, t: Translate) {
+function toolReadinessCards(tool: ToolRegistryItem, scopeState: ToolAgentScopeState, activeScope: ToolAgentScopeSummary, t: Translate) {
   return [
     {
-      key: "runtime",
-      label: t("toolsRuntimeActive"),
-      value: tool.runtimeActive ? t("toolsReady") : t("toolsInactive"),
-      ready: tool.runtimeActive,
+      key: "scopeVisible",
+      label: t("toolsScopeVisible"),
+      value: scopeState.visible ? t("toolsVisibleToAgent") : t("toolsHiddenFromAgent"),
+      ready: scopeState.visible,
     },
     {
-      key: "llm",
-      label: t("toolsLlmVisible"),
-      value: tool.llmVisible ? t("toolsVisibleToAgent") : t("toolsHiddenFromAgent"),
-      ready: tool.llmVisible,
+      key: "scopeCallable",
+      label: activeScope.isSubagent ? t("toolsSelectedAgent") : t("toolsRuntimeActive"),
+      value: scopeState.callable ? t("toolsReady") : t("toolsScopeBlocked"),
+      ready: scopeState.callable,
     },
     {
       key: "test",
       label: t("toolsTestPolicy"),
-      value: tool.testPolicy.callable ? t("toolsTestable") : t("toolsBlocked"),
-      ready: tool.testPolicy.callable,
+      value: scopeState.testable ? t("toolsTestable") : t("toolsBlocked"),
+      ready: scopeState.testable,
     },
     {
       key: "delete",
@@ -179,11 +195,28 @@ function testResultSummaryCards(result: ToolTestResponse, t: Translate) {
   ];
 }
 
+function scopeLabel(scope: ToolAgentScopeSummary, lang: string, t: Translate) {
+  if (scope.id === "main_agent") {
+    return t("toolsMainAgent");
+  }
+  if (scope.id === "subagent_default") {
+    return t("toolsSubagentDefault");
+  }
+  if (scope.id === "subagent_explorer") {
+    return t("toolsSubagentExplorer");
+  }
+  if (scope.id === "subagent_worker") {
+    return t("toolsSubagentWorker");
+  }
+  return scope.label || (lang === "zh" ? "Agent" : "Agent");
+}
+
 export function ToolsRoute() {
   const { lang, t } = useAppI18n();
   const queryClient = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<ToolFilter>("all");
   const [searchText, setSearchText] = useState("");
+  const [activeAgentScopeId, setActiveAgentScopeId] = useState(MAIN_AGENT_SCOPE_ID);
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
     storedPaneWidth(TOOLS_LEFT_PANEL_WIDTH_KEY, TOOLS_LEFT_PANEL_DEFAULT_WIDTH, TOOLS_LEFT_PANEL_BOUNDS),
@@ -207,9 +240,25 @@ export function ToolsRoute() {
   };
 
   const tools = toolsQuery.data?.tools ?? [];
+  const agentScopes = toolsQuery.data?.agentScopes ?? [];
+  const activeAgentScope =
+    agentScopes.find((scope) => scope.id === activeAgentScopeId) ??
+    ({
+      id: MAIN_AGENT_SCOPE_ID,
+      label: "Main agent",
+      kind: "main",
+      isSubagent: false,
+      mode: "runtime",
+      description: "",
+      counts: { total: tools.length, visible: tools.length, callable: tools.length, blocked: 0 },
+    } satisfies ToolAgentScopeSummary);
   const visibleTools = useMemo(() => {
     const query = searchText.trim().toLowerCase();
     return tools.filter((tool) => {
+      const scopeState = scopeStateForTool(tool, activeAgentScopeId);
+      if (!scopeState.visible) {
+        return false;
+      }
       if (!matchesFilter(tool, activeFilter)) {
         return false;
       }
@@ -218,9 +267,14 @@ export function ToolsRoute() {
       }
       return `${tool.name} ${tool.description} ${tool.source} ${tool.status}`.toLowerCase().includes(query);
     });
-  }, [activeFilter, searchText, tools]);
+  }, [activeAgentScopeId, activeFilter, searchText, tools]);
   const activeTool = tools.find((tool) => tool.id === activeToolId) ?? visibleTools[0] ?? null;
-  const filterCounts = useMemo(() => toolFilterCounts(tools), [tools]);
+  const activeScopeState = activeTool ? scopeStateForTool(activeTool, activeAgentScope.id) : null;
+  const scopedTools = useMemo(
+    () => tools.filter((tool) => scopeStateForTool(tool, activeAgentScopeId).visible),
+    [activeAgentScopeId, tools],
+  );
+  const filterCounts = useMemo(() => toolFilterCounts(scopedTools), [scopedTools]);
 
   useEffect(() => {
     if (!activeToolId || !tools.some((tool) => tool.id === activeToolId)) {
@@ -230,7 +284,20 @@ export function ToolsRoute() {
 
   useEffect(() => {
     setTestResult(null);
-  }, [activeToolId]);
+  }, [activeAgentScopeId, activeToolId]);
+
+  useEffect(() => {
+    if (!agentScopes.length || agentScopes.some((scope) => scope.id === activeAgentScopeId)) {
+      return;
+    }
+    setActiveAgentScopeId(MAIN_AGENT_SCOPE_ID);
+  }, [activeAgentScopeId, agentScopes]);
+
+  useEffect(() => {
+    if (activeToolId && !visibleTools.some((tool) => tool.id === activeToolId)) {
+      setActiveToolId(visibleTools[0]?.id ?? null);
+    }
+  }, [activeToolId, visibleTools]);
 
   useEffect(() => {
     window.localStorage.setItem(TOOLS_LEFT_PANEL_WIDTH_KEY, String(leftPanelWidth));
@@ -273,11 +340,11 @@ export function ToolsRoute() {
   });
 
   const testMutation = useMutation({
-    mutationFn: (toolId: string) =>
-      fetchJson<ToolTestResponse>(`/api/tools/${encodeURIComponent(toolId)}/test`, {
+    mutationFn: (payload: { toolId: string; agentScopeId: string }) =>
+      fetchJson<ToolTestResponse>(`/api/tools/${encodeURIComponent(payload.toolId)}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ args: {} }),
+        body: JSON.stringify({ args: {}, agentScope: payload.agentScopeId }),
       }),
     onSuccess: (payload) => {
       setTestResult(payload);
@@ -378,6 +445,39 @@ export function ToolsRoute() {
         </section>
       </div>
 
+      <section className={styles.agentScopeBar}>
+        <div className={styles.scopeCopy}>
+          <p className={styles.panelEyebrow}>{t("toolsAgentScope")}</p>
+          <strong>{scopeLabel(activeAgentScope, lang, t)}</strong>
+          <span>{activeAgentScope.isSubagent ? t("toolsScopeModeReadonly") : activeAgentScope.mode}</span>
+        </div>
+        <label className={styles.scopeSelect}>
+          <span>{t("toolsSelectedAgent")}</span>
+          <select
+            value={activeAgentScopeId}
+            aria-label={t("toolsAgentScope")}
+            onChange={(event) => setActiveAgentScopeId(event.target.value)}
+          >
+            {(agentScopes.length ? agentScopes : [activeAgentScope]).map((scope) => (
+              <option key={scope.id} value={scope.id}>
+                {scopeLabel(scope, lang, t)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className={styles.scopeStats}>
+          <span>
+            {t("toolsScopeVisible")}: <strong>{activeAgentScope.counts.visible}</strong>
+          </span>
+          <span>
+            {t("toolsScopeCallable")}: <strong>{activeAgentScope.counts.callable}</strong>
+          </span>
+          <span>
+            {t("toolsScopeBlocked")}: <strong>{activeAgentScope.counts.blocked}</strong>
+          </span>
+        </div>
+      </section>
+
       <div className={styles.workspace} style={workspaceStyle}>
         <aside className={styles.listPanel}>
           <div className={styles.panelHeader}>
@@ -445,7 +545,9 @@ export function ToolsRoute() {
             <>
               <section className={styles.detailHeader}>
                 <div>
-                  <p className={styles.panelEyebrow}>{displaySource(activeTool.source, lang)}</p>
+                  <p className={styles.panelEyebrow}>
+                    {displaySource(activeTool.source, lang)} / {scopeLabel(activeAgentScope, lang, t)}
+                  </p>
                   <h2>{activeTool.name}</h2>
                   <p>{activeTool.description || t("toolsNoDescription")}</p>
                 </div>
@@ -455,27 +557,29 @@ export function ToolsRoute() {
               </section>
               <div className={styles.metaGrid}>
                 <section>
-                  <span>{t("toolsRuntimeActive")}</span>
-                  <strong>{activeTool.runtimeActive ? t("yes") : t("no")}</strong>
+                  <span>{t("toolsScopeVisible")}</span>
+                  <strong>{activeScopeState?.visible ? t("yes") : t("no")}</strong>
+                </section>
+                <section>
+                  <span>{t("toolsScopeCallable")}</span>
+                  <strong>{activeScopeState?.callable ? t("yes") : t("no")}</strong>
                 </section>
                 <section>
                   <span>{t("toolsLlmVisible")}</span>
-                  <strong>{activeTool.llmVisible ? t("yes") : t("no")}</strong>
-                </section>
-                <section>
-                  <span>{t("toolsValidated")}</span>
-                  <strong>{activeTool.validated ? t("yes") : t("no")}</strong>
+                  <strong>{activeScopeState?.llmVisible ? t("yes") : t("no")}</strong>
                 </section>
                 <section>
                   <span>{t("toolsDeleteAllowed")}</span>
                   <strong>{activeTool.deleteAllowed ? t("yes") : t("no")}</strong>
                 </section>
               </div>
-              {activeTool.blockReason || activeTool.validationError ? (
-                <p className={styles.notice}>{activeTool.blockReason || activeTool.validationError}</p>
+              {activeScopeState?.blockReason || activeTool.blockReason || activeTool.validationError ? (
+                <p className={styles.notice}>
+                  {activeScopeState?.blockReason || activeTool.blockReason || activeTool.validationError}
+                </p>
               ) : null}
               <section className={styles.readinessPanel}>
-                {toolReadinessCards(activeTool, t).map((card) => (
+                {toolReadinessCards(activeTool, activeScopeState ?? scopeStateForTool(activeTool, activeAgentScope.id), activeAgentScope, t).map((card) => (
                   <div
                     key={card.key}
                     className={`${styles.readinessCard} ${styles[`readiness_${readinessTone(card.ready)}`]}`}
@@ -542,7 +646,7 @@ export function ToolsRoute() {
                   disabled={!activeTool || testMutation.isPending}
                   onClick={() => {
                     if (activeTool) {
-                      testMutation.mutate(activeTool.id);
+                      testMutation.mutate({ toolId: activeTool.id, agentScopeId: activeAgentScope.id });
                     }
                   }}
                 >
@@ -570,7 +674,7 @@ export function ToolsRoute() {
                       <p className={styles.panelEyebrow}>{t("toolsTestResult")}</p>
                       <h3>{testResult.status}</h3>
                     </div>
-                    <span className={styles.countPill}>{testResult.called ? t("yes") : t("no")}</span>
+                    <span className={styles.countPill}>{scopeLabel(testResult.agentScope, lang, t)}</span>
                   </div>
                   <p>{testResult.message}</p>
                   <div className={styles.resultSummaryGrid}>

@@ -21,6 +21,22 @@ def test_tools_api_lists_builtin_tools(tmp_path, monkeypatch):
     assert builtin["deleteAllowed"] is False
 
 
+def test_tools_api_lists_agent_scopes(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    response = _client().get("/api/tools")
+
+    assert response.status_code == 200
+    payload = response.json()
+    scopes = {scope["id"]: scope for scope in payload["agentScopes"]}
+    assert "main_agent" in scopes
+    assert "subagent_explorer" in scopes
+    assert scopes["subagent_explorer"]["isSubagent"] is True
+    apply_tool = next(item for item in payload["tools"] if item["name"] == "apply_diff_edit_tool")
+    assert apply_tool["agentScopes"]["subagent_explorer"]["visible"] is True
+    assert apply_tool["agentScopes"]["subagent_explorer"]["callable"] is False
+
+
 def test_tools_api_blocks_builtin_delete(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
@@ -67,6 +83,19 @@ def test_tools_api_blocks_unsafe_builtin_test(tmp_path, monkeypatch):
     assert payload["status"] == "blocked"
     assert payload["called"] is False
     assert payload["testPolicy"]["mode"] == "blocked"
+
+
+def test_tools_api_blocks_readonly_subagent_mutating_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    response = _client().post("/api/tools/apply_diff_edit_tool/test", json={"args": {}, "agentScope": "subagent_worker"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["called"] is False
+    assert payload["agentScope"]["id"] == "subagent_worker"
+    assert payload["agentCompatibility"]["callable"] is False
 
 
 def test_tools_api_runs_safe_builtin_test_with_fixed_args(tmp_path, monkeypatch):
