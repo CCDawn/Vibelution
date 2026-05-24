@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo } from "react";
+import { Component, type ErrorInfo, type ReactNode, useMemo } from "react";
 
 import CodeMirror from "@uiw/react-codemirror";
 import { RangeSetBuilder } from "@codemirror/state";
@@ -23,6 +23,75 @@ type FilePreviewProps = {
   highlightAsLog?: boolean;
   severityFilter?: LogSeverityFilter;
 };
+
+type PreviewEditorErrorBoundaryProps = {
+  previewPath: string;
+  fallbackContent: string;
+  children: ReactNode;
+};
+
+type PreviewEditorErrorBoundaryState = {
+  failed: boolean;
+};
+
+class PreviewEditorErrorBoundary extends Component<
+  PreviewEditorErrorBoundaryProps,
+  PreviewEditorErrorBoundaryState
+> {
+  state: PreviewEditorErrorBoundaryState = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    const errorName = error instanceof Error ? error.name : typeof error;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.warn("[file-preview-fallback]", {
+      path: this.props.previewPath,
+      errorName,
+      errorMessage,
+      componentStackLength: info.componentStack?.length ?? 0,
+    });
+  }
+
+  render() {
+    if (this.state.failed) {
+      return <pre className={styles.plainFallback}>{this.props.fallbackContent}</pre>;
+    }
+    return this.props.children;
+  }
+}
+
+function buildPreviewFingerprint(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return `${value.length}:${hash.toString(36)}`;
+}
+
+export function buildFilePreviewKey({
+  path,
+  language,
+  content,
+  highlightAsLog,
+  severityFilter,
+}: {
+  path: string;
+  language: string;
+  content: string;
+  highlightAsLog: boolean;
+  severityFilter: LogSeverityFilter;
+}) {
+  return [
+    path,
+    language,
+    highlightAsLog ? "log" : "plain",
+    severityFilter,
+    buildPreviewFingerprint(content),
+  ].join("|");
+}
 
 function getExtensions(language: string) {
   switch (language) {
@@ -77,8 +146,10 @@ export function FilePreview({
   severityFilter = "all",
 }: FilePreviewProps) {
   const { t } = useAppI18n();
-  const extensions = getExtensions(file.language);
-  const editorExtensions = highlightAsLog ? [...extensions, logLineDecorations, logHighlightTheme] : extensions;
+  const editorExtensions = useMemo(() => {
+    const extensions = getExtensions(file.language);
+    return highlightAsLog ? [...extensions, logLineDecorations, logHighlightTheme] : extensions;
+  }, [file.language, highlightAsLog]);
   const displayContent = useMemo(() => {
     if (!highlightAsLog || severityFilter === "all") {
       return file.content;
@@ -88,6 +159,13 @@ export function FilePreview({
       .filter((line) => matchesSeverityFilter(classifyLogText(line), severityFilter));
     return matchingLines.length > 0 ? matchingLines.join("\n") : t("logSeverityEmpty");
   }, [file.content, highlightAsLog, severityFilter, t]);
+  const editorKey = buildFilePreviewKey({
+    path: file.path,
+    language: file.language,
+    content: displayContent,
+    highlightAsLog,
+    severityFilter,
+  });
 
   return (
     <div className={styles.surface}>
@@ -105,19 +183,21 @@ export function FilePreview({
       </div>
 
       <div className={styles.editorWrap}>
-        <CodeMirror
-          value={displayContent}
-          editable={false}
-          theme={workbenchCodeMirrorTheme}
-          height="100%"
-          extensions={editorExtensions}
-          basicSetup={{
-            foldGutter: false,
-            dropCursor: false,
-            allowMultipleSelections: false,
-            indentOnInput: false,
-          }}
-        />
+        <PreviewEditorErrorBoundary key={editorKey} previewPath={file.path} fallbackContent={displayContent}>
+          <CodeMirror
+            value={displayContent}
+            editable={false}
+            theme={workbenchCodeMirrorTheme}
+            height="100%"
+            extensions={editorExtensions}
+            basicSetup={{
+              foldGutter: false,
+              dropCursor: false,
+              allowMultipleSelections: false,
+              indentOnInput: false,
+            }}
+          />
+        </PreviewEditorErrorBoundary>
       </div>
 
       {file.truncated ? <p className={styles.footnote}>{t("previewTruncated")}</p> : null}

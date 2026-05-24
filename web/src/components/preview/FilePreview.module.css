@@ -100,6 +100,21 @@
   border-left-color: currentColor;
 }
 
+.plainFallback {
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 14px 16px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--fg-primary);
+  background: var(--surface-panel);
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
 .footnote {
   margin: 0;
   padding: 10px 20px 14px;
