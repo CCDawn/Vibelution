@@ -60,11 +60,14 @@ def test_append_experience_record_dedupes_by_key(tmp_path: Path):
     )
 
     records = list_experience_records(project_root=tmp_path)
+    index = json.loads((tmp_path / "workspace" / "self_evolution" / "experience" / "index.json").read_text(encoding="utf-8"))
 
     assert first.created is True
     assert second.created is False
     assert second.record == first.record
     assert len(records) == 1
+    assert index["record_count"] == 1
+    assert index["latest_experience_id"] == first.record["experience_id"]
 
 
 def test_experience_paths_resolve_under_self_evolution_workspace(tmp_path: Path):

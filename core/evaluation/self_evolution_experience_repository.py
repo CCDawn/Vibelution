@@ -57,7 +57,7 @@ def append_experience_record(
 
     with paths.jsonl.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(normalized, ensure_ascii=False) + "\n")
-    _write_index(paths.index, normalized)
+    _write_index(paths.index, normalized, record_count=len(_read_jsonl_records(paths.jsonl)))
     return AppendExperienceResult(record=normalized, created=True, path=paths.jsonl)
 
 
@@ -69,7 +69,10 @@ def list_experience_records(
     paths = experience_paths(project_root=project_root)
     rows = _read_jsonl_records(paths.jsonl)
     if limit is not None:
-        return rows[-max(0, int(limit)) :]
+        count = max(0, int(limit))
+        if count == 0:
+            return []
+        return rows[-count:]
     return rows
 
 
@@ -179,19 +182,10 @@ def _read_jsonl_records(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _write_index(path: Path, latest: dict[str, Any]) -> None:
-    existing: dict[str, Any] = {}
-    if path.exists():
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(payload, dict):
-                existing = payload
-        except json.JSONDecodeError:
-            existing = {}
-    count = max(0, int(existing.get("record_count") or 0)) + 1
+def _write_index(path: Path, latest: dict[str, Any], *, record_count: int) -> None:
     payload = {
         "version": 1,
-        "record_count": count,
+        "record_count": max(0, int(record_count)),
         "latest_experience_id": str(latest.get("experience_id") or ""),
         "updated_at": utcnow_iso(),
     }
