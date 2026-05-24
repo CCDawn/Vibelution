@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import hashlib
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
@@ -80,6 +80,7 @@ class ChatDatasetCandidate:
     raw_excerpt_path: str
     segment: Dict[str, Any]
     structured_sample_preview: Dict[str, Any]
+    next_state_signals: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -129,6 +130,7 @@ class ChatDatasetCaptureService:
         session_id: str,
         source_log_path: str,
         turns: Sequence[ChatTurnRecord],
+        next_state_signals: Sequence[Dict[str, Any]] | None = None,
         require_auto_capture: bool = True,
         apply_quality_filters: bool = True,
         min_turns: int | None = None,
@@ -174,6 +176,7 @@ class ChatDatasetCaptureService:
                 "approved_at": "",
                 "reviewer_note": "",
             },
+            next_state_signals=next_state_signals,
         )
         candidate = ChatDatasetCandidate(
             candidate_id=segment.segment_id,
@@ -188,6 +191,7 @@ class ChatDatasetCaptureService:
             raw_excerpt_path=str(raw_path),
             segment=segment.to_dict(),
             structured_sample_preview=structured_preview,
+            next_state_signals=_normalize_next_state_signal_refs(next_state_signals),
         )
         self.paths.candidate_dir.mkdir(parents=True, exist_ok=True)
         raw_path.write_text(json.dumps(candidate.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -214,6 +218,28 @@ def collect_quality_signals(segment: ChatSegment) -> List[str]:
         if item not in deduped:
             deduped.append(item)
     return deduped
+
+
+def _normalize_next_state_signal_refs(signals: Sequence[Dict[str, Any]] | None) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for item in list(signals or [])[:12]:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "signalId": str(item.get("signalId") or "").strip(),
+                "sessionId": str(item.get("sessionId") or "").strip(),
+                "turnId": str(item.get("turnId") or "").strip(),
+                "source": str(item.get("source") or "").strip(),
+                "kind": str(item.get("kind") or "").strip(),
+                "polarity": str(item.get("polarity") or "").strip(),
+                "mode": str(item.get("mode") or "").strip(),
+                "relatedEventCode": str(item.get("relatedEventCode") or "").strip(),
+                "createdAt": str(item.get("createdAt") or "").strip(),
+                "summary": str(item.get("summary") or "").strip()[:240],
+            }
+        )
+    return normalized
 
 
 def collect_exclusion_reasons(
@@ -275,8 +301,10 @@ def build_structured_chat_sample(
     raw_excerpt_path: str,
     approval: Dict[str, Any],
     review: Dict[str, Any] | None = None,
+    next_state_signals: Sequence[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     quality_signals = collect_quality_signals(segment)
+    signal_refs = _normalize_next_state_signal_refs(next_state_signals)
     sample = {
         "case_id": segment.segment_id,
         "mode": "multiturn_chat",
@@ -296,6 +324,8 @@ def build_structured_chat_sample(
         },
         "approval": approval,
     }
+    if signal_refs:
+        sample["next_state_signals"] = signal_refs
     if review:
         sample["review"] = review
     return sample
@@ -380,6 +410,7 @@ def approve_chat_candidate(
             reviewed_at=reviewed_at,
             reviewer_note=reviewer_note,
         ),
+        next_state_signals=candidate_payload.get("next_state_signals") or [],
     )
     paths.approved_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     with paths.approved_jsonl_path.open("a", encoding="utf-8") as fh:
@@ -459,6 +490,7 @@ def record_negative_chat_candidate(
             correct_principle=correct_principle,
             ideal_behavior=ideal_behavior,
         ),
+        next_state_signals=candidate_payload.get("next_state_signals") or [],
     )
     paths.negative_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
     with paths.negative_jsonl_path.open("a", encoding="utf-8") as fh:
@@ -565,6 +597,7 @@ def format_structured_sample_preview(sample: Dict[str, Any]) -> str:
         f"scenario: {sample.get('scenario')}",
         f"training_tier: {sample.get('training_tier')}",
         f"quality_signals: {', '.join(sample.get('quality_signals') or []) or '-'}",
+        f"next_state_signals: {len(sample.get('next_state_signals') or [])}",
         f"prompt_seed: {sample.get('prompt_seed') or '-'}",
         f"dataset_ref: {json.dumps(sample.get('dataset_ref') or {}, ensure_ascii=False)}",
         "",

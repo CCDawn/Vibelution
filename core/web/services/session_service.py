@@ -24,6 +24,11 @@ from core.chat.chat_task_types import trim_lines
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.mental_model_flags import is_mental_model_enabled
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService
+from core.evaluation.chat_next_state_signals import (
+    append_chat_next_state_signal,
+    list_chat_next_state_signals,
+    summarize_chat_next_state_signals,
+)
 from core.evaluation.chat_segmenter import ChatTurnRecord, has_conclusion_signal, has_next_action_signal
 from core.logging.logger import debug as _debug_logger
 from core.logging.unified_logger import logger as unified_logger
@@ -595,6 +600,24 @@ def request_stop_session_turn(session_id: str) -> dict:
         )
     )
     stop_snapshot = controller.snapshot()
+    _record_chat_next_state_signal(
+        session_id=conversation_id,
+        turn_id=str(stop_snapshot.get("turnId") or controller.turn_id),
+        source="user",
+        kind="user_stops",
+        polarity="negative",
+        mode="directive",
+        related_event_code="conversation.user_stop_requested",
+        summary=text_for(
+            lang,
+            zh="用户请求停止当前对话轮次。",
+            en="The user requested the current chat turn to stop.",
+        ),
+        metadata={
+            "stopReason": stop_snapshot.get("stopReason") or "",
+            "stopRequestedAt": stop_snapshot.get("stopRequestedAt") or "",
+        },
+    )
     _persist_session_interrupted_snapshot(
         conversation_id,
         stop_snapshot,
@@ -791,6 +814,25 @@ def submit_session_message(
             message=message,
             source=user_message_source,
         )
+    if _is_continue_request(message):
+        _record_chat_next_state_signal(
+            session_id=conversation_id,
+            turn_id=turn_control.turn_id,
+            source="user",
+            kind="user_continues",
+            polarity="neutral",
+            mode="directive",
+            related_event_code="conversation.user_continue_requested",
+            summary=text_for(
+                lang,
+                zh="用户请求继续上一轮未完成任务。",
+                en="The user requested continuation of the unfinished task.",
+            ),
+            metadata={
+                "userMessageSource": user_message_source,
+                "effectivePromptLength": len(effective_user_message),
+            },
+        )
 
     context = {
         "session_id": conversation_id,
@@ -929,6 +971,26 @@ def edit_and_resubmit_session_message(
         truncated_count=max(0, len(previous_messages) - target_index - 1),
         original_content=original_entry.get("content") or "",
         edited_content=message,
+    )
+    _record_chat_next_state_signal(
+        session_id=conversation_id,
+        turn_id=turn_control.turn_id,
+        source="user",
+        kind="assistant_output_edited",
+        polarity="neutral",
+        mode="directive",
+        related_event_code="conversation.message_edited_resubmitted",
+        summary=text_for(
+            lang,
+            zh="用户编辑最新消息并重新提交，后续 assistant 输出被截断重跑。",
+            en="The user edited the latest message and resubmitted, truncating later assistant output.",
+        ),
+        metadata={
+            "messageId": target_message_id,
+            "truncatedMessageCount": max(0, len(previous_messages) - target_index - 1),
+            "originalLength": len(str(original_entry.get("content") or "")),
+            "editedLength": len(message),
+        },
     )
     _record_session_cycle_message(
         conversation_id,
@@ -2103,6 +2165,7 @@ def _run_session_continuation_loop(
             _record_session_turn_circuit_breaker_event(
                 session_id,
                 result,
+                turn_id=getattr(turn_control, "turn_id", ""),
                 turn_index=turn_index,
                 max_turns=max_turns,
             )
@@ -2240,6 +2303,13 @@ def _persist_session_turn_result(
                 status="failed",
                 active_task=next_active_task,
             )
+            _record_provider_failure_signal(
+                session_id=session_id,
+                turn_id=turn_id,
+                error_type=error_type,
+                raw_error=raw_error,
+                related_event_code="conversation.turn_error",
+            )
             return
         assistant_text = (
             text_for(
@@ -2375,6 +2445,13 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 turn_error,
                 raw_error=raw_error,
                 status="failed",
+            )
+            _record_provider_failure_signal(
+                session_id=session_id,
+                turn_id=str(context.get("turn_id") or ""),
+                error_type=error_type,
+                raw_error=raw_error,
+                related_event_code="conversation.turn_error",
             )
             return
         assistant_entry = _make_chat_message("assistant", summary)
@@ -2691,6 +2768,7 @@ def _record_session_turn_circuit_breaker_event(
     session_id: str,
     result: Any,
     *,
+    turn_id: str = "",
     turn_index: int,
     max_turns: int,
 ) -> None:
@@ -2736,6 +2814,17 @@ def _record_session_turn_circuit_breaker_event(
             f"runtime scene circuit breaker log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
+    _record_provider_failure_signal(
+        session_id=session_id,
+        turn_id=str(turn_id or "").strip(),
+        error_type=error_type,
+        raw_error=raw_error,
+        related_event_code="conversation.turn_circuit_breaker",
+        metadata={
+            "continuationTurn": max(0, int(turn_index or 0)),
+            "maxContinuationTurns": max(0, int(max_turns or 0)),
+        },
+    )
 
 
 def _record_session_message_edit_resubmit_event(
@@ -3721,6 +3810,21 @@ def _capture_session_ui_stream(
             summary = str(data.get("result") or data.get("error") or "").strip()
             capture.note_tool_event(name, status, summary)
             _set_session_live_output(session_id, turn_id=capture.turn_id, tool_calls=capture.tool_calls)
+            if event.name == EventNames.TOOL_ERROR:
+                _record_chat_next_state_signal(
+                    session_id=session_id,
+                    turn_id=capture.turn_id,
+                    source="tool",
+                    kind="tool_error",
+                    polarity="negative",
+                    mode="evaluative",
+                    related_event_code="conversation.tool_error",
+                    summary=f"Tool failed: {name}",
+                    metadata={
+                        "toolName": name,
+                        "errorPreview": summary,
+                    },
+                )
 
         setattr(ui, "stream_thought", stream_thought_proxy)
         setattr(ui, "clear_thought_stream", clear_thought_stream_proxy)
@@ -3760,9 +3864,79 @@ def _capture_session_chat_candidate(session_id: str, messages: list[dict[str, An
             session_id=session_id or "chat_session",
             source_log_path=_resolve_chat_source_log_path(),
             turns=turns,
+            next_state_signals=_recent_chat_next_state_signal_summaries(session_id),
         )
     except Exception as exc:
         _debug_logger.warning(f"web chat candidate capture skipped: {type(exc).__name__}: {exc}", tag="CHAT")
+
+
+def _record_chat_next_state_signal(
+    *,
+    session_id: str,
+    turn_id: str = "",
+    source: str,
+    kind: str,
+    polarity: str = "neutral",
+    mode: str = "evaluative",
+    related_event_code: str = "",
+    summary: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    try:
+        return append_chat_next_state_signal(
+            project_root=PROJECT_ROOT,
+            session_id=session_id,
+            turn_id=turn_id,
+            source=source,
+            kind=kind,
+            polarity=polarity,
+            mode=mode,
+            related_event_code=related_event_code,
+            summary=summary,
+            metadata=metadata or {},
+        )
+    except Exception as exc:
+        _debug_logger.warning(f"chat next-state signal skipped: {type(exc).__name__}: {exc}", tag="CHAT")
+        return None
+
+
+def _record_provider_failure_signal(
+    *,
+    session_id: str,
+    turn_id: str = "",
+    error_type: str = "",
+    raw_error: str = "",
+    related_event_code: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    fields = {
+        "errorType": str(error_type or "").strip(),
+        "rawErrorPreview": trim_lines(raw_error, max_lines=2),
+        **(metadata or {}),
+    }
+    return _record_chat_next_state_signal(
+        session_id=session_id,
+        turn_id=turn_id,
+        source="runtime",
+        kind="provider_failure",
+        polarity="negative",
+        mode="evaluative",
+        related_event_code=related_event_code or "conversation.turn_error",
+        summary="Provider failure interrupted the chat turn.",
+        metadata=fields,
+    )
+
+
+def _recent_chat_next_state_signal_summaries(session_id: str, *, limit: int = 8) -> list[dict[str, Any]]:
+    try:
+        signals = list_chat_next_state_signals(
+            project_root=PROJECT_ROOT,
+            session_id=session_id,
+            limit=limit,
+        )
+        return summarize_chat_next_state_signals(signals, limit=limit)
+    except Exception:
+        return []
 
 
 def _record_session_chat_review_candidate_event(
