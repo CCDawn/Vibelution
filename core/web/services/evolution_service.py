@@ -14,6 +14,10 @@ from core.evaluation import (
     load_gym_promotion_lifecycle,
     load_workbench_state,
 )
+from core.evaluation.self_evolution_candidate_pool import (
+    ALLOWED_CANDIDATE_TYPES,
+    list_candidate_records,
+)
 
 from .i18n import get_web_language, text_for
 from .workbench_contract_service import get_workbench_contract
@@ -25,6 +29,7 @@ DETAIL_RECORD_LIMIT = 400
 BLOCKED_DELETE_STATUSES = {"active", "applied"}
 MANUAL_GOVERNANCE_MODE = "manual_review"
 BLOCKED_EDIT_STATUSES = {"applied", "active", "rolled_back", "superseded", "promoted"}
+SELF_EVOLUTION_CANDIDATE_STATUS = "self_candidate_pending"
 
 
 class EvolutionProposalNotFoundError(Exception):
@@ -221,7 +226,69 @@ def list_pending_library_items() -> list[dict[str, Any]]:
         status = record.gym_proposal_status
         if status in {"proposed", "applied", "observing"} or (record.decision == "PROMOTE" and status == "missing"):
             pending.append(_pending_item_payload(record, root=root, lang=lang))
-    return pending
+    pending.extend(list_self_evolution_candidate_pending_items(project_root=root, lang=lang))
+    return sorted(pending, key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+
+
+def get_self_evolution_candidate_review_queue(*, project_root: Path | None = None) -> dict[str, Any]:
+    """Return self-evolution candidates as a supervised review source."""
+
+    root = (project_root or PROJECT_ROOT).resolve()
+    enabled = _self_evolution_enabled_for_candidate_review()
+    if not enabled:
+        return {
+            "enabled": False,
+            "pendingCount": 0,
+            "counts": {candidate_type: 0 for candidate_type in sorted(ALLOWED_CANDIDATE_TYPES)},
+            "items": [],
+        }
+
+    lang = get_web_language()
+    items = list_self_evolution_candidate_pending_items(project_root=root, lang=lang)
+    counts = {candidate_type: 0 for candidate_type in sorted(ALLOWED_CANDIDATE_TYPES)}
+    for item in items:
+        candidate_type = str(item.get("candidateType") or "")
+        if candidate_type in counts:
+            counts[candidate_type] += 1
+    return {
+        "enabled": True,
+        "pendingCount": len(items),
+        "counts": counts,
+        "items": items,
+    }
+
+
+def list_self_evolution_candidate_pending_items(
+    *,
+    project_root: Path | None = None,
+    lang: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return pending self-evolution candidate pool records for supervised review."""
+
+    if not _self_evolution_enabled_for_candidate_review():
+        return []
+    root = (project_root or PROJECT_ROOT).resolve()
+    active_lang = lang or get_web_language()
+    items: list[dict[str, Any]] = []
+    for candidate_type in sorted(ALLOWED_CANDIDATE_TYPES):
+        for record in list_candidate_records(candidate_type, project_root=root):
+            if str(record.get("review_state") or "").strip().lower() != "pending":
+                continue
+            items.append(_self_evolution_candidate_pending_item(record, lang=active_lang))
+    return sorted(items, key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+
+
+def _find_self_evolution_candidate(candidate_id: str, *, root: Path) -> dict[str, Any] | None:
+    if not _self_evolution_enabled_for_candidate_review():
+        return None
+    target = str(candidate_id or "").strip()
+    if not target:
+        return None
+    for candidate_type in sorted(ALLOWED_CANDIDATE_TYPES):
+        for record in list_candidate_records(candidate_type, project_root=root):
+            if str(record.get("candidate_id") or "").strip() == target:
+                return record
+    return None
 
 
 def get_proposal_detail(session_id: str, *, project_root: Path | None = None) -> dict[str, Any]:
@@ -229,7 +296,12 @@ def get_proposal_detail(session_id: str, *, project_root: Path | None = None) ->
 
     lang = get_web_language()
     root = (project_root or PROJECT_ROOT).resolve()
-    record = _require_record(session_id, root=root)
+    record = _find_record(session_id, root=root, limit=DETAIL_RECORD_LIMIT)
+    if record is None:
+        candidate = _find_self_evolution_candidate(session_id, root=root)
+        if candidate is not None:
+            return _self_evolution_candidate_detail(candidate, lang=lang)
+        raise EvolutionProposalNotFoundError("Supervised proposal not found.")
     decision_path = _resolve_path(record.decision_path, root=root)
     lifecycle = load_gym_promotion_lifecycle(str(decision_path), project_root=root)
     supervised_payload = _load_json_object(record.decision_path, root=root)
@@ -835,6 +907,198 @@ def _pending_item_payload(record, *, root: Path, lang: str) -> dict[str, Any]:
     }
 
 
+def _self_evolution_candidate_pending_item(record: dict[str, Any], *, lang: str) -> dict[str, Any]:
+    candidate_id = str(record.get("candidate_id") or "").strip()
+    candidate_type = str(record.get("candidate_type") or "").strip()
+    payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+    provenance = record.get("provenance") if isinstance(record.get("provenance"), dict) else {}
+    allowed_downstream_uses = _string_list(record.get("allowed_downstream_uses"))
+    blocked_downstream_uses = _string_list(record.get("blocked_downstream_uses"))
+    evidence_refs = _string_list(provenance.get("evidence_refs"))
+    target_label = _self_evolution_candidate_target_label(candidate_type, lang=lang)
+    summary = _self_evolution_candidate_summary(payload, fallback=str(record.get("source_run_id") or ""))
+    review_reason = text_for(
+        lang,
+        zh="无监督进化候选只能进入监督审阅，不能自动接纳或生效。",
+        en="Self-evolution candidates can only enter supervised review; they cannot be applied automatically.",
+    )
+    return {
+        "id": candidate_id,
+        "title": _self_evolution_candidate_title(candidate_type, candidate_id, lang=lang),
+        "type": candidate_type,
+        "sourceRun": candidate_id,
+        "ingestMode": "self_evolution_candidate",
+        "reason": review_reason,
+        "proposalStatus": SELF_EVOLUTION_CANDIDATE_STATUS,
+        "runtimeEffect": "not_applied",
+        "decision": "PENDING_REVIEW",
+        "targetKey": candidate_type,
+        "targetLabel": target_label,
+        "headline": text_for(
+            lang,
+            zh=f"无监督进化产出了一条 {target_label}，等待监督线审阅。",
+            en=f"Self-evolution produced a {target_label} awaiting supervised review.",
+        ),
+        "changeSummary": summary,
+        "summary": summary,
+        "availableActions": [],
+        "updatedAt": str(record.get("created_at") or ""),
+        "canDelete": False,
+        "deleteBlockReason": review_reason,
+        "candidateType": candidate_type,
+        "reviewState": "pending",
+        "supervisedRequired": True,
+        "candidateOnly": True,
+        "autoApply": False,
+        "allowedDownstreamUses": allowed_downstream_uses,
+        "blockedDownstreamUses": blocked_downstream_uses,
+        "provenance": provenance,
+        "evidenceRefs": evidence_refs,
+        "sourceExperienceId": str(record.get("source_experience_id") or ""),
+        "sourceReflectionId": str(record.get("source_reflection_id") or ""),
+        "sourceSelfRunId": str(record.get("source_run_id") or ""),
+        "txnId": str(record.get("txn_id") or ""),
+        "payload": payload,
+        "outcomeSemantics": _outcome_semantics(
+            decision="PENDING_REVIEW",
+            proposal_status=SELF_EVOLUTION_CANDIDATE_STATUS,
+            runtime_effect="not_applied",
+            lang=lang,
+        ),
+        "actionStates": _proposal_action_states(
+            available_actions=[],
+            proposal_status=SELF_EVOLUTION_CANDIDATE_STATUS,
+            can_delete=False,
+            delete_block_reason=review_reason,
+            lang=lang,
+            mode_block_reason=review_reason,
+        ),
+    }
+
+
+def _self_evolution_candidate_detail(record: dict[str, Any], *, lang: str) -> dict[str, Any]:
+    item = _self_evolution_candidate_pending_item(record, lang=lang)
+    payload = item["payload"] if isinstance(item.get("payload"), dict) else {}
+    provenance = item["provenance"] if isinstance(item.get("provenance"), dict) else {}
+    review_reason = str(item.get("reason") or "")
+    title = str(item.get("title") or item.get("id") or "")
+    source_self_run_id = str(item.get("sourceSelfRunId") or provenance.get("source_run_id") or "")
+    return {
+        "sessionId": item["id"],
+        "sourceRun": item["id"],
+        "title": title,
+        "type": item["type"],
+        "updatedAt": item["updatedAt"],
+        "decision": item["decision"],
+        "proposalStatus": item["proposalStatus"],
+        "runtimeEffect": item["runtimeEffect"],
+        "targetKey": item["targetKey"],
+        "targetLabel": item["targetLabel"],
+        "availableActions": [],
+        "canDelete": False,
+        "deleteBlockReason": review_reason,
+        "canEdit": False,
+        "editBlockReason": review_reason,
+        "runSemantics": {
+            "runStatus": "candidate_only",
+            "runStatusLabel": text_for(lang, zh="仅候选", en="Candidate only"),
+            "stage": "self_evolution_candidate",
+            "stageLabel": text_for(lang, zh="无监督候选", en="Self-evolution candidate"),
+            "diagnosis": item["summary"],
+            "nextAction": review_reason,
+        },
+        "outcomeSemantics": item["outcomeSemantics"],
+        "actionStates": item["actionStates"],
+        "review": {
+            "headline": item["headline"],
+            "changeSummary": item["changeSummary"],
+            "whatChanged": [
+                text_for(
+                    lang,
+                    zh=f"候选类型：{item['targetLabel']}。",
+                    en=f"Candidate type: {item['targetLabel']}.",
+                ),
+                item["summary"],
+            ],
+            "whyCreated": [
+                text_for(
+                    lang,
+                    zh=f"来源自进化运行：{source_self_run_id or '--'}。",
+                    en=f"Source self-evolution run: {source_self_run_id or '--'}.",
+                ),
+                text_for(
+                    lang,
+                    zh="它来自 experience / reflection / candidate pool 链路，还没有经过监督验收。",
+                    en="It comes from the experience / reflection / candidate-pool chain and has not passed supervised validation.",
+                ),
+            ],
+            "currentState": [
+                text_for(
+                    lang,
+                    zh="当前状态：pending candidate，只能作为监督线输入。",
+                    en="Current state: pending candidate, usable only as supervised-line input.",
+                ),
+                text_for(
+                    lang,
+                    zh="blocked downstream uses 会阻断 accepted baseline、selection policy、runtime prompt 或 skill registry 直接写入。",
+                    en="Blocked downstream uses prevent direct accepted-baseline, selection-policy, runtime-prompt, or skill-registry writes.",
+                ),
+            ],
+            "nextAction": review_reason,
+            "deleteImpact": text_for(
+                lang,
+                zh="当前只读桥接不提供删除动作；候选原始记录仍保留为审计证据。",
+                en="This read-only bridge does not expose deletion; the source candidate remains audit evidence.",
+            ),
+            "canDelete": False,
+            "deleteBlockReason": review_reason,
+            "evidenceNotes": item["evidenceRefs"],
+        },
+        "supervised": {
+            "baselineScore": 0,
+            "candidateScore": 0,
+            "deltaScore": 0,
+            "riskLevel": "pending_review",
+            "riskReasons": [review_reason],
+            "decisionReason": review_reason,
+            "activeAdvisoryCount": 0,
+            "caseDiagnostics": [],
+        },
+        "proposal": {
+            "proposalId": item["id"],
+            "episodeId": str(provenance.get("source_run_id") or item["sourceRun"]),
+            "candidateImprovementId": item["id"],
+            "improvementType": item["candidateType"],
+            "expectedEffect": item["summary"],
+            "summary": item["summary"],
+            "candidatePrompt": str(payload.get("suggested_prompt_change") or ""),
+            "baselinePrompt": "",
+            "editNote": "",
+            "editedAt": "",
+            "editedBy": "",
+            "targetLabel": item["targetLabel"],
+            "target": {
+                "kind": "self_evolution_candidate",
+                "candidate_type": item["candidateType"],
+            },
+            "payload": payload,
+            "targetKey": item["targetKey"],
+            "status": item["proposalStatus"],
+        },
+        "paths": {
+            "supervisedDecisionPath": "",
+            "gymProposalPath": "",
+            "gymDecisionPath": "",
+            "traceIndexPath": "",
+            "lineageIndexPath": "",
+            "selfEvolutionCandidatePath": str(record.get("target_path") or ""),
+        },
+        "rawProposal": record,
+        "rawGymDecision": None,
+        "rawSupervisedDecision": None,
+    }
+
+
 def _review_preview(record, *, root: Path, lang: str) -> dict[str, str]:
     gym_decision_payload = _load_json_object(record.gym_decision_path, root=root)
     proposal_payload = _load_json_object(record.gym_proposal_path, root=root)
@@ -1399,6 +1663,7 @@ def _decision_label(decision: str, *, lang: str) -> str:
         "ROLLBACK": text_for(lang, zh="建议回滚", en="Rollback"),
         "REJECT": text_for(lang, zh="拒绝候选", en="Reject"),
         "INCONCLUSIVE": text_for(lang, zh="评测无结论", en="Inconclusive"),
+        "PENDING_REVIEW": text_for(lang, zh="待监督审阅", en="Pending supervised review"),
     }
     return mapping.get(normalized, normalized or text_for(lang, zh="暂无结论", en="No decision yet"))
 
@@ -1412,6 +1677,11 @@ def _proposal_status_label(status: str, *, lang: str) -> str:
         "observing": text_for(lang, zh="观察池候选", en="Candidate under observation"),
         "expired": text_for(lang, zh="观察预算已过期", en="Observation budget expired"),
         "promoted": text_for(lang, zh="已晋升基线", en="Promoted baseline"),
+        SELF_EVOLUTION_CANDIDATE_STATUS: text_for(
+            lang,
+            zh="自进化候选待审阅",
+            en="Self-evolution candidate pending review",
+        ),
         "rolled_back": text_for(lang, zh="已回滚提案", en="Rolled-back proposal"),
         "superseded": text_for(lang, zh="已被替代", en="Superseded proposal"),
         "missing": text_for(lang, zh="提案缺失", en="Missing proposal"),
@@ -1431,6 +1701,36 @@ def _runtime_effect_label(effect: str, *, lang: str) -> str:
 def _runtime_effect_is_applied(effect: str) -> bool:
     normalized = str(effect or "").strip().lower()
     return normalized not in {"", "not_applied", "unknown", "missing"}
+
+
+def _self_evolution_enabled_for_candidate_review() -> bool:
+    return bool(get_workbench_contract().get("modeAvailability", {}).get("self_evolution"))
+
+
+def _self_evolution_candidate_target_label(candidate_type: str, *, lang: str) -> str:
+    normalized = str(candidate_type or "").strip()
+    mapping = {
+        "skill_candidate": text_for(lang, zh="skill 候选", en="skill candidate"),
+        "prompt_candidate": text_for(lang, zh="prompt 候选", en="prompt candidate"),
+        "proposal_candidate": text_for(lang, zh="proposal 候选", en="proposal candidate"),
+    }
+    return mapping.get(normalized, normalized or text_for(lang, zh="自进化候选", en="self-evolution candidate"))
+
+
+def _self_evolution_candidate_title(candidate_type: str, candidate_id: str, *, lang: str) -> str:
+    label = _self_evolution_candidate_target_label(candidate_type, lang=lang)
+    suffix = str(candidate_id or "").split(":", 1)[-1]
+    if suffix:
+        return f"{label} · {suffix}"
+    return label
+
+
+def _self_evolution_candidate_summary(payload: dict[str, Any], *, fallback: str) -> str:
+    for key in ("suggested_prompt_change", "suggested_skill_scope", "proposal_summary", "description"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return _trim_text(value, limit=120)
+    return _trim_text(fallback, limit=120)
 
 
 def _outcome_semantics(
@@ -1713,6 +2013,16 @@ def _normalize_session_ids(session_ids: list[str]) -> list[str]:
         normalized.append(value)
         seen.add(value)
     return normalized
+
+
+def _string_list(value: Any) -> list[str]:
+    raw_items = value if isinstance(value, list) else [] if value is None else [value]
+    items: list[str] = []
+    for raw in raw_items:
+        item = str(raw or "").strip()
+        if item and item not in items:
+            items.append(item)
+    return items
 
 
 def _trim_text(value: str, *, limit: int) -> str:

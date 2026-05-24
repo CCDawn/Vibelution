@@ -14,7 +14,12 @@ import {
 } from "lucide-react";
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { ConversationMessage, MentalStateSnapshot, SessionTurnError } from "../../api/types";
+import {
+  ChatNextStateSignalSummary,
+  ConversationMessage,
+  MentalStateSnapshot,
+  SessionTurnError,
+} from "../../api/types";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
@@ -94,6 +99,7 @@ type ConversationViewProps = {
   composerPending: boolean;
   composerError?: string;
   turnError?: SessionTurnError | null;
+  nextStateSignals?: ChatNextStateSignalSummary[];
   submitLabel?: string;
   submitPendingLabel?: string;
   stopLabel?: string;
@@ -135,6 +141,7 @@ export function ConversationView({
   composerPending,
   composerError,
   turnError,
+  nextStateSignals = [],
   submitLabel,
   submitPendingLabel,
   stopLabel,
@@ -212,6 +219,8 @@ export function ConversationView({
     { label: t("lastUpdated"), value: lastMessageTimestamp ? formatTimestamp(lastMessageTimestamp) : "--" },
   ];
   const resolvedStats = stats ?? [];
+  const visibleNextStateSignals = useMemo(() => nextStateSignals.slice(-5).reverse(), [nextStateSignals]);
+  const [nextStateSignalsExpanded, setNextStateSignalsExpanded] = useState(false);
   const latestToolCalls = useMemo(
     () =>
       [...messages]
@@ -652,6 +661,43 @@ export function ConversationView({
           </div>
           {turnError.errorType ? <span className={styles.turnErrorType}>{turnError.errorType}</span> : null}
         </div>
+      ) : null}
+
+      {visibleNextStateSignals.length > 0 ? (
+        <section className={styles.nextStateSignals} aria-label={t("nextStateSignalsLabel")}>
+          <button
+            type="button"
+            className={styles.nextStateSignalsToggle}
+            aria-expanded={nextStateSignalsExpanded}
+            onClick={() => setNextStateSignalsExpanded((current) => !current)}
+            title={nextStateSignalsExpanded ? t("nextStateSignalsVisible") : t("nextStateSignalsHidden")}
+          >
+            {nextStateSignalsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            <span>{t("nextStateSignalsLabel")}</span>
+            <span className={styles.nextStateSignalsCount}>{visibleNextStateSignals.length}</span>
+            {!nextStateSignalsExpanded ? (
+              <span className={styles.nextStateSignalsSummary}>{visibleNextStateSignals[0].summary}</span>
+            ) : null}
+          </button>
+          {nextStateSignalsExpanded ? (
+            <div className={styles.nextStateSignalList}>
+              {visibleNextStateSignals.map((signal) => (
+                <div key={signal.signalId || `${signal.turnId}-${signal.kind}`} className={styles.nextStateSignalItem}>
+                  <div className={styles.nextStateSignalMeta}>
+                    <span className={styles.nextStateSignalKind}>{signal.kind}</span>
+                    <span>{signal.source}</span>
+                    {signal.createdAt ? <span>{formatTimestamp(signal.createdAt)}</span> : null}
+                    {signal.turnId ? <span>{signal.turnId}</span> : null}
+                  </div>
+                  <p className={styles.nextStateSignalText}>{signal.summary}</p>
+                  {signal.relatedEventCode ? (
+                    <span className={styles.nextStateSignalEvent}>{signal.relatedEventCode}</span>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       <div className={styles.composer}>

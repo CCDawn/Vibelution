@@ -719,6 +719,103 @@
   white-space: nowrap;
 }
 
+.nextStateSignals {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 8px;
+  margin: 0 20px 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-panel-strong));
+  color: var(--fg-secondary);
+}
+
+.nextStateSignalsToggle {
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+}
+
+.nextStateSignalsToggle:hover {
+  color: var(--fg-primary);
+}
+
+.nextStateSignalsCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+  color: var(--accent-cool);
+  font-size: 0.72rem;
+  font-weight: 720;
+}
+
+.nextStateSignalsSummary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nextStateSignalList {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--fg-tertiary) 14%, transparent);
+}
+
+.nextStateSignalItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.nextStateSignalMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+}
+
+.nextStateSignalKind {
+  color: var(--accent-cool);
+  font-weight: 720;
+}
+
+.nextStateSignalText {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.nextStateSignalEvent {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .composerField {
   display: grid;
   gap: 8px;

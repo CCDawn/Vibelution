@@ -801,6 +801,19 @@ export type SessionTurnError = {
   turnId: string;
 };
 
+export type ChatNextStateSignalSummary = {
+  signalId: string;
+  sessionId: string;
+  turnId: string;
+  source: string;
+  kind: string;
+  polarity: string;
+  mode: string;
+  relatedEventCode: string;
+  createdAt: string;
+  summary: string;
+};
+
 export type SessionDetail = SessionSummary & {
   activeTask?: SessionActiveTask | null;
   defaultFileContext: string;
@@ -810,6 +823,7 @@ export type SessionDetail = SessionSummary & {
   readFiles: string[];
   messages: ConversationMessage[];
   lastTurnError?: SessionTurnError | null;
+  nextStateSignals?: ChatNextStateSignalSummary[];
   stopRequested: boolean;
   stopRequestedAt: string;
   stopReason: string;
@@ -1320,6 +1334,20 @@ export type EvolutionLibraryEntry = {
   updatedAt: string;
   canDelete: boolean;
   deleteBlockReason: string;
+  candidateType?: string;
+  reviewState?: string;
+  supervisedRequired?: boolean;
+  candidateOnly?: boolean;
+  autoApply?: boolean;
+  allowedDownstreamUses?: string[];
+  blockedDownstreamUses?: string[];
+  provenance?: Record<string, unknown>;
+  evidenceRefs?: string[];
+  sourceExperienceId?: string;
+  sourceReflectionId?: string;
+  sourceSelfRunId?: string;
+  txnId?: string;
+  payload?: Record<string, unknown>;
   outcomeSemantics: EvolutionOutcomeSemantics;
   actionStates: Record<string, EvolutionActionState>;
 };
@@ -1409,6 +1437,7 @@ export type EvolutionProposalDetail = {
     gymDecisionPath: string;
     traceIndexPath: string;
     lineageIndexPath: string;
+    selfEvolutionCandidatePath?: string;
   };
   rawProposal: Record<string, unknown> | null;
   rawGymDecision: Record<string, unknown> | null;

@@ -12,9 +12,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.evaluation.chat_next_state_signals import list_chat_next_state_signals
+from core.evaluation.chat_next_state_signals import append_chat_next_state_signal, list_chat_next_state_signals
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
 from core.evaluation.chat_segmenter import ChatTurnRecord
+from core.evaluation.self_evolution_candidate_pool import append_candidate_record
 from config.public_config import UNCONFIGURED_MODEL_REF, load_public_config, public_config_hash
 from core.gym import run_gym_collection_episode
 from core.gym.promotion import (
@@ -2620,6 +2621,47 @@ def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, mo
     ]
 
 
+def test_session_detail_exposes_recent_next_state_signal_summaries(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    append_chat_next_state_signal(
+        project_root=tmp_path,
+        session_id="session-live",
+        turn_id="turn-signal",
+        source="runtime",
+        kind="provider_failure",
+        polarity="negative",
+        mode="evaluative",
+        related_event_code="conversation.turn_circuit_breaker",
+        summary="Provider failed after a partial tool pass.",
+        metadata={"rawError": "full provider payload should stay out of session detail"},
+        created_at="2026-05-18T11:58:00Z",
+        record_scene=False,
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["nextStateSignals"] == [
+        {
+            "signalId": payload["nextStateSignals"][0]["signalId"],
+            "sessionId": "session-live",
+            "turnId": "turn-signal",
+            "source": "runtime",
+            "kind": "provider_failure",
+            "polarity": "negative",
+            "mode": "evaluative",
+            "relatedEventCode": "conversation.turn_circuit_breaker",
+            "createdAt": "2026-05-18T11:58:00Z",
+            "summary": "Provider failed after a partial tool pass.",
+        }
+    ]
+    assert "metadata" not in payload["nextStateSignals"][0]
+    assert payload["messages"][0]["content"] == "继续前端开发"
+    assert all(message["role"] in {"user", "assistant"} for message in payload["messages"])
+
+
 def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -4184,6 +4226,84 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
         assert payload["currentPhase"] == "running"
         assert payload["messages"][-1]["role"] == "user"
         assert payload["messages"][-1]["content"] == "第二轮已经开始"
+    finally:
+        session_service._set_session_running("session-live", False)
+        session_service._clear_session_turn_control("session-live")
+        session_service._clear_session_live_output("session-live")
+
+
+def test_stop_during_agent_call_does_not_record_late_completed_result(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    lifecycle_events = []
+
+    def record_lifecycle_event(session_id, phase, **kwargs):
+        lifecycle_events.append(
+            {
+                "session_id": session_id,
+                "phase": phase,
+                "turn_id": kwargs.get("turn_id", ""),
+                "outcome": kwargs.get("outcome", ""),
+                "fields": dict(kwargs.get("fields") or {}),
+            }
+        )
+
+    class LateCompletedAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def set_turn_interrupt_checker(self, checker):
+            self.stop_checker = checker
+
+        def run_single_turn(self, initial_prompt=None):
+            control = session_service._get_session_turn_control("session-live")
+            assert control is not None
+            control.request_stop("操作者请求停止当前轮。")
+            return {
+                "status": "completed",
+                "summary": "停止后的迟到完成结果不应该落盘。",
+                "raw_output": "停止后的迟到完成结果不应该落盘。",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        record_lifecycle_event,
+    )
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: LateCompletedAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    try:
+        response = client.post(
+            "/api/sessions/session-live/messages",
+            json={"content": "这轮会在模型调用期间被停止"},
+        )
+
+        assert response.status_code == 202
+        latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
+        detail_response = client.get("/api/sessions/session-live")
+        assert detail_response.status_code == 200
+        payload = detail_response.json()
+        assert latest_run["status"] == "stopped"
+        assert payload["currentPhase"] == "ready"
+        assert "本轮已按请求停止" in payload["messages"][-1]["content"]
+        assert "迟到完成结果" not in payload["messages"][-1]["content"]
+        assert not any(
+            event["phase"] in {"agent_turn_returned", "terminal_result"} and event["outcome"] == "completed"
+            for event in lifecycle_events
+        )
+        assert any(
+            event["phase"] == "stop_observed"
+            and event["outcome"] == "stopped"
+            and event["fields"].get("stage") == "agent_return"
+            for event in lifecycle_events
+        )
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -7013,6 +7133,145 @@ def test_evolution_routes_handle_empty_supervised_workspace(tmp_path, monkeypatc
     assert overview_response.json()["currentStatus"]["state"] == "idle"
     assert overview_response.json()["workbench"]["source"] == "unknown"
     assert runs_response.json() == []
+    assert library_response.json() == {"items": [], "pending": []}
+
+
+def test_evolution_library_exposes_self_evolution_candidates_as_pending_review_source(tmp_path, monkeypatch):
+    append_candidate_record(
+        {
+            "candidate_id": "prompt_candidate:web-self-review",
+            "candidate_type": "prompt_candidate",
+            "source_experience_id": "exp-review",
+            "source_reflection_id": "refl-review",
+            "source_run_id": "web-self-review",
+            "txn_id": "txn-review",
+            "provenance": {
+                "source_experience_id": "exp-review",
+                "source_reflection_id": "refl-review",
+                "source_run_id": "web-self-review",
+                "txn_id": "txn-review",
+                "evidence_refs": ["logs/runtime_scenes/pkg/agent/self_evolution_runs/web-self-review.jsonl"],
+            },
+            "payload": {
+                "suggested_prompt_change": "Ask for the smallest bounded validation before retrying.",
+            },
+            "allowed_downstream_uses": ["supervised_review", "accepted_baseline", "runtime_prompt_override"],
+            "blocked_downstream_uses": [],
+        },
+        project_root=tmp_path,
+    )
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evolution_service,
+        "get_workbench_contract",
+        lambda: {
+            "defaultMode": "supervised_evolution",
+            "defaultRoute": "/evolution",
+            "intakeMode": "manual_review",
+            "modeAvailability": {
+                "chat": True,
+                "self_evolution": True,
+                "supervised_evolution": True,
+            },
+            "domainAvailability": {
+                "chat": True,
+                "evolution": True,
+                "config": True,
+            },
+        },
+    )
+
+    queue_response = client.get("/api/evolution/self/candidates")
+    library_response = client.get("/api/evolution/library")
+    detail_response = client.get("/api/evolution/proposals/prompt_candidate:web-self-review")
+
+    assert queue_response.status_code == 200
+    assert library_response.status_code == 200
+    assert detail_response.status_code == 200
+    queue_payload = queue_response.json()
+    library_payload = library_response.json()
+    detail_payload = detail_response.json()
+    item = queue_payload["items"][0]
+
+    assert queue_payload["enabled"] is True
+    assert queue_payload["pendingCount"] == 1
+    assert queue_payload["counts"]["prompt_candidate"] == 1
+    assert item["id"] == "prompt_candidate:web-self-review"
+    assert item["sourceRun"] == item["id"]
+    assert item["sourceSelfRunId"] == "web-self-review"
+    assert item["ingestMode"] == "self_evolution_candidate"
+    assert item["candidateType"] == "prompt_candidate"
+    assert item["proposalStatus"] == "self_candidate_pending"
+    assert item["reviewState"] == "pending"
+    assert item["supervisedRequired"] is True
+    assert item["candidateOnly"] is True
+    assert item["autoApply"] is False
+    assert item["canDelete"] is False
+    assert item["availableActions"] == []
+    assert item["actionStates"]["apply"]["enabled"] is False
+    assert item["outcomeSemantics"]["isRuntimeApplied"] is False
+    assert item["outcomeSemantics"]["decisionLabel"] == "待监督审阅"
+    assert item["outcomeSemantics"]["proposalStatusLabel"] == "自进化候选待审阅"
+    assert "accepted_baseline" not in item["allowedDownstreamUses"]
+    assert "runtime_prompt_override" not in item["allowedDownstreamUses"]
+    assert "accepted_baseline" in item["blockedDownstreamUses"]
+    assert "selection_policy" in item["blockedDownstreamUses"]
+    assert item["provenance"]["source_run_id"] == "web-self-review"
+    assert item["evidenceRefs"] == ["logs/runtime_scenes/pkg/agent/self_evolution_runs/web-self-review.jsonl"]
+    assert any(pending["id"] == item["id"] for pending in library_payload["pending"])
+    assert library_payload["items"] == []
+    assert detail_payload["sessionId"] == item["id"]
+    assert detail_payload["sourceRun"] == item["id"]
+    assert detail_payload["canEdit"] is False
+    assert detail_payload["canDelete"] is False
+    assert detail_payload["availableActions"] == []
+    assert any("web-self-review" in note for note in detail_payload["review"]["whyCreated"])
+    assert not any("来源自进化运行：prompt_candidate:web-self-review" in note for note in detail_payload["review"]["whyCreated"])
+    assert detail_payload["proposalStatus"] == "self_candidate_pending"
+    assert detail_payload["proposal"]["status"] == "self_candidate_pending"
+    assert detail_payload["outcomeSemantics"]["isRuntimeApplied"] is False
+    assert detail_payload["outcomeSemantics"]["decisionLabel"] == "待监督审阅"
+    assert detail_payload["paths"]["selfEvolutionCandidatePath"].endswith("prompt_candidates.jsonl")
+    assert detail_payload["rawProposal"]["candidate_id"] == item["id"]
+
+
+def test_self_evolution_candidate_review_route_hides_when_self_evolution_disabled(tmp_path, monkeypatch):
+    append_candidate_record(
+        {
+            "candidate_id": "skill_candidate:hidden",
+            "candidate_type": "skill_candidate",
+            "source_experience_id": "exp-hidden",
+            "source_reflection_id": "refl-hidden",
+            "source_run_id": "web-self-hidden",
+            "provenance": {
+                "source_experience_id": "exp-hidden",
+                "source_reflection_id": "refl-hidden",
+                "source_run_id": "web-self-hidden",
+                "evidence_refs": ["reflection:web-self-hidden"],
+            },
+        },
+        project_root=tmp_path,
+    )
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evolution_service,
+        "get_workbench_contract",
+        lambda: {
+            "modeAvailability": {
+                "chat": True,
+                "self_evolution": False,
+                "supervised_evolution": True,
+            }
+        },
+    )
+
+    queue_response = client.get("/api/evolution/self/candidates")
+    library_response = client.get("/api/evolution/library")
+
+    assert queue_response.status_code == 200
+    assert queue_response.json()["enabled"] is False
+    assert queue_response.json()["pendingCount"] == 0
+    assert queue_response.json()["items"] == []
     assert library_response.json() == {"items": [], "pending": []}
 
 
