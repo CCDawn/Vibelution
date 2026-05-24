@@ -108,6 +108,7 @@ describe("runtimeScenePackageSections", () => {
       ],
       eventLogs: [
         file("events/launcher.jsonl"),
+        file("events/runtime_manager.jsonl"),
         file("events/backend.jsonl"),
         file("events/conversation.jsonl"),
         file("events/llm.jsonl"),
@@ -119,7 +120,7 @@ describe("runtimeScenePackageSections", () => {
     const sections = runtimeScenePackageSections(detail);
 
     expect(Object.fromEntries(sections.map((section) => [section.id, section.files.map((item) => item.path)]))).toEqual({
-      startup: ["events/backend.jsonl", "events/launcher.jsonl"],
+      startup: ["events/backend.jsonl", "events/launcher.jsonl", "events/runtime_manager.jsonl"],
       conversations: ["conversations/session-demo.jsonl", "events/conversation.jsonl"],
       supervised: [
         "agent/supervised_runs/web-supervised-demo.jsonl",
