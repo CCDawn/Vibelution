@@ -99,6 +99,26 @@ export function buildShutdownRequestedTelemetry(): BrowserTelemetryEventInput {
   };
 }
 
+export function buildShutdownRequestUnconfirmedTelemetry(errorMessage: string): BrowserTelemetryEventInput {
+  return {
+    phase: "shutdown",
+    eventCode: "browser.user_action.shutdown_request_unconfirmed",
+    message: "Shutdown confirmation was not received; keeping pending shutdown feedback.",
+    level: "warning",
+    fields: {
+      action: "shutdown",
+      source: "app_shell",
+      errorMessage,
+    },
+  };
+}
+
+export function shutdownRequestUnconfirmedBody(lang: string): string {
+  return lang === "en"
+    ? "The close flow has started, but this window did not receive a final confirmation yet. The workbench is still checking the runtime state."
+    : "关闭流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
+}
+
 export function AppShell() {
   const { lang, t, statusLabel } = useAppI18n();
   const location = useLocation();
@@ -172,6 +192,7 @@ export function AppShell() {
   const shutdownErrorBody = lang === "en"
     ? "The runtime manager could not close the workbench. Check the launcher and runtime-manager logs."
     : "运行时管理器没有成功关闭工作台。请检查 launcher 和 runtime-manager 日志。";
+  const shutdownUnconfirmedBody = shutdownRequestUnconfirmedBody(lang);
   const locale = lang === "zh" ? "zh-CN" : "en-US";
   const timezone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || (lang === "en" ? "Local time" : "本地时间"),
@@ -276,19 +297,21 @@ export function AppShell() {
       if (payload.message) {
         setShutdownDetail(payload.message);
       }
-    })().catch(() => {
-      setShutdownRequested(false);
+    })().catch((error) => {
+      const errorMessage = error instanceof Error ? error.message : String(error || "");
+      setShutdownRequested(true);
       setShutdownOpen(true);
-      setShutdownFailed(true);
+      setShutdownFailed(false);
       setShutdownTitle(shutdownHeading);
-      setShutdownDetail(shutdownErrorBody);
+      setShutdownDetail(shutdownUnconfirmedBody);
+      emitBrowserTelemetry(buildShutdownRequestUnconfirmedTelemetry(errorMessage), { preferBeacon: true });
     }).finally(() => {
       shutdownPromiseRef.current = null;
     });
 
     shutdownPromiseRef.current = task;
     return task;
-  }, [emitBrowserTelemetry, shutdownBody, shutdownErrorBody, shutdownHeading]);
+  }, [emitBrowserTelemetry, shutdownBody, shutdownHeading, shutdownUnconfirmedBody]);
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {

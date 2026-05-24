@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildShutdownRequestUnconfirmedTelemetry,
   buildShutdownRequestedTelemetry,
   shouldSuppressApiFailureTelemetry,
   shouldThrottleApiFailureTelemetry,
+  shutdownRequestUnconfirmedBody,
 } from "./AppShell";
 
 describe("api failure telemetry", () => {
@@ -90,6 +92,21 @@ describe("api failure telemetry", () => {
       fields: {
         action: "shutdown",
         source: "app_shell",
+      },
+    });
+  });
+
+  it("keeps shutdown request errors as pending confirmation instead of manager failure", () => {
+    expect(shutdownRequestUnconfirmedBody("zh")).toContain("还没有收到最终确认");
+    expect(shutdownRequestUnconfirmedBody("en")).toContain("did not receive a final confirmation");
+    expect(buildShutdownRequestUnconfirmedTelemetry("Failed to fetch")).toMatchObject({
+      phase: "shutdown",
+      eventCode: "browser.user_action.shutdown_request_unconfirmed",
+      level: "warning",
+      fields: {
+        action: "shutdown",
+        source: "app_shell",
+        errorMessage: "Failed to fetch",
       },
     });
   });
