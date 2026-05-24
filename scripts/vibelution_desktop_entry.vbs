@@ -2,7 +2,7 @@ Option Explicit
 
 Dim shell, fso, scriptPath, scriptDir, projectDir
 Dim powerShellPath, powerShellEntryPath, runtimeDir, launcherDir, logPath
-Dim action, noBrowser, command, exitCode
+Dim action, noBrowser, command, exitCode, runId
 
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -18,6 +18,7 @@ powerShellPath = shell.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\Win
 
 action = ResolveAction()
 noBrowser = ResolveNoBrowser()
+runId = CreateRunId()
 
 On Error Resume Next
 EnsureFolder launcherDir
@@ -67,6 +68,7 @@ End If
 On Error GoTo 0
 
 WriteLog "desktop_entry_vbs.launched", "info", "Hidden PowerShell desktop entry launched.", "action=" & action & ";shell_run_code=" & CStr(exitCode)
+ShowLaunchFeedback action
 WScript.Quit 0
 
 Function ResolveAction()
@@ -121,18 +123,68 @@ Function IsAllowedAction(value)
 End Function
 
 Sub SetLauncherEnvironment()
-    Dim env, venvPython, venvPythonw
+    Dim env, venvPython
     Set env = shell.Environment("PROCESS")
-    venvPythonw = fso.BuildPath(projectDir, ".venv\Scripts\pythonw.exe")
+    env("VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID") = runId
     venvPython = fso.BuildPath(projectDir, ".venv\Scripts\python.exe")
 
-    If fso.FileExists(venvPythonw) Then
-        env("VIBELUTION_PYTHON_EXE") = venvPythonw
-        WriteLog "desktop_entry_vbs.python_runtime.selected", "info", "Using windowless Python runtime for desktop launch.", "path=" & venvPythonw
-    ElseIf fso.FileExists(venvPython) Then
+    If fso.FileExists(venvPython) Then
         env("VIBELUTION_PYTHON_EXE") = venvPython
-        WriteLog "desktop_entry_vbs.python_runtime.selected", "warning", "Windowless Python runtime was not found; falling back to console Python.", "path=" & venvPython
+        WriteLog "desktop_entry_vbs.python_runtime.selected", "info", "Using Python runtime for desktop launch.", "path=" & venvPython
     End If
+End Sub
+
+Function CreateRunId()
+    Dim value
+    On Error Resume Next
+    value = CreateObject("Scriptlet.TypeLib").Guid
+    If Err.Number <> 0 Or Len(value) = 0 Then
+        Err.Clear
+        Randomize
+        value = "{" & Year(Now) & Month(Now) & Day(Now) & Hour(Now) & Minute(Now) & Second(Now) & "-" & CStr(Int(Rnd() * 1000000)) & "}"
+    End If
+    On Error GoTo 0
+    value = Replace(value, Chr(0), "")
+    value = Replace(value, "{", "")
+    value = Replace(value, "}", "")
+    value = Replace(value, "-", "")
+    CreateRunId = LCase(value)
+End Function
+
+Function ShouldSuppressFeedback()
+    Dim value
+    value = LCase(Trim(shell.Environment("PROCESS")("VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK")))
+    ShouldSuppressFeedback = (value = "1" Or value = "true" Or value = "yes" Or value = "on")
+End Function
+
+Function LaunchFeedbackMessage(value)
+    Select Case LCase(Trim(value))
+        Case "stop", "close"
+            LaunchFeedbackMessage = "Vibelution is closing. This notice will close automatically."
+        Case "restart"
+            LaunchFeedbackMessage = "Vibelution is restarting. The app window will reopen shortly."
+        Case "status"
+            LaunchFeedbackMessage = "Vibelution status check has started. Details are written to the launcher log."
+        Case Else
+            LaunchFeedbackMessage = "Vibelution is opening. If it is already open, its window will be brought forward."
+    End Select
+End Function
+
+Sub ShowLaunchFeedback(value)
+    If ShouldSuppressFeedback() Then
+        WriteLog "desktop_entry_vbs.feedback.suppressed", "info", "Desktop entry launch feedback was suppressed by environment.", "action=" & value
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    shell.Popup LaunchFeedbackMessage(value), 2, "Vibelution", vbInformation
+    If Err.Number <> 0 Then
+        WriteLog "desktop_entry_vbs.feedback.failed", "warning", "Failed to show desktop entry launch feedback.", "action=" & value & ";error=" & Err.Description
+        Err.Clear
+    Else
+        WriteLog "desktop_entry_vbs.feedback.shown", "info", "Desktop entry launch feedback was shown.", "action=" & value & ";timeout_seconds=2"
+    End If
+    On Error GoTo 0
 End Sub
 
 Sub EnsureFolder(path)
@@ -153,6 +205,13 @@ Sub WriteLog(eventName, level, message, details)
     Dim stream, line
     On Error Resume Next
     EnsureFolder launcherDir
+    If Len(runId) > 0 Then
+        If Len(details) > 0 Then
+            details = details & ";run_id=" & runId
+        Else
+            details = "run_id=" & runId
+        End If
+    End If
     line = "{""ts"":""" & JsonEscape(NowIso()) & """,""level"":""" & JsonEscape(level) & """,""event"":""" & JsonEscape(eventName) & """,""message"":""" & JsonEscape(message) & """,""details"":""" & JsonEscape(details) & """}"
     Set stream = fso.OpenTextFile(logPath, 8, True)
     stream.WriteLine line
