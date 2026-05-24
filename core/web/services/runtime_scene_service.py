@@ -185,7 +185,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
                 "packageIndex": package_index,
                 "startedAt": package_index["startedAt"],
                 "endedAt": str(manifest.get("ended_at") or ""),
-                "status": str(manifest.get("status") or "unknown"),
+                "status": _runtime_scene_status(manifest),
                 "result": str(manifest.get("result") or ""),
                 "stopReason": str(manifest.get("stop_reason") or ""),
                 "trigger": str(manifest.get("trigger") or ""),
@@ -236,7 +236,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
         "manifest": manifest,
         "startedAt": package_index["startedAt"],
         "endedAt": str(manifest.get("ended_at") or ""),
-        "status": str(manifest.get("status") or "unknown"),
+        "status": _runtime_scene_status(manifest),
         "result": str(manifest.get("result") or ""),
         "stopReason": str(manifest.get("stop_reason") or ""),
         "trigger": str(manifest.get("trigger") or ""),
@@ -772,7 +772,7 @@ def _runtime_scene_summary_payload(
         "package_id": package_index["packageId"],
         "display_name": package_index["displayName"],
         "index_key": package_index["indexKey"],
-        "status": str(manifest.get("status") or "unknown"),
+        "status": _runtime_scene_status(manifest),
         "result": str(manifest.get("result") or ""),
         "stop_reason": str(manifest.get("stop_reason") or ""),
         "trigger": str(manifest.get("trigger") or ""),
@@ -1004,7 +1004,7 @@ def _display_name_trigger_label(trigger: str) -> str:
 
 
 def _display_name_status_label(manifest: dict) -> str:
-    status = str(manifest.get("status") or "").strip().lower()
+    status = _runtime_scene_status(manifest)
     result = str(manifest.get("result") or "").strip().lower()
     stop_reason = str(manifest.get("stop_reason") or "").strip().lower()
     if status == "stopped" and (result or stop_reason):
@@ -1020,7 +1020,7 @@ def _package_index_trigger_token(trigger: str) -> str:
 
 
 def _package_index_status_token(manifest: dict) -> str:
-    status = str(manifest.get("status") or "").strip().lower()
+    status = _runtime_scene_status(manifest)
     result = str(manifest.get("result") or "").strip().lower()
     stop_reason = str(manifest.get("stop_reason") or "").strip().lower()
     if status == "stopped" and (result or stop_reason):
@@ -1029,8 +1029,17 @@ def _package_index_status_token(manifest: dict) -> str:
 
 
 def _runtime_scene_has_completed(manifest: dict) -> bool:
-    status = str(manifest.get("status") or "").strip().lower()
+    status = _runtime_scene_status(manifest)
     return status not in {"running", "starting", "queued", "stopping"}
+
+
+def _runtime_scene_status(manifest: dict) -> str:
+    status = str(manifest.get("status") or "").strip().lower()
+    if status and status != "unknown":
+        return status
+    if str(manifest.get("ended_at") or "").strip():
+        return status or "unknown"
+    return "running"
 
 
 def _runtime_scene_index_tags(manifest: dict, trigger_token: str, status_token: str) -> list[str]:
