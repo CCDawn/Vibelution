@@ -3757,6 +3757,61 @@ def test_submit_session_message_records_provider_failure_next_state_signal(tmp_p
     assert any(item["relatedEventCode"] == "conversation.turn_error" for item in signals)
 
 
+def test_capture_session_ui_stream_records_tool_error_next_state_signal(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live", turn_id="turn-tool")
+    with session_service._capture_session_ui_stream("session-live", capture):
+        session_service.get_event_bus().publish(
+            session_service.EventNames.TOOL_ERROR,
+            {"name": "read_file_tool", "error": "permission denied"},
+        )
+
+    signals = _read_next_state_signals(tmp_path, session_id="session-live", turn_id="turn-tool")
+    assert any(item["kind"] == "tool_error" for item in signals)
+    assert any(item["relatedEventCode"] == "conversation.tool_error" for item in signals)
+    assert any(item["metadata"]["toolName"] == "read_file_tool" for item in signals)
+
+
+def test_turn_circuit_breaker_records_next_state_signal_with_turn_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+
+    session_service._record_session_turn_circuit_breaker_event(
+        "session-live",
+        {
+            "error": "litellm.BadGatewayError: BadGatewayError: OpenAIException - {\"error\":{\"message\":\"Upstream request failed\"}}",
+            "llm_failure": {
+                "category": "server_error",
+                "retryable": True,
+                "attempts": 5,
+                "max_attempts": 5,
+                "consecutive_failures": 5,
+                "stop_reason": "retry budget exhausted",
+            },
+        },
+        turn_id="turn-42",
+        turn_index=2,
+        max_turns=4,
+    )
+
+    signals = _read_next_state_signals(tmp_path, session_id="session-live", turn_id="turn-42")
+    assert any(item["kind"] == "provider_failure" for item in signals)
+    assert any(item["relatedEventCode"] == "conversation.turn_circuit_breaker" for item in signals)
+    assert any(item["metadata"]["continuationTurn"] == 2 for item in signals)
+
+
 def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
