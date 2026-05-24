@@ -20,4 +20,25 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("packageDiagnosisInlineMetrics");
     expect(paneSource).toContain("handleOpenRawLog(scene.runtimeSceneId, entry.path)");
   });
+
+  it("surfaces active, historical, and control issue state near the package summary", () => {
+    expect(paneSource).toContain("const issueState = diagnosis.issueState");
+    expect(paneSource).toContain("signalHeading");
+    expect(paneSource).toContain("\"优先信号\"");
+    expect(paneSource).toContain("\"历史信号\"");
+    expect(paneSource).toContain("\"控制信号\"");
+    expect(paneSource).toContain("styles.packageIssueStateStrip");
+    expect(paneSource).toContain("issueState.activeClusterCount ?? activeSignalCount");
+    expect(paneSource).toContain("issueState.historicalClusterCount ?? historicalSignalCount");
+    expect(paneSource).toContain("issueState.controlSignalCount");
+  });
+
+  it("shows a primary issue cluster before folded diagnostic details", () => {
+    expect(paneSource).toContain("const primaryCluster");
+    expect(paneSource).toContain("styles.packagePrimaryCluster");
+    expect(paneSource).toContain("runtimeSceneIssueClusterLabel(primaryCluster, lang)");
+    expect(paneSource).toContain("runtimeSceneIssueClusterMeta(primaryCluster, lang)");
+    expect(paneSource).toContain("styles.packageClusterList");
+    expect(paneSource).toContain("handleOpenRawLog(scene.runtimeSceneId, cluster.rawRefs[0].path)");
+  });
 });

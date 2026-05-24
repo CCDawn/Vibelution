@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$projectVenvDir = Join-Path $projectDir ".venv"
 $preferredPythonExe = Join-Path $projectDir ".venv\Scripts\python.exe"
 $launcherPythonOverride = $env:VIBELUTION_PYTHON_EXE
 $requirementsPath = Join-Path $projectDir "requirements.txt"
@@ -22,6 +23,7 @@ $launcherControlLogPath = Join-Path $launcherDir "launcher-control.log"
 $runtimeSceneRoot = Join-Path $projectDir "logs\runtime_scenes"
 $browserProfileDir = Join-Path $launcherDir "edge-app-profile"
 $statePath = Join-Path $launcherDir "state.json"
+$activeRuntimeScenePath = Join-Path $launcherDir "active-runtime-scene.json"
 $pythonDepsStampPath = Join-Path $launcherDir "python-deps.stamp"
 $frontendDepsStampPath = Join-Path $launcherDir "frontend-deps.stamp"
 $bindHost = "127.0.0.1"
@@ -853,6 +855,28 @@ function Set-CurrentRuntimeSceneContext {
     $script:currentRuntimeSceneDir = $SceneDir
 }
 
+function Save-ActiveRuntimeSceneReference {
+    param(
+        [string]$SceneId,
+        [string]$SceneDir,
+        [string]$Trigger
+    )
+
+    if (-not $SceneId -or -not $SceneDir) {
+        return
+    }
+
+    $payload = @{
+        runtimeSceneId = $SceneId
+        runtimeSceneDir = $SceneDir
+        trigger = $Trigger
+        startedAt = (Get-Date).ToUniversalTime().ToString("o")
+        launcherPid = $PID
+    }
+    $payloadJson = $payload | ConvertTo-Json -Depth 6
+    Write-LauncherStateFile -Path $activeRuntimeScenePath -Value $payloadJson
+}
+
 function Restore-RuntimeSceneContextFromState {
     $state = Get-State
     if (-not $state) {
@@ -1200,6 +1224,7 @@ function Initialize-RuntimeScene {
     $sceneDir = Join-Path $runtimeSceneRoot $directoryName
     Set-CurrentRuntimeSceneContext -SceneId $sceneId -SceneDir $sceneDir
     Ensure-CurrentRuntimeSceneSubdirs
+    Save-ActiveRuntimeSceneReference -SceneId $sceneId -SceneDir $sceneDir -Trigger $Trigger
     $packageIndex = Get-RuntimeScenePackageIndex -SceneId $sceneId -StartedAt $startedAt -Trigger $Trigger -Status "running"
 
     $rawPaths = Get-RuntimeSceneRelativePaths
@@ -1694,6 +1719,35 @@ function Get-LogTail {
     return ((Get-Content $Path -Tail $Lines) -join [Environment]::NewLine)
 }
 
+function Get-FrontendBuildFailureSummary {
+    param([int]$ExitCode)
+
+    $summary = "npm run build failed with exit code $ExitCode."
+    if (-not $script:currentRuntimeSceneDir) {
+        return $summary
+    }
+    $buildLogPath = Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).FrontendBuild
+    $tail = Get-LogTail -Path $buildLogPath -Lines 80
+    if (-not $tail) {
+        return $summary
+    }
+    $signalLines = @()
+    foreach ($line in ($tail -split "\r?\n")) {
+        $text = ([string]$line).Trim()
+        if (-not $text) {
+            continue
+        }
+        if ($text -match '(?i)(src|web[\\/]+src).+\(\d+,\d+\):\s+error\s+TS\d+' -or $text -match '(?i)\berror\s+TS\d+\b') {
+            $signalLines += $text
+        }
+    }
+    if ($signalLines.Count -gt 0) {
+        $parts = @($summary, "frontend.build.failed") + @($signalLines | Select-Object -First 5)
+        return $parts -join [Environment]::NewLine
+    }
+    return @($summary, "frontend.build.failed", $tail) -join [Environment]::NewLine
+}
+
 function Test-WebHealthy {
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Uri $healthUrl -TimeoutSec 2
@@ -1813,6 +1867,29 @@ function Start-HiddenBackgroundProcess {
 
     if (-not $process.Start()) {
         throw "Failed to start hidden background process: $FilePath"
+    }
+
+    return $process
+}
+
+function Start-GuiProcessWithoutConsole {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [string[]]$ArgumentList = @(),
+        [string]$WorkingDirectory = $projectDir
+    )
+
+    $process = New-Object System.Diagnostics.Process
+    $process.StartInfo.FileName = $FilePath
+    $process.StartInfo.Arguments = ConvertTo-ProcessArgumentString -ArgumentList $ArgumentList
+    $process.StartInfo.WorkingDirectory = $WorkingDirectory
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Normal
+
+    if (-not $process.Start()) {
+        throw "Failed to start GUI process without console: $FilePath"
     }
 
     return $process
@@ -2157,6 +2234,79 @@ function Test-PythonRuntime {
     }
 }
 
+function Ensure-ProjectVirtualEnvironment {
+    if (Test-Path -LiteralPath $preferredPythonExe) {
+        return
+    }
+
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $pythonCommand) {
+        throw "Project virtual environment is missing and Python was not found on PATH. Install Python 3.11 or 3.12 first."
+    }
+
+    $pythonPath = (Resolve-Path -LiteralPath $pythonCommand.Source).Path
+    Write-Note "Project virtual environment is missing. Creating .venv ..."
+    Write-LauncherControlLog `
+        -Event "bootstrap.virtualenv.create.started" `
+        -Message "Creating project virtual environment." `
+        -Fields @{
+            python = $pythonPath
+            venv_path = $projectVenvDir
+        }
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "python_dependencies" `
+            -EventCode "bootstrap.virtualenv.create.started" `
+            -Message "Creating project virtual environment." `
+            -Outcome "started" `
+            -Fields @{ python = $pythonPath; venv_path = $projectVenvDir }
+    }
+
+    $exitCode = Invoke-NativeCommand `
+        -CommandPath $pythonPath `
+        -ArgumentList @("-m", "venv", $projectVenvDir)
+    if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $preferredPythonExe)) {
+        Write-LauncherControlLog `
+            -Event "bootstrap.virtualenv.create.failed" `
+            -Message "Creating project virtual environment failed." `
+            -Level "error" `
+            -Fields @{
+                python = $pythonPath
+                venv_path = $projectVenvDir
+                exit_code = $exitCode
+            }
+        if ($script:currentRuntimeSceneId) {
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "python_dependencies" `
+                -EventCode "bootstrap.virtualenv.create.failed" `
+                -Message "Creating project virtual environment failed." `
+                -Level "error" `
+                -Outcome "failed" `
+                -Fields @{ python = $pythonPath; venv_path = $projectVenvDir; exit_code = $exitCode }
+        }
+        throw "Creating project virtual environment failed with exit code $exitCode."
+    }
+
+    Write-LauncherControlLog `
+        -Event "bootstrap.virtualenv.create.succeeded" `
+        -Message "Project virtual environment created." `
+        -Fields @{
+            python = $pythonPath
+            venv_path = $projectVenvDir
+        }
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "python_dependencies" `
+            -EventCode "bootstrap.virtualenv.create.succeeded" `
+            -Message "Project virtual environment created." `
+            -Outcome "succeeded" `
+            -Fields @{ python = $pythonPath; venv_path = $projectVenvDir }
+    }
+}
+
 function Get-ProjectPythonCandidates {
     $venvCandidates = New-Object System.Collections.Generic.List[object]
     $seenPaths = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
@@ -2191,6 +2341,7 @@ function Get-ProjectPythonCandidates {
 }
 
 function Ensure-ProjectPythonDependencies {
+    Ensure-ProjectVirtualEnvironment
     $venvCandidates = @(Get-ProjectPythonCandidates)
     if ($venvCandidates.Count -eq 0) {
         return
@@ -2590,7 +2741,7 @@ function Ensure-WebBuild {
                     -Fields @{ reason = $buildReason; exit_code = $exitCode } `
                     -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).FrontendBuild -TailLines 120)
             }
-            throw "npm run build failed with exit code $exitCode."
+            throw (Get-FrontendBuildFailureSummary -ExitCode $exitCode)
         }
     } finally {
         Pop-Location
@@ -3018,13 +3169,16 @@ function Start-ManagedBrowser {
             -EventCode "browser.window.launch.requested" `
             -Message "Launching managed browser window." `
             -Outcome "started" `
-            -Fields @{ executable = $BrowserExecutable }
+            -Fields @{
+                executable = $BrowserExecutable
+                launch_api = "gui_process_without_console"
+                console_window_suppressed = $true
+            }
     }
-    $proc = Start-Process `
+    $proc = Start-GuiProcessWithoutConsole `
         -FilePath $BrowserExecutable `
         -ArgumentList $browserArgs `
-        -WorkingDirectory $projectDir `
-        -PassThru
+        -WorkingDirectory $projectDir
 
     $windowProcess = Wait-ForBrowserWindow -LaunchProcessId $proc.Id
     if (-not $windowProcess) {
@@ -3039,7 +3193,12 @@ function Start-ManagedBrowser {
                 -Message "Managed browser window did not open successfully." `
                 -Level "error" `
                 -Outcome "failed" `
-                -Fields @{ executable = $BrowserExecutable; launch_pid = $proc.Id }
+                -Fields @{
+                    executable = $BrowserExecutable
+                    launch_pid = $proc.Id
+                    launch_api = "gui_process_without_console"
+                    console_window_suppressed = $true
+                }
         }
         throw "Managed Edge app window did not open successfully."
     }
@@ -3053,7 +3212,13 @@ function Start-ManagedBrowser {
             -EventCode "browser.window.opened" `
             -Message "Managed browser window opened." `
             -Outcome "succeeded" `
-            -Fields @{ executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id }
+            -Fields @{
+                executable = $BrowserExecutable
+                launch_pid = $proc.Id
+                window_pid = $windowProcess.Id
+                launch_api = "gui_process_without_console"
+                console_window_suppressed = $true
+            }
     }
 
     return [pscustomobject]@{

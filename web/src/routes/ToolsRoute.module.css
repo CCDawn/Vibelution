@@ -183,7 +183,9 @@
 }
 
 .detailPanel {
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: none;
+  grid-auto-rows: max-content;
+  align-content: start;
   overflow: auto;
 }
 
@@ -196,11 +198,18 @@
   min-width: 0;
 }
 
+.panelHeader > div,
+.detailHeader > div {
+  min-width: 0;
+}
+
 .panelHeader h2,
 .detailHeader h2 {
   margin: 0;
   font-family: var(--font-display);
   font-size: 1rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 .detailHeader p {
@@ -393,8 +402,11 @@
 
 .detailActions {
   display: flex;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+  padding-top: 2px;
 }
 
 .secondaryButton,
@@ -410,7 +422,7 @@
   color: var(--state-error);
 }
 
-.schemaPanel,
+.schemaDisclosure,
 .testPanel,
 .policyPanel {
   display: grid;
@@ -422,15 +434,16 @@
   background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
 }
 
-.schemaPanel h3,
 .testPanel h3,
 .policyPanel h3 {
   margin: 0;
   font-family: var(--font-display);
   font-size: 0.96rem;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
 }
 
-.schemaPanel pre,
+.schemaDisclosure pre,
 .testPanel pre,
 .policyPanel pre {
   min-height: 0;
@@ -446,12 +459,106 @@
   line-height: 1.5;
 }
 
+.schemaDisclosure summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.schemaDisclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.schemaDisclosure summary > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.schemaDisclosure summary strong {
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-family: var(--font-display);
+  font-size: 0.96rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schemaDisclosure summary svg {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+}
+
 .testPanel p,
 .policyPanel p {
   margin: 0;
   color: var(--fg-secondary);
   font-size: 0.82rem;
   line-height: 1.45;
+}
+
+.readinessPanel,
+.resultSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+
+.readinessCard,
+.resultCard {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  min-height: 62px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
+}
+
+.readinessCard span,
+.resultCard span {
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readinessCard strong,
+.resultCard strong {
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readiness_ready,
+.result_ok {
+  border-color: color-mix(in srgb, var(--state-success) 24%, transparent);
+  background: color-mix(in srgb, var(--state-success) 8%, var(--surface-panel-muted, rgba(21, 24, 27, 0.82)));
+}
+
+.readiness_ready strong,
+.result_ok strong {
+  color: var(--state-success);
+}
+
+.readiness_blocked,
+.result_attention {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-panel-muted, rgba(21, 24, 27, 0.82)));
+}
+
+.readiness_blocked strong,
+.result_attention strong {
+  color: var(--accent-warm-2);
 }
 
 .policyMeta {
@@ -464,6 +571,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  max-width: 100%;
   min-height: 28px;
   padding: 0 9px;
   border: 1px solid var(--border-soft);
@@ -471,6 +579,7 @@
   background: var(--surface-input-strong, rgba(14, 17, 20, 0.72));
   color: var(--fg-secondary);
   font-size: 0.76rem;
+  overflow-wrap: anywhere;
 }
 
 .policyMeta strong {
@@ -555,6 +664,8 @@
 
   .summaryGrid,
   .workspace,
+  .readinessPanel,
+  .resultSummaryGrid,
   .metaGrid {
     grid-template-columns: 1fr;
   }

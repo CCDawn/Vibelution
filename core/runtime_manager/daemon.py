@@ -802,6 +802,20 @@ def _finalize_daemon_stopped_state(*, manager_pid: int) -> None:
     save_state(state)
 
 
+def _mark_daemon_not_running_after_exit(*, manager_pid: int) -> None:
+    state = load_state()
+    if not isinstance(state, dict):
+        state = default_state()
+    if int(state.get("managerPid") or 0) not in {0, int(manager_pid)}:
+        return
+    state["runtimeState"] = "idle"
+    state["managerPid"] = 0
+    state["daemonRunning"] = False
+    state["lastStoppedAt"] = now_iso()
+    state["lastStoppedManagerPid"] = int(manager_pid)
+    save_state(state)
+
+
 class RuntimeManagerDaemon:
     def __init__(self) -> None:
         self._pid = os.getpid()
@@ -854,6 +868,7 @@ class RuntimeManagerDaemon:
                 time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
         finally:
             clear_pid(self._pid)
+            _mark_daemon_not_running_after_exit(manager_pid=self._pid)
 
     def _handle_command(self, payload: dict[str, Any]) -> dict[str, Any]:
         command_id = str(payload.get("commandId") or "").strip()

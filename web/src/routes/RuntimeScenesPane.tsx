@@ -18,6 +18,7 @@ import {
   LogDiagnostics,
   LogFileContent,
   LogRoot,
+  RuntimeSceneIssueCluster,
   RuntimeSceneDeleteResponse,
   RuntimeSceneDetail,
   RuntimeSceneListItem,
@@ -218,6 +219,32 @@ function renderPackageDiagnosisPanel(
   const keyEntries = diagnosis.keyEntries ?? [];
   const recommendedOrder = diagnosis.recommendedOrder ?? [];
   const startupSteps = diagnosis.startupTrace?.steps ?? [];
+  const issueState = diagnosis.issueState;
+  const activeSignalCount = issueState ? issueState.activeErrorCount + issueState.activeWarningCount : 0;
+  const historicalSignalCount = issueState ? issueState.historicalErrorCount + issueState.historicalWarningCount : 0;
+  const activeIssueCount = issueState ? issueState.activeClusterCount ?? activeSignalCount : 0;
+  const historicalIssueCount = issueState ? issueState.historicalClusterCount ?? historicalSignalCount : 0;
+  const primaryCluster =
+    issueState?.firstActiveCluster ?? issueState?.firstHistoricalCluster ?? issueState?.activeClusters?.[0] ?? issueState?.historicalClusters?.[0];
+  const visibleClusters = [
+    ...(issueState?.activeClusters ?? []).slice(0, 3),
+    ...(issueState?.historicalClusters ?? []).slice(0, 2),
+  ].slice(0, 4);
+  const signalHeading = firstSignal?.eventCode
+    ? activeIssueCount > 0
+      ? lang === "zh"
+        ? "优先信号"
+        : "Priority signal"
+      : historicalIssueCount > 0
+        ? lang === "zh"
+          ? "历史信号"
+          : "Historical signal"
+        : lang === "zh"
+          ? "控制信号"
+          : "Control signal"
+    : lang === "zh"
+      ? "信号"
+      : "Signal";
   return (
     <section className={styles.packageDiagnosisPanel}>
       <div className={styles.packageDiagnosisHeader}>
@@ -228,6 +255,42 @@ function renderPackageDiagnosisPanel(
         <span className={severityClassName(diagnosis.severity)}>{severityLabel(diagnosis.severity, lang)}</span>
       </div>
       <p className={styles.packageDiagnosisSummary}>{diagnosis.userSummary}</p>
+      {issueState ? (
+        <div className={styles.packageIssueStateStrip}>
+          <span>
+            <strong>{activeIssueCount}</strong>
+            {lang === "zh" ? " 活跃问题簇" : " active clusters"}
+          </span>
+          <span>
+            <strong>{historicalIssueCount}</strong>
+            {lang === "zh" ? " 历史/已恢复簇" : " historical clusters"}
+          </span>
+          <span>
+            <strong>{issueState.controlSignalCount}</strong>
+            {lang === "zh" ? " 控制信号" : " control"}
+          </span>
+        </div>
+      ) : null}
+      {primaryCluster ? (
+        <div className={styles.packagePrimaryCluster}>
+          <span>{activeIssueCount > 0 ? (lang === "zh" ? "主活跃问题簇" : "Primary active cluster") : lang === "zh" ? "主历史问题簇" : "Primary historical cluster"}</span>
+          <strong>{runtimeSceneIssueClusterLabel(primaryCluster, lang)}</strong>
+          <p>{runtimeSceneIssueClusterMeta(primaryCluster, lang)}</p>
+          {primaryCluster.rawRefs?.length ? (
+            <div className={styles.packageClusterRefs}>
+              {primaryCluster.rawRefs.slice(0, 2).map((ref, index) => (
+                <button
+                  key={`${primaryCluster.eventCode}-${ref.path}-${index}`}
+                  type="button"
+                  onClick={() => handleOpenRawLog(scene.runtimeSceneId, ref.path)}
+                >
+                  {ref.path}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {diagnosis.startupTrace ? (
         <div className={styles.startupTracePanel}>
           <div className={styles.startupTraceHeader}>
@@ -265,7 +328,7 @@ function renderPackageDiagnosisPanel(
       ) : null}
       <div className={styles.packageDiagnosisGrid}>
         <article>
-          <span>{lang === "zh" ? "首个信号" : "First signal"}</span>
+          <span>{signalHeading}</span>
           <strong>{firstSignalLabel}</strong>
           {firstSignal?.message ? <p>{localizeRuntimeSceneText(firstSignal.message, lang)}</p> : null}
         </article>
@@ -314,10 +377,46 @@ function renderPackageDiagnosisPanel(
               </div>
             </div>
           ) : null}
+          {visibleClusters.length > 0 ? (
+            <div className={styles.packageDiagnosisFoldoutSection}>
+              <span>{lang === "zh" ? "问题簇索引" : "Issue cluster index"}</span>
+              <div className={styles.packageClusterList}>
+                {visibleClusters.map((cluster, index) => (
+                  <div key={`${cluster.eventCode}-${cluster.firstTimestamp}-${index}`} className={styles.packageClusterItem}>
+                    <strong>{runtimeSceneIssueClusterLabel(cluster, lang)}</strong>
+                    <span>{runtimeSceneIssueClusterMeta(cluster, lang)}</span>
+                    {cluster.rawRefs?.[0]?.path ? (
+                      <button type="button" onClick={() => handleOpenRawLog(scene.runtimeSceneId, cluster.rawRefs[0].path)}>
+                        {cluster.rawRefs[0].path}
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </details>
     </section>
   );
+}
+
+function runtimeSceneIssueClusterLabel(cluster: RuntimeSceneIssueCluster, lang: "zh" | "en") {
+  const label = cluster.label || [cluster.component, cluster.eventCode].filter(Boolean).join(" / ");
+  const localized = localizeRuntimeSceneText(label || (lang === "zh" ? "未命名问题簇" : "Unnamed issue cluster"), lang);
+  return cluster.repeatCount > 1 ? `${localized} x${cluster.repeatCount}` : localized;
+}
+
+function runtimeSceneIssueClusterMeta(cluster: RuntimeSceneIssueCluster, lang: "zh" | "en") {
+  const parts = [
+    severityLabel(cluster.severity, lang),
+    cluster.phase ? localizeRuntimeSceneText(cluster.phase, lang) : "",
+    cluster.firstTimestamp ? formatTimestamp(cluster.firstTimestamp, lang) : "",
+  ].filter(Boolean);
+  if (cluster.lastTimestamp && cluster.lastTimestamp !== cluster.firstTimestamp) {
+    parts.push(lang === "zh" ? `最后 ${formatTimestamp(cluster.lastTimestamp, lang)}` : `Last ${formatTimestamp(cluster.lastTimestamp, lang)}`);
+  }
+  return parts.join(lang === "zh" ? " · " : " · ");
 }
 
 function formatTimestamp(value: string, lang: "zh" | "en") {

@@ -1,4 +1,5 @@
 import json
+import http.client
 import subprocess
 import sys
 
@@ -121,6 +122,24 @@ def test_cli_command_forwards_no_browser_without_stop_manager(monkeypatch):
         "ensure",
         ("open_workbench", {"reason": "launcher_start", "noBrowser": True}, "cli"),
     ]
+
+
+def test_backend_health_probe_treats_connection_reset_as_unhealthy(monkeypatch):
+    def fake_urlopen(*args, **kwargs):
+        raise ConnectionResetError(10054, "An existing connection was forcibly closed")
+
+    monkeypatch.setattr(workbench_controller.urllib.request, "urlopen", fake_urlopen)
+
+    assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
+
+
+def test_backend_health_probe_treats_http_protocol_error_as_unhealthy(monkeypatch):
+    def fake_urlopen(*args, **kwargs):
+        raise workbench_controller.http.client.HTTPException("bad status line")
+
+    monkeypatch.setattr(workbench_controller.urllib.request, "urlopen", fake_urlopen)
+
+    assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
 
 
 def test_load_runtime_snapshot_aligns_legacy_open_session(monkeypatch):
@@ -303,6 +322,53 @@ def test_run_forever_refreshes_manager_started_at(monkeypatch):
 
     assert saved_states[0]["startedAt"] == "2026-05-19T08:00:00+00:00"
     assert saved_states[0]["runtimeManager"]["sourceSignature"] == "sig-current"
+
+
+def test_daemon_unexpected_exit_marks_manager_not_running(monkeypatch):
+    saved_states: list[dict] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "daemonRunning": True,
+            "command": {"activeCommandId": ""},
+            "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+        },
+    )
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-24T08:00:00+00:00")
+    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(json.loads(json.dumps(state))) or state)
+
+    daemon._mark_daemon_not_running_after_exit(manager_pid=9912)
+
+    assert saved_states[-1]["runtimeState"] == "idle"
+    assert saved_states[-1]["managerPid"] == 0
+    assert saved_states[-1]["daemonRunning"] is False
+    assert saved_states[-1]["lastStoppedAt"] == "2026-05-24T08:00:00+00:00"
+    assert saved_states[-1]["lastStoppedManagerPid"] == 9912
+
+
+def test_daemon_unexpected_exit_does_not_overwrite_newer_manager(monkeypatch):
+    saved_states: list[dict] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "running",
+            "managerPid": 2000,
+            "daemonRunning": True,
+            "command": {},
+            "workbench": {},
+        },
+    )
+    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(state) or state)
+
+    daemon._mark_daemon_not_running_after_exit(manager_pid=9912)
+
+    assert saved_states == []
 
 
 def test_run_forever_cleans_descendants_before_completing_stop_daemon(monkeypatch):
@@ -3573,3 +3639,48 @@ def test_clear_pid_keeps_newer_owner(tmp_path, monkeypatch):
 
     state_store.clear_pid(200)
     assert not pid_path.exists()
+
+
+def test_daemon_exit_marks_matching_manager_not_running(monkeypatch):
+    state = {
+        "runtimeState": "running",
+        "managerPid": 321,
+        "daemonRunning": True,
+    }
+    saved_states = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: dict(state))
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(dict(next_state)))
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-24T15:00:00+00:00")
+
+    daemon._mark_daemon_not_running_after_exit(manager_pid=321)
+
+    assert saved_states[-1]["runtimeState"] == "idle"
+    assert saved_states[-1]["managerPid"] == 0
+    assert saved_states[-1]["daemonRunning"] is False
+    assert saved_states[-1]["lastStoppedManagerPid"] == 321
+
+
+def test_daemon_exit_keeps_newer_manager_owner(monkeypatch):
+    state = {
+        "runtimeState": "running",
+        "managerPid": 654,
+        "daemonRunning": True,
+    }
+    saved_states = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: dict(state))
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(dict(next_state)))
+
+    daemon._mark_daemon_not_running_after_exit(manager_pid=321)
+
+    assert saved_states == []
+
+
+def test_backend_health_probe_treats_low_level_http_errors_as_unhealthy(monkeypatch):
+    def raise_http_exception(*_args, **_kwargs):
+        raise http.client.HTTPException("connection closed")
+
+    monkeypatch.setattr(workbench_controller.urllib.request, "urlopen", raise_http_exception)
+
+    assert workbench_controller._is_backend_healthy("http://127.0.0.1:8766") is False

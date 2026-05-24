@@ -65,7 +65,18 @@ Vibelution/
 
 ## 快速开始
 
-### 1. 安装 Python 依赖
+### 1. 首次打开自动准备环境
+
+从桌面入口或 `scripts/vibelution_launcher.ps1 start` 首次打开时，launcher 会自动准备项目内运行环境：
+
+- 缺少 `.venv` 时用系统 `python` 创建项目虚拟环境。
+- 按 `requirements.txt` 安装或更新 Python 依赖。
+- 缺少 `web/node_modules` 或前端依赖变更时自动执行 `npm ci`/`npm install`。
+- 缺少 `web/dist` 或前端源码更新时自动执行 `npm run build`。
+
+过程日志会写入 `.runtime/launcher/launcher-control.log` 和当前 `logs/runtime_scenes/` 包；后续启动只做快速指纹检查，已就绪时会直接复用。
+
+### 2. 手动安装 Python 依赖
 
 建议使用 Python `3.11` 或 `3.12`，并在项目虚拟环境中运行。
 
@@ -73,14 +84,14 @@ Vibelution/
 pip install -r requirements.txt
 ```
 
-### 2. 安装前端依赖
+### 3. 手动安装前端依赖
 
 ```bash
 cd web
 npm install
 ```
 
-### 3. 配置 LLM
+### 4. 配置 LLM
 
 新环境建议从 [config.example.toml](config.example.toml) 开始，复制为本地 `config.toml` 后再按需调整。
 

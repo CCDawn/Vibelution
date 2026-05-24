@@ -157,6 +157,12 @@ Function ShouldSuppressFeedback()
     ShouldSuppressFeedback = (value = "1" Or value = "true" Or value = "yes" Or value = "on")
 End Function
 
+Function ShouldShowFeedback()
+    Dim value
+    value = LCase(Trim(shell.Environment("PROCESS")("VIBELUTION_DESKTOP_ENTRY_SHOW_FEEDBACK")))
+    ShouldShowFeedback = (value = "1" Or value = "true" Or value = "yes" Or value = "on")
+End Function
+
 Function LaunchFeedbackMessage(value)
     Select Case LCase(Trim(value))
         Case "stop", "close"
@@ -173,6 +179,11 @@ End Function
 Sub ShowLaunchFeedback(value)
     If ShouldSuppressFeedback() Then
         WriteLog "desktop_entry_vbs.feedback.suppressed", "info", "Desktop entry launch feedback was suppressed by environment.", "action=" & value
+        Exit Sub
+    End If
+
+    If Not ShouldShowFeedback() Then
+        WriteLog "desktop_entry_vbs.feedback.suppressed", "info", "Desktop entry launch feedback is quiet by default.", "action=" & value & ";reason=default_quiet"
         Exit Sub
     End If
 

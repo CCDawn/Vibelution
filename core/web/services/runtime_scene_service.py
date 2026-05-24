@@ -31,6 +31,8 @@ MAX_TELEMETRY_TEXT_CHARS = 4_000
 MAX_TELEMETRY_FIELD_TEXT_CHARS = 1_200
 MAX_TELEMETRY_FIELD_ITEMS = 24
 BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS = 60.0
+WORK_RUN_SNAPSHOT_EVENT_CODE = "work_run.snapshot.persisted"
+WORK_RUN_SNAPSHOT_SUMMARY_EVENT_CODE = "work_run.snapshot.summary"
 MAX_CONVERSATION_TEXT_CHARS = 20_000
 REDACTED_FIELD_VALUE = "[redacted]"
 LIFECYCLE_INDEX_PHASES = {
@@ -60,6 +62,28 @@ SENSITIVE_FIELD_KEYWORDS = (
     "token",
     "cookie",
     "bearer",
+)
+NON_PROBLEM_NEXT_STATE_KINDS = {
+    "assistant_output_edited",
+    "user_continues",
+    "user_stops",
+}
+ISSUE_RESOLUTION_OUTCOMES = {
+    "fallback",
+    "fallback_activated",
+    "recovered",
+    "resolved",
+    "skipped",
+    "success",
+    "succeeded",
+}
+ISSUE_IDENTITY_FIELD_KEYS = (
+    "activeRunId",
+    "commandId",
+    "pageInstanceId",
+    "runId",
+    "sessionId",
+    "turnId",
 )
 BROWSER_TELEMETRY_WRITE_LOCK = Lock()
 BACKEND_API_WRITE_LOCK = Lock()
@@ -1195,7 +1219,7 @@ def _read_scene_timeline(scene_dir: Path) -> list[dict]:
             for entry in timeline_rows
         ]
         timeline.sort(key=lambda item: (item["timestamp"], item["component"], item["seq"]))
-        return timeline
+        return _fold_repeated_work_run_snapshots(timeline)
 
     events_dir = scene_dir / "events"
     timeline: list[dict] = []
@@ -1208,7 +1232,84 @@ def _read_scene_timeline(scene_dir: Path) -> list[dict]:
             timeline.append(_event_payload_to_client_item(entry, scene_dir, component))
 
     timeline.sort(key=lambda item: (item["timestamp"], item["component"], item["seq"]))
-    return timeline
+    return _fold_repeated_work_run_snapshots(timeline)
+
+
+def _fold_repeated_work_run_snapshots(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    folded: list[dict[str, Any]] = []
+    pending: dict[str, Any] | None = None
+    repeat_count = 0
+    last_timestamp = ""
+
+    def flush_pending() -> None:
+        nonlocal pending, repeat_count, last_timestamp
+        if pending is None:
+            return
+        if repeat_count <= 1:
+            folded.append(pending)
+        else:
+            folded.append(_work_run_snapshot_summary_event(pending, repeat_count, last_timestamp))
+        pending = None
+        repeat_count = 0
+        last_timestamp = ""
+
+    for event in events:
+        if str(event.get("eventCode") or "") != WORK_RUN_SNAPSHOT_EVENT_CODE:
+            flush_pending()
+            folded.append(event)
+            continue
+        if pending is None:
+            pending = event
+            repeat_count = 1
+            last_timestamp = str(event.get("timestamp") or "")
+            continue
+        if _work_run_snapshot_fold_key(event) == _work_run_snapshot_fold_key(pending):
+            repeat_count += 1
+            last_timestamp = str(event.get("timestamp") or last_timestamp)
+            continue
+        flush_pending()
+        pending = event
+        repeat_count = 1
+        last_timestamp = str(event.get("timestamp") or "")
+    flush_pending()
+    return folded
+
+
+def _work_run_snapshot_fold_key(event: dict[str, Any]) -> tuple[str, str, str, str]:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    return (
+        str(fields.get("runKind") or ""),
+        str(fields.get("runId") or ""),
+        str(fields.get("status") or ""),
+        str(fields.get("phase") or ""),
+    )
+
+
+def _work_run_snapshot_summary_event(event: dict[str, Any], repeat_count: int, last_timestamp: str) -> dict[str, Any]:
+    fields = dict(event.get("fields") if isinstance(event.get("fields"), dict) else {})
+    first_timestamp = str(event.get("timestamp") or "")
+    fields.update(
+        {
+            "repeatCount": repeat_count,
+            "foldedEvent": True,
+            "originalEventCode": WORK_RUN_SNAPSHOT_EVENT_CODE,
+            "firstTimestamp": first_timestamp,
+            "lastTimestamp": last_timestamp or first_timestamp,
+        }
+    )
+    run_kind = str(fields.get("runKind") or "work_run")
+    run_id = str(fields.get("runId") or "")
+    status = str(fields.get("status") or "")
+    phase = str(fields.get("phase") or "")
+    return {
+        **event,
+        "eventCode": WORK_RUN_SNAPSHOT_SUMMARY_EVENT_CODE,
+        "message": (
+            f"Folded {repeat_count} repeated work run snapshots: "
+            f"{run_kind}/{run_id} {status} {phase}".strip()
+        ),
+        "fields": fields,
+    }
 
 
 def _read_scene_lifecycle(scene_dir: Path, fallback_timeline: list[dict] | None = None) -> list[dict]:
@@ -1367,14 +1468,9 @@ def _runtime_scene_package_diagnosis(
     event_logs: list[dict],
 ) -> dict[str, Any]:
     severity_summary = _runtime_scene_severity_summary(timeline)
-    severity = (
-        "error"
-        if severity_summary["errorCount"] > 0
-        else "warning"
-        if severity_summary["warningCount"] > 0
-        else "info"
-    )
-    first_signal = _runtime_scene_first_signal(timeline)
+    issue_state = _runtime_scene_issue_state(timeline)
+    severity = str(issue_state.get("severity") or "info")
+    first_signal = _runtime_scene_first_signal(timeline, issue_state=issue_state)
     if first_signal is None:
         first_signal = _runtime_scene_first_key_event(lifecycle, timeline)
     startup_trace = _runtime_scene_startup_trace(scene_dir=scene_dir, manifest=manifest, timeline=timeline)
@@ -1407,6 +1503,7 @@ def _runtime_scene_package_diagnosis(
             timeline=timeline,
             lifecycle=lifecycle,
             severity_summary=severity_summary,
+            issue_state=issue_state,
             first_signal=first_signal,
             child_log_count=len(raw_files) + len(conversation_logs) + len(agent_logs) + len(artifacts) + len(event_logs),
             startup_trace=startup_trace,
@@ -1415,11 +1512,13 @@ def _runtime_scene_package_diagnosis(
             scene_dir_name=scene_dir.name,
             scene_id=scene_id,
             severity=severity,
+            issue_state=issue_state,
             first_signal=first_signal,
             recommended_order=recommended_order,
             key_entries=key_entries,
             startup_trace=startup_trace,
         ),
+        "issueState": issue_state,
         "firstSignal": _runtime_scene_diagnosis_signal_payload(first_signal),
         "startupTrace": startup_trace,
         "recommendedOrder": recommended_order,
@@ -1427,11 +1526,18 @@ def _runtime_scene_package_diagnosis(
     }
 
 
-def _runtime_scene_first_signal(events: list[dict]) -> dict[str, Any] | None:
-    for event in events:
-        severity = _runtime_scene_event_severity(event)
-        if severity in {"error", "warning"}:
-            return {**event, "diagnosisSeverity": severity}
+def _runtime_scene_first_signal(events: list[dict], *, issue_state: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    active = issue_state.get("firstActiveSignal") if isinstance(issue_state, dict) else None
+    if isinstance(active, dict):
+        return active
+    historical = issue_state.get("firstHistoricalSignal") if isinstance(issue_state, dict) else None
+    if isinstance(historical, dict):
+        return historical
+    for target_severity in ("error", "warning"):
+        for event in events:
+            severity = _runtime_scene_event_severity(event)
+            if severity == target_severity:
+                return {**event, "diagnosisSeverity": severity}
     return None
 
 
@@ -1443,6 +1549,239 @@ def _runtime_scene_first_key_event(lifecycle: list[dict], timeline: list[dict]) 
         if str(event.get("eventCode") or "").strip():
             return {**event, "diagnosisSeverity": _runtime_scene_event_severity(event)}
     return None
+
+
+def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
+    signals: list[dict[str, Any]] = []
+    for index, event in enumerate(events):
+        severity = _runtime_scene_event_severity(event)
+        if severity not in {"error", "warning"}:
+            continue
+        problem = _runtime_scene_signal_problem_kind(event)
+        signals.append(
+            {
+                "index": index,
+                "severity": severity,
+                "problem": problem,
+                "event": {**event, "diagnosisSeverity": severity},
+            }
+        )
+
+    active: list[dict[str, Any]] = []
+    historical: list[dict[str, Any]] = []
+    control: list[dict[str, Any]] = []
+    for signal in signals:
+        problem = str(signal.get("problem") or "")
+        event = signal.get("event")
+        if not isinstance(event, dict):
+            continue
+        if problem == "control":
+            control.append(signal)
+            continue
+        if _runtime_scene_signal_has_later_resolution(events, signal):
+            historical.append(signal)
+            continue
+        active.append(signal)
+
+    active_clusters = _runtime_scene_issue_clusters(active)
+    historical_clusters = _runtime_scene_issue_clusters(historical)
+    first_active_cluster = active_clusters[0] if active_clusters else None
+    first_historical_cluster = historical_clusters[0] if historical_clusters else None
+    first_active = _runtime_scene_first_ranked_signal(active)
+    first_historical = _runtime_scene_first_ranked_signal(historical)
+    return {
+        "schemaVersion": 1,
+        "severity": _runtime_scene_issue_state_severity(active),
+        "activeErrorCount": _count_issue_signals(active, "error"),
+        "activeWarningCount": _count_issue_signals(active, "warning"),
+        "historicalErrorCount": _count_issue_signals(historical, "error"),
+        "historicalWarningCount": _count_issue_signals(historical, "warning"),
+        "activeClusterCount": len(active_clusters),
+        "historicalClusterCount": len(historical_clusters),
+        "controlSignalCount": len(control),
+        "activeClusters": active_clusters,
+        "historicalClusters": historical_clusters,
+        "firstActiveCluster": first_active_cluster,
+        "firstHistoricalCluster": first_historical_cluster,
+        "firstActiveSignal": first_active,
+        "firstHistoricalSignal": first_historical,
+    }
+
+
+def _runtime_scene_issue_clusters(signals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    clusters_by_key: dict[tuple[str, ...], dict[str, Any]] = {}
+    cluster_order: list[tuple[str, ...]] = []
+    for signal in signals:
+        event = signal.get("event")
+        if not isinstance(event, dict):
+            continue
+        key = _runtime_scene_issue_cluster_key(event)
+        cluster = clusters_by_key.get(key)
+        timestamp = str(event.get("timestamp") or "")
+        representative = {**event, "diagnosisSeverity": str(signal.get("severity") or _runtime_scene_event_severity(event))}
+        if cluster is None:
+            cluster = {
+                "schemaVersion": 1,
+                "severity": str(signal.get("severity") or "info"),
+                "component": str(event.get("component") or ""),
+                "phase": str(event.get("phase") or ""),
+                "eventCode": str(event.get("eventCode") or ""),
+                "label": _runtime_scene_issue_cluster_label(event),
+                "repeatCount": 1,
+                "firstTimestamp": timestamp,
+                "lastTimestamp": timestamp,
+                "representativeSignal": representative,
+                "rawRefs": representative.get("rawRefs") if isinstance(representative.get("rawRefs"), list) else [],
+                "identity": _runtime_scene_event_identity(event),
+            }
+            clusters_by_key[key] = cluster
+            cluster_order.append(key)
+            continue
+        cluster["repeatCount"] = int(cluster.get("repeatCount") or 0) + 1
+        if timestamp:
+            cluster["lastTimestamp"] = timestamp
+        if not str(cluster.get("firstTimestamp") or "") and timestamp:
+            cluster["firstTimestamp"] = timestamp
+    clusters = [clusters_by_key[key] for key in cluster_order]
+    clusters.sort(key=_runtime_scene_issue_cluster_sort_key)
+    return clusters
+
+
+def _runtime_scene_issue_cluster_key(event: dict[str, Any]) -> tuple[str, ...]:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    parts = [
+        str(event.get("component") or ""),
+        str(event.get("eventCode") or ""),
+        str(event.get("phase") or ""),
+    ]
+    identity_parts: list[str] = []
+    for key in ISSUE_IDENTITY_FIELD_KEYS:
+        value = str(fields.get(key) or "").strip()
+        if value:
+            identity_parts.append(f"{key}={value}")
+    if identity_parts:
+        parts.extend(identity_parts)
+    else:
+        message_signature = _runtime_scene_signal_message_signature(str(event.get("message") or ""))
+        if message_signature:
+            parts.append(f"message={message_signature}")
+    return tuple(parts)
+
+
+def _runtime_scene_issue_cluster_sort_key(cluster: dict[str, Any]) -> tuple[int, int, str, str]:
+    severity = str(cluster.get("severity") or "")
+    severity_rank = 0 if severity == "error" else 1 if severity == "warning" else 2
+    repeat_count = int(cluster.get("repeatCount") or 0)
+    return (severity_rank, -repeat_count, str(cluster.get("firstTimestamp") or ""), str(cluster.get("label") or ""))
+
+
+def _runtime_scene_issue_cluster_label(event: dict[str, Any] | None) -> str:
+    if not isinstance(event, dict):
+        return "未命名问题簇"
+    parts = [
+        str(event.get("component") or "").strip(),
+        str(event.get("eventCode") or "").strip(),
+    ]
+    return " / ".join(part for part in parts if part) or _runtime_scene_signal_label(event)
+
+
+def _runtime_scene_issue_cluster_display(cluster: dict[str, Any] | None) -> str:
+    if not isinstance(cluster, dict):
+        return "未命名问题簇"
+    label = str(cluster.get("label") or "").strip() or _runtime_scene_issue_cluster_label(cluster.get("representativeSignal") if isinstance(cluster.get("representativeSignal"), dict) else None)
+    repeat_count = int(cluster.get("repeatCount") or 0)
+    if repeat_count > 1:
+        return f"{label} ×{repeat_count}"
+    return label
+
+
+def _runtime_scene_signal_message_signature(message: str) -> str:
+    text = " ".join(str(message or "").split())
+    if not text:
+        return ""
+    first_line = text.split(" | ", 1)[0].splitlines()[0]
+    return _truncate_text(first_line, 160)
+
+
+def _runtime_scene_signal_problem_kind(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    if str(event.get("eventCode") or "") == "conversation.next_state_signal.recorded":
+        kind = str(fields.get("kind") or event.get("outcome") or "").strip().lower()
+        if kind in NON_PROBLEM_NEXT_STATE_KINDS:
+            return "control"
+    return "problem"
+
+
+def _runtime_scene_signal_has_later_resolution(events: list[dict], signal: dict[str, Any]) -> bool:
+    event = signal.get("event")
+    index = int(signal.get("index") or 0)
+    if not isinstance(event, dict):
+        return False
+    identity = _runtime_scene_event_identity(event)
+    for later in events[index + 1 :]:
+        if not _runtime_scene_resolution_event_matches(later, event, identity):
+            continue
+        return True
+    return False
+
+
+def _runtime_scene_event_identity(event: dict[str, Any]) -> dict[str, str]:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    identity: dict[str, str] = {}
+    for key in ISSUE_IDENTITY_FIELD_KEYS:
+        value = str(fields.get(key) or "").strip()
+        if value:
+            identity[key] = value
+    return identity
+
+
+def _runtime_scene_resolution_event_matches(
+    candidate: dict[str, Any],
+    source: dict[str, Any],
+    identity: dict[str, str],
+) -> bool:
+    if _runtime_scene_event_severity(candidate) in {"error", "warning"}:
+        return False
+    outcome = str(candidate.get("outcome") or "").strip().lower()
+    status = str(candidate.get("status") or "").strip().lower()
+    fields = candidate.get("fields") if isinstance(candidate.get("fields"), dict) else {}
+    field_outcome = str(fields.get("outcome") or "").strip().lower()
+    field_status = str(fields.get("status") or fields.get("resultStatus") or "").strip().lower()
+    event_code = str(candidate.get("eventCode") or "").strip().lower()
+    if (
+        outcome not in ISSUE_RESOLUTION_OUTCOMES
+        and status not in ISSUE_RESOLUTION_OUTCOMES
+        and field_outcome not in ISSUE_RESOLUTION_OUTCOMES
+        and field_status not in ISSUE_RESOLUTION_OUTCOMES
+        and not event_code.endswith((".recovered", ".resolved", ".fallback", ".fallback_activated"))
+    ):
+        return False
+    if str(candidate.get("component") or "") != str(source.get("component") or ""):
+        return False
+    if identity:
+        candidate_identity = _runtime_scene_event_identity(candidate)
+        return any(candidate_identity.get(key) == value for key, value in identity.items())
+    return str(candidate.get("phase") or "") == str(source.get("phase") or "")
+
+
+def _runtime_scene_first_ranked_signal(signals: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for target_severity in ("error", "warning"):
+        for signal in signals:
+            if str(signal.get("severity") or "") == target_severity and isinstance(signal.get("event"), dict):
+                return signal["event"]
+    return None
+
+
+def _runtime_scene_issue_state_severity(active_signals: list[dict[str, Any]]) -> str:
+    if any(str(signal.get("severity") or "") == "error" for signal in active_signals):
+        return "error"
+    if any(str(signal.get("severity") or "") == "warning" for signal in active_signals):
+        return "warning"
+    return "info"
+
+
+def _count_issue_signals(signals: list[dict[str, Any]], severity: str) -> int:
+    return len([signal for signal in signals if str(signal.get("severity") or "") == severity])
 
 
 STARTUP_TRACE_STEPS = [
@@ -1662,7 +2001,7 @@ def _runtime_scene_startup_trace_summary(
 ) -> str:
     recorded = len([step for step in steps if step.get("status") == "recorded"])
     total = len(steps)
-    status = str(manifest.get("status") or "unknown").strip() or "unknown"
+    status = _runtime_scene_status(manifest)
     if not missing:
         return f"启动流程 {recorded}/{total} 个关键步骤已有证据，当前周期状态为 {status}。"
     labels = [
@@ -1813,11 +2152,12 @@ def _runtime_scene_diagnosis_user_summary(
     timeline: list[dict],
     lifecycle: list[dict],
     severity_summary: dict[str, int],
+    issue_state: dict[str, Any],
     first_signal: dict[str, Any] | None,
     child_log_count: int,
     startup_trace: dict[str, Any],
 ) -> str:
-    status = str(manifest.get("status") or "unknown").strip() or "unknown"
+    status = _runtime_scene_status(manifest)
     result = str(manifest.get("result") or manifest.get("stop_reason") or "").strip()
     event_count = len(timeline)
     lifecycle_count = len(lifecycle)
@@ -1825,18 +2165,50 @@ def _runtime_scene_diagnosis_user_summary(
     if result:
         base = f"{base}，结果为 {result}"
     base = f"{base}；记录了 {event_count} 个时间线事件、{lifecycle_count} 个生命周期事件、{child_log_count} 个子日志入口。"
+    issue_phrase = _runtime_scene_issue_state_summary(issue_state)
     if severity == "error":
         signal = _runtime_scene_signal_label(first_signal)
-        return f"{base}发现 {severity_summary['errorCount']} 个错误信号，首个信号是 {signal}。"
+        return f"{base}{issue_phrase}原始记录包含 {severity_summary['errorCount']} 个错误信号，优先排查的活跃信号是 {signal}。"
     if severity == "warning":
         signal = _runtime_scene_signal_label(first_signal)
-        return f"{base}发现 {severity_summary['warningCount']} 个警告信号，首个信号是 {signal}。"
+        return f"{base}{issue_phrase}原始记录包含 {severity_summary['warningCount']} 个警告信号，优先排查的活跃信号是 {signal}。"
+    if issue_phrase:
+        base = f"{base}{issue_phrase}"
     startup_summary = str((startup_trace or {}).get("summary") or "").strip()
     if startup_summary:
         base = f"{base}{startup_summary}"
     if event_count == 0 and child_log_count == 0:
         return f"{base}当前包缺少可分析事件和子日志，应把缺失日志视为日志系统问题。"
+    if issue_phrase:
+        return f"{base}当前未发现活跃错误或警告，可按推荐顺序抽查关键入口。"
     return f"{base}未发现明显错误或警告，可按推荐顺序抽查关键入口。"
+
+
+def _runtime_scene_issue_state_summary(issue_state: dict[str, Any]) -> str:
+    active_errors = int(issue_state.get("activeErrorCount") or 0)
+    active_warnings = int(issue_state.get("activeWarningCount") or 0)
+    historical_errors = int(issue_state.get("historicalErrorCount") or 0)
+    historical_warnings = int(issue_state.get("historicalWarningCount") or 0)
+    active_cluster_count = int(issue_state.get("activeClusterCount") or 0)
+    historical_cluster_count = int(issue_state.get("historicalClusterCount") or 0)
+    control_count = int(issue_state.get("controlSignalCount") or 0)
+    if active_errors or active_warnings:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
+        return (
+            f"当前仍有 {active_cluster_count} 个活跃问题簇，其中主簇是 {cluster}；"
+            if active_cluster_count
+            else f"当前仍有 {active_errors} 个活跃错误、{active_warnings} 个活跃警告；"
+        )
+    if historical_errors or historical_warnings:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstHistoricalCluster"))
+        return (
+            f"错误/警告均有后续恢复证据，当前记录到 {historical_cluster_count} 个历史/已恢复问题簇，主簇是 {cluster}；"
+            if historical_cluster_count
+            else f"错误/警告均有后续恢复证据，历史错误 {historical_errors} 个、历史警告 {historical_warnings} 个；"
+        )
+    if control_count:
+        return f"另有 {control_count} 个控制类信号，不作为当前问题；"
+    return ""
 
 
 def _runtime_scene_diagnosis_next_step(
@@ -1844,6 +2216,7 @@ def _runtime_scene_diagnosis_next_step(
     scene_dir_name: str,
     scene_id: str,
     severity: str,
+    issue_state: dict[str, Any],
     first_signal: dict[str, Any] | None,
     recommended_order: list[str],
     key_entries: list[dict[str, str]],
@@ -1851,17 +2224,47 @@ def _runtime_scene_diagnosis_next_step(
 ) -> str:
     first_path = key_entries[0]["path"] if key_entries else recommended_order[0] if recommended_order else SUMMARY_PATH
     package_anchor = str(scene_dir_name or scene_id).strip() or scene_id
-    if severity in {"error", "warning"} and first_signal:
+    historical_errors = int(issue_state.get("historicalErrorCount") or 0)
+    historical_warnings = int(issue_state.get("historicalWarningCount") or 0)
+    active_cluster_count = int(issue_state.get("activeClusterCount") or 0)
+    historical_cluster_count = int(issue_state.get("historicalClusterCount") or 0)
+    control_count = int(issue_state.get("controlSignalCount") or 0)
+    if severity == "error" and first_signal:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
         signal = _runtime_scene_signal_label(first_signal)
         return (
-            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再定位首个信号 {signal}；"
-            "若事件含 rawRefs，优先打开对应原始日志。"
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
+            f"再定位主问题簇 {cluster}，优先打开它的 rawRefs，并沿同一 component/runId/pageInstanceId 向后找恢复或重复崩溃。"
+        )
+    if severity == "warning" and first_signal:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
+        signal = _runtime_scene_signal_label(first_signal)
+        return (
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
+            f"再定位主问题簇 {cluster}，判断它是退化、重试还是用户控制信号，必要时打开 rawRefs。"
+        )
+    if historical_cluster_count or historical_errors or historical_warnings:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstHistoricalCluster"))
+        return (
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState 中历史/已恢复簇计数；"
+            f"再对照主历史簇 {cluster} 与后续恢复事件，避免把已恢复错误当成当前阻塞。"
         )
     missing = startup_trace.get("missingStepIds", []) if isinstance(startup_trace, dict) else []
     if missing:
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再对照 startupTrace.missingStepIds "
             "确认启动链路缺口是否属于日志系统问题。"
+        )
+    if control_count:
+        return (
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认控制类信号只代表用户意图或编辑行为；"
+            "再按推荐阅读顺序抽查 timeline、conversation 和 agent 子日志。"
+        )
+    if active_cluster_count:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
+        return (
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
+            f"再追踪主问题簇 {cluster}，把它和首个信号、rawRefs、timeline 顺序对齐。"
         )
     return (
         f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再按推荐阅读顺序对照 timeline、lifecycle 和子日志确认周期完整性。"
