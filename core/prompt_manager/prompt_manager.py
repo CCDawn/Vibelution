@@ -186,6 +186,7 @@ class PromptManager:
         "SPEC_DIGEST",
         "MEMORY",
         "GIT_MEMORY",
+        "RUNTIME_LOG_INDEX",
         "LANGUAGE_AWARENESS",
     ]
     _FALLBACK_DEFAULT_SECTIONS = [
@@ -194,6 +195,7 @@ class PromptManager:
         "SOUL",
         "SPEC_DIGEST",
         "GIT_MEMORY",
+        "RUNTIME_LOG_INDEX",
         "DELEGATION_RULES",
         "MEMORY",
         "LANGUAGE_AWARENESS",
@@ -207,6 +209,7 @@ class PromptManager:
         "TASK_CHECKLIST",
         "CODEBASE_MAP",
         "GIT_MEMORY",
+        "RUNTIME_LOG_INDEX",
         "DELEGATION_RULES",
         "CONFIG_AWARENESS",
         "LANGUAGE_AWARENESS",

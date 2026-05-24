@@ -71,6 +71,7 @@ model = ""
 api_key_env = "VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY"
 transport = "chat_completions"
 contract = "reasoning_chat"
+strict_compatibility = false
 reasoning_state_field = "reasoning_content"
 temperature = 1.0
 max_output_tokens = 8192
@@ -90,6 +91,9 @@ context_window = 204800
 
 [llm.profiles.subagent_explorer]
 model = "deepseek-v4-pro"
+transport = "responses"
+contract = "tool_chat"
+strict_compatibility = false
 temperature = 0.7
 max_output_tokens = 384000
 timeout = 120
@@ -112,6 +116,7 @@ model = ""
 api_key_env = "VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY"
 transport = "chat_completions"
 contract = "reasoning_chat"
+strict_compatibility = false
 reasoning_state_field = "reasoning_content"
 temperature = 1.0
 max_output_tokens = 8192
@@ -134,6 +139,7 @@ model = ""
 api_key_env = "VIBELUTION_LLM_REMOTE_MAIN_MINIMAX_M2_7_API_KEY"
 transport = "chat_completions"
 contract = "reasoning_chat"
+strict_compatibility = false
 reasoning_state_field = "reasoning_content"
 temperature = 1.0
 max_output_tokens = 8192
@@ -605,6 +611,7 @@ default_components = [
     "SPEC",
     "CODEBASE_MAP",
     "GIT_MEMORY",
+    "RUNTIME_LOG_INDEX",
     "DELEGATION_RULES",
     "CONFIG_AWARENESS",
     "LANGUAGE_AWARENESS",

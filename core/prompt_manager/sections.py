@@ -374,6 +374,26 @@ def make_git_memory_section() -> SystemPromptSection:
     )
 
 
+def make_runtime_log_index_section() -> SystemPromptSection:
+    """运行日志索引章节 — 每轮读取最近 runtime scene 包的轻量索引。"""
+
+    def compute() -> Optional[str]:
+        try:
+            from core.web.services.runtime_scene_service import build_runtime_scene_prompt_index
+
+            return build_runtime_scene_prompt_index(limit=3) or None
+        except Exception:
+            return None
+
+    return SystemPromptSection(
+        name="RUNTIME_LOG_INDEX",
+        compute=compute,
+        cache_break=True,
+        priority=36,
+        description="最近 runtime scene 包索引、状态、问题簇和优先读取路径",
+    )
+
+
 def make_config_awareness_section() -> SystemPromptSection:
     """配置自感知章节 — 每轮读取当前配置身份、风险与建议动作。"""
 
@@ -538,6 +558,7 @@ def create_default_sections(
     sections.append(make_task_checklist_section())
     sections.append(make_codebase_map_section())
     sections.append(make_git_memory_section())
+    sections.append(make_runtime_log_index_section())
     sections.append(make_delegation_rules_section())
     sections.append(make_config_awareness_section())
     sections.append(make_language_awareness_section())

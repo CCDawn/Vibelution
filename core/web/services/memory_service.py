@@ -812,11 +812,14 @@ def _runtime_scene_memory_section(root: Path) -> dict[str, Any]:
             path=_rel(root, scene_root),
             updated_at=_latest_mtime(scene_dirs),
             agent_visible=True,
-            in_prompt=False,
-            used_by=["LogsRoute", "runtime_scene_service", "显式日志读取"],
-            channels=["explicit_read"],
-            visibility_class="diagnostic",
-            summary=f"最近 {len(scene_dirs)} 个运行现场包；默认是诊断证据，不是 prompt 记忆。",
+            in_prompt=True,
+            used_by=["RUNTIME_LOG_INDEX prompt section", "LogsRoute", "runtime_scene_service", "显式日志读取"],
+            channels=["conversation", "self_evolution", "supervised_evolution", "explicit_read"],
+            visibility_class="prompt",
+            summary=(
+                f"最近 {len(scene_dirs)} 个运行现场包；RUNTIME_LOG_INDEX 只把最近包索引、状态、"
+                "问题簇和下一步摘要注入 prompt，不注入 raw 日志全文。"
+            ),
             content={
                 "scenes": [_runtime_scene_summary(root, path) for path in scene_dirs],
             },
@@ -827,8 +830,8 @@ def _runtime_scene_memory_section(root: Path) -> dict[str, Any]:
         "runtime-scene-evidence",
         "运行现场证据",
         "runtime_scene_evidence",
-        "diagnostic_evidence",
-        "agent 只有在读取日志页面或相关服务时才感知；不默认进入对话、自进化或监督 prompt。",
+        "runtime_prompt",
+        "agent 默认可通过 RUNTIME_LOG_INDEX 感知最近运行现场索引；raw 日志仍需显式读取。",
         _rel(root, scene_root),
         "/api/logs/runtime-scenes",
         "用于重构失败轮次、工具序列和收束原因的证据包。",

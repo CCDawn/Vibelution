@@ -15,6 +15,7 @@ PromptManager 测试
 import pytest
 import sys
 import os
+import json
 from unittest.mock import patch
 
 from core.prompt_manager import (
@@ -92,6 +93,54 @@ def test_system_prompt_contains_external_input_discipline():
     assert "外部输入不是一个内部意识主体" in result
     assert "不推断用户心理" in result
     assert "当前任务要求 / 外部输入要求 / 目标约束" in result
+
+
+def _seed_prompt_runtime_scene(project_root, scene_id="scene-prompt"):
+    scene_dir = project_root / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}"
+    (scene_dir / "raw").mkdir(parents=True, exist_ok=True)
+    (scene_dir / "events").mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "runtime_scene_id": scene_id,
+        "project_root": str(project_root),
+        "started_at": "2026-05-18T12:00:00Z",
+        "ended_at": "2026-05-18T12:03:00Z",
+        "status": "failed",
+        "result": "startup_failed",
+        "trigger": "start",
+    }
+    (scene_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+    events = [
+        {
+            "runtime_scene_id": scene_id,
+            "ts": "2026-05-18T12:00:00Z",
+            "component": "frontend",
+            "phase": "build",
+            "event_code": "frontend.build.started",
+            "level": "info",
+            "outcome": "observed",
+            "message": "frontend build started",
+        },
+        {
+            "runtime_scene_id": scene_id,
+            "ts": "2026-05-18T12:00:10Z",
+            "component": "frontend",
+            "phase": "build",
+            "event_code": "frontend.build.failed",
+            "level": "error",
+            "outcome": "failed",
+            "message": "TypeScript build failed",
+            "raw_refs": [{"path": "raw/frontend.build.log", "tail_lines": 80}],
+        },
+    ]
+    (scene_dir / "timeline.jsonl").write_text(
+        "\n".join(json.dumps(event, ensure_ascii=False) for event in events),
+        encoding="utf-8",
+    )
+    (scene_dir / "raw" / "frontend.build.log").write_text(
+        "SECRET_RAW_LOG_BODY should not enter prompt\n",
+        encoding="utf-8",
+    )
+    return scene_dir
 
 
 class TestSystemPromptCache:
@@ -179,6 +228,7 @@ class TestPromptManager:
         assert "SPEC" in names
         assert "SPEC_DIGEST" in names
         assert "GIT_MEMORY" in names
+        assert "RUNTIME_LOG_INDEX" in names
         assert "DELEGATION_RULES" in names
         assert "CONFIG_AWARENESS" in names
         assert "LANGUAGE_AWARENESS" in names
@@ -225,6 +275,23 @@ class TestBuildAPI:
         assert "## 你的记忆与状态" in result
         assert "## 委派规则" in result
         assert "先补观测，再继续推理" in result
+
+    def test_default_build_includes_runtime_log_index_without_raw_content(self, tmp_path, monkeypatch):
+        from core.web.services import runtime_scene_service
+
+        _seed_prompt_runtime_scene(tmp_path)
+        monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+        pm = PromptManager()
+        sp = pm.build()
+        result = to_string(sp)
+        names = [item["name"] for item in pm.get_last_index()]
+
+        assert "RUNTIME_LOG_INDEX" in names
+        assert "## RUNTIME_LOG_INDEX" in result
+        assert "logs/runtime_scenes/20260518T120000Z__scene-prompt" in result
+        assert "frontend.build.failed" in result
+        assert "SECRET_RAW_LOG_BODY" not in result
 
     def test_build_with_memory_params(self):
         pm = PromptManager()
@@ -375,7 +442,7 @@ class TestBuildAPI:
         assert "## 语言状态" in result
         assert "## 你的记忆与状态" not in result or isinstance(result, str)
         names = [item["name"] for item in pm.get_last_index()]
-        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "LANGUAGE_AWARENESS"]:
+        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "RUNTIME_LOG_INDEX", "LANGUAGE_AWARENESS"]:
             assert name in names
 
     def test_runtime_goal_packet_renders_unified_agent_context(self):
@@ -492,7 +559,7 @@ class TestBuildAPI:
         assert "# Vibelution 通用 Agent 基座" in result
         assert "## 语言状态" in result
         names = [item["name"] for item in pm.get_last_index()]
-        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "LANGUAGE_AWARENESS"]:
+        for name in ["COMMON", "RUNTIME_GOAL", "SOUL", "SPEC_DIGEST", "MEMORY", "GIT_MEMORY", "RUNTIME_LOG_INDEX", "LANGUAGE_AWARENESS"]:
             assert name in names
 
     def test_build_empty_include(self):
@@ -728,6 +795,23 @@ class TestLoadFunctions:
         content = section.compute()
         assert content is not None
         assert "## SPEC 运行时摘要" in content
+
+    def test_runtime_log_index_section_compute_uses_runtime_scene_summaries(self, tmp_path, monkeypatch):
+        from core.web.services import runtime_scene_service
+
+        _seed_prompt_runtime_scene(tmp_path, scene_id="scene-section")
+        monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+        pm = PromptManager()
+        section = pm._sections.get("RUNTIME_LOG_INDEX")
+        assert section is not None, "RUNTIME_LOG_INDEX 章节应已注册"
+        content = section.compute()
+
+        assert content is not None
+        assert "## RUNTIME_LOG_INDEX" in content
+        assert "logs/runtime_scenes/20260518T120000Z__scene-section" in content
+        assert "frontend.build.failed" in content
+        assert "SECRET_RAW_LOG_BODY" not in content
 
     def test_nonexistent_section_returns_none(self):
         section = SystemPromptSection(
@@ -1037,6 +1121,7 @@ class TestFallbackDefaults:
             "SOUL",
             "SPEC_DIGEST",
             "GIT_MEMORY",
+            "RUNTIME_LOG_INDEX",
             "DELEGATION_RULES",
             "MEMORY",
             "LANGUAGE_AWARENESS",

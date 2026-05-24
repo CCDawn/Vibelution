@@ -68,6 +68,20 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
     .join("|");
 }
 
+function isBusyConversationPhase(phase: string) {
+  return ["queued", "running", "stopping"].includes(String(phase || "").trim().toLowerCase());
+}
+
+export function shouldShowNextStateSignalInConversation(
+  signal: ChatNextStateSignalSummary,
+  phase: string,
+) {
+  if (signal.kind === "user_continues") {
+    return isBusyConversationPhase(phase);
+  }
+  return true;
+}
+
 type ConversationViewProps = {
   sessionId: string;
   title: string;
@@ -219,7 +233,14 @@ export function ConversationView({
     { label: t("lastUpdated"), value: lastMessageTimestamp ? formatTimestamp(lastMessageTimestamp) : "--" },
   ];
   const resolvedStats = stats ?? [];
-  const visibleNextStateSignals = useMemo(() => nextStateSignals.slice(-5).reverse(), [nextStateSignals]);
+  const visibleNextStateSignals = useMemo(
+    () =>
+      nextStateSignals
+        .filter((signal) => shouldShowNextStateSignalInConversation(signal, phase))
+        .slice(-5)
+        .reverse(),
+    [nextStateSignals, phase],
+  );
   const [nextStateSignalsExpanded, setNextStateSignalsExpanded] = useState(false);
   const latestToolCalls = useMemo(
     () =>

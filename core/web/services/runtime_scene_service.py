@@ -305,6 +305,73 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
     }
 
 
+def build_runtime_scene_prompt_index(limit: int = 3) -> str:
+    """Return a compact prompt-facing index for the newest runtime scene packages."""
+
+    try:
+        scene_summaries = list_runtime_scenes(limit=max(1, min(int(limit or 3), 10)))
+    except Exception:
+        return ""
+
+    if not scene_summaries:
+        return ""
+
+    lines = [
+        "## RUNTIME_LOG_INDEX",
+        "- 最近运行现场索引；用于先定位日志包，再按需读取 detail/raw 子日志。",
+        "- 只注入结构化摘要和路径，不注入 raw 日志全文、完整对话或完整工具输出。",
+    ]
+    for index, summary in enumerate(scene_summaries[: max(1, min(int(limit or 3), 10))], start=1):
+        scene_id = str(summary.get("runtimeSceneId") or "").strip()
+        detail: dict[str, Any] = {}
+        if scene_id:
+            try:
+                detail = get_runtime_scene_detail(scene_id)
+            except Exception:
+                detail = {}
+
+        source = detail or summary
+        package_index = source.get("packageIndex") if isinstance(source.get("packageIndex"), dict) else {}
+        package_summary = source.get("packageSummary") if isinstance(source.get("packageSummary"), dict) else {}
+        package_diagnosis = source.get("packageDiagnosis") if isinstance(source.get("packageDiagnosis"), dict) else {}
+        issue_state = package_diagnosis.get("issueState") if isinstance(package_diagnosis.get("issueState"), dict) else {}
+        first_signal = package_diagnosis.get("firstSignal") if isinstance(package_diagnosis.get("firstSignal"), dict) else {}
+
+        directory_name = str(source.get("directoryName") or summary.get("directoryName") or scene_id).strip()
+        display_name = str(
+            source.get("displayName")
+            or package_index.get("displayName")
+            or source.get("title")
+            or scene_id
+            or directory_name
+        ).strip()
+        status = str(source.get("status") or summary.get("status") or "unknown").strip()
+        result = str(source.get("result") or summary.get("result") or "").strip()
+        event_count = int(package_summary.get("eventCount") or source.get("eventCount") or summary.get("eventCount") or 0)
+        error_count = int(package_summary.get("errorCount") or source.get("errorCount") or summary.get("errorCount") or 0)
+        warning_count = int(package_summary.get("warningCount") or source.get("warningCount") or summary.get("warningCount") or 0)
+        active_cluster_count = int(issue_state.get("activeClusterCount") or 0)
+        policy_cluster_count = int(issue_state.get("policyClusterCount") or 0)
+        historical_cluster_count = int(issue_state.get("historicalClusterCount") or 0)
+        next_step = _truncate_prompt_index_text(str(package_diagnosis.get("agentNextStep") or ""), 360)
+        first_signal_code = str(first_signal.get("eventCode") or "").strip()
+        severity = str(package_diagnosis.get("severity") or issue_state.get("severity") or "").strip()
+
+        lines.append(f"### {index}. {display_name or 'runtime scene'}")
+        lines.append(f"- 包路径: `logs/runtime_scenes/{directory_name}`")
+        lines.append(f"- 状态: {status}{f' / {result}' if result else ''} | severity={severity or 'info'} | events={event_count} | errors={error_count} | warnings={warning_count}")
+        if active_cluster_count or policy_cluster_count or historical_cluster_count:
+            lines.append(
+                f"- 问题簇: active={active_cluster_count} | policy={policy_cluster_count} | historical={historical_cluster_count}"
+            )
+        if first_signal_code:
+            lines.append(f"- 首个信号: `{first_signal_code}`")
+        if next_step:
+            lines.append(f"- agent 下一步: {next_step}")
+
+    return "\n".join(lines).strip()
+
+
 def read_runtime_scene_file(scene_id: str, relative_path: str) -> dict:
     """Read a raw or structured file from one runtime scene bundle."""
 
@@ -1530,6 +1597,9 @@ def _runtime_scene_first_signal(events: list[dict], *, issue_state: dict[str, An
     active = issue_state.get("firstActiveSignal") if isinstance(issue_state, dict) else None
     if isinstance(active, dict):
         return active
+    policy = issue_state.get("firstPolicySignal") if isinstance(issue_state, dict) else None
+    if isinstance(policy, dict):
+        return policy
     historical = issue_state.get("firstHistoricalSignal") if isinstance(issue_state, dict) else None
     if isinstance(historical, dict):
         return historical
@@ -1557,7 +1627,7 @@ def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
         severity = _runtime_scene_event_severity(event)
         if severity not in {"error", "warning"}:
             continue
-        problem = _runtime_scene_signal_problem_kind(event)
+        problem = _runtime_scene_signal_kind(event)
         signals.append(
             {
                 "index": index,
@@ -1568,6 +1638,7 @@ def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
         )
 
     active: list[dict[str, Any]] = []
+    policy: list[dict[str, Any]] = []
     historical: list[dict[str, Any]] = []
     control: list[dict[str, Any]] = []
     for signal in signals:
@@ -1578,32 +1649,43 @@ def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
         if problem == "control":
             control.append(signal)
             continue
+        if problem == "policy":
+            policy.append(signal)
+            continue
         if _runtime_scene_signal_has_later_resolution(events, signal):
             historical.append(signal)
             continue
         active.append(signal)
 
     active_clusters = _runtime_scene_issue_clusters(active)
+    policy_clusters = _runtime_scene_issue_clusters(policy)
     historical_clusters = _runtime_scene_issue_clusters(historical)
     first_active_cluster = active_clusters[0] if active_clusters else None
+    first_policy_cluster = policy_clusters[0] if policy_clusters else None
     first_historical_cluster = historical_clusters[0] if historical_clusters else None
     first_active = _runtime_scene_first_ranked_signal(active)
+    first_policy = _runtime_scene_first_ranked_signal(policy)
     first_historical = _runtime_scene_first_ranked_signal(historical)
     return {
         "schemaVersion": 1,
-        "severity": _runtime_scene_issue_state_severity(active),
+        "severity": _runtime_scene_issue_state_severity(active, policy),
         "activeErrorCount": _count_issue_signals(active, "error"),
         "activeWarningCount": _count_issue_signals(active, "warning"),
+        "policySignalCount": len(policy),
         "historicalErrorCount": _count_issue_signals(historical, "error"),
         "historicalWarningCount": _count_issue_signals(historical, "warning"),
         "activeClusterCount": len(active_clusters),
+        "policyClusterCount": len(policy_clusters),
         "historicalClusterCount": len(historical_clusters),
         "controlSignalCount": len(control),
         "activeClusters": active_clusters,
+        "policyClusters": policy_clusters,
         "historicalClusters": historical_clusters,
         "firstActiveCluster": first_active_cluster,
+        "firstPolicyCluster": first_policy_cluster,
         "firstHistoricalCluster": first_historical_cluster,
         "firstActiveSignal": first_active,
+        "firstPolicySignal": first_policy,
         "firstHistoricalSignal": first_historical,
     }
 
@@ -1703,12 +1785,20 @@ def _runtime_scene_signal_message_signature(message: str) -> str:
     return _truncate_text(first_line, 160)
 
 
-def _runtime_scene_signal_problem_kind(event: dict[str, Any]) -> str:
+def _runtime_scene_signal_kind(event: dict[str, Any]) -> str:
     fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
     if str(event.get("eventCode") or "") == "conversation.next_state_signal.recorded":
         kind = str(fields.get("kind") or event.get("outcome") or "").strip().lower()
         if kind in NON_PROBLEM_NEXT_STATE_KINDS:
             return "control"
+    if str(event.get("component") or "") == "tool_registry":
+        if str(event.get("outcome") or "").strip().lower() == "blocked":
+            return "policy"
+        if str(fields.get("testPolicy") or "").strip().lower() == "blocked":
+            return "policy"
+    if str(event.get("eventCode") or "").endswith(".blocked"):
+        if str(fields.get("source") or "").strip().lower() == "built_in":
+            return "policy"
     return "problem"
 
 
@@ -1772,10 +1862,14 @@ def _runtime_scene_first_ranked_signal(signals: list[dict[str, Any]]) -> dict[st
     return None
 
 
-def _runtime_scene_issue_state_severity(active_signals: list[dict[str, Any]]) -> str:
-    if any(str(signal.get("severity") or "") == "error" for signal in active_signals):
+def _runtime_scene_issue_state_severity(
+    active_signals: list[dict[str, Any]],
+    policy_signals: list[dict[str, Any]] | None = None,
+) -> str:
+    combined_signals = [*active_signals, *(policy_signals or [])]
+    if any(str(signal.get("severity") or "") == "error" for signal in combined_signals):
         return "error"
-    if any(str(signal.get("severity") or "") == "warning" for signal in active_signals):
+    if any(str(signal.get("severity") or "") == "warning" for signal in combined_signals):
         return "warning"
     return "info"
 
@@ -2003,13 +2097,13 @@ def _runtime_scene_startup_trace_summary(
     total = len(steps)
     status = _runtime_scene_status(manifest)
     if not missing:
-        return f"启动流程 {recorded}/{total} 个关键步骤已有证据，当前周期状态为 {status}。"
+        return f"启动流程 {recorded}/{total}，状态 {status}。"
     labels = [
         str(step.get("label") or step.get("id") or "")
         for step in steps
         if step.get("id") in missing
     ]
-    return f"启动流程 {recorded}/{total} 个关键步骤已有证据，缺少：{'、'.join(labels)}。"
+    return f"启动流程 {recorded}/{total}，缺少：{'、'.join(labels)}。"
 
 
 def _scene_child_has_content(scene_dir: Path, relative_path: str) -> bool:
@@ -2166,10 +2260,15 @@ def _runtime_scene_diagnosis_user_summary(
         base = f"{base}，结果为 {result}"
     base = f"{base}；记录了 {event_count} 个时间线事件、{lifecycle_count} 个生命周期事件、{child_log_count} 个子日志入口。"
     issue_phrase = _runtime_scene_issue_state_summary(issue_state)
-    if severity == "error":
+    active_signal_count = int(issue_state.get("activeErrorCount") or 0) + int(issue_state.get("activeWarningCount") or 0)
+    policy_signal_count = int(issue_state.get("policySignalCount") or 0)
+    if policy_signal_count and not active_signal_count:
+        signal = _runtime_scene_signal_label(first_signal)
+        return f"{base}{issue_phrase}原始记录包含 {policy_signal_count} 个控制/策略信号，优先确认策略语义是 {signal}。"
+    if severity == "error" and active_signal_count:
         signal = _runtime_scene_signal_label(first_signal)
         return f"{base}{issue_phrase}原始记录包含 {severity_summary['errorCount']} 个错误信号，优先排查的活跃信号是 {signal}。"
-    if severity == "warning":
+    if severity == "warning" and active_signal_count:
         signal = _runtime_scene_signal_label(first_signal)
         return f"{base}{issue_phrase}原始记录包含 {severity_summary['warningCount']} 个警告信号，优先排查的活跃信号是 {signal}。"
     if issue_phrase:
@@ -2187,9 +2286,11 @@ def _runtime_scene_diagnosis_user_summary(
 def _runtime_scene_issue_state_summary(issue_state: dict[str, Any]) -> str:
     active_errors = int(issue_state.get("activeErrorCount") or 0)
     active_warnings = int(issue_state.get("activeWarningCount") or 0)
+    policy_signals = int(issue_state.get("policySignalCount") or 0)
     historical_errors = int(issue_state.get("historicalErrorCount") or 0)
     historical_warnings = int(issue_state.get("historicalWarningCount") or 0)
     active_cluster_count = int(issue_state.get("activeClusterCount") or 0)
+    policy_cluster_count = int(issue_state.get("policyClusterCount") or 0)
     historical_cluster_count = int(issue_state.get("historicalClusterCount") or 0)
     control_count = int(issue_state.get("controlSignalCount") or 0)
     if active_errors or active_warnings:
@@ -2198,6 +2299,13 @@ def _runtime_scene_issue_state_summary(issue_state: dict[str, Any]) -> str:
             f"当前仍有 {active_cluster_count} 个活跃问题簇，其中主簇是 {cluster}；"
             if active_cluster_count
             else f"当前仍有 {active_errors} 个活跃错误、{active_warnings} 个活跃警告；"
+        )
+    if policy_signals:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstPolicyCluster"))
+        return (
+            f"当前记录到 {policy_cluster_count} 个控制/策略问题簇，其中主簇是 {cluster}；"
+            if policy_cluster_count
+            else f"当前记录到 {policy_signals} 个控制/策略信号；"
         )
     if historical_errors or historical_warnings:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstHistoricalCluster"))
@@ -2227,21 +2335,33 @@ def _runtime_scene_diagnosis_next_step(
     historical_errors = int(issue_state.get("historicalErrorCount") or 0)
     historical_warnings = int(issue_state.get("historicalWarningCount") or 0)
     active_cluster_count = int(issue_state.get("activeClusterCount") or 0)
+    policy_cluster_count = int(issue_state.get("policyClusterCount") or 0)
+    policy_signal_count = int(issue_state.get("policySignalCount") or 0)
     historical_cluster_count = int(issue_state.get("historicalClusterCount") or 0)
     control_count = int(issue_state.get("controlSignalCount") or 0)
-    if severity == "error" and first_signal:
+    if policy_signal_count and not active_cluster_count and first_signal:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstPolicyCluster"))
+        return (
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.policyClusterCount；"
+            f"再定位主控制/策略簇 {cluster}，优先检查 testPolicy、mode、source 或 guard 语义，不要按业务故障继续追恢复链。"
+        )
+    if severity == "error" and active_cluster_count and first_signal:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
-        signal = _runtime_scene_signal_label(first_signal)
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
             f"再定位主问题簇 {cluster}，优先打开它的 rawRefs，并沿同一 component/runId/pageInstanceId 向后找恢复或重复崩溃。"
         )
-    if severity == "warning" and first_signal:
+    if severity == "warning" and active_cluster_count and first_signal:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
-        signal = _runtime_scene_signal_label(first_signal)
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
             f"再定位主问题簇 {cluster}，判断它是退化、重试还是用户控制信号，必要时打开 rawRefs。"
+        )
+    if policy_signal_count and first_signal:
+        cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstPolicyCluster"))
+        return (
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.policyClusterCount；"
+            f"再定位主控制/策略簇 {cluster}，优先检查 testPolicy、mode、source 或 guard 语义，不要按业务故障继续追恢复链。"
         )
     if historical_cluster_count or historical_errors or historical_warnings:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstHistoricalCluster"))
@@ -2727,6 +2847,11 @@ def _normalize_event_timestamp(value: object) -> str:
 
 def _truncate_text(value: str, limit: int) -> str:
     text = str(value or "")
+    return text if len(text) <= limit else f"{text[: max(0, limit - 3)]}..."
+
+
+def _truncate_prompt_index_text(value: str, limit: int) -> str:
+    text = " ".join(str(value or "").split())
     return text if len(text) <= limit else f"{text[: max(0, limit - 3)]}..."
 
 

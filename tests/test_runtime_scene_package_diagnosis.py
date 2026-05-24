@@ -101,6 +101,8 @@ def test_runtime_scene_detail_exposes_package_diagnosis_first_signal(tmp_path, m
     assert diagnosis["startupTrace"]["steps"][0]["id"] == "desktop_entry_vbs"
     assert diagnosis["startupTrace"]["steps"][0]["status"] == "recorded"
     assert any(step["id"] == "backend_start" and step["status"] == "recorded" for step in diagnosis["startupTrace"]["steps"])
+    assert "启动流程 6/10" in diagnosis["startupTrace"]["summary"]
+    assert "缺少：前端依赖与构建、后端依赖、浏览器窗口、监督器" in diagnosis["startupTrace"]["summary"]
     assert diagnosis["keyEntries"][0]["path"] == "summary.json"
     assert diagnosis["keyEntries"][1]["path"] == "package_index.json"
     assert diagnosis["keyEntries"][2]["path"] == "raw/desktop-entry-vbs.log"
@@ -293,6 +295,51 @@ def test_runtime_scene_issue_state_excludes_control_signals_from_clusters(tmp_pa
     assert "主问题簇" not in detail["packageDiagnosis"]["agentNextStep"]
 
 
+def test_runtime_scene_issue_state_tracks_tool_registry_policy_signals(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    _seed_scene(
+        tmp_path,
+        "scene-diagnosis-policy-block",
+        [
+            {
+                "runtime_scene_id": "scene-diagnosis-policy-block",
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "tool_registry",
+                "phase": "registry",
+                "event_code": "tool_registry.test.blocked",
+                "level": "warning",
+                "outcome": "blocked",
+                "message": "Built-in tool test was blocked by safe test policy.",
+                "fields": {
+                    "source": "built_in",
+                    "status": "blocked",
+                    "testPolicy": "blocked",
+                    "toolId": "shell_exec",
+                },
+            }
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail("scene-diagnosis-policy-block")
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "warning"
+    assert issue_state["policySignalCount"] == 1
+    assert issue_state["policyClusterCount"] == 1
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["firstPolicyCluster"]["eventCode"] == "tool_registry.test.blocked"
+    assert diagnosis["firstSignal"]["eventCode"] == "tool_registry.test.blocked"
+    assert "控制/策略问题簇" in diagnosis["userSummary"]
+    assert "原始记录包含 1 个控制/策略信号" in diagnosis["userSummary"]
+    assert "issueState.policyClusterCount" in diagnosis["agentNextStep"]
+    assert "testPolicy" in diagnosis["agentNextStep"]
+    assert "不要按业务故障继续追恢复链" in diagnosis["agentNextStep"]
+    assert "issueState.activeClusterCount" not in diagnosis["agentNextStep"]
+
+
 def test_runtime_scene_issue_state_clusters_recovered_historical_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     _seed_scene(
@@ -434,7 +481,7 @@ def test_runtime_scene_package_diagnosis_uses_effective_running_status(tmp_path,
     diagnosis = detail["packageDiagnosis"]
     assert detail["status"] == "running"
     assert "本周期状态为 running" in diagnosis["userSummary"]
-    assert "当前周期状态为 running" in diagnosis["startupTrace"]["summary"]
+    assert diagnosis["startupTrace"]["summary"] == "启动流程 10/10，状态 running。"
     assert "unknown" not in diagnosis["userSummary"]
     assert "unknown" not in diagnosis["startupTrace"]["summary"]
 

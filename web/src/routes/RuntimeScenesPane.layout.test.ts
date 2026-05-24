@@ -21,14 +21,19 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("handleOpenRawLog(scene.runtimeSceneId, entry.path)");
   });
 
-  it("surfaces active, historical, and control issue state near the package summary", () => {
+  it("surfaces active, policy, historical, and control issue state near the package summary", () => {
     expect(paneSource).toContain("const issueState = diagnosis.issueState");
     expect(paneSource).toContain("signalHeading");
     expect(paneSource).toContain("\"优先信号\"");
+    expect(paneSource).toContain("\"策略信号\"");
     expect(paneSource).toContain("\"历史信号\"");
     expect(paneSource).toContain("\"控制信号\"");
     expect(paneSource).toContain("styles.packageIssueStateStrip");
     expect(paneSource).toContain("issueState.activeClusterCount ?? activeSignalCount");
+    expect(paneSource).toContain("issueState.policyClusterCount ?? issueState.policySignalCount ?? 0");
+    expect(paneSource).toContain("issueState?.policyClusters?.[0]");
+    expect(paneSource).toContain("issueState?.firstPolicyCluster");
+    expect(paneSource).toContain("\"主控制/策略簇\"");
     expect(paneSource).toContain("issueState.historicalClusterCount ?? historicalSignalCount");
     expect(paneSource).toContain("issueState.controlSignalCount");
   });

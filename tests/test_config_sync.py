@@ -221,6 +221,7 @@ def test_main_and_example_configs_load_through_entrypoints():
     assert "CONFIG_AWARENESS" in main_loader.prompt.default_components
     assert "LANGUAGE_AWARENESS" in main_loader.prompt.default_components
     assert "MEMORY" in main_loader.prompt.default_components
+    assert "RUNTIME_LOG_INDEX" in main_loader.prompt.default_components
     assert len(main_loader.prompt.sections) == len(settings_config.prompt.sections) == 2
     assert example_loader.tools.restart_enabled is True
     assert example_loader.workbench.backend_port == 8000
