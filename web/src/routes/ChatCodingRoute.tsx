@@ -99,7 +99,7 @@ const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
 
 type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
-type FeaturePresetKey = "mentalModel" | "planningMode" | "goalMode" | "toolBoost";
+type FeaturePresetKey = "planningMode" | "goalMode" | "toolBoost";
 
 type DragState = {
   side: ResizableSide;
@@ -113,11 +113,6 @@ const CHAT_FEATURE_PRESETS: Array<{
   labelKey: TranslationKey;
   hintKey: TranslationKey;
 }> = [
-  {
-    key: "mentalModel",
-    labelKey: "chatFeatureMentalModel",
-    hintKey: "chatFeatureMentalModelHint",
-  },
   {
     key: "planningMode",
     labelKey: "chatFeaturePlanningMode",
@@ -136,7 +131,6 @@ const CHAT_FEATURE_PRESETS: Array<{
 ];
 
 const DEFAULT_CHAT_FEATURE_PRESETS: Record<FeaturePresetKey, boolean> = {
-  mentalModel: true,
   planningMode: false,
   goalMode: false,
   toolBoost: false,
@@ -1378,6 +1372,25 @@ export function ChatCodingRoute() {
             <span className={styles.featurePresetScope}>{t("chatFeaturePanelScope")}</span>
           </div>
           <div className={styles.featurePresetGrid}>
+            <button
+              type="button"
+              className={
+                mentalModelEnabledForNextTurn
+                  ? `${styles.featureToggle} ${styles.featureToggleActive} ${styles.featureTogglePrimary}`
+                  : `${styles.featureToggle} ${styles.featureTogglePrimary}`
+              }
+              aria-pressed={mentalModelEnabledForNextTurn}
+              disabled={!activeSessionId}
+              onClick={() => handleMentalModelEnabledChange(!mentalModelEnabledForNextTurn)}
+            >
+              <span className={styles.featureToggleText}>
+                <strong>{t("chatFeatureMentalModel")}</strong>
+                <span>{t("mentalModelForNextTurn")}</span>
+              </span>
+              <span className={styles.featureToggleState}>
+                {mentalModelEnabledForNextTurn ? t("mentalModelNextTurnOn") : t("mentalModelNextTurnOff")}
+              </span>
+            </button>
             {CHAT_FEATURE_PRESETS.map((item) => {
               const enabled = featurePresetState[item.key];
               return (
@@ -1399,7 +1412,7 @@ export function ChatCodingRoute() {
               );
             })}
           </div>
-          <p className={styles.featurePresetNote}>{t("chatFeaturePanelFrontendOnlyHint")}</p>
+          <p className={styles.featurePresetNote}>{t("chatFeaturePanelHint")}</p>
         </section>
 
         <section className={styles.leftBlock}>
@@ -1662,15 +1675,12 @@ export function ChatCodingRoute() {
                   composerModeNotice={resolvedEditTarget ? t("editMessageModeNotice") : ""}
                   cancelComposerModeLabel={t("cancelEditMessage")}
                   turnError={detail.lastTurnError}
-                  mentalModelEnabled={mentalModelEnabledForNextTurn}
-                  mentalModelOptionDisabled={!activeSessionId}
                   stopLabel={t("stop")}
                   stopPendingLabel={t("stopPending")}
                   editingMessageId={resolvedEditTarget?.messageId}
                   editUserMessageLabel={t("editAndResendMessage")}
                   editUserMessageDisabled={sessionBusy || submitPending}
                   onComposerChange={handleComposerChange}
-                  onMentalModelEnabledChange={handleMentalModelEnabledChange}
                   onEditUserMessage={handleEditUserMessage}
                   onCancelComposerMode={resolvedEditTarget ? handleCancelEditMessage : undefined}
                   onSubmit={handleSubmitTurn}
