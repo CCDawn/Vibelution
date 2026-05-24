@@ -75,6 +75,12 @@ def _llm_retry_event_fields(
     max_attempts: int,
     llm_error: LLMError,
 ) -> Dict[str, Any]:
+    safe_metadata = metadata or {}
+    role_fields = {}
+    if isinstance(safe_metadata, dict):
+        for key in ("messageRoles", "messageRoleCounts"):
+            if key in safe_metadata:
+                role_fields[key] = safe_metadata[key]
     return {
         "role": role,
         "profileId": profile_id,
@@ -82,12 +88,37 @@ def _llm_retry_event_fields(
         "model": model,
         "messageCount": message_count,
         "toolCount": tool_count,
-        "metadata": metadata or {},
+        **role_fields,
+        "metadata": safe_metadata,
         "attempt": attempt,
         "maxAttempts": max_attempts,
         "errorType": llm_error.category,
         "retryable": llm_error.retryable,
         "error": str(llm_error),
+    }
+
+
+def _safe_message_role_summary(messages: List[Any]) -> Dict[str, Any]:
+    roles: List[str] = []
+    counts: Dict[str, int] = {}
+    for message in list(messages or []):
+        if isinstance(message, SystemMessage):
+            role = "system"
+        elif isinstance(message, ToolMessage):
+            role = "tool"
+        elif isinstance(message, AIMessage):
+            role = "assistant"
+        elif isinstance(message, dict):
+            role = str(message.get("role") or "user").strip().lower() or "user"
+        elif isinstance(message, BaseMessage):
+            role = str(getattr(message, "type", "") or "user").strip().lower() or "user"
+        else:
+            role = "user"
+        roles.append(role)
+        counts[role] = counts.get(role, 0) + 1
+    return {
+        "messageRoles": roles,
+        "messageRoleCounts": counts,
     }
 
 
@@ -343,13 +374,14 @@ class LLMClient:
     def invoke(self, messages: List[Any], *, tools: Optional[List[Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> AIMessage:
         start = time.time()
         payload = self._build_payload(messages, tools=tools, stream=False)
+        message_role_summary = _safe_message_role_summary(payload.get("messages") or messages)
         response = self._invoke_backend_with_retry(
             payload,
             phase="invoke",
             event_code="llm.invoke.failed",
             message_count=len(messages or []),
             tool_count=len(tools or self.bound_tools or []),
-            metadata=metadata,
+            metadata={**(metadata or {}), **message_role_summary},
         )
         latency_ms = int((time.time() - start) * 1000)
         message = self._choice_message(response)
@@ -372,6 +404,7 @@ class LLMClient:
                 "messageCount": len(messages or []),
                 "toolCount": len(tools or self.bound_tools or []),
                 "toolCallCount": len(tool_calls),
+                **message_role_summary,
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
@@ -543,10 +576,34 @@ class LLMClient:
         payload = self._build_payload(messages, tools=tools, stream=True)
         message_count = len(messages or [])
         tool_count = len(tools or self.bound_tools or [])
+        message_role_summary = _safe_message_role_summary(payload.get("messages") or messages)
         max_attempts = _retry_policy_max_attempts(self.profile)
         for attempt in range(1, max_attempts + 1):
+            start = time.time()
             emitted = False
+            chunk_count = 0
+            text_delta_count = 0
+            reasoning_delta_count = 0
+            tool_call_count = 0
             try:
+                _record_llm_scene_event(
+                    "stream",
+                    "llm.stream.started",
+                    message="LLM stream started.",
+                    outcome="running",
+                    fields={
+                        "role": self.role,
+                        "profileId": self.profile_id,
+                        "provider": self.provider.kind,
+                        "model": self.profile.model,
+                        "messageCount": message_count,
+                        "toolCount": tool_count,
+                        **message_role_summary,
+                        "attempt": attempt,
+                        "maxAttempts": max_attempts,
+                    },
+                    lifecycle=False,
+                )
                 events, emitted_fn = self._stream_attempt(
                     payload,
                     message_count=message_count,
@@ -554,7 +611,35 @@ class LLMClient:
                 )
                 for event in events:
                     emitted = emitted_fn()
+                    chunk_count += 1
+                    if event.type == "text_delta":
+                        text_delta_count += 1
+                    elif event.type == "reasoning_delta":
+                        reasoning_delta_count += 1
+                    elif event.type == "tool_call_final":
+                        tool_call_count += len(event.tool_calls or [])
                     yield event
+                _record_llm_scene_event(
+                    "stream",
+                    "llm.stream.succeeded",
+                    message="LLM stream succeeded.",
+                    outcome="succeeded",
+                    fields={
+                        "role": self.role,
+                        "profileId": self.profile_id,
+                        "provider": self.provider.kind,
+                        "model": self.profile.model,
+                        "messageCount": message_count,
+                        "toolCount": tool_count,
+                        **message_role_summary,
+                        "chunkCount": chunk_count,
+                        "textDeltaCount": text_delta_count,
+                        "reasoningDeltaCount": reasoning_delta_count,
+                        "toolCallCount": tool_call_count,
+                        "latencyMs": int((time.time() - start) * 1000),
+                    },
+                    lifecycle=False,
+                )
                 return
             except Exception as exc:
                 llm_error = classify_exception(exc)
@@ -573,7 +658,7 @@ class LLMClient:
                             model=self.profile.model,
                             message_count=message_count,
                             tool_count=tool_count,
-                            metadata=None,
+                            metadata=message_role_summary,
                             attempt=attempt,
                             max_attempts=max_attempts,
                             llm_error=llm_error,
@@ -587,7 +672,7 @@ class LLMClient:
                     message="LLM stream failed before iterator",
                     message_count=message_count,
                     tool_count=tool_count,
-                    metadata=None,
+                    metadata=message_role_summary,
                     attempt=attempt,
                     max_attempts=max_attempts,
                     llm_error=llm_error,
