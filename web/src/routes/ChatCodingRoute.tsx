@@ -69,6 +69,15 @@ import {
 } from "./selfEvolutionHandoff";
 import styles from "./ChatCodingRoute.module.css";
 
+function encodeUtf8Base64(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
 const FilePreview = lazy(async () => {
   const module = await import("../components/preview/FilePreview");
   return { default: module.FilePreview };
@@ -432,7 +441,7 @@ export function ChatCodingRoute() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ content, mentalModelEnabled }),
+        body: JSON.stringify({ content, contentUtf8Base64: encodeUtf8Base64(content), mentalModelEnabled }),
       }),
     onMutate: async (variables) => {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
@@ -483,7 +492,7 @@ export function ChatCodingRoute() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ messageId, content, mentalModelEnabled }),
+        body: JSON.stringify({ messageId, content, contentUtf8Base64: encodeUtf8Base64(content), mentalModelEnabled }),
       }),
     onMutate: async (variables) => {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(variables.sessionId), markSessionDetailRunning);
