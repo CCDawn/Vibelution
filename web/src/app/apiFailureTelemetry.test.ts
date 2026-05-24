@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildShutdownLocallyCompleteTelemetry,
   buildShutdownRequestUnconfirmedTelemetry,
   buildShutdownRequestedTelemetry,
   shouldSuppressApiFailureTelemetry,
+  shouldTreatShutdownAsLocallyComplete,
   shouldThrottleApiFailureTelemetry,
+  shutdownLocallyCompleteBody,
   shutdownRequestUnconfirmedBody,
 } from "./AppShell";
 
@@ -109,5 +112,60 @@ describe("api failure telemetry", () => {
         errorMessage: "Failed to fetch",
       },
     });
+  });
+
+  it("treats shutdown as locally complete when the backend and runtime summary are both unreachable", () => {
+    expect(
+      shouldTreatShutdownAsLocallyComplete({
+        shutdownRequested: true,
+        backendState: "healthy",
+        backendUnavailable: true,
+        runtimeSummaryUnavailable: true,
+        workbench: null,
+      }),
+    ).toBe(true);
+    expect(shutdownLocallyCompleteBody("zh")).toContain("残留窗口");
+    expect(shutdownLocallyCompleteBody("en")).toContain("remaining window");
+    expect(buildShutdownLocallyCompleteTelemetry("backend_unreachable")).toMatchObject({
+      phase: "shutdown",
+      eventCode: "browser.user_action.shutdown_locally_completed",
+      level: "info",
+      fields: {
+        action: "shutdown",
+        source: "app_shell",
+        reason: "backend_unreachable",
+      },
+    });
+  });
+
+  it("does not infer shutdown completion from ordinary foreground API loss", () => {
+    expect(
+      shouldTreatShutdownAsLocallyComplete({
+        shutdownRequested: false,
+        backendState: "offline",
+        runtimeSummaryUnavailable: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldTreatShutdownAsLocallyComplete({
+        shutdownRequested: true,
+        backendState: "offline",
+        runtimeSummaryUnavailable: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("treats a runtime-manager orphaned browser signal as locally complete during shutdown", () => {
+    expect(
+      shouldTreatShutdownAsLocallyComplete({
+        shutdownRequested: true,
+        backendState: "healthy",
+        runtimeSummaryUnavailable: false,
+        workbench: {
+          frontendOrphaned: true,
+          lifecycleConsistency: "orphaned_browser",
+        } as never,
+      }),
+    ).toBe(true);
   });
 });
