@@ -27,6 +27,7 @@ from scripts.evolution_harness import HarnessResult, run_harness
 DEFAULT_BUNDLE_NAME = "supervised_evolution_dry_run_v1"
 DEFAULT_BUNDLE_PATH = Path("workspace/evaluation/bundles") / f"{DEFAULT_BUNDLE_NAME}.json"
 DEFAULT_BUNDLE_TEMPLATE_DIR = Path(__file__).resolve().parent / "bundles"
+TRANSACTION_REQUIRED_SCENARIOS = {"transaction", "modify_rollback", "full_evolution"}
 ProgressCallback = Callable[[Dict[str, Any]], None]
 CheckpointCallback = Callable[[Dict[str, Any]], None]
 CancelChecker = Callable[[], object]
@@ -313,6 +314,8 @@ def _extract_run_metrics(item: SupervisedEvolutionRun) -> Dict[str, Any]:
     if started_at and ended_at:
         wall_clock_seconds = max(0.0, round((ended_at - started_at).total_seconds(), 3))
     return {
+        "scenario": item.scenario,
+        "transaction_required": item.scenario in TRANSACTION_REQUIRED_SCENARIOS,
         "wall_clock_seconds": wall_clock_seconds,
         "validation_passed": int(validation.get("passed") or 0),
         "validation_failed": int(validation.get("failed") or 0),
@@ -887,6 +890,8 @@ def _build_case_difference_diagnostic(
 def _has_transaction_issue(metrics: Dict[str, Any]) -> bool:
     if not metrics:
         return False
+    if not bool(metrics.get("transaction_required")):
+        return False
     return (
         not bool(metrics.get("transaction_opened"))
         or not bool(metrics.get("transaction_closed"))
@@ -1119,16 +1124,12 @@ def _evaluate_gates(
     baseline_transaction_issues = sum(
         1
         for item in baseline_metrics
-        if not item["transaction_opened"]
-        or not item["transaction_closed"]
-        or item["transaction_status"] not in {"", "success"}
+        if _has_transaction_issue(item)
     )
     candidate_transaction_issues = sum(
         1
         for item in candidate_metrics
-        if not item["transaction_opened"]
-        or not item["transaction_closed"]
-        or item["transaction_status"] not in {"", "success"}
+        if _has_transaction_issue(item)
     )
     legality_status = "pass"
     legality_reason = "candidate 运行保持在受控事务约束内"
