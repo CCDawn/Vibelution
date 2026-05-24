@@ -14,6 +14,22 @@ from core.runtime_manager import state_store
 from core.runtime_manager import workbench_controller
 
 
+def _repeat_last(items):
+    values = list(items)
+    iterator = iter(values)
+    last = values[-1]
+
+    def next_value():
+        nonlocal last
+        try:
+            last = next(iterator)
+        except StopIteration:
+            pass
+        return dict(last)
+
+    return next_value
+
+
 def test_print_status_reports_stale_runtime_manager_source(capsys):
     runtime_cli._print_status(
         {
@@ -407,6 +423,49 @@ def test_run_forever_marks_runtime_stopping_then_finalizes_idle_before_exit(monk
     assert saved_states[-1]["workbench"]["phase"] == "steady"
 
 
+def test_reconcile_observation_keeps_daemon_running_true_and_preserves_stopping(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "backendPid": 0,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8000,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerTrusted": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "browserManaged": True,
+            "sessionId": "",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+
+    state = runtime_daemon._reconcile_observation(
+        {
+            "runtimeState": "stopping",
+            "daemonRunning": False,
+            "command": {},
+            "workbench": {"desiredState": "closed", "observedState": "closed", "phase": "steady"},
+        }
+    )
+
+    assert state["runtimeState"] == "stopping"
+    assert state["daemonRunning"] is True
+    assert state["managerPid"] == runtime_daemon._pid
+
+
 def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -728,12 +787,18 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
     monkeypatch.setattr(
         daemon.subprocess,
         "Popen",
-        lambda args, **kwargs: popen_calls.append(args),
+        lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 24680})(),
     )
 
     assert daemon.ensure_daemon_running(python_executable="python-test") is True
     assert terminated == [12345]
-    assert events == [("daemon.restart_requested", {"pid": 12345, "reason": "runtime_manager_source_changed"})]
+    assert events == [
+        ("daemon.restart_requested", {"pid": 12345, "reason": "runtime_manager_source_changed"}),
+        (
+            "daemon.start_requested",
+            {"launchPid": 24680, "pythonExecutable": "python-test"},
+        ),
+    ]
     assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
 
 
@@ -753,14 +818,13 @@ def test_ensure_daemon_running_keeps_current_source_signature(monkeypatch):
     assert daemon.ensure_daemon_running() is False
 
 
-def test_ensure_daemon_running_prefers_pythonw_for_background_daemon(tmp_path, monkeypatch):
+def test_ensure_daemon_running_prefers_python_for_background_daemon(tmp_path, monkeypatch):
     python_exe = tmp_path / "Scripts" / "python.exe"
-    pythonw_exe = tmp_path / "Scripts" / "pythonw.exe"
     python_exe.parent.mkdir()
     python_exe.write_text("", encoding="utf-8")
-    pythonw_exe.write_text("", encoding="utf-8")
     running_checks = iter([False, True])
     popen_calls = []
+    events: list[tuple[str, dict]] = []
 
     monkeypatch.setattr(daemon, "load_pid", lambda: 0)
     monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
@@ -768,11 +832,25 @@ def test_ensure_daemon_running_prefers_pythonw_for_background_daemon(tmp_path, m
     monkeypatch.setattr(daemon, "is_daemon_running", lambda: next(running_checks))
     monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", tmp_path / "daemon.out.log")
     monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", tmp_path / "daemon.err.log")
-    monkeypatch.setattr(daemon.subprocess, "Popen", lambda args, **kwargs: popen_calls.append(args))
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon.subprocess,
+        "Popen",
+        lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 13579})(),
+    )
 
     assert daemon.ensure_daemon_running(python_executable=str(python_exe)) is True
 
-    assert popen_calls == [[str(pythonw_exe.resolve()), "-m", "core.runtime_manager.cli", "daemon"]]
+    assert popen_calls == [[str(python_exe.resolve()), "-m", "core.runtime_manager.cli", "daemon"]]
+    assert events == [
+        (
+            "daemon.start_requested",
+            {
+                "launchPid": 13579,
+                "pythonExecutable": str(python_exe.resolve()),
+            },
+        )
+    ]
 
 
 def test_load_launcher_state_supports_utf8_bom(tmp_path, monkeypatch):
@@ -874,7 +952,585 @@ def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch)
     assert captured["kwargs"]["env"]["VIBELUTION_PORT"] == "9101"
 
 
+def test_run_launcher_action_uses_no_window_flags_without_detaching_powershell(monkeypatch):
+    captured = {}
+
+    def fake_run(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        kwargs["stdout"].write(b"ok\n")
+        kwargs["stdout"].flush()
+        return subprocess.CompletedProcess(args=args[0], returncode=0)
+
+    monkeypatch.setattr(workbench_controller.subprocess, "DETACHED_PROCESS", 0x00000008, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+
+    result = workbench_controller.run_launcher_action("internal-start")
+
+    assert result.returncode == 0
+    assert not captured["kwargs"]["creationflags"] & 0x00000008
+    assert captured["kwargs"]["creationflags"] & 0x00000200
+    assert captured["kwargs"]["creationflags"] & 0x08000000
+
+
 def test_handle_open_workbench_restarts_headless_session(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T09:00:00+00:00")
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": False,
+                "browserWindowAlive": False,
+                "backendPid": 28888,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "sessionId": "headless-session",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 28888,
+                "browserLaunchPid": 4500,
+                "browserWindowPid": 4500,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "sessionId": "browser-session",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 28888,
+                "browserLaunchPid": 4500,
+                "browserWindowPid": 4500,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "sessionId": "browser-session",
+                "url": "http://127.0.0.1:8000",
+            },
+        ]
+    )
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+
+    opened = {}
+    events = []
+
+    def fake_open_workbench(*, no_browser: bool):
+        opened["no_browser"] = no_browser
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench opened."
+    assert opened == {"no_browser": False}
+    assert events == [
+        (
+            "workbench.open.verification_succeeded",
+            {
+                "attempts": 1,
+                "commandId": "cmd-open",
+                "noBrowser": False,
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "backendPid": 28888,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 0,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "browserManaged": True,
+                "browserWindowPid": 4500,
+                "browserWindowAlive": True,
+                "url": "http://127.0.0.1:8000",
+                "healthUrl": "",
+            },
+        )
+    ]
+
+
+def test_handle_open_workbench_fails_when_launcher_exits_before_workbench_is_ready(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    saved_states = []
+    events = []
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: saved_states.append(next_state) or next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "_OPEN_VERIFICATION_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_command(
+        {
+            "commandId": "cmd-open",
+            "type": "open_workbench",
+            "requestedBy": "test",
+            "args": {"reason": "launcher_start"},
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["errorType"] == "RuntimeError"
+    assert "not ready" in result["message"]
+    assert saved_states[-1]["workbench"]["phase"] == "failed"
+    assert saved_states[-1]["workbench"]["desiredState"] == "open"
+    assert saved_states[-1]["workbench"]["observedState"] == "closed"
+    assert any(event_type == "workbench.open.verification_failed" for event_type, _payload in events)
+    failed_payload = next(payload for event_type, payload in events if event_type == "workbench.open.verification_failed")
+    assert failed_payload["commandId"] == "cmd-open"
+    assert failed_payload["attempts"] == 1
+    assert failed_payload["launcher"]["returnCode"] == 0
+
+
+def test_handle_open_workbench_retries_stale_browser_only_session(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    open_calls: list[bool] = []
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 0,
+                "browserLaunchPid": 38028,
+                "browserWindowPid": 38028,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "stale-browser-session",
+                "url": "http://127.0.0.1:8000",
+                "healthUrl": "http://127.0.0.1:8000/api/health",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 0,
+                "browserLaunchPid": 38028,
+                "browserWindowPid": 38028,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "stale-browser-session",
+                "url": "http://127.0.0.1:8000",
+                "healthUrl": "http://127.0.0.1:8000/api/health",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 0,
+                "browserLaunchPid": 38028,
+                "browserWindowPid": 38028,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "stale-browser-session",
+                "url": "http://127.0.0.1:8000",
+                "healthUrl": "http://127.0.0.1:8000/api/health",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 49972,
+                "browserLaunchPid": 33676,
+                "browserWindowPid": 33676,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 51780,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "sessionId": "fresh-browser-session",
+                "url": "http://127.0.0.1:8000",
+                "healthUrl": "http://127.0.0.1:8000/api/health",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "_OPEN_VERIFICATION_TIMEOUT_SECONDS", 0)
+
+    def fake_open_workbench(*, no_browser: bool):
+        open_calls.append(no_browser)
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench opened."
+    assert open_calls == [False, False]
+    assert [event_type for event_type, _payload in events] == [
+        "workbench.open.stale_session_retry",
+        "workbench.open.verification_succeeded",
+    ]
+    retry_payload = events[0][1]
+    assert retry_payload["commandId"] == "cmd-open"
+    assert retry_payload["backendHealthy"] is False
+    assert retry_payload["browserWindowAlive"] is True
+    assert retry_payload["attempts"] == 1
+    success_payload = events[1][1]
+    assert success_payload["backendHealthy"] is True
+    assert success_payload["browserWindowPid"] == 33676
+    assert success_payload["retry"] == "stale_session_cleanup"
+
+
+def test_handle_open_workbench_no_browser_succeeds_when_backend_is_ready(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": False,
+                "browserWindowAlive": False,
+                "backendPid": 28888,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "sessionId": "headless-session",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": False,
+                "browserWindowAlive": False,
+                "backendPid": 28888,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "sessionId": "headless-session",
+                "url": "http://127.0.0.1:8000",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    events = []
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={"noBrowser": True})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench opened."
+    assert events[0][0] == "workbench.open.verification_succeeded"
+    assert events[0][1]["commandId"] == "cmd-open"
+    assert events[0][1]["noBrowser"] is True
+    assert events[0][1]["attempts"] == 1
+
+
+def test_open_verification_timeout_is_extended_for_slow_startups():
+    assert daemon._OPEN_VERIFICATION_TIMEOUT_SECONDS >= 45
+
+
+def test_handle_open_workbench_waits_for_delayed_backend_observation(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": False,
+                "browserWindowAlive": False,
+                "backendPid": 28888,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 28888,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "sessionId": "headless-session",
+                "url": "http://127.0.0.1:8000",
+            },
+        ]
+    )
+    sleeps = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    fake_time = type(
+        "FakeTime",
+        (),
+        {"monotonic": staticmethod(lambda: 0.0), "sleep": staticmethod(lambda seconds: sleeps.append(seconds))},
+    )
+    monkeypatch.setattr(daemon, "time", fake_time)
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    events = []
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={"noBrowser": True})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench opened."
+    assert sleeps == [daemon._OPEN_VERIFICATION_POLL_INTERVAL_SECONDS]
+    assert events[0][0] == "workbench.open.verification_succeeded"
+    assert events[0][1]["attempts"] == 2
+
+
+def test_handle_open_workbench_restarts_healthy_headless_session_when_browser_requested(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
         "command": {},
@@ -891,33 +1547,203 @@ def test_handle_open_workbench_restarts_headless_session(monkeypatch):
     monkeypatch.setattr(
         daemon,
         "observe_workbench",
-        lambda: {
-            "observedState": "open",
-            "launcherStatePresent": True,
-            "browserManaged": False,
-            "browserWindowAlive": False,
-            "backendPid": 28888,
-            "browserLaunchPid": 0,
-            "browserWindowPid": 0,
-            "sessionId": "headless-session",
-            "url": "http://127.0.0.1:8000",
-        },
+        _repeat_last(
+            [
+                {
+                    "observedState": "open",
+                    "launcherStatePresent": True,
+                    "browserManaged": False,
+                    "browserWindowAlive": False,
+                    "backendPid": 28888,
+                    "browserLaunchPid": 0,
+                    "browserWindowPid": 0,
+                    "backendHealthy": True,
+                    "backendObserved": True,
+                    "backendPortListening": True,
+                    "backendPortOwnerPid": 28888,
+                    "backendPortOwnerTrusted": True,
+                    "backendPortConflict": False,
+                    "sessionId": "headless-session",
+                    "url": "http://127.0.0.1:8000",
+                },
+                {
+                    "observedState": "open",
+                    "launcherStatePresent": True,
+                    "browserManaged": True,
+                    "browserWindowAlive": True,
+                    "backendPid": 28888,
+                    "browserLaunchPid": 4500,
+                    "browserWindowPid": 4500,
+                    "backendHealthy": True,
+                    "backendObserved": True,
+                    "backendPortListening": True,
+                    "backendPortOwnerPid": 28888,
+                    "backendPortOwnerTrusted": True,
+                    "backendPortConflict": False,
+                    "sessionId": "browser-session",
+                    "url": "http://127.0.0.1:8000",
+                },
+            ]
+        ),
     )
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
 
     opened = {}
+    events = []
 
     def fake_open_workbench(*, no_browser: bool):
         opened["no_browser"] = no_browser
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
 
     result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
 
     assert result["ok"] is True
     assert result["message"] == "Workbench opened."
     assert opened == {"no_browser": False}
+    assert events[0][0] == "workbench.open.verification_succeeded"
+
+
+def test_handle_open_workbench_refocuses_existing_browser_session(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "launcherStatePresent": True,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "backendPid": 28888,
+            "browserLaunchPid": 4500,
+            "browserWindowPid": 4500,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 28888,
+            "backendPortOwnerTrusted": True,
+            "backendPortConflict": False,
+            "sessionId": "browser-session",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+
+    opened = {}
+    events: list[tuple[str, dict]] = []
+
+    def fake_open_workbench(*, no_browser: bool):
+        opened["no_browser"] = no_browser
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="Focused existing workbench.\n", stderr="")
+
+    monkeypatch.setattr(daemon, "open_workbench", fake_open_workbench)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench is already open."
+    assert opened == {"no_browser": False}
+    assert events == [
+        (
+            "workbench.open.already_satisfied",
+            {
+                "commandId": "cmd-open",
+                "noBrowser": False,
+                "focusRequested": True,
+                "observedState": "open",
+                "backendPid": 28888,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "browserManaged": True,
+                "browserWindowPid": 4500,
+                "browserWindowAlive": True,
+                "sessionId": "browser-session",
+                "url": "http://127.0.0.1:8000",
+            },
+        ),
+        (
+            "workbench.open.focus_requested",
+            {
+                "commandId": "cmd-open",
+                "returnCode": 0,
+                "stdout": "Focused existing workbench.",
+                "stderr": "",
+            },
+        ),
+    ]
+
+
+def test_handle_open_workbench_logs_focus_failure_for_existing_browser_session(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "browserManaged": True,
+        "browserWindowAlive": True,
+        "backendPid": 28888,
+        "browserLaunchPid": 4500,
+        "browserWindowPid": 4500,
+        "backendHealthy": True,
+        "backendObserved": True,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 28888,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "sessionId": "browser-session",
+        "url": "http://127.0.0.1:8000",
+    }
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", lambda: observation)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda *, no_browser: subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="No managed browser window was available to focus.",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="No managed browser window"):
+        runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert [event_type for event_type, _ in events] == [
+        "workbench.open.already_satisfied",
+        "workbench.open.focus_failed",
+    ]
+    assert events[1][1] == {
+        "commandId": "cmd-open",
+        "returnCode": 1,
+        "detail": "No managed browser window was available to focus.",
+    }
 
 
 def test_run_launcher_action_uses_devnull_stdio(monkeypatch):
@@ -964,17 +1790,42 @@ def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
     monkeypatch.setattr(
         daemon,
         "observe_workbench",
-        lambda: {
-            "observedState": "open",
-            "launcherStatePresent": True,
-            "browserManaged": True,
-            "browserWindowAlive": True,
-            "backendPid": 28888,
-            "browserLaunchPid": 29999,
-            "browserWindowPid": 29999,
-            "sessionId": "managed-session",
-            "url": "http://127.0.0.1:8000",
-        },
+        _repeat_last(
+            [
+                {
+                    "observedState": "open",
+                    "launcherStatePresent": True,
+                    "browserManaged": True,
+                    "browserWindowAlive": True,
+                    "backendPid": 28888,
+                    "browserLaunchPid": 29999,
+                    "browserWindowPid": 29999,
+                    "backendAlive": True,
+                    "backendHealthy": True,
+                    "backendObserved": True,
+                    "backendPortListening": True,
+                    "backendPortOwnerPid": 28888,
+                    "sessionId": "managed-session",
+                    "url": "http://127.0.0.1:8000",
+                },
+                {
+                    "observedState": "closed",
+                    "launcherStatePresent": False,
+                    "browserManaged": True,
+                    "browserWindowAlive": False,
+                    "backendPid": 0,
+                    "browserLaunchPid": 0,
+                    "browserWindowPid": 0,
+                    "backendAlive": False,
+                    "backendHealthy": False,
+                    "backendObserved": False,
+                    "backendPortListening": False,
+                    "backendPortOwnerPid": 0,
+                    "sessionId": "",
+                    "url": "http://127.0.0.1:8000",
+                },
+            ]
+        ),
     )
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(
@@ -1005,17 +1856,42 @@ def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     monkeypatch.setattr(
         daemon,
         "observe_workbench",
-        lambda: {
-            "observedState": "open",
-            "launcherStatePresent": True,
-            "browserManaged": True,
-            "browserWindowAlive": True,
-            "backendPid": 28888,
-            "browserLaunchPid": 29999,
-            "browserWindowPid": 29999,
-            "sessionId": "managed-session",
-            "url": "http://127.0.0.1:8000",
-        },
+        _repeat_last(
+            [
+                {
+                    "observedState": "open",
+                    "launcherStatePresent": True,
+                    "browserManaged": True,
+                    "browserWindowAlive": True,
+                    "backendPid": 28888,
+                    "browserLaunchPid": 29999,
+                    "browserWindowPid": 29999,
+                    "backendAlive": True,
+                    "backendHealthy": True,
+                    "backendObserved": True,
+                    "backendPortListening": True,
+                    "backendPortOwnerPid": 28888,
+                    "sessionId": "managed-session",
+                    "url": "http://127.0.0.1:8000",
+                },
+                {
+                    "observedState": "closed",
+                    "launcherStatePresent": False,
+                    "browserManaged": True,
+                    "browserWindowAlive": False,
+                    "backendPid": 0,
+                    "browserLaunchPid": 0,
+                    "browserWindowPid": 0,
+                    "backendAlive": False,
+                    "backendHealthy": False,
+                    "backendObserved": False,
+                    "backendPortListening": False,
+                    "backendPortOwnerPid": 0,
+                    "sessionId": "",
+                    "url": "http://127.0.0.1:8000",
+                },
+            ]
+        ),
     )
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(
@@ -1058,17 +1934,42 @@ def test_handle_close_workbench_closes_active_evolution_runs(monkeypatch):
     monkeypatch.setattr(
         daemon,
         "observe_workbench",
-        lambda: {
-            "observedState": "open",
-            "launcherStatePresent": True,
-            "browserManaged": True,
-            "browserWindowAlive": True,
-            "backendPid": 28888,
-            "browserLaunchPid": 29999,
-            "browserWindowPid": 29999,
-            "sessionId": "managed-session",
-            "url": "http://127.0.0.1:8000",
-        },
+        _repeat_last(
+            [
+                {
+                    "observedState": "open",
+                    "launcherStatePresent": True,
+                    "browserManaged": True,
+                    "browserWindowAlive": True,
+                    "backendPid": 28888,
+                    "browserLaunchPid": 29999,
+                    "browserWindowPid": 29999,
+                    "backendAlive": True,
+                    "backendHealthy": True,
+                    "backendObserved": True,
+                    "backendPortListening": True,
+                    "backendPortOwnerPid": 28888,
+                    "sessionId": "managed-session",
+                    "url": "http://127.0.0.1:8000",
+                },
+                {
+                    "observedState": "closed",
+                    "launcherStatePresent": False,
+                    "browserManaged": True,
+                    "browserWindowAlive": False,
+                    "backendPid": 0,
+                    "browserLaunchPid": 0,
+                    "browserWindowPid": 0,
+                    "backendAlive": False,
+                    "backendHealthy": False,
+                    "backendObserved": False,
+                    "backendPortListening": False,
+                    "backendPortOwnerPid": 0,
+                    "sessionId": "",
+                    "url": "http://127.0.0.1:8000",
+                },
+            ]
+        ),
     )
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(
@@ -1113,23 +2014,44 @@ def test_handle_close_workbench_does_not_short_circuit_when_backend_port_is_stil
     monkeypatch.setattr(
         daemon,
         "observe_workbench",
-        lambda: {
-            "observedState": "closed",
-            "launcherStatePresent": True,
-            "browserManaged": True,
-            "browserWindowAlive": False,
-            "backendPid": 19964,
-            "backendAlive": False,
-            "backendHealthy": False,
-            "backendObserved": True,
-            "backendPort": 8766,
-            "backendPortListening": True,
-            "backendPortOwnerPid": 52396,
-            "browserLaunchPid": 5168,
-            "browserWindowPid": 5168,
-            "sessionId": "managed-session",
-            "url": "http://127.0.0.1:8766",
-        },
+        _repeat_last(
+            [
+                {
+                    "observedState": "closed",
+                    "launcherStatePresent": True,
+                    "browserManaged": True,
+                    "browserWindowAlive": False,
+                    "backendPid": 19964,
+                    "backendAlive": False,
+                    "backendHealthy": False,
+                    "backendObserved": True,
+                    "backendPort": 8766,
+                    "backendPortListening": True,
+                    "backendPortOwnerPid": 52396,
+                    "browserLaunchPid": 5168,
+                    "browserWindowPid": 5168,
+                    "sessionId": "managed-session",
+                    "url": "http://127.0.0.1:8766",
+                },
+                {
+                    "observedState": "closed",
+                    "launcherStatePresent": False,
+                    "browserManaged": True,
+                    "browserWindowAlive": False,
+                    "backendPid": 0,
+                    "backendAlive": False,
+                    "backendHealthy": False,
+                    "backendObserved": False,
+                    "backendPort": 8766,
+                    "backendPortListening": False,
+                    "backendPortOwnerPid": 0,
+                    "browserLaunchPid": 0,
+                    "browserWindowPid": 0,
+                    "sessionId": "",
+                    "url": "http://127.0.0.1:8766",
+                },
+            ]
+        ),
     )
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
 
@@ -1205,6 +2127,180 @@ def test_handle_close_workbench_cleans_residual_processes_and_can_stop_daemon(mo
     assert result["residualCleanup"]["terminated"] == [49780]
     assert cleanup_calls
     assert runtime_daemon._pid in cleanup_calls[0]["exclude_pids"]
+
+
+def test_handle_close_workbench_includes_active_backend_in_residual_cleanup(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    cleanup_calls: list[dict] = []
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": False,
+                "browserWindowAlive": False,
+                "backendPid": 2748,
+                "backendLaunchPid": 2748,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 33556,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "sessionId": "managed-session",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": False,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "backendLaunchPid": 0,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    def fake_cleanup(**kwargs):
+        cleanup_calls.append(kwargs)
+        return {"supported": True, "requested": [2748, 33556], "terminated": [2748, 33556], "remaining": []}
+
+    monkeypatch.setattr(daemon, "terminate_unmanaged_workbench_processes", fake_cleanup)
+
+    result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={})
+
+    assert result["ok"] is True
+    assert cleanup_calls
+    assert 2748 not in cleanup_calls[0]["exclude_pids"]
+    assert 33556 not in cleanup_calls[0]["exclude_pids"]
+    assert runtime_daemon._pid in cleanup_calls[0]["exclude_pids"]
+
+
+def test_handle_close_workbench_fails_when_post_close_verification_still_sees_browser(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 6544,
+                "backendLaunchPid": 6544,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 14916,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "browserLaunchPid": 40736,
+                "browserWindowPid": 40736,
+                "sessionId": "managed-session",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 0,
+                "backendLaunchPid": 6544,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "browserLaunchPid": 40736,
+                "browserWindowPid": 40736,
+                "sessionId": "managed-session",
+                "url": "http://127.0.0.1:8000",
+            },
+        ]
+    )
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-24T05:30:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "_CLOSE_VERIFICATION_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_cleanup_residual_workbench_processes",
+        lambda: {"supported": True, "requested": [], "terminated": [], "remaining": []},
+    )
+
+    result = runtime_daemon._handle_command(
+        {
+            "commandId": "cmd-close",
+            "type": "close_workbench",
+            "requestedBy": "test",
+            "args": {},
+        }
+    )
+
+    assert result["ok"] is False
+    assert result["errorType"] == "RuntimeError"
+    assert "not fully stopped" in result["message"]
+    assert any(event_type == "workbench.close.verification_failed" for event_type, _payload in events)
+    failed_payload = next(payload for event_type, payload in events if event_type == "workbench.close.verification_failed")
+    assert failed_payload["commandId"] == "cmd-close"
+    assert failed_payload["browserWindowPid"] == 40736
+    assert failed_payload["attempts"] == 1
 
 
 def test_handle_close_workbench_cleans_residual_processes_when_already_closed(monkeypatch):
@@ -1418,7 +2514,7 @@ def test_residual_process_payload_ignores_descendants_of_active_backend(monkeypa
                             "/d",
                             "/s",
                             "/c",
-                            str(repo / ".venv" / "Scripts" / "pythonw.exe"),
+                            str(repo / ".venv" / "Scripts" / "python.exe"),
                             "scripts/web_workbench.py",
                             "--port",
                             "8000",
@@ -1431,9 +2527,9 @@ def test_residual_process_payload_ignores_descendants_of_active_backend(monkeypa
                     {
                         "pid": 31408,
                         "ppid": 13492,
-                        "name": "pythonw.exe",
+                        "name": "python.exe",
                         "cmdline": [
-                            str(repo / ".venv" / "Scripts" / "pythonw.exe"),
+                            str(repo / ".venv" / "Scripts" / "python.exe"),
                             "scripts/web_workbench.py",
                             "--port",
                             "8000",
@@ -1446,9 +2542,9 @@ def test_residual_process_payload_ignores_descendants_of_active_backend(monkeypa
                     {
                         "pid": 41160,
                         "ppid": 31408,
-                        "name": "pythonw.exe",
+                        "name": "python.exe",
                         "cmdline": [
-                            "pythonw.exe",
+                            "python.exe",
                             "scripts/web_workbench.py",
                             "--port",
                             "8000",
