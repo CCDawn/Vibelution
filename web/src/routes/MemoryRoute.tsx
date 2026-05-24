@@ -10,6 +10,8 @@ import {
   Pencil,
   RefreshCw,
   Search,
+  Square,
+  SquareCheckBig,
   Trash2,
   TriangleAlert,
   Undo2,
@@ -131,6 +133,29 @@ type Copy = {
   manageAllMemory: string;
   selectedMemory: string;
   sourceAudit: string;
+  reviewQueue: string;
+  reviewQueueHint: string;
+  reviewReason: string;
+  auditMemory: string;
+  manageMemoryAction: string;
+  reasonDisabled: string;
+  reasonOverridden: string;
+  reasonMissing: string;
+  reasonTruncated: string;
+  reasonInPrompt: string;
+  reasonAgentVisible: string;
+  reasonUserManaged: string;
+  selectMemory: string;
+  selectedCount: string;
+  selectAllVisible: string;
+  clearSelection: string;
+  bulkDisable: string;
+  bulkRestore: string;
+  bulkActionSkipped: string;
+  editPreview: string;
+  currentValue: string;
+  draftValue: string;
+  noDraftChanges: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
@@ -141,6 +166,7 @@ type MemoryPair = {
   section: MemorySection;
   item: MemoryItem;
 };
+type BulkMemoryAction = "disable" | "restore";
 type EditDraft = {
   mode: "create" | "edit";
   sectionId: string;
@@ -260,6 +286,29 @@ const COPY: Record<"zh" | "en", Copy> = {
     manageAllMemory: "全部可管理记忆",
     selectedMemory: "选中记忆",
     sourceAudit: "来源审计",
+    reviewQueue: "优先检查队列",
+    reviewQueueHint: "按风险和运行影响排序，先看会改变 agent 行为或证据不完整的记忆。",
+    reviewReason: "检查原因",
+    auditMemory: "去审计",
+    manageMemoryAction: "去管理",
+    reasonDisabled: "已被用户禁用",
+    reasonOverridden: "已被用户覆盖",
+    reasonMissing: "来源缺失",
+    reasonTruncated: "内容已截断",
+    reasonInPrompt: "会进入 prompt",
+    reasonAgentVisible: "agent 可感知",
+    reasonUserManaged: "用户手动记忆",
+    selectMemory: "选择记忆",
+    selectedCount: "已选择",
+    selectAllVisible: "选择可见项",
+    clearSelection: "清空选择",
+    bulkDisable: "批量禁用/删除",
+    bulkRestore: "批量恢复",
+    bulkActionSkipped: "已跳过不支持的条目",
+    editPreview: "保存前预览",
+    currentValue: "当前",
+    draftValue: "修改后",
+    noDraftChanges: "还没有修改。",
   },
   en: {
     eyebrow: "Agent Memory",
@@ -367,6 +416,29 @@ const COPY: Record<"zh" | "en", Copy> = {
     manageAllMemory: "All manageable memory",
     selectedMemory: "Selected memory",
     sourceAudit: "Source audit",
+    reviewQueue: "Priority review queue",
+    reviewQueueHint: "Sorted by risk and runtime impact so behavior-changing or incomplete evidence appears first.",
+    reviewReason: "Review reason",
+    auditMemory: "Audit",
+    manageMemoryAction: "Manage",
+    reasonDisabled: "Disabled by user",
+    reasonOverridden: "Overridden by user",
+    reasonMissing: "Source missing",
+    reasonTruncated: "Content truncated",
+    reasonInPrompt: "Injected into prompt",
+    reasonAgentVisible: "Agent-visible",
+    reasonUserManaged: "User-managed memory",
+    selectMemory: "Select memory",
+    selectedCount: "Selected",
+    selectAllVisible: "Select visible",
+    clearSelection: "Clear selection",
+    bulkDisable: "Disable/delete selected",
+    bulkRestore: "Restore selected",
+    bulkActionSkipped: "Skipped unsupported items",
+    editPreview: "Preview before saving",
+    currentValue: "Current",
+    draftValue: "Draft",
+    noDraftChanges: "No changes yet.",
   },
 };
 
@@ -415,6 +487,10 @@ function searchTarget(section: MemorySection, item: MemoryItem) {
 function sourceOriginLabel(section: MemorySection, item: MemoryItem) {
   const origin = [section.title, item.source].map((value) => String(value || "").trim()).filter(Boolean);
   return Array.from(new Set(origin)).join(" · ") || section.sourceKind;
+}
+
+function pairSelectionKey(sectionId: string, itemId: string) {
+  return `${sectionId}:${itemId}`;
 }
 
 async function copyText(text: string) {
@@ -735,16 +811,58 @@ function memoryViewSubtitle(copy: Copy, view: MemoryRouteView) {
 }
 
 function memoryPairPriority(pair: MemoryPair) {
-  if (pair.item.managedState?.disabled || pair.item.managedState?.overridden || !pair.item.exists || pair.item.contentTruncated) {
+  if (pair.item.managedState?.disabled || pair.item.managedState?.overridden) {
     return 0;
   }
-  if (pair.item.inPrompt) {
+  if (!pair.item.exists || pair.item.contentTruncated) {
     return 1;
   }
-  if (pair.item.agentVisible) {
+  if (pair.item.inPrompt) {
     return 2;
   }
-  return 3;
+  if (pair.item.agentVisible) {
+    return 3;
+  }
+  if (pair.item.managedState?.userManaged) {
+    return 4;
+  }
+  return 5;
+}
+
+function memoryPairActionTarget(pair: MemoryPair) {
+  return pair.item.managedState?.editable
+    || pair.item.managedState?.deletable
+    || pair.item.managedState?.restorable
+    || pair.item.managedState?.userManaged
+    || pair.item.managedState?.disabled
+    || pair.item.managedState?.overridden
+    ? "manage"
+    : "sources";
+}
+
+function reviewReasonLabels(copy: Copy, item: MemoryItem) {
+  const reasons: string[] = [];
+  if (item.managedState?.disabled) {
+    reasons.push(copy.reasonDisabled);
+  }
+  if (item.managedState?.overridden) {
+    reasons.push(copy.reasonOverridden);
+  }
+  if (!item.exists) {
+    reasons.push(copy.reasonMissing);
+  }
+  if (item.contentTruncated) {
+    reasons.push(copy.reasonTruncated);
+  }
+  if (item.inPrompt) {
+    reasons.push(copy.reasonInPrompt);
+  } else if (item.agentVisible) {
+    reasons.push(copy.reasonAgentVisible);
+  }
+  if (item.managedState?.userManaged) {
+    reasons.push(copy.reasonUserManaged);
+  }
+  return reasons;
 }
 
 export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
@@ -764,10 +882,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     text: "",
   });
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+  const [selectedMemoryKeys, setSelectedMemoryKeys] = useState<string[]>([]);
   const [mutationFeedback, setMutationFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
     tone: "idle",
     text: "",
   });
+  const [bulkActionPending, setBulkActionPending] = useState<BulkMemoryAction | null>(null);
 
   const overviewQuery = useQuery({
     queryKey: queryKeys.memoryOverview(),
@@ -859,6 +979,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         .sort((left, right) => memoryPairPriority(left) - memoryPairPriority(right))
         .slice(0, 8),
     [allPairs],
+  );
+  const priorityReviewPairs = useMemo(
+    () =>
+      allPairs
+        .filter(({ item }) => reviewReasonLabels(copy, item).length > 0)
+        .sort((left, right) => memoryPairPriority(left) - memoryPairPriority(right))
+        .slice(0, 10),
+    [allPairs, copy],
   );
   const reviewPairs = useMemo(
     () =>
@@ -992,6 +1120,20 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const activeItem = activePair?.item ?? null;
   const activeSection = activePair?.section ?? null;
   const activeImpact = activeItem ? impactCopy(copy, activeItem) : null;
+  const selectedMemoryKeySet = useMemo(() => new Set(selectedMemoryKeys), [selectedMemoryKeys]);
+  const selectedMemoryPairs = useMemo(
+    () => manageablePairs.filter(({ section, item }) => selectedMemoryKeySet.has(pairSelectionKey(section.id, item.id))),
+    [manageablePairs, selectedMemoryKeySet],
+  );
+  const visibleManagePairs = forcedView === "manage" ? flatVisibleItems : [];
+  const visibleSelectableKeys = useMemo(
+    () => visibleManagePairs.map(({ section, item }) => pairSelectionKey(section.id, item.id)),
+    [visibleManagePairs],
+  );
+  const allVisibleSelected =
+    visibleSelectableKeys.length > 0 && visibleSelectableKeys.every((key) => selectedMemoryKeySet.has(key));
+  const selectedDisablePairs = selectedMemoryPairs.filter(({ item }) => item.managedState?.deletable);
+  const selectedRestorePairs = selectedMemoryPairs.filter(({ item }) => item.managedState?.restorable);
   const hasOverviewSections = sections.length > 0;
   const showBlockingOverviewError = overviewQuery.isError && !hasOverviewSections;
   const showRefreshNotice = overviewQuery.isError && hasOverviewSections;
@@ -1068,6 +1210,17 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     }
     setActiveItemId(flatVisibleItems[0]?.item.id ?? "");
   }, [activeItemId, flatVisibleItems]);
+
+  useEffect(() => {
+    if (!selectedMemoryKeys.length) {
+      return;
+    }
+    const validKeys = new Set(manageablePairs.map(({ section, item }) => pairSelectionKey(section.id, item.id)));
+    const nextKeys = selectedMemoryKeys.filter((key) => validKeys.has(key));
+    if (nextKeys.length !== selectedMemoryKeys.length) {
+      setSelectedMemoryKeys(nextKeys);
+    }
+  }, [manageablePairs, selectedMemoryKeys]);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
@@ -1165,7 +1318,62 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     }
     restoreMemoryMutation.mutate({ sectionId: activeSection.id, itemId: activeItem.id });
   };
-  const mutationBusy = memoryMutation.isPending || deleteMemoryMutation.isPending || restoreMemoryMutation.isPending;
+  const mutationBusy = memoryMutation.isPending || deleteMemoryMutation.isPending || restoreMemoryMutation.isPending || bulkActionPending !== null;
+  const toggleMemorySelection = (sectionId: string, itemId: string) => {
+    const key = pairSelectionKey(sectionId, itemId);
+    setSelectedMemoryKeys((current) => (current.includes(key) ? current.filter((value) => value !== key) : [...current, key]));
+  };
+  const toggleVisibleMemorySelection = () => {
+    setSelectedMemoryKeys((current) => {
+      if (allVisibleSelected) {
+        const visibleSet = new Set(visibleSelectableKeys);
+        return current.filter((key) => !visibleSet.has(key));
+      }
+      return Array.from(new Set([...current, ...visibleSelectableKeys]));
+    });
+  };
+  const runBulkMemoryAction = async (action: BulkMemoryAction) => {
+    if (bulkActionPending !== null) {
+      return;
+    }
+    const pairs = action === "restore" ? selectedRestorePairs : selectedDisablePairs;
+    if (!pairs.length) {
+      setMutationFeedback({ tone: "error", text: `${copy.mutationFailed}: ${copy.bulkActionSkipped}` });
+      return;
+    }
+    const skipped = selectedMemoryPairs.length - pairs.length;
+    setBulkActionPending(action);
+    try {
+      await Promise.all(
+        pairs.map(({ section, item }) =>
+          fetchJson<MemoryMutationResponse>(
+            memoryMutationEndpoint(section.id, item.id, action === "restore" ? "/restore" : ""),
+            { method: action === "restore" ? "POST" : "DELETE" },
+          ),
+        ),
+      );
+      setSelectedMemoryKeys((current) => {
+        const completed = new Set(pairs.map(({ section, item }) => pairSelectionKey(section.id, item.id)));
+        return current.filter((key) => !completed.has(key));
+      });
+      setMutationFeedback({
+        tone: "success",
+        text: skipped > 0 ? `${copy.mutationDone} · ${copy.bulkActionSkipped}: ${skipped}` : copy.mutationDone,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+    } catch (error) {
+      setMutationFeedback({
+        tone: "error",
+        text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    } finally {
+      setBulkActionPending(null);
+    }
+  };
+  const selectMemoryPair = (sectionId: string, itemId: string) => {
+    setActiveSectionId(sectionId);
+    setActiveItemId(itemId);
+  };
 
   const renderSubnav = () => (
     <nav className={styles.subnav} aria-label={copy.title}>
@@ -1184,7 +1392,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </nav>
   );
 
-  const renderMemoryList = (pairs: MemoryPair[], emptyText: string, compact = false) => {
+  const renderMemoryList = (pairs: MemoryPair[], emptyText: string, compact = false, selectable = false) => {
     if (overviewQuery.isPending && !hasOverviewSections) {
       return <div className={styles.emptyState}>{copy.loading}</div>;
     }
@@ -1201,18 +1409,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     return (
       <div className={compact ? styles.compactMemoryList : styles.itemList}>
         {pairs.map(({ section, item }) => {
+          const itemKey = pairSelectionKey(section.id, item.id);
           const active = item.id === activeItem?.id;
-          return (
-            <button
-              key={`${section.id}:${item.id}`}
-              type="button"
-              className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
-              onClick={() => {
-                setActiveSectionId(section.id);
-                setActiveItemId(item.id);
-              }}
-              aria-pressed={active}
-            >
+          const itemBody = (
+            <>
               <span className={styles.itemHeader}>
                 <strong>{item.title}</strong>
                 <span>{formatTimestamp(item.updatedAt, lang)}</span>
@@ -1237,7 +1437,121 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 {!item.exists ? <span className={styles.statusPill}>{copy.missing}</span> : null}
                 {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
               </span>
+            </>
+          );
+
+          if (selectable) {
+            return (
+              <article
+                key={itemKey}
+                className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+              >
+                <label className={styles.itemSelectionRow}>
+                  <input
+                    type="checkbox"
+                    checked={selectedMemoryKeySet.has(itemKey)}
+                    aria-label={`${copy.selectMemory}: ${item.title}`}
+                    onChange={() => toggleMemorySelection(section.id, item.id)}
+                  />
+                  <span>{copy.selectMemory}</span>
+                </label>
+                <button
+                  type="button"
+                  className={styles.itemContentButton}
+                  onClick={() => selectMemoryPair(section.id, item.id)}
+                  aria-pressed={active}
+                >
+                  {itemBody}
+                </button>
+              </article>
+            );
+          }
+
+          return (
+            <button
+              key={itemKey}
+              type="button"
+              className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+              onClick={() => selectMemoryPair(section.id, item.id)}
+              aria-pressed={active}
+            >
+              {itemBody}
             </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const openReviewTarget = (pair: MemoryPair) => {
+    setActiveSectionId(pair.section.id);
+    setActiveItemId(pair.item.id);
+    setActiveFilter("all");
+    setActiveChannel("");
+    setSearchText("");
+  };
+
+  const renderReviewQueue = () => {
+    if (overviewQuery.isPending && !hasOverviewSections) {
+      return <div className={styles.emptyState}>{copy.loading}</div>;
+    }
+    if (showBlockingOverviewError) {
+      return (
+        <div className={styles.emptyState}>
+          {copy.loadFailed}: {overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}
+        </div>
+      );
+    }
+    if (!priorityReviewPairs.length) {
+      return <div className={styles.emptyState}>{copy.noIssues}</div>;
+    }
+    return (
+      <div className={styles.reviewQueueList}>
+        {priorityReviewPairs.map((pair, index) => {
+          const { section, item } = pair;
+          const reasons = reviewReasonLabels(copy, item);
+          const target = memoryPairActionTarget(pair);
+          return (
+            <article key={`${section.id}:${item.id}`} className={styles.reviewQueueItem}>
+              <div className={styles.reviewRank}>{index + 1}</div>
+              <div className={styles.reviewQueueBody}>
+                <div className={styles.itemHeader}>
+                  <strong>{item.title}</strong>
+                  <span>{formatTimestamp(item.updatedAt, lang)}</span>
+                </div>
+                <span className={styles.itemOrigin}>
+                  {copy.sourceOrigin}: {sourceOriginLabel(section, item)}
+                </span>
+                <span className={styles.itemSummary}>{item.summary}</span>
+                <div className={styles.reviewReasonList} aria-label={copy.reviewReason}>
+                  {reasons.map((reason) => (
+                    <span key={`${item.id}:${reason}`} className={styles.reviewReasonPill}>
+                      {reason}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div className={styles.reviewQueueActions}>
+                <NavLink
+                  className={styles.detailActionButton}
+                  to={`/memory/sources?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
+                  onClick={() => openReviewTarget(pair)}
+                >
+                  <FileText size={14} />
+                  <span>{copy.auditMemory}</span>
+                </NavLink>
+                {target === "manage" ? (
+                  <NavLink
+                    className={styles.detailActionButton}
+                    to={`/memory/manage?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
+                    onClick={() => openReviewTarget(pair)}
+                  >
+                    <Pencil size={14} />
+                    <span>{copy.manageMemoryAction}</span>
+                  </NavLink>
+                ) : null}
+              </div>
+            </article>
           );
         })}
       </div>
@@ -1346,6 +1660,37 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <span>{copy.cancelEdit}</span>
           </button>
         </div>
+        <section className={styles.editPreviewPanel} aria-label={copy.editPreview}>
+          <div className={styles.panelHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.editPreview}</p>
+              <h3>{editDraft.title.trim() || copy.titleField}</h3>
+            </div>
+          </div>
+          {activeItem && editDraft.mode === "edit" ? (
+            <div className={styles.editPreviewGrid}>
+              {[
+                { label: copy.titleField, current: activeItem.title, draft: editDraft.title },
+                { label: copy.summaryField, current: activeItem.summary, draft: editDraft.summary },
+                { label: copy.contentField, current: activeItem.content, draft: editDraft.content },
+              ].map((field) => (
+                <section key={field.label}>
+                  <strong>{field.label}</strong>
+                  <div>
+                    <span>{copy.currentValue}</span>
+                    <p>{field.current || "-"}</p>
+                  </div>
+                  <div>
+                    <span>{copy.draftValue}</span>
+                    <p>{field.draft || "-"}</p>
+                  </div>
+                </section>
+              ))}
+            </div>
+          ) : (
+            <p>{editDraft.content.trim() || editDraft.summary.trim() || editDraft.title.trim() ? editDraft.summary || editDraft.content : copy.noDraftChanges}</p>
+          )}
+        </section>
         {mutationFeedback.tone !== "idle" ? (
           <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
             {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
@@ -1581,6 +1926,18 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
       {renderWarningStrip()}
 
+      <section className={styles.reviewQueuePanel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
+            <h2>{copy.reviewQueue}</h2>
+          </div>
+          <span className={styles.countPill}>{priorityReviewPairs.length}</span>
+        </div>
+        <p className={styles.panelLead}>{copy.reviewQueueHint}</p>
+        {renderReviewQueue()}
+      </section>
+
       <div className={styles.overviewGrid}>
         <section className={styles.overviewPanel}>
           <div className={styles.panelHeader}>
@@ -1769,7 +2126,38 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <Search size={15} />
             <input value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
           </label>
-          {renderMemoryList(flatVisibleItems, copy.noMatches)}
+          <section className={styles.bulkActionBar}>
+            <button type="button" className={styles.detailActionButton} onClick={toggleVisibleMemorySelection} disabled={mutationBusy}>
+              {allVisibleSelected ? <SquareCheckBig size={14} /> : <Square size={14} />}
+              <span>{allVisibleSelected ? copy.clearSelection : copy.selectAllVisible}</span>
+            </button>
+            <span className={styles.countPill}>
+              {copy.selectedCount}: {selectedMemoryPairs.length}
+            </span>
+            <button
+              type="button"
+              className={styles.detailActionButton}
+              onClick={() => {
+                void runBulkMemoryAction("disable");
+              }}
+              disabled={mutationBusy || selectedDisablePairs.length === 0}
+            >
+              <Trash2 size={14} />
+              <span>{bulkActionPending === "disable" ? copy.loading : copy.bulkDisable}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.detailActionButton}
+              onClick={() => {
+                void runBulkMemoryAction("restore");
+              }}
+              disabled={mutationBusy || selectedRestorePairs.length === 0}
+            >
+              <Undo2 size={14} />
+              <span>{bulkActionPending === "restore" ? copy.loading : copy.bulkRestore}</span>
+            </button>
+          </section>
+          {renderMemoryList(flatVisibleItems, copy.noMatches, false, true)}
         </main>
 
         {renderDetailPanel(false)}

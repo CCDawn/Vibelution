@@ -332,6 +332,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.reviewQueuePanel,
 .overviewPanel,
 .manageFormPanel,
 .manageListPanel {
@@ -350,6 +351,10 @@
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+.reviewQueuePanel {
+  margin: 12px 14px 0;
+}
+
 .panelLead,
 .manageFormPanel > p {
   margin: 0;
@@ -363,6 +368,68 @@
   align-content: start;
   gap: 8px;
   min-height: 0;
+}
+
+.reviewQueueList {
+  display: grid;
+  gap: 8px;
+}
+
+.reviewQueueItem {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.reviewRank {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  border-radius: 999px;
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.reviewQueueBody {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.reviewReasonList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.reviewReasonPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 26%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--state-warning) 9%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.reviewQueueActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .panelNotice {
@@ -560,6 +627,28 @@
   text-align: left;
 }
 
+.itemSelectionRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: max-content;
+  max-width: 100%;
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+}
+
+.itemSelectionRow input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent-warm);
+}
+
 .sourceButton:hover,
 .itemButton:hover {
   border-color: var(--border-strong);
@@ -647,6 +736,19 @@
   display: grid;
   gap: 7px;
   padding: 11px 12px;
+}
+
+.itemContentButton {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
 }
 
 .itemHeader {
@@ -831,6 +933,77 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.bulkActionBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.editPreviewPanel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+}
+
+.editPreviewPanel > p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.editPreviewGrid {
+  display: grid;
+  gap: 8px;
+}
+
+.editPreviewGrid section {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.editPreviewGrid section > strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.editPreviewGrid div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.editPreviewGrid span {
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+}
+
+.editPreviewGrid p {
+  max-height: 112px;
+  margin: 0;
+  overflow: auto;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .fieldStack {
@@ -1104,6 +1277,15 @@
     grid-template-columns: 1fr;
   }
 
+  .reviewQueueItem {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .reviewQueueActions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
   .workspace {
     grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
   }
@@ -1160,5 +1342,14 @@
 
   .detailActions {
     grid-template-columns: 1fr;
+  }
+
+  .reviewQueueItem {
+    grid-template-columns: 1fr;
+  }
+
+  .reviewRank,
+  .reviewQueueActions {
+    grid-column: auto;
   }
 }
