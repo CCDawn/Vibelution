@@ -170,6 +170,36 @@ def _workbench_orphaned_browser_failure_message(observation: dict[str, Any]) -> 
     )
 
 
+def _snapshot_should_persist_reconciliation(original_state: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    if not isinstance(original_state, dict):
+        return True
+    scalar_keys = ("runtimeState", "managerPid", "daemonRunning")
+    if any(original_state.get(key) != snapshot.get(key) for key in scalar_keys):
+        return True
+    original_workbench = original_state.get("workbench") if isinstance(original_state.get("workbench"), dict) else {}
+    snapshot_workbench = snapshot.get("workbench") if isinstance(snapshot.get("workbench"), dict) else {}
+    workbench_keys = (
+        "desiredState",
+        "observedState",
+        "phase",
+        "backendPid",
+        "browserLaunchPid",
+        "browserWindowPid",
+        "backendAlive",
+        "backendHealthy",
+        "backendObserved",
+        "backendPortListening",
+        "backendPortOwnerPid",
+        "browserWindowAlive",
+        "backendMissing",
+        "frontendOrphaned",
+        "lifecycleConsistency",
+        "statusLine",
+        "failureMessage",
+    )
+    return any(original_workbench.get(key) != snapshot_workbench.get(key) for key in workbench_keys)
+
+
 def _open_request_already_satisfied(observation: dict[str, Any], *, no_browser: bool) -> bool:
     if not _open_request_ready(observation, no_browser=no_browser):
         return False
@@ -531,7 +561,8 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
 
 
 def load_runtime_snapshot() -> dict[str, Any]:
-    state = load_state()
+    loaded_state = load_state()
+    state = json.loads(json.dumps(loaded_state)) if isinstance(loaded_state, dict) else loaded_state
     observation = observe_workbench()
     manager_running = is_daemon_running()
     manager_pid = load_pid() if manager_running else 0
@@ -566,6 +597,10 @@ def load_runtime_snapshot() -> dict[str, Any]:
         elif observed_state == "closed" and desired_state != "closed":
             desired_state = "closed"
             phase = "steady"
+    if observed_state == "closed" and not manager_running and not active_command:
+        phase = "steady"
+        workbench["failureMessage"] = ""
+        state["lastError"] = {"scope": "", "message": "", "at": ""}
 
     if observed_state == desired_state and phase != "failed":
         phase = "steady"
@@ -579,8 +614,12 @@ def load_runtime_snapshot() -> dict[str, Any]:
             "desiredState": desired_state,
             "observedState": observed_state,
             "backendPid": int(observation.get("backendPid") or 0),
-            "browserLaunchPid": int(observation.get("browserLaunchPid") or 0),
-            "browserWindowPid": int(observation.get("browserWindowPid") or 0),
+            "browserLaunchPid": int(observation.get("browserLaunchPid") or 0)
+            if bool(observation.get("browserWindowAlive"))
+            else 0,
+            "browserWindowPid": int(observation.get("browserWindowPid") or 0)
+            if bool(observation.get("browserWindowAlive"))
+            else 0,
             "backendAlive": bool(observation.get("backendAlive")),
             "backendHealthy": bool(observation.get("backendHealthy")),
             "backendObserved": bool(observation.get("backendObserved")),
@@ -621,6 +660,20 @@ def load_runtime_snapshot() -> dict[str, Any]:
         "currentSourceSignature": _process_source_signature(),
         "sourceMatches": _state_source_signature(state) == _process_source_signature(),
     }
+    if _snapshot_should_persist_reconciliation(loaded_state, state):
+        state = save_state(state)
+        _append_event(
+            "runtime.snapshot.reconciled",
+            {
+                "managerRunning": bool(manager_running),
+                "managerPid": int(manager_pid or 0),
+                "desiredState": str(workbench.get("desiredState") or "closed"),
+                "observedState": str(workbench.get("observedState") or "closed"),
+                "backendPid": int(workbench.get("backendPid") or 0),
+                "browserWindowPid": int(workbench.get("browserWindowPid") or 0),
+                "lifecycleConsistency": str(workbench.get("lifecycleConsistency") or "consistent"),
+            },
+        )
     return state
 
 

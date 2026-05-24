@@ -143,6 +143,8 @@ def test_backend_health_probe_treats_http_protocol_error_as_unhealthy(monkeypatc
 
 
 def test_load_runtime_snapshot_aligns_legacy_open_session(monkeypatch):
+    saved_states: list[dict] = []
+
     monkeypatch.setattr(
         daemon,
         "load_state",
@@ -171,6 +173,7 @@ def test_load_runtime_snapshot_aligns_legacy_open_session(monkeypatch):
     )
     monkeypatch.setattr(daemon, "is_daemon_running", lambda: False)
     monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(json.loads(json.dumps(state))) or state)
 
     snapshot = daemon.load_runtime_snapshot()
 
@@ -178,6 +181,74 @@ def test_load_runtime_snapshot_aligns_legacy_open_session(monkeypatch):
     assert snapshot["workbench"]["desiredState"] == "open"
     assert snapshot["workbench"]["observedState"] == "open"
     assert snapshot["workbench"]["phase"] == "steady"
+
+
+def test_load_runtime_snapshot_persists_stale_running_state_as_closed(monkeypatch):
+    saved_states: list[dict] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "load_state",
+        lambda: {
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "daemonRunning": True,
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3200,
+                "browserWindowPid": 4500,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPortListening": True,
+                "statusLine": "Workbench is open (backend PID=3200, window PID=4500)",
+            },
+            "command": {"activeCommandId": ""},
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "closed",
+            "backendPid": 0,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "browserManaged": True,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8000,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerTrusted": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": False,
+            "sessionId": "",
+            "url": "http://127.0.0.1:8000",
+            "lifecycleConsistency": "consistent",
+        },
+    )
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: False)
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "save_state", lambda state: saved_states.append(json.loads(json.dumps(state))) or state)
+
+    snapshot = daemon.load_runtime_snapshot()
+
+    assert snapshot["runtimeState"] == "idle"
+    assert snapshot["managerPid"] == 0
+    assert snapshot["daemonRunning"] is False
+    assert snapshot["workbench"]["desiredState"] == "closed"
+    assert snapshot["workbench"]["observedState"] == "closed"
+    assert snapshot["workbench"]["backendPid"] == 0
+    assert snapshot["workbench"]["browserWindowPid"] == 0
+    assert snapshot["workbench"]["statusLine"] == "Workbench is closed."
+    assert snapshot["lastError"] == {"scope": "", "message": "", "at": ""}
+    assert saved_states
+    assert saved_states[-1]["runtimeState"] == "idle"
+    assert saved_states[-1]["workbench"]["observedState"] == "closed"
 
 
 def test_load_runtime_snapshot_preserves_failed_close_state(monkeypatch):
