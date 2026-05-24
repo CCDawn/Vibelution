@@ -144,7 +144,7 @@ def _run_desktop_entry_with_fake_launcher(
     venv_scripts_dir = project_dir / ".venv" / "Scripts"
     venv_scripts_dir.mkdir(parents=True)
     (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
-    (venv_scripts_dir / "pythonw.exe").write_text("windowless python", encoding="utf-8")
+    (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
     shutil.copyfile(DESKTOP_ENTRY_SCRIPT, scripts_dir / "vibelution_desktop_entry.ps1")
     (scripts_dir / "vibelution_launcher.ps1").write_text(
         """
@@ -201,7 +201,7 @@ def _run_vbs_desktop_entry_with_fake_powershell_entry(
     venv_scripts_dir = project_dir / ".venv" / "Scripts"
     venv_scripts_dir.mkdir(parents=True)
     (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
-    (venv_scripts_dir / "pythonw.exe").write_text("windowless python", encoding="utf-8")
+    (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
     shutil.copyfile(DESKTOP_ENTRY_VBS, scripts_dir / "vibelution_desktop_entry.vbs")
     (scripts_dir / "vibelution_desktop_entry.ps1").write_text(
         """
@@ -629,6 +629,139 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_upgrades_headless_backend_before_cleanup(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$completeAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Complete-HeadlessSessionWithBrowser"
+}, $true)
+if ($null -eq $completeAst) {
+    throw "Complete-HeadlessSessionWithBrowser was not found."
+}
+$completeText = $completeAst.Extent.Text
+foreach ($required in @(
+    "runtime.scene.headless_upgrade.started",
+    "Start-ManagedBrowser",
+    "Start-Supervisor",
+    "Save-SessionState",
+    "runtime.scene.headless_upgrade.succeeded"
+)) {
+    if ($completeText -notmatch [regex]::Escape($required)) {
+        throw "Headless upgrade is missing '$required'."
+    }
+}
+
+$managedAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-ManagedSession"
+}, $true)
+if ($null -eq $managedAst) {
+    throw "Start-ManagedSession was not found."
+}
+$managedText = $managedAst.Extent.Text
+$upgradeIndex = $managedText.IndexOf("Complete-HeadlessSessionWithBrowser")
+$cleanupIndex = $managedText.IndexOf("Found an incomplete managed session")
+if ($upgradeIndex -lt 0) {
+    throw "Start-ManagedSession does not attempt a headless backend upgrade."
+}
+if ($cleanupIndex -lt 0) {
+    throw "Start-ManagedSession cleanup branch was not found."
+}
+    if ($upgradeIndex -gt $cleanupIndex) {
+        throw "Headless backend upgrade must run before stale cleanup."
+    }
+    foreach ($required in @(
+        "launcher.session.snapshot",
+        "backend_healthy",
+        "browser_window_count",
+        "state_present",
+        "restart_reason"
+    )) {
+        if ($managedText -notmatch [regex]::Escape($required)) {
+            throw "Start-ManagedSession snapshot log is missing '$required'."
+        }
+    }
+    Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_python_candidates_prefer_python_runtime(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Get-ProjectPythonCandidates"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Get-ProjectPythonCandidates was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$projectDir = Join-Path $env:TEMP ("vibelution-python-candidates-" + [guid]::NewGuid().ToString("N"))
+$scriptsDir = Join-Path $projectDir ".venv\\Scripts"
+New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
+$pythonPath = Join-Path $scriptsDir "python.exe"
+Set-Content -LiteralPath $pythonPath -Value "" -Encoding ascii
+Set-Variable -Name preferredPythonExe -Value $pythonPath -Scope Script
+Set-Variable -Name launcherPythonOverride -Value $pythonPath -Scope Script
+
+$candidates = @(Get-ProjectPythonCandidates)
+if ($candidates.Count -ne 1) {
+    throw "Expected one deduplicated Python candidate, got $($candidates.Count)."
+}
+if ($candidates[0].FilePath -ne (Resolve-Path -LiteralPath $pythonPath).Path) {
+    throw "Launcher did not prefer python.exe."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_runtime_scene_lifecycle_event_classifier_indexes_operational_phases(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -690,6 +823,85 @@ if (-not (Test-RuntimeSceneLifecycleEvent -Payload @{ component = "runtime"; pha
 if (Test-RuntimeSceneLifecycleEvent -Payload @{ component = "browser_page"; phase = "focus"; event_code = "browser.focus.changed" }) {
     throw "Lifecycle classifier indexes browser focus noise."
 }
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_focus_lifecycle_events_are_traceable(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+function Get-LauncherFunctionText {
+    param([string]$Name)
+
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $Name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$Name was not found."
+    }
+    return $functionAst.Extent.Text
+}
+
+$focusText = Get-LauncherFunctionText -Name "Focus-ManagedBrowserWindow"
+foreach ($required in @(
+    "launcher.browser.focus.succeeded",
+    "launcher.browser.focus.failed",
+    "window_not_found",
+    "browser_pids",
+    "show_window",
+    "set_foreground",
+    "app_activate"
+)) {
+    if ($focusText -notmatch [regex]::Escape($required)) {
+        throw "Focus-ManagedBrowserWindow is missing trace field '$required'."
+    }
+}
+
+$adoptText = Get-LauncherFunctionText -Name "Adopt-Or-FocusSession"
+foreach ($required in @(
+    "runtime.scene.focused",
+    "runtime.scene.focus.failed",
+    "Focus-ManagedBrowserWindow"
+)) {
+    if ($adoptText -notmatch [regex]::Escape($required)) {
+        throw "Adopt-Or-FocusSession is missing trace field '$required'."
+    }
+}
+
+$startText = Get-LauncherFunctionText -Name "Start-ManagedSession"
+foreach ($required in @(
+    "runtime.scene.ready",
+    "focus_requested",
+    "Focus-ManagedBrowserWindow"
+)) {
+    if ($startText -notmatch [regex]::Escape($required)) {
+        throw "Start-ManagedSession is missing trace field '$required'."
+    }
+}
+
 Write-Output "ok"
 """,
     )
@@ -1114,6 +1326,7 @@ foreach ($name in @(
     "Get-RuntimeSceneEventSeverity",
     "Get-RuntimeSceneChildFileCount",
     "ConvertTo-PlainHashtable",
+    "Write-RuntimeSceneJsonFile",
     "Save-RuntimeSceneManifest"
 )) {{
     $functionAst = $ast.Find({{
@@ -1128,6 +1341,8 @@ foreach ($name in @(
 }}
 
 $script:currentRuntimeSceneDir = {json.dumps(str(scene_dir))}
+$script:runtimeSceneWriteMaxAttempts = 2
+$script:runtimeSceneWriteRetryDelayMilliseconds = 1
 function Ensure-CurrentRuntimeSceneSubdirs {{
     New-Item -ItemType Directory -Path $script:currentRuntimeSceneDir -Force | Out-Null
 }}
@@ -1226,6 +1441,86 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_runtime_scene_json_write_is_nonfatal_when_manifest_locked(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Write-RuntimeSceneJsonFile"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Write-RuntimeSceneJsonFile was not found."
+}
+
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:runtimeSceneWriteMaxAttempts = 1
+$script:runtimeSceneWriteRetryDelayMilliseconds = 1
+$script:logEvents = @()
+function Write-LauncherControlLog {
+    param(
+        [string]$Event,
+        [string]$Message,
+        [string]$Level = "info",
+        [hashtable]$Fields = @{}
+    )
+    $script:logEvents += ,@{
+        event = $Event
+        message = $Message
+        level = $Level
+        fields = $Fields
+    }
+}
+
+$targetDir = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+$manifestPath = Join-Path $targetDir "manifest.json"
+[System.IO.File]::WriteAllText($manifestPath, "{}")
+$lock = [System.IO.File]::Open($manifestPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+try {
+    $ok = Write-RuntimeSceneJsonFile -Path $manifestPath -Value @{ status = "running" } -Depth 4
+} finally {
+    $lock.Dispose()
+}
+
+if ($ok) {
+    throw "Runtime scene JSON write unexpectedly succeeded while the target file was locked."
+}
+if ($script:logEvents.Count -ne 1) {
+    throw "Runtime scene JSON write failure was not logged exactly once."
+}
+if ($script:logEvents[0].event -ne "launcher.runtime_scene.write.failed") {
+    throw "Unexpected log event: $($script:logEvents[0].event)"
+}
+if ($script:logEvents[0].level -ne "warning") {
+    throw "Runtime scene JSON write failure should be a warning, not a fatal error."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_closure_record_normalizes_successful_manifest_runtime_manager(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -1288,6 +1583,7 @@ function Write-LauncherControlLog {
 
 $closingSnapshot = [pscustomobject]@{
     BackendStopped = $true
+    BackendHealthy = $false
     BrowserStopped = $true
     ManagerClosed = $false
     BackendPids = @()
@@ -1322,6 +1618,7 @@ $payload = @{
     failedHasSupervisor = $script:manifestUpdates[2].ContainsKey("supervisor")
     startupFailure = $startupFailureRuntimeManager
     startupFailureHasSupervisor = $script:manifestUpdates[3].ContainsKey("supervisor")
+    controlLogBackendHealthy = $script:controlFields[0].backend_healthy
     controlLogPhase = $script:controlFields[0].phase
     controlLogObservedState = $script:controlFields[0].observed_state
 } | ConvertTo-Json -Depth 8 -Compress
@@ -1349,6 +1646,7 @@ Write-Output $payload
     assert payload["startupFailure"]["observed_state"] == "open"
     assert payload["startupFailure"]["phase"] == "closing"
     assert payload["startupFailureHasSupervisor"] is False
+    assert payload["controlLogBackendHealthy"] is False
     assert payload["controlLogObservedState"] == "open"
     assert payload["controlLogPhase"] == "closing"
 
@@ -1418,6 +1716,391 @@ Write-Output "ok"
 
     assert result.returncode == 0, result.stderr or result.stdout
     assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_backend_candidates_include_tracked_launch_and_listener_pids(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Get-ManagedBackendCandidatePids"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Get-ManagedBackendCandidatePids was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:port = 8000
+$script:healthy = $true
+function Get-State {
+    return [pscustomobject]@{
+        backendPid = 6544
+        backendLaunchPid = 6544
+        port = 8000
+    }
+}
+function Test-ProcessAlive {
+    param([int]$ProcessId)
+    return $ProcessId -eq 6544
+}
+function Get-ListeningPid {
+    param([int]$Port)
+    if ($Port -eq 8000) {
+        return 14916
+    }
+    return $null
+}
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if ($Filter -match "ProcessId = 14916") {
+        return [pscustomobject]@{
+            ProcessId = 14916
+            CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser"
+        }
+    }
+    return @()
+}
+function Test-WebHealthy { return [bool]$script:healthy }
+
+$pids = @(Get-ManagedBackendCandidatePids)
+if (($pids -join ",") -ne "6544,14916") {
+    throw "Expected tracked launch and listener PIDs, got $($pids -join ',')."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_browser_candidates_include_tracked_launch_window_and_profile_pids(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Get-ManagedBrowserCandidatePids"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Get-ManagedBrowserCandidatePids was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:browserProfileDir = "C:\\Users\\17533\\Desktop\\Vibelution\\.runtime\\launcher\\edge-app-profile"
+function Ensure-Directories { }
+function Get-State {
+    return [pscustomobject]@{
+        browserWindowPid = 40736
+        browserLaunchPid = 40736
+    }
+}
+function Test-ProcessAlive {
+    param([int]$ProcessId)
+    return $ProcessId -in @(40736, 36192)
+}
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    return @(
+        [pscustomobject]@{
+            ProcessId = 40736
+            Name = "msedge.exe"
+            CommandLine = "`"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe`" --user-data-dir=C:\\Users\\17533\\Desktop\\Vibelution\\.runtime\\launcher\\edge-app-profile --app=http://127.0.0.1:8000"
+        },
+        [pscustomobject]@{
+            ProcessId = 36192
+            Name = "msedge.exe"
+            CommandLine = "`"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe`" --type=renderer --user-data-dir=C:\\Users\\17533\\Desktop\\Vibelution\\.runtime\\launcher\\edge-app-profile"
+        }
+    )
+}
+
+$pids = @(Get-ManagedBrowserCandidatePids)
+if (($pids -join ",") -ne "36192,40736") {
+    throw "Expected tracked browser and profile PIDs, got $($pids -join ',')."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_stop_backend_kills_remaining_managed_port_owner(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Stop-ManagedBackendProcesses")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:port = 8000
+$script:stopCalls = @()
+$script:listenerCalls = 0
+function Get-ManagedBackendCandidatePids { return @(6544) }
+function Stop-ProcessesById {
+    param([int[]]$ProcessIds)
+    $script:stopCalls += ,@($ProcessIds)
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+}
+function Get-State {
+    return [pscustomobject]@{
+        port = 8000
+    }
+}
+function Get-ListeningPid {
+    param([int]$Port)
+    $script:listenerCalls += 1
+    if ($script:listenerCalls -eq 1) {
+        return 14916
+    }
+    return $null
+}
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if ($Filter -match "ProcessId = 14916") {
+        return [pscustomobject]@{
+            ProcessId = 14916
+            CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser"
+        }
+    }
+    return @()
+}
+function Test-WebHealthy { return $true }
+
+Stop-ManagedBackendProcesses
+
+$payload = @{
+    calls = @($script:stopCalls | ForEach-Object { @($_) })
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["calls"] == [6544, 14916]
+
+
+def test_launcher_stop_browser_processes_retry_until_profile_processes_exit(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Stop-ManagedBrowserProcesses"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Stop-ManagedBrowserProcesses was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:browserPids = @(40736, 36192)
+$script:stopCalls = @()
+$script:closeCalls = 0
+$script:logEvents = @()
+
+$windowProcess = [pscustomobject]@{
+    Id = 40736
+    MainWindowHandle = 2821910
+}
+$windowProcess | Add-Member -MemberType ScriptMethod -Name CloseMainWindow -Value {
+    $script:closeCalls += 1
+    return $true
+}
+
+function Get-ManagedBrowserWindowProcesses {
+    return @($windowProcess)
+}
+function Get-ManagedBrowserPids {
+    return @($script:browserPids)
+}
+function Stop-ProcessesById {
+    param([int[]]$ProcessIds)
+    $script:stopCalls += ,(($ProcessIds -join ","))
+    if ($script:stopCalls.Count -eq 1) {
+        $script:browserPids = @($script:browserPids | Where-Object { $_ -ne 40736 })
+    } else {
+        $script:browserPids = @()
+    }
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:logEvents += $Event
+}
+function Start-Sleep { param([int]$Milliseconds, [int]$Seconds) }
+
+Stop-ManagedBrowserProcesses
+
+$payload = @{
+    closeCalls = $script:closeCalls
+    stopCalls = @($script:stopCalls)
+    logEvents = @($script:logEvents)
+    remaining = @($script:browserPids)
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["closeCalls"] == 1
+    assert payload["stopCalls"] == ["40736,36192", "36192"]
+    assert "launcher.browser.stop.retry" in payload["logEvents"]
+    assert "launcher.browser.stop.incomplete" not in payload["logEvents"]
+    assert payload["remaining"] == []
+
+
+def test_launcher_stop_backend_logs_traceable_candidates_and_port_owner(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Stop-ManagedBackendProcesses"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Stop-ManagedBackendProcesses was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:port = 8000
+$script:controlEvents = @()
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlEvents += ,@{ event = $Event; level = $Level; fields = $Fields }
+}
+function Get-ManagedBackendCandidatePids { return @(6544) }
+function Stop-ProcessesById { param([int[]]$ProcessIds) }
+function Get-State { return [pscustomobject]@{ port = 8000 } }
+function Get-ListeningPid { param([int]$Port) return 14916 }
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    return [pscustomobject]@{
+        ProcessId = 14916
+        CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser"
+    }
+}
+function Test-WebHealthy { return $true }
+
+$trace = Stop-ManagedBackendProcesses
+$payload = @{
+    trace = $trace
+    events = @($script:controlEvents)
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["trace"]["CandidatePids"] == [6544]
+    assert payload["trace"]["RemainingPortPid"] == 14916
+    assert payload["trace"]["RemainingLooksManaged"] is True
+    assert payload["trace"]["RemainingHealthy"] is True
+    assert [item["event"] for item in payload["events"]] == [
+        "launcher.backend.stop.requested",
+        "launcher.backend.stop.port_owner_detected",
+    ]
+    assert payload["events"][1]["level"] == "warning"
 
 
 def test_launcher_wait_for_backend_healthy_does_not_abort_on_wrapper_pid_exit(tmp_path):
@@ -1678,9 +2361,55 @@ def test_desktop_entry_maps_open_to_start_without_monitor(tmp_path):
             "action": "start",
             "argv": [],
             "noBrowser": False,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
+
+
+def test_desktop_entry_failure_is_logged_without_blocking_popup(tmp_path):
+    project_dir = tmp_path / "project"
+    scripts_dir = project_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    venv_scripts_dir = project_dir / ".venv" / "Scripts"
+    venv_scripts_dir.mkdir(parents=True)
+    (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
+    (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
+    shutil.copyfile(DESKTOP_ENTRY_SCRIPT, scripts_dir / "vibelution_desktop_entry.ps1")
+    (scripts_dir / "vibelution_launcher.ps1").write_text(
+        """
+param(
+    [string]$Action = "",
+    [switch]$NoBrowser
+)
+
+$ErrorActionPreference = "Stop"
+throw "synthetic launcher failure"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    command = [
+        _powershell_exe(),
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(scripts_dir / "vibelution_desktop_entry.ps1"),
+        "-Action",
+        "open",
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, check=False, timeout=30)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == ""
+    log_path = project_dir / ".runtime" / "launcher" / "desktop-entry.log"
+    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    assert [event["event"] for event in events[-2:]] == [
+        "desktop_entry.failed",
+        "desktop_entry.failure.notice_suppressed",
+    ]
+    assert "synthetic launcher failure" in events[-1]["fields"]["error"]
 
 
 def test_desktop_entry_maps_close_to_stop_without_monitor(tmp_path):
@@ -1691,7 +2420,7 @@ def test_desktop_entry_maps_close_to_stop_without_monitor(tmp_path):
             "action": "stop",
             "argv": [],
             "noBrowser": False,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
 
@@ -1704,7 +2433,7 @@ def test_desktop_entry_runs_restart_without_monitor(tmp_path):
             "action": "restart",
             "argv": [],
             "noBrowser": False,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
 
@@ -1717,7 +2446,7 @@ def test_desktop_entry_status_does_not_attach_monitor(tmp_path):
             "action": "status",
             "argv": [],
             "noBrowser": False,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
 
@@ -1730,7 +2459,7 @@ def test_desktop_entry_forwards_no_browser_and_skips_monitor(tmp_path):
             "action": "start",
             "argv": [],
             "noBrowser": True,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
 
@@ -1743,7 +2472,7 @@ def test_vbs_desktop_entry_accepts_named_action_arguments(tmp_path):
             "action": "close",
             "argv": [],
             "noBrowser": False,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
 
@@ -1756,7 +2485,7 @@ def test_vbs_desktop_entry_accepts_powershell_style_no_browser_switch(tmp_path):
             "action": "open",
             "argv": [],
             "noBrowser": True,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
 
@@ -1769,7 +2498,7 @@ def test_vbs_desktop_entry_accepts_colon_action_argument(tmp_path):
             "action": "status",
             "argv": [],
             "noBrowser": False,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
 
@@ -1782,6 +2511,6 @@ def test_vbs_desktop_entry_accepts_equals_action_argument(tmp_path):
             "action": "restart",
             "argv": [],
             "noBrowser": True,
-            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "pythonw.exe"),
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]

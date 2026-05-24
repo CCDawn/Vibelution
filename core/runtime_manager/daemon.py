@@ -49,6 +49,10 @@ _SOURCE_SIGNATURE_PATHS = (
     Path("core/web/services/supervised_control_service.py"),
 )
 _ACTIVE_COMMAND_RESTART_GRACE_SECONDS = 300.0
+_OPEN_VERIFICATION_TIMEOUT_SECONDS = 60.0
+_OPEN_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
+_CLOSE_VERIFICATION_TIMEOUT_SECONDS = 8.0
+_CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS = 0.4
 
 
 def _command_affects_workbench_lifecycle(command_type: str) -> bool:
@@ -130,15 +134,147 @@ def _workbench_failure_should_stick(state: dict[str, Any], *, desired_state: str
 
 
 def _open_request_already_satisfied(observation: dict[str, Any], *, no_browser: bool) -> bool:
+    if not _open_request_ready(observation, no_browser=no_browser):
+        return False
+    return bool(observation.get("launcherStatePresent"))
+
+
+def _open_request_ready(observation: dict[str, Any], *, no_browser: bool) -> bool:
     if str(observation.get("observedState") or "closed") != "open":
+        return False
+    backend_ready = (
+        bool(observation.get("backendHealthy"))
+        and bool(observation.get("backendObserved"))
+        and not bool(observation.get("backendPortConflict"))
+    )
+    if not backend_ready:
         return False
     if no_browser:
         return True
-    if not bool(observation.get("launcherStatePresent")):
-        return False
     if not bool(observation.get("browserManaged")):
         return False
     return bool(observation.get("browserWindowAlive"))
+
+
+def _open_verification_failure_message(observation: dict[str, Any], *, no_browser: bool) -> str:
+    backend_ready = (
+        bool(observation.get("backendHealthy"))
+        and bool(observation.get("backendObserved"))
+        and not bool(observation.get("backendPortConflict"))
+    )
+    browser_ready = bool(no_browser) or (
+        bool(observation.get("browserManaged")) and bool(observation.get("browserWindowAlive"))
+    )
+    parts = [
+        "Workbench launcher exited successfully, but the workbench is not ready.",
+        f"observedState={str(observation.get('observedState') or 'closed')}",
+        f"backendHealthy={bool(observation.get('backendHealthy'))}",
+        f"backendObserved={bool(observation.get('backendObserved'))}",
+        f"backendPortListening={bool(observation.get('backendPortListening'))}",
+        f"backendPortOwnerPid={int(observation.get('backendPortOwnerPid') or 0)}",
+        f"backendPortConflict={bool(observation.get('backendPortConflict'))}",
+        f"browserManaged={bool(observation.get('browserManaged', True))}",
+        f"browserWindowAlive={bool(observation.get('browserWindowAlive'))}",
+        f"noBrowser={bool(no_browser)}",
+        f"backendReady={backend_ready}",
+        f"browserReady={browser_ready}",
+    ]
+    return " ".join(parts)
+
+
+def _open_verification_event_payload(
+    observation: dict[str, Any],
+    *,
+    no_browser: bool,
+    message: str = "",
+    command_id: str = "",
+    launcher_result: Any = None,
+) -> dict[str, Any]:
+    payload = {
+        "message": message,
+        "commandId": str(command_id or ""),
+        "noBrowser": bool(no_browser),
+        "observedState": str(observation.get("observedState") or "closed"),
+        "launcherStatePresent": bool(observation.get("launcherStatePresent")),
+        "backendPid": int(observation.get("backendPid") or 0),
+        "backendHealthy": bool(observation.get("backendHealthy")),
+        "backendObserved": bool(observation.get("backendObserved")),
+        "backendPort": int(observation.get("backendPort") or 0),
+        "backendPortListening": bool(observation.get("backendPortListening")),
+        "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+        "backendPortOwnerTrusted": bool(observation.get("backendPortOwnerTrusted")),
+        "backendPortConflict": bool(observation.get("backendPortConflict")),
+        "browserManaged": bool(observation.get("browserManaged", True)),
+        "browserWindowPid": int(observation.get("browserWindowPid") or 0),
+        "browserWindowAlive": bool(observation.get("browserWindowAlive")),
+        "url": str(observation.get("url") or ""),
+        "healthUrl": str(observation.get("healthUrl") or ""),
+    }
+    if not message:
+        payload.pop("message", None)
+    if not command_id:
+        payload.pop("commandId", None)
+    if launcher_result is not None:
+        payload["launcher"] = {
+            "returnCode": int(getattr(launcher_result, "returncode", 0) or 0),
+            "stdout": str(getattr(launcher_result, "stdout", "") or "").strip()[-1200:],
+            "stderr": str(getattr(launcher_result, "stderr", "") or "").strip()[-1200:],
+        }
+    return payload
+
+
+def _open_verification_should_retry_stale_session(observation: dict[str, Any], *, no_browser: bool) -> bool:
+    if _open_request_ready(observation, no_browser=no_browser):
+        return False
+    if not bool(observation.get("launcherStatePresent")):
+        return False
+    if str(observation.get("observedState") or "closed") != "open":
+        return False
+    if bool(observation.get("backendPortConflict")):
+        return False
+
+    backend_ready = (
+        bool(observation.get("backendHealthy"))
+        and bool(observation.get("backendObserved"))
+        and not bool(observation.get("backendPortConflict"))
+    )
+    browser_ready = bool(no_browser) or (
+        bool(observation.get("browserManaged")) and bool(observation.get("browserWindowAlive"))
+    )
+    return not backend_ready or not browser_ready
+
+
+def _wait_for_open_verification(*, no_browser: bool) -> tuple[bool, dict[str, Any], int]:
+    deadline = time.monotonic() + _OPEN_VERIFICATION_TIMEOUT_SECONDS
+    attempts = 0
+    latest: dict[str, Any] = {}
+    while True:
+        attempts += 1
+        latest = observe_workbench()
+        if _open_request_ready(latest, no_browser=no_browser):
+            return True, latest, attempts
+        if time.monotonic() >= deadline:
+            return False, latest, attempts
+        time.sleep(_OPEN_VERIFICATION_POLL_INTERVAL_SECONDS)
+
+
+def _open_already_satisfied_event_payload(
+    observation: dict[str, Any], *, command_id: str, no_browser: bool
+) -> dict[str, Any]:
+    return {
+        "commandId": str(command_id or ""),
+        "noBrowser": bool(no_browser),
+        "focusRequested": not bool(no_browser),
+        "observedState": str(observation.get("observedState") or "closed"),
+        "backendPid": int(observation.get("backendPid") or 0),
+        "backendHealthy": bool(observation.get("backendHealthy")),
+        "backendObserved": bool(observation.get("backendObserved")),
+        "browserManaged": bool(observation.get("browserManaged", True)),
+        "browserWindowPid": int(observation.get("browserWindowPid") or 0),
+        "browserWindowAlive": bool(observation.get("browserWindowAlive")),
+        "sessionId": str(observation.get("sessionId") or ""),
+        "url": str(observation.get("url") or ""),
+    }
 
 
 def _close_request_already_satisfied(observation: dict[str, Any]) -> bool:
@@ -153,6 +289,79 @@ def _close_request_already_satisfied(observation: dict[str, Any]) -> bool:
     )
     live_browser_evidence = bool(observation.get("browserWindowAlive"))
     return not live_backend_evidence and not live_browser_evidence
+
+
+def _close_verification_failure_message(observation: dict[str, Any]) -> str:
+    parts = [
+        "Workbench launcher exited successfully, but the workbench is not fully stopped.",
+        f"observedState={str(observation.get('observedState') or 'closed')}",
+        f"backendAlive={bool(observation.get('backendAlive'))}",
+        f"backendHealthy={bool(observation.get('backendHealthy'))}",
+        f"backendObserved={bool(observation.get('backendObserved'))}",
+        f"backendPortListening={bool(observation.get('backendPortListening'))}",
+        f"backendPortOwnerPid={int(observation.get('backendPortOwnerPid') or 0)}",
+        f"browserWindowAlive={bool(observation.get('browserWindowAlive'))}",
+        f"browserWindowPid={int(observation.get('browserWindowPid') or 0)}",
+    ]
+    return " ".join(parts)
+
+
+def _close_verification_event_payload(
+    observation: dict[str, Any],
+    *,
+    command_id: str = "",
+    message: str = "",
+    cleanup_result: dict[str, Any] | None = None,
+    launcher_result: Any = None,
+) -> dict[str, Any]:
+    payload = {
+        "message": message,
+        "commandId": str(command_id or ""),
+        "observedState": str(observation.get("observedState") or "closed"),
+        "launcherStatePresent": bool(observation.get("launcherStatePresent")),
+        "backendPid": int(observation.get("backendPid") or 0),
+        "backendLaunchPid": int(observation.get("backendLaunchPid") or 0),
+        "backendAlive": bool(observation.get("backendAlive")),
+        "backendHealthy": bool(observation.get("backendHealthy")),
+        "backendObserved": bool(observation.get("backendObserved")),
+        "backendPort": int(observation.get("backendPort") or 0),
+        "backendPortListening": bool(observation.get("backendPortListening")),
+        "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+        "backendPortOwnerTrusted": bool(observation.get("backendPortOwnerTrusted")),
+        "backendPortConflict": bool(observation.get("backendPortConflict")),
+        "browserManaged": bool(observation.get("browserManaged", True)),
+        "browserLaunchPid": int(observation.get("browserLaunchPid") or 0),
+        "browserWindowPid": int(observation.get("browserWindowPid") or 0),
+        "browserWindowAlive": bool(observation.get("browserWindowAlive")),
+        "url": str(observation.get("url") or ""),
+        "healthUrl": str(observation.get("healthUrl") or ""),
+        "residualCleanup": cleanup_result if isinstance(cleanup_result, dict) else {},
+    }
+    if launcher_result is not None:
+        payload["launcher"] = {
+            "returnCode": int(getattr(launcher_result, "returncode", 0) or 0),
+            "stdout": str(getattr(launcher_result, "stdout", "") or "").strip()[-800:],
+            "stderr": str(getattr(launcher_result, "stderr", "") or "").strip()[-800:],
+        }
+    if not message:
+        payload.pop("message", None)
+    if not command_id:
+        payload.pop("commandId", None)
+    return payload
+
+
+def _wait_for_close_verification() -> tuple[bool, dict[str, Any], int]:
+    deadline = time.monotonic() + _CLOSE_VERIFICATION_TIMEOUT_SECONDS
+    attempts = 0
+    latest: dict[str, Any] = {}
+    while True:
+        attempts += 1
+        latest = observe_workbench()
+        if _close_request_already_satisfied(latest):
+            return True, latest, attempts
+        if time.monotonic() >= deadline:
+            return False, latest, attempts
+        time.sleep(_CLOSE_VERIFICATION_POLL_INTERVAL_SECONDS)
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -218,16 +427,23 @@ def _creation_flags() -> int:
     return flags
 
 
-def _prefer_windowless_python(python_executable: str) -> str:
-    """Prefer pythonw.exe for background Windows daemons when it is available."""
+def _prefer_python_executable(python_executable: str) -> str:
+    """Prefer python.exe for background Windows daemons when it is available."""
 
-    candidate = Path(str(python_executable or "")).resolve()
-    if os.name != "nt" or candidate.name.lower() != "python.exe":
-        return str(candidate)
-    sibling = candidate.with_name("pythonw.exe")
+    raw = str(python_executable or "").strip()
+    if not raw:
+        return raw
+    candidate = Path(raw)
+    if os.name != "nt":
+        return raw
+    if candidate.name.lower() == "python.exe":
+        return str(candidate.resolve()) if candidate.exists() else raw
+    sibling = candidate.with_name("python.exe")
     if sibling.exists():
-        return str(sibling)
-    return str(candidate)
+        return str(sibling.resolve())
+    if candidate.exists():
+        return str(candidate.resolve())
+    return raw
 
 
 def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
@@ -244,11 +460,11 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
         _terminate_daemon_process(current_pid)
 
     ensure_runtime_manager_dirs()
-    python_cmd = _prefer_windowless_python(python_executable or sys.executable)
+    python_cmd = _prefer_python_executable(python_executable or sys.executable)
     with DAEMON_STDOUT_PATH.open("a", encoding="utf-8") as stdout_handle, DAEMON_STDERR_PATH.open(
         "a", encoding="utf-8"
     ) as stderr_handle:
-        subprocess.Popen(
+        process = subprocess.Popen(
             [python_cmd, "-m", "core.runtime_manager.cli", "daemon"],
             cwd=str(PROJECT_ROOT),
             stdin=subprocess.DEVNULL,
@@ -257,6 +473,13 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
             creationflags=_creation_flags(),
             close_fds=True,
         )
+    _append_event(
+        "daemon.start_requested",
+        {
+            "launchPid": int(getattr(process, "pid", 0) or 0),
+            "pythonExecutable": python_cmd,
+        },
+    )
 
     deadline = time.monotonic() + 5.0
     while time.monotonic() < deadline:
@@ -333,7 +556,8 @@ def load_runtime_snapshot() -> dict[str, Any]:
             ),
         }
     )
-    state["runtimeState"] = "running" if manager_running else "idle"
+    previous_runtime_state = str(state.get("runtimeState") or "").strip().lower()
+    state["runtimeState"] = "stopping" if manager_running and previous_runtime_state == "stopping" else "running" if manager_running else "idle"
     state["managerPid"] = manager_pid
     state["daemonRunning"] = manager_running
     state["projectRoot"] = str(PROJECT_ROOT)
@@ -349,8 +573,15 @@ def load_runtime_snapshot() -> dict[str, Any]:
     return state
 
 
-def _snapshot_residual_excluded_pids(observation: dict[str, Any], manager_pid: int = 0) -> set[int]:
+def _snapshot_residual_excluded_pids(
+    observation: dict[str, Any],
+    manager_pid: int = 0,
+    *,
+    include_workbench: bool = True,
+) -> set[int]:
     excluded = {os.getpid(), int(manager_pid or 0)}
+    if not include_workbench:
+        return {pid for pid in excluded if pid > 0}
     for key in ("backendPid", "backendLaunchPid", "backendPortOwnerPid", "browserLaunchPid", "browserWindowPid"):
         try:
             value = int(observation.get(key) or 0)
@@ -503,6 +734,7 @@ class RuntimeManagerDaemon:
             state = default_state()
         state["runtimeState"] = "running"
         state["managerPid"] = self._pid
+        state["daemonRunning"] = True
         state["runtimeManager"] = {"sourceSignature": _process_source_signature()}
         state["startedAt"] = now_iso()
         state = self._reconcile_observation(state)
@@ -524,6 +756,7 @@ class RuntimeManagerDaemon:
                         if isinstance(state, dict):
                             state["runtimeState"] = "stopping"
                             state["managerPid"] = self._pid
+                            state["daemonRunning"] = True
                             save_state(state)
                         _append_event("daemon.stopped", {"commandId": str(result.get("commandId") or "")})
                     complete_command(path, result)
@@ -612,6 +845,7 @@ class RuntimeManagerDaemon:
         if ok and isinstance(result_data, dict) and bool(result_data.get("stopDaemon")):
             state["runtimeState"] = "stopping"
             state["managerPid"] = self._pid
+            state["daemonRunning"] = True
         if ok:
             state["lastError"] = {"scope": "", "message": "", "at": ""}
         else:
@@ -703,8 +937,10 @@ class RuntimeManagerDaemon:
                 ),
             }
         )
-        state["runtimeState"] = "running"
+        previous_runtime_state = str(state.get("runtimeState") or "").strip().lower()
+        state["runtimeState"] = "stopping" if previous_runtime_state == "stopping" else "running"
         state["managerPid"] = self._pid
+        state["daemonRunning"] = True
         state["runtimeManager"] = {"sourceSignature": _process_source_signature()}
         state["evolution"] = build_evolution_summary()
         state["residualProcesses"] = residual_processes
@@ -720,6 +956,36 @@ class RuntimeManagerDaemon:
             workbench["phase"] = "steady"
             workbench["failureMessage"] = ""
             save_state(self._reconcile_observation(state))
+            _append_event(
+                "workbench.open.already_satisfied",
+                _open_already_satisfied_event_payload(observation, command_id=command_id, no_browser=no_browser),
+            )
+            if not no_browser:
+                result = open_workbench(no_browser=False)
+                if result.returncode != 0:
+                    _append_event(
+                        "workbench.open.focus_failed",
+                        {
+                            "commandId": command_id,
+                            "returnCode": int(result.returncode),
+                            "detail": _launcher_error_detail(result, "Focusing the workbench failed."),
+                        },
+                    )
+                    raise RuntimeError(_launcher_error_detail(result, "Focusing the workbench failed."))
+                _append_event(
+                    "workbench.open.focus_requested",
+                    {
+                        "commandId": command_id,
+                        "returnCode": int(result.returncode),
+                        "stdout": str(getattr(result, "stdout", "") or "").strip()[-400:],
+                        "stderr": str(getattr(result, "stderr", "") or "").strip()[-400:],
+                    },
+                )
+            else:
+                _append_event(
+                    "workbench.open.focus_skipped",
+                    {"commandId": command_id, "reason": "no_browser"},
+                )
             return self._finish_command(command_id, ok=True, message="Workbench is already open.")
 
         workbench.update(
@@ -736,6 +1002,60 @@ class RuntimeManagerDaemon:
         result = open_workbench(no_browser=no_browser)
         if result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(result, "Opening the workbench failed."))
+        ready, verification, verification_attempts = _wait_for_open_verification(no_browser=no_browser)
+        if not ready:
+            if _open_verification_should_retry_stale_session(verification, no_browser=no_browser):
+                _append_event(
+                    "workbench.open.stale_session_retry",
+                    _open_verification_event_payload(
+                        verification,
+                        no_browser=no_browser,
+                        message="Open verification found an incomplete stale session; retrying launcher cleanup once.",
+                        command_id=command_id,
+                        launcher_result=result,
+                    )
+                    | {"attempts": verification_attempts},
+                )
+                retry_result = open_workbench(no_browser=no_browser)
+                if retry_result.returncode != 0:
+                    raise RuntimeError(_launcher_error_detail(retry_result, "Opening the workbench failed."))
+                ready, verification, retry_attempts = _wait_for_open_verification(no_browser=no_browser)
+                verification_attempts += retry_attempts
+                result = retry_result
+                if ready:
+                    _append_event(
+                        "workbench.open.verification_succeeded",
+                        _open_verification_event_payload(
+                            verification,
+                            no_browser=no_browser,
+                            command_id=command_id,
+                            launcher_result=retry_result,
+                        )
+                        | {"attempts": verification_attempts, "retry": "stale_session_cleanup"},
+                    )
+                    return self._finish_command(command_id, ok=True, message="Workbench opened.")
+            message = _open_verification_failure_message(verification, no_browser=no_browser)
+            _append_event(
+                "workbench.open.verification_failed",
+                _open_verification_event_payload(
+                    verification,
+                    no_browser=no_browser,
+                    message=message,
+                    command_id=command_id,
+                    launcher_result=result,
+                )
+                | {"attempts": verification_attempts},
+            )
+            raise RuntimeError(message)
+        _append_event(
+            "workbench.open.verification_succeeded",
+            _open_verification_event_payload(
+                verification,
+                no_browser=no_browser,
+                command_id=command_id,
+            )
+            | {"attempts": verification_attempts},
+        )
         return self._finish_command(command_id, ok=True, message="Workbench opened.")
 
     def _handle_close_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -778,6 +1098,31 @@ class RuntimeManagerDaemon:
         if result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(result, "Closing the workbench failed."))
         cleanup_result = self._cleanup_residual_workbench_processes()
+        closed, verification, verification_attempts = _wait_for_close_verification()
+        if not closed:
+            message = _close_verification_failure_message(verification)
+            _append_event(
+                "workbench.close.verification_failed",
+                _close_verification_event_payload(
+                    verification,
+                    command_id=command_id,
+                    message=message,
+                    cleanup_result=cleanup_result,
+                    launcher_result=result,
+                )
+                | {"attempts": verification_attempts},
+            )
+            raise RuntimeError(message)
+        _append_event(
+            "workbench.close.verification_succeeded",
+            _close_verification_event_payload(
+                verification,
+                command_id=command_id,
+                cleanup_result=cleanup_result,
+                launcher_result=result,
+            )
+            | {"attempts": verification_attempts},
+        )
         final_result = self._finish_command(
             command_id,
             ok=True,
@@ -795,7 +1140,7 @@ class RuntimeManagerDaemon:
     def _cleanup_residual_workbench_processes(self) -> dict[str, Any]:
         return terminate_unmanaged_workbench_processes(
             project_root=PROJECT_ROOT,
-            exclude_pids=_snapshot_residual_excluded_pids(observe_workbench(), self._pid),
+            exclude_pids=_snapshot_residual_excluded_pids(observe_workbench(), self._pid, include_workbench=False),
         )
 
     def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
