@@ -58,6 +58,66 @@
   box-shadow: 0 18px 40px var(--shell-shadow);
 }
 
+.startupOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-canvas) 90%, transparent), var(--shell-page-end)),
+    var(--bg-canvas);
+}
+
+.startupPanel {
+  width: min(460px, 100%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
+    var(--shell-panel);
+  box-shadow: 0 18px 40px var(--shell-shadow);
+}
+
+.startupSpinner {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--shell-card);
+  color: var(--accent-warm-2);
+}
+
+.startupCopy {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.startupKicker {
+  color: var(--accent-warm-2);
+  font-size: 0.76rem;
+}
+
+.startupCopy strong {
+  color: var(--fg-primary);
+  font-size: 1rem;
+}
+
+.startupCopy p {
+  margin: 0;
+  color: var(--fg-secondary);
+  line-height: 1.5;
+}
+
 .shutdownCopy {
   display: grid;
   gap: 6px;

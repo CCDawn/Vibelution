@@ -269,23 +269,58 @@ export type RuntimeScenePackageSummary = {
   warningCount: number;
 };
 
+export type RuntimeSceneIssueSignal = {
+  severity: "error" | "warning" | "info" | string;
+  timestamp: string;
+  component: string;
+  phase: string;
+  eventCode: string;
+  message: string;
+  rawRefs: Array<{
+    path: string;
+    tail_lines?: number;
+  }>;
+};
+
+export type RuntimeSceneIssueCluster = {
+  schemaVersion: number;
+  severity: "error" | "warning" | "info" | string;
+  component: string;
+  phase: string;
+  eventCode: string;
+  label: string;
+  repeatCount: number;
+  firstTimestamp: string;
+  lastTimestamp: string;
+  representativeSignal?: RuntimeSceneIssueSignal & Record<string, unknown>;
+  rawRefs: Array<{
+    path: string;
+    tail_lines?: number;
+  }>;
+  identity?: Record<string, string>;
+};
+
 export type RuntimeScenePackageDiagnosis = {
   schemaVersion: number;
   severity: "error" | "warning" | "info" | string;
   userSummary: string;
   agentNextStep: string;
-  firstSignal: {
+  issueState?: {
+    schemaVersion: number;
     severity: "error" | "warning" | "info" | string;
-    timestamp: string;
-    component: string;
-    phase: string;
-    eventCode: string;
-    message: string;
-    rawRefs: Array<{
-      path: string;
-      tail_lines?: number;
-    }>;
-  } | null;
+    activeErrorCount: number;
+    activeWarningCount: number;
+    historicalErrorCount: number;
+    historicalWarningCount: number;
+    activeClusterCount?: number;
+    historicalClusterCount?: number;
+    controlSignalCount: number;
+    activeClusters?: RuntimeSceneIssueCluster[];
+    historicalClusters?: RuntimeSceneIssueCluster[];
+    firstActiveCluster?: RuntimeSceneIssueCluster | null;
+    firstHistoricalCluster?: RuntimeSceneIssueCluster | null;
+  };
+  firstSignal: RuntimeSceneIssueSignal | null;
   startupTrace?: {
     schemaVersion: number;
     summary: string;

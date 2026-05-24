@@ -11,6 +11,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import http.client
 from typing import Any
 
 from config.workbench import configured_backend_port
@@ -78,7 +79,7 @@ def _is_backend_healthy(url: str) -> bool:
     try:
         with urllib.request.urlopen(_health_url_for(url), timeout=2.0) as response:
             return int(getattr(response, "status", 0) or 0) == 200
-    except (urllib.error.URLError, TimeoutError, ValueError):
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError, http.client.HTTPException):
         return False
 
 

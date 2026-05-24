@@ -63,12 +63,7 @@ function Write-DesktopEntryLog {
 
 function Sync-DesktopEntryLogsIntoRuntimeScene {
     try {
-        $statePath = Join-Path $launcherDir "state.json"
-        if (-not (Test-Path -LiteralPath $statePath)) {
-            return
-        }
-        $state = Get-Content -LiteralPath $statePath -Raw -Encoding utf8 | ConvertFrom-Json
-        $sceneDir = [string]$state.runtimeSceneDir
+        $sceneDir = Get-DesktopEntryRuntimeSceneDir
         if (-not $sceneDir -or -not (Test-Path -LiteralPath $sceneDir)) {
             return
         }
@@ -93,6 +88,26 @@ function Sync-DesktopEntryLogsIntoRuntimeScene {
         }
     } catch {
     }
+}
+
+function Get-DesktopEntryRuntimeSceneDir {
+    foreach ($path in @(
+        (Join-Path $launcherDir "state.json"),
+        (Join-Path $launcherDir "active-runtime-scene.json")
+    )) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+        try {
+            $payload = Get-Content -LiteralPath $path -Raw -Encoding utf8 | ConvertFrom-Json
+            $sceneDir = [string]$payload.runtimeSceneDir
+            if ($sceneDir) {
+                return $sceneDir
+            }
+        } catch {
+        }
+    }
+    return ""
 }
 
 function Get-JsonPayloadField {
@@ -331,6 +346,11 @@ function Test-DesktopEntryFeedbackSuppressed {
     return @("1", "true", "yes", "on") -contains $value.Trim().ToLowerInvariant()
 }
 
+function Test-DesktopEntryFeedbackEnabled {
+    $value = [string]$env:VIBELUTION_DESKTOP_ENTRY_SHOW_FEEDBACK
+    return @("1", "true", "yes", "on") -contains $value.Trim().ToLowerInvariant()
+}
+
 function Show-DesktopEntryFeedback {
     param(
         [string]$Title,
@@ -345,6 +365,14 @@ function Show-DesktopEntryFeedback {
             -Event "desktop_entry.feedback.suppressed" `
             -Message "Desktop entry visible feedback was suppressed by environment." `
             -Fields @{ title = $Title; kind = $Kind }
+        return
+    }
+
+    if ($Kind -ne "error" -and -not (Test-DesktopEntryFeedbackEnabled)) {
+        Write-DesktopEntryLog `
+            -Event "desktop_entry.feedback.suppressed" `
+            -Message "Desktop entry visible feedback is quiet by default." `
+            -Fields @{ title = $Title; kind = $Kind; reason = "default_quiet" }
         return
     }
 

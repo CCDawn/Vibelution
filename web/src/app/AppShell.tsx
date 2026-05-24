@@ -19,6 +19,8 @@ import {
   deriveBackendSystemState,
   deriveFrontendSystemState,
   deriveRuntimeControllerState,
+  deriveStartupLoadingState,
+  deriveStartupProgressState,
   frontendSystemTone,
   lifecycleStateLabel,
   lifecycleStateTone,
@@ -173,7 +175,7 @@ export function AppShell() {
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [shutdownTitle, setShutdownTitle] = useState("");
   const [shutdownDetail, setShutdownDetail] = useState("");
-  const [shutdownFailed, setShutdownFailed] = useState(false);
+  const [shutdownSettled, setShutdownSettled] = useState(false);
   const [shutdownRequested, setShutdownRequested] = useState(false);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
@@ -273,6 +275,19 @@ export function AppShell() {
     health: backendHealthQuery.data,
   });
   const runtimeControllerState = deriveRuntimeControllerState(runtimeQuery.data);
+  const startupProgress = deriveStartupProgressState(runtimeQuery.data, lang);
+  const startupLoadingProgress = deriveStartupLoadingState(
+    {
+      configPending: configQuery.isPending && !configQuery.data,
+      runtimePending: runtimeQuery.isPending && !runtimeQuery.data,
+      backendPending: backendHealthQuery.isPending && !backendHealthQuery.data,
+      configError: configQuery.isError && !configQuery.data,
+      runtimeError: runtimeQuery.isError && !runtimeQuery.data,
+      backendError: backendHealthQuery.isError && !backendHealthQuery.data,
+    },
+    lang,
+  );
+  const startupPanel = startupProgress.active ? startupProgress : startupLoadingProgress;
   const shutdownLocallyComplete = shouldTreatShutdownAsLocallyComplete({
     shutdownRequested,
     backendState,
@@ -343,7 +358,7 @@ export function AppShell() {
 
     const task = (async () => {
       setShutdownRequested(true);
-      setShutdownFailed(false);
+      setShutdownSettled(false);
       setShutdownOpen(true);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(shutdownBody);
@@ -360,7 +375,7 @@ export function AppShell() {
       const errorMessage = error instanceof Error ? error.message : String(error || "");
       setShutdownRequested(true);
       setShutdownOpen(true);
-      setShutdownFailed(false);
+      setShutdownSettled(false);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(shutdownUnconfirmedBody);
       emitBrowserTelemetry(buildShutdownRequestUnconfirmedTelemetry(errorMessage), { preferBeacon: true });
@@ -631,7 +646,7 @@ export function AppShell() {
   useEffect(() => {
     if (shutdownLocallyComplete) {
       setShutdownOpen(true);
-      setShutdownFailed(true);
+      setShutdownSettled(true);
       setShutdownTitle(shutdownLocallyCompleteTitle);
       setShutdownDetail(shutdownLocallyCompleteDetail);
       if (!shutdownLocalCompletionLoggedRef.current) {
@@ -659,7 +674,7 @@ export function AppShell() {
     if (failed) {
       setShutdownRequested(false);
       setShutdownOpen(true);
-      setShutdownFailed(true);
+      setShutdownSettled(true);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(workbench.failureMessage || shutdownErrorBody);
       return;
@@ -667,7 +682,7 @@ export function AppShell() {
 
     if (closing) {
       setShutdownOpen(true);
-      setShutdownFailed(false);
+      setShutdownSettled(false);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(workbench.statusLine || shutdownBody);
       return;
@@ -679,7 +694,7 @@ export function AppShell() {
 
     if (workbench.desiredState === "closed" && workbench.observedState === "closed") {
       setShutdownOpen(true);
-      setShutdownFailed(false);
+      setShutdownSettled(false);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(workbench.statusLine || shutdownBody);
     }
@@ -816,10 +831,32 @@ export function AppShell() {
 
   return (
     <div className={styles.shell} data-theme={theme}>
+      {startupPanel.active && !shutdownOpen ? (
+        <div
+          className={styles.startupOverlay}
+          role="status"
+          aria-live="polite"
+          aria-busy={startupPanel.tone !== "failed"}
+        >
+          <div className={styles.startupPanel}>
+            <div className={styles.startupSpinner} aria-hidden="true">
+              <LoaderCircle
+                size={24}
+                className={startupPanel.tone === "failed" ? styles.shutdownIconStill : styles.shutdownIconSpin}
+              />
+            </div>
+            <div className={styles.startupCopy}>
+              <span className={styles.startupKicker}>{startupPanel.stage}</span>
+              <strong>{startupPanel.title}</strong>
+              <p>{startupPanel.detail}</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {shutdownOpen ? (
-        <div className={styles.shutdownOverlay} role="status" aria-live="polite" aria-busy={!shutdownFailed}>
+        <div className={styles.shutdownOverlay} role="status" aria-live="polite" aria-busy={!shutdownSettled}>
           <div className={styles.shutdownPanel}>
-            <LoaderCircle size={22} className={shutdownFailed ? styles.shutdownIconStill : styles.shutdownIconSpin} />
+            <LoaderCircle size={22} className={shutdownSettled ? styles.shutdownIconStill : styles.shutdownIconSpin} />
             <div className={styles.shutdownCopy}>
               <strong>{shutdownTitle}</strong>
               <p>{shutdownDetail}</p>
@@ -1069,7 +1106,7 @@ export function AppShell() {
             onClick={() => {
               void beginShutdown();
             }}
-            disabled={shutdownInFlight && !shutdownFailed}
+            disabled={shutdownInFlight && !shutdownSettled}
           >
             <Power size={16} />
           </button>

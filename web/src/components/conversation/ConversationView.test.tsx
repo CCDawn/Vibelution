@@ -169,7 +169,7 @@ describe("ConversationView edit resend affordance", () => {
       },
     );
 
-    expect(html).toContain("下轮信号");
+    expect(html).toContain("最近控制信号");
     expect(html).toContain("Provider failed after one ReAct pass.");
     expect(html).toContain("Visible assistant answer");
     expect(html.indexOf("Provider failed after one ReAct pass.")).toBeGreaterThan(
@@ -180,7 +180,7 @@ describe("ConversationView edit resend affordance", () => {
   it("does not render the next-state signal panel when no signals exist", () => {
     const html = renderConversation([]);
 
-    expect(html).not.toContain("下轮信号");
+    expect(html).not.toContain("最近控制信号");
   });
 });
 

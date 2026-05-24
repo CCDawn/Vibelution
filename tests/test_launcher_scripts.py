@@ -241,6 +241,7 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
     command = [_cscript_exe(), "//NoLogo", str(scripts_dir / "vibelution_desktop_entry.vbs"), *args]
     env = os.environ.copy()
     env["VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"] = "1"
+    env["VIBELUTION_DESKTOP_ENTRY_START_MUTEX_NAME"] = f"Local\\Vibelution.Tests.{tmp_path.name}.failure.{time.time_ns()}"
     result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, env=env, check=False, timeout=30)
     assert result.returncode == 0, result.stderr or result.stdout
 
@@ -572,6 +573,28 @@ if ($hiddenBackgroundText -notmatch 'ProcessWindowStyle\\]::Hidden') {
     throw "Start-HiddenBackgroundProcess does not set hidden window style."
 }
 
+$guiProcessAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-GuiProcessWithoutConsole"
+}, $true)
+if ($null -eq $guiProcessAst) {
+    throw "Start-GuiProcessWithoutConsole was not found."
+}
+$guiProcessText = $guiProcessAst.Extent.Text
+if ($guiProcessText -match "Start-Process") {
+    throw "GUI process helper still uses Start-Process."
+}
+if ($guiProcessText -notmatch 'CreateNoWindow\\s*=\\s*\\$true') {
+    throw "GUI process helper does not force CreateNoWindow."
+}
+if ($guiProcessText -notmatch 'UseShellExecute\\s*=\\s*\\$false') {
+    throw "GUI process helper does not avoid shell execution."
+}
+if ($guiProcessText -notmatch 'ProcessWindowStyle\\]::Normal') {
+    throw "GUI process helper should keep GUI windows visible while suppressing console windows."
+}
+
 $redirectedAst = $ast.Find({
     param($node)
     $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -616,6 +639,25 @@ $functionAst = $ast.Find({
     if ($functionText -notmatch "Start-RedirectedBackgroundProcess") {
         throw "$functionName does not use the redirected no-window helper."
     }
+}
+
+$browserAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-ManagedBrowser"
+}, $true)
+if ($null -eq $browserAst) {
+    throw "Start-ManagedBrowser was not found."
+}
+$browserText = $browserAst.Extent.Text
+if ($browserText -match "Start-Process") {
+    throw "Start-ManagedBrowser still uses Start-Process."
+}
+if ($browserText -notmatch "Start-GuiProcessWithoutConsole") {
+    throw "Start-ManagedBrowser does not use the no-console GUI helper."
+}
+if ($browserText -notmatch "gui_process_without_console" -or $browserText -notmatch "console_window_suppressed") {
+    throw "Start-ManagedBrowser does not log the no-console launch strategy."
 }
 
 $saveStateAst = $ast.Find({
@@ -729,6 +771,115 @@ if ($cleanupIndex -lt 0) {
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_runtime_scene_initialization_persists_active_sidecar(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Save-ActiveRuntimeSceneReference", "Initialize-RuntimeScene")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    if ($functionName -eq "Initialize-RuntimeScene" -and $functionAst.Extent.Text -notmatch "Save-ActiveRuntimeSceneReference") {
+        throw "Initialize-RuntimeScene does not persist the active runtime scene sidecar."
+    }
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_frontend_build_failure_summary_includes_typescript_error(tmp_path):
+    scene_dir = tmp_path / "scene"
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($functionName in @("Get-RuntimeSceneRelativePaths", "Get-LogTail", "Get-FrontendBuildFailureSummary")) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$functionName was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+$script:currentRuntimeSceneDir = {json.dumps(str(scene_dir))}
+function Get-CurrentRuntimeSceneFilePath {{
+    param([string]$RelativePath)
+    return Join-Path $script:currentRuntimeSceneDir $RelativePath
+}}
+New-Item -ItemType Directory -Path (Join-Path $script:currentRuntimeSceneDir "raw") -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "raw\\frontend.build.log") -Encoding utf8 -Value @(
+    "vite v6.0.0 building",
+    "web/src/routes/ToolsRoute.tsx(476,49): error TS2322: Type mismatch.",
+    "At scripts/vibelution_launcher.ps1:2616 char:13"
+)
+
+$summary = Get-FrontendBuildFailureSummary -ExitCode 2
+if ($summary -notmatch "npm run build failed with exit code 2") {{
+    throw "Build failure summary does not include the npm exit code."
+}}
+if ($summary -notmatch "frontend\\.build\\.failed") {{
+    throw "Build failure summary does not include the build failure event code."
+}}
+if ($summary -notmatch "ToolsRoute\\.tsx\\(476,49\\): error TS2322") {{
+    throw "Build failure summary does not include the first TypeScript error."
+}}
+if ($summary -match "At scripts") {{
+    throw "Build failure summary should prefer TypeScript errors over PowerShell stack noise."
+}}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_python_candidates_prefer_python_runtime(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -773,6 +924,176 @@ if ($candidates.Count -ne 1) {
 }
 if ($candidates[0].FilePath -ne (Resolve-Path -LiteralPath $pythonPath).Path) {
     throw "Launcher did not prefer python.exe."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_bootstrap_creates_project_venv_before_python_dependency_repair(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$bootstrapAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Ensure-ProjectVirtualEnvironment"
+}, $true)
+if ($null -eq $bootstrapAst) {
+    throw "Ensure-ProjectVirtualEnvironment was not found."
+}
+
+$depsAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Ensure-ProjectPythonDependencies"
+}, $true)
+if ($null -eq $depsAst) {
+    throw "Ensure-ProjectPythonDependencies was not found."
+}
+
+$bootstrapText = $bootstrapAst.Extent.Text
+$depsText = $depsAst.Extent.Text
+if ($bootstrapText -notmatch 'Get-Command\\s+python') {
+    throw "Virtual environment bootstrap does not discover Python from PATH."
+}
+if ($bootstrapText -notmatch '"-m",\\s*"venv"') {
+    throw "Virtual environment bootstrap does not create the project venv with python -m venv."
+}
+if ($bootstrapText -notmatch 'bootstrap.virtualenv.create.started') {
+    throw "Virtual environment bootstrap start event is not logged."
+}
+if ($bootstrapText -notmatch 'bootstrap.virtualenv.create.succeeded') {
+    throw "Virtual environment bootstrap success event is not logged."
+}
+if ($bootstrapText -notmatch 'bootstrap.virtualenv.create.failed') {
+    throw "Virtual environment bootstrap failure event is not logged."
+}
+if ($depsText -notmatch 'Ensure-ProjectVirtualEnvironment') {
+    throw "Python dependency repair does not bootstrap the project venv first."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_virtualenv_bootstrap_is_idempotent(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$names = @("Ensure-ProjectVirtualEnvironment", "Get-ProjectPythonCandidates")
+foreach ($name in $names) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:commands = @()
+$script:controlEvents = @()
+$script:runtimeEvents = @()
+$script:currentRuntimeSceneId = "test-scene"
+$projectDir = Join-Path $env:TEMP ("vibelution-bootstrap-" + [guid]::NewGuid().ToString("N"))
+$projectVenvDir = Join-Path $projectDir ".venv"
+$preferredPythonExe = Join-Path $projectVenvDir "Scripts\\python.exe"
+$launcherPythonOverride = ""
+New-Item -ItemType Directory -Path $projectDir -Force | Out-Null
+
+function Write-Note {
+    param([string]$Message)
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlEvents += ,@{ event = $Event; level = $Level; fields = $Fields }
+}
+function Write-RuntimeSceneEvent {
+    param(
+        [string]$Component,
+        [string]$Phase,
+        [string]$EventCode,
+        [string]$Message,
+        [string]$Level = "info",
+        [string]$Outcome = "observed",
+        [hashtable]$Fields = @{}
+    )
+    $script:runtimeEvents += ,@{ component = $Component; phase = $Phase; eventCode = $EventCode; outcome = $Outcome; level = $Level }
+}
+function Invoke-NativeCommand {
+    param([string]$CommandPath, [string[]]$ArgumentList = @())
+    $script:commands += ,@{ commandPath = $CommandPath; argumentList = @($ArgumentList) }
+    if ($ArgumentList.Count -ge 3 -and $ArgumentList[0] -eq "-m" -and $ArgumentList[1] -eq "venv") {
+        $scriptsDir = Join-Path $ArgumentList[2] "Scripts"
+        New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $scriptsDir "python.exe") -Value "" -Encoding ascii
+    }
+    return 0
+}
+
+Ensure-ProjectVirtualEnvironment
+Ensure-ProjectVirtualEnvironment
+
+if ($script:commands.Count -ne 1) {
+    throw "Expected virtualenv bootstrap to run once, got $($script:commands.Count)."
+}
+$args = @($script:commands[0].argumentList)
+if ($args[0] -ne "-m" -or $args[1] -ne "venv" -or $args[2] -ne $projectVenvDir) {
+    throw "Virtualenv bootstrap did not invoke python -m venv for the project venv."
+}
+if (-not (Test-Path -LiteralPath $preferredPythonExe)) {
+    throw "Virtualenv bootstrap did not create the project python path."
+}
+$candidate = @(Get-ProjectPythonCandidates)[0]
+if ($candidate.FilePath -ne (Resolve-Path -LiteralPath $preferredPythonExe).Path) {
+    throw "Project venv was not returned as the preferred Python candidate."
+}
+if (@($script:controlEvents | Where-Object { $_.event -eq "bootstrap.virtualenv.create.succeeded" }).Count -ne 1) {
+    throw "Virtualenv bootstrap success was not logged once."
+}
+if (@($script:runtimeEvents | Where-Object { $_.eventCode -eq "bootstrap.virtualenv.create.succeeded" }).Count -ne 1) {
+    throw "Virtualenv bootstrap success was not written to runtime scene once."
 }
 Write-Output "ok"
 """,
@@ -2790,6 +3111,145 @@ throw "synthetic launcher failure"
     assert "synthetic launcher failure" in events[-2]["fields"]["error"]
 
 
+def test_desktop_entry_syncs_logs_from_active_runtime_scene_sidecar(tmp_path):
+    scene_dir = tmp_path / "scene"
+    launcher_dir = tmp_path / "launcher"
+    result = _run_desktop_entry_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopEntryPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $DesktopEntryPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Desktop entry script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($functionName in @(
+    "Sync-DesktopEntryLogsIntoRuntimeScene",
+    "Get-DesktopEntryRuntimeSceneDir",
+    "Get-JsonPayloadField",
+    "Sync-DesktopEntryLogFile"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$functionName was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+$launcherDir = {json.dumps(str(launcher_dir))}
+$entryLogPath = Join-Path $launcherDir "desktop-entry.log"
+$script:desktopEntryRunId = "entry-run"
+$env:VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID = "vbs-run"
+New-Item -ItemType Directory -Path $launcherDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path {json.dumps(str(scene_dir))} "raw") -Force | Out-Null
+@{{
+    runtimeSceneId = "scene-a"
+    runtimeSceneDir = {json.dumps(str(scene_dir))}
+}} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $launcherDir "active-runtime-scene.json") -Encoding utf8
+
+Set-Content -LiteralPath $entryLogPath -Encoding utf8 -Value @(
+    '{{"event":"desktop_entry.started","fields":{{"run_id":"entry-run"}}}}',
+    '{{"event":"desktop_entry.started","fields":{{"run_id":"other-run"}}}}'
+)
+Set-Content -LiteralPath (Join-Path $launcherDir "desktop-entry-vbs.log") -Encoding utf8 -Value @(
+    '{{"event":"desktop_entry_vbs.started","details":"run_id=vbs-run action=start"}}',
+    '{{"event":"desktop_entry_vbs.started","details":"run_id=other-vbs action=start"}}'
+)
+
+Sync-DesktopEntryLogsIntoRuntimeScene
+
+$entryTarget = Get-Content -LiteralPath (Join-Path {json.dumps(str(scene_dir))} "raw\\desktop-entry.log") -Raw -Encoding utf8
+$vbsTarget = Get-Content -LiteralPath (Join-Path {json.dumps(str(scene_dir))} "raw\\desktop-entry-vbs.log") -Raw -Encoding utf8
+if ($entryTarget -notmatch "entry-run" -or $entryTarget -match "other-run") {{
+    throw "Desktop entry log was not filtered by run id through the sidecar scene reference."
+}}
+if ($vbsTarget -notmatch "vbs-run" -or $vbsTarget -match "other-vbs") {{
+    throw "Desktop entry VBS log was not filtered by VBS run id through the sidecar scene reference."
+}}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_desktop_entry_success_feedback_is_quiet_by_default(tmp_path):
+    result = _run_desktop_entry_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopEntryPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $DesktopEntryPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Desktop entry script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Show-DesktopEntryFeedback", "Test-DesktopEntryFeedbackSuppressed", "Test-DesktopEntryFeedbackEnabled")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:feedbackEvents = @()
+function Write-DesktopEntryLog {
+    param(
+        [string]$Event,
+        [string]$Message,
+        [string]$Level = "info",
+        [hashtable]$Fields = @{}
+    )
+    $script:feedbackEvents += ,@{ event = $Event; fields = $Fields }
+}
+
+$env:VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK = ""
+$env:VIBELUTION_DESKTOP_ENTRY_SHOW_FEEDBACK = ""
+Show-DesktopEntryFeedback -Title "title" -Message "message" -Seconds 1 -Kind "info"
+if ($script:feedbackEvents.Count -ne 1 -or $script:feedbackEvents[0].event -ne "desktop_entry.feedback.suppressed") {
+    throw "Success feedback should be quiet by default."
+}
+if ($script:feedbackEvents[0].fields.reason -ne "default_quiet") {
+    throw "Default quiet feedback should log reason=default_quiet."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_desktop_entry_has_nonblocking_start_gate(tmp_path):
     result = _run_desktop_entry_ast_harness(
         tmp_path,
@@ -2810,7 +3270,7 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Desktop entry script parse failed: $($parseErrors[0].Message)"
 }
 
-foreach ($functionName in @("Enter-DesktopEntryStartGate", "Exit-DesktopEntryStartGate", "Test-DesktopEntryStartAction", "Show-DesktopEntryFeedback", "Test-DesktopEntryFeedbackSuppressed")) {
+foreach ($functionName in @("Enter-DesktopEntryStartGate", "Exit-DesktopEntryStartGate", "Test-DesktopEntryStartAction", "Show-DesktopEntryFeedback", "Test-DesktopEntryFeedbackSuppressed", "Test-DesktopEntryFeedbackEnabled")) {
     $functionAst = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and

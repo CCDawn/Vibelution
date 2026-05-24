@@ -5012,6 +5012,64 @@ def test_submit_session_continue_preserves_unfinished_task_goal(tmp_path, monkey
     assert active_task["last_user_message"] == "继续"
 
 
+def test_submit_session_continue_clears_stale_next_action_after_visible_reply(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "stale-next-action",
+            "kind": "coding",
+            "status": "reading",
+            "title": "查看系统提示词",
+            "goal": "查看系统提示词",
+            "latest_summary": "已完成前半段汇报。",
+            "next_action": "发送“继续”以恢复停止前的现场。",
+            "updated_at": "2026-05-24T20:10:41",
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+
+    class ResumeAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "继续上次未完成的汇报，系统提示词已汇总完成。",
+                "raw_output": "继续上次未完成的汇报，系统提示词已汇总完成。",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ResumeAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["activeTask"]["goal"] == "查看系统提示词"
+    assert payload["activeTask"]["latestSummary"] == "继续上次未完成的汇报，系统提示词已汇总完成。"
+    assert payload["activeTask"]["nextAction"] == ""
+
+    state = load_chat_state(tmp_path)
+    active_task = state["conversations"][0]["active_task"]
+    assert active_task["next_action"] == ""
+
+
 def test_submit_session_continue_recovers_goal_when_active_task_is_continue(tmp_path, monkeypatch):
     (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
     (tmp_path / "tests" / "prompt_debugger.py").write_text("pass\n", encoding="utf-8")

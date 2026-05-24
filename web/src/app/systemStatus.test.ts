@@ -6,6 +6,8 @@ import {
   deriveBackendSystemState,
   deriveFrontendSystemState,
   deriveRuntimeControllerState,
+  deriveStartupLoadingState,
+  deriveStartupProgressState,
   frontendSystemTone,
   lifecycleStateLabel,
   lifecycleStateTone,
@@ -236,6 +238,183 @@ describe("systemStatus", () => {
     expect(runtimeControllerTone("managed")).toBe("running");
     expect(runtimeControllerTone("unmanaged")).toBe("idle");
     expect(runtimeControllerTone("failed")).toBe("failed");
+  });
+
+  it("derives startup loading stages before runtime data is settled", () => {
+    expect(
+      deriveStartupLoadingState({
+        configPending: true,
+        runtimePending: true,
+        backendPending: true,
+        configError: false,
+        runtimeError: false,
+        backendError: false,
+      }),
+    ).toMatchObject({
+      active: true,
+      stage: "加载配置",
+      tone: "running",
+    });
+
+    expect(
+      deriveStartupLoadingState({
+        configPending: false,
+        runtimePending: true,
+        backendPending: true,
+        configError: false,
+        runtimeError: false,
+        backendError: false,
+      }),
+    ).toMatchObject({
+      active: true,
+      stage: "读取运行状态",
+      tone: "running",
+    });
+
+    expect(
+      deriveStartupLoadingState({
+        configPending: false,
+        runtimePending: false,
+        backendPending: false,
+        configError: false,
+        runtimeError: false,
+        backendError: false,
+      }).active,
+    ).toBe(false);
+  });
+
+  it("derives startup progress only while the workbench is opening or failed", () => {
+    const opening = deriveStartupProgressState({
+      runtimeManager: {
+        running: true,
+        runtimeState: "running",
+        managerPid: 1001,
+        stateVersion: 3,
+      },
+      workbench: {
+        ...runtimeWorkbenchBase,
+        desiredState: "open",
+        observedState: "closed",
+        phase: "opening",
+        backendPid: 0,
+        browserWindowPid: 0,
+        browserManaged: true,
+        url: "http://127.0.0.1:8000",
+        lastReason: "launcher_start",
+        statusLine: "正在打开工作台。",
+        failureMessage: "",
+      },
+      lifecycleProof: {
+        overallState: "starting",
+        overallLabel: "正在开启",
+        summary: "Desired state is open, but components are not fully observed yet.",
+        verifiedAt: "2026-05-24T13:00:00Z",
+        desiredState: "open",
+        observedState: "closed",
+        phase: "opening",
+        browserManaged: true,
+        projectRootMatches: true,
+        components: [],
+        activeWorkRuns: { count: 0, kinds: [], items: [] },
+        residualProcesses: { count: 0, items: [] },
+      },
+    });
+
+    expect(opening).toMatchObject({
+      active: true,
+      title: "正在启动 Vibelution",
+      stage: "打开运行器",
+      tone: "running",
+    });
+
+    const steady = deriveStartupProgressState({
+      runtimeManager: {
+        running: true,
+        runtimeState: "running",
+        managerPid: 1001,
+        stateVersion: 4,
+      },
+      workbench: {
+        ...runtimeWorkbenchBase,
+        desiredState: "open",
+        observedState: "open",
+        phase: "steady",
+        backendPid: 222,
+        browserWindowPid: 333,
+        browserManaged: true,
+        url: "http://127.0.0.1:8000",
+        lastReason: "launcher_start",
+        statusLine: "工作台正在运行。",
+        failureMessage: "",
+      },
+      lifecycleProof: {
+        overallState: "ready",
+        overallLabel: "已真正开启",
+        summary: "Runtime manager, backend, window, and project root all agree.",
+        verifiedAt: "2026-05-24T13:00:05Z",
+        desiredState: "open",
+        observedState: "open",
+        phase: "steady",
+        browserManaged: true,
+        projectRootMatches: true,
+        components: [],
+        activeWorkRuns: { count: 0, kinds: [], items: [] },
+        residualProcesses: { count: 0, items: [] },
+      },
+    });
+
+    expect(steady.active).toBe(false);
+  });
+
+  it("summarizes frontend build failures with the first TypeScript error", () => {
+    const failed = deriveStartupProgressState({
+      runtimeManager: {
+        running: true,
+        runtimeState: "running",
+        managerPid: 1001,
+        stateVersion: 5,
+      },
+      workbench: {
+        ...runtimeWorkbenchBase,
+        desiredState: "open",
+        observedState: "closed",
+        phase: "failed",
+        backendPid: 0,
+        browserWindowPid: 0,
+        browserManaged: true,
+        url: "http://127.0.0.1:8000",
+        lastReason: "launcher_start",
+        statusLine: "Workbench hit a lifecycle error.",
+        failureMessage: [
+          "frontend.build.failed",
+          "npm run build failed with exit code 2.",
+          "web/src/routes/ToolsRoute.tsx(476,49): error TS2322: Type mismatch.",
+          "At scripts/vibelution_launcher.ps1:2616 char:13",
+        ].join("\n"),
+      },
+      lifecycleProof: {
+        overallState: "failed",
+        overallLabel: "异常",
+        summary: "Frontend build failed.",
+        verifiedAt: "2026-05-24T13:00:05Z",
+        desiredState: "open",
+        observedState: "closed",
+        phase: "failed",
+        browserManaged: true,
+        projectRootMatches: true,
+        components: [],
+        activeWorkRuns: { count: 0, kinds: [], items: [] },
+        residualProcesses: { count: 0, items: [] },
+      },
+    });
+
+    expect(failed).toMatchObject({
+      active: true,
+      title: "前端构建失败",
+      stage: "前端构建",
+      tone: "failed",
+      detail: "src/routes/ToolsRoute.tsx(476,49): error TS2322: Type mismatch.",
+    });
   });
 
   it("maps lifecycle proof states to stable visual tones and labels", () => {

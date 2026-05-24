@@ -1074,6 +1074,88 @@
   line-height: 1.5;
 }
 
+.packageIssueStateStrip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.packageIssueStateStrip span {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.packageIssueStateStrip strong {
+  margin-right: 4px;
+  color: var(--fg-primary);
+  font-size: 0.9rem;
+}
+
+.packagePrimaryCluster {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-subtle));
+}
+
+.packagePrimaryCluster > span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+}
+
+.packagePrimaryCluster > strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.packagePrimaryCluster > p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.packageClusterRefs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.packageClusterRefs button,
+.packageClusterItem button {
+  max-width: 100%;
+  padding: 5px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.packageClusterRefs button:hover,
+.packageClusterItem button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+}
+
 .startupTracePanel {
   display: grid;
   gap: 10px;
@@ -1317,6 +1399,40 @@
   color: var(--fg-tertiary);
   font-family: var(--font-mono);
   font-size: 0.72rem;
+}
+
+.packageClusterList {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.packageClusterItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+.packageClusterItem strong,
+.packageClusterItem span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.packageClusterItem strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.packageClusterItem span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 .sceneTechnicalDetails {

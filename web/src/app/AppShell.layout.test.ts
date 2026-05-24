@@ -23,4 +23,23 @@ describe("AppShell layout contract", () => {
     expect(styles.activeWorkDetailPanel).toBeTypeOf("string");
     expect(styles.activeWorkDetailItem).toBeTypeOf("string");
   });
+
+  it("treats locally completed shutdown as a settled state rather than a failed state", () => {
+    expect(shellSource).toContain("shutdownSettled");
+    expect(shellSource).toContain("aria-busy={!shutdownSettled}");
+    expect(shellSource).toContain("shutdownLocallyCompleteTitle");
+    expect(shellSource).not.toContain("shutdownFailed");
+  });
+
+  it("renders a startup progress overlay from loading and lifecycle state", () => {
+    expect(shellSource).toContain("deriveStartupLoadingState");
+    expect(shellSource).toContain("deriveStartupProgressState");
+    expect(shellSource).toContain("startupPanel.active");
+    expect(shellSource).toContain("startupOverlay");
+    expect(shellSource).toContain("startupKicker");
+
+    expect(styles.startupOverlay).toBeTypeOf("string");
+    expect(styles.startupPanel).toBeTypeOf("string");
+    expect(styles.startupKicker).toBeTypeOf("string");
+  });
 });

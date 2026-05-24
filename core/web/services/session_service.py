@@ -2355,9 +2355,17 @@ def _persist_session_turn_result(
         existing_active_task = _normalize_session_active_task(
             conversation.get("active_task") or conversation.get("activeTask")
         )
+        task_result = result
+        if not isinstance(task_result, dict):
+            task_result = {
+                "status": result_status or "completed",
+                "summary": assistant_text,
+                "raw_output": assistant_text,
+                "outcome": "done" if result_status == "completed" and not stop_requested else (result_status or ""),
+            }
         next_active_task = _build_session_active_task(
             session_id,
-            result,
+            task_result,
             conversation["messages"],
             existing_task=existing_active_task,
         )
@@ -4311,6 +4319,10 @@ def _build_session_active_task(
     blocked_reason = trim_lines(contract.get("blocked_reason") or "", max_lines=3)
     required_user_input = trim_lines(contract.get("required_user_input") or "", max_lines=3)
     next_action = trim_lines(contract.get("next_action") or "", max_lines=3)
+    latest_summary = trim_lines(
+        _visible_reply_summary_candidate(result),
+        max_lines=6,
+    )
 
     if not any(
         (
@@ -4321,6 +4333,7 @@ def _build_session_active_task(
             blocked_reason,
             required_user_input,
             next_action,
+            latest_summary,
         )
     ):
         return existing_task
@@ -4346,10 +4359,6 @@ def _build_session_active_task(
         read_files=read_files,
         changed_files=changed_files,
         verification_status=verification_status,
-    )
-    latest_summary = trim_lines(
-        _visible_reply_summary_candidate(result),
-        max_lines=6,
     )
     last_user_message = _latest_user_message(messages)
     existing_metadata = dict(existing_task.get("metadata") or {}) if isinstance(existing_task, dict) else {}

@@ -11,11 +11,13 @@ import {
   ToolTestResponse,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./ToolsRoute.module.css";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
+type Translate = (key: TranslationKey) => string;
 
 const FILTERS: ToolFilter[] = ["all", "built_in", "generated", "llm", "enabled"];
 const TOOLS_LEFT_PANEL_WIDTH_KEY = "vibelution.tools.left-panel-width";
@@ -105,6 +107,78 @@ function filterLabel(filter: ToolFilter, lang: string) {
   return (lang === "zh" ? zh : en)[filter];
 }
 
+function toolFilterCounts(tools: ToolRegistryItem[]) {
+  return {
+    all: tools.length,
+    built_in: tools.filter((tool) => tool.source === "built_in").length,
+    generated: tools.filter((tool) => tool.source === "generated").length,
+    llm: tools.filter((tool) => tool.llmVisible).length,
+    enabled: tools.filter((tool) => tool.source === "generated" && tool.enabled).length,
+  } satisfies Record<ToolFilter, number>;
+}
+
+function readinessTone(ready: boolean) {
+  return ready ? "ready" : "blocked";
+}
+
+function toolReadinessCards(tool: ToolRegistryItem, t: Translate) {
+  return [
+    {
+      key: "runtime",
+      label: t("toolsRuntimeActive"),
+      value: tool.runtimeActive ? t("toolsReady") : t("toolsInactive"),
+      ready: tool.runtimeActive,
+    },
+    {
+      key: "llm",
+      label: t("toolsLlmVisible"),
+      value: tool.llmVisible ? t("toolsVisibleToAgent") : t("toolsHiddenFromAgent"),
+      ready: tool.llmVisible,
+    },
+    {
+      key: "test",
+      label: t("toolsTestPolicy"),
+      value: tool.testPolicy.callable ? t("toolsTestable") : t("toolsBlocked"),
+      ready: tool.testPolicy.callable,
+    },
+    {
+      key: "delete",
+      label: t("toolsDeleteAllowed"),
+      value: tool.deleteAllowed ? t("toolsCanDelete") : t("toolsProtected"),
+      ready: tool.deleteAllowed,
+    },
+  ];
+}
+
+function testResultSummaryCards(result: ToolTestResponse, t: Translate) {
+  return [
+    {
+      key: "status",
+      label: t("toolsTestResult"),
+      value: result.status,
+      ok: result.status === "succeeded",
+    },
+    {
+      key: "agent",
+      label: t("toolsAgentCompatibility"),
+      value: result.agentCompatibility.status,
+      ok: result.agentCompatibility.status === "succeeded",
+    },
+    {
+      key: "timeout",
+      label: t("toolsTimedOut"),
+      value: result.timeout.timedOut ? t("yes") : t("no"),
+      ok: !result.timeout.timedOut,
+    },
+    {
+      key: "duration",
+      label: t("toolsDuration"),
+      value: `${result.timeout.durationMs}ms`,
+      ok: true,
+    },
+  ];
+}
+
 export function ToolsRoute() {
   const { lang, t } = useAppI18n();
   const queryClient = useQueryClient();
@@ -146,6 +220,7 @@ export function ToolsRoute() {
     });
   }, [activeFilter, searchText, tools]);
   const activeTool = tools.find((tool) => tool.id === activeToolId) ?? visibleTools[0] ?? null;
+  const filterCounts = useMemo(() => toolFilterCounts(tools), [tools]);
 
   useEffect(() => {
     if (!activeToolId || !tools.some((tool) => tool.id === activeToolId)) {
@@ -328,7 +403,8 @@ export function ToolsRoute() {
                 className={filter === activeFilter ? styles.filterButtonActive : styles.filterButton}
                 onClick={() => setActiveFilter(filter)}
               >
-                {filterLabel(filter, lang)}
+                <span>{filterLabel(filter, lang)}</span>
+                <strong>{filterCounts[filter]}</strong>
               </button>
             ))}
           </div>
@@ -398,6 +474,17 @@ export function ToolsRoute() {
               {activeTool.blockReason || activeTool.validationError ? (
                 <p className={styles.notice}>{activeTool.blockReason || activeTool.validationError}</p>
               ) : null}
+              <section className={styles.readinessPanel}>
+                {toolReadinessCards(activeTool, t).map((card) => (
+                  <div
+                    key={card.key}
+                    className={`${styles.readinessCard} ${styles[`readiness_${readinessTone(card.ready)}`]}`}
+                  >
+                    <span>{card.label}</span>
+                    <strong>{card.value}</strong>
+                  </div>
+                ))}
+              </section>
               <section className={styles.policyPanel}>
                 <div className={styles.panelHeader}>
                   <div>
@@ -486,19 +573,13 @@ export function ToolsRoute() {
                     <span className={styles.countPill}>{testResult.called ? t("yes") : t("no")}</span>
                   </div>
                   <p>{testResult.message}</p>
-                  <div className={styles.policyMeta}>
-                    <span>
-                      {t("toolsRuntimeCall")}: <strong>{testResult.testPolicy.runtimeCall ? t("yes") : t("no")}</strong>
-                    </span>
-                    <span>
-                      {t("toolsSimulatedCall")}: <strong>{testResult.testPolicy.simulated ? t("yes") : t("no")}</strong>
-                    </span>
-                    <span>
-                      {t("toolsTimedOut")}: <strong>{testResult.timeout.timedOut ? t("yes") : t("no")}</strong>
-                    </span>
-                    <span>
-                      {t("toolsDuration")}: <strong>{testResult.timeout.durationMs}ms</strong>
-                    </span>
+                  <div className={styles.resultSummaryGrid}>
+                    {testResultSummaryCards(testResult, t).map((card) => (
+                      <div key={card.key} className={`${styles.resultCard} ${card.ok ? styles.result_ok : styles.result_attention}`}>
+                        <span>{card.label}</span>
+                        <strong>{card.value}</strong>
+                      </div>
+                    ))}
                   </div>
                   <section className={styles.agentCompatibility}>
                     <div className={styles.panelHeader}>
@@ -529,16 +610,16 @@ export function ToolsRoute() {
                   </div>
                 </section>
               ) : null}
-              <section className={styles.schemaPanel}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{t("toolsArgsSchema")}</p>
-                    <h3>{t("toolsSchemaPreview")}</h3>
-                  </div>
+              <details className={styles.schemaDisclosure}>
+                <summary>
+                  <span>
+                    <span className={styles.panelEyebrow}>{t("toolsArgsSchema")}</span>
+                    <strong>{t("toolsShowSchema")}</strong>
+                  </span>
                   {activeTool.validated ? <CheckCircle2 size={17} /> : <CircleSlash size={17} />}
-                </div>
+                </summary>
                 <pre>{schemaPreview(activeTool)}</pre>
-              </section>
+              </details>
             </>
           ) : (
             <section className={styles.emptyDetail}>
