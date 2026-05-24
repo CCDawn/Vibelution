@@ -310,14 +310,18 @@ export type RuntimeScenePackageDiagnosis = {
     severity: "error" | "warning" | "info" | string;
     activeErrorCount: number;
     activeWarningCount: number;
+    policySignalCount?: number;
     historicalErrorCount: number;
     historicalWarningCount: number;
     activeClusterCount?: number;
+    policyClusterCount?: number;
     historicalClusterCount?: number;
     controlSignalCount: number;
     activeClusters?: RuntimeSceneIssueCluster[];
+    policyClusters?: RuntimeSceneIssueCluster[];
     historicalClusters?: RuntimeSceneIssueCluster[];
     firstActiveCluster?: RuntimeSceneIssueCluster | null;
+    firstPolicyCluster?: RuntimeSceneIssueCluster | null;
     firstHistoricalCluster?: RuntimeSceneIssueCluster | null;
   };
   firstSignal: RuntimeSceneIssueSignal | null;
@@ -486,6 +490,34 @@ export type GitCommitResponse = {
 
 export type ToolRegistrySource = "built_in" | "generated" | string;
 
+export type ToolAgentScopeId = string;
+
+export type ToolAgentScopeCounts = {
+  total: number;
+  visible: number;
+  callable: number;
+  blocked: number;
+};
+
+export type ToolAgentScopeSummary = {
+  id: ToolAgentScopeId;
+  label: string;
+  kind: string;
+  isSubagent: boolean;
+  mode: string;
+  description: string;
+  counts: ToolAgentScopeCounts;
+};
+
+export type ToolAgentScopeState = {
+  visible: boolean;
+  callable: boolean;
+  llmVisible: boolean;
+  runtimeActive: boolean;
+  testable: boolean;
+  blockReason: string;
+};
+
 export type ToolTestPolicy = {
   mode: string;
   callable: boolean;
@@ -530,6 +562,7 @@ export type ToolRegistryItem = {
   validationError: string;
   argsSchema: Record<string, unknown>;
   testPolicy: ToolTestPolicy;
+  agentScopes: Record<ToolAgentScopeId, ToolAgentScopeState>;
   responseTemplate?: string;
   createdAt: string;
   updatedAt: string;
@@ -548,6 +581,7 @@ export type ToolRegistryPayload = {
     enabledGenerated: number;
     invalidGenerated: number;
   };
+  agentScopes: ToolAgentScopeSummary[];
   tools: ToolRegistryItem[];
 };
 
@@ -568,6 +602,7 @@ export type ToolTestResponse = {
   argsUsed: Record<string, unknown>;
   testPolicy: ToolTestPolicy;
   agentCompatibility: ToolAgentCompatibility;
+  agentScope: ToolAgentScopeSummary;
   timeout: ToolTestTimeout;
 };
 

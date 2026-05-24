@@ -36,6 +36,7 @@ class GeneratedToolEnabledPayload(BaseModel):
 
 class ToolTestPayload(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
+    agentScope: str = ""
 
 
 def _raise_tool_registry_error(exc: Exception) -> None:
@@ -90,6 +91,10 @@ def tools_delete(tool_id: str) -> dict:
 @router.post("/tools/{tool_id}/test")
 def tools_test(tool_id: str, payload: ToolTestPayload | None = None) -> dict:
     try:
-        return test_tool(tool_id, args=(payload.args if payload else {}))
+        return test_tool(
+            tool_id,
+            args=(payload.args if payload else {}),
+            agent_scope=(payload.agentScope if payload else ""),
+        )
     except Exception as exc:  # pragma: no cover - routed by helper
         _raise_tool_registry_error(exc)

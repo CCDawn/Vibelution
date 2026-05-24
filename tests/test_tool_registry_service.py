@@ -19,6 +19,30 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert safe_builtin["testPolicy"]["argsPreview"] == {"limit": 3}
 
 
+def test_tool_registry_exposes_agent_scoped_tool_views(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    payload = registry.get_tool_registry()
+
+    scopes = {scope["id"]: scope for scope in payload["agentScopes"]}
+    assert {"main_agent", "subagent_default", "subagent_explorer", "subagent_worker"}.issubset(scopes)
+    assert scopes["subagent_explorer"]["isSubagent"] is True
+    assert scopes["subagent_explorer"]["mode"] == "readonly"
+
+    grep_tool = next(item for item in payload["tools"] if item["name"] == "grep_search_tool")
+    apply_tool = next(item for item in payload["tools"] if item["name"] == "apply_diff_edit_tool")
+    spawn_tool_names = {item["name"] for item in payload["tools"]}
+
+    assert "spawn_agent_tool" not in spawn_tool_names
+    assert grep_tool["agentScopes"]["subagent_explorer"]["visible"] is True
+    assert grep_tool["agentScopes"]["subagent_explorer"]["callable"] is True
+    assert apply_tool["agentScopes"]["subagent_explorer"]["visible"] is True
+    assert apply_tool["agentScopes"]["subagent_explorer"]["callable"] is False
+    assert "只读" in apply_tool["agentScopes"]["subagent_explorer"]["blockReason"] or "read-only" in apply_tool["agentScopes"]["subagent_explorer"]["blockReason"]
+    assert scopes["subagent_explorer"]["counts"]["visible"] > 0
+    assert scopes["subagent_explorer"]["counts"]["blocked"] > 0
+
+
 def test_generated_tool_lifecycle(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
 
@@ -146,6 +170,19 @@ def test_builtin_tool_test_blocks_non_allowlisted_tool(tmp_path, monkeypatch):
     assert result["testPolicy"]["mode"] == "blocked"
     assert result["agentCompatibility"]["status"] == "blocked"
     assert result["agentCompatibility"]["callable"] is False
+
+
+def test_subagent_scope_test_blocks_readonly_mutating_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    result = registry.test_tool("apply_diff_edit_tool", agent_scope="subagent_explorer")
+
+    assert result["status"] == "blocked"
+    assert result["called"] is False
+    assert result["agentScope"]["id"] == "subagent_explorer"
+    assert result["agentCompatibility"]["status"] == "blocked"
+    assert result["agentCompatibility"]["callable"] is False
+    assert "只读" in result["message"] or "read-only" in result["message"]
 
 
 def test_builtin_tool_test_runs_allowlisted_tool(tmp_path, monkeypatch):

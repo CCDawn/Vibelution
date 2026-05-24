@@ -22,6 +22,42 @@ SCHEMA_BLOCKED_KEYS = {"$ref", "oneOf", "anyOf", "allOf", "not", "patternPropert
 MAX_DESCRIPTION_CHARS = 600
 MAX_RESPONSE_TEMPLATE_CHARS = 2_000
 TOOL_TEST_TIMEOUT_SECONDS = 3.0
+MAIN_AGENT_SCOPE_ID = "main_agent"
+SUBAGENT_SCOPE_IDS = ("subagent_default", "subagent_explorer", "subagent_worker")
+AGENT_SCOPE_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "id": MAIN_AGENT_SCOPE_ID,
+        "label": "Main agent",
+        "kind": "main",
+        "isSubagent": False,
+        "mode": "runtime",
+        "description": "Primary agent runtime and management view.",
+    },
+    {
+        "id": "subagent_default",
+        "label": "Subagent default",
+        "kind": "subagent",
+        "isSubagent": True,
+        "mode": "readonly",
+        "description": "Default read-only subagent role.",
+    },
+    {
+        "id": "subagent_explorer",
+        "label": "Subagent explorer",
+        "kind": "subagent",
+        "isSubagent": True,
+        "mode": "readonly",
+        "description": "Explorer subagent role for bounded codebase inspection.",
+    },
+    {
+        "id": "subagent_worker",
+        "label": "Subagent worker",
+        "kind": "subagent",
+        "isSubagent": True,
+        "mode": "readonly",
+        "description": "Worker subagent role running under the current read-only subagent guard.",
+    },
+)
 SAFE_BUILTIN_TEST_ARGS: dict[str, dict[str, Any]] = {
     "get_current_goal_tool": {},
     "get_core_context_tool": {},
@@ -60,6 +96,7 @@ def get_tool_registry() -> dict[str, Any]:
     builtins = _builtin_tool_items()
     generated = _generated_tool_items(_load_generated_tools(), builtin_names={item["name"] for item in builtins})
     tools = [*builtins, *generated]
+    tools = [_with_agent_scope_states(item) for item in tools]
     counts = {
         "total": len(tools),
         "builtIn": len(builtins),
@@ -74,6 +111,7 @@ def get_tool_registry() -> dict[str, Any]:
         "mode": "safe_manifest_registry",
         "storagePath": _relative_project_path(GENERATED_TOOLS_PATH),
         "counts": counts,
+        "agentScopes": _agent_scope_summaries(tools),
         "tools": tools,
     }
 
@@ -203,7 +241,7 @@ def delete_tool(tool_id: str) -> dict[str, Any]:
     return delete_generated_tool(normalized)
 
 
-def test_tool(tool_id: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str | None = None) -> dict[str, Any]:
     """Run a controlled test call for one tool.
 
     Generated tools use their manifest response template. Built-ins only run when
@@ -211,8 +249,43 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None) -> dict[str, Any
     """
 
     normalized = _normalize_tool_id(tool_id)
+    scope_id = _normalize_agent_scope_id(agent_scope)
+    scope_summary = _agent_scope_summary(scope_id)
     builtin_names = _builtin_tool_names()
     if normalized in builtin_names:
+        item = _with_agent_scope_states(next(tool for tool in _builtin_tool_items() if tool["name"] == normalized))
+        scope_block = _agent_scope_test_block(item, scope_id)
+        if scope_block:
+            compatibility = _agent_compatibility_result(
+                status="blocked",
+                callable=False,
+                message=scope_block,
+                tool_name=normalized,
+                args={},
+            )
+            _record_registry_event(
+                "tool_registry.test.blocked",
+                "Tool test was blocked by agent scope policy.",
+                tool_id=normalized,
+                status="blocked",
+                outcome="blocked",
+                level="warning",
+                fields={"source": "built_in", "agentScope": scope_id},
+            )
+            return {
+                "toolId": normalized,
+                "source": "built_in",
+                "status": "blocked",
+                "called": False,
+                "callable": False,
+                "message": scope_block,
+                "resultPreview": "",
+                "argsUsed": {},
+                "testPolicy": item["testPolicy"],
+                "agentCompatibility": compatibility,
+                "agentScope": scope_summary,
+                "timeout": _timeout_metadata(False, TOOL_TEST_TIMEOUT_SECONDS, 0),
+            }
         if normalized not in SAFE_BUILTIN_TEST_ARGS:
             test_policy = _builtin_test_policy(normalized)
             compatibility = _agent_compatibility_result(
@@ -242,6 +315,7 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None) -> dict[str, Any
                 "argsUsed": {},
                 "testPolicy": test_policy,
                 "agentCompatibility": compatibility,
+                "agentScope": scope_summary,
                 "timeout": _timeout_metadata(False, TOOL_TEST_TIMEOUT_SECONDS, 0),
             }
 
@@ -252,12 +326,37 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None) -> dict[str, Any
             source="built_in",
             test_policy=test_policy,
             args_used=test_args,
+            agent_scope=scope_summary,
             run=lambda: _test_safe_builtin_tool(normalized, test_args, test_policy),
         )
 
     records = _load_generated_tools()
     _, record = _find_generated_record(records, normalized)
     item = _generated_tool_item(record, builtin_names=builtin_names)
+    scoped_item = _with_agent_scope_states(item)
+    scope_block = _agent_scope_test_block(scoped_item, scope_id)
+    if scope_block:
+        compatibility = _agent_compatibility_result(
+            status="blocked",
+            callable=False,
+            message=scope_block,
+            tool_name=normalized,
+            args={},
+        )
+        return {
+            "toolId": normalized,
+            "source": "generated",
+            "status": "blocked",
+            "called": False,
+            "callable": False,
+            "message": scope_block,
+            "resultPreview": "",
+            "argsUsed": {},
+            "testPolicy": scoped_item["testPolicy"],
+            "agentCompatibility": compatibility,
+            "agentScope": scope_summary,
+            "timeout": _timeout_metadata(False, TOOL_TEST_TIMEOUT_SECONDS, 0),
+        }
     if not item["validated"]:
         raise ToolRegistryError("Generated tool must be validated before testing")
     supplied_args = args if isinstance(args, dict) else {}
@@ -268,6 +367,7 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None) -> dict[str, Any
         source="generated",
         test_policy=item["testPolicy"],
         args_used=supplied_args,
+        agent_scope=scope_summary,
         run=lambda: _test_generated_tool_manifest(normalized, item, supplied_args, result_text),
     )
 
@@ -368,6 +468,7 @@ def _run_tool_test_with_timeout(
     source: str,
     test_policy: dict[str, Any],
     args_used: dict[str, Any],
+    agent_scope: dict[str, Any],
     run: Any,
 ) -> dict[str, Any]:
     timeout_seconds = _effective_tool_test_timeout()
@@ -418,6 +519,7 @@ def _run_tool_test_with_timeout(
             "argsUsed": args_used,
             "testPolicy": test_policy,
             "agentCompatibility": compatibility,
+            "agentScope": agent_scope,
             "timeout": _timeout_metadata(True, timeout_seconds, duration_ms),
         }
 
@@ -458,6 +560,7 @@ def _run_tool_test_with_timeout(
             "argsUsed": args_used,
             "testPolicy": test_policy,
             "agentCompatibility": compatibility,
+            "agentScope": agent_scope,
             "timeout": _timeout_metadata(False, timeout_seconds, duration_ms),
         }
 
@@ -465,6 +568,7 @@ def _run_tool_test_with_timeout(
     payload = value if isinstance(value, dict) else {}
     event_fields = payload.pop("_eventFields", {})
     payload["timeout"] = _timeout_metadata(False, timeout_seconds, duration_ms)
+    payload["agentScope"] = agent_scope
     _record_completed_tool_test(
         tool_name,
         source=source,
@@ -495,6 +599,7 @@ def _record_completed_tool_test(
     elif source == "generated":
         message = "Generated tool manifest test executed."
     compatibility = payload.get("agentCompatibility") if isinstance(payload.get("agentCompatibility"), dict) else {}
+    agent_scope = payload.get("agentScope") if isinstance(payload.get("agentScope"), dict) else {}
     _record_registry_event(
         "tool_registry.test.executed",
         message,
@@ -506,6 +611,7 @@ def _record_completed_tool_test(
             "source": source,
             "testPolicy": str(test_policy.get("mode") or ""),
             "agentCompatibility": str(compatibility.get("status") or ""),
+            "agentScope": str(agent_scope.get("id") or MAIN_AGENT_SCOPE_ID),
             "durationMs": duration_ms,
             **event_fields,
         },
@@ -743,6 +849,128 @@ def _generated_test_policy(validated: bool) -> dict[str, Any]:
         "reason": "Generated tool tests validate the manifest response template without executing browser-submitted code.",
         "argsPreview": {},
     }
+
+
+def _normalize_agent_scope_id(agent_scope: object) -> str:
+    scope_id = str(agent_scope or "").strip()
+    if any(scope["id"] == scope_id for scope in AGENT_SCOPE_DEFINITIONS):
+        return scope_id
+    return MAIN_AGENT_SCOPE_ID
+
+
+def _agent_scope_summary(scope_id: str, counts: dict[str, int] | None = None) -> dict[str, Any]:
+    normalized = _normalize_agent_scope_id(scope_id)
+    definition = next(scope for scope in AGENT_SCOPE_DEFINITIONS if scope["id"] == normalized)
+    return {
+        **definition,
+        "counts": counts
+        or {
+            "total": 0,
+            "visible": 0,
+            "callable": 0,
+            "blocked": 0,
+        },
+    }
+
+
+def _agent_scope_summaries(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summaries: list[dict[str, Any]] = []
+    for definition in AGENT_SCOPE_DEFINITIONS:
+        scope_id = str(definition["id"])
+        states = [
+            item.get("agentScopes", {}).get(scope_id, {})
+            for item in tools
+            if isinstance(item.get("agentScopes"), dict)
+        ]
+        visible_count = sum(1 for state in states if state.get("visible"))
+        callable_count = sum(1 for state in states if state.get("callable"))
+        blocked_count = sum(1 for state in states if state.get("visible") and not state.get("callable"))
+        summaries.append(
+            _agent_scope_summary(
+                scope_id,
+                counts={
+                    "total": len(tools),
+                    "visible": visible_count,
+                    "callable": callable_count,
+                    "blocked": blocked_count,
+                },
+            )
+        )
+    return summaries
+
+
+def _with_agent_scope_states(item: dict[str, Any]) -> dict[str, Any]:
+    scoped = dict(item)
+    scoped["agentScopes"] = {
+        str(definition["id"]): _agent_scope_state_for_tool(scoped, str(definition["id"]))
+        for definition in AGENT_SCOPE_DEFINITIONS
+    }
+    return scoped
+
+
+def _agent_scope_state_for_tool(item: dict[str, Any], scope_id: str) -> dict[str, Any]:
+    normalized = _normalize_agent_scope_id(scope_id)
+    test_policy = item.get("testPolicy") if isinstance(item.get("testPolicy"), dict) else {}
+    llm_visible = bool(item.get("llmVisible"))
+    runtime_active = bool(item.get("runtimeActive"))
+    testable = bool(test_policy.get("callable"))
+
+    if normalized == MAIN_AGENT_SCOPE_ID:
+        callable_by_agent = runtime_active or (item.get("source") == "generated" and bool(item.get("validated")))
+        block_reason = "" if callable_by_agent else str(item.get("blockReason") or item.get("validationError") or "")
+        return {
+            "visible": True,
+            "callable": callable_by_agent,
+            "llmVisible": llm_visible,
+            "runtimeActive": runtime_active,
+            "testable": testable,
+            "blockReason": block_reason,
+        }
+
+    visible = llm_visible or (item.get("source") == "generated" and bool(item.get("validated")))
+    block_reason = ""
+    callable_by_agent = bool(visible)
+    readonly_block = _readonly_subagent_block_reason(str(item.get("name") or item.get("id") or ""))
+    if readonly_block:
+        callable_by_agent = False
+        block_reason = readonly_block
+    elif not visible:
+        callable_by_agent = False
+        block_reason = "Tool is not visible to this agent scope."
+
+    return {
+        "visible": visible,
+        "callable": callable_by_agent,
+        "llmVisible": llm_visible,
+        "runtimeActive": runtime_active,
+        "testable": testable and callable_by_agent,
+        "blockReason": block_reason,
+    }
+
+
+def _agent_scope_test_block(item: dict[str, Any], scope_id: str) -> str:
+    normalized = _normalize_agent_scope_id(scope_id)
+    state = item.get("agentScopes", {}).get(normalized, {}) if isinstance(item.get("agentScopes"), dict) else {}
+    if state.get("callable"):
+        return ""
+    return str(state.get("blockReason") or "Tool is not callable in the selected agent scope.")
+
+
+def _readonly_subagent_block_reason(tool_name: str) -> str:
+    normalized = str(tool_name or "").strip()
+    if not normalized:
+        return ""
+    try:
+        from core.infrastructure.tool_executor import ToolExecutor
+
+        blocked_tools = ToolExecutor._READ_ONLY_BLOCKED_TOOLS
+    except Exception:
+        blocked_tools = set()
+    if normalized not in blocked_tools:
+        return ""
+    if normalized == "spawn_agent_tool":
+        return "[只读子代理] 当前子 agent 运行在只读模式，禁止继续派发子 agent。"
+    return f"[只读子代理] 当前子 agent 运行在只读模式，禁止调用 `{normalized}`。"
 
 
 def _normalize_generated_payload(payload: dict[str, Any]) -> dict[str, Any]:
