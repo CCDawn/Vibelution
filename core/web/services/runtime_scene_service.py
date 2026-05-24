@@ -175,6 +175,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
         artifacts = _list_artifacts(scene_dir)
         event_logs = _list_event_logs(scene_dir)
         package_index = _runtime_scene_package_index(scene_dir, manifest, scene_id)
+        _sync_runtime_scene_package_sidecars_if_stale(scene_dir, manifest, package_index)
         severity_summary = _runtime_scene_severity_summary(timeline)
         scenes.append(
             {
@@ -227,6 +228,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
     artifacts = _list_artifacts(scene_dir)
     event_logs = _list_event_logs(scene_dir)
     package_index = _runtime_scene_package_index(scene_dir, manifest, detail_scene_id)
+    _sync_runtime_scene_package_sidecars_if_stale(scene_dir, manifest, package_index)
     return {
         "runtimeSceneId": detail_scene_id,
         "directoryName": scene_dir.name,
@@ -732,7 +734,12 @@ def _save_scene_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
 
 def _save_runtime_scene_package_index(scene_dir: Path, package_index: dict[str, Any]) -> None:
     index_path = scene_dir / PACKAGE_INDEX_PATH
-    payload = {
+    payload = _runtime_scene_package_index_payload(package_index)
+    index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _runtime_scene_package_index_payload(package_index: dict[str, Any]) -> dict[str, Any]:
+    return {
         "schema_version": package_index["schemaVersion"],
         "package_id": package_index["packageId"],
         "display_name": package_index["displayName"],
@@ -753,7 +760,6 @@ def _save_runtime_scene_package_index(scene_dir: Path, package_index: dict[str, 
         "agent_dir": AGENT_DIR,
         "artifacts_dir": ARTIFACTS_DIR,
     }
-    index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _save_runtime_scene_summary(scene_dir: Path, manifest: dict[str, Any], package_index: dict[str, Any]) -> None:
@@ -815,6 +821,58 @@ def _runtime_scene_summary_payload(
         },
         "generated_at": _now_utc(),
     }
+
+
+def _sync_runtime_scene_package_sidecars_if_stale(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    package_index: dict[str, Any],
+) -> None:
+    if not _runtime_scene_package_sidecars_are_stale(scene_dir, manifest, package_index):
+        return
+    try:
+        _update_runtime_scene_package_manifest(scene_dir, manifest)
+    except OSError:
+        return
+
+
+def _runtime_scene_package_sidecars_are_stale(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    package_index: dict[str, Any],
+) -> bool:
+    expected_index = _runtime_scene_package_index_payload(package_index)
+    actual_index = _load_scene_json(scene_dir / PACKAGE_INDEX_PATH)
+    for key, expected_value in expected_index.items():
+        if actual_index.get(key) != expected_value:
+            return True
+
+    expected_summary = _runtime_scene_summary_payload(scene_dir, manifest, package_index)
+    actual_summary = _load_scene_json(scene_dir / SUMMARY_PATH)
+    for key, expected_value in expected_summary.items():
+        if key == "generated_at":
+            continue
+        if actual_summary.get(key) != expected_value:
+            return True
+
+    package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    expected_package_values = {
+        "index_schema_version": package_index["schemaVersion"],
+        "package_id": package_index["packageId"],
+        "display_name": package_index["displayName"],
+        "index_key": package_index["indexKey"],
+        "summary_path": SUMMARY_PATH,
+        "package_index_path": PACKAGE_INDEX_PATH,
+    }
+    return any(package.get(key) != expected_value for key, expected_value in expected_package_values.items())
+
+
+def _load_scene_json(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:

@@ -241,3 +241,42 @@ def test_runtime_scene_status_defaults_to_running_until_ended(tmp_path, monkeypa
     assert scenes[0]["status"] == "running"
     assert scenes[0]["startedAt"] == "2026-05-24T12:00:01Z"
     assert detail["status"] == "running"
+
+
+def test_runtime_scene_detail_refreshes_stale_package_sidecars(tmp_path, monkeypatch):
+    scene_id = "stale-sidecars-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
+    scene_dir.mkdir(parents=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T12:00:01Z",
+                "ended_at": "",
+                "status": "unknown",
+                "trigger": "internal-start",
+                "project_root": str(tmp_path),
+                "package": {
+                    "index_key": "stale",
+                    "package_index_path": "package_index.json",
+                    "summary_path": "summary.json",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    scene_dir.joinpath("package_index.json").write_text('{"index_key":"stale"}', encoding="utf-8")
+    scene_dir.joinpath("summary.json").write_text('{"package_id":"stale"}', encoding="utf-8")
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    manifest = json.loads(scene_dir.joinpath("manifest.json").read_text(encoding="utf-8"))
+    package_index = json.loads(scene_dir.joinpath("package_index.json").read_text(encoding="utf-8"))
+    summary = json.loads(scene_dir.joinpath("summary.json").read_text(encoding="utf-8"))
+    assert detail["status"] == "running"
+    assert package_index["package_id"] == scene_id
+    assert package_index["index_key"] == detail["packageIndex"]["indexKey"]
+    assert summary["package_id"] == scene_id
+    assert summary["display_name"] == detail["packageIndex"]["displayName"]
+    assert manifest["package"]["index_key"] == detail["packageIndex"]["indexKey"]

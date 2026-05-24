@@ -387,6 +387,26 @@ function Get-RuntimeSceneStatusDisplayLabel {
     }
 }
 
+function Get-RuntimeSceneEffectiveStatus {
+    param(
+        [string]$Status,
+        [string]$EndedAt = "",
+        [string]$Default = "unknown"
+    )
+
+    $normalizedStatus = ([string]$Status).Trim().ToLowerInvariant()
+    if ($normalizedStatus -and $normalizedStatus -ne "unknown") {
+        return $normalizedStatus
+    }
+    if (-not ([string]$EndedAt).Trim()) {
+        return "running"
+    }
+    if ($normalizedStatus) {
+        return $normalizedStatus
+    }
+    return $Default
+}
+
 function Get-RuntimeSceneTriggerDisplayLabel {
     param([string]$Trigger)
 
@@ -420,18 +440,19 @@ function Get-RuntimeScenePackageIndex {
     )
 
     $localStarted = $StartedAt.ToLocalTime()
+    $effectiveStatus = Get-RuntimeSceneEffectiveStatus -Status $Status -EndedAt $EndedAt -Default "unknown"
     $startedDate = $localStarted.ToString("yyyy-MM-dd")
     $startedTime = $localStarted.ToString("HH:mm:ss")
     $triggerToken = Get-RuntimeSceneTriggerIndexToken -Trigger $Trigger
-    $statusToken = Get-RuntimeSceneStatusIndexToken -Status $Status -Result $Result -StopReason $StopReason
-    $displayName = "{0} {1} · {2} · {3}" -f $startedDate, $startedTime, (Get-RuntimeSceneTriggerDisplayLabel -Trigger $Trigger), (Get-RuntimeSceneStatusDisplayLabel -Status $Status -Result $Result -StopReason $StopReason)
+    $statusToken = Get-RuntimeSceneStatusIndexToken -Status $effectiveStatus -Result $Result -StopReason $StopReason
+    $displayName = "{0} {1} · {2} · {3}" -f $startedDate, $startedTime, (Get-RuntimeSceneTriggerDisplayLabel -Trigger $Trigger), (Get-RuntimeSceneStatusDisplayLabel -Status $effectiveStatus -Result $Result -StopReason $StopReason)
     $indexKey = "{0}_{1}_{2}_{3}" -f $startedDate, ($startedTime -replace ":", "-"), $triggerToken, $statusToken
     $tags = @(
         "runtime-scene",
         "workbench-lifecycle",
         $triggerToken,
         $statusToken,
-        (ConvertTo-RuntimeSceneIndexToken -Value $Status -Default ""),
+        (ConvertTo-RuntimeSceneIndexToken -Value $effectiveStatus -Default ""),
         (ConvertTo-RuntimeSceneIndexToken -Value $Result -Default ""),
         (ConvertTo-RuntimeSceneIndexToken -Value $Trigger -Default ""),
         "managed"
@@ -455,7 +476,7 @@ function Get-RuntimeScenePackageIndex {
         $startedDate,
         $startedTime,
         $Trigger,
-        $Status,
+        $effectiveStatus,
         $Result,
         $StopReason
     ) | Where-Object { $_ }
@@ -484,10 +505,7 @@ function Get-RuntimeScenePackageSummary {
         [hashtable]$PackageIndex
     )
 
-    $status = [string]$Manifest.status
-    if (-not $status) {
-        $status = "unknown"
-    }
+    $status = Get-RuntimeSceneEffectiveStatus -Status ([string]$Manifest.status) -EndedAt ([string]$Manifest.ended_at) -Default "unknown"
 
     $timelineEvents = Get-RuntimeSceneJsonlEventCount -RelativePath "timeline.jsonl"
     $lifecycleEvents = Get-RuntimeSceneJsonlEventCount -RelativePath "lifecycle.jsonl"
@@ -501,9 +519,9 @@ function Get-RuntimeScenePackageSummary {
         display_name = [string]$PackageIndex.display_name
         index_key = [string]$PackageIndex.index_key
         status = $status
-        result = [string]$Manifest.result
-        stop_reason = [string]$Manifest.stop_reason
-        trigger = [string]$Manifest.trigger
+        result = Get-HashtableStringValue -Table $Manifest -Key "result"
+        stop_reason = Get-HashtableStringValue -Table $Manifest -Key "stop_reason"
+        trigger = Get-HashtableStringValue -Table $Manifest -Key "trigger"
         started_at = [string]$PackageIndex.started_at
         started_at_local = [string]$PackageIndex.started_at_local
         started_date = [string]$PackageIndex.started_date
@@ -599,6 +617,19 @@ function Get-RuntimeScenePackageSummary {
         }
         generated_at = (Get-Date).ToUniversalTime().ToString("o")
     }
+}
+
+function Get-HashtableStringValue {
+    param(
+        [hashtable]$Table,
+        [string]$Key,
+        [string]$Default = ""
+    )
+
+    if ($Table -and $Table.ContainsKey($Key)) {
+        return [string]$Table[$Key]
+    }
+    return $Default
 }
 
 function Get-RuntimeSceneJsonlEventCount {
@@ -870,10 +901,10 @@ function Save-RuntimeSceneManifest {
     if ($Manifest.ContainsKey("started_at")) {
         try {
             $startedAt = [datetime]$Manifest.started_at
-            $status = [string]$Manifest.status
-            $result = [string]$Manifest.result
-            $stopReason = [string]$Manifest.stop_reason
-            $endedAt = [string]$Manifest.ended_at
+            $status = Get-HashtableStringValue -Table $Manifest -Key "status"
+            $result = Get-HashtableStringValue -Table $Manifest -Key "result"
+            $stopReason = Get-HashtableStringValue -Table $Manifest -Key "stop_reason"
+            $endedAt = Get-HashtableStringValue -Table $Manifest -Key "ended_at"
             $packageIndex = Get-RuntimeScenePackageIndex `
                 -SceneId ([string]$Manifest.runtime_scene_id) `
                 -StartedAt $startedAt `
