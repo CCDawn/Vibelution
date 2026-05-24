@@ -324,7 +324,8 @@ def test_workbench_home_routes_option_five_to_evolution_console(monkeypatch):
     assert len(calls) == 1
 
 
-def test_workbench_chat_evolution_mention_stays_in_chat(monkeypatch):
+def test_workbench_chat_evolution_mention_stays_in_chat(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("core.ui.workbench.PROJECT_ROOT", tmp_path)
     shell = AgentWorkbenchShell(config=SimpleNamespace(avatar=SimpleNamespace(preset="default")))
     fake_ui = _FakeUI()
     shell.ui = fake_ui
@@ -344,6 +345,10 @@ def test_workbench_chat_evolution_mention_stays_in_chat(monkeypatch):
     assert chat_calls == ["开始自主进化"]
     assert evolution_calls == []
     assert shell._recent_status == "已退出工作台"
+    state = load_chat_state(tmp_path)
+    active = state["conversations"][0]["messages"]
+    assert active[-2]["content"] == "开始自主进化"
+    assert active[-1]["content"] == "收到"
 
 
 def test_workbench_agent_self_evolution_entry_runs_agent_loop(monkeypatch):
