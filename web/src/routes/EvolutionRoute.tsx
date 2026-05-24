@@ -1834,6 +1834,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <span>{item.reviewState || "--"}</span>
             </article>
             <article className={styles.relatedRow}>
+              <strong>{t("riskLevel")}</strong>
+              <span>{item.riskLevel ? riskLabel(item.riskLevel) : "--"}</span>
+            </article>
+            <article className={styles.relatedRow}>
               <strong>supervised_required</strong>
               <span>{item.supervisedRequired ? "true" : "false"}</span>
             </article>

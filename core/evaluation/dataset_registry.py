@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from core.infrastructure.workspace_manager import get_workspace
 
 from .chat_case_lifecycle import chat_reviewed_dataset_metadata
+from .self_evolution_candidate_pool import ALLOWED_CANDIDATE_TYPES, list_candidate_records
 from .supervised_intake import (
     ALLOWED_SUPERVISED_CASE_TYPES,
     DYNAMIC_REPLANNING_CASE_TYPE,
@@ -24,6 +25,7 @@ from .supervised_intake import (
     generated_case_dataset_metadata,
     protected_dataset_boundary_fields,
     reviewed_chat_row_status,
+    self_evolution_candidate_risk_level,
 )
 from .supervised_evolution import (
     DEFAULT_BUNDLE_NAME,
@@ -71,9 +73,60 @@ class DatasetMaterialization:
     source_path: Optional[str] = None
 
 
+def list_pending_self_evolution_dataset_candidates(
+    project_root: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Return self-evolution candidates as pending supervised intake sources.
+
+    These records are visible to the supervised line and dataset registry, but
+    they are not registered datasets and cannot be materialized automatically.
+    """
+
+    root = (project_root or get_workspace().project_root).resolve()
+    rows: List[Dict[str, Any]] = []
+    for candidate_type in sorted(ALLOWED_CANDIDATE_TYPES):
+        for record in list_candidate_records(candidate_type, project_root=root):
+            if str(record.get("review_state") or "").strip().lower() != "pending":
+                continue
+            boundary = record.get("supervised_intake_boundary")
+            rows.append(
+                {
+                    "candidate_id": str(record.get("candidate_id") or "").strip(),
+                    "candidate_type": candidate_type,
+                    "source_run_id": str(record.get("source_run_id") or "").strip(),
+                    "txn_id": str(record.get("txn_id") or "").strip(),
+                    "provenance": record.get("provenance") if isinstance(record.get("provenance"), dict) else {},
+                    "review_state": "pending",
+                    "risk_level": self_evolution_candidate_risk_level(record.get("risk_level")),
+                    "allowed_downstream_uses": _text_list(record.get("allowed_downstream_uses")),
+                    "blocked_downstream_uses": _text_list(record.get("blocked_downstream_uses")),
+                    "supervised_required": True,
+                    "candidate_only": True,
+                    "auto_apply": False,
+                    "ingest_mode": "self_evolution_candidate",
+                    "pending_review_source": True,
+                    "accepted_baseline": False,
+                    "supervised_intake_boundary": boundary if isinstance(boundary, dict) else {},
+                    "source_path": str(record.get("target_path") or "").strip(),
+                    "created_at": str(record.get("created_at") or "").strip(),
+                }
+            )
+    return sorted(rows, key=lambda item: str(item.get("created_at") or ""), reverse=True)
+
+
 def _registry_path(project_root: Optional[Path] = None) -> Path:
     root = (project_root or get_workspace().project_root).resolve()
     return root / DATASET_REGISTRY_PATH
+
+
+def _text_list(value: Any) -> List[str]:
+    raw_items = value if isinstance(value, list) else [] if value is None else [value]
+    items: List[str] = []
+    for raw in raw_items:
+        item = str(raw or "").strip()
+        if item and item not in items:
+            items.append(item)
+    return items
 
 
 def _default_registry_payload() -> Dict[str, Any]:
@@ -738,6 +791,7 @@ __all__ = [
     "DatasetSpec",
     "ensure_dataset_registry",
     "get_dataset_spec",
+    "list_pending_self_evolution_dataset_candidates",
     "list_dataset_status",
     "load_dataset_specs",
     "materialize_dataset_bundle",

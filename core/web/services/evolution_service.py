@@ -14,6 +14,7 @@ from core.evaluation import (
     load_gym_promotion_lifecycle,
     load_workbench_state,
 )
+from core.evaluation.supervised_intake import self_evolution_candidate_risk_level
 from core.evaluation.self_evolution_candidate_pool import (
     ALLOWED_CANDIDATE_TYPES,
     list_candidate_records,
@@ -942,6 +943,7 @@ def _self_evolution_candidate_pending_item(record: dict[str, Any], *, lang: str)
     candidate_type = str(record.get("candidate_type") or "").strip()
     payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
     provenance = record.get("provenance") if isinstance(record.get("provenance"), dict) else {}
+    risk_level = self_evolution_candidate_risk_level(record.get("risk_level"))
     allowed_downstream_uses = _string_list(record.get("allowed_downstream_uses"))
     blocked_downstream_uses = _string_list(record.get("blocked_downstream_uses"))
     evidence_refs = _string_list(provenance.get("evidence_refs"))
@@ -962,6 +964,7 @@ def _self_evolution_candidate_pending_item(record: dict[str, Any], *, lang: str)
         "proposalStatus": SELF_EVOLUTION_CANDIDATE_STATUS,
         "runtimeEffect": "not_applied",
         "decision": "PENDING_REVIEW",
+        "riskLevel": risk_level,
         "targetKey": candidate_type,
         "targetLabel": target_label,
         "headline": text_for(
@@ -1088,7 +1091,7 @@ def _self_evolution_candidate_detail(record: dict[str, Any], *, lang: str) -> di
             "baselineScore": 0,
             "candidateScore": 0,
             "deltaScore": 0,
-            "riskLevel": "pending_review",
+            "riskLevel": item["riskLevel"],
             "riskReasons": [review_reason],
             "decisionReason": review_reason,
             "activeAdvisoryCount": 0,

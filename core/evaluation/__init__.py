@@ -39,6 +39,7 @@ from .dataset_registry import (
     ensure_dataset_registry,
     get_dataset_spec,
     list_dataset_status,
+    list_pending_self_evolution_dataset_candidates,
     load_dataset_specs,
     materialize_dataset_bundle,
 )
@@ -149,6 +150,7 @@ __all__ = [
     "ensure_dataset_registry",
     "get_dataset_spec",
     "list_dataset_status",
+    "list_pending_self_evolution_dataset_candidates",
     "load_dataset_specs",
     "materialize_dataset_bundle",
     "ChatSegment",

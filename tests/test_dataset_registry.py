@@ -8,9 +8,11 @@ import pytest
 
 from core.evaluation.dataset_registry import (
     ensure_dataset_registry,
+    list_pending_self_evolution_dataset_candidates,
     list_dataset_status,
     materialize_dataset_bundle,
 )
+from core.evaluation.self_evolution_candidate_pool import append_candidate_record
 
 
 def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
@@ -148,6 +150,69 @@ def test_dataset_registry_backfills_generated_case_boundary_metadata(tmp_path: P
         "regression_observation",
     ]
     assert row["intake_boundary"]["boundary_reasons"] == []
+
+
+def test_dataset_registry_lists_self_evolution_candidates_as_pending_intake_sources(tmp_path: Path):
+    append_candidate_record(
+        {
+            "candidate_id": "prompt_candidate:dataset-registry",
+            "candidate_type": "prompt_candidate",
+            "source_experience_id": "exp-registry",
+            "source_reflection_id": "refl-registry",
+            "source_run_id": "web-self-registry",
+            "txn_id": "txn-registry",
+            "risk_level": "medium",
+            "provenance": {
+                "source_run_id": "web-self-registry",
+                "evidence_refs": ["logs/runtime_scenes/pkg/agent/self_evolution_runs/web-self-registry.jsonl"],
+            },
+            "allowed_downstream_uses": ["supervised_review", "accepted_baseline"],
+            "blocked_downstream_uses": "manual_block",
+        },
+        project_root=tmp_path,
+    )
+
+    rows = list_pending_self_evolution_dataset_candidates(tmp_path)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["candidate_id"] == "prompt_candidate:dataset-registry"
+    assert row["source_run_id"] == "web-self-registry"
+    assert row["review_state"] == "pending"
+    assert row["risk_level"] == "medium"
+    assert row["candidate_only"] is True
+    assert row["supervised_required"] is True
+    assert row["auto_apply"] is False
+    assert row["pending_review_source"] is True
+    assert row["accepted_baseline"] is False
+    assert row["allowed_downstream_uses"] == ["supervised_review"]
+    assert "accepted_baseline" in row["blocked_downstream_uses"]
+    assert "manual_block" in row["blocked_downstream_uses"]
+    assert "m" not in row["blocked_downstream_uses"]
+    assert row["supervised_intake_boundary"]["contract"] == "self_evolution_candidate"
+    assert row["supervised_intake_boundary"]["risk_level"] == "medium"
+
+
+def test_dataset_registry_normalizes_legacy_self_evolution_candidate_risk(tmp_path: Path):
+    append_candidate_record(
+        {
+            "candidate_id": "skill_candidate:legacy-risk",
+            "candidate_type": "skill_candidate",
+            "source_experience_id": "exp-legacy-risk",
+            "source_run_id": "web-self-legacy-risk",
+            "risk_level": "accepted",
+            "provenance": {
+                "source_run_id": "web-self-legacy-risk",
+                "evidence_refs": ["reflection:web-self-legacy-risk"],
+            },
+        },
+        project_root=tmp_path,
+    )
+
+    row = list_pending_self_evolution_dataset_candidates(tmp_path)[0]
+
+    assert row["risk_level"] == "pending_review"
+    assert row["supervised_intake_boundary"]["risk_level"] == "pending_review"
 
 
 def test_ensure_dataset_registry_bootstraps_generated_and_chat_sources(tmp_path: Path):
