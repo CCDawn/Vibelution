@@ -722,20 +722,28 @@ def _case_diagnostics(record) -> list[dict[str, Any]]:
             continue
         metrics = case.get("difference_metrics") if isinstance(case.get("difference_metrics"), dict) else {}
         reasons = case.get("difference_reasons") if isinstance(case.get("difference_reasons"), list) else []
+        score_breakdown = case.get("score_breakdown") if isinstance(case.get("score_breakdown"), dict) else {}
+        failure_taxonomy = case.get("failure_taxonomy") if isinstance(case.get("failure_taxonomy"), list) else []
+        evidence_paths = case.get("evidence_paths") if isinstance(case.get("evidence_paths"), dict) else {}
         summary = str(case.get("difference_summary") or "")
-        if not summary and not metrics and not reasons:
+        if not summary and not metrics and not reasons and not score_breakdown and not failure_taxonomy and not evidence_paths:
             continue
-        diagnostics.append(
-            {
-                "caseId": str(case.get("case_id") or ""),
-                "baselineStatus": str(case.get("baseline_status") or ""),
-                "candidateStatus": str(case.get("candidate_status") or ""),
-                "decisionSignal": str(case.get("decision_signal") or ""),
-                "summary": summary,
-                "metrics": metrics,
-                "reasons": [str(item) for item in reasons],
-            }
-        )
+        diagnostic = {
+            "caseId": str(case.get("case_id") or ""),
+            "baselineStatus": str(case.get("baseline_status") or ""),
+            "candidateStatus": str(case.get("candidate_status") or ""),
+            "decisionSignal": str(case.get("decision_signal") or ""),
+            "summary": summary,
+            "metrics": metrics,
+            "reasons": [str(item) for item in reasons],
+        }
+        if score_breakdown:
+            diagnostic["scoreBreakdown"] = score_breakdown
+        if failure_taxonomy:
+            diagnostic["failureTaxonomy"] = [str(item) for item in failure_taxonomy]
+        if evidence_paths:
+            diagnostic["evidencePaths"] = evidence_paths
+        diagnostics.append(diagnostic)
     return diagnostics
 
 

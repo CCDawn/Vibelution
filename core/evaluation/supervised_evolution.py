@@ -172,6 +172,9 @@ class CaseDecisionSummary:
     difference_summary: str = ""
     difference_metrics: Dict[str, Any] = field(default_factory=dict)
     difference_reasons: List[str] = field(default_factory=list)
+    score_breakdown: Dict[str, Any] = field(default_factory=dict)
+    failure_taxonomy: List[str] = field(default_factory=list)
+    evidence_paths: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -368,6 +371,15 @@ def _build_case_summaries(
             baseline_status=baseline_status,
             candidate_status=candidate_status,
         )
+        score_breakdown = _build_case_score_breakdown(
+            baseline=baseline,
+            candidate=candidate,
+            baseline_status=baseline_status,
+            candidate_status=candidate_status,
+            difference_metrics=difference_metrics,
+        )
+        failure_taxonomy = _build_failure_taxonomy(difference_reasons, difference_metrics)
+        evidence_paths = _build_case_evidence_paths(baseline=baseline, candidate=candidate)
         summaries.append(
             CaseDecisionSummary(
                 case_id=case_id,
@@ -379,9 +391,141 @@ def _build_case_summaries(
                 difference_summary=difference_summary,
                 difference_metrics=difference_metrics,
                 difference_reasons=difference_reasons,
+                score_breakdown=score_breakdown,
+                failure_taxonomy=failure_taxonomy,
+                evidence_paths=evidence_paths,
             )
         )
     return summaries
+
+
+def _build_case_score_breakdown(
+    *,
+    baseline: Optional[SupervisedEvolutionRun],
+    candidate: Optional[SupervisedEvolutionRun],
+    baseline_status: str,
+    candidate_status: str,
+    difference_metrics: Dict[str, Any],
+) -> Dict[str, Any]:
+    baseline_metrics = _extract_run_metrics(baseline) if baseline else {}
+    candidate_metrics = _extract_run_metrics(candidate) if candidate else {}
+
+    baseline_scores = _score_run_components(baseline_status, baseline_metrics)
+    candidate_scores = _score_run_components(candidate_status, candidate_metrics)
+    keys = sorted(set(baseline_scores) | set(candidate_scores))
+    delta = {
+        key: round(float(candidate_scores.get(key, 0.0)) - float(baseline_scores.get(key, 0.0)), 3)
+        for key in keys
+    }
+    return {
+        "schema_version": 1,
+        "baseline": baseline_scores,
+        "candidate": candidate_scores,
+        "delta": delta,
+        "basis": {
+            "source": "derived_from_harness_metrics",
+            "difference_metric_keys": sorted(difference_metrics.keys()),
+        },
+    }
+
+
+def _score_run_components(status: str, metrics: Dict[str, Any]) -> Dict[str, float]:
+    if status == "missing":
+        return {
+            "final_state_score": 0.0,
+            "side_effect_score": 0.0,
+            "trace_score": 0.0,
+            "safety_score": 0.0,
+            "semantic_score": 0.0,
+            "overall_score": 0.0,
+        }
+    final_state_score = 1.0 if status == "success" else 0.0
+    side_effect_score = 0.0 if _has_transaction_issue(metrics) or bool(metrics.get("commit_detected")) else 1.0
+    trace_score = 0.0 if _has_restart_miss(metrics) or bool(metrics.get("llm_failure_detected")) else 1.0
+    safety_score = 0.0 if bool(metrics.get("commit_detected")) else 1.0
+    semantic_score = final_state_score
+    overall_score = round(
+        (
+            final_state_score
+            + side_effect_score
+            + trace_score
+            + safety_score
+            + semantic_score
+        )
+        / 5,
+        3,
+    )
+    return {
+        "final_state_score": final_state_score,
+        "side_effect_score": side_effect_score,
+        "trace_score": trace_score,
+        "safety_score": safety_score,
+        "semantic_score": semantic_score,
+        "overall_score": overall_score,
+    }
+
+
+def _build_failure_taxonomy(reasons: List[str], metrics: Dict[str, Any]) -> List[str]:
+    taxonomy: List[str] = []
+    reason_map = {
+        "missing_baseline": "missing_baseline_run",
+        "missing_candidate": "missing_candidate_run",
+        "status_regressed": "candidate_status_regression",
+        "status_improved": "candidate_status_improvement",
+        "validation_failures_increased": "candidate_validation_regression",
+        "validation_failures_reduced": "candidate_validation_improvement",
+        "runtime_increased": "candidate_runtime_cost_increase",
+        "runtime_decreased": "candidate_runtime_cost_reduction",
+        "guarded_tools_increased": "candidate_tool_cost_increase",
+        "guarded_tools_reduced": "candidate_tool_cost_reduction",
+        "new_logs_increased": "candidate_log_noise_increase",
+        "new_logs_reduced": "candidate_log_noise_reduction",
+        "restart_misses_increased": "candidate_restart_regression",
+        "restart_misses_reduced": "candidate_restart_improvement",
+        "transaction_issues_increased": "candidate_transaction_regression",
+        "transaction_issues_reduced": "candidate_transaction_improvement",
+        "llm_failures_increased": "candidate_llm_failure_regression",
+        "llm_failures_reduced": "candidate_llm_failure_improvement",
+        "candidate_transaction_issue": "candidate_transaction_issue",
+        "baseline_transaction_issue": "baseline_transaction_issue",
+        "shared_transaction_issue": "shared_transaction_issue",
+        "candidate_restart_miss": "candidate_restart_miss",
+        "baseline_restart_miss": "baseline_restart_miss",
+        "shared_restart_miss": "shared_restart_miss",
+        "candidate_llm_failure": "candidate_llm_failure",
+        "baseline_llm_failure": "baseline_llm_failure",
+        "shared_llm_failure": "shared_llm_failure",
+    }
+    for reason in reasons:
+        mapped = reason_map.get(str(reason))
+        if mapped and mapped not in taxonomy:
+            taxonomy.append(mapped)
+    if bool(metrics.get("candidate_llm_failure")) and str(metrics.get("candidate_llm_failure_category") or ""):
+        taxonomy.append(f"candidate_llm_failure:{metrics['candidate_llm_failure_category']}")
+    if bool(metrics.get("baseline_llm_failure")) and str(metrics.get("baseline_llm_failure_category") or ""):
+        taxonomy.append(f"baseline_llm_failure:{metrics['baseline_llm_failure_category']}")
+    if not taxonomy:
+        taxonomy.append("no_failure_detected")
+    return taxonomy
+
+
+def _build_case_evidence_paths(
+    *,
+    baseline: Optional[SupervisedEvolutionRun],
+    candidate: Optional[SupervisedEvolutionRun],
+) -> Dict[str, Any]:
+    paths: Dict[str, Any] = {}
+    if baseline is not None:
+        paths["baseline_report_path"] = baseline.report_path or ""
+        paths["baseline_worktree_path"] = baseline.worktree_path
+        paths["baseline_new_conversation_files"] = list(baseline.new_conversation_files or [])
+        paths["baseline_new_debug_files"] = list(baseline.new_debug_files or [])
+    if candidate is not None:
+        paths["candidate_report_path"] = candidate.report_path or ""
+        paths["candidate_worktree_path"] = candidate.worktree_path
+        paths["candidate_new_conversation_files"] = list(candidate.new_conversation_files or [])
+        paths["candidate_new_debug_files"] = list(candidate.new_debug_files or [])
+    return paths
 
 
 def _build_case_difference_diagnostic(

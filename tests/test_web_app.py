@@ -8826,6 +8826,16 @@ def _write_supervised_decision_record(project_root: Path, session_id: str, overr
                 "difference_summary": "candidate 与 baseline 同为 success，validation 持平，runtime +1.0s。",
                 "difference_metrics": {"wall_clock_seconds_delta": 1.0},
                 "difference_reasons": ["same_status"],
+                "score_breakdown": {
+                    "baseline": {"overall_score": 1.0, "final_state_score": 1.0},
+                    "candidate": {"overall_score": 0.95, "final_state_score": 1.0},
+                    "delta": {"overall_score": -0.05},
+                },
+                "failure_taxonomy": ["same_status"],
+                "evidence_paths": {
+                    "baseline_report_path": "workspace/supervised_evolution/sessions/demo/baseline.json",
+                    "candidate_report_path": "workspace/supervised_evolution/sessions/demo/candidate.json",
+                },
             }
         ],
         "gates": [],
@@ -8846,6 +8856,16 @@ def _assert_seeded_case_diagnostic(diagnostic: dict) -> None:
         "summary": "candidate 与 baseline 同为 success，validation 持平，runtime +1.0s。",
         "metrics": {"wall_clock_seconds_delta": 1.0},
         "reasons": ["same_status"],
+        "scoreBreakdown": {
+            "baseline": {"overall_score": 1.0, "final_state_score": 1.0},
+            "candidate": {"overall_score": 0.95, "final_state_score": 1.0},
+            "delta": {"overall_score": -0.05},
+        },
+        "failureTaxonomy": ["same_status"],
+        "evidencePaths": {
+            "baseline_report_path": "workspace/supervised_evolution/sessions/demo/baseline.json",
+            "candidate_report_path": "workspace/supervised_evolution/sessions/demo/candidate.json",
+        },
     }
 
 

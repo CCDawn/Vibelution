@@ -192,14 +192,27 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert proposal["difference_summary"] == decision.case_summaries[0].difference_summary
     assert proposal["difference_metrics"] == decision.case_summaries[0].difference_metrics
     assert proposal["difference_reasons"] == decision.case_summaries[0].difference_reasons
+    assert proposal["score_breakdown"] == decision.case_summaries[0].score_breakdown
+    assert proposal["failure_taxonomy"] == decision.case_summaries[0].failure_taxonomy
+    assert proposal["evidence_paths"] == decision.case_summaries[0].evidence_paths
     assert proposal["baseline_status"] == "success"
     assert proposal["candidate_status"] == "success"
     assert proposal["target"]["kind"] == "bundle_prompt_case"
     assert proposal["lineage"]["parent_baseline_id"] is None
+    case_summary = decision.case_summaries[0]
+    assert case_summary.score_breakdown["baseline"]["final_state_score"] == 1.0
+    assert case_summary.score_breakdown["candidate"]["final_state_score"] == 1.0
+    assert case_summary.score_breakdown["delta"]["overall_score"] == 0.0
+    assert case_summary.failure_taxonomy == ["no_failure_detected"]
+    assert Path(case_summary.evidence_paths["baseline_report_path"]).exists()
+    assert Path(case_summary.evidence_paths["candidate_report_path"]).exists()
     policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
     assert policy_record["case_evidence"][0]["case_id"] == "probe"
     assert policy_record["case_evidence"][0]["proposal_status"] == "observing"
     assert policy_record["case_evidence"][0]["difference_summary"] == decision.case_summaries[0].difference_summary
+    assert policy_record["case_evidence"][0]["score_breakdown"] == decision.case_summaries[0].score_breakdown
+    assert policy_record["case_evidence"][0]["failure_taxonomy"] == decision.case_summaries[0].failure_taxonomy
+    assert policy_record["case_evidence"][0]["evidence_paths"] == decision.case_summaries[0].evidence_paths
     lineage_index_path = Path(decision.policy_action["lineage_index_path"])
     assert lineage_index_path.exists()
     lineage_index = json.loads(lineage_index_path.read_text(encoding="utf-8"))
@@ -241,6 +254,9 @@ def test_selection_policy_proposal_path_is_safe_for_unsafe_case_id(tmp_path: Pat
         difference_summary="stable success",
         difference_metrics={},
         difference_reasons=[],
+        score_breakdown={},
+        failure_taxonomy=[],
+        evidence_paths={},
     )
     decision = SimpleNamespace(
         decision="HOLD",
@@ -821,6 +837,8 @@ def test_run_supervised_evolution_session_is_inconclusive_when_baseline_and_cand
     assert decision.case_summaries[0].difference_metrics["baseline_transaction_issue"] is True
     assert decision.case_summaries[0].difference_metrics["candidate_transaction_issue"] is True
     assert "shared_transaction_issue" in decision.case_summaries[0].difference_reasons
+    assert "shared_transaction_issue" in decision.case_summaries[0].failure_taxonomy
+    assert decision.case_summaries[0].score_breakdown["candidate"]["side_effect_score"] == 0.0
     assert decision.gates[0].name == "legality"
     assert decision.gates[0].status == "fail"
     assert decision.gates[0].metrics["baseline_transaction_issues"] == 1
@@ -896,6 +914,8 @@ def test_run_supervised_evolution_session_reports_provider_transport_as_infrastr
     assert decision.gates[0].metrics["provider_transport_failures"] == 2
     assert decision.gates[1].name == "legality"
     assert decision.gates[1].status == "skipped"
+    assert "shared_llm_failure" in decision.case_summaries[0].failure_taxonomy
+    assert decision.case_summaries[0].score_breakdown["candidate"]["trace_score"] == 0.0
     assert "未开账" not in format_decision_record_summary(decision)
     assert decision.policy_action["action"] == "INCONCLUSIVE"
 
