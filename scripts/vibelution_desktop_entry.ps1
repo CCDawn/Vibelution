@@ -12,24 +12,21 @@ $launcherScript = Join-Path $projectDir "scripts\vibelution_launcher.ps1"
 $runtimeDir = Join-Path $projectDir ".runtime"
 $launcherDir = Join-Path $runtimeDir "launcher"
 $entryLogPath = Join-Path $launcherDir "desktop-entry.log"
+$desktopEntryStartMutexName = [string]$env:VIBELUTION_DESKTOP_ENTRY_START_MUTEX_NAME
+if (-not $desktopEntryStartMutexName.Trim()) {
+    $desktopEntryStartMutexName = "Global\Vibelution.Workbench.DesktopEntry.Start"
+}
+$script:desktopEntryRunId = [guid]::NewGuid().ToString("N")
+$script:desktopEntryStartedAt = (Get-Date).ToUniversalTime().ToString("o")
+$script:desktopEntryStartMutex = $null
 
 function Set-DesktopEntryPythonRuntime {
-    $pythonwPath = Join-Path $projectDir ".venv\Scripts\pythonw.exe"
     $pythonPath = Join-Path $projectDir ".venv\Scripts\python.exe"
-    if (Test-Path -LiteralPath $pythonwPath) {
-        $env:VIBELUTION_PYTHON_EXE = $pythonwPath
-        Write-DesktopEntryLog `
-            -Event "desktop_entry.python_runtime.selected" `
-            -Message "Using windowless Python runtime for desktop launch." `
-            -Fields @{ path = $pythonwPath }
-        return
-    }
     if (Test-Path -LiteralPath $pythonPath) {
         $env:VIBELUTION_PYTHON_EXE = $pythonPath
         Write-DesktopEntryLog `
             -Event "desktop_entry.python_runtime.selected" `
-            -Message "Windowless Python runtime was not found; falling back to console Python." `
-            -Level "warning" `
+            -Message "Using Python runtime for desktop launch." `
             -Fields @{ path = $pythonPath }
     }
 }
@@ -50,34 +47,124 @@ function Write-DesktopEntryLog {
 
     try {
         Ensure-EntryDirectories
+        $safeFields = if ($Fields) { $Fields.Clone() } else { @{} }
+        $safeFields["run_id"] = $script:desktopEntryRunId
         $payload = @{
             ts = (Get-Date).ToUniversalTime().ToString("o")
             level = $Level
             event = $Event
             message = $Message
-            fields = if ($Fields) { $Fields } else { @{} }
+            fields = $safeFields
         }
         Add-Content -LiteralPath $entryLogPath -Value ($payload | ConvertTo-Json -Depth 8 -Compress) -Encoding utf8
     } catch {
     }
 }
 
-function Show-DesktopEntryFailure {
+function Sync-DesktopEntryLogsIntoRuntimeScene {
+    try {
+        $statePath = Join-Path $launcherDir "state.json"
+        if (-not (Test-Path -LiteralPath $statePath)) {
+            return
+        }
+        $state = Get-Content -LiteralPath $statePath -Raw -Encoding utf8 | ConvertFrom-Json
+        $sceneDir = [string]$state.runtimeSceneDir
+        if (-not $sceneDir -or -not (Test-Path -LiteralPath $sceneDir)) {
+            return
+        }
+
+        Sync-DesktopEntryLogFile `
+            -SourcePath $entryLogPath `
+            -TargetPath (Join-Path $sceneDir "raw\desktop-entry.log") `
+            -Matcher {
+                param($payload)
+                return (Get-JsonPayloadField -Payload $payload -FieldName "run_id") -eq $script:desktopEntryRunId
+            }
+
+        $vbsRunId = [string]$env:VIBELUTION_DESKTOP_ENTRY_VBS_RUN_ID
+        if ($vbsRunId) {
+            Sync-DesktopEntryLogFile `
+                -SourcePath (Join-Path $launcherDir "desktop-entry-vbs.log") `
+                -TargetPath (Join-Path $sceneDir "raw\desktop-entry-vbs.log") `
+                -Matcher {
+                    param($payload)
+                    return ([string]$payload.details) -match [regex]::Escape("run_id=$vbsRunId")
+                }
+        }
+    } catch {
+    }
+}
+
+function Get-JsonPayloadField {
+    param(
+        $Payload,
+        [string]$FieldName
+    )
+
+    if ($null -eq $Payload) {
+        return ""
+    }
+    $fieldsProperty = $Payload.PSObject.Properties["fields"]
+    if ($null -eq $fieldsProperty -or $null -eq $fieldsProperty.Value) {
+        return ""
+    }
+    $fieldProperty = $fieldsProperty.Value.PSObject.Properties[$FieldName]
+    if ($null -eq $fieldProperty) {
+        return ""
+    }
+    return [string]$fieldProperty.Value
+}
+
+function Sync-DesktopEntryLogFile {
+    param(
+        [string]$SourcePath,
+        [string]$TargetPath,
+        [scriptblock]$Matcher
+    )
+
+    if (-not (Test-Path -LiteralPath $SourcePath)) {
+        return
+    }
+    $lines = @()
+    foreach ($line in Get-Content -LiteralPath $SourcePath -Encoding utf8 -ErrorAction SilentlyContinue) {
+        if ([string]::IsNullOrWhiteSpace([string]$line)) {
+            continue
+        }
+        try {
+            $payload = $line | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            continue
+        }
+        if (& $Matcher $payload) {
+            $lines += [string]$line
+        }
+    }
+    if ($lines.Count -eq 0) {
+        return
+    }
+    $targetDir = Split-Path -Parent $TargetPath
+    if (-not (Test-Path -LiteralPath $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+    Set-Content -LiteralPath $TargetPath -Value $lines -Encoding utf8
+}
+
+function Write-DesktopEntryFailureNotice {
     param([string]$Message)
 
-    $body = "$Message`n`nLog: $entryLogPath"
-    try {
-        Add-Type -AssemblyName PresentationFramework
-        [System.Windows.MessageBox]::Show($body, "Vibelution Launcher", "OK", "Error") | Out-Null
-        return
-    } catch {
-    }
-
-    try {
-        Add-Type -AssemblyName System.Windows.Forms
-        [System.Windows.Forms.MessageBox]::Show($body, "Vibelution Launcher", "OK", "Error") | Out-Null
-    } catch {
-    }
+    Write-DesktopEntryLog `
+        -Event "desktop_entry.failure.notice.requested" `
+        -Message "Desktop entry requested visible failure feedback." `
+        -Level "error" `
+        -Fields @{
+            error = $Message
+            log_path = $entryLogPath
+        }
+    Show-DesktopEntryFeedback `
+        -Title "Vibelution start failed" `
+        -Message "Vibelution did not start. Details were written to $entryLogPath" `
+        -Seconds 8 `
+        -Kind "error"
 }
 
 function Invoke-HiddenLauncherAction {
@@ -125,6 +212,8 @@ function Invoke-HiddenLauncherAction {
     $proc.StartInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
     $proc.StartInfo.RedirectStandardOutput = $true
     $proc.StartInfo.RedirectStandardError = $true
+    $proc.StartInfo.EnvironmentVariables["VIBELUTION_DESKTOP_ENTRY_RUN_ID"] = $script:desktopEntryRunId
+    $proc.StartInfo.EnvironmentVariables["VIBELUTION_DESKTOP_ENTRY_STARTED_AT"] = $script:desktopEntryStartedAt
 
     if (-not $proc.Start()) {
         throw "Failed to start launcher action '$LauncherAction'."
@@ -231,7 +320,103 @@ function Convert-ToLauncherAction {
     }
 }
 
+function Test-DesktopEntryStartAction {
+    param([string]$LauncherAction)
+
+    return ([string]$LauncherAction).ToLowerInvariant() -eq "start"
+}
+
+function Test-DesktopEntryFeedbackSuppressed {
+    $value = [string]$env:VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK
+    return @("1", "true", "yes", "on") -contains $value.Trim().ToLowerInvariant()
+}
+
+function Show-DesktopEntryFeedback {
+    param(
+        [string]$Title,
+        [string]$Message,
+        [int]$Seconds = 3,
+        [ValidateSet("info", "warning", "error")]
+        [string]$Kind = "info"
+    )
+
+    if (Test-DesktopEntryFeedbackSuppressed) {
+        Write-DesktopEntryLog `
+            -Event "desktop_entry.feedback.suppressed" `
+            -Message "Desktop entry visible feedback was suppressed by environment." `
+            -Fields @{ title = $Title; kind = $Kind }
+        return
+    }
+
+    try {
+        $wshShell = New-Object -ComObject WScript.Shell
+        $icon = switch ($Kind) {
+            "error" { 16 }
+            "warning" { 48 }
+            default { 64 }
+        }
+        [void]$wshShell.Popup($Message, $Seconds, $Title, $icon)
+        Write-DesktopEntryLog `
+            -Event "desktop_entry.feedback.shown" `
+            -Message "Desktop entry visible feedback was shown." `
+            -Fields @{ title = $Title; kind = $Kind; timeout_seconds = $Seconds }
+    } catch {
+        Write-DesktopEntryLog `
+            -Event "desktop_entry.feedback.failed" `
+            -Message "Desktop entry visible feedback failed." `
+            -Level "warning" `
+            -Fields @{ title = $Title; kind = $Kind; error = $_.Exception.Message }
+    }
+}
+
+function Enter-DesktopEntryStartGate {
+    param([string]$LauncherAction)
+
+    if (-not (Test-DesktopEntryStartAction -LauncherAction $LauncherAction)) {
+        return $true
+    }
+
+    $script:desktopEntryStartMutex = New-Object System.Threading.Mutex($false, $desktopEntryStartMutexName)
+    $acquired = $script:desktopEntryStartMutex.WaitOne(0)
+    if ($acquired) {
+        return $true
+    }
+
+    try {
+        $script:desktopEntryStartMutex.Dispose()
+    } catch {
+    }
+    $script:desktopEntryStartMutex = $null
+
+    Write-DesktopEntryLog `
+        -Event "desktop_entry.start.skipped_in_progress" `
+        -Message "Desktop entry ignored a duplicate start while another start is already running." `
+        -Fields @{ action = $Action; launcher_action = $LauncherAction; no_browser = [bool]$NoBrowser }
+    Show-DesktopEntryFeedback `
+        -Title "Vibelution is opening" `
+        -Message "Vibelution is already starting. Please wait for the app window to appear." `
+        -Seconds 3 `
+        -Kind "info"
+    return $false
+}
+
+function Exit-DesktopEntryStartGate {
+    if ($null -eq $script:desktopEntryStartMutex) {
+        return
+    }
+    try {
+        $script:desktopEntryStartMutex.ReleaseMutex() | Out-Null
+    } catch {
+    }
+    try {
+        $script:desktopEntryStartMutex.Dispose()
+    } catch {
+    }
+    $script:desktopEntryStartMutex = $null
+}
+
 Ensure-EntryDirectories
+$startGateAcquired = $false
 try {
     Set-DesktopEntryPythonRuntime
 
@@ -247,6 +432,12 @@ try {
         -Message "Desktop entry started." `
         -Fields @{ action = $Action; launcher_action = $launcherAction; no_browser = [bool]$NoBrowser }
 
+    $startGateAcquired = Enter-DesktopEntryStartGate -LauncherAction $launcherAction
+    if (-not $startGateAcquired) {
+        Sync-DesktopEntryLogsIntoRuntimeScene
+        exit 0
+    }
+
     Invoke-HiddenLauncherAction -LauncherAction $launcherAction -ForwardNoBrowser:$NoBrowser
 
     if ($monitorWouldAttach) {
@@ -260,6 +451,7 @@ try {
         -Event "desktop_entry.completed" `
         -Message "Desktop entry completed." `
         -Fields @{ action = $Action; launcher_action = $launcherAction; no_browser = [bool]$NoBrowser }
+    Sync-DesktopEntryLogsIntoRuntimeScene
 } catch {
     $message = $_.Exception.Message
     Write-DesktopEntryLog `
@@ -267,6 +459,11 @@ try {
         -Message $message `
         -Level "error" `
         -Fields @{ action = $Action; no_browser = [bool]$NoBrowser }
-    Show-DesktopEntryFailure -Message $message
+    Write-DesktopEntryFailureNotice -Message $message
+    Sync-DesktopEntryLogsIntoRuntimeScene
     exit 1
+} finally {
+    if ($startGateAcquired) {
+        Exit-DesktopEntryStartGate
+    }
 }

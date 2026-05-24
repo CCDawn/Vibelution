@@ -73,6 +73,14 @@ def _cscript_exe() -> str:
     return exe
 
 
+def _loads_json_line_allowing_control_chars(line: str) -> dict[str, object]:
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        sanitized = "".join(char for char in line if char >= " " or char in "\t\r\n")
+        return json.loads(sanitized)
+
+
 def _resolve_launcher_backend_port(
     tmp_path: Path,
     *,
@@ -183,7 +191,10 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-launcher-calls.jsonl") -Value 
     if no_browser:
         command.append("-NoBrowser")
 
-    result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, check=False, timeout=30)
+    env = os.environ.copy()
+    env["VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"] = "1"
+    env["VIBELUTION_DESKTOP_ENTRY_START_MUTEX_NAME"] = f"Local\\Vibelution.Tests.{tmp_path.name}.{action}"
+    result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, env=env, check=False, timeout=30)
     assert result.returncode == 0, result.stderr or result.stdout
 
     calls_path = project_dir / ".runtime" / "launcher" / "fake-launcher-calls.jsonl"
@@ -240,7 +251,11 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
     assert calls_path.exists()
     calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
     log_path = project_dir / ".runtime" / "launcher" / "desktop-entry-vbs.log"
-    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    events = [
+        _loads_json_line_allowing_control_chars(line)
+        for line in log_path.read_text(encoding="utf-8-sig").splitlines()
+        if line.strip()
+    ]
     return calls, events
 
 
@@ -2679,7 +2694,7 @@ def test_desktop_entry_forwards_no_browser_and_skips_monitor(tmp_path):
 
 
 def test_vbs_desktop_entry_accepts_named_action_arguments(tmp_path):
-    calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action", "close"])
+    calls, _events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action", "close"])
 
     assert calls == [
         {
@@ -2692,7 +2707,7 @@ def test_vbs_desktop_entry_accepts_named_action_arguments(tmp_path):
 
 
 def test_vbs_desktop_entry_accepts_powershell_style_no_browser_switch(tmp_path):
-    calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["open", "-NoBrowser"])
+    calls, events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["open", "-NoBrowser"])
 
     assert calls == [
         {
@@ -2702,10 +2717,11 @@ def test_vbs_desktop_entry_accepts_powershell_style_no_browser_switch(tmp_path):
             "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]
+    assert events[-1]["event"] == "desktop_entry_vbs.feedback.suppressed"
 
 
 def test_vbs_desktop_entry_accepts_colon_action_argument(tmp_path):
-    calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action:status"])
+    calls, _events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["-Action:status"])
 
     assert calls == [
         {
@@ -2718,7 +2734,7 @@ def test_vbs_desktop_entry_accepts_colon_action_argument(tmp_path):
 
 
 def test_vbs_desktop_entry_accepts_equals_action_argument(tmp_path):
-    calls = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["--action=restart", "--no-browser"])
+    calls, _events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, ["--action=restart", "--no-browser"])
 
     assert calls == [
         {
