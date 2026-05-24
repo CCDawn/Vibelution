@@ -1269,6 +1269,7 @@ foreach ($name in @(
     "Get-RuntimeSceneTriggerIndexToken",
     "Get-RuntimeSceneStatusIndexToken",
     "Get-RuntimeSceneStatusDisplayLabel",
+    "Get-RuntimeSceneEffectiveStatus",
     "Get-RuntimeSceneTriggerDisplayLabel",
     "Get-RuntimeScenePackageIndex"
 )) {
@@ -1340,6 +1341,7 @@ foreach ($name in @(
     "Get-RuntimeSceneTriggerIndexToken",
     "Get-RuntimeSceneStatusIndexToken",
     "Get-RuntimeSceneStatusDisplayLabel",
+    "Get-RuntimeSceneEffectiveStatus",
     "Get-RuntimeSceneTriggerDisplayLabel",
     "Get-RuntimeScenePackageIndex",
     "Get-RuntimeScenePackageSummary",
@@ -1347,6 +1349,7 @@ foreach ($name in @(
     "Get-RuntimeSceneSeverityCounts",
     "Get-RuntimeSceneEventSeverity",
     "Get-RuntimeSceneChildFileCount",
+    "Get-HashtableStringValue",
     "ConvertTo-PlainHashtable",
     "Write-RuntimeSceneJsonFile",
     "Save-RuntimeSceneManifest"
@@ -1466,6 +1469,99 @@ if ($summary.diagnostic_entrypoint.recommended_order[0] -ne "summary.json") {{
 }}
 if ($summary.diagnostic_entrypoint.recommended_order[2] -ne "raw/desktop-entry-vbs.log") {{
     throw "summary diagnostic order should inspect startup logs before timeline."
+}}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_runtime_scene_manifest_treats_active_unknown_package_as_running(tmp_path):
+    scene_dir = tmp_path / "scene"
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($name in @(
+    "ConvertTo-RuntimeSceneIndexToken",
+    "Get-RuntimeSceneTriggerIndexToken",
+    "Get-RuntimeSceneStatusIndexToken",
+    "Get-RuntimeSceneStatusDisplayLabel",
+    "Get-RuntimeSceneEffectiveStatus",
+    "Get-RuntimeSceneTriggerDisplayLabel",
+    "Get-RuntimeScenePackageIndex",
+    "Get-RuntimeScenePackageSummary",
+    "Get-RuntimeSceneJsonlEventCount",
+    "Get-RuntimeSceneSeverityCounts",
+    "Get-RuntimeSceneEventSeverity",
+    "Get-RuntimeSceneChildFileCount",
+    "Get-HashtableStringValue",
+    "ConvertTo-PlainHashtable",
+    "Write-RuntimeSceneJsonFile",
+    "Save-RuntimeSceneManifest"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$name was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+$script:currentRuntimeSceneDir = {json.dumps(str(scene_dir))}
+$script:runtimeSceneWriteMaxAttempts = 2
+$script:runtimeSceneWriteRetryDelayMilliseconds = 1
+function Ensure-CurrentRuntimeSceneSubdirs {{
+    New-Item -ItemType Directory -Path $script:currentRuntimeSceneDir -Force | Out-Null
+}}
+function Get-CurrentRuntimeSceneFilePath {{
+    param([string]$RelativePath)
+    return Join-Path $script:currentRuntimeSceneDir $RelativePath
+}}
+
+Save-RuntimeSceneManifest -Manifest @{{
+    schema_version = 2
+    runtime_scene_id = "scene-active"
+    started_at = "2026-05-24T12:00:01Z"
+    ended_at = ""
+    status = "unknown"
+    trigger = "internal-start"
+}}
+
+$manifest = Get-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "manifest.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$packageIndex = Get-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "package_index.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+$summary = Get-Content -LiteralPath (Join-Path $script:currentRuntimeSceneDir "summary.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($packageIndex.index_key -notmatch "_running$") {{
+    throw "active unknown package index should end with running."
+}}
+if ($packageIndex.display_name -notmatch "运行中") {{
+    throw "active unknown package display name should be user-readable running."
+}}
+if ($summary.status -ne "running") {{
+    throw "active unknown package summary should report running."
+}}
+if ($manifest.package.index_key -ne $packageIndex.index_key) {{
+    throw "manifest package index should match package_index."
 }}
 Write-Output "ok"
 """,
