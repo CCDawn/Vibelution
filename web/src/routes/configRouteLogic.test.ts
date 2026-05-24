@@ -10,10 +10,11 @@ import {
   groupModelPresets,
   hasPendingSecretChanges,
   presetCategory,
+  resolveProfileDisplayState,
   shouldBlockConfigLeave,
   type PublicConfigShape,
 } from "./configRouteLogic";
-import type { ConfigModelOption, ConfigModelPresetOption } from "../api/types";
+import type { ConfigModelOption, ConfigModelPresetOption, ConfigProfileCard } from "../api/types";
 
 function preset(
   presetId: string,
@@ -134,6 +135,50 @@ describe("configRouteLogic", () => {
 
     const profile = (publicConfig.llm as Record<string, unknown>).profiles as Record<string, Record<string, unknown>>;
     expect(profile.primary.api_key_env).toBeUndefined();
+  });
+
+  it("shows the newly selected model details while a profile edit is staged", () => {
+    const profile: ConfigProfileCard = {
+      profileId: "primary",
+      label: "聊天模型",
+      modelRef: "old_model",
+      selectedModelId: "old_model",
+      selectedModelLabel: "Old label",
+      model: "old-model",
+      providerKind: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      apiKeyEnv: "OLD_KEY",
+      apiKeyConfigured: true,
+      apiKeyState: "configured",
+      apiKeySource: "OLD_KEY",
+      requiredModelMissing: false,
+    };
+    const selected = option({
+      model_id: "relay_openai_gpt_5_5",
+      provider_kind: "relay",
+      model: "gpt-5.5",
+      label: "GPT-5.5 via relay",
+      api_key_env: "NEW_KEY",
+      api_key_state: "missing",
+      provider: {
+        kind: "relay",
+        base_url: "https://pixel.try-chatapi.com/v1",
+        compat_mode: "openai",
+        requires_api_key: true,
+      },
+    });
+
+    const view = resolveProfileDisplayState(profile, "relay_openai_gpt_5_5", selected, true);
+
+    expect(view.selectionDirty).toBe(true);
+    expect(view.selectedModelId).toBe("relay_openai_gpt_5_5");
+    expect(view.selectedModelLabel).toBe("GPT-5.5 via relay");
+    expect(view.providerKind).toBe("relay");
+    expect(view.model).toBe("gpt-5.5");
+    expect(view.baseUrl).toBe("https://pixel.try-chatapi.com/v1");
+    expect(view.apiKeyEnv).toBe("NEW_KEY");
+    expect(view.apiKeyState).toBe("missing");
+    expect(view.apiKeySource).toBe("NEW_KEY");
   });
 
   it("treats pending secret writes and clears as unsaved user changes", () => {

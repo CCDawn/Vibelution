@@ -46,6 +46,7 @@ import {
   getString,
   groupModelPresets,
   hasPendingSecretChanges,
+  resolveProfileDisplayState,
   shouldBlockConfigLeave,
   type ModelPresetGroupLabels,
   type PublicConfigShape,
@@ -313,6 +314,12 @@ export const CONFIG_COPY = {
     sourceProfile: "参考任务",
     assignModel: "模型",
     createProfile: "确认新增",
+    profileTableModel: "当前模型",
+    profileTableProvider: "服务商",
+    profileTableKey: "Key 状态",
+    profileTableActions: "操作",
+    profileTableCurrent: "当前配置",
+    profileTableStaged: "本次修改预览",
     modelEditorCreate: "新增模型",
     modelEditorEdit: "编辑模型",
     preset: "预设",
@@ -383,6 +390,8 @@ export const CONFIG_COPY = {
     saveSourceHint: "当前修改还没写入 config.toml，保存成功后这里会刷新为最新文件状态。",
     modelSavePending: "保存模型修改中",
     modelSaveFailed: "模型修改未生效：",
+    modelEditorAdvancedTitle: "高级参数",
+    modelEditorAdvancedHint: "常用字段已经在上方，只有需要时再展开这里。",
     profileSavePending: "保存任务模型修改中",
     testPending: "测试连接中",
     testScopeDraft: "按当前修改测试",
@@ -501,6 +510,12 @@ export const CONFIG_COPY = {
     sourceProfile: "Based on task",
     assignModel: "Model",
     createProfile: "Confirm",
+    profileTableModel: "Current model",
+    profileTableProvider: "Provider",
+    profileTableKey: "Key status",
+    profileTableActions: "Actions",
+    profileTableCurrent: "Current config",
+    profileTableStaged: "Change preview",
     modelEditorCreate: "Create model",
     modelEditorEdit: "Edit model",
     preset: "Preset",
@@ -571,6 +586,8 @@ export const CONFIG_COPY = {
     saveSourceHint: "Save to config.toml to persist the current changes.",
     modelSavePending: "Saving model changes",
     modelSaveFailed: "Model changes were not applied:",
+    modelEditorAdvancedTitle: "Advanced parameters",
+    modelEditorAdvancedHint: "The common fields are above. Expand this only when needed.",
     profileSavePending: "Saving task model changes",
     testPending: "Testing connection",
     testScopeDraft: "Testing current changes",
@@ -1672,7 +1689,6 @@ export function ConfigRoute() {
   const [modelEditorError, setModelEditorError] = useState("");
   const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfileDraft());
   const [profileEditors, setProfileEditors] = useState<Record<string, ProfileEditState>>({});
-  const [expandedProfiles, setExpandedProfiles] = useState<Record<string, boolean>>({});
   const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({});
   const [profileFormExpanded, setProfileFormExpanded] = useState(false);
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
@@ -2046,12 +2062,7 @@ export function ConfigRoute() {
     return profileEditors[profileId]?.modelId ?? fallback;
   }
 
-  function toggleExpandedProfile(profileId: string) {
-    setExpandedProfiles((current) => ({ ...current, [profileId]: !current[profileId] }));
-  }
-
   function beginProfileEdit(profileId: string, fallbackModelId = "") {
-    setExpandedProfiles((current) => ({ ...current, [profileId]: true }));
     setProfileEditors((current) => ({
       ...current,
       [profileId]: emptyProfileEditState(fallbackModelId),
@@ -2675,148 +2686,121 @@ export function ConfigRoute() {
             <Play size={16} className={styles.sectionIcon} />
           </div>
           <p className={styles.sectionText}>{copy.profilesBody}</p>
-          <div className={styles.profileGrid}>
-            {workspace.profileCards.map((profile) => (
-              <article key={profile.profileId} className={styles.profileCard}>
-                {(() => {
+          <div className={styles.profileTableWrap}>
+            <table className={styles.profileTable}>
+              <thead>
+                <tr>
+                  <th>{copy.profiles}</th>
+                  <th>{copy.profileTableModel}</th>
+                  <th>{copy.profileTableProvider}</th>
+                  <th>{copy.profileTableKey}</th>
+                  <th>{copy.profileTableActions}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workspace.profileCards.map((profile) => {
                   const profileEditor = profileEditors[profile.profileId];
                   const isEditingProfile = Boolean(profileEditor);
                   const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
                   const selectedModel = modelOptionsById.get(selectedModelId) ?? null;
-                  const profileExpanded = Boolean(expandedProfiles[profile.profileId]);
-                  const selectionDirty = isEditingProfile && Boolean(selectedModelId) && selectedModelId !== profile.selectedModelId;
-                  const previewProviderKind = selectionDirty ? selectedModel?.provider_kind ?? profile.providerKind : profile.providerKind;
-                  const previewModel = selectionDirty ? selectedModel?.model ?? profile.model : profile.model;
-                  const previewBaseUrl = selectionDirty
-                    ? getString(asRecord(selectedModel?.provider).base_url) || profile.baseUrl
-                    : profile.baseUrl;
-                  const previewApiKeyEnv = selectionDirty ? selectedModel?.api_key_env ?? profile.apiKeyEnv : profile.apiKeyEnv;
-                  const previewKeyState = selectionDirty ? selectedModel?.api_key_state ?? profile.apiKeyState : profile.apiKeyState;
-                  const previewApiKeySource = selectionDirty ? previewApiKeyEnv || "-" : profile.apiKeySource || "-";
-
+                  const displayState = resolveProfileDisplayState(profile, selectedModelId, selectedModel, isEditingProfile);
+                  const keyStateClassName =
+                    displayState.apiKeyState === "missing" || displayState.apiKeyState === "clear_pending"
+                      ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
+                      : styles.inlineBadge;
                   return (
-                    <>
-                      <div className={styles.cardHeader}>
-                        <div>
-                          <p className={styles.cardTitle}>{profile.label}</p>
-                          <p className={styles.cardSubtle}>{profile.profileId}</p>
-                        </div>
-                        <div className={styles.cardHeaderActions}>
-                          <div className={styles.cardBadges}>
-                            <span
-                              className={
-                                profile.requiredModelMissing
-                                  ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
-                                  : styles.inlineBadge
-                              }
+                    <tr key={profile.profileId}>
+                      <td className={styles.profileTaskCell}>
+                        <strong>{profile.label}</strong>
+                        <span>{profile.profileId}</span>
+                        {displayState.selectionDirty ? <span className={styles.inlineBadge}>{copy.profileTableStaged}</span> : null}
+                      </td>
+                      <td>
+                        {isEditingProfile ? (
+                          <label className={`${styles.field} ${styles.profileTableSelect}`}>
+                            <span>{copy.selectedModel}</span>
+                            <select
+                              value={selectedModelId}
+                              disabled={structuredActionsDisabled}
+                              onChange={(event) => updateProfileModelDraft(profile.profileId, event.target.value)}
                             >
-                              {profile.requiredModelMissing ? copy.requiredModelMissing : profile.selectedModelLabel}
-                            </span>
-                            {selectionDirty && selectedModel ? <span className={styles.inlineBadge}>{copy.stagedRoute}</span> : null}
-                            {isEditingProfile ? <span className={styles.inlineBadge}>{copy.editProfile}</span> : null}
+                              <option value="" />
+                              {modelOptions.map((option) => (
+                                <option key={option.model_id} value={option.model_id}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : (
+                          <div className={styles.profileModelCell}>
+                            <strong>{profile.requiredModelMissing ? copy.requiredModelMissing : displayState.selectedModelLabel}</strong>
+                            <span>{displayState.model || "-"}</span>
                           </div>
+                        )}
+                      </td>
+                      <td className={styles.profileMetaCell}>
+                        <strong>{displayState.providerKind || "-"}</strong>
+                        <span>{displayState.baseUrl || "-"}</span>
+                      </td>
+                      <td className={styles.profileMetaCell}>
+                        <span className={keyStateClassName}>{keyStateLabel(displayState.apiKeyState)}</span>
+                        <span>{displayState.apiKeyEnv || "-"}</span>
+                      </td>
+                      <td>
+                        <div className={styles.profileTableActions}>
+                          {isEditingProfile ? (
+                            <>
+                              <button
+                                type="button"
+                                className={`${styles.primaryButton} ${styles.compactButton}`}
+                                disabled={structuredActionsDisabled || !selectedModelId}
+                                onClick={() => handleApplySelectedProfileModel(profile.profileId, profile.selectedModelId)}
+                              >
+                                <Save size={14} />
+                                {copy.saveSelectedModel}
+                              </button>
+                              <button
+                                type="button"
+                                className={`${styles.actionButton} ${styles.compactButton}`}
+                                disabled={structuredActionsDisabled}
+                                onClick={() => cancelProfileEdit(profile.profileId)}
+                              >
+                                <RotateCcw size={14} />
+                                {copy.cancelProfileEdit}
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className={`${styles.actionButton} ${styles.compactButton}`}
+                              disabled={structuredActionsDisabled}
+                              onClick={() => beginProfileEdit(profile.profileId, profile.selectedModelId)}
+                            >
+                              <Pencil size={14} />
+                              {copy.editProfile}
+                            </button>
+                          )}
                           <button
                             type="button"
                             className={`${styles.actionButton} ${styles.compactButton}`}
-                            aria-expanded={profileExpanded}
-                            onClick={() => toggleExpandedProfile(profile.profileId)}
+                            disabled={structuredActionsDisabled || !selectedModelId}
+                            onClick={() =>
+                              isEditingProfile
+                                ? handleTestSelectedProfile(profile.profileId, profile.selectedModelId)
+                                : handleTestProfile(profile.profileId)
+                            }
                           >
-                            <ChevronRight size={14} className={profileExpanded ? styles.treeToggleIconExpanded : styles.treeToggleIcon} />
-                            {profileExpanded ? copy.collapseSection : copy.expandSection}
+                            <Play size={14} />
+                            {isEditingProfile ? copy.testSelectedModel : copy.testConnection}
                           </button>
                         </div>
-                      </div>
-
-                      <div className={styles.cardSummaryLine}>
-                        <span>{previewProviderKind}</span>
-                        <span>{previewModel}</span>
-                        <span>{keyStateLabel(previewKeyState)}</span>
-                      </div>
-
-                      {profileExpanded ? (
-                        <>
-                          {isEditingProfile ? (
-                            <label className={styles.field}>
-                              <span>{copy.selectedModel}</span>
-                              <select
-                                value={selectedModelId}
-                                disabled={structuredActionsDisabled}
-                                onChange={(event) => updateProfileModelDraft(profile.profileId, event.target.value)}
-                              >
-                                <option value="" />
-                                {modelOptions.map((option) => (
-                                  <option key={option.model_id} value={option.model_id}>
-                                    {option.label}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                          ) : null}
-
-                          <div className={styles.cardMeta}>
-                            <strong>{selectionDirty ? copy.stagedRoute : copy.currentRoute}</strong>
-                            <span>{previewProviderKind}</span>
-                            <span>{previewModel}</span>
-                            <span>{previewBaseUrl}</span>
-                            <span>{previewApiKeyEnv || "-"}</span>
-                            <span>{keyStateLabel(previewKeyState)}</span>
-                            <span>{`${copy.apiKeySource}: ${previewApiKeySource}`}</span>
-                          </div>
-
-                          <div className={styles.cardActionsGrid}>
-                            {isEditingProfile ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className={`${styles.primaryButton} ${styles.buttonBlock}`}
-                                  disabled={structuredActionsDisabled || !selectedModelId}
-                                  onClick={() => handleApplySelectedProfileModel(profile.profileId, profile.selectedModelId)}
-                                >
-                                  <Save size={14} />
-                                  {copy.saveSelectedModel}
-                                </button>
-                                <button
-                                  type="button"
-                                  className={`${styles.actionButton} ${styles.buttonBlock}`}
-                                  disabled={structuredActionsDisabled}
-                                  onClick={() => cancelProfileEdit(profile.profileId)}
-                                >
-                                  <RotateCcw size={14} />
-                                  {copy.cancelProfileEdit}
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                className={`${styles.actionButton} ${styles.buttonBlock}`}
-                                disabled={structuredActionsDisabled}
-                                onClick={() => beginProfileEdit(profile.profileId, profile.selectedModelId)}
-                              >
-                                <Pencil size={14} />
-                                {copy.editProfile}
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className={`${styles.actionButton} ${styles.buttonBlock}`}
-                              disabled={structuredActionsDisabled || !selectedModelId}
-                              onClick={() =>
-                                isEditingProfile
-                                  ? handleTestSelectedProfile(profile.profileId, profile.selectedModelId)
-                                  : handleTestProfile(profile.profileId)
-                              }
-                            >
-                              <Play size={14} />
-                              {isEditingProfile ? copy.testSelectedModel : copy.testConnection}
-                            </button>
-                          </div>
-                        </>
-                      ) : null}
-                    </>
+                      </td>
+                    </tr>
                   );
-                })()}
-              </article>
-            ))}
+                })}
+              </tbody>
+            </table>
           </div>
           <div ref={profileFormRef} className={styles.formSurface}>
             <div className={styles.formHeader}>
@@ -2995,127 +2979,136 @@ export function ConfigRoute() {
                       onChange={(event) => setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))}
                     />
                   </label>
-                  <label className={styles.field}>
-                    <span>{copy.compatMode}</span>
-                    <input
-                      value={modelEditor.provider.compat_mode}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          provider: { ...current.provider, compat_mode: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.contextWindow}</span>
-                    <input
-                      value={modelEditor.provider.context_window}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          provider: { ...current.provider, context_window: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.transport}</span>
-                    <input
-                      value={modelEditor.details.transport}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          details: { ...current.details, transport: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.contract}</span>
-                    <input
-                      value={modelEditor.details.contract}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          details: { ...current.details, contract: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.reasoningStateField}</span>
-                    <input
-                      value={modelEditor.details.reasoning_state_field}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          details: { ...current.details, reasoning_state_field: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.toolCallingMode}</span>
-                    <input
-                      value={modelEditor.details.tool_calling_mode}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          details: { ...current.details, tool_calling_mode: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.temperature}</span>
-                    <input
-                      value={modelEditor.details.temperature}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          details: { ...current.details, temperature: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.maxOutputTokens}</span>
-                    <input
-                      value={modelEditor.details.max_output_tokens}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          details: { ...current.details, max_output_tokens: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.timeout}</span>
-                    <input
-                      value={modelEditor.details.timeout}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          details: { ...current.details, timeout: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.connectTimeout}</span>
-                    <input
-                      value={modelEditor.details.connect_timeout}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          details: { ...current.details, connect_timeout: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
                 </div>
+
+                <details className={styles.advancedEditorPanel}>
+                  <summary>
+                    <span>{copy.modelEditorAdvancedTitle}</span>
+                    <small>{copy.modelEditorAdvancedHint}</small>
+                  </summary>
+                  <div className={styles.formGridWide}>
+                    <label className={styles.field}>
+                      <span>{copy.compatMode}</span>
+                      <input
+                        value={modelEditor.provider.compat_mode}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            provider: { ...current.provider, compat_mode: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.contextWindow}</span>
+                      <input
+                        value={modelEditor.provider.context_window}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            provider: { ...current.provider, context_window: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.transport}</span>
+                      <input
+                        value={modelEditor.details.transport}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, transport: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.contract}</span>
+                      <input
+                        value={modelEditor.details.contract}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, contract: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.reasoningStateField}</span>
+                      <input
+                        value={modelEditor.details.reasoning_state_field}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, reasoning_state_field: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.toolCallingMode}</span>
+                      <input
+                        value={modelEditor.details.tool_calling_mode}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, tool_calling_mode: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.temperature}</span>
+                      <input
+                        value={modelEditor.details.temperature}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, temperature: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.maxOutputTokens}</span>
+                      <input
+                        value={modelEditor.details.max_output_tokens}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, max_output_tokens: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.timeout}</span>
+                      <input
+                        value={modelEditor.details.timeout}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, timeout: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.connectTimeout}</span>
+                      <input
+                        value={modelEditor.details.connect_timeout}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            details: { ...current.details, connect_timeout: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                </details>
 
                 <div className={styles.toggleGrid}>
                   <label className={styles.toggleField}>
