@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode, useMemo } from "react";
+import { Component, type ErrorInfo, type ReactNode, useMemo, useState } from "react";
 
 import CodeMirror from "@uiw/react-codemirror";
 import { RangeSetBuilder } from "@codemirror/state";
@@ -13,7 +13,9 @@ import { FileContent } from "../../api/types";
 import { workbenchCodeMirrorTheme } from "../../design/codeMirrorTheme";
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { classifyLogText, matchesSeverityFilter, type LogSeverityFilter } from "../../logs/logSeverity";
+import { parseStructuredLogPreview } from "../../logs/structuredLogPreview";
 import styles from "./FilePreview.module.css";
+import { StructuredLogPreview } from "./StructuredLogPreview";
 
 type FilePreviewProps = {
   file: FileContent;
@@ -146,6 +148,7 @@ export function FilePreview({
   severityFilter = "all",
 }: FilePreviewProps) {
   const { t } = useAppI18n();
+  const [viewMode, setViewMode] = useState<"structured" | "raw">("structured");
   const editorExtensions = useMemo(() => {
     const extensions = getExtensions(file.language);
     return highlightAsLog ? [...extensions, logLineDecorations, logHighlightTheme] : extensions;
@@ -166,6 +169,31 @@ export function FilePreview({
     highlightAsLog,
     severityFilter,
   });
+  const structuredModel = useMemo(() => {
+    if (!highlightAsLog) {
+      return null;
+    }
+    return parseStructuredLogPreview(file.content);
+  }, [file.content, highlightAsLog]);
+  const showStructuredPreview = Boolean(structuredModel && viewMode === "structured");
+  const previewModeActions = structuredModel ? (
+    <div className={styles.previewModeGroup} role="group" aria-label={t("logPreviewMode")}>
+      <button
+        type="button"
+        className={viewMode === "structured" ? `${styles.previewModeButton} ${styles.previewModeButtonActive}` : styles.previewModeButton}
+        onClick={() => setViewMode("structured")}
+      >
+        {t("logPreviewStructured")}
+      </button>
+      <button
+        type="button"
+        className={viewMode === "raw" ? `${styles.previewModeButton} ${styles.previewModeButtonActive}` : styles.previewModeButton}
+        onClick={() => setViewMode("raw")}
+      >
+        {t("logPreviewRaw")}
+      </button>
+    </div>
+  ) : null;
 
   return (
     <div className={styles.surface}>
@@ -178,26 +206,31 @@ export function FilePreview({
         <div className={styles.metaBlock}>
           {changed ? <span className={styles.changedPill}>{t("changed")}</span> : null}
           <span className={styles.sourcePill}>{sourceLabel}</span>
+          {previewModeActions}
           {headerActions}
         </div>
       </div>
 
       <div className={styles.editorWrap}>
-        <PreviewEditorErrorBoundary key={editorKey} previewPath={file.path} fallbackContent={displayContent}>
-          <CodeMirror
-            value={displayContent}
-            editable={false}
-            theme={workbenchCodeMirrorTheme}
-            height="100%"
-            extensions={editorExtensions}
-            basicSetup={{
-              foldGutter: false,
-              dropCursor: false,
-              allowMultipleSelections: false,
-              indentOnInput: false,
-            }}
-          />
-        </PreviewEditorErrorBoundary>
+        {showStructuredPreview && structuredModel ? (
+          <StructuredLogPreview model={structuredModel} severityFilter={severityFilter} />
+        ) : (
+          <PreviewEditorErrorBoundary key={editorKey} previewPath={file.path} fallbackContent={displayContent}>
+            <CodeMirror
+              value={displayContent}
+              editable={false}
+              theme={workbenchCodeMirrorTheme}
+              height="100%"
+              extensions={editorExtensions}
+              basicSetup={{
+                foldGutter: false,
+                dropCursor: false,
+                allowMultipleSelections: false,
+                indentOnInput: false,
+              }}
+            />
+          </PreviewEditorErrorBoundary>
+        )}
       </div>
 
       {file.truncated ? <p className={styles.footnote}>{t("previewTruncated")}</p> : null}

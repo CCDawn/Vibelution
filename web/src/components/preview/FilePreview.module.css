@@ -54,6 +54,33 @@
   font-size: 0.8rem;
 }
 
+.previewModeGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+}
+
+.previewModeButton {
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--fg-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.previewModeButtonActive {
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-panel));
+}
+
 .changedPill {
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);

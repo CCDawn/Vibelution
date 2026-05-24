@@ -899,8 +899,15 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     supervised_items = {item["id"]: item for item in sections["supervised-evolution-memory"]["items"]}
     assert supervised_items["supervised-bundles"]["channels"] == ["supervised_evolution"]
     runtime_scene_items = {item["id"]: item for item in sections["runtime-scene-evidence"]["items"]}
-    assert runtime_scene_items["runtime-scenes-index"]["visibilityClass"] == "diagnostic"
-    assert runtime_scene_items["runtime-scenes-index"]["channels"] == ["explicit_read"]
+    assert runtime_scene_items["runtime-scenes-index"]["visibilityClass"] == "prompt"
+    assert runtime_scene_items["runtime-scenes-index"]["inPrompt"] is True
+    assert runtime_scene_items["runtime-scenes-index"]["channels"] == [
+        "conversation",
+        "self_evolution",
+        "supervised_evolution",
+        "explicit_read",
+    ]
+    assert "RUNTIME_LOG_INDEX" in sections["runtime-scene-evidence"]["agentVisibility"]
     assert any("tools.memory_tools" in item["usedBy"] for item in sections["runtime-memory"]["items"])
 
 

@@ -71,6 +71,7 @@ model = "gpt-5.5"
 api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
 transport = "responses"
 contract = "tool_chat"
+reasoning_state_field = "reasoning_content"
 strict_compatibility = false
 temperature = 0.7
 max_output_tokens = 128000
@@ -115,6 +116,7 @@ model = "gpt-5.5"
 api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
 transport = "responses"
 contract = "tool_chat"
+reasoning_state_field = "reasoning_content"
 strict_compatibility = false
 temperature = 0.7
 max_output_tokens = 128000
@@ -137,6 +139,7 @@ model = "gpt-5.5"
 api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
 transport = "responses"
 contract = "tool_chat"
+reasoning_state_field = "reasoning_content"
 strict_compatibility = false
 temperature = 0.7
 max_output_tokens = 128000
@@ -160,6 +163,7 @@ api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
 transport = "responses"
 contract = "tool_chat"
 strict_compatibility = false
+reasoning_state_field = "reasoning_content"
 temperature = 0.7
 max_output_tokens = 128000
 timeout = 120
@@ -607,6 +611,7 @@ default_components = [
     "SPEC",
     "CODEBASE_MAP",
     "GIT_MEMORY",
+    "RUNTIME_LOG_INDEX",
     "DELEGATION_RULES",
     "CONFIG_AWARENESS",
     "LANGUAGE_AWARENESS",

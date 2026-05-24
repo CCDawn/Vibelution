@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ChatNextStateSignalSummary, ConversationMessage } from "../../api/types";
-import { buildTimelineScrollSignal, ConversationView } from "./ConversationView";
+import {
+  buildTimelineScrollSignal,
+  ConversationView,
+  shouldShowNextStateSignalInConversation,
+} from "./ConversationView";
 
 function renderConversation(
   messages: ConversationMessage[],
@@ -181,6 +185,49 @@ describe("ConversationView edit resend affordance", () => {
     const html = renderConversation([]);
 
     expect(html).not.toContain("最近控制信号");
+  });
+
+  it("hides completed continue signals from the main conversation panel", () => {
+    const continueSignal: ChatNextStateSignalSummary = {
+      signalId: "chat-signal-continue",
+      sessionId: "session-1",
+      turnId: "turn-continue",
+      source: "user",
+      kind: "user_continues",
+      polarity: "neutral",
+      mode: "directive",
+      relatedEventCode: "conversation.user_continue_requested",
+      createdAt: "2026-05-25T00:19:12Z",
+      summary: "用户请求继续上一轮未完成任务。",
+    };
+
+    expect(shouldShowNextStateSignalInConversation(continueSignal, "ready")).toBe(false);
+    expect(shouldShowNextStateSignalInConversation(continueSignal, "completed")).toBe(false);
+    expect(shouldShowNextStateSignalInConversation(continueSignal, "running")).toBe(true);
+
+    const html = renderConversation([], { nextStateSignals: [continueSignal] });
+    expect(html).not.toContain("最近控制信号");
+    expect(html).not.toContain("用户请求继续上一轮未完成任务。");
+  });
+
+  it("keeps stop and failure signals visible after the turn finishes", () => {
+    expect(
+      shouldShowNextStateSignalInConversation(
+        {
+          signalId: "chat-signal-stop",
+          sessionId: "session-1",
+          turnId: "turn-stop",
+          source: "user",
+          kind: "user_stops",
+          polarity: "negative",
+          mode: "directive",
+          relatedEventCode: "conversation.user_stop_requested",
+          createdAt: "2026-05-25T00:19:12Z",
+          summary: "用户请求停止当前对话轮次。",
+        },
+        "ready",
+      ),
+    ).toBe(true);
   });
 });
 

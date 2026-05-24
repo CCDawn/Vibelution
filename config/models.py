@@ -1286,7 +1286,7 @@ class PromptConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     default_components: List[str] = Field(
-        default=["SOUL", "SPEC", "CODEBASE_MAP", "GIT_MEMORY", "DELEGATION_RULES", "CONFIG_AWARENESS", "LANGUAGE_AWARENESS", "GIT_RULES", "MEMORY", "ENV_INFO"],
+        default=["SOUL", "SPEC", "CODEBASE_MAP", "GIT_MEMORY", "RUNTIME_LOG_INDEX", "DELEGATION_RULES", "CONFIG_AWARENESS", "LANGUAGE_AWARENESS", "GIT_RULES", "MEMORY", "ENV_INFO"],
         description="默认拼装的组件列表（静态章节 + 内置动态章节）"
     )
     sections: List[SectionConfig] = Field(
@@ -1697,6 +1697,10 @@ class AppConfig(BaseModel):
         if "MEMORY" not in self.prompt.default_components:
             warnings.append("prompt.default_components 未包含 MEMORY")
             suggested_actions.append("将 MEMORY 加入默认 prompt 组件，确保状态记忆与复盘约束进入当前轮提示词")
+
+        if "RUNTIME_LOG_INDEX" not in self.prompt.default_components:
+            warnings.append("prompt.default_components 未包含 RUNTIME_LOG_INDEX")
+            suggested_actions.append("将 RUNTIME_LOG_INDEX 加入默认 prompt 组件，让 agent 感知最近运行现场日志索引")
 
         if not self.prompt.sections:
             warnings.append("未配置任何静态 prompt sections")

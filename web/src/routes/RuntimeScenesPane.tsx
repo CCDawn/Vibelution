@@ -223,19 +223,42 @@ function renderPackageDiagnosisPanel(
   const activeSignalCount = issueState ? issueState.activeErrorCount + issueState.activeWarningCount : 0;
   const historicalSignalCount = issueState ? issueState.historicalErrorCount + issueState.historicalWarningCount : 0;
   const activeIssueCount = issueState ? issueState.activeClusterCount ?? activeSignalCount : 0;
+  const policyIssueCount = issueState ? issueState.policyClusterCount ?? issueState.policySignalCount ?? 0 : 0;
   const historicalIssueCount = issueState ? issueState.historicalClusterCount ?? historicalSignalCount : 0;
   const primaryCluster =
-    issueState?.firstActiveCluster ?? issueState?.firstHistoricalCluster ?? issueState?.activeClusters?.[0] ?? issueState?.historicalClusters?.[0];
+    issueState?.firstActiveCluster ??
+    issueState?.firstPolicyCluster ??
+    issueState?.firstHistoricalCluster ??
+    issueState?.activeClusters?.[0] ??
+    issueState?.policyClusters?.[0] ??
+    issueState?.historicalClusters?.[0];
   const visibleClusters = [
     ...(issueState?.activeClusters ?? []).slice(0, 3),
+    ...(issueState?.policyClusters ?? []).slice(0, 2),
     ...(issueState?.historicalClusters ?? []).slice(0, 2),
   ].slice(0, 4);
+  const primaryClusterLabel =
+    activeIssueCount > 0
+      ? lang === "zh"
+        ? "主活跃问题簇"
+        : "Primary active cluster"
+      : policyIssueCount > 0
+        ? lang === "zh"
+          ? "主控制/策略簇"
+          : "Primary policy cluster"
+        : lang === "zh"
+          ? "主历史问题簇"
+          : "Primary historical cluster";
   const signalHeading = firstSignal?.eventCode
     ? activeIssueCount > 0
       ? lang === "zh"
         ? "优先信号"
         : "Priority signal"
-      : historicalIssueCount > 0
+      : policyIssueCount > 0
+        ? lang === "zh"
+          ? "策略信号"
+          : "Policy signal"
+        : historicalIssueCount > 0
         ? lang === "zh"
           ? "历史信号"
           : "Historical signal"
@@ -262,6 +285,10 @@ function renderPackageDiagnosisPanel(
             {lang === "zh" ? " 活跃问题簇" : " active clusters"}
           </span>
           <span>
+            <strong>{policyIssueCount}</strong>
+            {lang === "zh" ? " 策略簇" : " policy clusters"}
+          </span>
+          <span>
             <strong>{historicalIssueCount}</strong>
             {lang === "zh" ? " 历史/已恢复簇" : " historical clusters"}
           </span>
@@ -273,7 +300,7 @@ function renderPackageDiagnosisPanel(
       ) : null}
       {primaryCluster ? (
         <div className={styles.packagePrimaryCluster}>
-          <span>{activeIssueCount > 0 ? (lang === "zh" ? "主活跃问题簇" : "Primary active cluster") : lang === "zh" ? "主历史问题簇" : "Primary historical cluster"}</span>
+          <span>{primaryClusterLabel}</span>
           <strong>{runtimeSceneIssueClusterLabel(primaryCluster, lang)}</strong>
           <p>{runtimeSceneIssueClusterMeta(primaryCluster, lang)}</p>
           {primaryCluster.rawRefs?.length ? (
