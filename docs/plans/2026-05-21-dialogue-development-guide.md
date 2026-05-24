@@ -76,7 +76,7 @@
 - turn lifecycle 会写入 runtime scene 子日志：`conversations/<session>-turns.jsonl`。
 - 每个 session 拥有独立可读日志：`workspace/sessions/<session>/logs/conversation.jsonl` 和 `conversation.md`。
 - 日志记录安全字段、状态、计数、路径引用、错误类型、工具摘要和 active task，不应记录 secrets、完整 prompts、大段文件或无界模型输出。
-- 当前 typed trace 已覆盖多数组件事件，但还缺少一个统一命名、可被其他线稳定消费的 `next_state_signal` 对象或 store。
+- 当前 typed trace 已覆盖多数组件事件；统一 `next_state_signal` store 已落地，作为对话线向监督/无监督线提供的安全证据引用。
 
 ### 3.5 Session Workspace 隔离
 
@@ -101,6 +101,20 @@
 - allowed downstream uses 当前为 `supervised_evaluation`、`gym_candidate_case`、`future_training_export`。
 - `tests/test_chat_dataset_capture.py` 和 `tests/test_web_app.py` 已覆盖候选采集、安全路径、positive/negative/discard、dataset metadata、reviewRequired、non-holdout 边界和 evolution workbench 展示。
 
+### 3.8 Next-state signal 证据链
+
+- `core/evaluation/chat_next_state_signals.py` 已提供统一信号仓库，默认写入 `workspace/evaluation/chat_next_state_signals.jsonl`。
+- 信号字段包括 `signalId`、`sessionId`、`turnId`、`source`、`kind`、`polarity`、`mode`、`relatedEventCode`、`createdAt`、`summary` 和安全裁剪后的 `metadata`。
+- 当前 Web Chat 已覆盖用户纠错/编辑重发、provider failure、tool error、stop、continue、turn circuit breaker 等关键信号：
+  - 编辑重发写 `kind=assistant_output_edited`，`relatedEventCode=conversation.message_edited_resubmitted`。
+  - 停止写 `kind=user_stops`，继续写 `kind=user_continues`。
+  - 普通 provider failure 写 `kind=provider_failure`，`relatedEventCode=conversation.turn_error`。
+  - turn circuit breaker 写 `kind=provider_failure`，`relatedEventCode=conversation.turn_circuit_breaker`，metadata 保留 continuation turn 等安全字段。
+  - 工具错误写 `kind=tool_error`，`relatedEventCode=conversation.tool_error`，metadata 保留工具名和错误摘要。
+- `ChatDatasetCaptureService.capture_candidate()` 可携带规范化后的 `next_state_signals` 引用；这些引用是 candidate evidence，不是训练样本本体。
+- `SessionDetail.nextStateSignals` 暴露最近 5 条安全摘要，`ConversationView` 在消息框外用可收缩面板展示，不写入 `messages`。
+- 回归测试覆盖 repository round-trip、dataset capture 引用、session detail 安全摘要、provider failure、tool error、stop、continue、编辑重发和 circuit breaker。
+
 ## 4. 当前文档与实现差距
 
 旧版指南方向正确，但已经落后于实现：
@@ -108,7 +122,7 @@
 - 旧文档把 `ChatTurn` 登记为 `WorkRun(chat_turn)`、resource lease、runtime summary 聚合作为后续任务；当前这些已经实现，应改为维护和加固项。
 - 旧文档没有把 session workspace 隔离列为核心事实；当前这是防止对话污染全局 workspace 的关键机制。
 - 旧文档对 chat review lifecycle 描述偏抽象；当前 positive/negative/discard、dataset metadata 和 downstream uses 已形成公开契约。
-- 旧文档提到 next-state signal，但实现中还没有一个统一、可查询、跨线可消费的 `next_state_signal` 契约；目前信号散落在 lifecycle 事件、review candidate quality signals、用户编辑/停止/继续事件中。
+- 旧文档把 next-state signal 作为缺口；当前统一仓库、Web Chat 关键信号、dataset capture 引用和前端摘要展示已经落地，应改为维护和扩展项。
 - 终端 workbench 的 chat review 菜单仍显示 `approved/rejected` 计数，并调用旧的 approve/reject API 语义；当前服务层已转为 `positive/negative/discard`，这是 UI/术语一致性风险。
 - 前端已有 `workRuns` 类型与 active work indicator，但还没有独立 `workRuns` query key；目前主要依赖 runtime summary 同步。若后续 UI 要细粒度订阅 work runs，需要补 frontend sync contract。
 
@@ -184,31 +198,33 @@ pytest tests/test_web_app.py -k "chat_review or dataset" -v
 - `chat_reviewed_multiturn` 标记 `reviewRequired=True`、`sourceTrack=dialogue`、`holdoutAllowed=False`。
 - pending、positive、negative、discard 状态清晰可见且不会混入错误数据集。
 
-### P1：补齐统一 next-state signal 契约
+### P1：加固统一 next-state signal 契约与消费边界
 
-目标：把用户后续行为、工具/测试结果、停止/继续、编辑重发、验证结果统一成 typed signal，供监督线和无监督线读取，但不让对话线做最终决策。
+目标：维护已落地的 typed signal 仓库，把用户后续行为、工具/测试结果、停止/继续、编辑重发、provider failure 和验证结果作为 evidence/candidate 引用提供给监督线和无监督线，但不让对话线做最终决策。
 
-建议契约：
+当前契约：
 
 - `signalId`
 - `sessionId`
 - `turnId`
 - `source`: `user` / `tool` / `runtime` / `verification` / `review`
-- `kind`: `user_accepts` / `user_corrects` / `user_reasks` / `user_stops` / `user_continues` / `assistant_output_edited` / `tool_error` / `verification_passed` / `verification_failed`
+- `kind`: `user_accepts` / `user_corrects` / `user_reasks` / `user_stops` / `user_continues` / `assistant_output_edited` / `tool_error` / `verification_passed` / `verification_failed` / `provider_failure`
 - `polarity`: `positive` / `negative` / `neutral`
 - `mode`: `evaluative` / `directive`
 - `relatedEventCode`
 - `createdAt`
 - `summary`
+- `metadata`: 安全裁剪字段，不能保存完整 prompt、大段输出或 secrets
 
 影响文件：
 
+- `core/evaluation/chat_next_state_signals.py`
 - `core/web/services/session_service.py`
 - `core/evaluation/chat_dataset_capture.py`
-- `core/evaluation/chat_segmenter.py`
-- `core/web/services/runtime_scene_service.py`
-- 可能新增：`core/evaluation/chat_next_state_signals.py`
+- `web/src/components/conversation/ConversationView.tsx`
+- `web/src/api/types.ts`
 - `tests/test_web_app.py`
+- `tests/test_chat_next_state_signals.py`
 - `tests/test_chat_dataset_capture.py`
 
 风险：
@@ -220,15 +236,16 @@ pytest tests/test_web_app.py -k "chat_review or dataset" -v
 测试锚点：
 
 ```powershell
-pytest tests/test_web_app.py -k "message_edit or stop or continue or chat_review" -v
-pytest tests/test_chat_dataset_capture.py -k "signal or candidate" -v
+pytest tests/test_chat_next_state_signals.py tests/test_chat_dataset_capture.py tests/test_web_app.py -k "next_state or signal or circuit_breaker or tool_error" -q
+pytest tests/test_web_app.py -k "message_edit or stop or continue or provider" -v
 ```
 
 验收：
 
-- 停止、继续、编辑重发、provider failure、验证结果至少能生成结构化 signal。
+- 停止、继续、编辑重发、provider failure、tool error 和 turn circuit breaker 能生成结构化 signal。
 - signal 只记录摘要、类型和关联 ID，不记录完整 prompt 或大段输出。
 - review candidate 可以引用 signal summary，但不能直接把 signal 当训练样本。
+- 后续若接入测试/验证工具，应补 `verification_passed` / `verification_failed` 的实际 emission 点和回归测试。
 
 ### P1：统一终端 review UI 术语
 
@@ -443,6 +460,12 @@ pytest tests/test_dataset_registry.py -k "chat_reviewed or review" -v
 pytest tests/test_web_app.py -k "chat_review or dataset" -v
 ```
 
+Next-state signal：
+
+```powershell
+pytest tests/test_chat_next_state_signals.py tests/test_chat_dataset_capture.py tests/test_web_app.py -k "next_state or signal or circuit_breaker or tool_error" -q
+```
+
 终端与前端：
 
 ```powershell
@@ -456,7 +479,7 @@ cd web; npm run build
 
 1. P0：持续保护 `ChatTurn -> WorkRun(chat_turn)`、stop/continue/recovery、shutdown partial persistence。
 2. P0：持续保护 raw chat 不绕过 review，reviewed chat case 才能进入 supervised/Gym 数据入口。
-3. P1：补一个统一 `next_state_signal` 契约，把已有散落事件整理成可消费证据。
+3. P1：持续加固统一 `next_state_signal` 契约、消费者摘要展示和验证类 signal emission。
 4. P1：统一终端 review UI 的 positive/negative/discard 术语。
 5. P1：补强心智模型动态开关的前端 payload 测试。
 6. P2：需要更细粒度 UI 时，再添加独立 WorkRun query/sync contract。
