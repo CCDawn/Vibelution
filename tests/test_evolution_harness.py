@@ -12,7 +12,9 @@ from scripts.evolution_harness import (
     build_synthetic_venv,
     classify_tool_event_phase,
     create_harness_config,
+    DEFAULT_DYNAMIC_REPLANNING_FIXTURE_PROMPT,
     DEFAULT_FULL_EVOLUTION_PROMPT,
+    DEFAULT_IMPOSSIBLE_TASK_FIXTURE_PROMPT,
     DEFAULT_SAFE_MODIFY_PROMPT,
     DEFAULT_TRANSACTION_PROMPT,
     ensure_harness_safe_modify_allowlist,
@@ -46,6 +48,8 @@ from scripts.evolution_harness import (
     summarize_latest_matching_file,
     summarize_conversation_file,
     run_harness,
+    SUPERVISED_FINAL_STATE_MARKER,
+    SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
 )
 from core.orchestration.turn_outcome import TurnOutcomeController
 
@@ -161,6 +165,52 @@ def test_resolve_run_options_for_strategy_probe_forces_readonly_single_turn():
     assert options.prompt == "read files and answer"
     assert options.expect_restart is False
     assert options.scenario == "strategy"
+
+
+def test_resolve_run_options_for_dynamic_replanning_fixture_forces_single_turn():
+    options = resolve_run_options(
+        scenario="dynamic_replanning_fixture",
+        mode="test",
+        prompt=None,
+        expect_restart=True,
+    )
+
+    assert options.mode == "single_turn"
+    assert options.expect_restart is False
+    assert options.scenario == "dynamic_replanning_fixture"
+    assert options.prompt == DEFAULT_DYNAMIC_REPLANNING_FIXTURE_PROMPT
+    assert SUPERVISED_FINAL_STATE_MARKER in options.prompt
+    assert "verified_after_change" in options.prompt
+    assert "不要触发重启" in options.prompt
+
+
+def test_resolve_run_options_for_impossible_task_fixture_forces_single_turn():
+    options = resolve_run_options(
+        scenario="impossible_task_fixture",
+        mode="auto",
+        prompt=None,
+        expect_restart=True,
+    )
+
+    assert options.mode == "single_turn"
+    assert options.expect_restart is False
+    assert options.scenario == "impossible_task_fixture"
+    assert options.prompt == DEFAULT_IMPOSSIBLE_TASK_FIXTURE_PROMPT
+    assert SUPERVISED_INFEASIBLE_OUTCOME_MARKER in options.prompt
+    assert "missing_permission" in options.prompt
+    assert "不要伪造完成" in options.prompt
+
+
+def test_resolve_run_options_allows_custom_supervised_fixture_prompt():
+    options = resolve_run_options(
+        scenario="dynamic_replanning_fixture",
+        mode="test",
+        prompt="custom dynamic marker prompt",
+        expect_restart=False,
+    )
+
+    assert options.mode == "single_turn"
+    assert options.prompt == "custom dynamic marker prompt"
 
 
 def test_materialize_scenario_prompt_injects_worktree_absolute_probe_path(tmp_path: Path):
@@ -967,6 +1017,64 @@ def test_infer_evolution_summary_includes_safe_modify_probe_state():
     assert summary["safe_modify"] == safe_modify
 
 
+def test_infer_evolution_summary_extracts_supervised_final_state_marker():
+    summary = infer_evolution_summary(
+        [],
+        [],
+        [
+            "开始执行 fixture",
+            (
+                f'{SUPERVISED_FINAL_STATE_MARKER} '
+                '{"calendar_event":"rescheduled","new_time":"10:30","verified_after_change":true}'
+            ),
+        ],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert summary["final_state"] == {
+        "calendar_event": "rescheduled",
+        "new_time": "10:30",
+        "verified_after_change": True,
+    }
+    assert summary["supervised"]["final_state"] == summary["final_state"]
+
+
+def test_infer_evolution_summary_extracts_supervised_infeasible_outcome_marker_from_debug():
+    summary = infer_evolution_summary(
+        [],
+        [
+            (
+                f'{SUPERVISED_INFEASIBLE_OUTCOME_MARKER} '
+                '{"status":"infeasible","reason":"missing_permission","honest_stop":true}'
+            )
+        ],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert summary["infeasible_outcome"] == {
+        "status": "infeasible",
+        "reason": "missing_permission",
+        "honest_stop": True,
+    }
+    assert summary["supervised"]["infeasible_outcome"] == summary["infeasible_outcome"]
+
+
+def test_infer_evolution_summary_records_invalid_supervised_marker_error():
+    summary = infer_evolution_summary(
+        [],
+        [],
+        [f"{SUPERVISED_FINAL_STATE_MARKER} not-json"],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert summary["supervised_marker_errors"] == {"final_state": "invalid_json"}
+    assert summary["supervised"]["marker_errors"] == {"final_state": "invalid_json"}
+
+
 def test_validation_passed_for_python_lint_requires_zero_issues():
     assert _validation_passed_for_tool(
         tool_name="python_lint_tool",
@@ -1120,6 +1228,86 @@ def test_infer_result_status_prefers_provider_transport_error_over_missing_trans
     assert status == "failed"
     assert "provider 传输异常" in reason
     assert "未开账" not in reason
+
+
+def test_infer_result_status_requires_dynamic_fixture_final_state_marker():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "session_end"},
+        scenario="dynamic_replanning_fixture",
+        evolution_summary={
+            "validation": {"passed": 0, "failed": 0},
+            "transaction": {"opened": False, "closed": False, "status": None},
+        },
+    )
+
+    assert status == "failed"
+    assert "final_state marker" in reason
+
+
+def test_infer_result_status_accepts_dynamic_fixture_final_state_marker():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "session_end"},
+        scenario="dynamic_replanning_fixture",
+        evolution_summary={
+            "final_state": {"calendar_event": "rescheduled", "verified_after_change": True},
+            "supervised": {
+                "final_state": {"calendar_event": "rescheduled", "verified_after_change": True}
+            },
+        },
+    )
+
+    assert status == "success"
+    assert "正常结束" in reason
+
+
+def test_infer_result_status_requires_impossible_fixture_infeasible_marker():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "session_end"},
+        scenario="impossible_task_fixture",
+        evolution_summary={
+            "supervised": {
+                "marker_errors": {"infeasible_outcome": "invalid_json"},
+            },
+        },
+    )
+
+    assert status == "failed"
+    assert "marker 格式无效" in reason
+
+
+def test_infer_result_status_accepts_impossible_fixture_infeasible_marker():
+    status, reason = infer_result_status(
+        timed_out=False,
+        restart_expected=False,
+        restart_reentered=False,
+        primary_returncode=0,
+        last_observation={"phase": "session_end"},
+        scenario="impossible_task_fixture",
+        evolution_summary={
+            "supervised": {
+                "infeasible_outcome": {
+                    "status": "infeasible",
+                    "reason": "missing_permission",
+                    "honest_stop": True,
+                },
+            },
+        },
+    )
+
+    assert status == "success"
+    assert "正常结束" in reason
 
 
 def test_single_turn_direct_response_does_not_finish_tool_required_probe():
