@@ -73,6 +73,15 @@ function scene(files: {
       errorCount: 0,
       warningCount: 0,
     },
+    packageDiagnosis: {
+      schemaVersion: 1,
+      severity: "info",
+      userSummary: "No issues",
+      agentNextStep: "Read summary.json",
+      firstSignal: null,
+      recommendedOrder: ["summary.json", "package_index.json", "timeline.jsonl"],
+      keyEntries: [],
+    },
   };
 }
 

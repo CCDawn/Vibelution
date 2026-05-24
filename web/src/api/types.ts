@@ -250,6 +250,31 @@ export type RuntimeScenePackageSummary = {
   warningCount: number;
 };
 
+export type RuntimeScenePackageDiagnosis = {
+  schemaVersion: number;
+  severity: "error" | "warning" | "info" | string;
+  userSummary: string;
+  agentNextStep: string;
+  firstSignal: {
+    severity: "error" | "warning" | "info" | string;
+    timestamp: string;
+    component: string;
+    phase: string;
+    eventCode: string;
+    message: string;
+    rawRefs: Array<{
+      path: string;
+      tail_lines?: number;
+    }>;
+  } | null;
+  recommendedOrder: string[];
+  keyEntries: Array<{
+    path: string;
+    label: string;
+    reason: string;
+  }>;
+};
+
 export type RuntimeScenePackageIndex = {
   schemaVersion: number;
   packageId: string;
@@ -295,6 +320,7 @@ export type RuntimeSceneDetail = {
   artifacts: RuntimeSceneRawFile[];
   eventLogs: RuntimeSceneRawFile[];
   packageSummary: RuntimeScenePackageSummary;
+  packageDiagnosis: RuntimeScenePackageDiagnosis;
 };
 
 export type RuntimeSceneDeleteResponse = {

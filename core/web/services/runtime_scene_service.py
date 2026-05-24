@@ -255,6 +255,18 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
             artifacts=artifacts,
             event_logs=event_logs,
         ),
+        "packageDiagnosis": _runtime_scene_package_diagnosis(
+            scene_dir=scene_dir,
+            scene_id=detail_scene_id,
+            manifest=manifest,
+            timeline=timeline,
+            lifecycle=lifecycle_events,
+            raw_files=raw_files,
+            conversation_logs=conversation_logs,
+            agent_logs=agent_logs,
+            artifacts=artifacts,
+            event_logs=event_logs,
+        ),
     }
 
 
@@ -1248,6 +1260,286 @@ def _runtime_scene_package_summary(
         "errorCount": severity_summary["errorCount"],
         "warningCount": severity_summary["warningCount"],
     }
+
+
+def _runtime_scene_package_diagnosis(
+    *,
+    scene_dir: Path,
+    scene_id: str,
+    manifest: dict[str, Any],
+    timeline: list[dict],
+    lifecycle: list[dict],
+    raw_files: list[dict],
+    conversation_logs: list[dict],
+    agent_logs: list[dict],
+    artifacts: list[dict],
+    event_logs: list[dict],
+) -> dict[str, Any]:
+    severity_summary = _runtime_scene_severity_summary(timeline)
+    severity = (
+        "error"
+        if severity_summary["errorCount"] > 0
+        else "warning"
+        if severity_summary["warningCount"] > 0
+        else "info"
+    )
+    first_signal = _runtime_scene_first_signal(timeline)
+    if first_signal is None:
+        first_signal = _runtime_scene_first_key_event(lifecycle, timeline)
+    recommended_order = _runtime_scene_recommended_reading_order(
+        raw_files=raw_files,
+        conversation_logs=conversation_logs,
+        agent_logs=agent_logs,
+        artifacts=artifacts,
+        event_logs=event_logs,
+        first_signal=first_signal,
+    )
+    key_entries = _runtime_scene_key_entries(
+        scene_dir=scene_dir,
+        manifest=manifest,
+        raw_files=raw_files,
+        conversation_logs=conversation_logs,
+        agent_logs=agent_logs,
+        artifacts=artifacts,
+        event_logs=event_logs,
+        first_signal=first_signal,
+    )
+    return {
+        "schemaVersion": 1,
+        "severity": severity,
+        "userSummary": _runtime_scene_diagnosis_user_summary(
+            severity=severity,
+            manifest=manifest,
+            timeline=timeline,
+            lifecycle=lifecycle,
+            severity_summary=severity_summary,
+            first_signal=first_signal,
+            child_log_count=len(raw_files) + len(conversation_logs) + len(agent_logs) + len(artifacts) + len(event_logs),
+        ),
+        "agentNextStep": _runtime_scene_diagnosis_next_step(
+            scene_dir_name=scene_dir.name,
+            scene_id=scene_id,
+            severity=severity,
+            first_signal=first_signal,
+            recommended_order=recommended_order,
+            key_entries=key_entries,
+        ),
+        "firstSignal": _runtime_scene_diagnosis_signal_payload(first_signal),
+        "recommendedOrder": recommended_order,
+        "keyEntries": key_entries,
+    }
+
+
+def _runtime_scene_first_signal(events: list[dict]) -> dict[str, Any] | None:
+    for event in events:
+        severity = _runtime_scene_event_severity(event)
+        if severity in {"error", "warning"}:
+            return {**event, "diagnosisSeverity": severity}
+    return None
+
+
+def _runtime_scene_first_key_event(lifecycle: list[dict], timeline: list[dict]) -> dict[str, Any] | None:
+    for event in lifecycle:
+        if str(event.get("eventCode") or "").strip():
+            return {**event, "diagnosisSeverity": _runtime_scene_event_severity(event)}
+    for event in timeline:
+        if str(event.get("eventCode") or "").strip():
+            return {**event, "diagnosisSeverity": _runtime_scene_event_severity(event)}
+    return None
+
+
+def _runtime_scene_recommended_reading_order(
+    *,
+    raw_files: list[dict],
+    conversation_logs: list[dict],
+    agent_logs: list[dict],
+    artifacts: list[dict],
+    event_logs: list[dict],
+    first_signal: dict[str, Any] | None,
+) -> list[str]:
+    order = [SUMMARY_PATH, PACKAGE_INDEX_PATH, TIMELINE_PATH, LIFECYCLE_PATH]
+    raw_refs = first_signal.get("rawRefs") if isinstance(first_signal, dict) else []
+    for item in raw_refs if isinstance(raw_refs, list) else []:
+        if isinstance(item, dict):
+            _append_unique_path(order, str(item.get("path") or "").strip())
+    for group in (conversation_logs, agent_logs, event_logs, raw_files, artifacts):
+        for item in group:
+            _append_unique_path(order, str(item.get("path") or "").strip())
+            if len(order) >= 12:
+                return order
+    return order
+
+
+def _runtime_scene_key_entries(
+    *,
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    raw_files: list[dict],
+    conversation_logs: list[dict],
+    agent_logs: list[dict],
+    artifacts: list[dict],
+    event_logs: list[dict],
+    first_signal: dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    entries: list[dict[str, str]] = []
+    for path, label, reason in (
+        (SUMMARY_PATH, "Lifecycle package summary", "Start here for package counts, sections, and diagnostic entrypoint."),
+        (PACKAGE_INDEX_PATH, "Package index", "Use this for stable date-based lookup and package identity."),
+        (TIMELINE_PATH, "Unified timeline", "Read chronological events across the full lifecycle."),
+        (LIFECYCLE_PATH, "Lifecycle events", "Check startup, shutdown, supervision, and recovery phases."),
+    ):
+        if _scene_child_exists(scene_dir, path):
+            _append_key_entry(
+                entries,
+                path=path,
+                label=label,
+                reason=reason,
+            )
+    if not entries and event_logs:
+        _append_key_entry(
+            entries,
+            path=str(event_logs[0].get("path") or ""),
+            label="Component event stream",
+            reason="This legacy package has no merged timeline file; start from component events.",
+        )
+    raw_refs = first_signal.get("rawRefs") if isinstance(first_signal, dict) else []
+    for item in raw_refs if isinstance(raw_refs, list) else []:
+        if isinstance(item, dict):
+            path = str(item.get("path") or "").strip()
+            if not _scene_child_exists(scene_dir, path):
+                continue
+            _append_key_entry(
+                entries,
+                path=path,
+                label="First signal evidence",
+                reason="Open the raw reference attached to the first error or warning event.",
+            )
+    for key, label, reason in (
+        ("frontend.log_path", "Frontend build log", "Confirm frontend build output for this lifecycle."),
+        ("backend.stdout_path", "Backend stdout", "Inspect backend startup and runtime output."),
+        ("backend.stderr_path", "Backend stderr", "Inspect backend errors and tracebacks when present."),
+        ("browser.log_path", "Browser log", "Inspect managed browser launch and close behavior."),
+        ("supervisor.log_path", "Supervisor log", "Inspect supervisor process behavior."),
+        ("supervisor.stderr_path", "Supervisor stderr", "Inspect supervisor errors when present."),
+    ):
+        path = _manifest_nested_string(manifest, key)
+        if path and _scene_child_exists(scene_dir, path):
+            _append_key_entry(entries, path=path, label=label, reason=reason)
+    for group, label, reason in (
+        (conversation_logs, "Conversation child log", "Review user, assistant, and tool-call conversation breadcrumbs."),
+        (agent_logs, "Agent child log", "Review agent turn, tool-call, supervision, or self-evolution breadcrumbs."),
+        (event_logs, "Component event stream", "Inspect component-specific structured events backing the timeline."),
+        (raw_files, "Raw log", "Use as supporting low-level process evidence."),
+        (artifacts, "Artifact", "Inspect generated reports, snapshots, or referenced run outputs."),
+    ):
+        if group:
+            _append_key_entry(entries, path=str(group[0].get("path") or ""), label=label, reason=reason)
+    return entries[:10]
+
+
+def _runtime_scene_diagnosis_user_summary(
+    *,
+    severity: str,
+    manifest: dict[str, Any],
+    timeline: list[dict],
+    lifecycle: list[dict],
+    severity_summary: dict[str, int],
+    first_signal: dict[str, Any] | None,
+    child_log_count: int,
+) -> str:
+    status = str(manifest.get("status") or "unknown").strip() or "unknown"
+    result = str(manifest.get("result") or manifest.get("stop_reason") or "").strip()
+    event_count = len(timeline)
+    lifecycle_count = len(lifecycle)
+    base = f"本周期状态为 {status}"
+    if result:
+        base = f"{base}，结果为 {result}"
+    base = f"{base}；记录了 {event_count} 个时间线事件、{lifecycle_count} 个生命周期事件、{child_log_count} 个子日志入口。"
+    if severity == "error":
+        signal = _runtime_scene_signal_label(first_signal)
+        return f"{base}发现 {severity_summary['errorCount']} 个错误信号，首个信号是 {signal}。"
+    if severity == "warning":
+        signal = _runtime_scene_signal_label(first_signal)
+        return f"{base}发现 {severity_summary['warningCount']} 个警告信号，首个信号是 {signal}。"
+    if event_count == 0 and child_log_count == 0:
+        return f"{base}当前包缺少可分析事件和子日志，应把缺失日志视为日志系统问题。"
+    return f"{base}未发现明显错误或警告，可按推荐顺序抽查关键入口。"
+
+
+def _runtime_scene_diagnosis_next_step(
+    *,
+    scene_dir_name: str,
+    scene_id: str,
+    severity: str,
+    first_signal: dict[str, Any] | None,
+    recommended_order: list[str],
+    key_entries: list[dict[str, str]],
+) -> str:
+    first_path = key_entries[0]["path"] if key_entries else recommended_order[0] if recommended_order else SUMMARY_PATH
+    package_anchor = str(scene_dir_name or scene_id).strip() or scene_id
+    if severity in {"error", "warning"} and first_signal:
+        signal = _runtime_scene_signal_label(first_signal)
+        return (
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再定位首个信号 {signal}；"
+            "若事件含 rawRefs，优先打开对应原始日志。"
+        )
+    return (
+        f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再按推荐阅读顺序对照 timeline、lifecycle 和子日志确认周期完整性。"
+    )
+
+
+def _runtime_scene_diagnosis_signal_payload(event: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not event:
+        return None
+    return {
+        "severity": str(event.get("diagnosisSeverity") or _runtime_scene_event_severity(event)),
+        "timestamp": str(event.get("timestamp") or ""),
+        "component": str(event.get("component") or ""),
+        "phase": str(event.get("phase") or ""),
+        "eventCode": str(event.get("eventCode") or ""),
+        "message": _truncate_text(str(event.get("message") or ""), 320),
+        "rawRefs": event.get("rawRefs") if isinstance(event.get("rawRefs"), list) else [],
+    }
+
+
+def _runtime_scene_signal_label(event: dict[str, Any] | None) -> str:
+    if not event:
+        return "未记录"
+    parts = [
+        str(event.get("timestamp") or "").strip(),
+        str(event.get("component") or "").strip(),
+        str(event.get("eventCode") or "").strip(),
+    ]
+    return " / ".join(part for part in parts if part) or "未命名事件"
+
+
+def _append_unique_path(items: list[str], path: str) -> None:
+    normalized = str(path or "").strip().replace("\\", "/")
+    if normalized and normalized not in items:
+        items.append(normalized)
+
+
+def _append_key_entry(entries: list[dict[str, str]], *, path: str, label: str, reason: str) -> None:
+    normalized = str(path or "").strip().replace("\\", "/")
+    if not normalized or any(item["path"] == normalized for item in entries):
+        return
+    entries.append({"path": normalized, "label": label, "reason": reason})
+
+
+def _manifest_nested_string(manifest: dict[str, Any], key: str) -> str:
+    current: Any = manifest
+    for part in key.split("."):
+        if not isinstance(current, dict):
+            return ""
+        current = current.get(part)
+    return str(current or "").strip().replace("\\", "/")
+
+
+def _scene_child_exists(scene_dir: Path, relative_path: str) -> bool:
+    try:
+        return _resolve_scene_child(scene_dir, relative_path).exists()
+    except ValueError:
+        return False
 
 
 def _runtime_scene_severity_summary(events: list[dict]) -> dict[str, int]:
