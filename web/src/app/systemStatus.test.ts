@@ -290,6 +290,20 @@ describe("systemStatus", () => {
       overflowCount: 2,
       tone: "running",
     });
+    expect(indicator?.items).toMatchObject([
+      {
+        kind: "supervised",
+        summary: "review proposal safety",
+      },
+      {
+        kind: "self",
+        summary: "tighten tests",
+      },
+      {
+        kind: "chat",
+        summary: "继续",
+      },
+    ]);
   });
 
   it("uses self-evolution goals as summaries and marks queued work as caution", () => {

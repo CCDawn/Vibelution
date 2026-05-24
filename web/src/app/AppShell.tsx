@@ -224,6 +224,7 @@ export function AppShell() {
   });
   const runtimeControllerState = deriveRuntimeControllerState(runtimeQuery.data);
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
+  const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const currentTime = clockFormatter.format(clockNow);
   const buildId = __VIBELUTION_BUILD_ID__;
   const gitStatus = gitStatusQuery.data;
@@ -751,13 +752,15 @@ export function AppShell() {
           {activeWorkIndicator ? (
             <div
               className={styles.activeWorkChip}
-              title={activeWorkIndicator.detail}
-              aria-label={`${t("activeWorkNow")}: ${activeWorkIndicator.label} ${activeWorkIndicator.summary}`}
+              tabIndex={0}
+              title={activeWorkDetailsTitle}
+              aria-label={`${t("activeWorkNow")}: ${activeWorkIndicator.label} ${statusLabel(activeWorkIndicator.status)}${
+                activeWorkIndicator.count > 1 ? `, ${activeWorkIndicator.count} ${t("activeWorkCountSuffix")}` : ""
+              }. ${activeWorkDetailsTitle}`}
             >
               <span className={`${styles.statusDot} ${styles[`status_${activeWorkIndicator.tone}`]}`} />
               <span className={styles.activeWorkKicker}>{t("activeWorkNow")}</span>
               <strong>{activeWorkIndicator.label}</strong>
-              <span className={styles.activeWorkSummary}>{activeWorkIndicator.summary}</span>
               <span className={styles.activeWorkStatus}>{statusLabel(activeWorkIndicator.status)}</span>
               {activeWorkIndicator.overflowCount > 0 ? (
                 <span className={styles.activeWorkMore}>
@@ -765,6 +768,29 @@ export function AppShell() {
                   {activeWorkIndicator.overflowCount}
                 </span>
               ) : null}
+              <div className={styles.activeWorkDetailPanel} role="note">
+                <div className={styles.activeWorkDetailHeader}>
+                  <strong>{t("activeWorkDetails")}</strong>
+                  <span>
+                    {activeWorkIndicator.count} {t("activeWorkCountSuffix")}
+                  </span>
+                </div>
+                <ul className={styles.activeWorkDetailList}>
+                  {activeWorkIndicator.items.map((item) => (
+                    <li key={`${item.kind}-${item.runId || item.status}`} className={styles.activeWorkDetailItem}>
+                      <span className={`${styles.statusDot} ${styles[`status_${item.tone}`]}`} />
+                      <div className={styles.activeWorkDetailCopy}>
+                        <div className={styles.activeWorkDetailTitle}>
+                          <strong>{item.label}</strong>
+                          <span>{statusLabel(item.status)}</span>
+                        </div>
+                        <p>{item.summary}</p>
+                        {item.runId ? <code>{item.runId}</code> : null}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           ) : null}
         </div>
