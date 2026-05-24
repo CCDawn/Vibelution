@@ -1074,6 +1074,76 @@
   line-height: 1.5;
 }
 
+.startupTracePanel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.startupTraceHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.startupTraceHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+}
+
+.startupTraceHeader strong {
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.startupTraceSteps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 6px;
+}
+
+.startupTraceStep {
+  display: grid;
+  gap: 3px;
+  min-height: 46px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--success, #35c986) 30%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--success, #35c986) 8%, var(--surface-input));
+  color: var(--fg-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.startupTraceStep:disabled {
+  cursor: default;
+}
+
+.startupTraceStep span,
+.startupTraceStep strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.startupTraceStep span {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.startupTraceStep strong {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.startupTraceStepMissing {
+  border-color: color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-input));
+}
+
 .packageDiagnosisGrid,
 .packageDiagnosisEntries {
   display: grid;

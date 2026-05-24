@@ -100,10 +100,28 @@ def _log_atomic_write_failure(path: Path, exc: OSError) -> None:
 def _atomic_write_text(path: Path, text: str, *, suppress_write_failure: bool = False) -> bool:
     ensure_runtime_manager_dirs()
     with _WRITE_LOCK:
-        fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+        fd = -1
+        temp_path: str | None = None
         try:
-            with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
-                handle.write(text)
+            try:
+                fd, temp_path = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+                with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+                    handle.write(text)
+            except OSError as exc:
+                try:
+                    if fd >= 0:
+                        os.close(fd)
+                except OSError:
+                    pass
+                try:
+                    _retry_in_place_write(path, text, timeout_seconds=WRITE_FALLBACK_TIMEOUT_SECONDS)
+                    return True
+                except OSError as fallback_exc:
+                    if suppress_write_failure:
+                        _log_atomic_write_failure(path, fallback_exc)
+                        return False
+                    raise exc from fallback_exc
+
             deadline = time.monotonic() + WRITE_RETRY_TIMEOUT_SECONDS
             attempt = 0
             last_replace_error: PermissionError | None = None
@@ -129,7 +147,7 @@ def _atomic_write_text(path: Path, text: str, *, suppress_write_failure: bool = 
                     raise last_replace_error from exc
                 raise
         finally:
-            if os.path.exists(temp_path):
+            if temp_path and os.path.exists(temp_path):
                 try:
                     os.remove(temp_path)
                 except OSError:
@@ -174,7 +192,7 @@ def save_state(state: dict[str, Any]) -> dict[str, Any]:
 
 def save_pid(pid: int) -> None:
     ensure_runtime_manager_dirs()
-    _atomic_write_text(PID_PATH, str(int(pid)))
+    _atomic_write_text(PID_PATH, str(int(pid)), suppress_write_failure=True)
 
 
 def load_pid() -> int:

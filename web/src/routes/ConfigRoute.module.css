@@ -223,6 +223,68 @@
   border-color: color-mix(in srgb, var(--state-error) 24%, transparent);
 }
 
+.leaveGuardOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(7, 10, 14, 0.68);
+  backdrop-filter: blur(6px);
+}
+
+.leaveGuardPanel {
+  display: grid;
+  gap: 14px;
+  width: min(520px, 100%);
+  padding: 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, var(--surface-panel-strong), var(--surface-panel)),
+    var(--surface-panel);
+  box-shadow: var(--shadow-strong);
+}
+
+.leaveGuardCopy {
+  display: grid;
+  gap: 7px;
+}
+
+.leaveGuardCopy h2,
+.leaveGuardCopy p {
+  margin: 0;
+}
+
+.leaveGuardCopy h2 {
+  color: var(--fg-primary);
+  font-size: 1.06rem;
+}
+
+.leaveGuardCopy p {
+  color: var(--fg-secondary);
+  line-height: 1.42;
+}
+
+.leaveGuardActions {
+  display: flex;
+  justify-content: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.inlineFormError {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--state-error) 28%, transparent);
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--state-error) 12%, transparent);
+  color: var(--state-error);
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
 .sectionSurface,
 .loadingSurface,
 .formSurface {

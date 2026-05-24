@@ -79,6 +79,20 @@ def _is_gpt5_family_model(model: str) -> bool:
     return any(part.startswith("gpt-5") for part in _model_segments(model))
 
 
+def _convert_system_messages_after_first_to_user(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    seen_system = False
+    for item in messages:
+        message = dict(item)
+        if message.get("role") == "system":
+            if seen_system:
+                message["role"] = "user"
+            else:
+                seen_system = True
+        normalized.append(message)
+    return normalized
+
+
 class ProviderAdapter:
     """Base adapter for provider/model specific payload quirks."""
 
@@ -169,6 +183,9 @@ class OpenAICompatibleAdapter(ProviderAdapter):
             return "minimax"
         return "openai"
 
+    def messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return _convert_system_messages_after_first_to_user(messages)
+
 
 class MiniMaxAdapter(ProviderAdapter):
     """MiniMax's chat endpoint expects only the first system message as system."""
@@ -177,17 +194,7 @@ class MiniMaxAdapter(ProviderAdapter):
         return "minimax"
 
     def messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        normalized: List[Dict[str, Any]] = []
-        seen_system = False
-        for item in messages:
-            message = dict(item)
-            if message.get("role") == "system":
-                if seen_system:
-                    message["role"] = "user"
-                else:
-                    seen_system = True
-            normalized.append(message)
-        return normalized
+        return _convert_system_messages_after_first_to_user(messages)
 
     def capabilities(self, base: LLMCapabilities) -> LLMCapabilities:
         return replace(

@@ -30,6 +30,13 @@ export type ConfigEditorSyncState = {
   canRestoreEditorText: boolean;
 };
 
+export type ConfigLeaveGuardInput = {
+  hasPendingApply: boolean;
+  busy: boolean;
+  currentPathname: string;
+  nextPathname: string;
+};
+
 export function clonePublicConfig<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -81,6 +88,10 @@ export function deriveConfigEditorSyncState(input: ConfigEditorSyncStateInput): 
     canCheckCurrentChanges: input.configLoaded && !input.busy,
     canRestoreEditorText: input.configLoaded && hasEditorChanges && !input.busy,
   };
+}
+
+export function shouldBlockConfigLeave(input: ConfigLeaveGuardInput): boolean {
+  return input.hasPendingApply && !input.busy && input.currentPathname === "/config" && input.nextPathname !== "/config";
 }
 
 export function presetCategory(preset: ConfigModelPresetOption): ModelPresetGroupId {

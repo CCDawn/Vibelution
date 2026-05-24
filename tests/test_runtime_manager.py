@@ -30,6 +30,16 @@ def _repeat_last(items):
     return next_value
 
 
+@pytest.fixture(autouse=True)
+def _block_real_process_termination(monkeypatch):
+    monkeypatch.setattr(daemon, "terminate_process_descendants", lambda *args, **kwargs: {"terminated": [], "remaining": []})
+    monkeypatch.setattr(
+        daemon,
+        "terminate_unmanaged_workbench_processes",
+        lambda *args, **kwargs: {"supported": True, "requested": [], "terminated": [], "remaining": []},
+    )
+
+
 def test_print_status_reports_stale_runtime_manager_source(capsys):
     runtime_cli._print_status(
         {
@@ -466,6 +476,71 @@ def test_reconcile_observation_keeps_daemon_running_true_and_preserves_stopping(
     assert state["managerPid"] == runtime_daemon._pid
 
 
+def test_reconcile_observation_marks_orphaned_browser_failed(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "backendPid": 0,
+            "browserLaunchPid": 12132,
+            "browserWindowPid": 12132,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8000,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerTrusted": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": True,
+            "browserManaged": True,
+            "backendMissing": True,
+            "frontendOrphaned": True,
+            "lifecycleConsistency": "orphaned_browser",
+            "sessionId": "stale-session",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    state = runtime_daemon._reconcile_observation(
+        {
+            "runtimeState": "running",
+            "command": {"activeCommandId": ""},
+            "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+        }
+    )
+
+    workbench = state["workbench"]
+    assert workbench["desiredState"] == "closed"
+    assert workbench["observedState"] == "open"
+    assert workbench["phase"] == "failed"
+    assert workbench["frontendOrphaned"] is True
+    assert workbench["lifecycleConsistency"] == "orphaned_browser"
+    assert "frontend window is still open" in workbench["failureMessage"]
+    assert events == [
+        (
+            "workbench.consistency.orphaned_browser_detected",
+            {
+                "observedState": "open",
+                "browserWindowPid": 12132,
+                "backendPid": 0,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "sessionId": "stale-session",
+            },
+        )
+    ]
+
+
 def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -595,6 +670,134 @@ def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_pa
     assert result["ok"] is True
     assert result["runtimeManagerStopping"] is True
     assert result["message"] == "Runtime manager shutdown is already in progress."
+
+
+def test_submit_command_joins_active_open_workbench(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 51,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {
+                "activeCommandId": "cmd-active-open",
+                "activeType": "open_workbench",
+                "noBrowser": False,
+            },
+        },
+    )
+
+    command = command_queue.submit_command("open_workbench", args={"reason": "launcher_start"}, requested_by="launcher_ps")
+
+    assert command["commandId"] == "cmd-active-open"
+    assert list(inbox_dir.glob("*.json")) == []
+    assert list(results_dir.glob("*.json")) == []
+    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert event["type"] == "command_queue.open_joined"
+    assert event["payload"]["commandId"] == "cmd-active-open"
+
+
+def test_submit_command_joins_pending_open_workbench(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-pending-open.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-pending-open",
+                "type": "open_workbench",
+                "requestedBy": "launcher_ps",
+                "args": {"reason": "launcher_start"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 52,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {"activeCommandId": "", "activeType": ""},
+        },
+    )
+
+    command = command_queue.submit_command("open_workbench", args={"reason": "launcher_start"}, requested_by="launcher_ps")
+
+    assert command["commandId"] == "cmd-pending-open"
+    assert [path.name for path in inbox_dir.glob("*.json")] == ["cmd-pending-open.json"]
+    assert list(results_dir.glob("*.json")) == []
+
+
+def test_submit_command_does_not_join_headless_open_when_browser_is_requested(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    (inbox_dir / "cmd-headless-open.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-headless-open",
+                "type": "open_workbench",
+                "requestedBy": "launcher_ps",
+                "args": {"reason": "launcher_start", "noBrowser": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 53,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "command": {"activeCommandId": "", "activeType": ""},
+        },
+    )
+
+    command = command_queue.submit_command("open_workbench", args={"reason": "launcher_start"}, requested_by="launcher_ps")
+
+    queued = sorted(path.name for path in inbox_dir.glob("*.json"))
+    assert command["commandId"] != "cmd-headless-open"
+    assert queued == ["cmd-headless-open.json", f"{command['commandId']}.json"]
 
 
 def test_reject_pending_commands_for_shutdown_removes_stale_open_from_inbox(tmp_path, monkeypatch):
@@ -893,6 +1096,35 @@ def test_observe_workbench_drops_stale_backend_pid(monkeypatch):
     assert observation["backendObserved"] is False
 
 
+def test_observe_workbench_reports_orphaned_browser(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "_load_launcher_state",
+        lambda: {
+            "url": "http://127.0.0.1:8000",
+            "backendPid": 42608,
+            "backendLaunchPid": 42608,
+            "browserLaunchPid": 12132,
+            "browserWindowPid": 12132,
+            "browserManaged": True,
+            "sessionId": "orphaned-browser",
+        },
+    )
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: pid == 12132)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 0)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "open"
+    assert observation["backendObserved"] is False
+    assert observation["browserWindowAlive"] is True
+    assert observation["backendMissing"] is True
+    assert observation["frontendOrphaned"] is True
+    assert observation["lifecycleConsistency"] == "orphaned_browser"
+
+
 def test_observe_workbench_reports_backend_launch_pid(monkeypatch):
     monkeypatch.setattr(
         workbench_controller,
@@ -932,6 +1164,45 @@ def test_snapshot_residual_excluded_pids_includes_backend_launch_tree_root():
     )
 
     assert {25744, 43460, 39880, 45904}.issubset(excluded)
+
+
+def test_snapshot_residual_excluded_pids_includes_active_backend_parent(monkeypatch):
+    monkeypatch.setattr(
+        daemon,
+        "list_repo_runtime_processes",
+        lambda project_root=None: [
+            process_inventory.RuntimeProcess(
+                pid=44052,
+                parent_pid=48240,
+                kind="unmanaged_workbench",
+                name="python.exe",
+                command_line="python scripts/web_workbench.py --port 8000 --no-browser",
+                cwd="C:/repo",
+                port=8000,
+            ),
+            process_inventory.RuntimeProcess(
+                pid=32344,
+                parent_pid=44052,
+                kind="unmanaged_workbench",
+                name="python.exe",
+                command_line="python scripts/web_workbench.py --port 8000 --no-browser",
+                cwd="C:/repo",
+                port=8000,
+            ),
+        ],
+    )
+
+    excluded = daemon._snapshot_residual_excluded_pids(
+        {
+            "backendPid": 32344,
+            "backendLaunchPid": 32344,
+            "backendPortOwnerPid": 32344,
+            "browserWindowPid": 37160,
+        },
+        manager_pid=26360,
+    )
+
+    assert {32344, 44052, 37160, 26360}.issubset(excluded)
 
 
 def test_run_launcher_action_passes_configured_port_to_launcher_env(monkeypatch):

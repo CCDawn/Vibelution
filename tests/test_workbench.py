@@ -126,6 +126,42 @@ def test_workbench_config_panel_uses_default_panel_port(monkeypatch):
     assert shell._recent_status == "已打开配置页面：http://127.0.0.1:8000/config"
 
 
+def test_workbench_config_panel_prefers_python(monkeypatch, tmp_path):
+    import core.ui.workbench as workbench_module
+
+    shell = AgentWorkbenchShell(config=SimpleNamespace(avatar=SimpleNamespace(preset="default")))
+    shell.ui = _FakeUI()
+    opened = {}
+
+    project_root = tmp_path / "project"
+    project_python = project_root / ".venv" / "Scripts" / "python.exe"
+    project_python.parent.mkdir(parents=True, exist_ok=True)
+    project_python.write_text("", encoding="utf-8")
+
+    class FakeProcess:
+        pass
+
+    def fake_popen(cmd, **kwargs):
+        opened["cmd"] = cmd
+        opened["kwargs"] = kwargs
+        return FakeProcess()
+
+    monkeypatch.setattr("core.ui.workbench.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("core.ui.workbench._config_panel_is_ready", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr("core.ui.workbench._open_config_panel_page", lambda url: opened.setdefault("url", url))
+    monkeypatch.setattr("core.ui.workbench.time.sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("core.ui.workbench.Prompt.ask", lambda *args, **kwargs: "")
+    monkeypatch.setattr("core.ui.workbench.os.name", "nt", raising=False)
+    monkeypatch.setattr("core.ui.workbench.sys.executable", r"C:\Python312\python.exe", raising=False)
+    monkeypatch.setattr(workbench_module, "PROJECT_ROOT", project_root, raising=False)
+
+    shell._open_config_panel()
+
+    assert opened["url"] == "http://127.0.0.1:8000/config"
+    assert opened["cmd"][0] == str(project_python)
+    assert opened["cmd"][opened["cmd"].index("--port") + 1] == "8000"
+
+
 def test_workbench_config_panel_uses_configured_backend_port(monkeypatch):
     import core.ui.workbench as workbench_module
 
@@ -152,6 +188,34 @@ def test_workbench_config_panel_uses_configured_backend_port(monkeypatch):
 
     assert opened["url"] == "http://127.0.0.1:9101/config"
     assert opened["cmd"][opened["cmd"].index("--port") + 1] == "9101"
+
+
+def test_preferred_python_executable_keeps_python_executable_when_project_venv_missing(monkeypatch, tmp_path):
+    import core.ui.workbench as workbench_module
+
+    project_root = tmp_path / "project"
+    project_root.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(workbench_module.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_module.sys, "executable", r"C:\Python312\python.exe", raising=False)
+    monkeypatch.setattr(workbench_module, "PROJECT_ROOT", project_root, raising=False)
+
+    assert workbench_module._preferred_python_executable() == r"C:\Python312\python.exe"
+
+
+def test_preferred_python_executable_prefers_project_venv_python(monkeypatch, tmp_path):
+    import core.ui.workbench as workbench_module
+
+    project_root = tmp_path / "project"
+    project_python = project_root / ".venv" / "Scripts" / "python.exe"
+    project_python.parent.mkdir(parents=True, exist_ok=True)
+    project_python.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(workbench_module, "PROJECT_ROOT", project_root, raising=False)
+    monkeypatch.setattr(workbench_module.os, "name", "nt", raising=False)
+    monkeypatch.setattr(workbench_module.sys, "executable", r"C:\Python312\python.exe", raising=False)
+
+    assert workbench_module._preferred_python_executable() == str(project_python)
 
 
 def test_workbench_config_panel_reuses_existing_server(monkeypatch):

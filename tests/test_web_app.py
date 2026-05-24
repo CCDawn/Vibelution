@@ -854,10 +854,11 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     assert response.status_code == 200, response.json()
     payload = response.json()
     sections = {section["id"]: section for section in payload["sections"]}
-    assert payload["schemaVersion"] == 1
+    assert payload["schemaVersion"] == 3
     assert payload["projectRoot"] == str(tmp_path.resolve())
-    assert payload["summary"]["sectionCount"] == 9
+    assert payload["summary"]["sectionCount"] == 10
     assert set(sections) == {
+        "user-managed-memory",
         "project-memory",
         "runtime-memory",
         "prompt-memory",
@@ -869,18 +870,147 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
         "runtime-scene-evidence",
     }
     assert not any("计数不一致" in item for item in payload["summary"]["warnings"])
+    assert sections["user-managed-memory"]["sourcePath"] == "workspace/memory/user_memory_overrides.json"
+    assert sections["user-managed-memory"]["sourceApi"] == "/api/memory/items"
     prompt_items = {item["title"]: item for item in sections["prompt-memory"]["items"]}
     assert prompt_items["STATE_MEMORY.md"]["agentVisible"] is True
     assert prompt_items["STATE_MEMORY.md"]["inPrompt"] is True
+    assert prompt_items["STATE_MEMORY.md"]["visibilityClass"] == "prompt"
+    assert prompt_items["STATE_MEMORY.md"]["channels"] == ["conversation"]
+    assert prompt_items["STATE_MEMORY.md"]["managedState"]["editable"] is True
+    assert prompt_items["STATE_MEMORY.md"]["managedState"]["overridden"] is False
     assert prompt_items["STATE_MEMORY.md"]["content"] == "Current prompt memory."
     assert prompt_items["DYNAMIC.md"]["inPrompt"] is False
+    assert prompt_items["DYNAMIC.md"]["visibilityClass"] == "agent_visible"
+    assert prompt_items["DYNAMIC.md"]["channels"] == ["explicit_read"]
     git_items = {item["id"]: item for item in sections["git-memory"]["items"]}
     assert git_items["git-working-tree"]["agentVisible"] is True
     assert git_items["git-working-tree"]["inPrompt"] is True
+    assert git_items["git-working-tree"]["visibilityClass"] == "prompt"
+    assert git_items["git-working-tree"]["channels"] == ["conversation", "self_evolution"]
     assert "GIT_MEMORY" in sections["git-memory"]["agentVisibility"]
     sqlite_items = {item["id"]: item for item in sections["workspace-database"]["items"]}
     assert '"count": 1' in sqlite_items["sqlite-longtermmemory"]["content"]
+    assert sqlite_items["sqlite-longtermmemory"]["channels"] == ["explicit_read"]
+    self_items = {item["id"]: item for item in sections["self-evolution-memory"]["items"]}
+    assert self_items["self-evolution-transactions"]["channels"] == ["self_evolution"]
+    supervised_items = {item["id"]: item for item in sections["supervised-evolution-memory"]["items"]}
+    assert supervised_items["supervised-bundles"]["channels"] == ["supervised_evolution"]
+    runtime_scene_items = {item["id"]: item for item in sections["runtime-scene-evidence"]["items"]}
+    assert runtime_scene_items["runtime-scenes-index"]["visibilityClass"] == "diagnostic"
+    assert runtime_scene_items["runtime-scenes-index"]["channels"] == ["explicit_read"]
     assert any("tools.memory_tools" in item["usedBy"] for item in sections["runtime-memory"]["items"])
+
+
+def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path, monkeypatch):
+    prompt_dir = tmp_path / "workspace" / "prompts"
+    prompt_dir.mkdir(parents=True)
+    state_memory_path = prompt_dir / "STATE_MEMORY.md"
+    state_memory_path.write_text("Original state memory.", encoding="utf-8")
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    recorded_events: list[dict] = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        recorded_events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "eventCode": event_code,
+                **kwargs,
+            }
+        )
+        return {"accepted": True, "runtimeSceneId": "scene-memory"}
+
+    monkeypatch.setattr(runtime_scene_service, "record_runtime_scene_event", fake_record_runtime_scene_event)
+
+    create_response = client.post(
+        "/api/memory/items",
+        json={
+            "title": "人工规则",
+            "summary": "用户确认的长期偏好",
+            "content": "始终先解释记忆来源。",
+        },
+    )
+
+    assert create_response.status_code == 201, create_response.json()
+    created = create_response.json()
+    assert created["sectionId"] == "user-managed-memory"
+    assert created["item"]["managedState"]["userManaged"] is True
+    managed_path = tmp_path / "workspace" / "memory" / "user_memory_overrides.json"
+    assert managed_path.exists()
+    managed_payload = json.loads(managed_path.read_text(encoding="utf-8"))
+    assert managed_payload["items"][0]["title"] == "人工规则"
+
+    overview = client.get("/api/memory/overview").json()
+    user_section = next(section for section in overview["sections"] if section["id"] == "user-managed-memory")
+    assert user_section["items"][0]["title"] == "人工规则"
+    assert user_section["items"][0]["channels"] == ["explicit_read"]
+
+    overview = client.get("/api/memory/overview").json()
+    prompt_section = next(section for section in overview["sections"] if section["id"] == "prompt-memory")
+    state_item_id = next(item["id"] for item in prompt_section["items"] if item["title"] == "STATE_MEMORY.md")
+
+    patch_response = client.patch(
+        f"/api/memory/items/prompt-memory/{state_item_id}",
+        json={
+            "title": "短期状态记忆（用户标注）",
+            "summary": "这条摘要来自用户覆盖层",
+            "content": "覆盖展示内容，不改原文件。",
+        },
+    )
+
+    assert patch_response.status_code == 200, patch_response.json()
+    assert state_memory_path.read_text(encoding="utf-8") == "Original state memory."
+    overview = client.get("/api/memory/overview").json()
+    prompt_section = next(section for section in overview["sections"] if section["id"] == "prompt-memory")
+    state_item = next(item for item in prompt_section["items"] if item["id"] == state_item_id)
+    assert state_item["title"] == "短期状态记忆（用户标注）"
+    assert state_item["summary"] == "这条摘要来自用户覆盖层"
+    assert state_item["content"] == "覆盖展示内容，不改原文件。"
+    assert state_item["managedState"]["overridden"] is True
+    assert state_item["managedState"]["restorable"] is True
+
+    delete_response = client.delete(f"/api/memory/items/prompt-memory/{state_item_id}")
+
+    assert delete_response.status_code == 200, delete_response.json()
+    overview = client.get("/api/memory/overview").json()
+    prompt_section = next(section for section in overview["sections"] if section["id"] == "prompt-memory")
+    disabled_item = next(item for item in prompt_section["items"] if item["id"] == state_item_id)
+    assert disabled_item["managedState"]["disabled"] is True
+    assert disabled_item["agentVisible"] is False
+    assert disabled_item["inPrompt"] is False
+    assert disabled_item["channels"] == []
+    assert state_memory_path.read_text(encoding="utf-8") == "Original state memory."
+
+    restore_response = client.post(f"/api/memory/items/prompt-memory/{state_item_id}/restore")
+
+    assert restore_response.status_code == 200, restore_response.json()
+    overview = client.get("/api/memory/overview").json()
+    prompt_section = next(section for section in overview["sections"] if section["id"] == "prompt-memory")
+    restored_item = next(item for item in prompt_section["items"] if item["id"] == state_item_id)
+    assert restored_item["title"] == "STATE_MEMORY.md"
+    assert restored_item["content"] == "Original state memory."
+    assert restored_item["managedState"]["overridden"] is False
+    assert restored_item["managedState"]["restorable"] is False
+
+    delete_user_response = client.delete(f"/api/memory/items/user-managed-memory/{created['itemId']}")
+
+    assert delete_user_response.status_code == 200, delete_user_response.json()
+    overview = client.get("/api/memory/overview").json()
+    user_section = next(section for section in overview["sections"] if section["id"] == "user-managed-memory")
+    assert user_section["items"] == []
+    event_codes = [event["eventCode"] for event in recorded_events]
+    assert event_codes == [
+        "memory.create",
+        "memory.update",
+        "memory.disable",
+        "memory.restore",
+        "memory.delete",
+    ]
+    assert all(event["component"] == "memory_service" for event in recorded_events)
+    assert all(event["phase"] == "memory_management" for event in recorded_events)
+    assert all(event["lifecycle"] is True for event in recorded_events)
+    assert all("content" not in event.get("fields", {}) for event in recorded_events)
 
 
 def test_git_commits_endpoint_exposes_recent_commits(monkeypatch):
@@ -5222,7 +5352,46 @@ def test_runtime_summary_exposes_runtime_manager_workbench_state(monkeypatch):
     assert payload["workbench"]["observedState"] == "open"
     assert payload["workbench"]["phase"] == "closing"
     assert payload["workbench"]["backendPid"] == 3001
-    assert payload["lifecycleProof"]["overallState"] == "closing"
+
+
+def test_runtime_summary_exposes_orphaned_browser_status(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "workbench": {
+                "desiredState": "closed",
+                "observedState": "open",
+                "phase": "failed",
+                "backendPid": 0,
+                "browserWindowPid": 12132,
+                "backendObserved": False,
+                "backendPortListening": False,
+                "browserWindowAlive": True,
+                "browserManaged": True,
+                "backendMissing": True,
+                "frontendOrphaned": True,
+                "lifecycleConsistency": "orphaned_browser",
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "external_close",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["workbench"]["frontendOrphaned"] is True
+    assert payload["workbench"]["backendMissing"] is True
+    assert payload["workbench"]["lifecycleConsistency"] == "orphaned_browser"
+    assert "后端服务已经离线" in payload["workbench"]["statusLine"]
+    assert payload["lifecycleProof"]["overallState"] == "failed"
 
 
 def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
@@ -5868,9 +6037,9 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_meta["runtime.profile"]["kind"] == "select"
     assert editor_meta["runtime.profile"]["badge"] == "选项"
     assert editor_meta["workbench.backend_port"]["kind"] == "number"
-    assert editor_meta["workbench.backend_port"]["label"] == "后端端口"
+    assert editor_meta["workbench.backend_port"]["label"] == "后端服务端口"
     assert editor_meta["workbench.frontend_port"]["kind"] == "number"
-    assert editor_meta["workbench.frontend_port"]["label"] == "前端端口"
+    assert editor_meta["workbench.frontend_port"]["label"] == "前端页面端口"
     assert editor_meta["tools.file.editable_extensions"]["kind"] == "string_list"
     assert editor_meta["prompt.sections"]["kind"] == "object_list"
     assert editor_meta["prompt.sections"]["badge"] == "列表"
@@ -5880,7 +6049,7 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert payload["publicConfig"]["git"]["commit_message_profile"]
     assert "{diff}" in payload["publicConfig"]["git"]["commit_message_prompt"]
     assert editor_meta["git.commit_message_profile"]["kind"] == "select"
-    assert editor_meta["git.commit_message_profile"]["label"] == "AI 提交说明模型"
+    assert editor_meta["git.commit_message_profile"]["label"] == "提交说明使用的模型"
     assert "profile" not in editor_meta["git.commit_message_profile"]["hint"].lower()
     assert editor_meta["git.commit_message_prompt"]["kind"] == "multiline"
     assert sections_by_id["health-diagnostics"]["title"] == "健康诊断"
@@ -6346,6 +6515,36 @@ def test_config_workspace_draft_model_rejects_path_api_key_env(monkeypatch):
 
     assert response.status_code == 422
     assert "PATH" in response.json()["detail"]
+
+
+def test_config_workspace_draft_model_allows_approved_ai_pixel_relay_host(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    target = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    provider = copy.deepcopy(target["provider"])
+    provider["base_url"] = "https://ai-pixel.online"
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/draft/update-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelId": "relay_openai_gpt_5_5",
+            "provider": provider,
+            "model": "gpt-5.5",
+            "label": "GPT-5.5 via relay",
+            "details": target,
+            "apiKeyEnv": "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    updated = payload["publicConfig"]["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    assert updated["provider"]["base_url"] == "https://ai-pixel.online"
 
 
 def test_config_workspace_apply_rejects_stale_base_hash(monkeypatch):

@@ -21,12 +21,23 @@ export type MemoryItem = {
   updatedAt: string;
   agentVisible: boolean;
   inPrompt: boolean;
+  visibilityClass: "prompt" | "agent_visible" | "manual" | "diagnostic" | "missing" | string;
+  channels: Array<"conversation" | "self_evolution" | "supervised_evolution" | "explicit_read" | string>;
   usedBy: string[];
   summary: string;
   content: string;
   contentType: string;
   contentTruncated: boolean;
   exists: boolean;
+  managedState: {
+    editable: boolean;
+    deletable: boolean;
+    restorable: boolean;
+    disabled: boolean;
+    userManaged: boolean;
+    overridden: boolean;
+    actionHint: string;
+  };
 };
 
 export type MemorySection = {
@@ -54,6 +65,14 @@ export type MemoryOverview = {
     warnings: string[];
   };
   sections: MemorySection[];
+};
+
+export type MemoryMutationResponse = {
+  ok: boolean;
+  action: string;
+  sectionId: string;
+  itemId: string;
+  item: MemoryItem;
 };
 
 export type LogRoot = {
@@ -267,6 +286,20 @@ export type RuntimeScenePackageDiagnosis = {
       tail_lines?: number;
     }>;
   } | null;
+  startupTrace?: {
+    schemaVersion: number;
+    summary: string;
+    missingStepIds: string[];
+    steps: Array<{
+      id: string;
+      label: string;
+      status: "recorded" | "missing" | string;
+      timestamp: string;
+      eventCode: string;
+      message: string;
+      evidencePath: string;
+    }>;
+  };
   recommendedOrder: string[];
   keyEntries: Array<{
     path: string;
@@ -655,6 +688,9 @@ export type RuntimeSummary = {
     backendPortConflict: boolean;
     browserWindowAlive: boolean;
     browserManaged: boolean;
+    backendMissing: boolean;
+    frontendOrphaned: boolean;
+    lifecycleConsistency: string;
     url: string;
     lastReason: string;
     statusLine: string;

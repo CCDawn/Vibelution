@@ -1,13 +1,14 @@
 .route {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--surface-page);
 }
 
 .header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   justify-content: space-between;
   gap: var(--route-topbar-gap);
@@ -104,6 +105,147 @@
   white-space: nowrap;
 }
 
+.matrixPanel {
+  display: grid;
+  gap: 10px;
+  margin: 10px 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+.matrixHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.matrixHeader h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+}
+
+.matrixHeaderMeta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.matrixGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.matrixCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.matrixCardButton {
+  width: 100%;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.matrixCardButton:hover,
+.matrixCardButton:focus-visible {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+}
+
+.matrixCardButton:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 46%, transparent);
+  outline-offset: 2px;
+}
+
+.matrixCardActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent-warm);
+  background: var(--surface-panel-strong);
+}
+
+.matrixCard > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.matrixCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrixCard span {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.matrixCard dl {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 6px;
+  margin: 0;
+}
+
+.matrixCard dl div {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  min-width: 42px;
+}
+
+.matrixCard dt,
+.matrixCard dd {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.matrixCard dt {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.matrixCard dd {
+  color: var(--accent-warm-2);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.activeChannelPill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+  color: var(--accent-warm-2);
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
 .warningStrip {
   display: flex;
   align-items: center;
@@ -131,6 +273,33 @@
   white-space: nowrap;
 }
 
+.panelNotice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 8px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 30%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-warning) 10%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+}
+
+.panelNotice svg,
+.panelNotice strong {
+  flex: 0 0 auto;
+  color: var(--state-warning);
+}
+
+.panelNotice span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(250px, 300px) minmax(360px, 0.95fr) minmax(420px, 1.1fr);
@@ -151,7 +320,7 @@
 .sourcePanel,
 .itemPanel {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
   gap: 12px;
   padding: 14px;
 }
@@ -229,6 +398,45 @@
 
 .searchBox input::placeholder {
   color: var(--fg-tertiary);
+}
+
+.filterGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filterButton,
+.filterButtonActive {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.filterButton:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--surface-panel-hover);
+}
+
+.filterButtonActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 32%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.filterButton strong,
+.filterButtonActive strong {
+  color: inherit;
+  font-size: 0.72rem;
 }
 
 .sourceList,
@@ -317,6 +525,15 @@
   white-space: nowrap;
 }
 
+.itemOrigin {
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sourceStats {
   color: var(--accent-warm-2);
   white-space: nowrap;
@@ -354,6 +571,20 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.channelPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: var(--accent-cool);
+  font-size: 0.7rem;
+  white-space: nowrap;
 }
 
 .statusPill {
@@ -419,6 +650,8 @@
 
 .factGrid section,
 .visibilityPanel,
+.impactPanel,
+.managementPanel,
 .sectionPanel,
 .rawPanel {
   min-width: 0;
@@ -448,10 +681,198 @@
 }
 
 .visibilityPanel,
+.impactPanel,
+.managementPanel,
 .sectionPanel {
   display: grid;
   gap: 10px;
   padding: 12px;
+}
+
+.impactPanel {
+  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card));
+}
+
+.impactPanel > p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.managementPanel {
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-card));
+}
+
+.managementPanel > p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.managementHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.managementHeader h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 0.96rem;
+}
+
+.managementActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fieldStack {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.fieldStack span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.fieldStack input,
+.fieldStack textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-page);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+.fieldStack input {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.fieldStack textarea {
+  min-height: 120px;
+  resize: vertical;
+  padding: 9px 10px;
+  line-height: 1.45;
+}
+
+.fieldStack input:focus,
+.fieldStack textarea:focus {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--accent-cool) 18%, transparent);
+}
+
+.primaryActionButton,
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.primaryActionButton {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.iconButton {
+  flex: 0 0 auto;
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+}
+
+.primaryActionButton:hover:not(:disabled),
+.iconButton:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+  color: var(--fg-primary);
+}
+
+.primaryActionButton:disabled,
+.iconButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.detailActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.detailActionButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.detailActionButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailActionButton:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--surface-panel-hover);
+}
+
+.detailActionButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.detailActionButton svg {
+  flex: 0 0 auto;
+}
+
+.copyNotice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+}
+
+.copyNotice[data-tone="success"] {
+  color: var(--state-success);
+}
+
+.copyNotice[data-tone="error"] {
+  color: var(--state-warning);
 }
 
 .visibilityHeader {
@@ -601,6 +1022,7 @@
   }
 
   .summaryGrid,
+  .matrixGrid,
   .workspace {
     grid-template-columns: 1fr;
   }
@@ -616,6 +1038,10 @@
   }
 
   .factGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .detailActions {
     grid-template-columns: 1fr;
   }
 }

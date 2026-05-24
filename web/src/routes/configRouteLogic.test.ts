@@ -10,6 +10,7 @@ import {
   groupModelPresets,
   hasPendingSecretChanges,
   presetCategory,
+  shouldBlockConfigLeave,
   type PublicConfigShape,
 } from "./configRouteLogic";
 import type { ConfigModelOption, ConfigModelPresetOption } from "../api/types";
@@ -182,6 +183,42 @@ describe("configRouteLogic", () => {
     expect(cleanState.structuredActionsDisabled).toBe(false);
     expect(cleanState.canSaveConfig).toBe(true);
     expect(cleanState.canRestoreEditorText).toBe(false);
+  });
+
+  it("blocks leaving config only when persisted changes are unsaved", () => {
+    expect(
+      shouldBlockConfigLeave({
+        hasPendingApply: true,
+        busy: false,
+        currentPathname: "/config",
+        nextPathname: "/chat",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldBlockConfigLeave({
+        hasPendingApply: false,
+        busy: false,
+        currentPathname: "/config",
+        nextPathname: "/chat",
+      }),
+    ).toBe(false);
+    expect(
+      shouldBlockConfigLeave({
+        hasPendingApply: true,
+        busy: true,
+        currentPathname: "/config",
+        nextPathname: "/chat",
+      }),
+    ).toBe(false);
+    expect(
+      shouldBlockConfigLeave({
+        hasPendingApply: true,
+        busy: false,
+        currentPathname: "/config",
+        nextPathname: "/config",
+      }),
+    ).toBe(false);
   });
 });
 
