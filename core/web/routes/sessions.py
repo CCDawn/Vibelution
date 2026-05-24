@@ -29,6 +29,7 @@ router = APIRouter(tags=["sessions"])
 
 class SessionMessagePayload(BaseModel):
     content: str = ""
+    contentUtf8Base64: str = ""
     mentalModelEnabled: bool | None = None
     turnMode: str = ""
     writeIntent: bool | None = None
@@ -101,6 +102,7 @@ def session_submit_message(session_id: str, payload: SessionMessagePayload) -> d
         return submit_session_message(
             session_id,
             payload.content,
+            content_utf8_base64=payload.contentUtf8Base64,
             mental_model_enabled=payload.mentalModelEnabled,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,
@@ -120,6 +122,7 @@ def session_edit_resubmit_message(session_id: str, payload: SessionMessageEditPa
             session_id,
             payload.messageId,
             payload.content,
+            content_utf8_base64=payload.contentUtf8Base64,
             mental_model_enabled=payload.mentalModelEnabled,
             turn_mode=payload.turnMode,
             write_intent=payload.writeIntent,

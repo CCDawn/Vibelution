@@ -13,10 +13,11 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(rawHeaderIndex).toBeGreaterThan(evidenceIndex);
   });
 
-  it("keeps package diagnosis actionable with key entry buttons", () => {
-    expect(paneSource).toContain("diagnosis.agentNextStep");
-    expect(paneSource).toContain("diagnosis.recommendedOrder");
-    expect(paneSource).toContain("diagnosis.keyEntries");
+  it("keeps package diagnosis compact by folding low-frequency details", () => {
+    expect(paneSource).toContain("<details className={styles.packageDiagnosisDetails}>");
+    expect(paneSource).toContain("{lang === \"zh\" ? \"阅读顺序与关键入口\" : \"Reading order and key entries\"}");
+    expect(paneSource).toContain("packageDiagnosisFoldout");
+    expect(paneSource).toContain("packageDiagnosisInlineMetrics");
     expect(paneSource).toContain("handleOpenRawLog(scene.runtimeSceneId, entry.path)");
   });
 });

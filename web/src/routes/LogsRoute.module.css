@@ -1110,6 +1110,86 @@
   overflow-wrap: anywhere;
 }
 
+.packageDiagnosisDetails {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input);
+}
+
+.packageDiagnosisSummaryRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.packageDiagnosisSummaryRow::-webkit-details-marker {
+  display: none;
+}
+
+.packageDiagnosisSummaryText {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packageDiagnosisInlineMetrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.packageDiagnosisInlineMetrics strong {
+  color: var(--fg-primary);
+}
+
+.packageDiagnosisExpandLabel {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.packageDiagnosisDetails[open] .packageDiagnosisExpandLabel {
+  color: var(--fg-secondary);
+}
+
+.packageDiagnosisFoldout {
+  display: grid;
+  gap: 10px;
+  padding: 0 10px 10px;
+}
+
+.packageDiagnosisFoldoutSection {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.packageDiagnosisFoldoutSection > span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+}
+
 .packageReadingOrder,
 .packageKeyEntries {
   display: flex;
@@ -1483,7 +1563,8 @@
   .sceneDetailHeaderCompact,
   .sceneInfoGrid,
   .diagnosticHintGrid,
-  .packageDiagnosisGrid {
+  .packageDiagnosisGrid,
+  .packageDiagnosisDetails {
     grid-template-columns: minmax(0, 1fr);
   }
 

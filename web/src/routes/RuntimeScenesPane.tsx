@@ -238,34 +238,48 @@ function renderPackageDiagnosisPanel(
           <p>{diagnosis.agentNextStep}</p>
         </article>
       </div>
-      <div className={styles.packageDiagnosisEntries}>
-        <div>
-          <span>{lang === "zh" ? "推荐阅读顺序" : "Reading order"}</span>
-          <div className={styles.packageReadingOrder}>
-            {recommendedOrder.slice(0, 8).map((path, index) => (
-              <code key={`${path}-${index}`}>{path}</code>
-            ))}
-          </div>
-        </div>
-        {keyEntries.length > 0 ? (
-          <div>
-            <span>{lang === "zh" ? "关键入口" : "Key entries"}</span>
-            <div className={styles.packageKeyEntries}>
-              {keyEntries.slice(0, 6).map((entry) => (
-                <button
-                  key={entry.path}
-                  type="button"
-                  className={styles.packageKeyEntryButton}
-                  onClick={() => handleOpenRawLog(scene.runtimeSceneId, entry.path)}
-                >
-                  <strong>{localizeRuntimeSceneText(entry.label, lang)}</strong>
-                  <span>{entry.path}</span>
-                </button>
+      <details className={styles.packageDiagnosisDetails}>
+        <summary className={styles.packageDiagnosisSummaryRow}>
+          <span className={styles.packageDiagnosisSummaryText}>
+            {lang === "zh" ? "阅读顺序与关键入口" : "Reading order and key entries"}
+          </span>
+          <span className={styles.packageDiagnosisInlineMetrics}>
+            <strong>{Math.min(recommendedOrder.length, 8)}</strong>
+            {lang === "zh" ? " 项阅读" : " items"}
+            <strong>{keyEntries.length}</strong>
+            {lang === "zh" ? " 个入口" : " entries"}
+          </span>
+          <span className={styles.packageDiagnosisExpandLabel}>{lang === "zh" ? "展开" : "Open"}</span>
+        </summary>
+        <div className={styles.packageDiagnosisFoldout}>
+          <div className={styles.packageDiagnosisFoldoutSection}>
+            <span>{lang === "zh" ? "推荐阅读顺序" : "Reading order"}</span>
+            <div className={styles.packageReadingOrder}>
+              {recommendedOrder.slice(0, 8).map((path, index) => (
+                <code key={`${path}-${index}`}>{path}</code>
               ))}
             </div>
           </div>
-        ) : null}
-      </div>
+          {keyEntries.length > 0 ? (
+            <div className={styles.packageDiagnosisFoldoutSection}>
+              <span>{lang === "zh" ? "关键入口" : "Key entries"}</span>
+              <div className={styles.packageKeyEntries}>
+                {keyEntries.slice(0, 6).map((entry) => (
+                  <button
+                    key={entry.path}
+                    type="button"
+                    className={styles.packageKeyEntryButton}
+                    onClick={() => handleOpenRawLog(scene.runtimeSceneId, entry.path)}
+                  >
+                    <strong>{localizeRuntimeSceneText(entry.label, lang)}</strong>
+                    <span>{entry.path}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </details>
     </section>
   );
 }

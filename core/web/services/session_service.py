@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import queue
 import re
@@ -79,6 +81,8 @@ _PROVIDER_ERROR_PATTERN = re.compile(
     r"upstream_error|upstream request failed|api(?:connection|status|timeout|rate)?error)",
     re.IGNORECASE,
 )
+_REPLACEMENT_ONLY_PREFIX_PATTERN = re.compile(r"^\?{3,}(?=[:：\s]|$)")
+_REPLACEMENT_ONLY_TEXT_PATTERN = re.compile(r"^\?{3,}$")
 _SESSION_WORKSPACE_SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
 
@@ -689,6 +693,7 @@ def stream_session_events(session_id: str, initial_detail: dict[str, Any] | None
 def submit_session_message(
     session_id: str,
     content: str,
+    content_utf8_base64: str = "",
     mental_model_enabled: bool | None = None,
     *,
     turn_mode: str = "",
@@ -698,13 +703,14 @@ def submit_session_message(
 
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
-    message = str(content or "").strip()
+    message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
         raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
     if not message:
         raise SessionValidationError(
             text_for(lang, zh="请输入本轮消息后再发送。", en="Enter a message before sending.")
         )
+    _validate_user_message_not_encoding_replacement(message, lang=lang)
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
         conversation = _find_conversation_entry(payload, conversation_id)
@@ -761,16 +767,42 @@ def submit_session_message(
         event="user_message",
         status="running",
     )
+    _record_session_turn_started_event(
+        conversation_id,
+        turn_id=turn_control.turn_id,
+        leases=requested_leases,
+        user_message=message,
+        raw_user_message=message,
+        user_message_source="raw",
+    )
     _publish_session_detail_snapshot(conversation_id)
+
+    effective_user_message, user_message_source = _resolve_session_user_prompt(
+        conversation_id,
+        message,
+        previous_messages,
+        existing_task=active_task,
+    )
+    if effective_user_message != message:
+        _record_session_user_message_filtered_event(
+            conversation_id,
+            turn_id=turn_control.turn_id,
+            reason="non_meaningful_user_message",
+            message=message,
+            source=user_message_source,
+        )
 
     context = {
         "session_id": conversation_id,
         "turn_id": turn_control.turn_id,
         "turn_control": turn_control,
-        "user_message": message,
+        "user_message": effective_user_message,
+        "raw_user_message": message,
+        "user_message_source": user_message_source,
         "history_messages": previous_messages,
         "mental_model_enabled": mental_model_enabled,
     }
+    _record_session_turn_scheduled_event(context)
     try:
         _schedule_session_turn(context)
     except Exception as exc:
@@ -794,6 +826,7 @@ def edit_and_resubmit_session_message(
     session_id: str,
     message_id: str,
     content: str,
+    content_utf8_base64: str = "",
     mental_model_enabled: bool | None = None,
     *,
     turn_mode: str = "",
@@ -804,7 +837,7 @@ def edit_and_resubmit_session_message(
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
     target_message_id = str(message_id or "").strip()
-    message = str(content or "").strip()
+    message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
         raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
     if not target_message_id:
@@ -813,6 +846,7 @@ def edit_and_resubmit_session_message(
         raise SessionValidationError(
             text_for(lang, zh="请输入重新发送的消息。", en="Enter the edited message before sending.")
         )
+    _validate_user_message_not_encoding_replacement(message, lang=lang)
 
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -887,16 +921,42 @@ def edit_and_resubmit_session_message(
         event="user_message_edited_resubmitted",
         status="running",
     )
+    _record_session_turn_started_event(
+        conversation_id,
+        turn_id=turn_control.turn_id,
+        leases=requested_leases,
+        user_message=message,
+        raw_user_message=message,
+        user_message_source="raw",
+    )
     _publish_session_detail_snapshot(conversation_id)
+
+    effective_user_message, user_message_source = _resolve_session_user_prompt(
+        conversation_id,
+        message,
+        edited_messages[:target_index],
+        existing_task=active_task,
+    )
+    if effective_user_message != message:
+        _record_session_user_message_filtered_event(
+            conversation_id,
+            turn_id=turn_control.turn_id,
+            reason="non_meaningful_user_message",
+            message=message,
+            source=user_message_source,
+        )
 
     context = {
         "session_id": conversation_id,
         "turn_id": turn_control.turn_id,
         "turn_control": turn_control,
-        "user_message": message,
+        "user_message": effective_user_message,
+        "raw_user_message": message,
+        "user_message_source": user_message_source,
         "history_messages": edited_messages[:target_index],
         "mental_model_enabled": mental_model_enabled,
     }
+    _record_session_turn_scheduled_event(context)
     try:
         _schedule_session_turn(context)
     except Exception as exc:
@@ -914,6 +974,65 @@ def edit_and_resubmit_session_message(
         _publish_session_detail_snapshot(conversation_id)
         raise
     return get_session_detail(conversation_id) or {}
+
+
+def _resolve_user_message_content(content: str, *, content_utf8_base64: str = "") -> str:
+    encoded = str(content_utf8_base64 or "").strip()
+    if not encoded:
+        return str(content or "").strip()
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+        decoded = raw.decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError, ValueError):
+        return str(content or "").strip()
+    return decoded.strip()
+
+
+def _validate_user_message_not_encoding_replacement(message: str, *, lang: str) -> None:
+    if not _looks_like_encoding_replacement_message(message):
+        return
+    _record_session_message_encoding_rejected(message)
+    raise SessionValidationError(
+        text_for(
+            lang,
+            zh="消息看起来已在进入后端前发生编码损坏，请刷新页面后重新输入原始中文。",
+            en="The message appears to have been corrupted before it reached the backend. Refresh the page and re-enter the original text.",
+        )
+    )
+
+
+def _looks_like_encoding_replacement_message(message: str) -> bool:
+    text = str(message or "").strip()
+    if not text:
+        return False
+    if _REPLACEMENT_ONLY_TEXT_PATTERN.fullmatch(text):
+        return True
+    if _REPLACEMENT_ONLY_PREFIX_PATTERN.match(text):
+        return True
+    question_count = text.count("?")
+    if question_count < 3:
+        return False
+    non_space_count = sum(1 for char in text if not char.isspace())
+    return non_space_count > 0 and question_count / non_space_count >= 0.8
+
+
+def _record_session_message_encoding_rejected(message: str) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "message_validation",
+            "conversation.message_encoding_rejected",
+            level="warning",
+            outcome="rejected",
+            message="Rejected a user message that appears to contain replacement characters from upstream encoding loss.",
+            fields={
+                "length": len(str(message or "")),
+                "questionMarkCount": str(message or "").count("?"),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _load_conversations() -> tuple[str, list[dict[str, Any]]]:
@@ -1087,8 +1206,16 @@ def _history_messages_for_agent_seed(items: Any) -> list[dict[str, Any]]:
     """Build the prompt history view without transient runtime failure notices."""
 
     filtered: list[dict[str, Any]] = []
+    drop_assistant_until_next_user = False
     for item in normalize_chat_messages(items or []):
+        role = str(item.get("role") or "").strip().lower()
+        if role == "user":
+            drop_assistant_until_next_user = False
         if _should_omit_message_from_agent_history(item):
+            if role == "user":
+                drop_assistant_until_next_user = True
+            continue
+        if role == "assistant" and drop_assistant_until_next_user:
             continue
         filtered.append(item)
     return filtered
@@ -1096,14 +1223,52 @@ def _history_messages_for_agent_seed(items: Any) -> list[dict[str, Any]]:
 
 def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
     role = str(message.get("role") or "").strip().lower()
-    if role != "assistant":
-        return False
     content = str(message.get("content") or "").strip()
-    if not content:
-        return True
-    if _looks_like_provider_error_text(content):
-        return True
-    return _looks_like_runtime_failure_notice(content)
+    if role != "user":
+        return role == "assistant" and (
+            not content or _looks_like_provider_error_text(content) or _looks_like_runtime_failure_notice(content)
+        )
+    return not _is_meaningful_task_goal(content)
+
+
+def _is_effective_user_message(message: Any) -> bool:
+    return _is_meaningful_task_goal(message)
+
+
+def _latest_effective_user_message(messages: list[dict[str, Any]]) -> str:
+    for item in reversed(messages):
+        if str(item.get("role") or "").strip().lower() != "user":
+            continue
+        content = trim_lines(item.get("content") or "", max_lines=4)
+        if _is_effective_user_message(content):
+            return content
+    return ""
+
+
+def _resolve_session_user_prompt(
+    session_id: str,
+    raw_message: Any,
+    history_messages: list[dict[str, Any]],
+    *,
+    existing_task: dict[str, Any] | None = None,
+) -> tuple[str, str]:
+    prompt = trim_lines(raw_message or "", max_lines=4)
+    if _is_continue_request(prompt):
+        return prompt, "continue"
+    if _is_effective_user_message(prompt):
+        return prompt, "raw_meaningful"
+
+    existing_goal = ""
+    if isinstance(existing_task, dict):
+        existing_goal = trim_lines(existing_task.get("goal") or existing_task.get("title") or "", max_lines=2)
+    if existing_goal and _is_effective_user_message(existing_goal):
+        return existing_goal, "active_task_fallback"
+
+    history_goal = _latest_effective_user_message(history_messages)
+    if history_goal:
+        return history_goal, "history_fallback"
+
+    return prompt, "raw_non_meaningful"
 
 
 def _looks_like_runtime_failure_notice(text: Any) -> bool:
@@ -1631,6 +1796,15 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     session_id = str(context.get("session_id") or "").strip()
     turn_id = str(context.get("turn_id") or "").strip()
     if turn_id and not _is_session_turn_current(session_id, turn_id):
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "skipped_stale",
+            turn_id=turn_id,
+            outcome="skipped",
+            fields={
+                "reason": "turn_id_not_current",
+            },
+        )
         return
     turn_control = context.get("turn_control")
     if not isinstance(turn_control, SessionTurnControl):
@@ -1638,10 +1812,31 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     turn_capture = SessionTurnCapture(session_id=session_id, turn_id=turn_id)
     mental_model_enabled = _normalize_optional_bool(context.get("mental_model_enabled"))
     session_workspace = _ensure_session_workspace(session_id)
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "worker_started",
+        turn_id=turn_id,
+        outcome="running",
+        fields={
+            "workspacePath": _session_workspace_relative_path(session_id),
+            "hasTurnControl": isinstance(turn_control, SessionTurnControl),
+            "mentalModelEnabled": mental_model_enabled,
+        },
+    )
     try:
         with mental_model_enabled_override(mental_model_enabled), _session_tool_workspace_override(session_workspace):
             initial_stop_reason = _get_turn_control_stop_reason(turn_control)
             if initial_stop_reason:
+                _record_session_turn_lifecycle_event(
+                    session_id,
+                    "stop_observed",
+                    turn_id=turn_id,
+                    outcome="stopped",
+                    fields={
+                        "stage": "initial",
+                        "stopReason": trim_lines(initial_stop_reason, max_lines=2),
+                    },
+                )
                 _persist_session_turn_result(
                     session_id,
                     _build_stopped_turn_result(initial_stop_reason),
@@ -1651,7 +1846,26 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 return
 
             with _capture_session_ui_stream(session_id, turn_capture, mental_model_enabled=mental_model_enabled):
+                _record_session_turn_lifecycle_event(
+                    session_id,
+                    "ui_capture_started",
+                    turn_id=turn_id,
+                    outcome="running",
+                    fields={
+                        "mentalModelEnabled": mental_model_enabled,
+                    },
+                )
                 agent = _create_chat_agent_for_session(session_workspace)
+                _record_session_turn_lifecycle_event(
+                    session_id,
+                    "agent_created",
+                    turn_id=turn_id,
+                    outcome="running",
+                    fields={
+                        "agentType": type(agent).__name__,
+                        "workspacePath": _session_workspace_relative_path(session_id),
+                    },
+                )
                 mental_override_configurer = getattr(agent, "set_mental_model_enabled_override", None)
                 if callable(mental_override_configurer):
                     mental_override_configurer(mental_model_enabled)
@@ -1662,9 +1876,30 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 history_messages = _history_messages_for_agent_seed(context.get("history_messages") or [])
                 if callable(restore) and history_messages:
                     restore(history_messages)
+                _record_session_turn_lifecycle_event(
+                    session_id,
+                    "history_seeded",
+                    turn_id=turn_id,
+                    outcome="running",
+                    fields={
+                        "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
+                        "seededHistoryMessageCount": len(history_messages),
+                        "restoreAvailable": callable(restore),
+                    },
+                )
 
                 preflight_stop_reason = _get_turn_control_stop_reason(turn_control)
                 if preflight_stop_reason:
+                    _record_session_turn_lifecycle_event(
+                        session_id,
+                        "stop_observed",
+                        turn_id=turn_id,
+                        outcome="stopped",
+                        fields={
+                            "stage": "preflight",
+                            "stopReason": trim_lines(preflight_stop_reason, max_lines=2),
+                        },
+                    )
                     _persist_session_turn_result(
                         session_id,
                         _build_stopped_turn_result(preflight_stop_reason),
@@ -1686,6 +1921,18 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 turn_capture,
                 mental_model_enabled=mental_model_enabled,
             )
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "capture_attached",
+                turn_id=turn_id,
+                outcome="running",
+                fields={
+                    "hasThought": bool(turn_capture.thought),
+                    "hasContent": bool(turn_capture.content),
+                    "hasMentalState": bool(turn_capture.mental_state),
+                    "toolCallCount": len(turn_capture.tool_calls),
+                },
+            )
             _persist_session_turn_result(
                 session_id,
                 result,
@@ -1694,9 +1941,29 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 turn_id=turn_id,
             )
     except Exception as exc:
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "exception",
+            turn_id=turn_id,
+            level="error",
+            outcome="failed",
+            fields={
+                "exceptionType": type(exc).__name__,
+                "errorPreview": trim_lines(str(exc), max_lines=2),
+            },
+        )
         if _is_session_turn_current(session_id, turn_id):
             _persist_session_turn_failure(session_id, context, exc)
     finally:
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "worker_finished",
+            turn_id=turn_id,
+            outcome="finished",
+            fields={
+                "wasCurrentTurn": _is_session_turn_current(session_id, turn_id),
+            },
+        )
         _set_session_running(session_id, False, turn_id=turn_id)
         _clear_session_turn_control(session_id, turn_id=turn_id)
         _publish_session_detail_snapshot(session_id)
@@ -1733,19 +2000,82 @@ def _run_session_continuation_loop(
 ) -> Any:
     max_turns = _web_chat_max_continuation_turns()
     prompt = str(initial_prompt or "").strip()
+    if not _is_continue_request(prompt) and not _is_effective_user_message(prompt):
+        history_goal = _latest_effective_user_message(history_messages)
+        if history_goal:
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "user_message_filtered",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="ignored",
+                fields={
+                    "reason": "non_meaningful_user_message",
+                    "messageLength": len(prompt),
+                    "questionMarkCount": prompt.count("?"),
+                    "fallbackSource": "history",
+                },
+            )
+            prompt = history_goal
     if _is_continue_request(prompt):
         resume_goal = _latest_unfinished_task_goal(session_id)
         if resume_goal:
             prompt = f"继续完成上一任务：{resume_goal}"
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "resume_goal_resolved",
+                outcome="running",
+                fields={
+                    "resumeGoalLength": len(resume_goal),
+                    "historyMessageCount": len(history_messages),
+                },
+            )
 
     result: Any = None
     last_visible_result: dict[str, Any] | None = None
     for turn_index in range(1, max_turns + 1):
         stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
         if stop_reason:
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "stop_observed",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="stopped",
+                fields={
+                    "stage": "continuation_preflight",
+                    "turnIndex": turn_index,
+                    "stopReason": trim_lines(stop_reason, max_lines=2),
+                },
+            )
             return _build_stopped_turn_result(stop_reason)
 
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "agent_turn_started",
+            turn_id=getattr(turn_control, "turn_id", ""),
+            outcome="running",
+            fields={
+                "turnIndex": turn_index,
+                "maxTurns": max_turns,
+                "promptLength": len(prompt),
+                "historyMessageCount": len(history_messages),
+            },
+        )
         result = agent.run_single_turn(initial_prompt=prompt)
+        result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else type(result).__name__
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "agent_turn_returned",
+            turn_id=getattr(turn_control, "turn_id", ""),
+            outcome=result_status or "returned",
+            fields={
+                "turnIndex": turn_index,
+                "maxTurns": max_turns,
+                "resultStatus": result_status,
+                "toolCallCount": _coerce_nonnegative_int(result.get("tool_call_count") or 0) if isinstance(result, dict) else 0,
+                "hasVisibleReply": bool(_visible_reply_candidate(result)) if isinstance(result, dict) else False,
+                "isProviderFailed": _is_provider_failed_result(result),
+            },
+        )
         last_visible_result = _remember_continuation_visible_result(result, last_visible_result)
         if _is_provider_failed_result(result):
             _record_session_turn_circuit_breaker_event(
@@ -1757,9 +2087,31 @@ def _run_session_continuation_loop(
             return _annotate_continuation_result(result, turn_index, max_turns, reached_limit=False)
         if _is_session_turn_terminal(result):
             result = _merge_continuation_visible_result(result, last_visible_result)
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "terminal_result",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="completed",
+                fields={
+                    "turnIndex": turn_index,
+                    "maxTurns": max_turns,
+                    "resultStatus": result_status,
+                },
+            )
             return _annotate_continuation_result(result, turn_index, max_turns, reached_limit=False)
 
         if turn_index >= max_turns:
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "continuation_limit_reached",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                level="warning",
+                outcome="paused",
+                fields={
+                    "turnIndex": turn_index,
+                    "maxTurns": max_turns,
+                },
+            )
             return _build_continuation_limit_result(result, turn_index, max_turns)
 
         prompt = _build_followup_prompt(
@@ -1768,6 +2120,16 @@ def _run_session_continuation_loop(
             latest_result=result,
             history_messages=history_messages,
             turn_index=turn_index,
+        )
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "followup_prompt_built",
+            turn_id=getattr(turn_control, "turn_id", ""),
+            outcome="running",
+            fields={
+                "turnIndex": turn_index,
+                "nextPromptLength": len(prompt),
+            },
         )
 
     return _build_continuation_limit_result(result, max_turns, max_turns)
@@ -1836,6 +2198,19 @@ def _persist_session_turn_result(
                 finished_at=timestamp,
                 updated_at=timestamp,
             )
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "result_persisted",
+                turn_id=turn_id,
+                level="error",
+                outcome="failed",
+                fields={
+                    "resultStatus": "failed",
+                    "errorType": error_type,
+                    "providerFailure": True,
+                    "messageCount": len(conversation.get("messages") or []),
+                },
+            )
             _record_session_turn_error(
                 session_id,
                 turn_error,
@@ -1899,6 +2274,21 @@ def _persist_session_turn_result(
             finished_at=assistant_entry["timestamp"],
             updated_at=assistant_entry["timestamp"],
         )
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "result_persisted",
+            turn_id=turn_id,
+            outcome=final_status,
+            fields={
+                "resultStatus": result_status or "completed",
+                "finalStatus": final_status,
+                "messageCount": len(conversation.get("messages") or []),
+                "assistantTextLength": len(assistant_text),
+                "toolCallCount": len(_extract_chat_tool_calls(result)),
+                "hasThought": bool(assistant_entry.get("thought")),
+                "hasMentalSnapshot": bool(assistant_entry.get("mental_snapshot")),
+            },
+        )
     _record_session_cycle_message(
         session_id,
         assistant_entry,
@@ -1946,6 +2336,18 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 finished_at=timestamp,
                 updated_at=timestamp,
             )
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "failure_persisted",
+                turn_id=str(context.get("turn_id") or ""),
+                level="error",
+                outcome="failed",
+                fields={
+                    "errorType": error_type,
+                    "providerFailure": True,
+                    "messageCount": len(messages),
+                },
+            )
             _record_session_turn_error(
                 session_id,
                 turn_error,
@@ -1971,6 +2373,19 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             error=raw_error,
             finished_at=assistant_entry["timestamp"],
             updated_at=assistant_entry["timestamp"],
+        )
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "failure_persisted",
+            turn_id=str(context.get("turn_id") or ""),
+            level="error",
+            outcome="failed",
+            fields={
+                "errorType": error_type,
+                "providerFailure": False,
+                "messageCount": len(conversation.get("messages") or []),
+                "assistantTextLength": len(str(assistant_entry.get("content") or "")),
+            },
         )
     _record_session_cycle_message(
         session_id,
@@ -2065,6 +2480,131 @@ def _record_session_cycle_message(
     except Exception as exc:
         _debug_logger.warning(
             f"runtime scene conversation log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _record_session_turn_started_event(
+    session_id: str,
+    *,
+    turn_id: str,
+    leases: list[str] | None = None,
+    user_message: str = "",
+    raw_user_message: str = "",
+    user_message_source: str = "",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "turn",
+            "conversation.turn.started",
+            message="Web chat turn started.",
+            level="info",
+            outcome="running",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "leaseCount": len(list(leases or [])),
+                "userMessageChars": len(str(user_message or "")),
+                "rawUserMessageChars": len(str(raw_user_message or "")),
+                "userMessageSource": str(user_message_source or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene chat turn start log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _record_session_turn_scheduled_event(context: dict[str, Any]) -> None:
+    session_id = str(context.get("session_id") or "").strip()
+    turn_id = str(context.get("turn_id") or "").strip()
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "scheduled",
+        turn_id=turn_id,
+        outcome="queued",
+        fields={
+            "historyMessageCount": len(list(context.get("history_messages") or [])),
+            "mentalModelEnabled": _normalize_optional_bool(context.get("mental_model_enabled")),
+            "userMessageLength": len(str(context.get("user_message") or "")),
+            "userMessageSource": str(context.get("user_message_source") or "").strip(),
+        },
+    )
+
+
+def _record_session_user_message_filtered_event(
+    session_id: str,
+    *,
+    turn_id: str = "",
+    reason: str = "",
+    message: str = "",
+    source: str = "",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "message_filtered",
+            "conversation.user_message_filtered",
+            level="warning",
+            outcome="ignored",
+            message="Ignored a non-meaningful user message for prompt/task derivation.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "reason": str(reason or "").strip(),
+                "source": str(source or "").strip(),
+                "messageLength": len(str(message or "")),
+                "questionMarkCount": str(message or "").count("?"),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_session_turn_lifecycle_event(
+    session_id: str,
+    phase: str,
+    *,
+    turn_id: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_phase = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(phase or "event").strip()).strip("._-") or "event"
+    normalized_turn_id = str(turn_id or "").strip()
+    event_fields = {
+        "sessionId": normalized_session_id,
+        "turnId": normalized_turn_id,
+        **(fields or {}),
+    }
+    child_payload = {
+        "session_id": normalized_session_id,
+        "turn_id": normalized_turn_id,
+        "phase": normalized_phase,
+        "outcome": str(outcome or "").strip() or "observed",
+        **(fields or {}),
+    }
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            f"turn_{normalized_phase}",
+            f"conversation.turn.{normalized_phase}",
+            level=level,
+            outcome=outcome,
+            message=f"Conversation turn {normalized_phase.replace('_', ' ')}.",
+            fields=event_fields,
+            child_log_path=f"conversations/{_safe_session_workspace_token(normalized_session_id)}-turns.jsonl",
+            child_log_payload=child_payload,
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene turn lifecycle log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
 
@@ -3302,7 +3842,7 @@ def _latest_unfinished_task_goal(session_id: str) -> str:
     if status in {"done", "idle"}:
         return ""
     goal = trim_lines(active_task.get("goal") or active_task.get("title") or "", max_lines=2)
-    if _is_continue_request(goal):
+    if _is_continue_request(goal) or not _is_meaningful_task_goal(goal):
         return _latest_meaningful_user_message(messages)
     return goal
 
@@ -3486,7 +4026,7 @@ def _build_followup_prompt(
         )
     goal = str(effective_prompt or original_prompt or "").strip()
     if _is_continue_request(goal):
-        goal = _latest_user_message(history_messages) or str(original_prompt or "").strip()
+        goal = _latest_effective_user_message(history_messages) or str(original_prompt or "").strip()
     lines = [
         f"继续完成同一个用户目标：{goal}",
         f"上一内部回合仍未完成用户目标（第 {turn_index} 轮）。",
@@ -3571,17 +4111,17 @@ def _build_session_active_task(
         if isinstance(existing_task, dict)
         else ""
     )
-    history_goal = _latest_meaningful_user_message(messages)
+    history_goal = _latest_effective_user_message(messages)
     if _is_continue_request(last_user_message):
-        effective_goal = existing_goal if existing_goal and not _is_continue_request(existing_goal) else history_goal
+        effective_goal = existing_goal if existing_goal and _is_effective_user_message(existing_goal) else history_goal
     else:
-        effective_goal = last_user_message
+        effective_goal = last_user_message if _is_effective_user_message(last_user_message) else history_goal
     if not effective_goal:
-        effective_goal = existing_goal if existing_goal and not _is_continue_request(existing_goal) else history_goal
+        effective_goal = existing_goal if existing_goal and _is_effective_user_message(existing_goal) else history_goal
     effective_title = (
         effective_goal
         if _is_continue_request(last_user_message) and effective_goal
-        else (last_user_message or latest_summary)
+        else (last_user_message if _is_effective_user_message(last_user_message) else (effective_goal or latest_summary))
     )
     metadata = dict(existing_metadata)
     metadata.update(
@@ -3596,6 +4136,9 @@ def _build_session_active_task(
         metadata["blocked_reason"] = blocked_reason
     if required_user_input:
         metadata["required_user_input"] = required_user_input
+    if last_user_message and not _is_effective_user_message(last_user_message):
+        metadata["last_user_message_filtered"] = True
+        metadata["last_user_message_reason"] = "non_meaningful_user_message"
 
     return {
         "task_id": str(existing_task.get("task_id") or f"{session_id}-coding-task").strip()
