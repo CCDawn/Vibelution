@@ -75,7 +75,8 @@
 - `docs/plans/2026-05-21-workrun-substrate-and-chat-case-loop.md` 已把 raw chat -> candidate -> review -> reviewed case -> dataset/bundle 定为共享边界。
 - `core/evaluation/self_evolution_experience_repository.py` 已提供第一版 terminal experience repository：自进化终态 run 会写入 `workspace/self_evolution/experience/experience.jsonl`，并用 `self_terminal:<runId>` 去重。
 - `core/evaluation/self_evolution_reflection.py` 已提供第一版 bounded reflection：每条 terminal experience 可派生 self-questioning / self-navigating / self-attributing 三段结构化候选，并写入 `workspace/self_evolution/reflection/reflection.jsonl`。
-- 目前还没有正式的 skill candidate / prompt candidate / proposal candidate 池存储层；reflection record 也还没有被 P3 候选池消费。
+- `core/evaluation/self_evolution_candidate_pool.py` 已提供第一版 skill / prompt / proposal candidate 池，三类候选分别写入 `workspace/self_evolution/candidates/*_candidates.jsonl`，并强制 `review_state=pending`、`supervised_required=true`、`auto_apply=false`。
+- 目前还没有把 reflection record 自动蒸馏进 candidate pool，也还没有 P4 监督线回流 UI / API。
 
 ## 当前文档与实现差距
 
@@ -91,8 +92,8 @@
 4. generated cases 已有部分监督边界；experience repository 已落地第一版，但仍只是候选来源。
    文档需要继续强调：experience record 不自动生效，不写 accepted baseline / selection policy，也还未接入 P2/P3 候选池消费。
 
-5. skill / prompt / proposal candidate 池还缺统一契约。
-   当前只有 generated case 和 chat reviewed case 有较明确的 registry / review 边界；skill candidate、prompt candidate、proposal candidate 还需要 schema、provenance、dedupe、quality score 和 supervised handoff。
+5. skill / prompt / proposal candidate 池已有第一版统一契约，但还没有监督线回流。
+   当前 candidate pool 已有 schema、provenance、dedupe、review_state、blocked_downstream_uses 和 supervised_required；下一步需要接入 P4 review / proposal / dataset lifecycle。
 
 6. self-questioning / self-navigating / self-attributing 已有第一版 bounded artifact，但还未接入候选池。
    当前 reflection record 只从 experience evidence 派生问题、路径建议和归因候选，不自动驱动下一轮运行，也不写 runtime prompt / skill / policy。
@@ -120,9 +121,9 @@
 | reflection record | `workspace/self_evolution/reflection/reflection.jsonl` | 否 | 视 downstream use 而定 | P2 第一版已写入；只作为 question/navigation/attribution 候选。 |
 | generated case | `workspace/evaluation/datasets/generated_cases.jsonl` | 否 | 是 | 已要求 provenance，不能自动 holdout。 |
 | reviewed chat case | `chat_reviewed_multiturn` 数据集 | 否 | 是 | 必须 review 后进入 supervised/Gym。 |
-| proposal candidate | 待建候选池或 `workspace/gym/proposals` | 否 | 是 | 不能直接写 accepted baseline。 |
-| skill candidate | 待建候选池 | 否 | 是 | 只能作为候选 skill，不能自动安装/启用。 |
-| prompt candidate | 待建候选池 | 否 | 是 | 不能直接覆盖 runtime prompt 或 accepted prompt。 |
+| proposal candidate | `workspace/self_evolution/candidates/proposal_candidates.jsonl` | 否 | 是 | 不能直接写 accepted baseline 或 selection policy。 |
+| skill candidate | `workspace/self_evolution/candidates/skill_candidates.jsonl` | 否 | 是 | 只能作为候选 skill，不能自动安装/启用。 |
+| prompt candidate | `workspace/self_evolution/candidates/prompt_candidates.jsonl` | 否 | 是 | 不能直接覆盖 runtime prompt 或 accepted prompt。 |
 | accepted baseline | 监督线 accepted registry | 是 | 已验收后 | 无监督线不得直接写。 |
 | selection policy | 监督线 policy 文件/代码 | 是 | 已验收后 | 无监督线不得直接写。 |
 
@@ -323,18 +324,17 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 
 ### P3：建立 skill / prompt / proposal candidate 池
 
+状态：核心池已落地。`core/evaluation/self_evolution_candidate_pool.py` 支持从 reflection record 构建 `skill_candidate`、`prompt_candidate`、`proposal_candidate`，按类型写入独立 JSONL，并强制候选保持 `review_state=pending`、`supervised_required=true`、`candidate_only=true`、`auto_apply=false`。本阶段仍不自动安装 skill、不覆盖 prompt、不写 accepted baseline / selection policy。
+
 目标：无监督线可以产出候选，但不能自动安装、启用或 accepted。
 
-建议文件影响：
+已落地文件影响：
 
 - 新增 `core/evaluation/self_evolution_candidate_pool.py`
 - 新增 `workspace/self_evolution/candidates/skill_candidates.jsonl`
 - 新增 `workspace/self_evolution/candidates/prompt_candidates.jsonl`
 - 新增 `workspace/self_evolution/candidates/proposal_candidates.jsonl`
-- 更新 `core/gym/generated_cases.py`
-- 更新 `core/evaluation/dataset_registry.py`
 - 新增 `tests/test_self_evolution_candidate_pool.py`
-- 更新 `tests/test_dataset_registry.py`
 
 候选通用字段：
 
@@ -358,8 +358,8 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 测试锚点：
 
 ```powershell
-pytest tests/test_self_evolution_candidate_pool.py -v
-pytest tests/test_dataset_registry.py -k "generated_cases or provenance or holdout" -v
+.\.venv\Scripts\python.exe -m pytest tests/test_self_evolution_candidate_pool.py -v
+.\.venv\Scripts\python.exe -m pytest tests/test_dataset_registry.py -k "generated_cases or provenance or holdout" -v
 ```
 
 ### P4：把候选回流监督线
@@ -510,7 +510,7 @@ Raw Chat Segment -> Candidate -> Human/Review Decision -> ReviewedChatCase -> Da
 - `.runtime/runtime-manager/work_runs`
 - `workspace/self_evolution/experience`
 - `workspace/self_evolution/reflection`
-- 待建：`workspace/self_evolution/candidates`
+- `workspace/self_evolution/candidates`
 
 测试：
 
@@ -566,7 +566,7 @@ pytest tests/test_web_app.py -k "chat_review or supervised or self_evolution" -v
    状态：第一版已完成。self-questioning 只从证据生成问题，self-navigating 只生成必须重查当前现场的路径建议，self-attributing 只生成可追溯归因；三者都不能直接修改 runtime 标准。下一步是让 P3 candidate pool 消费这些 reflection records。
 
 3. 建立 skill / prompt / proposal candidate 池并接回监督线。
-   generated cases 已有较强边界，下一步要把 prompt、skill、proposal 也纳入同样的 provenance、review_state、downstream_use 和 supervised_required 契约。
+   状态：candidate pool 核心持久化已完成，prompt、skill、proposal 已纳入 provenance、review_state、downstream_use 和 supervised_required 契约。下一步是 P4，把候选回流监督线 review / proposal / dataset lifecycle。
 
 ## 提交说明
 
