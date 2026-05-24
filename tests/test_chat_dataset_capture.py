@@ -219,6 +219,12 @@ def test_chat_candidate_decisions_update_queue_and_datasets(tmp_path: Path):
     assert bundle_payload["dataset"]["review_required"] is True
     assert bundle_payload["dataset"]["source_track"] == "dialogue"
     assert bundle_payload["dataset"]["holdout_allowed"] is False
+    assert bundle_payload["dataset"]["raw_chat_direct_training_allowed"] is False
+    assert bundle_payload["dataset"]["intake_boundary"]["contract"] == "reviewed_chat_case"
+    assert bundle_payload["dataset"]["intake_boundary"]["formal_supervised_evaluation_allowed"] is True
+    assert bundle_payload["cases"][0]["review"]["status"] == "positive"
+    assert bundle_payload["cases"][0]["source_track"] == "dialogue"
+    assert bundle_payload["cases"][0]["intake_boundary"]["holdout_allowed"] is False
     assert "future_training_export" in bundle_payload["dataset"]["allowed_downstream_uses"]
 
     negative = record_negative_chat_candidate(

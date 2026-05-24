@@ -13,6 +13,12 @@ from typing import Any, Dict, Iterable, List, Optional
 from core.infrastructure.workspace_manager import get_workspace
 
 from .chat_case_lifecycle import chat_reviewed_dataset_metadata
+from .supervised_intake import (
+    dataset_intake_boundary,
+    generated_case_dataset_metadata,
+    protected_dataset_boundary_fields,
+    reviewed_chat_row_status,
+)
 from .supervised_evolution import (
     DEFAULT_BUNDLE_NAME,
     resolve_supervised_bundle_path,
@@ -102,6 +108,7 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "runnable": True,
                 "adapter_status": "ready",
                 "tags": ["generated", "gym"],
+                **generated_case_dataset_metadata(),
             },
             {
                 "name": "chat_reviewed_multiturn",
@@ -190,8 +197,11 @@ def _merge_registry_payload(existing: Dict[str, Any]) -> Dict[str, Any]:
             merged.append(default_item)
             continue
         changed = False
+        protected_keys = protected_dataset_boundary_fields()
         for key, value in default_item.items():
-            if key not in existing_item:
+            if key not in existing_item or key in protected_keys:
+                if existing_item.get(key) == value:
+                    continue
                 existing_item[key] = value
                 changed = True
         if changed:
@@ -330,6 +340,15 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
             usability_status = "ready"
             usability_reason = "数据集已有可运行 case。"
         effective = usability_status == "ready"
+        boundary = dataset_intake_boundary(
+            name=spec.name,
+            kind=spec.kind,
+            review_required=spec.review_required,
+            source_track=spec.source_track,
+            allowed_downstream_uses=spec.allowed_downstream_uses,
+            holdout_allowed=spec.holdout_allowed,
+            raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
+        )
         rows.append(
             {
                 "name": spec.name,
@@ -353,6 +372,10 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 "allowed_downstream_uses": spec.allowed_downstream_uses,
                 "holdout_allowed": spec.holdout_allowed,
                 "raw_chat_direct_training_allowed": spec.raw_chat_direct_training_allowed,
+                "intake_boundary": boundary,
+                "formal_supervised_evaluation_allowed": boundary[
+                    "formal_supervised_evaluation_allowed"
+                ],
             }
         )
     return rows
@@ -411,6 +434,33 @@ def _build_prompt_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Di
         "training_tier": _normalize_training_tier(row.get("training_tier")),
         "dataset_ref": {key: row.get(key) for key in ("id", "task_id", "instance_id", "repo", "base_commit") if key in row},
     }
+    if spec.name == "chat_reviewed_multiturn":
+        status = reviewed_chat_row_status(row)
+        if status != "positive":
+            raise ValueError("Reviewed Chat Case 必须经过 positive review 才能物化为监督 case")
+        for key in ("approval", "review", "quality_signals", "conversation_turns", "next_state_signals"):
+            if key in row:
+                case[key] = row[key]
+        review_payload = case.get("review") if isinstance(case.get("review"), dict) else {}
+        case["review"] = {
+            **review_payload,
+            "status": status,
+            "review_required": True,
+            "source_track": "dialogue",
+        }
+    if spec.source_track:
+        case["source_track"] = spec.source_track
+    if spec.allowed_downstream_uses:
+        case["allowed_downstream_uses"] = list(spec.allowed_downstream_uses)
+    case["intake_boundary"] = dataset_intake_boundary(
+        name=spec.name,
+        kind=spec.kind,
+        review_required=spec.review_required,
+        source_track=spec.source_track,
+        allowed_downstream_uses=spec.allowed_downstream_uses,
+        holdout_allowed=spec.holdout_allowed,
+        raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
+    )
     if "expected" in row:
         case["expected"] = row["expected"]
     if "rubric" in row:
@@ -480,6 +530,17 @@ def _build_generated_case(spec: DatasetSpec, row: Dict[str, Any], index: int) ->
     case["dataset_splits"] = splits
     case["provenance"] = provenance
     case["generated"] = True
+    case["source_track"] = "generated"
+    case["allowed_downstream_uses"] = list(spec.allowed_downstream_uses)
+    case["intake_boundary"] = dataset_intake_boundary(
+        name=spec.name,
+        kind=spec.kind,
+        review_required=spec.review_required,
+        source_track=spec.source_track,
+        allowed_downstream_uses=spec.allowed_downstream_uses,
+        holdout_allowed=spec.holdout_allowed,
+        raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
+    )
     return case
 
 
@@ -589,6 +650,15 @@ def materialize_dataset_bundle(
             "allowed_downstream_uses": spec.allowed_downstream_uses,
             "holdout_allowed": spec.holdout_allowed,
             "raw_chat_direct_training_allowed": spec.raw_chat_direct_training_allowed,
+            "intake_boundary": dataset_intake_boundary(
+                name=spec.name,
+                kind=spec.kind,
+                review_required=spec.review_required,
+                source_track=spec.source_track,
+                allowed_downstream_uses=spec.allowed_downstream_uses,
+                holdout_allowed=spec.holdout_allowed,
+                raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
+            ),
         },
         "default_timeout_seconds": spec.timeout_seconds,
         "cases": cases,

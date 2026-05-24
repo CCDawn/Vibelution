@@ -80,6 +80,8 @@ def test_build_candidate_from_reflection_keeps_candidate_pending(candidate_type:
     assert candidate["supervised_required"] is True
     assert candidate["candidate_only"] is True
     assert candidate["auto_apply"] is False
+    assert candidate["supervised_intake_boundary"]["contract"] == "self_evolution_candidate"
+    assert candidate["supervised_intake_boundary"]["runtime_effect"] == "not_applied"
     assert blocked_use in candidate["blocked_downstream_uses"]
     assert "accepted_baseline" in candidate["blocked_downstream_uses"]
     assert "selection_policy" in candidate["blocked_downstream_uses"]
@@ -139,7 +141,7 @@ def test_append_candidate_record_forces_candidate_only_boundaries(tmp_path: Path
             "candidate_only": False,
             "auto_apply": True,
             "allowed_downstream_uses": ["supervised_review", "accepted_baseline", "runtime_prompt_override"],
-            "blocked_downstream_uses": [],
+            "blocked_downstream_uses": "manual_block",
         },
         project_root=tmp_path,
     )
@@ -154,3 +156,7 @@ def test_append_candidate_record_forces_candidate_only_boundaries(tmp_path: Path
     assert "accepted_baseline" not in record["allowed_downstream_uses"]
     assert "runtime_prompt_override" not in record["allowed_downstream_uses"]
     assert "runtime_prompt_override" in record["blocked_downstream_uses"]
+    assert "manual_block" in record["blocked_downstream_uses"]
+    assert "m" not in record["blocked_downstream_uses"]
+    assert record["supervised_intake_boundary"]["formal_supervised_review_allowed"] is True
+    assert record["supervised_intake_boundary"]["candidate_only"] is True

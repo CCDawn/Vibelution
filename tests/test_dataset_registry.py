@@ -27,6 +27,14 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
     assert by_name["chat_reviewed_multiturn"]["holdout_allowed"] is False
     assert by_name["chat_reviewed_multiturn"]["raw_chat_direct_training_allowed"] is False
     assert "supervised_evaluation" in by_name["chat_reviewed_multiturn"]["allowed_downstream_uses"]
+    assert by_name["chat_reviewed_multiturn"]["intake_boundary"]["contract"] == "reviewed_chat_case"
+    assert by_name["chat_reviewed_multiturn"]["formal_supervised_evaluation_allowed"] is True
+    assert by_name["generated_cases"]["source_track"] == "generated"
+    assert by_name["generated_cases"]["holdout_allowed"] is False
+    assert by_name["generated_cases"]["raw_chat_direct_training_allowed"] is False
+    assert by_name["generated_cases"]["intake_boundary"]["contract"] == "generated_case"
+    assert by_name["generated_cases"]["formal_supervised_evaluation_allowed"] is True
+    assert "supervised_evaluation" in by_name["generated_cases"]["allowed_downstream_uses"]
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
 
@@ -99,6 +107,47 @@ def test_dataset_registry_backfills_chat_review_boundary_metadata(tmp_path: Path
         "gym_candidate_case",
         "future_training_export",
     ]
+
+
+def test_dataset_registry_backfills_generated_case_boundary_metadata(tmp_path: Path):
+    registry_path = tmp_path / "workspace" / "evaluation" / "datasets" / "registry.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "datasets": [
+                    {
+                        "name": "generated_cases",
+                        "kind": "generated_case_jsonl",
+                        "description": "legacy generated cases",
+                        "source_path": "workspace/evaluation/datasets/generated_cases.jsonl",
+                        "bundle_name": "generated_cases_v1",
+                        "holdout_allowed": True,
+                        "raw_chat_direct_training_allowed": True,
+                        "allowed_downstream_uses": ["holdout", "runtime_prompt_override"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    ensure_dataset_registry(tmp_path)
+    row = next(item for item in list_dataset_status(tmp_path) if item["name"] == "generated_cases")
+
+    assert row["source_track"] == "generated"
+    assert row["holdout_allowed"] is False
+    assert row["raw_chat_direct_training_allowed"] is False
+    assert row["allowed_downstream_uses"] == [
+        "supervised_evaluation",
+        "gym_candidate_case",
+        "regression_observation",
+    ]
+    assert row["intake_boundary"]["boundary_reasons"] == []
 
 
 def test_ensure_dataset_registry_bootstraps_generated_and_chat_sources(tmp_path: Path):
@@ -253,10 +302,16 @@ def test_materialize_generated_cases_requires_provenance_and_blocks_holdout(tmp_
     bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
 
     assert result.bundle_name == "generated_cases_v1"
+    assert bundle["dataset"]["source_track"] == "generated"
+    assert bundle["dataset"]["holdout_allowed"] is False
+    assert bundle["dataset"]["raw_chat_direct_training_allowed"] is False
+    assert bundle["dataset"]["intake_boundary"]["contract"] == "generated_case"
     assert bundle["cases"][0]["generated"] is True
     assert bundle["cases"][0]["training_tier"] == "intelligence"
     assert bundle["cases"][0]["dataset_splits"] == ["train", "observe"]
     assert bundle["cases"][0]["provenance"]["source_trace_id"] == "trace_001"
+    assert bundle["cases"][0]["source_track"] == "generated"
+    assert bundle["cases"][0]["intake_boundary"]["formal_supervised_evaluation_allowed"] is True
 
     dataset_path.write_text(
         json.dumps(
@@ -282,6 +337,26 @@ def test_materialize_generated_cases_requires_provenance_and_blocks_holdout(tmp_
 
     with pytest.raises(ValueError, match="holdout"):
         materialize_dataset_bundle("generated_cases", project_root=tmp_path)
+
+
+def test_materialize_chat_reviewed_multiturn_rejects_unreviewed_rows(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "chat_reviewed_multiturn.jsonl"
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "case_id": "raw_chat_leak",
+                "prompt": "This raw chat row should not become a supervised case.",
+                "approval": {"status": "pending"},
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="positive review"):
+        materialize_dataset_bundle("chat_reviewed_multiturn", project_root=tmp_path)
 
 
 def test_materialize_dataset_rejects_unknown_training_tier(tmp_path: Path):

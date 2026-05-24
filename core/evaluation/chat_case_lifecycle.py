@@ -5,17 +5,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from .supervised_intake import (
+    REVIEWED_CHAT_ALLOWED_DOWNSTREAM_USES,
+    reviewed_chat_dataset_metadata as _reviewed_chat_dataset_metadata,
+)
+
 
 POSITIVE_DATASET_NAME = "chat_reviewed_multiturn"
 POSITIVE_DATASET_BUNDLE_NAME = "chat_reviewed_multiturn_v1"
 NEGATIVE_DATASET_NAME = "chat_negative_multiturn"
 NEGATIVE_DATASET_BUNDLE_NAME = "chat_negative_multiturn_v1"
 
-CHAT_CASE_ALLOWED_DOWNSTREAM_USES = [
-    "supervised_evaluation",
-    "gym_candidate_case",
-    "future_training_export",
-]
+CHAT_CASE_ALLOWED_DOWNSTREAM_USES = list(REVIEWED_CHAT_ALLOWED_DOWNSTREAM_USES)
 
 
 def chat_case_lifecycle_payload() -> dict[str, Any]:
@@ -34,13 +35,7 @@ def chat_case_lifecycle_payload() -> dict[str, Any]:
 def chat_reviewed_dataset_metadata() -> dict[str, Any]:
     """Return registry metadata for the reviewed positive chat dataset."""
 
-    return {
-        "review_required": True,
-        "source_track": "dialogue",
-        "allowed_downstream_uses": list(CHAT_CASE_ALLOWED_DOWNSTREAM_USES),
-        "holdout_allowed": False,
-        "raw_chat_direct_training_allowed": False,
-    }
+    return _reviewed_chat_dataset_metadata()
 
 
 __all__ = [

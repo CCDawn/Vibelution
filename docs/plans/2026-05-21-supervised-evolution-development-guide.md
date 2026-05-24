@@ -33,8 +33,11 @@
 - 当前 hybrid verification 是“部分结构化”：case 级已有 `difference_summary`、`difference_metrics`、`difference_reasons`，覆盖 validation、wall clock、guarded tools、new logs、restart miss、transaction issue、LLM failure。
 - 当前 gate 顺序为 infrastructure、legality、safety、survival、cost，并在 PROMOTE 前追加 Gym promotion gate；LLM provider transport failure 会进入 `INCONCLUSIVE`，并跳过后续合法性/安全/生存/成本判断。
 - `core/evaluation/dataset_registry.py` 已有 dataset 准入元数据：`review_required`、`source_track`、`allowed_downstream_uses`、`holdout_allowed`、`raw_chat_direct_training_allowed`、`usability_status`、`usability_reason`。
-- `chat_reviewed_multiturn` 已被标记为 dialogue 来源、review required、非 holdout、禁止 raw chat direct training，允许 downstream use 为 `supervised_evaluation`、`gym_candidate_case`、`future_training_export`。
-- `generated_cases` 已要求 provenance，且 `_validate_generated_case_provenance` 和 `_build_generated_case` 都禁止自动进入 `holdout`。
+- `core/evaluation/supervised_intake.py` 已成为监督准入契约层，统一描述 reviewed chat、generated case 和 self-evolution candidate 的 downstream use、holdout/raw-chat 禁止项与 candidate-only 边界。
+- `chat_reviewed_multiturn` 已被标记为 dialogue 来源、review required、非 holdout、禁止 raw chat direct training，允许 downstream use 为 `supervised_evaluation`、`gym_candidate_case`、`future_training_export`；物化 bundle 时只接受 `positive` review row。
+- `generated_cases` 已被标记为 generated 来源、非 holdout、禁止 raw chat direct training，允许 downstream use 为 `supervised_evaluation`、`gym_candidate_case`、`regression_observation`；每条 case 要求 provenance，且 `_validate_generated_case_provenance` 和 `_build_generated_case` 都禁止自动进入 `holdout`。
+- `CaseDecisionSummary` 已新增 `intake_provenance`，会把 generated provenance、review/approval、dataset split、allowed downstream uses 和 intake boundary 带入 decision record；selection policy 的 case evidence 与 proposal 也会保留该字段。
+- self-evolution candidate pool 已写入 `supervised_intake_boundary`，并强制 `review_state=pending`、`candidate_only=true`、`supervised_required=true`、`auto_apply=false`，同时阻断 `accepted_baseline`、`selection_policy`、`runtime_prompt_override` 和 skill registry 直接写入。
 - `core/evaluation/selection_policy.py` 会按 decision 写 policy 记录、audit log、observation/rejection/rollback pool、lineage index 和 proposal 文件；`INCONCLUSIVE` 只审计，不写候选观察池或回滚池。
 - `core/evaluation/supervised_workbench.py` 与 `core/evaluation/supervised_dashboard.py` 已能读取 Gym proposal lifecycle，并展示 `runtime_effect` 与 `agent_consumption`；active advisory baseline 仍只是 advisory。
 - `core/web/services/evolution_service.py` 已区分 `manual_review` 与 `auto`：自动审查模式会锁定手工 proposal governance action、手工 proposal 编辑和删除。
@@ -45,7 +48,7 @@
 
 - `score_breakdown` 已成为 case-level decision schema v1，并从现有 harness metrics 派生 `final_state_score`、`side_effect_score`、`trace_score`、`safety_score`、`semantic_score`、`overall_score`；后续若接入语义裁判，必须保持旧字段兼容。
 - `failure_taxonomy` 已从 `difference_reasons` 与 LLM failure category 派生，覆盖事务、restart、LLM failure、状态回归/改善和成本噪声；dynamic case、impossible task、stale-state execution、post-adaptation verification miss 仍需随 P1 动态 case 扩展。
-- `evidence_paths` 已进入 case summary、policy case evidence、proposal 和 Web case diagnostics，当前统一引用 role report、worktree、新 conversation/debug 文件；Gym trace/diff/log artifact map 仍可继续补强。
+- `evidence_paths` 已进入 case summary、policy case evidence、proposal 和 Web case diagnostics，当前统一引用 role report、worktree、新 conversation/debug 文件；`intake_provenance` 已补上 case 来源和准入边界，但 Gym trace/diff/log artifact map 仍可继续补强。
 - 动态 case 与不可完成 case 仍主要停留在计划层。现有 dry-run 更偏事务、restart、validation、LLM failure 与安全边界，还缺一组明确的 temporal/spatial/impossible/replanning fixture。
 - PROMOTE 与 accepted baseline 的边界需要更清楚地写入文档和 UI/API 语义：当前 supervised selection policy 可更新监督侧 accepted baseline registry 与 bundle baseline，这仍是 frozen evaluator / supervision artifact，不代表 runtime prompt、模型配置或线上行为已生效。
 - `proposal_action` 目前有审计和生命周期记录，但尚未统一登记为独立 `WorkRun(proposal_action)`；如果后续要和共享底座完全对齐，需要补这个 run kind 或等价 lifecycle event。
@@ -215,6 +218,8 @@
 - `source_track=dialogue`。
 - `holdout_allowed=false`，除非后续有独立 frozen holdout review 流程。
 - downstream use 只允许 registry 明确列出的用途。
+- `intake_boundary.contract=reviewed_chat_case`。
+- bundle case 必须携带 positive review/approval 证据；pending/negative/discard/raw row 不得物化为正式监督 case。
 
 测试锚点：
 
@@ -239,6 +244,9 @@ pytest tests/test_web_app.py -k "chat_review" -v
 - generated case 可以用于 observe/dev/regression 压力测试。
 - generated case 不能无 review 晋升为 frozen holdout。
 - generated case 的 provenance 要进入 bundle case，供 decision record 回放。
+- `source_track=generated`、`holdout_allowed=false`、`raw_chat_direct_training_allowed=false`。
+- `intake_boundary.contract=generated_case`。
+- provenance、dataset split 和 downstream uses 必须进入 `intake_provenance`，供 selection policy proposal 回放。
 
 测试锚点：
 
@@ -262,6 +270,8 @@ pytest tests/test_dataset_registry.py -k "generated_cases or holdout or provenan
 - `runtime_effect=not_applied` 与 `agent_consumption=advisory` 必须在 dashboard/workbench/Web 中可见。
 - 无监督线不能直接改 policy、accepted baseline registry、frozen evaluator 或 runtime 配置。
 - 监督侧 accepted baseline registry 属于 `V_ref`/frozen evaluator 工件，不是线上 runtime prompt。
+- candidate pool 记录必须保持 `review_state=pending`、`supervised_required=true`、`candidate_only=true`、`auto_apply=false`。
+- `supervised_intake_boundary.contract=self_evolution_candidate`，且 blocked downstream uses 必须包含 `accepted_baseline`、`selection_policy`、`runtime_prompt_override`。
 
 测试锚点：
 
@@ -312,28 +322,38 @@ pytest tests/test_supervised_dashboard.py -k "artifact or decision" -v
 pytest tests/test_web_app.py -k "proposal or evolution_routes_use_real_supervised_records" -v
 ```
 
-### P0-2：锁定三类输入准入边界
+### P0-2：锁定三类输入准入边界（已完成核心契约）
 
 目标：reviewed chat case、generated case、self-evolution proposal 都能进入监督验收，但不能污染 `V_ref`。
 
-重点检查：
+已完成：
 
-- `chat_reviewed_multiturn` 的 review/downstream/holdout/raw-chat 边界是否在 API、bundle、UI 中一致。
-- `generated_cases` provenance 是否进入物化 bundle 和 decision evidence。
-- self-evolution 产出的 candidate/proposal 是否只能通过监督 run 与 proposal lifecycle action 进入 accepted/advisory 状态。
-- `manual_review` 与 `auto` 的锁定语义是否覆盖 apply/activate/rollback/edit/delete。
+- 新增 `core/evaluation/supervised_intake.py`，集中定义 reviewed chat、generated case、self-evolution candidate 的准入 contract。
+- `chat_reviewed_multiturn` 现在只物化 positive reviewed row，bundle dataset/case 都携带 intake boundary。
+- `generated_cases` registry 会强制回填 generated 来源、非 holdout、禁止 raw-chat direct training 和 allowed downstream uses；bundle case 携带 provenance、source track 与 intake boundary。
+- `CaseDecisionSummary`、selection policy case evidence 和 proposal 均携带 `intake_provenance`，可回放 case 来源和准入证据。
+- self-evolution candidate pool 写入 `supervised_intake_boundary`，并继续强制 candidate-only/pending/supervised-required/no-auto-apply。
+- Web supervised workbench dataset payload 透出 `intakeBoundary` 与 `formalSupervisedEvaluationAllowed`；proposal/detail 层的 `intakeProvenance` 展示仍留给 P0-3/P1-2 读取层统一。
+
+后续仍可补强：
+
+- UI 文案可以继续把 reviewed case / supervised pressure / future training export 分层讲得更直白。
+- self-evolution candidate 当前是只读 pending source；是否进入正式 proposal action run 仍留给 P0-3 / proposal_action 工作。
 
 文件影响：
 
+- `core/evaluation/supervised_intake.py`
 - `core/evaluation/chat_case_lifecycle.py`
 - `core/evaluation/dataset_registry.py`
+- `core/evaluation/self_evolution_candidate_pool.py`
+- `core/evaluation/supervised_evolution.py`
 - `core/evaluation/selection_policy.py`
 - `core/web/services/evolution_service.py`
 - `core/web/services/supervised_control_service.py`
-- `core/web/routes/evolution.py`
 - `tests/test_chat_dataset_capture.py`
 - `tests/test_dataset_registry.py`
 - `tests/test_supervised_evolution.py`
+- `tests/test_self_evolution_candidate_pool.py`
 - `tests/test_web_app.py`
 
 风险：
