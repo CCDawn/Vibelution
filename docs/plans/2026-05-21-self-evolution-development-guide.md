@@ -1,75 +1,465 @@
 # 无监督进化开发指导文档
 
+本轮接手日期：2026-05-24
+
 ## 定位
 
 无监督进化线负责让 Vibelution 在没有人类逐步评价每个候选的情况下，进行一轮受控、自证据驱动、自我约束的改进尝试。
 
-它不是自由改写系统，也不是监督进化的替代品。它的职责是读取当前目标、工作区现场、最近事务、监督建议和运行证据，决定是否启动一轮 bounded self-evolution，并在运行后留下可诊断、可回滚、可删除的事务证据。
+它不是自由改写系统，也不是监督进化的替代品。它的职责是读取当前目标、工作区现场、最近事务、监督建议和运行证据，决定是否启动一轮 bounded self-evolution，并在运行后留下可诊断、可回滚、可删除、可回到监督线验收的证据链。
 
-结合 Agent Harness 论文综述，无监督进化线应优先吸收三类机制：
+当前阶段的核心目标：
 
-- EvolveR 风格的经验闭环：在线经验经过清洗、去重、整合、蒸馏后进入策略/原则仓库，再反哺后续候选生成。
-- AgentEvolver 风格的 self-questioning / self-navigating / self-attributing：系统自己发现弱点、复用历史成功轨迹，并把成功或失败归因到步骤、工具、prompt、文件或决策点。
-- SAGE / E-SPL 风格的候选池：可进化的不只是一段 diff，还可以是 skill candidate、prompt candidate、proposal candidate，但这些都只是候选，必须回到监督线验收。
+- 对齐无监督进化的运行控制、事务边界和证据链。
+- 把成功经验先收敛为 experience / candidate，而不是直接宣布 runtime 标准改变。
+- 把 skill / prompt / proposal / generated case 全部纳入候选池语义。
+- 明确所有候选最终必须回到监督线验收，不能自改 accepted baseline、selection policy 或冻结评测面。
 
-## 当前事实
+## 当前实现事实
 
-- Web 自进化页已有 start 按钮、运行状态、历史组、批量删除和 stale run 解锁逻辑。
-- `self_evolution_control_service` 已能处理 stale queued/paused/running 快照。
-- 自进化启动会检查 active supervised run，避免和监督运行冲突。
-- 自进化历史删除以 txnIds 为唯一入口，审计尾迹同步清理。
-- 预览和 run prompt 已包含目标、建议基线、工作区快照、最近事务和 fitness。
-- 这条线仍以 helper/control/service 层为主，不应随意改共享 workbench 入口。
-- 最新规划要求自进化运行登记为 `WorkRun(self_evolution_run)`，并通过 resource lease 与 chat/supervised 协调。
+### 运行控制
 
-## 职责边界
+- `core/web/services/self_evolution_control_service.py` 已经实现网页自进化的 start、pause、resume、stop、rollback、handoff 和 SSE 事件流。
+- 自进化 run snapshot 带 `runKind=self_evolution_run`、`leases=[evolution_transaction, worktree_write, memory_write]`、`runtimeManagerControl.ownerPid`、`rollback` 和 `artifacts`。
+- live runtime-manager 模式下，自进化控制会通过 `submit_command()` 转交 runtime manager；非 live 模式保留本地 executor 兜底。
+- start/resume 会拒绝写入型 chat turn、active supervised run、active supervised worktree run，以及 lease policy 判定出的资源冲突。
+- queued / running / paused / stopping 都属于 locked status；done / failed / cancelled 属于 final status。
+- stale / orphaned self run 会通过 `ownerPid` 与当前 runtime-manager pid 对齐；owner 不匹配或 active index 丢失时会自动改写为 `cancelled` 并清空 active index。
+- 工作台关闭前会通过 runtime shutdown / daemon close path 收口 active self / supervised evolution run，避免留下假 active。
 
-无监督进化线负责：
+### WorkRun 与 lease
 
-- 自进化 run 的 start、pause、resume、stop、stale unlock。
-- 启动前现场摘要：goal、worktree、recent transactions、fitness、advisory baseline。
-- 自进化事务历史和 audit 证据。
-- 自进化运行与监督 active run 的互斥。
-- 自进化结果的可诊断性、可回滚性、可删除性。
-- 运行失败或停止后的用户可见恢复说明。
-- 生成候选 case、候选策略、候选 skill、候选 prompt 和候选 proposal，但不直接宣布生效。
+- `core/runtime_manager/work_run_store.py` 已经提供共享 `WorkRunStore`，按 `runKind` 持久化 active/latest snapshot，并把 lifecycle 变化写入 runtime scene。
+- `core/runtime_manager/evolution_store.py` 已经通过 legacy facade 复用 `WorkRunStore`；当前 self/supervised 仍使用 legacy kind `self` / `supervised` 路径，但语义上对应 `self_evolution_run` / `supervised_evolution_run`。
+- `core/runtime_manager/work_run_leases.py` 已经定义初始 lease policy：
+  - `readonly_chat` 不阻塞 supervised/self。
+  - `self_evolution_run` 默认占用 `evolution_transaction`、`worktree_write`、`memory_write`。
+  - `supervised_evolution_run` 默认占用 `evaluation`。
+  - `supervised_worktree_evolution_run` 占用 `evaluation` 和 `worktree_write`。
+  - write / evaluation / evolution_transaction 之间按冲突矩阵互斥。
+- `core/web/services/session_service.py` 已把 chat turn 注册为 `WorkRun(chat_turn)`，并用 `infer_chat_turn_leases()` 区分 readonly 与 write intent。
+- `core/web/services/runtime_service.py` 已在 runtime summary 中暴露 `workRuns.active/latest`，覆盖 chat、self、supervised、supervised worktree。
 
-无监督进化线不负责：
+### 事务边界
 
-- 监督决策的 PROMOTE/HOLD/ROLLBACK 判定。
-- 对话消息展示、工具调用卡片、聊天停止按钮 UI。
-- LLM provider/profile 的配置安全。
-- 直接修改冻结评测集或监督 policy。
-- 绕过 risky write transaction gate。
-- 自己改写 accepted baseline 或 selection policy。
+- `core/infrastructure/git_memory.py` 负责 `open_evolution_transaction()` / `close_evolution_transaction()`，事务写入 `EvolutionTransaction`，并发布 `EVOLUTION_TXN_OPENED` / `EVOLUTION_TXN_CLOSED`。
+- `tools.git_tools.open_evolution_transaction_tool()` 会设置 session active txn；`close_evolution_transaction_tool()` 会清空 active txn。
+- validation 事件不会自动关闭 active txn；事务必须显式 close。
+- `GitMemoryService.note_file_modified()` 只追踪 dirty state 和 attention，不会因为修改 risky path 自动开账。
+- `core/infrastructure/evolution_governor.py` 对 risky write 做运行时拦截：
+  - 没有 active txn 时，写入 `core/`、`tools/`、`config/`、`workspace/prompts/`、`agent.py` 会被拒绝。
+  - 有 active txn 时，只允许写入 `config.evolution.allowed_target_dirs`。
+  - mutation blocked / recorded、txn opened / closed、validation completed 会进入 `workspace/evolution/audit.jsonl`。
+- `core/infrastructure/tool_executor.py` 在工具执行前调用 governor，并在工具执行后记录 mutation result。
 
-## 共享底座边界
+### 证据链与回滚
 
-无监督进化线必须遵守横向计划：[WorkRun Substrate And Chat Case Loop Implementation Plan](./2026-05-21-workrun-substrate-and-chat-case-loop.md)。
+- `self_evolution_control_service` 在启动前通过 `_capture_preflight_state()` 记录 git base rev、dirty files、backup dir 和 manifest path。
+- run 结束后通过 `_finalize_rollback_manifest()` 生成 rollback manifest；可安全回滚时前端状态为 `rollback.status=available`。
+- 自动回滚会先检测进化后文件是否又被修改；冲突时阻断并要求 handoff 给会话 agent。
+- runtime scene 已记录：
+  - `self_evolution_run.preflight.captured`
+  - `self_evolution_run.state.changed`
+  - `self_evolution_run.turn.started`
+  - `self_evolution_run.turn.completed`
+  - `self_evolution_run.failed`
+  - runtime-manager command succeeded / failed
+- `WorkRunStore` 也记录 `work_run.snapshot.persisted` / rejected / deleted，用于统一 active/latest 生命周期证据。
+- `core/evaluation/self_evolution_workbench.py` 已把 goal、active advisory baseline、worktree snapshot、recent transactions 和 fitness 写入 preview / run prompt。
 
-统一边界：
+### 候选与监督边界
 
-- 每次自进化运行登记为 `WorkRun(self_evolution_run)`。
-- 自进化运行的 `active` 与 `latest` 只在 `self_evolution_run` kind 下生效，不应吞掉 chat 或 supervised 的状态。
-- 自进化默认申请 `evolution_transaction`、`worktree_write`、`memory_write` 等严格 lease；只有 lease policy 允许时才能与其他 run 并行。
-- 自进化可以生成候选 case、候选策略、候选修改，但不能直接写入冻结验收标准或 accepted baseline。
-- 自进化成功经验必须作为 proposal、dataset candidate、generated case、skill candidate 或 prompt candidate 回到监督线验收。
-- 自进化运行必须留下 evidence tail、transaction id、rollback hook 和 provenance。
+- `generated_cases` 已作为 dataset registry 里的 generated dataset 存在；`core/evaluation/dataset_registry.py` 要求 generated case provenance，并阻止自动进入 holdout。
+- `core/gym/generated_cases.py` 写入 generated case 时要求 provenance，且拒绝 `dataset_splits` 包含 `holdout`。
+- `chat_reviewed_multiturn` 已带 `review_required`、`source_track`、`allowed_downstream_uses`、`raw_chat_direct_training_allowed=false` 等元数据。
+- `docs/plans/2026-05-21-workrun-substrate-and-chat-case-loop.md` 已把 raw chat -> candidate -> review -> reviewed case -> dataset/bundle 定为共享边界。
+- 目前还没有统一的 experience repository，也没有正式的 skill candidate / prompt candidate / proposal candidate 池存储层。
 
-无监督线向共享底座提供：
+## 当前文档与实现差距
 
-- `self_evolution_run` 的 lifecycle snapshot、event tail、事务证据和 rollback/handoff 信息。
-- 候选增量的来源、provenance、事务 ID 和是否可回滚。
-- 失败 run 的诊断标签、触发阶段、工具轨迹和可恢复说明。
+1. WorkRun 底座不再只是“最新规划”。
+   `WorkRunStore`、chat turn registration、runtime summary `workRuns`、resource lease policy 已部分落地；文档需要把它们写成当前事实，并保留 legacy `self` / `supervised` facade 仍存在的现实。
 
-## 论文启发到工程机制
+2. 事务和 risky write 边界已经比旧文档更具体。
+   现在必须写清楚：risky write 没有 active txn 会被 tool executor 前置拦截；active txn 仍受 allowed target dirs 限制；validation 不会自动 close txn。
 
-- EvolveR：把经验做成闭环，在线交互 -> 离线蒸馏 -> principle repository -> candidate generation；重点是去重、整合和质量控制。
-- AgentEvolver：让系统主动提出新问题、主动复用历史成功路径、主动给出归因，而不是只等人类告诉它哪里坏了。
-- SAGE：把 skill library 作为可成长资产；新 skill 不是直接上线，而是带着适用条件、收益和失败案例进入 candidate pool。
-- E-SPL：prompt evolution 可以做，但必须和 RL / evaluation 解耦为候选探索；它不适合作为当前阶段的直接自修改机制。
-- MAESTRO：长期可引入 model/skill routing，但目前优先级低于 run evidence 和 candidate governance。
-- Orchard：环境/执行基座要可复用、可扩展，尤其适合把真实 worktree、GUI 或 web environment 纳入统一执行面。
+3. 证据链已经包含 runtime scene 和 rollback manifest。
+   旧文档只说 evidence tail / rollback hook，未准确写出 preflight、child log、WorkRun lifecycle、ownerPid stale 收口和 rollback conflict handoff。
+
+4. generated cases 已有部分监督边界，但 experience repository 仍未落地。
+   文档不能把 EvolveR 式 experience repository 写成已实现；应明确这是下一阶段 P1 缺口。
+
+5. skill / prompt / proposal candidate 池还缺统一契约。
+   当前只有 generated case 和 chat reviewed case 有较明确的 registry / review 边界；skill candidate、prompt candidate、proposal candidate 还需要 schema、provenance、dedupe、quality score 和 supervised handoff。
+
+6. self-questioning / self-navigating / self-attributing 还只是目标机制。
+   现有实现能提供 worktree、fitness、recent transactions、runtime scene 和 tool trace，但还没有把三种机制固化为 bounded steps 和候选输出。
+
+## 不可突破边界
+
+- 无监督进化必须 bounded：每轮必须有目标、预算、停止条件、事务边界和可见结果。
+- 不能自改评判标准：不得直接修改冻结评测集、accepted baseline、selection policy、supervised policy 或 holdout。
+- 不能直接写入 accepted baseline 或 selection policy。
+- risky write 必须走事务，并且事务内仍必须遵守 allowed target dirs。
+- 成功经验只能先进入 experience repository / candidate pool，再回到监督线验收。
+- generated case 默认不能进入 holdout；必须带 provenance 和 allowed splits。
+- raw chat 不能直接变成训练/评测压力；必须经过 review。
+- 自进化可以生成候选、证据和 handoff，但不能自己宣布候选生效。
+
+## 产物分级
+
+| 产物 | 当前允许落点 | 是否可直接生效 | 必须回到监督线验收 | 备注 |
+|---|---|---:|---:|---|
+| runtime scene event | `logs/runtime_scenes/` | 否 | 否 | 证据，不是策略。 |
+| WorkRun snapshot | `.runtime/runtime-manager/...` | 否 | 否 | 运行状态，不是评判标准。 |
+| audit record | `workspace/evolution/audit.jsonl` | 否 | 否 | 事务证据。 |
+| rollback manifest | `workspace/web_self_evolution/<runId>/rollback_manifest.json` | 否 | 否 | 只用于恢复/交接。 |
+| experience record | 待建 `workspace/self_evolution/experience/*.jsonl` | 否 | 视 downstream use 而定 | 下一阶段要落地。 |
+| generated case | `workspace/evaluation/datasets/generated_cases.jsonl` | 否 | 是 | 已要求 provenance，不能自动 holdout。 |
+| reviewed chat case | `chat_reviewed_multiturn` 数据集 | 否 | 是 | 必须 review 后进入 supervised/Gym。 |
+| proposal candidate | 待建候选池或 `workspace/gym/proposals` | 否 | 是 | 不能直接写 accepted baseline。 |
+| skill candidate | 待建候选池 | 否 | 是 | 只能作为候选 skill，不能自动安装/启用。 |
+| prompt candidate | 待建候选池 | 否 | 是 | 不能直接覆盖 runtime prompt 或 accepted prompt。 |
+| accepted baseline | 监督线 accepted registry | 是 | 已验收后 | 无监督线不得直接写。 |
+| selection policy | 监督线 policy 文件/代码 | 是 | 已验收后 | 无监督线不得直接写。 |
+
+## EvolveR 式经验闭环
+
+目标：把一次性运行经验变成可审计、可去重、可候选化、但不直接生效的长期资产。
+
+建议闭环：
+
+1. Online experience capture
+   - 来源：runtime scene、WorkRun snapshot、audit、tool trace、rollback manifest、recent transactions、fitness。
+   - 输出：原始 experience record，只保存摘要、稳定 ID、路径引用和结果，不保存秘密、完整 prompt 或大段工具输出。
+
+2. Cleaning and dedupe
+   - 合并重复失败模式、重复成功策略和同一 root cause 的多条运行记录。
+   - 以 `source_run_id`、`txn_id`、`event_code`、`tool_name`、`target_paths`、`failure_signature` 做去重锚点。
+
+3. Integration
+   - 把经验归类为 failure pattern、successful strategy、tool-use heuristic、diagnostic case、candidate prompt、candidate skill、candidate proposal。
+   - 每条记录带 `quality_score`、`confidence`、`downstream_use` 和 `supervised_required=true/false`。
+
+4. Distillation
+   - 只把高质量经验蒸馏为 candidate。
+   - distillation 产物仍是候选，不能直接改写 runtime prompt、skill library 或 policy。
+
+5. Candidate generation
+   - 生成 prompt candidate、skill candidate、proposal candidate、generated case。
+   - 生成时必须携带 provenance：source run、source turn、txn id、runtime scene refs、audit refs、原因和限制。
+
+6. Supervised validation
+   - 候选回到监督线进入 proposal / dataset / review lifecycle。
+   - 通过监督线验收后，才允许进入 accepted baseline、policy 或正式 skill/prompt registry。
+
+## AgentEvolver 三机制工程化
+
+### self-questioning
+
+目的：从最近失败、重复错误、空白 case 和低 fitness 中主动提出 bounded 问题。
+
+输入：
+
+- 最近 failed / cancelled self run。
+- `EvolutionGovernor.build_fitness_summary()`。
+- runtime scene timeline/lifecycle。
+- generated case 缺口和 chat review feedback。
+
+输出：
+
+- question candidate，不直接改代码。
+- diagnostic case candidate。
+- proposal candidate。
+
+约束：
+
+- 每轮最多生成少量问题，问题必须绑定 source evidence。
+- 问题必须指向可验证行为，不生成泛泛愿望。
+
+### self-navigating
+
+目的：复用历史成功路径，减少重复漂移。
+
+输入：
+
+- successful transactions。
+- validated tool sequence。
+- previous rollback-free run。
+- project memory lane 和 relevant plan docs。
+
+输出：
+
+- navigation hint / strategy candidate。
+- tool-use heuristic candidate。
+
+约束：
+
+- 只能推荐路径，不能绕过 WorkRun lease、txn gate 或测试。
+- 不允许因为历史成功就跳过当前现场检查。
+
+### self-attributing
+
+目的：把成功或失败归因到步骤、工具、prompt、文件、阶段和外部状态变化。
+
+输入：
+
+- tool trace。
+- WorkRun state changes。
+- audit mutation records。
+- validation completed events。
+- rollback touched files / conflicts。
+
+输出：
+
+- attribution record。
+- failure pattern candidate。
+- candidate quality score。
+
+约束：
+
+- 归因必须指向证据引用，不写无证据结论。
+- attribution 只支持候选排序和诊断，不直接成为 selection policy。
+
+## 可执行优先计划
+
+### P0：对齐当前文档和实现边界
+
+状态：本轮文档更新完成。
+
+文件影响：
+
+- `docs/plans/2026-05-21-self-evolution-development-guide.md`
+- `.docs/project-memory/lanes/self-evolution-loop.json`
+- `.docs/project-memory/*`
+- `PROJECT_MEMORY.html`
+
+风险：
+
+- 文档把未落地机制写成已实现，会误导后续 agent。
+
+测试锚点：
+
+```powershell
+git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
+```
+
+### P1：建立 experience repository
+
+目标：把自进化运行经验从日志尾迹变成结构化候选来源。
+
+建议文件影响：
+
+- 新增 `core/evaluation/self_evolution_experience_repository.py`
+- 新增 `workspace/self_evolution/experience/experience.jsonl`
+- 新增 `workspace/self_evolution/experience/index.json`
+- 更新 `core/web/services/self_evolution_control_service.py`
+- 新增 `tests/test_self_evolution_experience_repository.py`
+- 更新 `tests/test_self_evolution_control_service.py`
+
+最小 schema：
+
+```json
+{
+  "experience_id": "exp_...",
+  "kind": "failure_pattern | successful_strategy | tool_heuristic | diagnostic_case | prompt_candidate | skill_candidate | proposal_candidate",
+  "source_run_id": "web-self-...",
+  "source_turn": 1,
+  "txn_id": "txn-...",
+  "runtime_scene_refs": [],
+  "audit_refs": [],
+  "summary": "...",
+  "evidence": {"status": "failed", "tool_name": "..."},
+  "quality_score": 0.0,
+  "confidence": 0.0,
+  "dedupe_key": "...",
+  "downstream_use": ["self_questioning", "supervised_candidate"],
+  "supervised_required": true,
+  "created_at": "..."
+}
+```
+
+风险：
+
+- 记录过多会噪声化；必须摘要化、去重、保留路径引用。
+- 不能记录秘密、完整 prompt、大段工具输出或完整文件内容。
+
+测试锚点：
+
+```powershell
+pytest tests/test_self_evolution_experience_repository.py -v
+pytest tests/test_self_evolution_control_service.py -k "experience or self_evolution_run" -v
+```
+
+### P2：把 self-questioning / self-navigating / self-attributing 固化为 bounded step
+
+目标：每轮自进化结束后生成结构化问题、路径建议和归因，而不是自由展开。
+
+建议文件影响：
+
+- 新增 `core/evaluation/self_evolution_reflection.py`
+- 更新 `core/evaluation/self_evolution_workbench.py`
+- 更新 `core/web/services/self_evolution_control_service.py`
+- 新增 `tests/test_self_evolution_reflection.py`
+
+风险：
+
+- 三机制如果直接喂回 prompt，容易形成无限循环。
+- 归因若没有证据引用，会变成叙事污染。
+
+测试锚点：
+
+```powershell
+pytest tests/test_self_evolution_reflection.py -v
+pytest tests/test_self_evolution_control_service.py -k "failed or completed or runtime_scene" -v
+```
+
+### P3：建立 skill / prompt / proposal candidate 池
+
+目标：无监督线可以产出候选，但不能自动安装、启用或 accepted。
+
+建议文件影响：
+
+- 新增 `core/evaluation/self_evolution_candidate_pool.py`
+- 新增 `workspace/self_evolution/candidates/skill_candidates.jsonl`
+- 新增 `workspace/self_evolution/candidates/prompt_candidates.jsonl`
+- 新增 `workspace/self_evolution/candidates/proposal_candidates.jsonl`
+- 更新 `core/gym/generated_cases.py`
+- 更新 `core/evaluation/dataset_registry.py`
+- 新增 `tests/test_self_evolution_candidate_pool.py`
+- 更新 `tests/test_dataset_registry.py`
+
+候选通用字段：
+
+- `candidate_id`
+- `candidate_type`
+- `source_experience_id`
+- `source_run_id`
+- `txn_id`
+- `provenance`
+- `review_state=pending`
+- `allowed_downstream_uses`
+- `blocked_downstream_uses`
+- `supervised_required=true`
+
+风险：
+
+- skill candidate 不能直接写入实际 skills 目录。
+- prompt candidate 不能直接覆盖 runtime prompt。
+- proposal candidate 不能直接写 accepted baseline 或 selection policy。
+
+测试锚点：
+
+```powershell
+pytest tests/test_self_evolution_candidate_pool.py -v
+pytest tests/test_dataset_registry.py -k "generated_cases or provenance or holdout" -v
+```
+
+### P4：把候选回流监督线
+
+目标：成功经验和候选进入监督线 review / proposal / dataset lifecycle。
+
+建议文件影响：
+
+- 更新 `core/web/services/supervised_control_service.py`
+- 更新 `core/web/services/evolution_service.py`
+- 更新 `core/evaluation/dataset_registry.py`
+- 更新 `web/src/routes/EvolutionRoute.tsx`
+- 更新 `web/src/api/types.ts`
+- 更新 `tests/test_web_app.py`
+- 更新 `tests/test_dataset_registry.py`
+
+风险：
+
+- UI 文案必须明确“candidate / pending / reviewed / accepted”的区别。
+- 不能把自进化成功 run 等同于监督验收通过。
+
+测试锚点：
+
+```powershell
+pytest tests/test_web_app.py -k "self_evolution or supervised or candidate" -v
+pytest tests/test_dataset_registry.py -k "generated_cases or chat_reviewed or downstream" -v
+```
+
+### P5：强化运行关闭和证据审计
+
+目标：关闭、停止、失败、回滚冲突都可从日志包重建。
+
+建议文件影响：
+
+- 更新 `core/web/services/self_evolution_control_service.py`
+- 更新 `core/runtime_manager/work_run_store.py`
+- 更新 `core/web/services/runtime_service.py`
+- 更新 `tests/test_self_evolution_control_service.py`
+- 更新 `tests/test_web_app.py`
+- 更新 `tests/test_work_run_store.py`
+
+风险：
+
+- lifecycle 日志过密会噪声化。
+- duplicate snapshot 不能反复进入 lifecycle。
+
+测试锚点：
+
+```powershell
+pytest tests/test_self_evolution_control_service.py -k "stale or orphaned or rollback or shutdown" -v
+pytest tests/test_web_app.py -k "work_run or runtime_scene or shutdown" -v
+pytest tests/test_work_run_store.py -v
+```
+
+## 与对话线的接口
+
+无监督线可以读取：
+
+- 当前用户目标。
+- 最近对话上下文摘要。
+- stop / continue 失败证据。
+- runtime scene 和 conversation log。
+- next-state signal 和 trace-driven failure pattern。
+- reviewed chat case 的汇总信号。
+
+无监督线不能修改：
+
+- Chat 消息结构。
+- ConversationView 展示规则。
+- 用户对话历史原文。
+- 对话线 stop / continue UI 语义。
+- raw chat -> reviewed case 的 review 边界。
+
+chat 进入进化压力的唯一路径：
+
+```text
+Raw Chat Segment -> Candidate -> Human/Review Decision -> ReviewedChatCase -> Dataset/Bundle
+```
+
+## 与监督进化线的接口
+
+无监督线可以读取：
+
+- active advisory baseline 摘要。
+- 最近 supervised decision。
+- proposal lifecycle 状态。
+- 是否存在 active supervised run。
+- 最近失败 taxonomy 和弱点分布。
+- 监督线反馈的可生成 case 缺口。
+
+无监督线可以提交候选：
+
+- generated case candidate。
+- proposal candidate。
+- prompt candidate。
+- skill candidate。
+- diagnostic case candidate。
+
+无监督线不能直接修改：
+
+- `workspace/supervised_evolution/decisions`
+- `workspace/supervised_evolution/policy`
+- `core/evaluation/selection_policy.py`
+- accepted baseline registry
+- frozen holdout
+
+任何自进化产出的“更好策略”都必须回到监督线验收，不能自己宣布生效。
 
 ## 关键文件
 
@@ -79,6 +469,8 @@
 - `core/web/services/self_evolution_control_service.py`
 - `core/web/routes/evolution.py`
 - `core/runtime_manager/evolution_store.py`
+- `core/runtime_manager/work_run_store.py`
+- `core/runtime_manager/work_run_leases.py`
 - `core/runtime_manager/daemon.py`
 
 共享治理：
@@ -87,8 +479,9 @@
 - `core/infrastructure/git_memory.py`
 - `core/infrastructure/tool_executor.py`
 - `core/gym/advisory.py`
-- `core/runtime_manager/work_run_store.py`，如共享底座已引入
-- `core/runtime_manager/work_run_leases.py`，如共享 lease policy 已引入
+- `core/gym/generated_cases.py`
+- `core/evaluation/dataset_registry.py`
+- `core/evaluation/chat_case_lifecycle.py`
 
 前端：
 
@@ -102,235 +495,70 @@
 工件：
 
 - `workspace/evolution/audit.jsonl`
-- `workspace/evolution/proposals`
+- `workspace/web_self_evolution/<runId>/rollback_manifest.json`
+- `workspace/evaluation/datasets/generated_cases.jsonl`
+- `workspace/evaluation/datasets/chat_reviewed_multiturn.jsonl`
 - `workspace/gym/proposals`
-- `workspace/supervised_evolution/policy`
-- `.runtime`，如当前 runtime manager 使用该目录
+- `.runtime/runtime-manager/evolution`
+- `.runtime/runtime-manager/work_runs`
+- 待建：`workspace/self_evolution/experience`
+- 待建：`workspace/self_evolution/candidates`
 
 测试：
 
 - `tests/test_self_evolution_control_service.py`
-- `tests/test_web_app.py`
 - `tests/test_runtime_manager.py`
+- `tests/test_work_run_store.py`
+- `tests/test_work_run_leases.py`
 - `tests/test_evolution_governor.py`
 - `tests/test_git_memory.py`
 - `tests/test_tool_executor.py`
-- `tests/test_work_run_store.py`
-- `tests/test_work_run_leases.py`
-
-## 开发原则
-
-1. 先看现场，再决定是否开跑。
-   如果 worktree 已脏、监督运行 active、stale run 未收口、最近事务失败，先解释和收口，不直接开新 run。
-
-2. 自进化必须 bounded。
-   每轮要有目标、预算、停止条件、事务边界和可见结果。
-
-3. 自进化不能自改评判标准。
-   可以参考 active advisory baseline，但不能直接改写监督 policy 或冻结验收逻辑。
-
-4. 高风险写入必须走事务。
-   `core/`、`tools/`、`config/`、`workspace/prompts/` 等路径必须由 risky write gate 保护。
-
-5. 失败也是证据。
-   失败 run 要写清楚原因、阶段、工具、路径、是否可恢复，而不是只留一个 failed 状态。
-
-6. 经验要先入仓，再出候选。
-   在线发现的策略、失误、修复和启发先写入 experience repository，再决定是否生成 prompt candidate、skill candidate 或 proposal candidate。
-
-7. 自问自答要面向弱点。
-   self-questioning 应直接围绕最近失败、重复错误和未覆盖 case，而不是泛泛地产生新点子。
-
-8. 归因要细到步骤和证据。
-   self-attributing 需要把成功/失败拆到 tool、prompt、文件、阶段和外部状态变化，供后续诊断和复用。
-
-## 优先任务
-
-### 任务 1：稳定启动前现场检查
-
-目标：用户点开始前，能看清楚这一轮是否适合启动。
-
-重点检查：
-
-- active supervised run 是否阻止 self-evolution start。
-- stale queued/paused/running 是否能自动收口或给出解释。
-- worktree snapshot 是否展示 dirty files、branch、recent transactions。
-- advisory baseline 是否明确标注“参考，不是开关”。
-- 最近失败是否能转成诊断输入，而不是只展示一个 failed 状态。
-
-建议测试：
-
-```powershell
-pytest tests/test_self_evolution_control_service.py -k "start or stale or supervised" -v
-pytest tests/test_web_app.py -k "self_evolution or active_supervised" -v
-```
-
-### 任务 2：稳定运行控制
-
-目标：start/pause/resume/stop 不互相污染，停止不会留下假 active 状态。
-
-重点检查：
-
-- runtime manager store 是否隔离测试和真实 `.runtime`。
-- queued/paused/running/stopping 之间的状态迁移。
-- stop 后 worker 是否真正停止。
-- 重新加载页面时是否修复缺内存 worker 的持久化状态。
-- run 结束后是否留下完整 evidence tail 和 transaction context。
-
-建议测试：
-
-```powershell
-pytest tests/test_self_evolution_control_service.py -v
-pytest tests/test_runtime_manager.py -k "evolution or daemon" -v
-```
-
-### 任务 3：稳定事务历史
-
-目标：自进化运行产生的事务和 audit 可以被用户理解、删除、回看。
-
-重点检查：
-
-- 删除入口是否只接受 txnIds。
-- 删除 history 时，相关 audit jsonl 也同步清理。
-- active/running/stopping 事务是否禁止删除。
-- UI 是否把事务组、审计尾迹、运行状态对应起来。
-- provenance、rollback hook 和恢复说明是否可见。
-
-建议测试：
-
-```powershell
-pytest tests/test_web_app.py -k "self_evolution.*delete or history" -v
-pytest tests/test_self_evolution_control_service.py -k "history or delete" -v
-```
-
-### 任务 4：稳定自改边界
-
-目标：无监督 agent 的修改不会绕过阶段 2 的事务治理。
-
-重点检查：
-
-- `open_evolution_transaction_tool` 是否在 risky write 前显式调用。
-- `close_evolution_transaction_tool` 是否清理 active txn。
-- `GitMemoryService.note_file_modified()` 是否只追踪 dirty state，不写后自动开账。
-- cli 写入目标是否能被 `EvolutionGovernor` 解析。
-- proposal candidate、skill candidate、prompt candidate 是否都留有 provenance，但不直接落盘为标准。
-
-建议测试：
-
-```powershell
-pytest tests/test_tool_executor.py -k "evolution or risky or transaction" -v
-pytest tests/test_evolution_governor.py -v
-pytest tests/test_git_memory.py -k "evolution or transaction" -v
-```
-
-### 任务 5：把开放探索变成候选增量
-
-目标：无监督进化可以发现新策略、新 case、新工具习惯，但只进入候选池，不直接污染核心标准。
-
-重点检查：
-
-- generated cases 是否有 provenance。
-- 运行失败是否能变成诊断 case。
-- 自进化成功经验是否只作为 proposal、dataset candidate、skill candidate 或 prompt candidate。
-- 是否仍要回到监督线进行验收。
-- experience repository 是否去重、聚合和保留质量分数。
-
-建议测试：
-
-```powershell
-pytest tests/test_dataset_registry.py -k "generated_cases" -v
-pytest tests/test_gym_collections.py -v
-```
-
-### 任务 6：建立经验仓库
-
-目标：把可复用经验从一次性日志变成长期资产。
-
-建议仓库内容：
-
-- recurring failure patterns
-- successful strategies
-- candidate prompts
-- candidate skills
-- candidate proposals
-- diagnostic cases
-- tool-use heuristics
-
-要求：
-
-- 每条记录带 provenance、source run、source turn 或 transaction id。
-- 经验条目应支持 dedupe、quality score 和 downstream use 标签。
-- 经验仓库本身不能成为冻结标准。
-
-建议测试：
-
-```powershell
-pytest tests/test_dataset_registry.py -k "generated_cases or review" -v
-pytest tests/test_web_app.py -k "self_evolution or evolution_workbench" -v
-```
-
-## 与对话线的接口
-
-无监督线可以读取：
-
-- 用户当前目标。
-- 最近对话上下文摘要。
-- stop/continue 失败证据。
-- runtime scene 和 conversation log。
-- next-state signal 和 trace-driven failure pattern。
-
-无监督线不能修改：
-
-- Chat 消息结构。
-- ConversationView 展示规则。
-- 用户对话历史的原文内容。
-- 对话线的 stop/continue UI 语义。
-- reviewed chat case 的 review 边界。
-
-## 与监督进化线的接口
-
-无监督线可以读取：
-
-- active advisory baseline 摘要。
-- 最近 supervised decision。
-- proposal lifecycle 状态。
-- 是否存在 active supervised run。
-- 最近失败 taxonomy 和弱点分布。
-- 监督线反馈的可生成 case 缺口。
-
-无监督线不能直接修改：
-
-- `workspace/supervised_evolution/decisions`
-- `workspace/supervised_evolution/policy`
-- `core/evaluation/selection_policy.py`
-- accepted baseline registry
-
-任何自进化产出的“更好策略”都必须回到监督线验收，不能自己宣布生效。
-
-## 验收清单
-
-- 有 active supervised run 时，self-evolution start 被拒绝。
-- stale self-evolution run 能收口或解释。
-- start/pause/resume/stop 状态稳定。
-- 历史删除以 txnId 为唯一入口。
-- risky write 必须显式开账。
-- 失败 run 有可读原因。
-- 成功经验只进入候选增量，不直接改写标准。
-- 经验仓库中能找到重复失败模式和重复成功策略。
-- proposal / skill / prompt / generated case 都带 provenance 和 downstream use 标签。
-- 无监督探索产物最终仍回到监督线验收。
+- `tests/test_dataset_registry.py`
+- `tests/test_web_app.py`
 
 ## 推荐验证
 
+文档/计划变更：
+
+```powershell
+git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
+```
+
+运行控制与 WorkRun：
+
 ```powershell
 pytest tests/test_self_evolution_control_service.py -v
-pytest tests/test_runtime_manager.py -k "evolution or daemon" -v
-pytest tests/test_web_app.py -k "self_evolution or active_supervised" -v
+pytest tests/test_runtime_manager.py -k "evolution or close_workbench" -v
+pytest tests/test_work_run_store.py -v
+pytest tests/test_work_run_leases.py -v
+pytest tests/test_web_app.py -k "work_run or runtime_summary or self_evolution" -v
+```
+
+事务边界：
+
+```powershell
 pytest tests/test_tool_executor.py -k "evolution or risky or transaction" -v
 pytest tests/test_evolution_governor.py -v
-pytest tests/test_git_memory.py -k "evolution or transaction" -v
-pytest tests/test_dataset_registry.py -k "generated_cases or review" -v
+pytest tests/test_git_memory.py -k "evolution or transaction or risky" -v
 ```
+
+候选与监督边界：
+
+```powershell
+pytest tests/test_dataset_registry.py -k "generated_cases or chat_reviewed or provenance or holdout" -v
+pytest tests/test_web_app.py -k "chat_review or supervised or self_evolution" -v
+```
+
+## 第一轮建议优先补的 3 件事
+
+1. 先建 experience repository。
+   这是 EvolveR 闭环的入口，也是 self-questioning / self-navigating / self-attributing 的共同数据底座。没有它，候选池会变成散落日志和自由文本。
+
+2. 把三种自反机制固化为 bounded step。
+   self-questioning 只从证据生成问题，self-navigating 只复用有验证的路径，self-attributing 只生成可追溯归因；三者都不能直接修改 runtime 标准。
+
+3. 建立 skill / prompt / proposal candidate 池并接回监督线。
+   generated cases 已有较强边界，下一步要把 prompt、skill、proposal 也纳入同样的 provenance、review_state、downstream_use 和 supervised_required 契约。
 
 ## 提交说明
 
@@ -340,5 +568,6 @@ pytest tests/test_dataset_registry.py -k "generated_cases or review" -v
 - `fix(self-evolution): ...`
 - `refactor(self-evolution): ...`
 - `test(self-evolution): ...`
+- `docs(self-evolution): ...`
 
 不要把监督 selection policy、Chat UI、Config security 的无关改动混进无监督提交。
