@@ -16,7 +16,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { NavLink, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -112,9 +112,29 @@ type Copy = {
   userManaged: string;
   mutationDone: string;
   mutationFailed: string;
+  overviewView: string;
+  effectiveView: string;
+  manageView: string;
+  sourcesView: string;
+  overviewSubtitle: string;
+  effectiveSubtitle: string;
+  manageSubtitle: string;
+  sourcesSubtitle: string;
+  healthOverview: string;
+  affectedRuntimeMemory: string;
+  needsReview: string;
+  noIssues: string;
+  noRuntimeMemory: string;
+  managedMemory: string;
+  disabledOrOverridden: string;
+  effectiveByChannel: string;
+  manageAllMemory: string;
+  selectedMemory: string;
+  sourceAudit: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
+export type MemoryRouteView = "overview" | "effective" | "manage" | "sources";
 type MemoryChannel = "conversation" | "self_evolution" | "supervised_evolution" | "explicit_read";
 type ChannelFilter = MemoryChannel | "";
 type MemoryPair = {
@@ -221,6 +241,25 @@ const COPY: Record<"zh" | "en", Copy> = {
     userManaged: "用户记忆",
     mutationDone: "操作已保存",
     mutationFailed: "操作失败",
+    overviewView: "总览",
+    effectiveView: "生效范围",
+    manageView: "手动管理",
+    sourcesView: "来源审计",
+    overviewSubtitle: "先看记忆健康、运行影响和需要检查的内容；复杂证据放到子页里。",
+    effectiveSubtitle: "按对话、自进化、监督进化和显式读取说明哪些记忆会被 agent 感知。",
+    manageSubtitle: "集中新增、编辑、禁用、恢复和删除用户可管理的记忆。",
+    sourcesSubtitle: "保留完整来源、路径、接口、原文和复制动作，供专业审查使用。",
+    healthOverview: "记忆健康概览",
+    affectedRuntimeMemory: "会影响运行的记忆",
+    needsReview: "需要检查",
+    noIssues: "当前没有需要优先检查的记忆。",
+    noRuntimeMemory: "当前没有进入 prompt 或 agent 可感知的记忆。",
+    managedMemory: "用户管理状态",
+    disabledOrOverridden: "已禁用/覆盖",
+    effectiveByChannel: "按作用位置查看",
+    manageAllMemory: "全部可管理记忆",
+    selectedMemory: "选中记忆",
+    sourceAudit: "来源审计",
   },
   en: {
     eyebrow: "Agent Memory",
@@ -309,6 +348,25 @@ const COPY: Record<"zh" | "en", Copy> = {
     userManaged: "User memory",
     mutationDone: "Saved",
     mutationFailed: "Action failed",
+    overviewView: "Overview",
+    effectiveView: "Effective scope",
+    manageView: "Manual management",
+    sourcesView: "Source audit",
+    overviewSubtitle: "Start with memory health, runtime impact, and items that need review. Detailed evidence stays in subpages.",
+    effectiveSubtitle: "Shows how conversation, self-evolution, supervised evolution, and explicit-read memory can be perceived.",
+    manageSubtitle: "Add, edit, disable, restore, and delete user-manageable memory in one place.",
+    sourcesSubtitle: "Keeps the full source, path, API, raw content, and copy actions for professional audit.",
+    healthOverview: "Memory health",
+    affectedRuntimeMemory: "Runtime-affecting memory",
+    needsReview: "Needs review",
+    noIssues: "No memory needs priority review right now.",
+    noRuntimeMemory: "No memory is currently injected or agent-visible.",
+    managedMemory: "User-managed state",
+    disabledOrOverridden: "Disabled/overridden",
+    effectiveByChannel: "By effective scope",
+    manageAllMemory: "All manageable memory",
+    selectedMemory: "Selected memory",
+    sourceAudit: "Source audit",
   },
 };
 
@@ -639,7 +697,57 @@ function memoryMutationEndpoint(sectionId: string, itemId: string, suffix = "") 
   return `/api/memory/items/${encodeURIComponent(sectionId)}/${encodeURIComponent(itemId)}${suffix}`;
 }
 
-export function MemoryRoute() {
+type MemoryRouteProps = {
+  forcedView?: MemoryRouteView;
+};
+
+const MEMORY_VIEWS: Array<{ key: MemoryRouteView; href: string }> = [
+  { key: "overview", href: "/memory" },
+  { key: "effective", href: "/memory/effective" },
+  { key: "manage", href: "/memory/manage" },
+  { key: "sources", href: "/memory/sources" },
+];
+
+function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
+  if (view === "effective") {
+    return copy.effectiveView;
+  }
+  if (view === "manage") {
+    return copy.manageView;
+  }
+  if (view === "sources") {
+    return copy.sourcesView;
+  }
+  return copy.overviewView;
+}
+
+function memoryViewSubtitle(copy: Copy, view: MemoryRouteView) {
+  if (view === "effective") {
+    return copy.effectiveSubtitle;
+  }
+  if (view === "manage") {
+    return copy.manageSubtitle;
+  }
+  if (view === "sources") {
+    return copy.sourcesSubtitle;
+  }
+  return copy.overviewSubtitle;
+}
+
+function memoryPairPriority(pair: MemoryPair) {
+  if (pair.item.managedState?.disabled || pair.item.managedState?.overridden || !pair.item.exists || pair.item.contentTruncated) {
+    return 0;
+  }
+  if (pair.item.inPrompt) {
+    return 1;
+  }
+  if (pair.item.agentVisible) {
+    return 2;
+  }
+  return 3;
+}
+
+export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const { lang } = useAppI18n();
   const copy = COPY[lang];
   const queryClient = useQueryClient();
@@ -744,6 +852,48 @@ export function MemoryRoute() {
   const overview = overviewQuery.data;
   const sections = overview?.sections ?? [];
   const allPairs = useMemo(() => flattenSections(sections), [sections]);
+  const runtimePairs = useMemo(
+    () =>
+      allPairs
+        .filter(({ item }) => item.inPrompt || item.agentVisible)
+        .sort((left, right) => memoryPairPriority(left) - memoryPairPriority(right))
+        .slice(0, 8),
+    [allPairs],
+  );
+  const reviewPairs = useMemo(
+    () =>
+      allPairs
+        .filter(
+          ({ item }) =>
+            item.managedState?.disabled
+            || item.managedState?.overridden
+            || item.managedState?.userManaged
+            || !item.exists
+            || item.contentTruncated,
+        )
+        .sort((left, right) => memoryPairPriority(left) - memoryPairPriority(right))
+        .slice(0, 8),
+    [allPairs],
+  );
+  const manageablePairs = useMemo(
+    () =>
+      allPairs.filter(
+        ({ item }) =>
+          item.managedState?.editable
+          || item.managedState?.deletable
+          || item.managedState?.restorable
+          || item.managedState?.userManaged
+          || item.managedState?.disabled
+          || item.managedState?.overridden,
+      ),
+    [allPairs],
+  );
+  const managedStateCount = manageablePairs.filter(
+    ({ item }) => item.managedState?.userManaged || item.managedState?.disabled || item.managedState?.overridden,
+  ).length;
+  const disabledOrOverriddenCount = allPairs.filter(
+    ({ item }) => item.managedState?.disabled || item.managedState?.overridden,
+  ).length;
   const matrixCards = useMemo(
     () => [
       {
@@ -808,15 +958,34 @@ export function MemoryRoute() {
     () => filterSections(sections, activeSectionId, searchText, activeFilter, activeChannel),
     [activeChannel, activeFilter, activeSectionId, searchText, sections],
   );
+  const manageSections = useMemo(
+    () =>
+      filterSections(sections, activeSectionId, searchText, activeFilter, activeChannel)
+        .map((section) => ({
+          ...section,
+          items: section.items.filter(
+            (item) =>
+              item.managedState?.editable
+              || item.managedState?.deletable
+              || item.managedState?.restorable
+              || item.managedState?.userManaged
+              || item.managedState?.disabled
+              || item.managedState?.overridden,
+          ),
+        }))
+        .filter((section) => section.items.length > 0),
+    [activeChannel, activeFilter, activeSectionId, searchText, sections],
+  );
+  const activeDisplaySections = forcedView === "manage" ? manageSections : visibleSections;
   const flatVisibleItems = useMemo(
     () =>
-      visibleSections.flatMap((section) =>
+      activeDisplaySections.flatMap((section) =>
         section.items.map((item) => ({
           section,
           item,
         })),
       ),
-    [visibleSections],
+    [activeDisplaySections],
   );
   const activePair =
     flatVisibleItems.find(({ item }) => item.id === activeItemId) ?? flatVisibleItems[0] ?? null;
@@ -998,24 +1167,391 @@ export function MemoryRoute() {
   };
   const mutationBusy = memoryMutation.isPending || deleteMemoryMutation.isPending || restoreMemoryMutation.isPending;
 
-  return (
-    <section className={styles.route}>
-      <header className={styles.header}>
-        <div>
-          <p className={styles.eyebrow}>{copy.eyebrow}</p>
-          <h1 className={styles.title}>{copy.title}</h1>
-          <p className={styles.subtitle}>{copy.subtitle}</p>
-        </div>
-        <button type="button" className={styles.refreshButton} onClick={refresh}>
-          <RefreshCw size={16} />
-          {copy.refresh}
-        </button>
-        <button type="button" className={styles.refreshButton} onClick={startCreate}>
-          <Pencil size={16} />
-          {copy.addMemory}
-        </button>
-      </header>
+  const renderSubnav = () => (
+    <nav className={styles.subnav} aria-label={copy.title}>
+      {MEMORY_VIEWS.map((view) => (
+        <NavLink
+          key={view.key}
+          to={view.href}
+          end={view.key === "overview"}
+          className={({ isActive }) =>
+            isActive || forcedView === view.key ? `${styles.subnavLink} ${styles.subnavLinkActive}` : styles.subnavLink
+          }
+        >
+          {memoryViewLabel(copy, view.key)}
+        </NavLink>
+      ))}
+    </nav>
+  );
 
+  const renderMemoryList = (pairs: MemoryPair[], emptyText: string, compact = false) => {
+    if (overviewQuery.isPending && !hasOverviewSections) {
+      return <div className={styles.emptyState}>{copy.loading}</div>;
+    }
+    if (showBlockingOverviewError) {
+      return (
+        <div className={styles.emptyState}>
+          {copy.loadFailed}: {overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}
+        </div>
+      );
+    }
+    if (!pairs.length) {
+      return <div className={styles.emptyState}>{emptyText}</div>;
+    }
+    return (
+      <div className={compact ? styles.compactMemoryList : styles.itemList}>
+        {pairs.map(({ section, item }) => {
+          const active = item.id === activeItem?.id;
+          return (
+            <button
+              key={`${section.id}:${item.id}`}
+              type="button"
+              className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+              onClick={() => {
+                setActiveSectionId(section.id);
+                setActiveItemId(item.id);
+              }}
+              aria-pressed={active}
+            >
+              <span className={styles.itemHeader}>
+                <strong>{item.title}</strong>
+                <span>{formatTimestamp(item.updatedAt, lang)}</span>
+              </span>
+              <span className={styles.itemOrigin}>
+                {copy.sourceOrigin}: {sourceOriginLabel(section, item)}
+              </span>
+              <span className={styles.itemPath}>{item.path || item.source}</span>
+              <span className={styles.itemSummary}>{item.summary}</span>
+              <span className={styles.itemBadges}>
+                <span className={statusClassName(item.agentVisible, item.inPrompt)}>
+                  {item.inPrompt ? copy.inPrompt : item.agentVisible ? copy.canUse : copy.manualOnly}
+                </span>
+                {item.managedState?.userManaged ? <span className={styles.statusPill}>{copy.userManaged}</span> : null}
+                {item.managedState?.overridden ? <span className={styles.statusPill}>{copy.overridden}</span> : null}
+                {item.managedState?.disabled ? <span className={styles.statusPill}>{copy.disabledByUser}</span> : null}
+                {itemChannelPills(copy, item).map((pill) => (
+                  <span key={`${item.id}:${pill.label}`} className={styles.channelPill} title={pill.hint}>
+                    {pill.label}
+                  </span>
+                ))}
+                {!item.exists ? <span className={styles.statusPill}>{copy.missing}</span> : null}
+                {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderMatrixPanel = (title = copy.whereMemoryWorks) => (
+    <section className={styles.matrixPanel} aria-label={copy.perceptionMatrix}>
+      <div className={styles.matrixHeader}>
+        <div>
+          <p className={styles.panelEyebrow}>{copy.perceptionMatrix}</p>
+          <h2>{title}</h2>
+        </div>
+        <div className={styles.matrixHeaderMeta}>
+          {activeChannel ? <span className={styles.activeChannelPill}>{channelFilterLabel(copy, activeChannel)}</span> : null}
+          {overview ? <span className={styles.countPill}>{formatTimestamp(overview.generatedAt, lang)}</span> : null}
+        </div>
+      </div>
+      <div className={styles.matrixGrid}>
+        {matrixCards.map((card) => (
+          <button
+            key={card.id}
+            type="button"
+            className={
+              activeChannel === card.channel
+                ? `${styles.matrixCard} ${styles.matrixCardButton} ${styles.matrixCardActive}`
+                : `${styles.matrixCard} ${styles.matrixCardButton}`
+            }
+            onClick={() => handleChannelCardClick(card.channel)}
+            aria-pressed={activeChannel === card.channel}
+          >
+            <div>
+              <strong>{card.title}</strong>
+              <span>{card.hint}</span>
+            </div>
+            <dl>
+              <div>
+                <dt>{copy.matrixItems}</dt>
+                <dd>{card.itemCount}</dd>
+              </div>
+              <div>
+                <dt>{copy.matrixPrompt}</dt>
+                <dd>{card.promptCount}</dd>
+              </div>
+            </dl>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderWarningStrip = () =>
+    warningCount > 0 ? (
+      <section className={styles.warningStrip} aria-label={copy.warnings}>
+        <TriangleAlert size={16} />
+        <strong>{copy.warnings}</strong>
+        <span>{overview?.summary.warnings.join("；")}</span>
+      </section>
+    ) : null;
+
+  const renderManagementEditor = () =>
+    editDraft ? (
+      <section className={styles.managementPanel} aria-label={copy.management}>
+        <div className={styles.managementHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.management}</p>
+            <h2>{editDraft.mode === "create" ? copy.addMemory : copy.editMemory}</h2>
+          </div>
+          <button type="button" className={styles.iconButton} onClick={cancelDraft} disabled={mutationBusy}>
+            <XCircle size={16} />
+            <span>{copy.cancelEdit}</span>
+          </button>
+        </div>
+        <p>{copy.managementHint}</p>
+        <label className={styles.fieldStack}>
+          <span>{copy.titleField}</span>
+          <input
+            value={editDraft.title}
+            placeholder={copy.titlePlaceholder}
+            onChange={(event) => setEditDraft((current) => (current ? { ...current, title: event.target.value } : current))}
+          />
+        </label>
+        <label className={styles.fieldStack}>
+          <span>{copy.summaryField}</span>
+          <input
+            value={editDraft.summary}
+            placeholder={copy.summaryPlaceholder}
+            onChange={(event) => setEditDraft((current) => (current ? { ...current, summary: event.target.value } : current))}
+          />
+        </label>
+        <label className={styles.fieldStack}>
+          <span>{copy.contentField}</span>
+          <textarea
+            value={editDraft.content}
+            placeholder={copy.contentPlaceholder}
+            onChange={(event) => setEditDraft((current) => (current ? { ...current, content: event.target.value } : current))}
+          />
+        </label>
+        <div className={styles.managementActions}>
+          <button type="button" className={styles.primaryActionButton} onClick={saveDraft} disabled={mutationBusy}>
+            <CheckCircle2 size={15} />
+            <span>{copy.saveMemory}</span>
+          </button>
+          <button type="button" className={styles.detailActionButton} onClick={cancelDraft} disabled={mutationBusy}>
+            <XCircle size={15} />
+            <span>{copy.cancelEdit}</span>
+          </button>
+        </div>
+        {mutationFeedback.tone !== "idle" ? (
+          <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
+            {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
+            <span>{mutationFeedback.text}</span>
+          </p>
+        ) : null}
+      </section>
+    ) : null;
+
+  const renderDetailPanel = (showEditor = true) => (
+    <aside className={styles.detailPanel}>
+      {showEditor ? renderManagementEditor() : null}
+
+      {activeItem && activeSection ? (
+        <>
+          <section className={styles.detailHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{activeSection.title}</p>
+              <h2>{activeItem.title}</h2>
+              <p>{activeItem.summary}</p>
+            </div>
+            <span className={statusClassName(activeItem.agentVisible, activeItem.inPrompt)}>
+              {activeItem.inPrompt ? copy.inPrompt : activeItem.agentVisible ? copy.canUse : copy.manualOnly}
+            </span>
+          </section>
+
+          {activeImpact ? (
+            <section className={styles.impactPanel}>
+              <div className={styles.visibilityHeader}>
+                <Brain size={16} />
+                <div>
+                  <strong>{copy.impact}</strong>
+                  <p>{activeImpact.title}</p>
+                </div>
+              </div>
+              <p>{activeImpact.body}</p>
+            </section>
+          ) : null}
+
+          <div className={styles.detailActions}>
+            <button type="button" className={styles.detailActionButton} onClick={handleCopySourceSummary}>
+              <CopyIcon size={14} />
+              <span>{copy.copySourceSummary}</span>
+            </button>
+            <button type="button" className={styles.detailActionButton} onClick={handleCopySourcePath}>
+              <FileText size={14} />
+              <span>{copy.copySourcePath}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.detailActionButton}
+              onClick={handleCopyRawContent}
+              disabled={!canCopyRawContent}
+              title={!canCopyRawContent ? copy.noContent : undefined}
+            >
+              <FileText size={14} />
+              <span>{copy.copyRawContentAction}</span>
+            </button>
+            <button type="button" className={styles.detailActionButton} onClick={handleCopyCurrentLink}>
+              <Link2 size={14} />
+              <span>{copy.copyCurrentLink}</span>
+            </button>
+          </div>
+
+          {copyFeedback.tone !== "idle" ? (
+            <p className={styles.copyNotice} data-tone={copyFeedback.tone}>
+              {copyFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
+              <span>{copyFeedback.text}</span>
+            </p>
+          ) : null}
+
+          <section className={styles.managementPanel} aria-label={copy.management}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.management}</p>
+                <h2>{activeItem.managedState?.userManaged ? copy.userManaged : activeItem.managedState?.overridden ? copy.overridden : copy.management}</h2>
+              </div>
+              <span className={styles.countPill}>
+                {activeItem.managedState?.disabled
+                  ? copy.disabledByUser
+                  : activeItem.managedState?.userManaged
+                    ? copy.userManaged
+                    : activeItem.managedState?.overridden
+                      ? copy.overridden
+                      : copy.canUse}
+              </span>
+            </div>
+            <p>{activeItem.managedState?.actionHint || copy.managementHint}</p>
+            <div className={styles.managementActions}>
+              <button
+                type="button"
+                className={styles.detailActionButton}
+                onClick={startEdit}
+                disabled={!activeItem.managedState?.editable || mutationBusy}
+              >
+                <Pencil size={15} />
+                <span>{copy.editMemory}</span>
+              </button>
+              {activeItem.managedState?.restorable ? (
+                <button type="button" className={styles.detailActionButton} onClick={restoreActiveItem} disabled={mutationBusy}>
+                  <Undo2 size={15} />
+                  <span>{copy.restoreMemory}</span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={styles.detailActionButton}
+                onClick={disableOrDeleteActiveItem}
+                disabled={!activeItem.managedState?.deletable || mutationBusy}
+              >
+                <Trash2 size={15} />
+                <span>{activeItem.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
+              </button>
+            </div>
+          </section>
+
+          {mutationFeedback.tone !== "idle" ? (
+            <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
+              {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
+              <span>{mutationFeedback.text}</span>
+            </p>
+          ) : null}
+
+          <div className={styles.factGrid}>
+            <section>
+              <span>{copy.sourcePath}</span>
+              <strong title={activeItem.path}>{activeItem.path || "-"}</strong>
+            </section>
+            <section>
+              <span>{copy.sourceApi}</span>
+              <strong title={activeSection.sourceApi}>{activeSection.sourceApi || "-"}</strong>
+            </section>
+            <section>
+              <span>{copy.agentVisible}</span>
+              <strong>{activeItem.agentVisible ? copy.yes : copy.no}</strong>
+            </section>
+            <section>
+              <span>{copy.runtimeInjected}</span>
+              <strong>{activeItem.inPrompt ? copy.yes : copy.no}</strong>
+            </section>
+          </div>
+
+          <section className={styles.visibilityPanel}>
+            <div className={styles.visibilityHeader}>
+              <Eye size={16} />
+              <div>
+                <strong>{copy.agentVisibility}</strong>
+                <p>{activeSection.agentVisibility}</p>
+              </div>
+            </div>
+            <div className={styles.usageList}>
+              {itemChannelPills(copy, activeItem).map((pill) => (
+                <span key={`${activeItem.id}:channel:${pill.label}`} title={pill.hint}>
+                  <CheckCircle2 size={13} />
+                  {pill.label}
+                </span>
+              ))}
+            </div>
+            <div className={styles.usageList}>
+              {activeItem.usedBy.map((usage) => (
+                <span key={`${activeItem.id}:${usage}`}>
+                  <CheckCircle2 size={13} />
+                  {usage}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          <section className={styles.sectionPanel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.summary}</p>
+                <h3>{activeSection.sourceKind}</h3>
+              </div>
+              <span className={styles.countPill}>{formatTimestamp(activeSection.updatedAt, lang)}</span>
+            </div>
+            <p>{activeSection.summary}</p>
+          </section>
+
+          <details className={styles.rawPanel} open>
+            <summary>
+              <FileText size={15} />
+              <span>{copy.rawContent}</span>
+              <code>{activeItem.contentType}</code>
+            </summary>
+            {activeItem.content ? <pre data-language={contentLanguage(activeItem.contentType)}>{activeItem.content}</pre> : <p>{copy.noContent}</p>}
+          </details>
+        </>
+      ) : editDraft ? null : (
+        <section className={styles.emptyDetail}>
+          <Brain size={24} />
+          <strong>{copy.title}</strong>
+          <p>{overviewQuery.isPending ? copy.loading : copy.noMatches}</p>
+        </section>
+      )}
+
+      {overview ? (
+        <p className={styles.generatedAt}>
+          {copy.generatedAt}: {formatTimestamp(overview.generatedAt, lang)}
+        </p>
+      ) : null}
+    </aside>
+  );
+
+  const renderOverviewView = () => (
+    <>
       <div className={styles.summaryGrid}>
         <section className={styles.summaryCard}>
           <span>{copy.sectionCount}</span>
@@ -1033,470 +1569,248 @@ export function MemoryRoute() {
           <span>{copy.runtimeInjected}</span>
           <strong>{overview?.summary.runtimeInjectedCount ?? 0}</strong>
         </section>
+        <section className={styles.summaryCard}>
+          <span>{copy.managedMemory}</span>
+          <strong>{managedStateCount}</strong>
+        </section>
+        <section className={styles.summaryCard}>
+          <span>{copy.disabledOrOverridden}</span>
+          <strong>{disabledOrOverriddenCount}</strong>
+        </section>
       </div>
 
-      <section className={styles.matrixPanel} aria-label={copy.perceptionMatrix}>
-        <div className={styles.matrixHeader}>
-          <div>
-            <p className={styles.panelEyebrow}>{copy.perceptionMatrix}</p>
-            <h2>{copy.whereMemoryWorks}</h2>
+      {renderWarningStrip()}
+
+      <div className={styles.overviewGrid}>
+        <section className={styles.overviewPanel}>
+          <div className={styles.panelHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
+              <h2>{copy.affectedRuntimeMemory}</h2>
+            </div>
+            <span className={styles.countPill}>{runtimePairs.length}</span>
           </div>
-          <div className={styles.matrixHeaderMeta}>
-            {activeChannel ? (
-              <span className={styles.activeChannelPill}>{channelFilterLabel(copy, activeChannel)}</span>
-            ) : null}
-            {overview ? <span className={styles.countPill}>{formatTimestamp(overview.generatedAt, lang)}</span> : null}
+          {renderMemoryList(runtimePairs, copy.noRuntimeMemory, true)}
+        </section>
+
+        <section className={styles.overviewPanel}>
+          <div className={styles.panelHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.healthOverview}</p>
+              <h2>{copy.needsReview}</h2>
+            </div>
+            <span className={styles.countPill}>{reviewPairs.length}</span>
           </div>
-        </div>
-        <div className={styles.matrixGrid}>
-          {matrixCards.map((card) => (
-            <button
-              key={card.id}
-              type="button"
-              className={
-                activeChannel === card.channel
-                  ? `${styles.matrixCard} ${styles.matrixCardButton} ${styles.matrixCardActive}`
-                  : `${styles.matrixCard} ${styles.matrixCardButton}`
-              }
-              onClick={() => handleChannelCardClick(card.channel)}
-              aria-pressed={activeChannel === card.channel}
-            >
-              <div>
-                <strong>{card.title}</strong>
-                <span>{card.hint}</span>
+          {renderMemoryList(reviewPairs, copy.noIssues, true)}
+        </section>
+      </div>
+    </>
+  );
+
+  const renderEffectiveView = () => (
+    <>
+      {renderMatrixPanel(copy.effectiveByChannel)}
+      {renderWarningStrip()}
+      <div className={styles.effectiveGrid}>
+        {matrixCards.map((card) => {
+          const pairs = allPairs.filter((pair) => matchesMemoryChannel(card.channel, pair));
+          return (
+            <section key={card.id} className={styles.overviewPanel}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <p className={styles.panelEyebrow}>{copy.whereMemoryWorks}</p>
+                  <h2>{card.title}</h2>
+                </div>
+                <span className={styles.countPill}>{pairs.length}</span>
               </div>
-              <dl>
-                <div>
-                  <dt>{copy.matrixItems}</dt>
-                  <dd>{card.itemCount}</dd>
-                </div>
-                <div>
-                  <dt>{copy.matrixPrompt}</dt>
-                  <dd>{card.promptCount}</dd>
-                </div>
-              </dl>
+              <p className={styles.panelLead}>{card.hint}</p>
+              {renderMemoryList(pairs, copy.noMatches, true)}
+            </section>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  const renderSourceAndItemPanels = (title: string) => (
+    <>
+      <aside className={styles.sourcePanel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.sections}</p>
+            <h2>{selectedSection?.title ?? copy.allSections}</h2>
+          </div>
+          <span className={styles.countPill}>{selectedSectionVisibleCount}</span>
+        </div>
+
+        <label className={styles.searchBox}>
+          <Search size={15} />
+          <input value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
+        </label>
+
+        <div className={styles.filterGroup} aria-label={copy.filters}>
+          {filterOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={option.id === activeFilter ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
+              onClick={() => setActiveFilter(option.id)}
+              aria-pressed={option.id === activeFilter}
+            >
+              <span>{option.label}</span>
+              <strong>{option.count}</strong>
             </button>
           ))}
         </div>
-      </section>
 
-      {warningCount > 0 ? (
-        <section className={styles.warningStrip} aria-label={copy.warnings}>
-          <TriangleAlert size={16} />
-          <strong>{copy.warnings}</strong>
-          <span>{overview?.summary.warnings.join("；")}</span>
-        </section>
-      ) : null}
+        <button
+          type="button"
+          className={!activeSectionId ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
+          onClick={() => setActiveSectionId("")}
+        >
+          <span className={styles.sourceIcon}>
+            <Database size={15} />
+          </span>
+          <span className={styles.sourceCopy}>
+            <strong>{copy.allSections}</strong>
+            <span>
+              {copy.items}: {flatVisibleItems.length}
+              {selectedSectionPromptCount ? ` / ${selectedSectionPromptCount}` : ""}
+            </span>
+          </span>
+        </button>
 
-      <div className={styles.workspace}>
-        <aside className={styles.sourcePanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.sections}</p>
-              <h2>{selectedSection?.title ?? copy.allSections}</h2>
-            </div>
-            <span className={styles.countPill}>{selectedSectionVisibleCount}</span>
-          </div>
-
-          <label className={styles.searchBox}>
-            <Search size={15} />
-            <input
-              value={searchText}
-              placeholder={copy.searchPlaceholder}
-              onChange={(event) => setSearchText(event.target.value)}
-            />
-          </label>
-
-          <div className={styles.filterGroup} aria-label={copy.filters}>
-            {filterOptions.map((option) => (
+        <nav className={styles.sourceList} aria-label={copy.sections}>
+          {sections.map((section) => {
+            const active = section.id === activeSectionId;
+            const metrics = sourceSectionMetrics.get(section.id);
+            return (
               <button
-                key={option.id}
+                key={section.id}
                 type="button"
-                className={option.id === activeFilter ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
-                onClick={() => setActiveFilter(option.id)}
-                aria-pressed={option.id === activeFilter}
+                className={active ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
+                onClick={() => setActiveSectionId(section.id)}
+                aria-pressed={active}
               >
-                <span>{option.label}</span>
-                <strong>{option.count}</strong>
-              </button>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            className={!activeSectionId ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-            onClick={() => setActiveSectionId("")}
-          >
-            <span className={styles.sourceIcon}>
-              <Database size={15} />
-            </span>
-            <span className={styles.sourceCopy}>
-              <strong>{copy.allSections}</strong>
-              <span>
-                {copy.items}: {flatVisibleItems.length}
-                {selectedSectionPromptCount ? ` / ${selectedSectionPromptCount}` : ""}
-              </span>
-            </span>
-          </button>
-
-          <nav className={styles.sourceList} aria-label={copy.sections}>
-            {sections.map((section) => {
-              const active = section.id === activeSectionId;
-              const metrics = sourceSectionMetrics.get(section.id);
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  className={active ? `${styles.sourceButton} ${styles.sourceButtonActive}` : styles.sourceButton}
-                  onClick={() => setActiveSectionId(section.id)}
-                  aria-pressed={active}
-                >
-                  <span className={styles.sourceIcon}>
-                    <Brain size={15} />
-                  </span>
-                  <span className={styles.sourceCopy}>
-                    <strong>{section.title}</strong>
-                    <span>{[section.sourcePath, section.sourceApi].filter(Boolean).join(" · ") || section.sourceKind}</span>
-                  </span>
-                  <span className={styles.sourceStats}>
-                    {metrics?.itemCount ?? 0}
-                    {metrics?.promptCount ? ` / ${metrics.promptCount}` : ""}
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
-
-        <main className={styles.itemPanel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.items}</p>
-              <h2>{activeSection?.title ?? copy.allSections}</h2>
-            </div>
-            <span className={styles.countPill}>{flatVisibleItems.length}</span>
-          </div>
-
-          {showRefreshNotice ? (
-            <section className={styles.panelNotice} aria-label={copy.refreshFailed}>
-              <TriangleAlert size={16} />
-              <strong>{copy.refreshFailed}</strong>
-              <span>{overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}</span>
-            </section>
-          ) : null}
-
-          {overviewQuery.isPending && !hasOverviewSections ? (
-            <div className={styles.emptyState}>{copy.loading}</div>
-          ) : showBlockingOverviewError ? (
-            <div className={styles.emptyState}>
-              {copy.loadFailed}: {overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}
-            </div>
-          ) : !flatVisibleItems.length ? (
-            <div className={styles.emptyState}>{copy.noMatches}</div>
-          ) : (
-            <div className={styles.itemList}>
-              {flatVisibleItems.map(({ section, item }) => {
-                const active = item.id === activeItem?.id;
-                return (
-                  <button
-                    key={`${section.id}:${item.id}`}
-                    type="button"
-                    className={active ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
-                    onClick={() => setActiveItemId(item.id)}
-                    aria-pressed={active}
-                  >
-                    <span className={styles.itemHeader}>
-                      <strong>{item.title}</strong>
-                      <span>{formatTimestamp(item.updatedAt, lang)}</span>
-                    </span>
-                    <span className={styles.itemOrigin}>
-                      {copy.sourceOrigin}: {sourceOriginLabel(section, item)}
-                    </span>
-                    <span className={styles.itemPath}>{item.path || item.source}</span>
-                    <span className={styles.itemSummary}>{item.summary}</span>
-                    <span className={styles.itemBadges}>
-                      <span className={statusClassName(item.agentVisible, item.inPrompt)}>
-                        {item.inPrompt ? copy.inPrompt : item.agentVisible ? copy.canUse : copy.manualOnly}
-                      </span>
-                      {item.managedState?.userManaged ? <span className={styles.statusPill}>{copy.userManaged}</span> : null}
-                      {item.managedState?.overridden ? <span className={styles.statusPill}>{copy.overridden}</span> : null}
-                      {item.managedState?.disabled ? <span className={styles.statusPill}>{copy.disabledByUser}</span> : null}
-                      {itemChannelPills(copy, item).map((pill) => (
-                        <span key={`${item.id}:${pill.label}`} className={styles.channelPill} title={pill.hint}>
-                          {pill.label}
-                        </span>
-                      ))}
-                      {!item.exists ? <span className={styles.statusPill}>{copy.missing}</span> : null}
-                      {item.contentTruncated ? <span className={styles.statusPill}>{copy.truncated}</span> : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </main>
-
-        <aside className={styles.detailPanel}>
-          {editDraft ? (
-            <section className={styles.managementPanel} aria-label={copy.management}>
-              <div className={styles.managementHeader}>
-                <div>
-                  <p className={styles.panelEyebrow}>{copy.management}</p>
-                  <h2>{editDraft.mode === "create" ? copy.addMemory : copy.editMemory}</h2>
-                </div>
-                <button type="button" className={styles.iconButton} onClick={cancelDraft} disabled={mutationBusy}>
-                  <XCircle size={16} />
-                  <span>{copy.cancelEdit}</span>
-                </button>
-              </div>
-              <p>{copy.managementHint}</p>
-              <label className={styles.fieldStack}>
-                <span>{copy.titleField}</span>
-                <input
-                  value={editDraft.title}
-                  placeholder={copy.titlePlaceholder}
-                  onChange={(event) =>
-                    setEditDraft((current) => (current ? { ...current, title: event.target.value } : current))
-                  }
-                />
-              </label>
-              <label className={styles.fieldStack}>
-                <span>{copy.summaryField}</span>
-                <input
-                  value={editDraft.summary}
-                  placeholder={copy.summaryPlaceholder}
-                  onChange={(event) =>
-                    setEditDraft((current) => (current ? { ...current, summary: event.target.value } : current))
-                  }
-                />
-              </label>
-              <label className={styles.fieldStack}>
-                <span>{copy.contentField}</span>
-                <textarea
-                  value={editDraft.content}
-                  placeholder={copy.contentPlaceholder}
-                  onChange={(event) =>
-                    setEditDraft((current) => (current ? { ...current, content: event.target.value } : current))
-                  }
-                />
-              </label>
-              <div className={styles.managementActions}>
-                <button type="button" className={styles.primaryActionButton} onClick={saveDraft} disabled={mutationBusy}>
-                  <CheckCircle2 size={15} />
-                  <span>{copy.saveMemory}</span>
-                </button>
-                <button type="button" className={styles.detailActionButton} onClick={cancelDraft} disabled={mutationBusy}>
-                  <XCircle size={15} />
-                  <span>{copy.cancelEdit}</span>
-                </button>
-              </div>
-              {mutationFeedback.tone !== "idle" ? (
-                <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
-                  {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-                  <span>{mutationFeedback.text}</span>
-                </p>
-              ) : null}
-            </section>
-          ) : null}
-
-          {activeItem && activeSection ? (
-            <>
-              <section className={styles.detailHeader}>
-                <div>
-                  <p className={styles.panelEyebrow}>{activeSection.title}</p>
-                  <h2>{activeItem.title}</h2>
-                  <p>{activeItem.summary}</p>
-                </div>
-                <span className={statusClassName(activeItem.agentVisible, activeItem.inPrompt)}>
-                  {activeItem.inPrompt ? copy.inPrompt : activeItem.agentVisible ? copy.canUse : copy.manualOnly}
+                <span className={styles.sourceIcon}>
+                  <Brain size={15} />
                 </span>
-              </section>
+                <span className={styles.sourceCopy}>
+                  <strong>{section.title}</strong>
+                  <span>{[section.sourcePath, section.sourceApi].filter(Boolean).join(" · ") || section.sourceKind}</span>
+                </span>
+                <span className={styles.sourceStats}>
+                  {metrics?.itemCount ?? 0}
+                  {metrics?.promptCount ? ` / ${metrics.promptCount}` : ""}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
 
-              {activeImpact ? (
-                <section className={styles.impactPanel}>
-                  <div className={styles.visibilityHeader}>
-                    <Brain size={16} />
-                    <div>
-                      <strong>{copy.impact}</strong>
-                      <p>{activeImpact.title}</p>
-                    </div>
-                  </div>
-                  <p>{activeImpact.body}</p>
-                </section>
-              ) : null}
+      <main className={styles.itemPanel}>
+        <div className={styles.panelHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.items}</p>
+            <h2>{activeSection?.title ?? title}</h2>
+          </div>
+          <span className={styles.countPill}>{flatVisibleItems.length}</span>
+        </div>
 
-              <div className={styles.detailActions}>
-                <button type="button" className={styles.detailActionButton} onClick={handleCopySourceSummary}>
-                  <CopyIcon size={14} />
-                  <span>{copy.copySourceSummary}</span>
-                </button>
-                <button type="button" className={styles.detailActionButton} onClick={handleCopySourcePath}>
-                  <FileText size={14} />
-                  <span>{copy.copySourcePath}</span>
-                </button>
-                <button
-                  type="button"
-                  className={styles.detailActionButton}
-                  onClick={handleCopyRawContent}
-                  disabled={!canCopyRawContent}
-                  title={!canCopyRawContent ? copy.noContent : undefined}
-                >
-                  <FileText size={14} />
-                  <span>{copy.copyRawContentAction}</span>
-                </button>
-                <button type="button" className={styles.detailActionButton} onClick={handleCopyCurrentLink}>
-                  <Link2 size={14} />
-                  <span>{copy.copyCurrentLink}</span>
-                </button>
-              </div>
+        {showRefreshNotice ? (
+          <section className={styles.panelNotice} aria-label={copy.refreshFailed}>
+            <TriangleAlert size={16} />
+            <strong>{copy.refreshFailed}</strong>
+            <span>{overviewQuery.error instanceof Error ? overviewQuery.error.message : String(overviewQuery.error)}</span>
+          </section>
+        ) : null}
 
-              {copyFeedback.tone !== "idle" ? (
-                <p className={styles.copyNotice} data-tone={copyFeedback.tone}>
-                  {copyFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-                  <span>{copyFeedback.text}</span>
-                </p>
-              ) : null}
+        {renderMemoryList(flatVisibleItems, copy.noMatches)}
+      </main>
+    </>
+  );
 
-              <section className={styles.managementPanel} aria-label={copy.management}>
-                <div className={styles.managementHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.management}</p>
-                    <h2>{activeItem.managedState?.userManaged ? copy.userManaged : activeItem.managedState?.overridden ? copy.overridden : copy.management}</h2>
-                  </div>
-                  <span className={styles.countPill}>
-                    {activeItem.managedState?.disabled
-                      ? copy.disabledByUser
-                      : activeItem.managedState?.userManaged
-                        ? copy.userManaged
-                        : activeItem.managedState?.overridden
-                          ? copy.overridden
-                          : copy.canUse}
-                  </span>
-                </div>
-                <p>{activeItem.managedState?.actionHint || copy.managementHint}</p>
-                <div className={styles.managementActions}>
-                  <button
-                    type="button"
-                    className={styles.detailActionButton}
-                    onClick={startEdit}
-                    disabled={!activeItem.managedState?.editable || mutationBusy}
-                  >
-                    <Pencil size={15} />
-                    <span>{copy.editMemory}</span>
-                  </button>
-                  {activeItem.managedState?.restorable ? (
-                    <button
-                      type="button"
-                      className={styles.detailActionButton}
-                      onClick={restoreActiveItem}
-                      disabled={mutationBusy}
-                    >
-                      <Undo2 size={15} />
-                      <span>{copy.restoreMemory}</span>
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={styles.detailActionButton}
-                    onClick={disableOrDeleteActiveItem}
-                    disabled={!activeItem.managedState?.deletable || mutationBusy}
-                  >
-                    <Trash2 size={15} />
-                    <span>{activeItem.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
-                  </button>
-                </div>
-              </section>
-
-              {mutationFeedback.tone !== "idle" ? (
-                <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
-                  {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-                  <span>{mutationFeedback.text}</span>
-                </p>
-              ) : null}
-
-              <div className={styles.factGrid}>
-                <section>
-                  <span>{copy.sourcePath}</span>
-                  <strong title={activeItem.path}>{activeItem.path || "-"}</strong>
-                </section>
-                <section>
-                  <span>{copy.sourceApi}</span>
-                  <strong title={activeSection.sourceApi}>{activeSection.sourceApi || "-"}</strong>
-                </section>
-                <section>
-                  <span>{copy.agentVisible}</span>
-                  <strong>{activeItem.agentVisible ? copy.yes : copy.no}</strong>
-                </section>
-                <section>
-                  <span>{copy.runtimeInjected}</span>
-                  <strong>{activeItem.inPrompt ? copy.yes : copy.no}</strong>
-                </section>
-              </div>
-
-              <section className={styles.visibilityPanel}>
-                <div className={styles.visibilityHeader}>
-                  <Eye size={16} />
-                  <div>
-                    <strong>{copy.agentVisibility}</strong>
-                    <p>{activeSection.agentVisibility}</p>
-                  </div>
-                </div>
-                <div className={styles.usageList}>
-                  {itemChannelPills(copy, activeItem).map((pill) => (
-                    <span key={`${activeItem.id}:channel:${pill.label}`} title={pill.hint}>
-                      <CheckCircle2 size={13} />
-                      {pill.label}
-                    </span>
-                  ))}
-                </div>
-                <div className={styles.usageList}>
-                  {activeItem.usedBy.map((usage) => (
-                    <span key={`${activeItem.id}:${usage}`}>
-                      <CheckCircle2 size={13} />
-                      {usage}
-                    </span>
-                  ))}
-                </div>
-              </section>
-
-              <section className={styles.sectionPanel}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{copy.summary}</p>
-                    <h3>{activeSection.sourceKind}</h3>
-                  </div>
-                  <span className={styles.countPill}>{formatTimestamp(activeSection.updatedAt, lang)}</span>
-                </div>
-                <p>{activeSection.summary}</p>
-              </section>
-
-              <details className={styles.rawPanel} open>
-                <summary>
-                  <FileText size={15} />
-                  <span>{copy.rawContent}</span>
-                  <code>{activeItem.contentType}</code>
-                </summary>
-                {activeItem.content ? (
-                  <pre data-language={contentLanguage(activeItem.contentType)}>{activeItem.content}</pre>
-                ) : (
-                  <p>{copy.noContent}</p>
-                )}
-              </details>
-            </>
-          ) : editDraft ? null : (
+  const renderManageView = () => (
+    <>
+      {renderWarningStrip()}
+      <div className={styles.workspace}>
+        <section className={styles.manageFormPanel}>
+          <div className={styles.managementHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.management}</p>
+              <h2>{editDraft ? (editDraft.mode === "create" ? copy.addMemory : copy.editMemory) : copy.manageAllMemory}</h2>
+            </div>
+            <button type="button" className={styles.primaryActionButton} onClick={startCreate} disabled={mutationBusy}>
+              <Pencil size={15} />
+              <span>{copy.addMemory}</span>
+            </button>
+          </div>
+          <p>{copy.managementHint}</p>
+          {renderManagementEditor()}
+          {!editDraft ? (
             <section className={styles.emptyDetail}>
               <Brain size={24} />
-              <strong>{copy.title}</strong>
-              <p>{overviewQuery.isPending ? copy.loading : copy.noMatches}</p>
+              <strong>{copy.selectedMemory}</strong>
+              <p>{activeItem ? activeItem.title : copy.noMatches}</p>
             </section>
-          )}
-
-          {overview ? (
-            <p className={styles.generatedAt}>
-              {copy.generatedAt}: {formatTimestamp(overview.generatedAt, lang)}
-            </p>
           ) : null}
-        </aside>
+        </section>
+
+        <main className={styles.manageListPanel}>
+          <div className={styles.panelHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.management}</p>
+              <h2>{copy.manageAllMemory}</h2>
+            </div>
+            <span className={styles.countPill}>{manageablePairs.length}</span>
+          </div>
+          <label className={styles.searchBox}>
+            <Search size={15} />
+            <input value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
+          </label>
+          {renderMemoryList(flatVisibleItems, copy.noMatches)}
+        </main>
+
+        {renderDetailPanel(false)}
+      </div>
+    </>
+  );
+
+  const renderSourcesView = () => (
+    <>
+      {renderMatrixPanel(copy.sourceAudit)}
+      {renderWarningStrip()}
+      <div className={styles.workspace}>
+        {renderSourceAndItemPanels(copy.sourceAudit)}
+        {renderDetailPanel()}
+      </div>
+    </>
+  );
+
+  return (
+    <section className={styles.route}>
+      <header className={styles.header}>
+        <div>
+          <p className={styles.eyebrow}>{copy.eyebrow}</p>
+          <h1 className={styles.title}>{memoryViewLabel(copy, forcedView)}</h1>
+          <p className={styles.subtitle}>{memoryViewSubtitle(copy, forcedView)}</p>
+        </div>
+        {renderSubnav()}
+        <button type="button" className={styles.refreshButton} onClick={refresh}>
+          <RefreshCw size={16} />
+          {copy.refresh}
+        </button>
+      </header>
+
+      <div className={styles.viewStack}>
+        {forcedView === "overview"
+          ? renderOverviewView()
+          : forcedView === "effective"
+            ? renderEffectiveView()
+            : forcedView === "manage"
+              ? renderManageView()
+              : renderSourcesView()}
       </div>
     </section>
   );

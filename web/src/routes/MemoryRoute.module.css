@@ -1,6 +1,6 @@
 .route {
   display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--surface-page);
@@ -74,9 +74,52 @@
   background: var(--surface-panel-hover);
 }
 
+.subnav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-panel-muted);
+}
+
+.subnavLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  min-width: 74px;
+  padding: 0 11px;
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.subnavLink:hover {
+  color: var(--fg-primary);
+  background: var(--surface-card-hover);
+}
+
+.subnavLinkActive {
+  background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.viewStack {
+  display: grid;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+}
+
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--route-summary-gap);
   padding: 10px 14px 0;
 }
@@ -273,6 +316,55 @@
   white-space: nowrap;
 }
 
+.overviewGrid,
+.effectiveGrid {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  padding: var(--route-workspace-padding);
+}
+
+.overviewGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.effectiveGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.overviewPanel,
+.manageFormPanel,
+.manageListPanel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+.overviewPanel {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.panelLead,
+.manageFormPanel > p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.compactMemoryList {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+}
+
 .panelNotice {
   display: flex;
   align-items: center;
@@ -306,6 +398,14 @@
   gap: 12px;
   min-height: 0;
   padding: var(--route-workspace-padding);
+}
+
+.manageFormPanel {
+  overflow: auto;
+}
+
+.manageListPanel {
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .sourcePanel,
@@ -995,6 +1095,15 @@
 }
 
 @media (max-width: 1180px) {
+  .summaryGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .overviewGrid,
+  .effectiveGrid {
+    grid-template-columns: 1fr;
+  }
+
   .workspace {
     grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
   }
@@ -1017,12 +1126,20 @@
     align-items: start;
   }
 
+  .subnav {
+    width: 100%;
+    overflow-x: auto;
+    justify-content: flex-start;
+  }
+
   .subtitle {
     white-space: normal;
   }
 
   .summaryGrid,
   .matrixGrid,
+  .overviewGrid,
+  .effectiveGrid,
   .workspace {
     grid-template-columns: 1fr;
   }

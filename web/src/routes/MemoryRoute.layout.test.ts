@@ -25,14 +25,34 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.deleteMemory");
   });
 
-  it("keeps source, item, and detail panels as the primary page structure", () => {
-    const sourcePanelIndex = routeSource.indexOf("styles.sourcePanel");
-    const itemPanelIndex = routeSource.indexOf("styles.itemPanel");
-    const detailPanelIndex = routeSource.indexOf("styles.detailPanel");
+  it("keeps source, item, and detail panels available in the source audit view", () => {
+    const sourceAndItemRendererIndex = routeSource.indexOf("const renderSourceAndItemPanels");
+    const sourcePanelIndex = routeSource.indexOf("styles.sourcePanel", sourceAndItemRendererIndex);
+    const itemPanelIndex = routeSource.indexOf("styles.itemPanel", sourcePanelIndex);
+    const sourcesViewIndex = routeSource.indexOf("const renderSourcesView");
+    const sourcesWorkspaceIndex = routeSource.indexOf("styles.workspace", sourcesViewIndex);
+    const sourcesPanelsIndex = routeSource.indexOf("renderSourceAndItemPanels(copy.sourceAudit)", sourcesWorkspaceIndex);
+    const detailPanelIndex = routeSource.indexOf("renderDetailPanel()", sourcesPanelsIndex);
 
+    expect(sourceAndItemRendererIndex).toBeGreaterThan(0);
     expect(sourcePanelIndex).toBeGreaterThan(0);
     expect(itemPanelIndex).toBeGreaterThan(sourcePanelIndex);
-    expect(detailPanelIndex).toBeGreaterThan(itemPanelIndex);
+    expect(sourcesViewIndex).toBeGreaterThan(itemPanelIndex);
+    expect(sourcesPanelsIndex).toBeGreaterThan(sourcesWorkspaceIndex);
+    expect(detailPanelIndex).toBeGreaterThan(sourcesPanelsIndex);
+  });
+
+  it("splits memory into overview, effective scope, management, and source audit views", () => {
+    expect(routeSource).toContain('export type MemoryRouteView = "overview" | "effective" | "manage" | "sources"');
+    expect(routeSource).toContain("MEMORY_VIEWS");
+    expect(routeSource).toContain("styles.subnav");
+    expect(routeSource).toContain("renderOverviewView()");
+    expect(routeSource).toContain("renderEffectiveView()");
+    expect(routeSource).toContain("renderManageView()");
+    expect(routeSource).toContain("renderSourcesView()");
+    expect(routeSource).toContain('forcedView === "overview"');
+    expect(routeSource).toContain('forcedView === "effective"');
+    expect(routeSource).toContain('forcedView === "manage"');
   });
 
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
@@ -132,7 +152,13 @@ describe("MemoryRoute layout contract", () => {
 
   it("is registered as an independent top-level route and global nav item", () => {
     expect(routerSource).toContain('path: "memory"');
-    expect(routerSource).toContain("<MemoryRoute />");
+    expect(routerSource).toContain('<MemoryRoute forcedView="overview" />');
+    expect(routerSource).toContain('path: "memory/effective"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="effective" />');
+    expect(routerSource).toContain('path: "memory/manage"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="manage" />');
+    expect(routerSource).toContain('path: "memory/sources"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="sources" />');
     expect(appShellSource).toContain('to="/memory"');
     expect(appShellSource).toContain('t("navMemory")');
   });
