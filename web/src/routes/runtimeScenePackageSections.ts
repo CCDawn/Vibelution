@@ -56,6 +56,7 @@ function isStartupFile(file: RuntimeSceneRawFile) {
     file.path === "events/frontend.jsonl" ||
     file.path === "events/backend.jsonl" ||
     file.path === "events/browser.jsonl" ||
+    file.path === "events/runtime_manager.jsonl" ||
     file.path === "events/supervisor.jsonl"
   );
 }
