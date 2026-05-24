@@ -20,6 +20,9 @@ from core.evaluation import DEFAULT_SELF_EVOLUTION_GOAL, build_self_evolution_ru
 from core.evaluation.self_evolution_experience_repository import (
     record_terminal_self_evolution_experience,
 )
+from core.evaluation.self_evolution_reflection import (
+    record_bounded_self_evolution_reflection,
+)
 from core.infrastructure.agent_session import get_session_state
 from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
@@ -1534,6 +1537,48 @@ def _record_terminal_self_evolution_experience(
             "created": bool(getattr(result, "created", False)),
             "dedupeKey": str(record.get("dedupe_key") or ""),
             "status": status,
+        },
+        lifecycle=True,
+    )
+    _record_terminal_self_evolution_reflection(run_id, record)
+
+
+def _record_terminal_self_evolution_reflection(run_id: str, experience: dict[str, Any]) -> None:
+    if not isinstance(experience, dict):
+        return
+    try:
+        result = record_bounded_self_evolution_reflection(
+            experience,
+            project_root=PROJECT_ROOT,
+        )
+    except Exception as exc:  # pragma: no cover - defensive diagnostics
+        _record_self_scene_event(
+            "reflection",
+            "self_evolution_run.reflection_record_failed",
+            run_id=run_id,
+            message=f"Failed to record self-evolution bounded reflection: {type(exc).__name__}",
+            level="warning",
+            outcome="failed",
+            fields={
+                "errorType": type(exc).__name__,
+                "experienceId": str(experience.get("experience_id") or ""),
+            },
+            lifecycle=True,
+        )
+        return
+
+    record = result.record if hasattr(result, "record") else {}
+    _record_self_scene_event(
+        "reflection",
+        "self_evolution_run.reflection_recorded",
+        run_id=run_id,
+        message="Self-evolution bounded reflection recorded.",
+        outcome="succeeded",
+        fields={
+            "experienceId": str(experience.get("experience_id") or ""),
+            "reflectionId": str(record.get("reflection_id") or ""),
+            "created": bool(getattr(result, "created", False)),
+            "dedupeKey": str(record.get("dedupe_key") or ""),
         },
         lifecycle=True,
     )
