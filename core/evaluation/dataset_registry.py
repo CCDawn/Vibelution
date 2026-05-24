@@ -14,6 +14,12 @@ from core.infrastructure.workspace_manager import get_workspace
 
 from .chat_case_lifecycle import chat_reviewed_dataset_metadata
 from .supervised_intake import (
+    ALLOWED_SUPERVISED_CASE_TYPES,
+    DYNAMIC_REPLANNING_CASE_TYPE,
+    GENERATED_CASE_TYPE,
+    IMPOSSIBLE_TASK_CASE_TYPE,
+    REVIEWED_CHAT_CASE_TYPE,
+    STATIC_CASE_TYPE,
     dataset_intake_boundary,
     generated_case_dataset_metadata,
     protected_dataset_boundary_fields,
@@ -421,8 +427,52 @@ def _case_id_from_row(row: Dict[str, Any], index: int) -> str:
     return f"case_{index:04d}"
 
 
+def _normalize_case_type(row: Dict[str, Any], *, default: str = "static") -> str:
+    case_type = str(row.get("case_type") or default).strip().lower()
+    if case_type not in ALLOWED_SUPERVISED_CASE_TYPES:
+        raise ValueError(f"未知 case_type: {row.get('case_type')}")
+    return case_type
+
+
+def _require_dict_field(row: Dict[str, Any], field_name: str, *, case_type: str) -> Dict[str, Any]:
+    value = row.get(field_name)
+    if not isinstance(value, dict) or not value:
+        raise ValueError(f"{case_type} case 缺少 {field_name}")
+    return value
+
+
+def _copy_case_schema_fields(case: Dict[str, Any], row: Dict[str, Any], *, case_type: str) -> None:
+    case["case_type"] = case_type
+    for key in (
+        "provenance",
+        "expected_final_state",
+        "expected_infeasible_outcome",
+        "dynamic_events",
+    ):
+        value = row.get(key)
+        if value not in (None, "", [], {}):
+            case[key] = value
+
+
+def _validate_dynamic_or_impossible_case(row: Dict[str, Any], *, case_type: str) -> None:
+    if case_type not in {DYNAMIC_REPLANNING_CASE_TYPE, IMPOSSIBLE_TASK_CASE_TYPE}:
+        return
+    _require_dict_field(row, "provenance", case_type=case_type)
+    if case_type == DYNAMIC_REPLANNING_CASE_TYPE:
+        _require_dict_field(row, "expected_final_state", case_type=case_type)
+    if case_type == IMPOSSIBLE_TASK_CASE_TYPE:
+        _require_dict_field(row, "expected_infeasible_outcome", case_type=case_type)
+
+
 def _build_prompt_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Dict[str, Any]:
     prompt = _prompt_from_row(row)
+    default_case_type = REVIEWED_CHAT_CASE_TYPE if spec.name == "chat_reviewed_multiturn" else STATIC_CASE_TYPE
+    case_type = _normalize_case_type(row, default=default_case_type)
+    if spec.name == "chat_reviewed_multiturn" and case_type != REVIEWED_CHAT_CASE_TYPE:
+        raise ValueError("Reviewed Chat Case 必须使用 case_type=reviewed_chat")
+    if case_type == GENERATED_CASE_TYPE and spec.name != "generated_cases":
+        raise ValueError("generated_case case_type 只能由 generated_cases 数据集物化")
+    _validate_dynamic_or_impossible_case(row, case_type=case_type)
     case = {
         "case_id": _case_id_from_row(row, index),
         "scenario": str(row.get("scenario") or spec.scenario),
@@ -434,6 +484,7 @@ def _build_prompt_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Di
         "training_tier": _normalize_training_tier(row.get("training_tier")),
         "dataset_ref": {key: row.get(key) for key in ("id", "task_id", "instance_id", "repo", "base_commit") if key in row},
     }
+    _copy_case_schema_fields(case, row, case_type=case_type)
     if spec.name == "chat_reviewed_multiturn":
         status = reviewed_chat_row_status(row)
         if status != "positive":
@@ -526,7 +577,11 @@ def _build_generated_case(spec: DatasetSpec, row: Dict[str, Any], index: int) ->
     disallowed = [split for split in splits if split not in provenance["allowed_splits"]]
     if disallowed:
         raise ValueError(f"Generated Case split 超出 provenance allowed_splits: {', '.join(disallowed)}")
+    explicit_case_type = str(row.get("case_type") or GENERATED_CASE_TYPE).strip().lower()
+    if explicit_case_type != GENERATED_CASE_TYPE:
+        raise ValueError("generated_cases 数据集必须使用 case_type=generated_case")
     case = _build_prompt_case(spec, row, index)
+    case["case_type"] = GENERATED_CASE_TYPE
     case["dataset_splits"] = splits
     case["provenance"] = provenance
     case["generated"] = True
@@ -562,6 +617,7 @@ def _build_swe_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Dict[
     )
     return {
         "case_id": instance_id,
+        "case_type": STATIC_CASE_TYPE,
         "scenario": spec.scenario,
         "mode": spec.mode,
         "timeout_seconds": spec.timeout_seconds,

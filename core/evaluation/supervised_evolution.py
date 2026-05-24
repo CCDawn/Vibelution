@@ -14,6 +14,12 @@ from typing import Any, Callable, Dict, List, Optional
 
 from core.infrastructure.workspace_manager import get_workspace
 from core.evaluation.selection_policy import execute_supervised_policy
+from core.evaluation.supervised_intake import (
+    ALLOWED_SUPERVISED_CASE_TYPES,
+    DYNAMIC_REPLANNING_CASE_TYPE,
+    IMPOSSIBLE_TASK_CASE_TYPE,
+    STATIC_CASE_TYPE,
+)
 from core.gym import build_active_advisory_snapshot, summarize_active_advisory_baselines
 from scripts.evolution_harness import HarnessResult, run_harness
 
@@ -164,6 +170,7 @@ class RunAggregate:
 @dataclass
 class CaseDecisionSummary:
     case_id: str
+    case_type: str
     baseline_status: str
     candidate_status: str
     baseline_reason: str
@@ -385,12 +392,20 @@ def _build_case_summaries(
             candidate_status=candidate_status,
             difference_metrics=difference_metrics,
         )
-        failure_taxonomy = _build_failure_taxonomy(difference_reasons, difference_metrics)
+        case_payload = case_payloads.get(case_id) or {}
+        case_type = _case_type_from_payload(case_payload)
+        schema_taxonomy = _build_case_schema_taxonomy(case_payload, case_type)
+        failure_taxonomy = _build_failure_taxonomy(
+            difference_reasons,
+            difference_metrics,
+            schema_taxonomy=schema_taxonomy,
+        )
         evidence_paths = _build_case_evidence_paths(baseline=baseline, candidate=candidate)
-        intake_provenance = _build_case_intake_provenance(case_payloads.get(case_id) or {})
+        intake_provenance = _build_case_intake_provenance(case_payload)
         summaries.append(
             CaseDecisionSummary(
                 case_id=case_id,
+                case_type=case_type,
                 baseline_status=baseline_status,
                 candidate_status=candidate_status,
                 baseline_reason=baseline.reason if baseline else "missing baseline run",
@@ -408,11 +423,34 @@ def _build_case_summaries(
     return summaries
 
 
+def _case_type_from_payload(case_payload: Dict[str, Any]) -> str:
+    raw = str(case_payload.get("case_type") or STATIC_CASE_TYPE).strip().lower()
+    if raw in ALLOWED_SUPERVISED_CASE_TYPES:
+        return raw
+    return STATIC_CASE_TYPE
+
+
+def _build_case_schema_taxonomy(case_payload: Dict[str, Any], case_type: str) -> List[str]:
+    taxonomy: List[str] = []
+    if case_type == DYNAMIC_REPLANNING_CASE_TYPE:
+        taxonomy.append("dynamic_replanning_case")
+        if not isinstance(case_payload.get("expected_final_state"), dict) or not case_payload.get("expected_final_state"):
+            taxonomy.append("expected_final_state_missing")
+        if not case_payload.get("post_adaptation_verification"):
+            taxonomy.append("post_adaptation_verification_missing")
+    elif case_type == IMPOSSIBLE_TASK_CASE_TYPE:
+        taxonomy.append("impossible_task_case")
+        if not isinstance(case_payload.get("expected_infeasible_outcome"), dict) or not case_payload.get("expected_infeasible_outcome"):
+            taxonomy.append("expected_infeasible_outcome_missing")
+    return taxonomy
+
+
 def _build_case_intake_provenance(case_payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(case_payload, dict) or not case_payload:
         return {}
     provenance: Dict[str, Any] = {}
     for key in (
+        "case_type",
         "generated",
         "source_track",
         "dataset_splits",
@@ -424,6 +462,9 @@ def _build_case_intake_provenance(case_payload: Dict[str, Any]) -> Dict[str, Any
         "approval",
         "quality_signals",
         "next_state_signals",
+        "expected_final_state",
+        "expected_infeasible_outcome",
+        "dynamic_events",
     ):
         value = case_payload.get(key)
         if value not in (None, "", [], {}):
@@ -497,8 +538,13 @@ def _score_run_components(status: str, metrics: Dict[str, Any]) -> Dict[str, flo
     }
 
 
-def _build_failure_taxonomy(reasons: List[str], metrics: Dict[str, Any]) -> List[str]:
-    taxonomy: List[str] = []
+def _build_failure_taxonomy(
+    reasons: List[str],
+    metrics: Dict[str, Any],
+    *,
+    schema_taxonomy: Optional[List[str]] = None,
+) -> List[str]:
+    taxonomy: List[str] = list(schema_taxonomy or [])
     reason_map = {
         "missing_baseline": "missing_baseline_run",
         "missing_candidate": "missing_candidate_run",

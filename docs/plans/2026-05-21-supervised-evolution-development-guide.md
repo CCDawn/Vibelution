@@ -36,7 +36,9 @@
 - `core/evaluation/supervised_intake.py` 已成为监督准入契约层，统一描述 reviewed chat、generated case 和 self-evolution candidate 的 downstream use、holdout/raw-chat 禁止项与 candidate-only 边界。
 - `chat_reviewed_multiturn` 已被标记为 dialogue 来源、review required、非 holdout、禁止 raw chat direct training，允许 downstream use 为 `supervised_evaluation`、`gym_candidate_case`、`future_training_export`；物化 bundle 时只接受 `positive` review row。
 - `generated_cases` 已被标记为 generated 来源、非 holdout、禁止 raw chat direct training，允许 downstream use 为 `supervised_evaluation`、`gym_candidate_case`、`regression_observation`；每条 case 要求 provenance，且 `_validate_generated_case_provenance` 和 `_build_generated_case` 都禁止自动进入 `holdout`。
-- `CaseDecisionSummary` 已新增 `intake_provenance`，会把 generated provenance、review/approval、dataset split、allowed downstream uses 和 intake boundary 带入 decision record；selection policy 的 case evidence 与 proposal 也会保留该字段。
+- `core/evaluation/supervised_intake.py` 已定义监督 case 类型集合：`static`、`dynamic_replanning`、`impossible_task`、`reviewed_chat`、`generated_case`。
+- `core/evaluation/dataset_registry.py` 已能从 JSONL row 物化 dynamic/impossible case：`dynamic_replanning` 必须带 `provenance` 与 `expected_final_state`，`impossible_task` 必须带 `provenance` 与 `expected_infeasible_outcome`，并保留 `dynamic_events`。
+- `CaseDecisionSummary` 已新增 `case_type` 与 `intake_provenance`，会把 generated provenance、review/approval、dataset split、allowed downstream uses、intake boundary、expected final state、expected infeasible outcome 和 dynamic events 带入 decision record；selection policy 的 case evidence 与 proposal 也会保留这些字段。
 - self-evolution candidate pool 已写入 `supervised_intake_boundary`，并强制 `review_state=pending`、`candidate_only=true`、`supervised_required=true`、`auto_apply=false`，同时阻断 `accepted_baseline`、`selection_policy`、`runtime_prompt_override` 和 skill registry 直接写入。
 - `core/evaluation/selection_policy.py` 会按 decision 写 policy 记录、audit log、observation/rejection/rollback pool、lineage index 和 proposal 文件；`INCONCLUSIVE` 只审计，不写候选观察池或回滚池。
 - `core/evaluation/supervised_workbench.py` 与 `core/evaluation/supervised_dashboard.py` 已能读取 Gym proposal lifecycle，并展示 `runtime_effect` 与 `agent_consumption`；active advisory baseline 仍只是 advisory。
@@ -47,9 +49,9 @@
 ### 仍存在的实现缺口
 
 - `score_breakdown` 已成为 case-level decision schema v1，并从现有 harness metrics 派生 `final_state_score`、`side_effect_score`、`trace_score`、`safety_score`、`semantic_score`、`overall_score`；后续若接入语义裁判，必须保持旧字段兼容。
-- `failure_taxonomy` 已从 `difference_reasons` 与 LLM failure category 派生，覆盖事务、restart、LLM failure、状态回归/改善和成本噪声；dynamic case、impossible task、stale-state execution、post-adaptation verification miss 仍需随 P1 动态 case 扩展。
+- `failure_taxonomy` 已从 `difference_reasons` 与 LLM failure category 派生，覆盖事务、restart、LLM failure、状态回归/改善和成本噪声；dynamic/impossible schema 会额外留下 `dynamic_replanning_case`、`impossible_task_case`、`post_adaptation_verification_missing`、`expected_*_missing` 等标签。stale-state execution 和真正的动态 benchmark 判分仍需后续扩展。
 - `evidence_paths` 已进入 case summary、policy case evidence、proposal 和 Web case diagnostics，当前统一引用 role report、worktree、新 conversation/debug 文件；`intake_provenance` 已补上 case 来源和准入边界，但 Gym trace/diff/log artifact map 仍可继续补强。
-- 动态 case 与不可完成 case 仍主要停留在计划层。现有 dry-run 更偏事务、restart、validation、LLM failure 与安全边界，还缺一组明确的 temporal/spatial/impossible/replanning fixture。
+- 动态 case 与不可完成 case 已有 dataset schema 和最小监督 run 记录路径，但现有 dry-run 仍更偏事务、restart、validation、LLM failure 与安全边界，还缺一组明确的 temporal/spatial/impossible/replanning fixture 和真实动态执行判分。
 - PROMOTE 与 accepted baseline 的边界需要更清楚地写入文档和 UI/API 语义：当前 supervised selection policy 可更新监督侧 accepted baseline registry 与 bundle baseline，这仍是 frozen evaluator / supervision artifact，不代表 runtime prompt、模型配置或线上行为已生效。
 - `proposal_action` 目前有审计和生命周期记录，但尚未统一登记为独立 `WorkRun(proposal_action)`；如果后续要和共享底座完全对齐，需要补这个 run kind 或等价 lifecycle event。
 
@@ -405,6 +407,13 @@ pytest tests/test_web_app.py -k "proposal or delete or action or auto_review_mod
 ### P1-1：增加动态和不可完成 case
 
 目标：让监督评测覆盖真实 agent 常见失败：环境变化、工具失败、用户改目标、任务不可行、适配后未验证。
+
+当前状态：
+
+- 已完成最小 schema：bundle case 可携带 `case_type`，支持 `static`、`dynamic_replanning`、`impossible_task`、`reviewed_chat`、`generated_case`。
+- 已完成最小 materialization：dynamic/impossible JSONL row 会校验 provenance 与 expected outcome，并写入 materialized bundle。
+- 已完成最小 decision path：`CaseDecisionSummary`、policy case evidence 和 proposal 会保留 `case_type`、expected final/infeasible outcome、dynamic events、score breakdown、failure taxonomy 和 evidence paths。
+- 尚未完成真实 STT-Arena 风格动态执行器；当前 taxonomy 标签只能说明 case 类型和 schema 风险，不能替代完整动态 benchmark。
 
 建议 case 类型：
 

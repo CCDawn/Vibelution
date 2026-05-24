@@ -191,6 +191,7 @@ def _case_evidence_payload(
 ) -> Dict[str, Any]:
     evidence = {
         "case_id": str(getattr(case_summary, "case_id", "") or ""),
+        "case_type": str(getattr(case_summary, "case_type", "") or ""),
         "baseline_status": str(getattr(case_summary, "baseline_status", "") or ""),
         "candidate_status": str(getattr(case_summary, "candidate_status", "") or ""),
         "baseline_reason": str(getattr(case_summary, "baseline_reason", "") or ""),
@@ -240,6 +241,7 @@ def _write_proposal(
         "session_id": decision.session_id,
         "bundle_name": decision.bundle_name,
         "case_id": case_summary.case_id,
+        "case_type": str(getattr(case_summary, "case_type", "") or ""),
         "target": _target_for_case(decision.bundle_name, case_summary.case_id),
         "lineage": _lineage_for_case(registry, decision.bundle_name, case_summary.case_id),
         "candidate_prompt": str(case_payload.get("candidate_prompt") or ""),
