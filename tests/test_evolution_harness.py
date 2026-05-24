@@ -1040,6 +1040,31 @@ def test_infer_evolution_summary_extracts_supervised_final_state_marker():
     assert summary["supervised"]["final_state"] == summary["final_state"]
 
 
+def test_infer_evolution_summary_extracts_supervised_marker_from_llm_response():
+    summary = infer_evolution_summary(
+        [
+            {
+                "type": "llm_response",
+                "content": (
+                    f'{SUPERVISED_FINAL_STATE_MARKER} '
+                    '{"calendar_event":"rescheduled","new_time":"10:30","verified_after_change":true}'
+                ),
+            }
+        ],
+        [],
+        [],
+        restart_expected=False,
+        restart_reentered=False,
+    )
+
+    assert summary["final_state"] == {
+        "calendar_event": "rescheduled",
+        "new_time": "10:30",
+        "verified_after_change": True,
+    }
+    assert summary["supervised"]["final_state"] == summary["final_state"]
+
+
 def test_infer_evolution_summary_extracts_supervised_infeasible_outcome_marker_from_debug():
     summary = infer_evolution_summary(
         [],

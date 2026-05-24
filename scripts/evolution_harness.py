@@ -1317,10 +1317,12 @@ def _extract_supervised_marker_payload(
 
 
 def _extract_supervised_fixture_markers(
+    events: List[Dict[str, Any]],
     debug_lines: List[str],
     stdout_lines: List[str],
 ) -> Dict[str, Any]:
-    combined_lines = [*debug_lines, *stdout_lines]
+    event_lines = _supervised_marker_event_lines(events)
+    combined_lines = [*event_lines, *debug_lines, *stdout_lines]
     final_state, final_state_error = _extract_supervised_marker_payload(
         combined_lines,
         SUPERVISED_FINAL_STATE_MARKER,
@@ -1343,6 +1345,22 @@ def _extract_supervised_fixture_markers(
     if errors:
         markers["marker_errors"] = errors
     return markers
+
+
+def _supervised_marker_event_lines(events: List[Dict[str, Any]]) -> List[str]:
+    lines: List[str] = []
+    for event in events:
+        event_type = str(event.get("type") or "").strip()
+        if event_type == "llm_response":
+            for key in ("content", "raw_response", "message"):
+                value = event.get(key)
+                if isinstance(value, str) and value.strip():
+                    lines.append(value)
+        elif event_type == "tool_call":
+            value = event.get("tool_result")
+            if isinstance(value, str) and value.strip():
+                lines.append(value)
+    return lines
 
 
 def _validation_passed_for_tool(
@@ -1531,7 +1549,7 @@ def infer_evolution_summary(
             validation_failed = max(validation_failed, 1)
         elif "passed" in combined_lines.lower() or "通过" in combined_lines:
             validation_passed = max(validation_passed, 1)
-    supervised_markers = _extract_supervised_fixture_markers(debug_lines, stdout_lines)
+    supervised_markers = _extract_supervised_fixture_markers(events, debug_lines, stdout_lines)
 
     restart_triggered = any(is_restart_trigger_line(line) for line in stdout_lines)
     meaningful_tools = [item for item in tool_sequence if not item.startswith("get_git_")]

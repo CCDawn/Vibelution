@@ -417,6 +417,7 @@ pytest tests/test_web_app.py -k "proposal or delete or action or auto_review_mod
 - 已完成最小 harness fixture：`scripts/evolution_harness.py` 新增 `dynamic_replanning_fixture` 与 `impossible_task_fixture` scenario，要求 agent 在最终回复输出单行 JSON marker：`SUPERVISED_FINAL_STATE: {...}` 或 `SUPERVISED_INFEASIBLE_OUTCOME: {...}`；`infer_evolution_summary()` 会提取 marker 并写入顶层 `final_state` / `infeasible_outcome` 与 `supervised` 子对象，供监督 decision path 使用。
 - 已完成内置 dry-run 接入：`supervised_evolution_dry_run_v1` 新增 dynamic/impossible fixture case，携带 provenance、expected outcome 和 dynamic events。
 - 已完成门控对齐：`transaction`、`modify_rollback`、`full_evolution` 继续要求完整 open/close transaction；`dynamic_replanning_fixture` 与 `impossible_task_fixture` 是 marker-only 场景，不把缺少事务开关当成 legality failure，但仍受 commit 越界、运行状态和 expected outcome verification 约束。
+- 已完成真实 smoke：真实 agent 对 dynamic/impossible fixture 的最终 `llm_response` 能输出 marker；harness 已从 conversation event、stdout 和 debug 三类来源提取 marker，避免只看 stdout/debug 导致误判。
 - 尚未完成真实 STT-Arena 风格动态执行器；当前 fixture 只能提供稳定 outcome marker 与最小核验闭环，不能替代完整动态 benchmark。
 
 建议 case 类型：
