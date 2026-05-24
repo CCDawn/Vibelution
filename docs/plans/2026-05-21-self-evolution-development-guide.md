@@ -73,7 +73,8 @@
 - `core/gym/generated_cases.py` 写入 generated case 时要求 provenance，且拒绝 `dataset_splits` 包含 `holdout`。
 - `chat_reviewed_multiturn` 已带 `review_required`、`source_track`、`allowed_downstream_uses`、`raw_chat_direct_training_allowed=false` 等元数据。
 - `docs/plans/2026-05-21-workrun-substrate-and-chat-case-loop.md` 已把 raw chat -> candidate -> review -> reviewed case -> dataset/bundle 定为共享边界。
-- 目前还没有统一的 experience repository，也没有正式的 skill candidate / prompt candidate / proposal candidate 池存储层。
+- `core/evaluation/self_evolution_experience_repository.py` 已提供第一版 terminal experience repository：自进化终态 run 会写入 `workspace/self_evolution/experience/experience.jsonl`，并用 `self_terminal:<runId>` 去重。
+- 目前还没有正式的 skill candidate / prompt candidate / proposal candidate 池存储层；experience record 也还没有被 P2/P3 机制消费。
 
 ## 当前文档与实现差距
 
@@ -86,8 +87,8 @@
 3. 证据链已经包含 runtime scene 和 rollback manifest。
    旧文档只说 evidence tail / rollback hook，未准确写出 preflight、child log、WorkRun lifecycle、ownerPid stale 收口和 rollback conflict handoff。
 
-4. generated cases 已有部分监督边界，但 experience repository 仍未落地。
-   文档不能把 EvolveR 式 experience repository 写成已实现；应明确这是下一阶段 P1 缺口。
+4. generated cases 已有部分监督边界；experience repository 已落地第一版，但仍只是候选来源。
+   文档需要继续强调：experience record 不自动生效，不写 accepted baseline / selection policy，也还未接入 P2/P3 候选池消费。
 
 5. skill / prompt / proposal candidate 池还缺统一契约。
    当前只有 generated case 和 chat reviewed case 有较明确的 registry / review 边界；skill candidate、prompt candidate、proposal candidate 还需要 schema、provenance、dedupe、quality score 和 supervised handoff。
@@ -114,7 +115,7 @@
 | WorkRun snapshot | `.runtime/runtime-manager/...` | 否 | 否 | 运行状态，不是评判标准。 |
 | audit record | `workspace/evolution/audit.jsonl` | 否 | 否 | 事务证据。 |
 | rollback manifest | `workspace/web_self_evolution/<runId>/rollback_manifest.json` | 否 | 否 | 只用于恢复/交接。 |
-| experience record | 待建 `workspace/self_evolution/experience/*.jsonl` | 否 | 视 downstream use 而定 | 下一阶段要落地。 |
+| experience record | `workspace/self_evolution/experience/experience.jsonl` | 否 | 视 downstream use 而定 | 终态 run 第一版已写入；只作为候选来源。 |
 | generated case | `workspace/evaluation/datasets/generated_cases.jsonl` | 否 | 是 | 已要求 provenance，不能自动 holdout。 |
 | reviewed chat case | `chat_reviewed_multiturn` 数据集 | 否 | 是 | 必须 review 后进入 supervised/Gym。 |
 | proposal candidate | 待建候选池或 `workspace/gym/proposals` | 否 | 是 | 不能直接写 accepted baseline。 |
@@ -246,9 +247,11 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 
 ### P1：建立 experience repository
 
+状态：第一版已落地。终态 self-evolution run 会生成摘要化 experience record，写入 `workspace/self_evolution/experience/experience.jsonl`，并记录 `self_evolution_run.experience_recorded` / `self_evolution_run.experience_record_failed` runtime scene 事件。该记录仍只是候选来源，不自动进入 accepted baseline、selection policy、runtime prompt 或正式 skill registry。
+
 目标：把自进化运行经验从日志尾迹变成结构化候选来源。
 
-建议文件影响：
+已落地文件影响：
 
 - 新增 `core/evaluation/self_evolution_experience_repository.py`
 - 新增 `workspace/self_evolution/experience/experience.jsonl`
@@ -287,8 +290,8 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 测试锚点：
 
 ```powershell
-pytest tests/test_self_evolution_experience_repository.py -v
-pytest tests/test_self_evolution_control_service.py -k "experience or self_evolution_run" -v
+.\.venv\Scripts\python.exe -m pytest tests/test_self_evolution_experience_repository.py -v
+.\.venv\Scripts\python.exe -m pytest tests/test_self_evolution_control_service.py -k "experience or self_evolution_run" -v
 ```
 
 ### P2：把 self-questioning / self-navigating / self-attributing 固化为 bounded step
@@ -501,7 +504,7 @@ Raw Chat Segment -> Candidate -> Human/Review Decision -> ReviewedChatCase -> Da
 - `workspace/gym/proposals`
 - `.runtime/runtime-manager/evolution`
 - `.runtime/runtime-manager/work_runs`
-- 待建：`workspace/self_evolution/experience`
+- `workspace/self_evolution/experience`
 - 待建：`workspace/self_evolution/candidates`
 
 测试：
@@ -552,7 +555,7 @@ pytest tests/test_web_app.py -k "chat_review or supervised or self_evolution" -v
 ## 第一轮建议优先补的 3 件事
 
 1. 先建 experience repository。
-   这是 EvolveR 闭环的入口，也是 self-questioning / self-navigating / self-attributing 的共同数据底座。没有它，候选池会变成散落日志和自由文本。
+   状态：第一版已完成。它现在是 EvolveR 闭环的入口，也是 self-questioning / self-navigating / self-attributing 的共同数据底座；下一步是让 P2 bounded reflection 消费这些记录，而不是继续从散落日志和自由文本里直接推断。
 
 2. 把三种自反机制固化为 bounded step。
    self-questioning 只从证据生成问题，self-navigating 只复用有验证的路径，self-attributing 只生成可追溯归因；三者都不能直接修改 runtime 标准。
