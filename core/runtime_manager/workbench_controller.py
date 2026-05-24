@@ -215,6 +215,18 @@ def observe_workbench() -> dict[str, Any]:
         observed_state = "closed"
     else:
         observed_state = "open"
+    frontend_orphaned = bool(browser_managed and browser_window_alive and not backend_observed)
+    backend_missing = bool(observed_state == "open" and not backend_observed)
+    if port_conflict:
+        lifecycle_consistency = "port_conflict"
+    elif frontend_orphaned:
+        lifecycle_consistency = "orphaned_browser"
+    elif backend_missing:
+        lifecycle_consistency = "backend_missing"
+    elif observed_state == "open" and browser_managed and not browser_window_alive:
+        lifecycle_consistency = "browser_missing"
+    else:
+        lifecycle_consistency = "consistent"
 
     return {
         "launcherStatePresent": bool(launcher_state),
@@ -236,12 +248,15 @@ def observe_workbench() -> dict[str, Any]:
         "backendPortConflict": port_conflict,
         "browserWindowAlive": browser_window_alive,
         "observedState": observed_state,
+        "backendMissing": backend_missing,
+        "frontendOrphaned": frontend_orphaned,
+        "lifecycleConsistency": lifecycle_consistency,
     }
 
 
 def _creation_flags() -> int:
     flags = 0
-    for name in ("CREATE_NO_WINDOW",):
+    for name in ("CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
         flags |= int(getattr(subprocess, name, 0))
     return flags
 

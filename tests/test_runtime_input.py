@@ -8,6 +8,7 @@ from core.infrastructure.runtime_input import (
     build_supervised_evolution_request_message,
     is_external_request_message,
 )
+from core.llm.client import _message_to_openai_dict
 
 
 def test_external_request_message_uses_system_message_with_protocol_header():
@@ -33,10 +34,12 @@ def test_runtime_notice_message_has_depersonalized_label():
 def test_chat_user_message_uses_chat_protocol_header():
     msg = build_chat_user_message("帮我解释一下这个报错")
 
-    assert isinstance(msg, SystemMessage)
+    assert isinstance(msg, dict)
+    assert msg["role"] == "user"
     assert RuntimeInputKind.CHAT_USER_MESSAGE.value == "chat_user_message"
-    assert "对话用户输入" in msg.content
-    assert "帮我解释一下这个报错" in msg.content
+    assert "对话用户输入" in msg["content"]
+    assert "帮我解释一下这个报错" in msg["content"]
+    assert _message_to_openai_dict(msg)["role"] == "user"
 
 
 def test_supervised_evolution_request_message_uses_supervised_label():

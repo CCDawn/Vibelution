@@ -89,6 +89,29 @@ def test_litellm_payload_prefixes_relay_openai_compatible_model():
     assert payload["model"] == "openai/gpt-5.5"
 
 
+def test_openai_compatible_payload_converts_runtime_system_messages_after_first_to_user():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+        }
+    )
+
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload(
+        [
+            {"role": "system", "content": "system prompt"},
+            {"role": "system", "content": "## 运行时提示\n请输出 state"},
+        ]
+    )
+
+    assert [item["role"] for item in payload["messages"]] == ["system", "user"]
+
+
 def test_openai_gpt5_payload_sanitizes_temperature_and_tool_choice():
     config = make_config(
         **{

@@ -45,3 +45,47 @@ describe("ConfigRoute layout density contract", () => {
     expect(phoneRules).toMatch(/\.treeGrid\s*{[^}]*grid-template-columns:\s*1fr/s);
   });
 });
+
+describe("ConfigRoute content experience contract", () => {
+  it("frames the overview as save/apply status instead of an internal config source", () => {
+    expect(configRouteSource).toContain('sourceTitle: "保存与生效"');
+    expect(configRouteSource).toContain('sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。"');
+    expect(configRouteSource).not.toContain('sourceTitle: "配置源"');
+  });
+
+  it("keeps low-value field-type badges out of read-only config cards", () => {
+    const viewStart = configRouteSource.indexOf("function renderFieldView");
+    const editStart = configRouteSource.indexOf("function renderFieldEditor");
+    const renderFieldViewSource = configRouteSource.slice(viewStart, editStart);
+
+    expect(renderFieldViewSource).toContain("styles.treeFieldCardView");
+    expect(renderFieldViewSource).not.toContain("meta?.badge");
+  });
+
+  it("keeps restart timing visible for workbench ports", () => {
+    const schemaSource = readFileSync(new URL("../core/web/services/config_editor_schema.py", import.meta.url), "utf-8");
+
+    expect(schemaSource).toContain("修改后下次启动或重启生效");
+    expect(schemaSource).toContain("Restart the workbench after changing it");
+  });
+
+  it("shows model edit failures inside the model editor instead of relying only on the page notice", () => {
+    expect(configRouteSource).toContain("modelEditorError");
+    expect(configRouteSource).toContain('role="alert"');
+    expect(configRouteSource).toContain("styles.inlineFormError");
+    expect(configRouteSource).toContain("setModelEditorError(markError(error))");
+  });
+
+  it("guards internal route changes when config changes have not been saved to disk", () => {
+    expect(configRouteSource).toContain("useBlocker");
+    expect(configRouteSource).toContain("shouldBlockConfigLeave");
+    expect(configRouteSource).toContain('leaveBlocker.state === "blocked"');
+    expect(configRouteSource).toContain("handleSaveAndLeave");
+    expect(configRouteSource).toContain("copy.leaveGuardSave");
+    expect(configRouteSource).toContain("copy.leaveGuardDiscard");
+    expect(configRouteSource).toContain("copy.leaveGuardCancel");
+
+    expect(configRouteCss).toContain(".leaveGuardOverlay");
+    expect(configRouteCss).toContain(".leaveGuardPanel");
+  });
+});

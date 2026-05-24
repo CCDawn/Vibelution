@@ -80,8 +80,10 @@ export function deriveRuntimeControllerState(runtime: RuntimeSnapshot | null | u
   const phase = String(runtime?.workbench?.phase ?? "").trim().toLowerCase();
   const failureMessage = String(runtime?.workbench?.failureMessage ?? "").trim();
   const browserManaged = Boolean(runtime?.workbench?.browserManaged);
+  const lifecycleConsistency = String(runtime?.workbench?.lifecycleConsistency ?? "").trim().toLowerCase();
+  const frontendOrphaned = Boolean(runtime?.workbench?.frontendOrphaned) || lifecycleConsistency === "orphaned_browser";
 
-  if (phase === "failed" || failureMessage) {
+  if (frontendOrphaned || phase === "failed" || failureMessage) {
     return "failed";
   }
   if (desiredState === "closed" && observedState !== "closed") {

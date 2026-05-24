@@ -21,6 +21,16 @@ from .constants import (
 )
 from .state_store import load_pid, load_state
 
+SAFE_COMMAND_ARG_KEYS = {
+    "reason",
+    "noBrowser",
+    "stopManager",
+    "runId",
+    "run_id",
+    "mode",
+    "scope",
+}
+
 
 def _command_timestamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -69,7 +79,21 @@ def submit_command(
         )
         _complete_rejected_shutdown_command(command, shutdown_state=shutdown_state)
         return command
+    joined_command_id = _joinable_open_command_id(command)
+    if joined_command_id:
+        command["commandId"] = joined_command_id
+        _append_queue_event(
+            "command_queue.open_joined",
+            {
+                "commandId": joined_command_id,
+                "type": str(command.get("type") or ""),
+                "requestedBy": str(command.get("requestedBy") or ""),
+                "noBrowser": bool((command.get("args") or {}).get("noBrowser")),
+            },
+        )
+        return command
     _atomic_write_json(INBOX_DIR / f"{command['commandId']}.json", command)
+    _append_queue_event("command_queue.command_queued", _command_event_payload(command))
     return command
 
 
@@ -109,6 +133,7 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         except (OSError, json.JSONDecodeError):
             payload = {}
         if isinstance(payload, dict):
+            _append_queue_event("command_queue.command_claimed", _command_event_payload(payload, queue_path=target.name))
             return target, payload
         try:
             target.unlink(missing_ok=True)
@@ -124,6 +149,17 @@ def complete_command(path: Path, result: dict[str, Any]) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+    _append_queue_event(
+        "command_queue.command_result_written",
+        {
+            "commandId": command_id,
+            "ok": bool(result.get("ok")),
+            "completed": bool(result.get("completed")),
+            "message": _truncate_event_text(str(result.get("message") or "")),
+            "errorType": str(result.get("errorType") or ""),
+            "stopDaemon": bool(result.get("stopDaemon")),
+        },
+    )
 
 
 def reject_pending_commands_for_shutdown(*, shutdown_state: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -194,6 +230,51 @@ def _shutdown_in_progress_state() -> dict[str, Any] | None:
     return state
 
 
+def _joinable_open_command_id(command: dict[str, Any]) -> str:
+    command_type = str(command.get("type") or "").strip()
+    if command_type != "open_workbench":
+        return ""
+    manager_pid = load_pid()
+    if not _process_is_alive(manager_pid):
+        return ""
+    state = load_state()
+    if not isinstance(state, dict) or not _state_belongs_to_current_manager(state, manager_pid):
+        return ""
+    requested_args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    requested_no_browser = bool(requested_args.get("noBrowser"))
+    active = state.get("command") if isinstance(state.get("command"), dict) else {}
+    active_command_id = str(active.get("activeCommandId") or "").strip()
+    if (
+        active_command_id
+        and str(active.get("activeType") or "").strip() == "open_workbench"
+        and _open_requests_are_compatible(existing_no_browser=bool(active.get("noBrowser")), requested_no_browser=requested_no_browser)
+    ):
+        return active_command_id
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("type") or "").strip() != "open_workbench":
+            continue
+        existing_args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        if not _open_requests_are_compatible(
+            existing_no_browser=bool(existing_args.get("noBrowser")),
+            requested_no_browser=requested_no_browser,
+        ):
+            continue
+        return str(payload.get("commandId") or path.stem).strip() or path.stem
+    return ""
+
+
+def _open_requests_are_compatible(*, existing_no_browser: bool, requested_no_browser: bool) -> bool:
+    if existing_no_browser and not requested_no_browser:
+        return False
+    return True
+
+
 def _state_belongs_to_current_manager(state: dict[str, Any], manager_pid: int) -> bool:
     try:
         state_manager_pid = int(state.get("managerPid") or 0)
@@ -225,6 +306,88 @@ def _append_queue_event(event_type: str, payload: dict[str, Any]) -> None:
             handle.write(json.dumps(event, ensure_ascii=False) + "\n")
     except OSError:
         pass
+    _record_runtime_manager_scene_event(event_type, payload, phase="queue")
+
+
+def _command_event_payload(command: dict[str, Any], *, queue_path: str = "") -> dict[str, Any]:
+    args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    payload: dict[str, Any] = {
+        "commandId": str(command.get("commandId") or ""),
+        "type": str(command.get("type") or ""),
+        "requestedBy": str(command.get("requestedBy") or ""),
+        "requestedAt": str(command.get("requestedAt") or ""),
+        "args": _safe_command_args(args),
+    }
+    if queue_path:
+        payload["queuePath"] = queue_path
+    return payload
+
+
+def _safe_command_args(args: dict[str, Any]) -> dict[str, Any]:
+    safe: dict[str, Any] = {}
+    for key in sorted(SAFE_COMMAND_ARG_KEYS):
+        if key not in args:
+            continue
+        value = args[key]
+        if isinstance(value, (bool, int, float)) or value is None:
+            safe[key] = value
+        else:
+            safe[key] = _truncate_event_text(str(value), limit=160)
+    extra_keys = sorted(str(key) for key in args.keys() if str(key) not in SAFE_COMMAND_ARG_KEYS)
+    if extra_keys:
+        safe["argKeys"] = extra_keys
+    return safe
+
+
+def _record_runtime_manager_scene_event(event_type: str, payload: dict[str, Any], *, phase: str) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "runtime_manager",
+            phase,
+            event_type,
+            message=f"Runtime manager {phase} event: {event_type}",
+            level=_runtime_scene_event_level(event_type, payload),
+            outcome=_runtime_scene_event_outcome(event_type, payload),
+            fields=payload,
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _runtime_scene_event_level(event_type: str, payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "").strip().lower()
+    if "failed" in event_type or status == "failed" or payload.get("ok") is False:
+        return "error"
+    if any(marker in event_type for marker in ("rejected", "ignored", "retrying", "joined")):
+        return "warning"
+    return "info"
+
+
+def _runtime_scene_event_outcome(event_type: str, payload: dict[str, Any]) -> str:
+    status = str(payload.get("status") or "").strip().lower()
+    if "failed" in event_type or status == "failed" or payload.get("ok") is False:
+        return "failed"
+    if "queued" in event_type:
+        return "queued"
+    if "claimed" in event_type:
+        return "started"
+    if "completed" in event_type or payload.get("ok") is True:
+        return "succeeded"
+    if "rejected" in event_type:
+        return "rejected"
+    if "joined" in event_type:
+        return "joined"
+    if "ignored" in event_type:
+        return "ignored"
+    return "observed"
+
+
+def _truncate_event_text(value: str, *, limit: int = 240) -> str:
+    text = str(value or "")
+    return text if len(text) <= limit else f"{text[: max(0, limit - 3)]}..."
 
 
 def _complete_rejected_shutdown_command(command: dict[str, Any], *, shutdown_state: dict[str, Any]) -> None:

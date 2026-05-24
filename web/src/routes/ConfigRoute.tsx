@@ -16,7 +16,8 @@ import {
   SlidersHorizontal,
   Trash2,
 } from "lucide-react";
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type BlockerFunction, useBlocker } from "react-router-dom";
 import { json } from "@codemirror/lang-json";
 import { EditorView } from "@codemirror/view";
 
@@ -45,6 +46,7 @@ import {
   getString,
   groupModelPresets,
   hasPendingSecretChanges,
+  shouldBlockConfigLeave,
   type ModelPresetGroupLabels,
   type PublicConfigShape,
 } from "./configRouteLogic";
@@ -218,8 +220,8 @@ export const CONFIG_COPY = {
     subtitle: "这里是唯一配置网页入口。结构化编辑、完整配置检查和最终保存，都收口到同一份 config.toml。",
     loading: "正在加载统一配置工作区...",
     loadFailed: "配置工作区加载失败",
-    sourceTitle: "配置源",
-    sourceBody: "当前页面直接读取 config.toml，保存时也只写回这一个文件。",
+    sourceTitle: "保存与生效",
+    sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。",
     runtimeTitle: "运行时与界面",
     runtimeBody: "语言、默认入口和治理模式可以在这里修改，确认后页面会立即展示本次修改。",
     profilesTitle: "任务模型",
@@ -245,14 +247,20 @@ export const CONFIG_COPY = {
     openEnvironmentOpened: "已打开系统环境变量窗口。",
     saveConfig: "保存到 config.toml",
     applying: "保存中",
+    leaveGuardTitle: "还有未保存的设置",
+    leaveGuardBody: "本次修改还没有保存到 config.toml。离开前要保存吗？",
+    leaveGuardSave: "保存并离开",
+    leaveGuardSaving: "保存后离开中",
+    leaveGuardDiscard: "不保存离开",
+    leaveGuardCancel: "取消",
     interfaceLanguage: "界面语言",
     intakeMode: "模式",
     languageChinese: "中文",
     languageEnglish: "English",
     groupOverviewSaveTitle: "总览与保存",
-    groupOverviewSaveSummary: "配置源、修改检查与诊断保存统一收口。",
+    groupOverviewSaveSummary: "查看保存状态、重新读取配置，并处理系统环境变量。",
     groupWorkbenchTitle: "工作台与界面",
-    groupWorkbenchSummary: "默认入口、语言与运行界面相关设置。",
+    groupWorkbenchSummary: "默认入口、语言、前后端端口与重启后生效的工作台设置。",
     groupAvatarPetTitle: "形象与陪伴体",
     groupAvatarPetSummary: "统一管理形象、宠物与陪伴体相关配置。",
     groupModelingTitle: "模型",
@@ -374,6 +382,7 @@ export const CONFIG_COPY = {
     editorRestoreHint: "放弃编辑文本里的未检查内容，并回到当前结构化面板。",
     saveSourceHint: "当前修改还没写入 config.toml，保存成功后这里会刷新为最新文件状态。",
     modelSavePending: "保存模型修改中",
+    modelSaveFailed: "模型修改未生效：",
     profileSavePending: "保存任务模型修改中",
     testPending: "测试连接中",
     testScopeDraft: "按当前修改测试",
@@ -399,8 +408,8 @@ export const CONFIG_COPY = {
     subtitle: "This is the single config web entry. Structured editing, full-config checks, and final writes converge on one config.toml.",
     loading: "Loading unified config workspace...",
     loadFailed: "Failed to load config workspace",
-    sourceTitle: "Config Source",
-    sourceBody: "This page reads config.toml directly and writes back to that same file when saved.",
+    sourceTitle: "Save and Apply",
+    sourceBody: "Shows whether current changes are saved and which system-level settings take effect after restart.",
     runtimeTitle: "Runtime and Interface",
     runtimeBody: "Language, default route, and governance mode changes are shown here immediately after confirmation.",
     profilesTitle: "Task Models",
@@ -426,14 +435,20 @@ export const CONFIG_COPY = {
     openEnvironmentOpened: "System environment variables window opened.",
     saveConfig: "Save to config.toml",
     applying: "Saving",
+    leaveGuardTitle: "Unsaved settings",
+    leaveGuardBody: "These changes have not been saved to config.toml. Save before leaving?",
+    leaveGuardSave: "Save and leave",
+    leaveGuardSaving: "Saving before leaving",
+    leaveGuardDiscard: "Leave without saving",
+    leaveGuardCancel: "Cancel",
     interfaceLanguage: "Interface language",
     intakeMode: "Mode",
     languageChinese: "Chinese",
     languageEnglish: "English",
     groupOverviewSaveTitle: "Overview and Save",
-    groupOverviewSaveSummary: "Keep config source, change checks, diagnostics, and saving in one place.",
+    groupOverviewSaveSummary: "Review save status, reload config, and open system environment variables.",
     groupWorkbenchTitle: "Workbench and Interface",
-    groupWorkbenchSummary: "Default entry, language, and runtime-facing interface settings.",
+    groupWorkbenchSummary: "Default entry, language, frontend/backend ports, and workbench settings that apply after restart.",
     groupAvatarPetTitle: "Avatar and Companion",
     groupAvatarPetSummary: "Manage avatar, pet, and companion-facing settings together.",
     groupModelingTitle: "Models",
@@ -555,6 +570,7 @@ export const CONFIG_COPY = {
     editorRestoreHint: "Discard unchecked editor text and return to the current structured panel.",
     saveSourceHint: "Save to config.toml to persist the current changes.",
     modelSavePending: "Saving model changes",
+    modelSaveFailed: "Model changes were not applied:",
     profileSavePending: "Saving task model changes",
     testPending: "Testing connection",
     testScopeDraft: "Testing current changes",
@@ -691,6 +707,10 @@ function emptyProfileEditState(modelId = ""): ProfileEditState {
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
+}
+
+function readableErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function formatBytes(size: number) {
@@ -1315,7 +1335,6 @@ function ConfigSectionEditor({
       <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView}`}>
         <div className={styles.treeFieldHead}>
           <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath)}</span>
-          {meta?.badge ? <span className={styles.inlineBadge}>{meta.badge}</span> : null}
         </div>
         {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
         <div className={styles.treeFieldValue}>{formatConfigDisplayValue(fieldValue, meta?.kind, copy)}</div>
@@ -1650,6 +1669,7 @@ export function ConfigRoute() {
   const [notice, setNotice] = useState<{ tone: NoticeTone; text: string }>({ tone: "neutral", text: "" });
   const [busyAction, setBusyAction] = useState("");
   const [modelEditor, setModelEditor] = useState<ModelEditorState>(emptyModelEditorState());
+  const [modelEditorError, setModelEditorError] = useState("");
   const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfileDraft());
   const [profileEditors, setProfileEditors] = useState<Record<string, ProfileEditState>>({});
   const [expandedProfiles, setExpandedProfiles] = useState<Record<string, boolean>>({});
@@ -1680,6 +1700,7 @@ export function ConfigRoute() {
     setJsonText(formatJson(workspace.publicConfig));
     setNotice({ tone, text: workspace.message || "" });
     setModelEditor(emptyModelEditorState());
+    setModelEditorError("");
     setProfileDraft(emptyProfileDraft(workspace.profileCards[0]?.profileId ?? "primary"));
     setProfileEditors({});
   }
@@ -1818,6 +1839,19 @@ export function ConfigRoute() {
     canCheckCurrentChanges,
     canRestoreEditorText,
   } = editorSyncState;
+  const shouldBlockLeave = useCallback<BlockerFunction>(
+    ({ currentLocation, nextLocation }) =>
+      shouldBlockConfigLeave({
+        hasPendingApply,
+        busy: Boolean(busyAction),
+        currentPathname: currentLocation.pathname,
+        nextPathname: nextLocation.pathname,
+      }),
+    [busyAction, hasPendingApply],
+  );
+  const leaveBlocker = useBlocker(shouldBlockLeave);
+  const leaveGuardOpen = leaveBlocker.state === "blocked";
+  const leaveGuardSaveLabel = busyAction === copy.leaveGuardSaving ? copy.leaveGuardSaving : copy.leaveGuardSave;
 
   function updateSectionUiState(sectionId: string, nextState: ConfigSectionUiState) {
     setSectionUiState((current) => ({ ...current, [sectionId]: nextState }));
@@ -1863,10 +1897,12 @@ export function ConfigRoute() {
   }
 
   function markError(error: unknown) {
+    const text = readableErrorMessage(error);
     setNotice({
       tone: "error",
-      text: error instanceof Error ? error.message : String(error),
+      text,
     });
+    return text;
   }
 
   function requireDraft(): PublicConfigShape {
@@ -1930,8 +1966,8 @@ export function ConfigRoute() {
     }
   }
 
-  async function handleApply() {
-    setBusyAction(copy.applying);
+  async function handleApply(pendingLabel: string = copy.applying): Promise<boolean> {
+    setBusyAction(pendingLabel);
     try {
       const response = await requestJson<ConfigWorkspace>(
         "/api/config/apply",
@@ -1944,10 +1980,35 @@ export function ConfigRoute() {
       );
       syncWorkspace(response, "success");
       await invalidateWorkbenchQueries();
+      return true;
     } catch (error) {
       markError(error);
+      return false;
     } finally {
       setBusyAction("");
+    }
+  }
+
+  async function handleSaveAndLeave() {
+    if (leaveBlocker.state !== "blocked" || !canSaveConfig) {
+      return;
+    }
+    const proceed = leaveBlocker.proceed;
+    const ok = await handleApply(copy.leaveGuardSaving);
+    if (ok) {
+      proceed();
+    }
+  }
+
+  function handleDiscardAndLeave() {
+    if (leaveBlocker.state === "blocked") {
+      leaveBlocker.proceed();
+    }
+  }
+
+  function handleCancelLeave() {
+    if (leaveBlocker.state === "blocked") {
+      leaveBlocker.reset();
     }
   }
 
@@ -2089,6 +2150,7 @@ export function ConfigRoute() {
 
   function applyPreset(presetId: string) {
     setModelEditorExpanded(true);
+    setModelEditorError("");
     const preset = workspace?.modelPresetOptions.find((item) => item.preset_id === presetId);
     if (!preset) {
       setModelEditor((current) => ({ ...current, preset_id: presetId }));
@@ -2114,6 +2176,7 @@ export function ConfigRoute() {
       return;
     }
     setBusyAction(copy.modelSavePending);
+    setModelEditorError("");
     try {
       const endpoint = modelEditor.mode === "edit" ? "/api/config/draft/update-model" : "/api/config/draft/add-model";
       const response = await requestJson<ConfigWorkspace>(endpoint, {
@@ -2133,7 +2196,8 @@ export function ConfigRoute() {
       syncWorkspace(response, "success");
       setModelEditorExpanded(false);
     } catch (error) {
-      markError(error);
+      setModelEditorError(markError(error));
+      setModelEditorExpanded(true);
     } finally {
       setBusyAction("");
     }
@@ -2316,6 +2380,42 @@ export function ConfigRoute() {
 
   return (
     <div ref={pageRef} className={styles.page} style={pageStyle}>
+      {leaveGuardOpen ? (
+        <div className={styles.leaveGuardOverlay}>
+          <section
+            className={styles.leaveGuardPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="config-leave-guard-title"
+          >
+            <div className={styles.leaveGuardCopy}>
+              <p className={styles.eyebrow}>Config</p>
+              <h2 id="config-leave-guard-title">{copy.leaveGuardTitle}</h2>
+              <p>{copy.leaveGuardBody}</p>
+              <p className={styles.helperText}>{sidebarApplyHint}</p>
+            </div>
+            <div className={styles.leaveGuardActions}>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                disabled={!canSaveConfig || Boolean(busyAction)}
+                onClick={() => {
+                  void handleSaveAndLeave();
+                }}
+              >
+                <Save size={14} />
+                {leaveGuardSaveLabel}
+              </button>
+              <button type="button" className={styles.dangerButton} disabled={Boolean(busyAction)} onClick={handleDiscardAndLeave}>
+                {copy.leaveGuardDiscard}
+              </button>
+              <button type="button" className={styles.actionButton} disabled={Boolean(busyAction)} onClick={handleCancelLeave}>
+                {copy.leaveGuardCancel}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
       <aside className={styles.sidebar} style={sidebarStyle}>
         <div className={styles.sidebarIntro}>
           <p className={styles.eyebrow}>Config</p>
@@ -2337,7 +2437,9 @@ export function ConfigRoute() {
             type="button"
             className={`${styles.primaryButton} ${styles.buttonBlock}`}
             disabled={!canSaveConfig}
-            onClick={handleApply}
+            onClick={() => {
+              void handleApply();
+            }}
           >
             <Save size={14} />
             {saveButtonLabel}
@@ -2800,7 +2902,7 @@ export function ConfigRoute() {
             <Blocks size={16} className={styles.sectionIcon} />
           </div>
           <p className={styles.sectionText}>{copy.modelsBody}</p>
-          <div className={styles.formSurface}>
+          <div className={styles.formSurface} onChange={() => (modelEditorError ? setModelEditorError("") : undefined)}>
             <div className={styles.formHeader}>
               <div className={styles.formHeaderIntro}>
                 <Pencil size={16} />
@@ -3095,10 +3197,11 @@ export function ConfigRoute() {
                   <button
                     type="button"
                     className={styles.actionButton}
-                    onClick={() => {
-                      setModelEditor(emptyModelEditorState());
-                      setModelEditorExpanded(false);
-                    }}
+                      onClick={() => {
+                        setModelEditorError("");
+                        setModelEditor(emptyModelEditorState());
+                        setModelEditorExpanded(false);
+                      }}
                   >
                     <RotateCcw size={14} />
                     {copy.cancelEditing}
@@ -3115,6 +3218,11 @@ export function ConfigRoute() {
                     </button>
                   ) : null}
                 </div>
+                {modelEditorError ? (
+                  <p className={styles.inlineFormError} role="alert" aria-live="assertive">
+                    <strong>{copy.modelSaveFailed}</strong> {modelEditorError}
+                  </p>
+                ) : null}
               </>
             ) : null}
           </div>
@@ -3164,6 +3272,7 @@ export function ConfigRoute() {
                               type="button"
                               className={`${styles.actionButton} ${styles.buttonBlock}`}
                               onClick={() => {
+                                setModelEditorError("");
                                 setModelEditor(hydrateModelEditorFromOption(option));
                                 setModelEditorExpanded(true);
                               }}

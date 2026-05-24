@@ -39,7 +39,7 @@ discovery_enabled = true
 [llm.profiles.primary.provider]
 kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -61,7 +61,7 @@ discovery_enabled = true
 [llm.profiles.mental_model.provider]
 kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -83,7 +83,7 @@ discovery_enabled = true
 [llm.profiles.subagent_worker.provider]
 kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -105,7 +105,7 @@ discovery_enabled = true
 [llm.profiles.subagent_explorer.provider]
 kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -127,7 +127,7 @@ discovery_enabled = true
 [llm.profiles.supervised_baseline.provider]
 kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -149,7 +149,7 @@ discovery_enabled = true
 [llm.profiles.supervised_candidate.provider]
 kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -171,7 +171,7 @@ discovery_enabled = true
 [llm.profiles.compression.provider]
 kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -267,7 +267,7 @@ api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
 [llm.model_library.relay_openai_gpt_5_5.provider]
 kind = "relay"
 api_key_env = "OPENAI_API_KEY"
-base_url = "https://pixel.try-chatapi.com/v1"
+base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000

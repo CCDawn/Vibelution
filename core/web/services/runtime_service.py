@@ -534,8 +534,16 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     observed_state = str(workbench.get("observedState") or "closed").strip() or "closed"
     phase = str(workbench.get("phase") or "steady").strip() or "steady"
     failure_message = str(workbench.get("failureMessage") or "").strip()
+    lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "consistent").strip() or "consistent"
+    frontend_orphaned = bool(workbench.get("frontendOrphaned")) or lifecycle_consistency == "orphaned_browser"
 
-    if phase == "failed":
+    if frontend_orphaned:
+        status_line = failure_message or text_for(
+            lang,
+            zh="前端窗口仍在，但后端服务已经离线。",
+            en="The frontend window is still open, but the backend service is offline.",
+        )
+    elif phase == "failed":
         status_line = failure_message or text_for(
             lang,
             zh="工作台生命周期遇到了错误。",
@@ -582,6 +590,9 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
         "backendPortConflict": bool(workbench.get("backendPortConflict")),
         "browserWindowAlive": bool(workbench.get("browserWindowAlive")),
         "browserManaged": bool(workbench.get("browserManaged", True)),
+        "backendMissing": bool(workbench.get("backendMissing")),
+        "frontendOrphaned": frontend_orphaned,
+        "lifecycleConsistency": lifecycle_consistency,
         "url": str(workbench.get("url") or "").strip(),
         "lastReason": str(workbench.get("lastReason") or "").strip(),
         "statusLine": status_line,

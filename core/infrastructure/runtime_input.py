@@ -18,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from typing import Any, Dict
+
 from langchain_core.messages import SystemMessage
 
 
@@ -61,9 +63,13 @@ def build_external_request_message(content: str) -> SystemMessage:
     return SystemMessage(content=f"{EXTERNAL_REQUEST_HEADER}\n{content.strip()}")
 
 
-def build_chat_user_message(content: str) -> SystemMessage:
-    """构建 chat 模式用户输入消息。"""
-    return build_runtime_input_message(RuntimeInput(RuntimeInputKind.CHAT_USER_MESSAGE, content))
+def build_chat_user_message(content: str) -> Dict[str, Any]:
+    """构建 chat 模式用户输入消息。
+
+    Chat 是真实对话入口，必须以 provider user role 进入 LLM payload。
+    """
+    title = _TITLES[RuntimeInputKind.CHAT_USER_MESSAGE]
+    return {"role": "user", "content": f"## {title}\n{content.strip()}"}
 
 
 def build_supervised_evolution_request_message(content: str) -> SystemMessage:

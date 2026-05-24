@@ -19,7 +19,7 @@ from agent import (
 )
 from config import Settings
 from core.infrastructure.llm_utils import parse_tool_args, parse_xml_tool_calls
-from core.infrastructure.runtime_input import build_external_request_message
+from core.infrastructure.runtime_input import build_chat_user_message, build_external_request_message
 from core.prompt_manager import build_restart_focus_state_memory
 from core.orchestration.agent_modes import AgentMode, ModePolicy
 from core.orchestration.delegation_governor import DelegationGovernor
@@ -2528,7 +2528,7 @@ class TestRuntimeStateMemoryFlow:
     def test_prepare_turn_messages_appends_user_message_for_chat_context(self):
         previous = [
             SystemMessage(content="old system"),
-            build_external_request_message("第一句"),
+            build_chat_user_message("第一句"),
             AIMessage(content="第一轮回复"),
         ]
 
@@ -2539,14 +2539,16 @@ class TestRuntimeStateMemoryFlow:
             active_turn_messages=previous,
             active_turn_goal="第一句",
             build_system_message=agent_module.build_system_message,
-            build_external_request_message=build_external_request_message,
+            build_external_request_message=build_chat_user_message,
             allow_append_user_message=True,
         )
 
         assert resumed is True
         assert len(messages) == 4
         assert isinstance(messages[0], dict)
-        assert messages[1:] == previous[1:] + [build_external_request_message("第二句")]
+        assert messages[1:] == previous[1:] + [build_chat_user_message("第二句")]
+        assert messages[-1]["role"] == "user"
+        assert "对话用户输入" in messages[-1]["content"]
 
     def test_finish_turn_message_carryover_keeps_unfinished_context_and_clears_after_close(self):
         messages = [

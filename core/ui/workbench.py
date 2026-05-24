@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 import shutil
@@ -73,12 +74,38 @@ from core.ui.cli_ui import get_ui
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+LOGGER = logging.getLogger(__name__)
+
+
 def _default_workbench_port() -> int:
     return configured_backend_port()
 
 
 CONFIG_PANEL_PORT = _default_workbench_port()
 CONFIG_PANEL_BROWSER_PROFILE_DIR = PROJECT_ROOT / ".runtime" / "config_panel_browser"
+
+
+def _preferred_python_executable() -> str:
+    """Prefer python.exe for background Windows helpers when it is available."""
+
+    project_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    if os.name == "nt" and project_python.exists():
+        LOGGER.debug("Using project venv python.exe for workbench helper: %s", project_python)
+        return str(project_python)
+
+    candidate = Path(sys.executable)
+    if os.name != "nt":
+        LOGGER.debug("Using current interpreter for workbench helper: %s", candidate)
+        return str(candidate)
+    if candidate.name.lower() == "python.exe":
+        LOGGER.debug("Using current python.exe for workbench helper: %s", candidate)
+        return str(candidate)
+    sibling = candidate.with_name("python.exe")
+    if sibling.exists():
+        LOGGER.debug("Using sibling python.exe for workbench helper: %s", sibling)
+        return str(sibling)
+    LOGGER.debug("Falling back to current interpreter for workbench helper: %s", candidate)
+    return str(candidate)
 
 
 def _config_panel_is_ready(url: str, timeout: float = 0.75) -> bool:
@@ -393,7 +420,7 @@ class AgentWorkbenchShell:
         url = f"http://127.0.0.1:{CONFIG_PANEL_PORT}{suffix}"
         health_url = f"http://127.0.0.1:{CONFIG_PANEL_PORT}/api/health"
         cmd = [
-            sys.executable,
+            _preferred_python_executable(),
             str(panel_script),
             "--host",
             "127.0.0.1",

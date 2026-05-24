@@ -21,7 +21,10 @@ const runtimeWorkbenchBase = {
   backendPortOwnerPid: 222,
   backendPortOwnerTrusted: true,
   backendPortConflict: false,
+  backendMissing: false,
   browserWindowAlive: true,
+  frontendOrphaned: false,
+  lifecycleConsistency: "consistent",
 };
 
 function runtimeWithActiveWork(active: {
@@ -159,6 +162,39 @@ describe("systemStatus", () => {
           lastReason: "",
           statusLine: "Failed.",
           failureMessage: "boom",
+        },
+      }),
+    ).toBe("failed");
+
+    expect(
+      deriveRuntimeControllerState({
+        runtimeManager: {
+          running: true,
+          runtimeState: "running",
+          managerPid: 1001,
+          stateVersion: 3,
+        },
+        workbench: {
+          ...runtimeWorkbenchBase,
+          backendAlive: false,
+          backendHealthy: false,
+          backendObserved: false,
+          backendPortListening: false,
+          backendPortOwnerPid: 0,
+          backendPortOwnerTrusted: false,
+          desiredState: "closed",
+          observedState: "open",
+          phase: "steady",
+          backendPid: 0,
+          browserWindowPid: 333,
+          browserManaged: true,
+          backendMissing: true,
+          frontendOrphaned: true,
+          lifecycleConsistency: "orphaned_browser",
+          url: "http://127.0.0.1:8000",
+          lastReason: "",
+          statusLine: "Frontend is orphaned.",
+          failureMessage: "",
         },
       }),
     ).toBe("failed");

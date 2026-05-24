@@ -28,6 +28,7 @@ from .constants import (
 )
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
 from .process_inventory import (
+    list_repo_runtime_processes,
     residual_process_payload,
     terminate_process_descendants,
     terminate_unmanaged_workbench_processes,
@@ -131,6 +132,40 @@ def _workbench_failure_should_stick(state: dict[str, Any], *, desired_state: str
     last_error = state.get("lastError") if isinstance(state.get("lastError"), dict) else {}
     scope = str(last_error.get("scope") or "").strip()
     return not scope or _command_affects_workbench_lifecycle(scope)
+
+
+def _workbench_has_orphaned_browser(observation: dict[str, Any]) -> bool:
+    consistency = str(observation.get("lifecycleConsistency") or "").strip().lower()
+    if consistency == "orphaned_browser" or bool(observation.get("frontendOrphaned")):
+        return True
+    return bool(
+        observation.get("browserManaged", True)
+        and observation.get("browserWindowAlive")
+        and not observation.get("backendObserved")
+        and not observation.get("backendPortListening")
+        and int(observation.get("backendPortOwnerPid") or 0) <= 0
+    )
+
+
+def _workbench_consistency_fields(observation: dict[str, Any]) -> dict[str, Any]:
+    consistency = str(observation.get("lifecycleConsistency") or "").strip() or "consistent"
+    return {
+        "backendMissing": bool(observation.get("backendMissing")) or (
+            str(observation.get("observedState") or "closed") == "open"
+            and not bool(observation.get("backendObserved"))
+        ),
+        "frontendOrphaned": _workbench_has_orphaned_browser(observation),
+        "lifecycleConsistency": consistency,
+    }
+
+
+def _workbench_orphaned_browser_failure_message(observation: dict[str, Any]) -> str:
+    return (
+        "Workbench frontend window is still open, but no backend service is reachable. "
+        f"browserWindowPid={int(observation.get('browserWindowPid') or 0)} "
+        f"backendPid={int(observation.get('backendPid') or 0)} "
+        f"backendPort={int(observation.get('backendPort') or 0)}"
+    )
 
 
 def _open_request_already_satisfied(observation: dict[str, Any], *, no_browser: bool) -> bool:
@@ -507,10 +542,16 @@ def load_runtime_snapshot() -> dict[str, Any]:
     desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"
     observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
     phase = str(workbench.get("phase") or "steady").strip() or "steady"
+    consistency_fields = _workbench_consistency_fields(observation)
+    orphaned_browser = bool(consistency_fields["frontendOrphaned"])
 
     if phase == "failed" and not _workbench_failure_should_stick(state, desired_state=desired_state, observed_state=observed_state):
         phase = "steady"
         workbench["failureMessage"] = ""
+    if orphaned_browser and phase != "closing":
+        desired_state = "closed"
+        phase = "failed"
+        workbench["failureMessage"] = _workbench_orphaned_browser_failure_message(observation)
 
     if (not manager_running or not active_command) and phase != "failed":
         if observed_state == "open" and desired_state != "open":
@@ -544,6 +585,9 @@ def load_runtime_snapshot() -> dict[str, Any]:
             "backendPortConflict": bool(observation.get("backendPortConflict")),
             "browserWindowAlive": bool(observation.get("browserWindowAlive")),
             "browserManaged": bool(observation.get("browserManaged", True)),
+            "backendMissing": bool(consistency_fields["backendMissing"]),
+            "frontendOrphaned": bool(consistency_fields["frontendOrphaned"]),
+            "lifecycleConsistency": str(consistency_fields["lifecycleConsistency"]),
             "sessionId": str(observation.get("sessionId") or "").strip(),
             "url": str(observation.get("url") or workbench.get("url") or "").strip(),
             "phase": phase,
@@ -553,6 +597,7 @@ def load_runtime_snapshot() -> dict[str, Any]:
                 phase=phase,
                 backend_pid=int(observation.get("backendPid") or 0),
                 browser_pid=int(observation.get("browserWindowPid") or 0),
+                lifecycle_consistency=str(consistency_fields["lifecycleConsistency"]),
             ),
         }
     )
@@ -589,7 +634,32 @@ def _snapshot_residual_excluded_pids(
             value = 0
         if value > 0:
             excluded.add(value)
-    return excluded
+    return _expand_excluded_workbench_ancestors(excluded)
+
+
+def _expand_excluded_workbench_ancestors(excluded: set[int]) -> set[int]:
+    try:
+        processes = list_repo_runtime_processes(project_root=PROJECT_ROOT)
+    except Exception:
+        return excluded
+
+    by_pid = {int(item.pid): item for item in processes}
+    expanded = set(excluded)
+    changed = True
+    while changed:
+        changed = False
+        for pid in list(expanded):
+            item = by_pid.get(int(pid))
+            if item is None:
+                continue
+            parent_pid = int(getattr(item, "parent_pid", 0) or 0)
+            parent = by_pid.get(parent_pid)
+            if parent is None or str(getattr(parent, "kind", "") or "") != "unmanaged_workbench":
+                continue
+            if parent_pid not in expanded:
+                expanded.add(parent_pid)
+                changed = True
+    return expanded
 
 
 def _build_workbench_status_line(
@@ -599,8 +669,11 @@ def _build_workbench_status_line(
     phase: str,
     backend_pid: int,
     browser_pid: int,
+    lifecycle_consistency: str = "consistent",
 ) -> str:
     if phase == "failed":
+        if lifecycle_consistency == "orphaned_browser":
+            return "Workbench frontend is orphaned: browser window is open but backend is stopped."
         return "Workbench hit a lifecycle error."
     if desired_state == "closed" and observed_state != "closed":
         return "Runtime manager is closing the workbench."
@@ -699,6 +772,9 @@ def _finalize_daemon_stopped_state(*, manager_pid: int) -> None:
             "backendPortOwnerTrusted": False,
             "backendPortConflict": False,
             "browserWindowAlive": False,
+            "backendMissing": False,
+            "frontendOrphaned": False,
+            "lifecycleConsistency": "consistent",
             "failureMessage": "",
             "statusLine": "Workbench is closed.",
         }
@@ -788,6 +864,7 @@ class RuntimeManagerDaemon:
                 "requestedBy": requested_by,
                 "startedAt": now_iso(),
                 "stopManager": command_type == "close_workbench" and bool(args.get("stopManager")),
+                "noBrowser": command_type == "open_workbench" and bool(args.get("noBrowser")),
             }
         )
         state = self._reconcile_observation(state)
@@ -840,6 +917,7 @@ class RuntimeManagerDaemon:
                 "requestedBy": "",
                 "startedAt": "",
                 "stopManager": False,
+                "noBrowser": False,
             }
         )
         if ok and isinstance(result_data, dict) and bool(result_data.get("stopDaemon")):
@@ -880,6 +958,9 @@ class RuntimeManagerDaemon:
         observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
         phase = str(workbench.get("phase") or "steady").strip() or "steady"
         active_command = str(state.setdefault("command", {}).get("activeCommandId") or "").strip()
+        previous_frontend_orphaned = bool(workbench.get("frontendOrphaned"))
+        consistency_fields = _workbench_consistency_fields(observation)
+        orphaned_browser = bool(consistency_fields["frontendOrphaned"])
 
         if phase == "failed" and not _workbench_failure_should_stick(
             state,
@@ -888,6 +969,23 @@ class RuntimeManagerDaemon:
         ):
             phase = "steady"
             workbench["failureMessage"] = ""
+        if orphaned_browser and phase != "closing":
+            desired_state = "closed"
+            phase = "failed"
+            workbench["failureMessage"] = _workbench_orphaned_browser_failure_message(observation)
+            if not previous_frontend_orphaned:
+                _append_event(
+                    "workbench.consistency.orphaned_browser_detected",
+                    {
+                        "observedState": observed_state,
+                        "browserWindowPid": int(observation.get("browserWindowPid") or 0),
+                        "backendPid": int(observation.get("backendPid") or 0),
+                        "backendPort": int(observation.get("backendPort") or 0),
+                        "backendPortListening": bool(observation.get("backendPortListening")),
+                        "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+                        "sessionId": str(observation.get("sessionId") or "").strip(),
+                    },
+                )
 
         if not active_command and phase != "failed":
             if observed_state == "open" and desired_state != "open":
@@ -927,6 +1025,9 @@ class RuntimeManagerDaemon:
                 "backendPortConflict": bool(observation.get("backendPortConflict")),
                 "browserWindowAlive": bool(observation.get("browserWindowAlive")),
                 "browserManaged": bool(observation.get("browserManaged", True)),
+                "backendMissing": bool(consistency_fields["backendMissing"]),
+                "frontendOrphaned": bool(consistency_fields["frontendOrphaned"]),
+                "lifecycleConsistency": str(consistency_fields["lifecycleConsistency"]),
                 "url": str(observation.get("url") or workbench.get("url") or "").strip(),
                 "statusLine": _build_workbench_status_line(
                     desired_state=desired_state,
@@ -934,6 +1035,7 @@ class RuntimeManagerDaemon:
                     phase=phase,
                     backend_pid=int(observation.get("backendPid") or 0),
                     browser_pid=int(observation.get("browserWindowPid") or 0),
+                    lifecycle_consistency=str(consistency_fields["lifecycleConsistency"]),
                 ),
             }
         )
