@@ -40,10 +40,11 @@ from core.evaluation.self_evolution_workbench import (
 )
 from core.evaluation.chat_dataset_capture import (
     approve_chat_candidate,
+    discard_chat_candidate,
     format_candidate_preview,
     format_structured_sample_preview,
     load_candidate_payload,
-    reject_chat_candidate,
+    record_negative_chat_candidate,
     resolve_chat_dataset_paths,
 )
 from core.evaluation.chat_review_queue import get_review_item, list_review_items
@@ -538,12 +539,14 @@ class AgentWorkbenchShell:
         while True:
             pending = list_review_items(paths.review_queue_path, status="pending")
             total = list_review_items(paths.review_queue_path)
-            approved = [item for item in total if str(item.get("status") or "") == "approved"]
-            rejected = [item for item in total if str(item.get("status") or "") == "rejected"]
+            positive = [item for item in total if str(item.get("status") or "") == "positive"]
+            negative = [item for item in total if str(item.get("status") or "") == "negative"]
+            discarded = [item for item in total if str(item.get("status") or "") == "discard"]
             lines = [
                 f"pending: {len(pending)}",
-                f"approved: {len(approved)}",
-                f"rejected: {len(rejected)}",
+                f"positive: {len(positive)}",
+                f"negative: {len(negative)}",
+                f"discard: {len(discarded)}",
                 "",
             ]
             if pending:
@@ -609,14 +612,15 @@ class AgentWorkbenchShell:
             )
             self.ui.console.print(
                 Panel(
-                    "1. 批准\n"
-                    "2. 拒绝\n"
+                    "1. 标记 positive\n"
+                    "2. 记录 negative\n"
+                    "3. discard\n"
                     "q. 返回",
                     title="审核动作",
                     border_style="cyan",
                 )
             )
-            action = Prompt.ask("请选择", choices=["1", "2", "q"], default="q")
+            action = Prompt.ask("请选择", choices=["1", "2", "3", "q"], default="q")
             if action == "q":
                 self._recent_status = f"已查看 chat 候选：{candidate_id}"
                 return
@@ -631,13 +635,37 @@ class AgentWorkbenchShell:
                 self.ui.console.print(
                     Panel(
                         format_structured_sample_preview(sample),
-                        title="已批准并写入数据集",
+                        title="已记录 positive 样本",
                         border_style="green",
                     )
                 )
-                self._recent_status = f"已批准 chat 候选：{candidate_id}"
+                self._recent_status = f"已记录 positive chat 候选：{candidate_id}"
                 return
-            reject_chat_candidate(
+            if action == "2":
+                reason_code = Prompt.ask("negative reason code（可留空）", default="")
+                error_type = Prompt.ask("error type（可留空）", default="")
+                correct_principle = Prompt.ask("correct principle（可留空）", default="")
+                ideal_behavior = Prompt.ask("ideal behavior（可留空）", default="")
+                sample = record_negative_chat_candidate(
+                    candidate_payload=payload,
+                    project_root=PROJECT_ROOT,
+                    reviewer_note=note,
+                    reason_code=reason_code,
+                    error_type=error_type,
+                    correct_principle=correct_principle,
+                    ideal_behavior=ideal_behavior,
+                    config=self.config,
+                )
+                self.ui.console.print(
+                    Panel(
+                        format_structured_sample_preview(sample),
+                        title="已记录 negative 反例",
+                        border_style="yellow",
+                    )
+                )
+                self._recent_status = f"已记录 negative chat 候选：{candidate_id}"
+                return
+            discard_chat_candidate(
                 candidate_payload=payload,
                 project_root=PROJECT_ROOT,
                 reviewer_note=note,
@@ -645,12 +673,12 @@ class AgentWorkbenchShell:
             )
             self.ui.console.print(
                 Panel(
-                    f"已拒绝候选 {candidate_id}",
+                    f"已 discard 候选 {candidate_id}",
                     title="审核完成",
                     border_style="yellow",
                 )
             )
-            self._recent_status = f"已拒绝 chat 候选：{candidate_id}"
+            self._recent_status = f"已 discard chat 候选：{candidate_id}"
             return
 
     def _run_evolution_history_menu(self):
