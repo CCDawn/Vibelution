@@ -22,6 +22,20 @@ from core.evaluation.dataset_registry import ensure_dataset_registry, materializ
 def test_chat_candidate_capture_writes_raw_and_queue(tmp_path: Path):
     config = AppConfig()
     service = ChatDatasetCaptureService(project_root=tmp_path, config=config)
+    next_state_signals = [
+        {
+            "signalId": "chat-signal-1",
+            "sessionId": "chat_session_demo",
+            "turnId": "turn-2",
+            "source": "user",
+            "kind": "user_continues",
+            "polarity": "neutral",
+            "mode": "directive",
+            "relatedEventCode": "conversation.user_continue_requested",
+            "createdAt": "2026-05-18T12:00:01Z",
+            "summary": "用户请求继续上一轮未完成任务。",
+        }
+    ]
 
     candidate = service.capture_candidate(
         mode="chat",
@@ -45,6 +59,7 @@ def test_chat_candidate_capture_writes_raw_and_queue(tmp_path: Path):
                 had_next_action=True,
             ),
         ],
+        next_state_signals=next_state_signals,
     )
 
     assert candidate is not None
@@ -55,6 +70,8 @@ def test_chat_candidate_capture_writes_raw_and_queue(tmp_path: Path):
     assert queue_items[0]["status"] == "pending"
     payload = load_candidate_payload(candidate.raw_excerpt_path)
     assert payload["structured_sample_preview"]["mode"] == "multiturn_chat"
+    assert payload["next_state_signals"][0]["signalId"] == "chat-signal-1"
+    assert candidate.next_state_signals[0]["kind"] == "user_continues"
 
 
 def test_chat_candidate_file_paths_are_safe_for_unsafe_session_ids(tmp_path: Path):
