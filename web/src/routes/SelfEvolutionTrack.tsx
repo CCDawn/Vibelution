@@ -84,6 +84,18 @@ type ConversationTaskSummary = {
 const WORKTREE_PAGE_SIZE = 10;
 const SELF_SIDEBAR_WIDTH_STORAGE_KEY = "vibelution.self.sidebar.width";
 
+export function pruneSelectedHistoryTxnIds(selectedTxnIds: string[], visibleTxnIds: string[]) {
+  if (selectedTxnIds.length === 0) {
+    return selectedTxnIds;
+  }
+  const visibleSet = new Set(visibleTxnIds);
+  const next = selectedTxnIds.filter((txnId) => visibleSet.has(txnId));
+  if (next.length === selectedTxnIds.length) {
+    return selectedTxnIds;
+  }
+  return next;
+}
+
 function formatRate(value: number | null | undefined) {
   if (typeof value !== "number" || Number.isNaN(value)) {
     return "--";
@@ -328,8 +340,8 @@ export function SelfEvolutionTrack({
   const pauseRequested = controlAction === "pause" || String(latestRun?.runtimeStatus || "").toLowerCase() === "pausing";
   const errorMessage =
     startError || pauseError || resumeError || terminateError || rollbackError || handoffError || deleteHistoryError;
-  const visibleTransactions = transactionItems.slice(0, 8);
-  const visibleAuditTrail = (overview?.auditTail ?? []).slice(-8).reverse();
+  const visibleTransactions = useMemo(() => transactionItems.slice(0, 8), [transactionItems]);
+  const visibleAuditTrail = useMemo(() => (overview?.auditTail ?? []).slice(-8).reverse(), [overview?.auditTail]);
   const visibleTransactionIds = useMemo(
     () => visibleTransactions.map((item) => item.txnId).filter(Boolean),
     [visibleTransactions],
@@ -473,7 +485,7 @@ export function SelfEvolutionTrack({
   }, [latestRun?.messages, overview]);
 
   useEffect(() => {
-    setSelectedHistoryTxnIds((current) => current.filter((txnId) => visibleTransactionIds.includes(txnId)));
+    setSelectedHistoryTxnIds((current) => pruneSelectedHistoryTxnIds(current, visibleTransactionIds));
   }, [visibleTransactionIds]);
 
   function beginSidebarResize(event: ReactPointerEvent<HTMLButtonElement>) {
