@@ -9,7 +9,6 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$preferredPythonwExe = Join-Path $projectDir ".venv\Scripts\pythonw.exe"
 $preferredPythonExe = Join-Path $projectDir ".venv\Scripts\python.exe"
 $launcherPythonOverride = $env:VIBELUTION_PYTHON_EXE
 $requirementsPath = Join-Path $projectDir "requirements.txt"
@@ -81,6 +80,8 @@ $script:currentRuntimeSceneDir = $null
 $script:sceneEventSequence = @{}
 $script:launcherStateWriteMaxAttempts = 25
 $script:launcherStateWriteRetryDelayMilliseconds = 120
+$script:runtimeSceneWriteMaxAttempts = 8
+$script:runtimeSceneWriteRetryDelayMilliseconds = 120
 
 function Set-LauncherEndpoint {
     param(
@@ -528,8 +529,15 @@ function Get-RuntimeScenePackageSummary {
             manifest = "manifest.json"
             timeline = "timeline.jsonl"
             lifecycle = "lifecycle.jsonl"
+            startup = "raw/desktop-entry.log"
         }
         sections = @{
+            startup = @{
+                path = "raw/desktop-entry.log"
+                vbs_path = "raw/desktop-entry-vbs.log"
+                launcher_path = "raw/launcher-control.log"
+                purpose = "Desktop entry, launcher handoff, runtime manager, backend, browser, and supervisor startup breadcrumbs."
+            }
             lifecycle = @{
                 path = "lifecycle.jsonl"
                 purpose = "Workbench startup, shutdown, recovery, supervision, and lifecycle state changes."
@@ -574,6 +582,9 @@ function Get-RuntimeScenePackageSummary {
             recommended_order = @(
                 "summary.json",
                 "package_index.json",
+                "raw/desktop-entry-vbs.log",
+                "raw/desktop-entry.log",
+                "raw/launcher-control.log",
                 "timeline.jsonl",
                 "lifecycle.jsonl",
                 "conversations/",
@@ -789,13 +800,15 @@ function Merge-HashtableRecursively {
 
 function Get-RuntimeSceneRelativePaths {
     return @{
+        DesktopEntry = "raw/desktop-entry.log"
+        DesktopEntryVbs = "raw/desktop-entry-vbs.log"
+        LauncherControl = "raw/launcher-control.log"
         FrontendBuild = "raw/frontend.build.log"
         BackendStdout = "raw/backend.stdout.log"
         BackendStderr = "raw/backend.stderr.log"
         Supervisor = "raw/supervisor.log"
         SupervisorStderr = "raw/supervisor.stderr.log"
         Browser = "raw/browser.log"
-        LauncherControl = "raw/launcher-control.log"
     }
 }
 
@@ -890,15 +903,116 @@ function Save-RuntimeSceneManifest {
             $package.summary_path = "summary.json"
             $Manifest.package = $package
             $packageIndexPath = Get-CurrentRuntimeSceneFilePath "package_index.json"
-            $packageIndex | ConvertTo-Json -Depth 8 | Set-Content -Path $packageIndexPath -Encoding utf8
+            [void](Write-RuntimeSceneJsonFile -Path $packageIndexPath -Value $packageIndex -Depth 8)
             $summary = Get-RuntimeScenePackageSummary -Manifest $Manifest -PackageIndex $packageIndex
             $summaryPath = Get-CurrentRuntimeSceneFilePath "summary.json"
-            $summary | ConvertTo-Json -Depth 12 | Set-Content -Path $summaryPath -Encoding utf8
+            [void](Write-RuntimeSceneJsonFile -Path $summaryPath -Value $summary -Depth 12)
         } catch {
         }
     }
     $manifestPath = Get-CurrentRuntimeSceneFilePath "manifest.json"
-    $Manifest | ConvertTo-Json -Depth 8 | Set-Content -Path $manifestPath -Encoding utf8
+    [void](Write-RuntimeSceneJsonFile -Path $manifestPath -Value $Manifest -Depth 8)
+}
+
+function Write-RuntimeSceneJsonFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        $Value,
+        [int]$Depth = 8
+    )
+
+    $targetDir = Split-Path -Parent $Path
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+
+    $payloadJson = $Value | ConvertTo-Json -Depth $Depth
+    $maxAttempts = [Math]::Max(1, [int]$script:runtimeSceneWriteMaxAttempts)
+    $delayMilliseconds = [Math]::Max(0, [int]$script:runtimeSceneWriteRetryDelayMilliseconds)
+    $lastError = $null
+
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        $tempName = ".{0}.{1}.{2}.tmp" -f (Split-Path -Leaf $Path), $PID, ([guid]::NewGuid().ToString("N"))
+        $tempPath = Join-Path $targetDir $tempName
+        try {
+            $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+            [System.IO.File]::WriteAllText($tempPath, $payloadJson, $utf8NoBom)
+            Move-Item -LiteralPath $tempPath -Destination $Path -Force -ErrorAction Stop
+
+            if ($attempt -gt 1) {
+                Write-LauncherControlLog `
+                    -Event "launcher.runtime_scene.write.recovered" `
+                    -Message "Runtime scene JSON write recovered after retry." `
+                    -Level "warning" `
+                    -Fields @{ path = $Path; attempts = $attempt }
+            }
+            return $true
+        } catch {
+            $lastError = $_.Exception
+            if ($tempPath -and (Test-Path $tempPath)) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+            if ($attempt -lt $maxAttempts) {
+                Start-Sleep -Milliseconds $delayMilliseconds
+            }
+        }
+    }
+
+    $errorMessage = if ($lastError) { $lastError.Message } else { "unknown error" }
+    Write-LauncherControlLog `
+        -Event "launcher.runtime_scene.write.failed" `
+        -Message "Runtime scene JSON write failed after retries." `
+        -Level "warning" `
+        -Fields @{ path = $Path; attempts = $maxAttempts; error = $errorMessage }
+    return $false
+}
+
+function Write-RuntimeSceneTextLine {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [string]$Value,
+        [string]$Kind = "jsonl"
+    )
+
+    $targetDir = Split-Path -Parent $Path
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+    }
+
+    $maxAttempts = [Math]::Max(1, [int]$script:runtimeSceneWriteMaxAttempts)
+    $delayMilliseconds = [Math]::Max(0, [int]$script:runtimeSceneWriteRetryDelayMilliseconds)
+    $lastError = $null
+
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Add-Content -LiteralPath $Path -Value $Value -Encoding utf8 -ErrorAction Stop
+            if ($attempt -gt 1) {
+                Write-LauncherControlLog `
+                    -Event "launcher.runtime_scene.append.recovered" `
+                    -Message "Runtime scene append recovered after retry." `
+                    -Level "warning" `
+                    -Fields @{ path = $Path; kind = $Kind; attempts = $attempt }
+            }
+            return $true
+        } catch {
+            $lastError = $_.Exception
+            if ($attempt -lt $maxAttempts) {
+                Start-Sleep -Milliseconds $delayMilliseconds
+            }
+        }
+    }
+
+    $errorMessage = if ($lastError) { $lastError.Message } else { "unknown error" }
+    Write-LauncherControlLog `
+        -Event "launcher.runtime_scene.append.failed" `
+        -Message "Runtime scene append failed after retries." `
+        -Level "warning" `
+        -Fields @{ path = $Path; kind = $Kind; attempts = $maxAttempts; error = $errorMessage }
+    return $false
 }
 
 function Get-RuntimeSceneManifest {
@@ -948,7 +1062,10 @@ function Append-RuntimeSceneRawLog {
     if (-not (Test-Path $targetDir)) {
         New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
     }
-    Add-Content -Path $targetPath -Value "[$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff'))] $Message" -Encoding utf8
+    [void](Write-RuntimeSceneTextLine `
+        -Path $targetPath `
+        -Value "[$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff'))] $Message" `
+        -Kind "raw_log")
 }
 
 function New-RuntimeSceneRawRef {
@@ -1032,10 +1149,10 @@ function Write-RuntimeSceneEvent {
 
     $eventsPath = Get-CurrentRuntimeSceneFilePath ("events/{0}.jsonl" -f $sequenceKey)
     $payloadJson = $payload | ConvertTo-Json -Depth 8 -Compress
-    $payloadJson | Add-Content -Path $eventsPath -Encoding utf8
-    $payloadJson | Add-Content -Path (Get-CurrentRuntimeSceneFilePath "timeline.jsonl") -Encoding utf8
+    [void](Write-RuntimeSceneTextLine -Path $eventsPath -Value $payloadJson -Kind "component_event")
+    [void](Write-RuntimeSceneTextLine -Path (Get-CurrentRuntimeSceneFilePath "timeline.jsonl") -Value $payloadJson -Kind "timeline")
     if (Test-RuntimeSceneLifecycleEvent -Payload $payload) {
-        $payloadJson | Add-Content -Path (Get-CurrentRuntimeSceneFilePath "lifecycle.jsonl") -Encoding utf8
+        [void](Write-RuntimeSceneTextLine -Path (Get-CurrentRuntimeSceneFilePath "lifecycle.jsonl") -Value $payloadJson -Kind "lifecycle")
     }
 }
 
@@ -1091,6 +1208,8 @@ function Initialize-RuntimeScene {
             conversations_dir = "conversations"
             agent_dir = "agent"
             artifacts_dir = "artifacts"
+            entry_log_path = $rawPaths.DesktopEntry
+            entry_vbs_log_path = $rawPaths.DesktopEntryVbs
             updated_at = $startedAt.ToString("o")
         }
         started_at = $startedAt.ToString("o")
@@ -1125,6 +1244,8 @@ function Initialize-RuntimeScene {
         }
         launcher = @{
             control_log_path = $rawPaths.LauncherControl
+            entry_log_path = $rawPaths.DesktopEntry
+            entry_vbs_log_path = $rawPaths.DesktopEntryVbs
             visible_monitor = "not_started"
         }
         supervisor = @{
@@ -1687,6 +1808,8 @@ namespace VibelutionLauncher {
         private const uint STARTF_USESTDHANDLES = 0x00000100;
         private const uint STARTF_USESHOWWINDOW = 0x00000001;
         private const ushort SW_HIDE = 0;
+        private const uint DETACHED_PROCESS = 0x00000008;
+        private const uint CREATE_NEW_PROCESS_GROUP = 0x00000200;
         private const uint CREATE_NO_WINDOW = 0x08000000;
 
         [StructLayout(LayoutKind.Sequential)]
@@ -1794,7 +1917,7 @@ namespace VibelutionLauncher {
                     IntPtr.Zero,
                     IntPtr.Zero,
                     true,
-                    CREATE_NO_WINDOW,
+                    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                     IntPtr.Zero,
                     workingDirectory,
                     ref startupInfo,
@@ -2019,14 +2142,6 @@ function Get-ProjectPythonCandidates {
 
         $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
         $fileName = [System.IO.Path]::GetFileName($resolvedPath)
-        if ($fileName -ieq "python.exe") {
-            $pythonwSibling = Join-Path ([System.IO.Path]::GetDirectoryName($resolvedPath)) "pythonw.exe"
-            if (Test-Path -LiteralPath $pythonwSibling) {
-                $resolvedPath = (Resolve-Path -LiteralPath $pythonwSibling).Path
-                $Label = "$Label windowless"
-            }
-        }
-
         if (-not $seenPaths.Add($resolvedPath)) {
             return
         }
@@ -2039,7 +2154,6 @@ function Get-ProjectPythonCandidates {
     }
 
     Add-PythonCandidate -Path $launcherPythonOverride -Label "launcher virtual environment"
-    Add-PythonCandidate -Path $preferredPythonwExe -Label "project venv windowless"
     Add-PythonCandidate -Path $preferredPythonExe -Label "project venv"
 
     return $venvCandidates.ToArray()
@@ -2182,6 +2296,7 @@ function Resolve-PythonRuntime {
 
     foreach ($candidate in $venvCandidates) {
         if (Test-PythonRuntime -CommandPath $candidate.FilePath -PrefixArgs $candidate.PrefixArgs) {
+            Write-PythonRuntimeSelectedLog -PythonRuntime $candidate
             return $candidate
         }
     }
@@ -2195,20 +2310,49 @@ function Resolve-PythonRuntime {
 
     $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
     if ($pythonCommand) {
-        [void]$candidates.Add([pscustomobject]@{
-            FilePath = $pythonCommand.Source
-            PrefixArgs = @()
-            Label = "python on PATH"
-        })
+        $resolvedPythonPath = (Resolve-Path -LiteralPath $pythonCommand.Source).Path
+        if (-not @($candidates | Where-Object { $_.FilePath -eq $resolvedPythonPath })) {
+            [void]$candidates.Add([pscustomobject]@{
+                FilePath = $resolvedPythonPath
+                PrefixArgs = @()
+                Label = "python on PATH"
+            })
+        }
     }
 
     foreach ($candidate in $candidates) {
         if (Test-PythonRuntime -CommandPath $candidate.FilePath -PrefixArgs $candidate.PrefixArgs) {
+            Write-PythonRuntimeSelectedLog -PythonRuntime $candidate
             return $candidate
         }
     }
 
     throw "No usable Python runtime was found. Expected one that can import uvicorn."
+}
+
+function Write-PythonRuntimeSelectedLog {
+    param([pscustomobject]$PythonRuntime)
+
+    if (-not $PythonRuntime) {
+        return
+    }
+    $fields = @{
+        path = [string]$PythonRuntime.FilePath
+        label = [string]$PythonRuntime.Label
+    }
+    Write-LauncherControlLog `
+        -Event "launcher.python_runtime.selected" `
+        -Message "Selected Python runtime for launcher-managed work." `
+        -Fields $fields
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "python_dependencies" `
+            -EventCode "launcher.python_runtime.selected" `
+            -Message "Selected Python runtime for launcher-managed work." `
+            -Outcome "succeeded" `
+            -Fields $fields
+    }
 }
 
 function Resolve-EdgeExecutable {
@@ -2457,11 +2601,25 @@ function Get-ManagedBackendCandidatePids {
             [void]$pids.Add($trackedPid)
         }
     }
+    if ($state -and $state.backendLaunchPid) {
+        $trackedLaunchPid = [int]$state.backendLaunchPid
+        if (Test-ProcessAlive $trackedLaunchPid) {
+            [void]$pids.Add($trackedLaunchPid)
+        }
+    }
 
     $listenerPid = Get-ListeningPid $port
     if ($listenerPid) {
         $listenerProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" -ErrorAction SilentlyContinue
-        if ($listenerProcess -and $listenerProcess.CommandLine -and $listenerProcess.CommandLine -match "scripts[\\/]+web_workbench\.py") {
+        $listenerLooksManaged = [bool](
+            $listenerProcess `
+            -and $listenerProcess.CommandLine `
+            -and $listenerProcess.CommandLine -match "scripts[\\/]+web_workbench\.py"
+        )
+        if ((-not $listenerLooksManaged) -and $state -and [int]$state.port -eq $port -and (Test-WebHealthy)) {
+            $listenerLooksManaged = $true
+        }
+        if ($listenerLooksManaged) {
             [void]$pids.Add([int]$listenerPid)
         }
     }
@@ -2518,17 +2676,47 @@ function Test-ManagedBackendAlive {
     return [bool]$liveness.Alive
 }
 
-function Get-ManagedBrowserProcesses {
+function Get-ManagedBrowserCandidatePids {
+    $pids = New-Object System.Collections.Generic.List[int]
+    $state = Get-State
+    if ($state -and $state.browserWindowPid) {
+        $trackedWindowPid = [int]$state.browserWindowPid
+        if (Test-ProcessAlive $trackedWindowPid) {
+            [void]$pids.Add($trackedWindowPid)
+        }
+    }
+    if ($state -and $state.browserLaunchPid) {
+        $trackedLaunchPid = [int]$state.browserLaunchPid
+        if (Test-ProcessAlive $trackedLaunchPid) {
+            [void]$pids.Add($trackedLaunchPid)
+        }
+    }
+
     Ensure-Directories
     $profileMarker = [regex]::Escape([System.IO.Path]::GetFullPath($browserProfileDir))
-
-    return @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+    $profileProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
         $_.Name -ieq "msedge.exe" -and $_.CommandLine -and $_.CommandLine -match $profileMarker
     })
+    foreach ($process in $profileProcesses) {
+        [void]$pids.Add([int]$process.ProcessId)
+    }
+
+    return @($pids | Sort-Object -Unique)
+}
+
+function Get-ManagedBrowserProcesses {
+    $candidatePids = @(Get-ManagedBrowserCandidatePids)
+    if ($candidatePids.Count -eq 0) {
+        return @()
+    }
+
+    return @(Get-Process -Id $candidatePids -ErrorAction SilentlyContinue | Where-Object {
+        $_.ProcessName -ieq "msedge"
+    } | Sort-Object Id -Unique)
 }
 
 function Get-ManagedBrowserPids {
-    return @(Get-ManagedBrowserProcesses | ForEach-Object { [int]$_.ProcessId } | Sort-Object -Unique)
+    return @(Get-ManagedBrowserProcesses | ForEach-Object { [int]$_.Id } | Sort-Object -Unique)
 }
 
 function Get-ManagedBrowserWindowProcesses {
@@ -2608,24 +2796,82 @@ namespace VibelutionLauncher {
 function Focus-ManagedBrowserWindow {
     $windowProcess = Get-ManagedBrowserWindowProcess
     if (-not $windowProcess) {
+        Write-LauncherControlLog `
+            -Event "launcher.browser.focus.failed" `
+            -Message "No managed browser window was available to focus." `
+            -Level "warning" `
+            -Fields @{
+                reason = "window_not_found"
+                browser_pids = @(Get-ManagedBrowserPids)
+            }
+        if ($script:currentRuntimeSceneId) {
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "window" `
+                -EventCode "launcher.browser.focus.failed" `
+                -Message "No managed browser window was available to focus." `
+                -Level "warning" `
+                -Outcome "failed" `
+                -Fields @{
+                    reason = "window_not_found"
+                    browser_pids = @(Get-ManagedBrowserPids)
+                }
+        }
         return $false
     }
 
+    $showWindowResult = $false
+    $setForegroundResult = $false
+    $appActivateResult = $false
+    $focusError = ""
     Ensure-WinApi
     try {
-        [VibelutionLauncher.WinApi]::ShowWindowAsync([IntPtr]$windowProcess.MainWindowHandle, 9) | Out-Null
+        $showWindowResult = [bool][VibelutionLauncher.WinApi]::ShowWindowAsync([IntPtr]$windowProcess.MainWindowHandle, 9)
         Start-Sleep -Milliseconds 120
-        [VibelutionLauncher.WinApi]::SetForegroundWindow([IntPtr]$windowProcess.MainWindowHandle) | Out-Null
+        $setForegroundResult = [bool][VibelutionLauncher.WinApi]::SetForegroundWindow([IntPtr]$windowProcess.MainWindowHandle)
     } catch {
+        $focusError = $_.Exception.Message
     }
 
     try {
         $wshShell = New-Object -ComObject WScript.Shell
-        $wshShell.AppActivate($windowProcess.Id) | Out-Null
+        $appActivateResult = [bool]$wshShell.AppActivate($windowProcess.Id)
     } catch {
+        if (-not $focusError) {
+            $focusError = $_.Exception.Message
+        }
     }
 
-    return $true
+    $focused = [bool]($showWindowResult -or $setForegroundResult -or $appActivateResult)
+    $fields = @{
+        window_pid = [int]$windowProcess.Id
+        main_window_handle = [string]$windowProcess.MainWindowHandle
+        show_window = [bool]$showWindowResult
+        set_foreground = [bool]$setForegroundResult
+        app_activate = [bool]$appActivateResult
+    }
+    if ($focusError) {
+        $fields.error = $focusError
+    }
+
+    Write-LauncherControlLog `
+        -Event $(if ($focused) { "launcher.browser.focus.succeeded" } else { "launcher.browser.focus.failed" }) `
+        -Message $(if ($focused) { "Managed browser window focus was requested." } else { "Managed browser window focus request did not report success." }) `
+        -Level $(if ($focused) { "info" } else { "warning" }) `
+        -Fields $fields
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "window" `
+            -EventCode $(if ($focused) { "launcher.browser.focus.succeeded" } else { "launcher.browser.focus.failed" }) `
+            -Message $(if ($focused) { "Managed browser window focus was requested." } else { "Managed browser window focus request did not report success." }) `
+            -Level $(if ($focused) { "info" } else { "warning" }) `
+            -Outcome $(if ($focused) { "succeeded" } else { "failed" }) `
+            -Fields $fields `
+            -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).LauncherControl -TailLines 80)
+    }
+
+    return $focused
 }
 
 function Start-ManagedBackend {
@@ -2955,12 +3201,17 @@ function Adopt-Or-FocusSession {
         if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
             Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
         }
+        $backendLaunchPid = if ($Snapshot.State -and $Snapshot.State.backendLaunchPid) {
+            [int]$Snapshot.State.backendLaunchPid
+        } else {
+            [int]$Snapshot.BackendPid
+        }
         $managedSessionId = [guid]::NewGuid().ToString()
         $supervisorPid = Start-Supervisor -ManagedSessionId $managedSessionId
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
             -BackendPid $Snapshot.BackendPid `
-            -BackendLaunchPid $Snapshot.BackendPid `
+            -BackendLaunchPid $backendLaunchPid `
             -PythonRuntime $null `
             -BrowserExecutable $null `
             -BrowserLaunchPid 0 `
@@ -2972,14 +3223,79 @@ function Adopt-Or-FocusSession {
     Write-Note "Vibelution is already running. Focusing the existing app window."
     if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
         Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
+        $focusResult = [bool](Focus-ManagedBrowserWindow)
         Write-RuntimeSceneEvent `
             -Component "launcher" `
             -Phase "session" `
-            -EventCode "runtime.scene.focused" `
-            -Message "Focused the existing managed session." `
-            -Outcome "observed"
+            -EventCode $(if ($focusResult) { "runtime.scene.focused" } else { "runtime.scene.focus.failed" }) `
+            -Message $(if ($focusResult) { "Focused the existing managed session." } else { "Failed to focus the existing managed session." }) `
+            -Level $(if ($focusResult) { "info" } else { "warning" }) `
+            -Outcome $(if ($focusResult) { "succeeded" } else { "failed" })
+    } else {
+        [void](Focus-ManagedBrowserWindow)
+        return $true
     }
-    [void](Focus-ManagedBrowserWindow)
+    return $true
+}
+
+function Complete-HeadlessSessionWithBrowser {
+    param([pscustomobject]$Snapshot)
+
+    if (-not $Snapshot -or -not $Snapshot.BackendHealthy -or $Snapshot.BrowserWindowCount -gt 0) {
+        return $false
+    }
+
+    Write-Note "A healthy backend is already running without a browser. Opening the managed app window."
+    if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
+        Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
+    } else {
+        Initialize-RuntimeScene -Trigger $Action -BrowserManaged $true
+    }
+
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "session" `
+            -EventCode "runtime.scene.headless_upgrade.started" `
+            -Message "Upgrading a healthy headless backend into a managed browser session." `
+            -Outcome "started" `
+            -Fields @{ backend_pid = $Snapshot.BackendPid; url = $url }
+    }
+
+    $browserExecutable = Resolve-EdgeExecutable
+    $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable
+    $managedSessionId = if ($Snapshot.State -and $Snapshot.State.sessionId) {
+        [string]$Snapshot.State.sessionId
+    } else {
+        [guid]::NewGuid().ToString()
+    }
+    $backendLaunchPid = if ($Snapshot.State -and $Snapshot.State.backendLaunchPid) {
+        [int]$Snapshot.State.backendLaunchPid
+    } else {
+        [int]$Snapshot.BackendPid
+    }
+    $supervisorPid = Start-Supervisor -ManagedSessionId $managedSessionId
+
+    Save-SessionState `
+        -ManagedSessionId $managedSessionId `
+        -BackendPid $Snapshot.BackendPid `
+        -BackendLaunchPid $backendLaunchPid `
+        -PythonRuntime $null `
+        -BrowserExecutable $browserExecutable `
+        -BrowserLaunchPid $browserInfo.LaunchPid `
+        -BrowserWindowPid $browserInfo.WindowPid `
+        -SupervisorPid $supervisorPid `
+        -BrowserManaged $true
+
+    $focusResult = [bool](Focus-ManagedBrowserWindow)
+    Write-RuntimeSceneEvent `
+        -Component "launcher" `
+        -Phase "session" `
+        -EventCode "runtime.scene.headless_upgrade.succeeded" `
+        -Message "Healthy headless backend is now attached to a managed browser window." `
+        -Outcome "succeeded" `
+        -Fields @{ url = $url; backend_pid = $Snapshot.BackendPid; browser_window_pid = $browserInfo.WindowPid; supervisor_pid = $supervisorPid; focus_requested = $focusResult }
+    Write-Note "Vibelution is live in a managed Edge app window at $url"
     return $true
 }
 
@@ -2992,11 +3308,95 @@ function Stop-ManagedBrowserProcesses {
         }
     }
     Start-Sleep -Milliseconds 600
-    Stop-ProcessesById (Get-ManagedBrowserPids)
+
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        $browserPids = @(Get-ManagedBrowserPids)
+        if ($browserPids.Count -eq 0) {
+            return
+        }
+
+        if ($attempt -gt 1) {
+            Write-LauncherControlLog `
+                -Event "launcher.browser.stop.retry" `
+                -Message "Managed browser processes were still alive after a stop attempt." `
+                -Level "warning" `
+                -Fields @{
+                    attempt = $attempt
+                    browser_pids = @($browserPids)
+                    window_pids = @($windowProcesses | ForEach-Object { [int]$_.Id })
+                }
+        }
+
+        Stop-ProcessesById $browserPids
+        Start-Sleep -Milliseconds $(if ($attempt -eq 1) { 450 } else { 650 })
+    }
+
+    $remainingPids = @(Get-ManagedBrowserPids)
+    if ($remainingPids.Count -gt 0) {
+        Write-LauncherControlLog `
+            -Event "launcher.browser.stop.incomplete" `
+            -Message "Managed browser processes were still present after repeated stop attempts." `
+            -Level "error" `
+            -Fields @{
+                browser_pids = @($remainingPids)
+                window_pids = @($windowProcesses | ForEach-Object { [int]$_.Id })
+            }
+    }
 }
 
 function Stop-ManagedBackendProcesses {
-    Stop-ProcessesById (Get-ManagedBackendCandidatePids)
+    $candidatePids = @(Get-ManagedBackendCandidatePids)
+    Write-LauncherControlLog `
+        -Event "launcher.backend.stop.requested" `
+        -Message "Stopping managed backend candidates." `
+        -Fields @{
+            candidate_pids = @($candidatePids)
+            port = $port
+        }
+    Stop-ProcessesById $candidatePids
+    $state = Get-State
+    $remainingPortPid = Get-ListeningPid $port
+    if (-not $remainingPortPid) {
+        return [pscustomobject]@{
+            CandidatePids = @($candidatePids)
+            RemainingPortPid = $null
+            RemainingLooksManaged = $false
+            RemainingHealthy = $false
+            PortOwnerStopped = $false
+        }
+    }
+
+    $remainingProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $remainingPortPid" -ErrorAction SilentlyContinue
+    $remainingHealthy = [bool](Test-WebHealthy)
+    $remainingLooksManaged = [bool](
+        $remainingProcess `
+        -and $remainingProcess.CommandLine `
+        -and $remainingProcess.CommandLine -match "scripts[\\/]+web_workbench\.py"
+    )
+    if ((-not $remainingLooksManaged) -and $state -and [int]$state.port -eq $port -and $remainingHealthy) {
+        $remainingLooksManaged = $true
+    }
+    Write-LauncherControlLog `
+        -Event "launcher.backend.stop.port_owner_detected" `
+        -Message "Backend port still had a listener after stopping tracked candidates." `
+        -Level $(if ($remainingLooksManaged) { "warning" } else { "error" }) `
+        -Fields @{
+            candidate_pids = @($candidatePids)
+            port_owner_pid = [int]$remainingPortPid
+            remaining_looks_managed = [bool]$remainingLooksManaged
+            remaining_healthy = [bool]$remainingHealthy
+            port = $port
+        }
+    if ($remainingLooksManaged) {
+        Stop-ProcessesById @([int]$remainingPortPid)
+    }
+    return [pscustomobject]@{
+        CandidatePids = @($candidatePids)
+        RemainingPortPid = [int]$remainingPortPid
+        RemainingLooksManaged = [bool]$remainingLooksManaged
+        RemainingHealthy = [bool]$remainingHealthy
+        PortOwnerStopped = [bool]$remainingLooksManaged
+    }
 }
 
 function Get-ManagedSessionClosureSnapshot {
@@ -3007,7 +3407,8 @@ function Get-ManagedSessionClosureSnapshot {
     $phase = [string](Get-ObjectPropertyValue -Object $workbench -Name "phase" -Default "")
     $failureMessage = [string](Get-ObjectPropertyValue -Object $workbench -Name "failureMessage" -Default "")
     $portOwnerPid = Get-ListeningPid $port
-    $backendRunning = ($snapshot.BackendPids.Count -gt 0) -or [bool]$portOwnerPid -or (Test-WebHealthy)
+    $backendHealthy = [bool](Test-WebHealthy)
+    $backendRunning = ($snapshot.BackendPids.Count -gt 0) -or [bool]$portOwnerPid -or $backendHealthy
     $browserRunning = ($snapshot.BrowserPids.Count -gt 0) -or ($snapshot.BrowserWindowCount -gt 0)
     $managerClosed = if ($workbench) {
         $desiredState -eq "closed" -and $observedState -eq "closed" -and $phase -eq "steady"
@@ -3020,6 +3421,7 @@ function Get-ManagedSessionClosureSnapshot {
         BrowserStopped = -not $browserRunning
         ManagerClosed = [bool]$managerClosed
         BackendPids = @($snapshot.BackendPids)
+        BackendHealthy = [bool]$backendHealthy
         BrowserPids = @($snapshot.BrowserPids)
         BrowserWindowCount = [int]$snapshot.BrowserWindowCount
         PortOwnerPid = $portOwnerPid
@@ -3056,6 +3458,7 @@ function Write-ManagedSessionClosureRecord {
         reason = $Reason
         source = $Source
         backend_stopped = [bool]$Closure.BackendStopped
+        backend_healthy = [bool]$Closure.BackendHealthy
         browser_stopped = [bool]$Closure.BrowserStopped
         manager_closed = [bool]$Closure.ManagerClosed
         backend_pids = @($Closure.BackendPids)
@@ -3115,6 +3518,7 @@ function Write-ManagedSessionClosureRecord {
             backend = @{
                 health_status = if ($Closure.BackendStopped) { "stopped" } else { "failed_to_stop" }
                 remaining_pids = @($Closure.BackendPids)
+                healthy_after_stop = [bool]$Closure.BackendHealthy
                 port_owner_pid = $Closure.PortOwnerPid
             }
             browser = @{
@@ -3179,7 +3583,7 @@ function Stop-ManagedSession {
             }
         }
     }
-    Stop-ManagedBackendProcesses
+    $backendStopTrace = Stop-ManagedBackendProcesses
     $backendStopped = Wait-ForPortClosed -Port $port
 
     if ($supervisorPid -and $supervisorPid -ne $selfProcessId) {
@@ -3189,7 +3593,7 @@ function Stop-ManagedSession {
     $browserStopped = $true
     if ($backendStopped) {
         Stop-ManagedBrowserProcesses
-        $browserStopped = Wait-ForBrowserStopped
+        $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20
     }
 
     $closure = Get-ManagedSessionClosureSnapshot
@@ -3204,7 +3608,11 @@ function Stop-ManagedSession {
             -Fields @{
                 reason = $Reason
                 backend_stopped = [bool]$closure.BackendStopped
+                backend_healthy = [bool]$closure.BackendHealthy
+                backend_stop_trace = $backendStopTrace
+                backend_pids = @($closure.BackendPids)
                 browser_stopped = [bool]$closure.BrowserStopped
+                browser_pids = @($closure.BrowserPids)
                 manager_closed = [bool]$closure.ManagerClosed
                 port_owner_pid = $closure.PortOwnerPid
             }
@@ -3308,6 +3716,24 @@ function Start-ManagedSession {
     $snapshot = Get-SessionSnapshot
     $restartReason = Get-SessionRestartReason -Snapshot $snapshot
 
+    Write-LauncherControlLog `
+        -Event "launcher.session.snapshot" `
+        -Message "Launcher evaluated the managed session before starting." `
+        -Fields @{
+            action = $Action
+            no_browser = [bool]$NoBrowser
+            backend_pid = $snapshot.BackendPid
+            backend_pids = @($snapshot.BackendPids)
+            backend_healthy = [bool]$snapshot.BackendHealthy
+            browser_pids = @($snapshot.BrowserPids)
+            browser_window_count = [int]$snapshot.BrowserWindowCount
+            browser_window_pid = $snapshot.BrowserWindowPid
+            supervisor_pid = $snapshot.SupervisorPid
+            session_running = [bool]$snapshot.SessionRunning
+            state_present = [bool]$snapshot.State
+            restart_reason = $restartReason
+        }
+
     if ($snapshot.SessionRunning -and -not $restartReason) {
         if (Adopt-Or-FocusSession -Snapshot $snapshot) {
             return
@@ -3316,6 +3742,12 @@ function Start-ManagedSession {
         Write-Note "Restarting the managed session because $restartReason."
         Stop-ManagedSession -Reason $restartReason
         $snapshot = Get-SessionSnapshot
+    }
+
+    if ((-not $NoBrowser) -and $snapshot.BackendHealthy -and $snapshot.BrowserWindowCount -eq 0) {
+        if (Complete-HeadlessSessionWithBrowser -Snapshot $snapshot) {
+            return
+        }
     }
 
     if ($snapshot.BackendPids.Count -gt 0 -or $snapshot.BrowserPids.Count -gt 0 -or $snapshot.State) {
@@ -3387,14 +3819,14 @@ function Start-ManagedSession {
             -SupervisorPid $supervisorPid `
             -BrowserManaged $true
 
-        [void](Focus-ManagedBrowserWindow)
+        $focusResult = [bool](Focus-ManagedBrowserWindow)
         Write-RuntimeSceneEvent `
             -Component "launcher" `
             -Phase "session" `
             -EventCode "runtime.scene.ready" `
             -Message "Managed runtime scene is ready." `
             -Outcome "succeeded" `
-            -Fields @{ url = $url; backend_pid = $backendProc.Id; browser_window_pid = $browserInfo.WindowPid; supervisor_pid = $supervisorPid }
+            -Fields @{ url = $url; backend_pid = $backendProc.Id; browser_window_pid = $browserInfo.WindowPid; supervisor_pid = $supervisorPid; focus_requested = $focusResult }
         Write-Note "Vibelution is live in a managed Edge app window at $url"
     } catch {
         if ($script:currentRuntimeSceneId) {

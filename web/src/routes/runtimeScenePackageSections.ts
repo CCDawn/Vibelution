@@ -1,6 +1,7 @@
 import type { RuntimeSceneDetail, RuntimeSceneRawFile } from "../api/types";
 
 export type RuntimeScenePackageSectionId =
+  | "startup"
   | "conversations"
   | "supervised"
   | "selfEvolution"
@@ -46,10 +47,25 @@ function isAgentEventFile(file: RuntimeSceneRawFile) {
   return ["events/llm.jsonl", "events/tool_executor.jsonl", "events/work_run.jsonl"].includes(file.path);
 }
 
+function isStartupFile(file: RuntimeSceneRawFile) {
+  return (
+    file.path === "raw/desktop-entry.log" ||
+    file.path === "raw/desktop-entry-vbs.log" ||
+    file.path === "raw/launcher-control.log" ||
+    file.path === "events/launcher.jsonl" ||
+    file.path === "events/frontend.jsonl" ||
+    file.path === "events/backend.jsonl" ||
+    file.path === "events/browser.jsonl" ||
+    file.path === "events/supervisor.jsonl"
+  );
+}
+
 export function runtimeScenePackageSections(scene: RuntimeSceneDetail): RuntimeScenePackageSection[] {
   const eventLogs = [...(scene.eventLogs ?? [])];
   const conversationLogs = [...scene.conversationLogs, ...eventLogs.filter(isConversationEventFile)].sort(byPath);
   const rawFiles = [...scene.rawFiles].sort(byPath);
+  const startupLogs = [...rawFiles.filter(isStartupFile), ...eventLogs.filter(isStartupFile)].sort(byPath);
+  const otherRawFiles = rawFiles.filter((file) => !isStartupFile(file));
   const supervisedLogs = [
     ...scene.agentLogs.filter(isSupervisedFile),
     ...scene.artifacts.filter(isSupervisedFile),
@@ -68,6 +84,7 @@ export function runtimeScenePackageSections(scene: RuntimeSceneDetail): RuntimeS
     .filter(
       (file) =>
         !isConversationEventFile(file) &&
+        !isStartupFile(file) &&
         !isSupervisedFile(file) &&
         !isSelfEvolutionFile(file) &&
         !isAgentEventFile(file),
@@ -78,6 +95,14 @@ export function runtimeScenePackageSections(scene: RuntimeSceneDetail): RuntimeS
     .sort(byPath);
 
   return [
+    {
+      id: "startup",
+      titleZh: "启动流程",
+      titleEn: "Startup",
+      emptyZh: "本周期没有记录脚本启动流程。",
+      emptyEn: "No startup flow breadcrumbs were recorded in this cycle.",
+      files: startupLogs,
+    },
     {
       id: "conversations",
       titleZh: "对话日志",
@@ -124,7 +149,7 @@ export function runtimeScenePackageSections(scene: RuntimeSceneDetail): RuntimeS
       titleEn: "System Raw Logs",
       emptyZh: "本周期没有系统原始日志。",
       emptyEn: "No system raw logs were recorded in this cycle.",
-      files: rawFiles,
+      files: otherRawFiles,
     },
     {
       id: "artifacts",
