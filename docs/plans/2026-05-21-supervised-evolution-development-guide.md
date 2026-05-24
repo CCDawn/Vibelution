@@ -51,7 +51,7 @@
 - `score_breakdown` 已成为 case-level decision schema v1，并从现有 harness metrics 派生 `final_state_score`、`side_effect_score`、`trace_score`、`safety_score`、`semantic_score`、`overall_score`；dynamic/impossible case 若在 harness `evolution_summary` 中提供实际 `final_state` 或 `infeasible_outcome`，会额外写入 `expected_outcome_score` 并让 semantic score 反映 expected outcome 核验。后续若接入语义裁判，必须保持旧字段兼容。
 - `failure_taxonomy` 已从 `difference_reasons`、LLM failure category 和 expected outcome verification 派生，覆盖事务、restart、LLM failure、状态回归/改善、成本噪声、dynamic/impossible schema 风险、actual evidence missing 与 expected outcome mismatch。stale-state execution 和真正的动态 benchmark 判分仍需后续扩展。
 - `evidence_paths` 已进入 case summary、policy case evidence、proposal 和 Web case diagnostics，当前统一引用 role report、worktree、新 conversation/debug 文件；`intake_provenance` 已补上 case 来源和准入边界，但 Gym trace/diff/log artifact map 仍可继续补强。
-- 动态 case 与不可完成 case 已有 dataset schema、最小监督 run 记录路径和 expected outcome verification decision path；但现有 dry-run 仍更偏事务、restart、validation、LLM failure 与安全边界，还缺一组明确的 temporal/spatial/impossible/replanning fixture 和真实动态执行判分。
+- 动态 case 与不可完成 case 已有 dataset schema、最小监督 run 记录路径、expected outcome verification decision path 和 harness fixture marker 提取；内置 dry-run bundle 已包含 `dynamic_replanning_fixture` 与 `impossible_task_fixture`，可分别产出 `final_state` / `infeasible_outcome` 作为监督核验证据。现有 fixture 仍是轻量可回放探针，还不是完整 STT-Arena 风格动态执行器。
 - PROMOTE 与 accepted baseline 的边界需要更清楚地写入文档和 UI/API 语义：当前 supervised selection policy 可更新监督侧 accepted baseline registry 与 bundle baseline，这仍是 frozen evaluator / supervision artifact，不代表 runtime prompt、模型配置或线上行为已生效。
 - `proposal_action` 目前有审计和生命周期记录，但尚未统一登记为独立 `WorkRun(proposal_action)`；如果后续要和共享底座完全对齐，需要补这个 run kind 或等价 lifecycle event。
 
@@ -414,7 +414,9 @@ pytest tests/test_web_app.py -k "proposal or delete or action or auto_review_mod
 - 已完成最小 materialization：dynamic/impossible JSONL row 会校验 provenance 与 expected outcome，并写入 materialized bundle。
 - 已完成最小 decision path：`CaseDecisionSummary`、policy case evidence 和 proposal 会保留 `case_type`、expected final/infeasible outcome、dynamic events、expected outcome verification、score breakdown、failure taxonomy 和 evidence paths。
 - 已完成最小核验路径：dynamic case 从 harness `evolution_summary.final_state` / `post_adaptation_final_state` / `observed_final_state` 读取实际最终状态；impossible case 从 `evolution_summary.infeasible_outcome` / `observed_infeasible_outcome` 读取实际不可完成结果；核验采用 expected dict 子集匹配，缺证据或 mismatch 会进入 taxonomy 与 score breakdown。
-- 尚未完成真实 STT-Arena 风格动态执行器；当前 expected outcome verification 只能核验 harness 已产出的状态证据，不能替代完整动态 benchmark。
+- 已完成最小 harness fixture：`scripts/evolution_harness.py` 新增 `dynamic_replanning_fixture` 与 `impossible_task_fixture` scenario，要求 agent 在最终回复输出单行 JSON marker：`SUPERVISED_FINAL_STATE: {...}` 或 `SUPERVISED_INFEASIBLE_OUTCOME: {...}`；`infer_evolution_summary()` 会提取 marker 并写入顶层 `final_state` / `infeasible_outcome` 与 `supervised` 子对象，供监督 decision path 使用。
+- 已完成内置 dry-run 接入：`supervised_evolution_dry_run_v1` 新增 dynamic/impossible fixture case，携带 provenance、expected outcome 和 dynamic events。
+- 尚未完成真实 STT-Arena 风格动态执行器；当前 fixture 只能提供稳定 outcome marker 与最小核验闭环，不能替代完整动态 benchmark。
 
 建议 case 类型：
 
