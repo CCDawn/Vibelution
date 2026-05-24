@@ -888,6 +888,81 @@ def test_request_stop_self_evolution_run_closes_file_only_queued_run(monkeypatch
     assert persisted["payload"]["status"] == "cancelled"
 
 
+def test_finalize_terminal_self_evolution_run_records_experience(monkeypatch):
+    run_id = "web-self-experience"
+    calls: list[dict[str, object]] = []
+    events: list[dict[str, object]] = []
+    with service._RUN_STATE_LOCK:
+        service._RUN_STATES[run_id] = {
+            "runId": run_id,
+            "goal": "learn from terminal run",
+            "status": "failed",
+            "phase": "failed",
+            "startedAt": "2026-05-18T12:00:00Z",
+            "updatedAt": "2026-05-18T12:02:00Z",
+            "finishedAt": "2026-05-18T12:02:00Z",
+            "latestMessage": "pytest failed",
+            "currentGoal": "learn from terminal run",
+            "lastToolName": "pytest",
+            "runtimeStatus": "failed",
+            "toolCallCount": 2,
+            "summary": "A bounded run failed during verification.",
+            "error": "pytest failed",
+            "cancelRequested": False,
+            "cancelRequestedAt": "",
+            "stopReason": "",
+            "controlAction": "",
+            "controlRequestedAt": "",
+            "messages": [],
+            "turnCount": 1,
+            "resumeCount": 0,
+            "rollback": {
+                "status": "unavailable",
+                "reason": "",
+                "baseRev": "",
+                "rolledBackAt": "",
+                "entryCount": 0,
+                "touchedFiles": [],
+                "conflictFiles": [],
+                "blockedHint": "",
+            },
+            "artifacts": {
+                "manifestPath": "workspace/self_evolution/rollback/web-self-experience/manifest.json",
+            },
+        }
+        service._RUN_INTERNALS[run_id] = {"preflight": {"manifestPath": ""}}
+
+    monkeypatch.setattr(service, "_finalize_rollback_manifest", lambda loaded_run_id, preflight: None)
+
+    def fake_record(snapshot: dict, *, rollback: dict | None = None, project_root=None):
+        calls.append({"snapshot": copy.deepcopy(snapshot), "rollback": copy.deepcopy(rollback)})
+        return SimpleNamespace(
+            record={"experience_id": "exp_test", "dedupe_key": f"self_terminal:{snapshot['runId']}"},
+            created=True,
+        )
+
+    monkeypatch.setattr(service, "record_terminal_self_evolution_experience", fake_record)
+    monkeypatch.setattr(
+        service,
+        "_record_self_scene_event",
+        lambda phase, event_code, **kwargs: events.append(
+            {"phase": phase, "event_code": event_code, **copy.deepcopy(kwargs)}
+        ),
+    )
+
+    manifest = service._finalize_terminal_run_snapshot(run_id)
+
+    assert manifest is None
+    assert len(calls) == 1
+    recorded = calls[0]["snapshot"]
+    assert recorded["runId"] == run_id
+    assert recorded["status"] == "failed"
+    assert calls[0]["rollback"] is None
+    assert events[-1]["phase"] == "experience"
+    assert events[-1]["event_code"] == "self_evolution_run.experience_recorded"
+    assert events[-1]["fields"]["dedupeKey"] == f"self_terminal:{run_id}"
+
+
 def test_resume_self_evolution_run_requeues_paused_run(monkeypatch):
     run_id = "web-self-resume"
     submitted: list[dict[str, str]] = []

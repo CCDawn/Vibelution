@@ -17,6 +17,9 @@ from typing import Any
 from uuid import uuid4
 
 from core.evaluation import DEFAULT_SELF_EVOLUTION_GOAL, build_self_evolution_run_prompt
+from core.evaluation.self_evolution_experience_repository import (
+    record_terminal_self_evolution_experience,
+)
 from core.infrastructure.agent_session import get_session_state
 from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
@@ -1169,6 +1172,8 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
             manifest = _finalize_rollback_manifest(run_id, preflight)
             if manifest is not None:
                 _merge_run_state(run_id, {"rollback": manifest})
+                state = get_self_evolution_run_snapshot(run_id) or state
+            _record_terminal_self_evolution_experience(run_id, state, manifest)
             _clear_run_internal(run_id)
 
 
@@ -1478,8 +1483,60 @@ def _finalize_terminal_run_snapshot(run_id: str) -> dict[str, Any] | None:
     internal = _get_run_internal(run_id)
     preflight = internal.get("preflight") if isinstance(internal.get("preflight"), dict) else {}
     manifest = _finalize_rollback_manifest(run_id, preflight)
+    snapshot = get_self_evolution_run_snapshot(run_id) or {}
+    _record_terminal_self_evolution_experience(run_id, snapshot, manifest)
     _clear_run_internal(run_id)
     return manifest
+
+
+def _record_terminal_self_evolution_experience(
+    run_id: str,
+    snapshot: dict[str, Any],
+    rollback: dict[str, Any] | None,
+) -> None:
+    if not isinstance(snapshot, dict):
+        return
+    status = str(snapshot.get("status") or "").strip().lower()
+    if status not in _RUN_FINAL_STATUSES:
+        return
+    try:
+        result = record_terminal_self_evolution_experience(
+            snapshot,
+            rollback=rollback,
+            project_root=PROJECT_ROOT,
+        )
+    except Exception as exc:  # pragma: no cover - defensive diagnostics
+        _record_self_scene_event(
+            "experience",
+            "self_evolution_run.experience_record_failed",
+            run_id=run_id,
+            message=f"Failed to record self-evolution terminal experience: {type(exc).__name__}",
+            level="warning",
+            outcome="failed",
+            fields={
+                "errorType": type(exc).__name__,
+                "status": status,
+            },
+            lifecycle=True,
+        )
+        return
+
+    record = result.record if hasattr(result, "record") else {}
+    _record_self_scene_event(
+        "experience",
+        "self_evolution_run.experience_recorded",
+        run_id=run_id,
+        message="Self-evolution terminal experience recorded.",
+        outcome="succeeded",
+        fields={
+            "experienceId": str(record.get("experience_id") or ""),
+            "experienceKind": str(record.get("kind") or ""),
+            "created": bool(getattr(result, "created", False)),
+            "dedupeKey": str(record.get("dedupe_key") or ""),
+            "status": status,
+        },
+        lifecycle=True,
+    )
 
 
 def _current_run_control_reason(run_id: str) -> str:
