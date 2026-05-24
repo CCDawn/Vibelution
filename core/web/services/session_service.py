@@ -870,6 +870,21 @@ def edit_and_resubmit_session_message(
             raise SessionValidationError(
                 text_for(lang, zh="只能重新编辑历史用户消息。", en="Only historical user messages can be edited and resent.")
             )
+        latest_user_index = _latest_user_message_index(previous_messages)
+        if target_index != latest_user_index:
+            latest_message_id = ""
+            if latest_user_index >= 0:
+                latest_message_id = str(previous_messages[latest_user_index].get("id") or "").strip()
+            _record_session_message_edit_resubmit_rejected_event(
+                conversation_id,
+                target_message_id=target_message_id,
+                reason="not_latest_user_message",
+                latest_message_id=latest_message_id,
+                target_preview=previous_messages[target_index].get("content") or "",
+            )
+            raise SessionValidationError(
+                text_for(lang, zh="只能重新编辑最新一条用户消息。", en="Only the latest user message can be edited and resent.")
+            )
 
         active_task = _normalize_session_active_task(conversation.get("active_task") or conversation.get("activeTask"))
         requested_leases = infer_chat_turn_leases(
@@ -1297,6 +1312,13 @@ def _find_user_message_index_by_api_id(
         api_id = str(item.get("id") or f"{conversation_id}-message-{index}").strip()
         if api_id == normalized_target and role == "user":
             return index - 1
+    return -1
+
+
+def _latest_user_message_index(messages: list[dict[str, Any]]) -> int:
+    for index in range(len(messages or []) - 1, -1, -1):
+        if str((messages[index] or {}).get("role") or "").strip().lower() == "user":
+            return index
     return -1
 
 
@@ -2754,6 +2776,45 @@ def _record_session_message_edit_resubmit_event(
     except Exception as exc:
         _debug_logger.warning(
             f"runtime scene message edit log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _record_session_message_edit_resubmit_rejected_event(
+    session_id: str,
+    *,
+    target_message_id: str,
+    reason: str,
+    latest_message_id: str = "",
+    target_preview: str = "",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "message_edit_resubmit_rejected",
+            "conversation.message_edit_resubmit_rejected",
+            level="warning",
+            outcome="rejected",
+            message="Rejected a message edit because only the latest user message can be edited and resent.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "messageId": str(target_message_id or "").strip(),
+                "latestMessageId": str(latest_message_id or "").strip(),
+                "reason": str(reason or "").strip(),
+                "targetPreview": trim_lines(target_preview, max_lines=2),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-edits.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "message_id": str(target_message_id or "").strip(),
+                "latest_message_id": str(latest_message_id or "").strip(),
+                "reason": str(reason or "").strip(),
+                "target_preview": trim_lines(target_preview, max_lines=2),
+            },
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene rejected edit log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
 

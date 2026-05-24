@@ -198,6 +198,13 @@ export function ConversationView({
         .find((message) => message.role === "user")?.content ?? "",
     [messages],
   );
+  const latestUserMessageId = useMemo(
+    () =>
+      [...messages]
+        .reverse()
+        .find((message) => message.role === "user")?.id ?? "",
+    [messages],
+  );
   const lastMessageTimestamp = useMemo(
     () => [...messages].reverse().find((message) => message.timestamp)?.timestamp ?? "",
     [messages],
@@ -539,7 +546,7 @@ export function ConversationView({
                     </div>
                     <span className={styles.turnMetaActions}>
                       {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-                      {message.role === "user" && onEditUserMessage ? (
+                      {message.role === "user" && message.id === latestUserMessageId && onEditUserMessage ? (
                         <button
                           type="button"
                           className={

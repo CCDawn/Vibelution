@@ -67,6 +67,33 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Answer");
   });
 
+  it("renders edit controls only for the latest user message", () => {
+    const html = renderConversation([
+      {
+        id: "message-user-1",
+        role: "user",
+        content: "First prompt",
+        timestamp: "2026-05-22T00:00:00Z",
+      },
+      {
+        id: "message-assistant-1",
+        role: "assistant",
+        content: "First answer",
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+      {
+        id: "message-user-2",
+        role: "user",
+        content: "Second prompt",
+        timestamp: "2026-05-22T00:02:00Z",
+      },
+    ]);
+
+    expect(html.match(/aria-label="Edit and resend"/g)?.length).toBe(1);
+    expect(html).toContain("Second prompt");
+    expect(html).toContain("First prompt");
+  });
+
   it("keeps the response toggle visible even when a message has no tool block", () => {
     const html = renderConversation([
       {

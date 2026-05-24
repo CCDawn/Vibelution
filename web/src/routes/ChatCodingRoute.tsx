@@ -62,6 +62,11 @@ import {
   mergeSessionDetailIntoSummaries,
   shouldAcceptSessionStreamEvent,
 } from "./chatSessionState";
+import {
+  latestUserMessageId as deriveLatestUserMessageId,
+  resolveComposerDraftValue,
+  resolveLatestEditTarget,
+} from "./chatComposerState";
 import { buildVisiblePanelRows, getPetAvatarPresetKey, getPetAvatarSymbol } from "./chatCompactPanel";
 import {
   clearPendingSelfEvolutionHandoff,
@@ -868,6 +873,9 @@ export function ChatCodingRoute() {
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
   const activeComposerError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
   const activeEditTarget = activeSessionId ? sessionEditTargets[activeSessionId] ?? null : null;
+  const latestUserMessageId = useMemo(() => deriveLatestUserMessageId(detail?.messages), [detail?.messages]);
+  const resolvedEditTarget = resolveLatestEditTarget(activeEditTarget, latestUserMessageId);
+  const activeDraftEffective = resolveComposerDraftValue(activeDraft, activeEditTarget, resolvedEditTarget);
   const submitMutationMatchesActiveSession =
     submitTurnMutation.variables?.sessionId === activeSessionId;
   const editResubmitMutationMatchesActiveSession =
@@ -885,7 +893,7 @@ export function ChatCodingRoute() {
     composerStopMode ? (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping : submitPending;
   const composerDisabled = !activeSessionId || submitPending || sessionBusy;
   const composerActionDisabled = !activeSessionId || (
-    composerStopMode ? composerPending : submitPending || !activeDraft.trim()
+    composerStopMode ? composerPending : submitPending || !activeDraftEffective.trim()
   );
   const composerPlaceholder =
     !activeSessionId
@@ -894,7 +902,7 @@ export function ChatCodingRoute() {
         ? t("sessionStoppingPlaceholder")
         : sessionBusy
           ? t("sessionBusyPlaceholder")
-          : activeEditTarget
+          : resolvedEditTarget
             ? t("editMessagePlaceholder")
           : t("messageInputPlaceholder");
   const contextPercent = contextUsagePercent(
@@ -1115,14 +1123,14 @@ export function ChatCodingRoute() {
     if (!activeSessionId) {
       return;
     }
-    const content = activeDraft.trim();
+    const content = activeDraftEffective.trim();
     if (!content || composerDisabled) {
       return;
     }
-    if (activeEditTarget) {
+    if (resolvedEditTarget) {
       editResubmitMutation.mutate({
         sessionId: activeSessionId,
-        messageId: activeEditTarget.messageId,
+        messageId: resolvedEditTarget.messageId,
         content,
         mentalModelEnabled: mentalModelEnabledForNextTurn,
       });
@@ -1137,6 +1145,9 @@ export function ChatCodingRoute() {
 
   function handleEditUserMessage(message: ConversationMessage) {
     if (!activeSessionId || sessionBusy) {
+      return;
+    }
+    if (message.id !== latestUserMessageId) {
       return;
     }
     setSessionEditTargets((current) => ({
@@ -1155,6 +1166,20 @@ export function ChatCodingRoute() {
       [activeSessionId]: "",
     }));
   }
+
+  useEffect(() => {
+    if (!activeSessionId || !detail || !activeEditTarget || activeEditTarget.messageId === latestUserMessageId) {
+      return;
+    }
+    setSessionEditTargets((current) => {
+      const { [activeSessionId]: _removed, ...remaining } = current;
+      return remaining;
+    });
+    setSessionDrafts((current) => ({
+      ...current,
+      [activeSessionId]: "",
+    }));
+  }, [activeEditTarget, activeSessionId, latestUserMessageId, setSessionDrafts, setSessionEditTargets]);
 
   function handleCancelEditMessage() {
     if (!activeSessionId) {
@@ -1627,27 +1652,27 @@ export function ChatCodingRoute() {
                   defaultFileContext={detail.defaultFileContext}
                   showHeader={false}
                   showSessionOverview={false}
-                  composerValue={activeDraft}
+                  composerValue={activeDraftEffective}
                   composerPlaceholder={composerPlaceholder}
                   composerDisabled={composerDisabled}
                   composerActionDisabled={composerActionDisabled}
                   composerActionMode={composerStopMode ? "stop" : "send"}
                   composerPending={composerPending}
                   composerError={activeComposerError}
-                  composerModeNotice={activeEditTarget ? t("editMessageModeNotice") : ""}
+                  composerModeNotice={resolvedEditTarget ? t("editMessageModeNotice") : ""}
                   cancelComposerModeLabel={t("cancelEditMessage")}
                   turnError={detail.lastTurnError}
                   mentalModelEnabled={mentalModelEnabledForNextTurn}
                   mentalModelOptionDisabled={!activeSessionId}
                   stopLabel={t("stop")}
                   stopPendingLabel={t("stopPending")}
-                  editingMessageId={activeEditTarget?.messageId}
+                  editingMessageId={resolvedEditTarget?.messageId}
                   editUserMessageLabel={t("editAndResendMessage")}
                   editUserMessageDisabled={sessionBusy || submitPending}
                   onComposerChange={handleComposerChange}
                   onMentalModelEnabledChange={handleMentalModelEnabledChange}
                   onEditUserMessage={handleEditUserMessage}
-                  onCancelComposerMode={activeEditTarget ? handleCancelEditMessage : undefined}
+                  onCancelComposerMode={resolvedEditTarget ? handleCancelEditMessage : undefined}
                   onSubmit={handleSubmitTurn}
                   onStop={handleStopTurn}
                 />
