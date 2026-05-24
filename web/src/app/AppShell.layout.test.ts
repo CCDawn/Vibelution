@@ -14,4 +14,13 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryChip).toBeTypeOf("string");
     expect(styles.statusSummaryCount).toBeTypeOf("string");
   });
+
+  it("keeps active work details out of the primary top bar chip", () => {
+    expect(shellSource).toContain("activeWorkDetailPanel");
+    expect(shellSource).toContain("activeWorkIndicator.items.map");
+    expect(shellSource).not.toContain("className={styles.activeWorkSummary}");
+
+    expect(styles.activeWorkDetailPanel).toBeTypeOf("string");
+    expect(styles.activeWorkDetailItem).toBeTypeOf("string");
+  });
 });

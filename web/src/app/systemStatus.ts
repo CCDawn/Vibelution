@@ -7,16 +7,20 @@ export type BackendSystemState = "checking" | "healthy" | "offline" | "unhealthy
 export type RuntimeControllerState = "managed" | "closing" | "unmanaged" | "failed";
 export type ActiveWorkKind = "supervised" | "self" | "chat";
 
-export type ActiveWorkIndicator = {
+export type ActiveWorkIndicatorItem = {
   kind: ActiveWorkKind;
   label: string;
   summary: string;
   status: string;
   runId: string;
   detail: string;
+  tone: SystemStatusTone;
+};
+
+export type ActiveWorkIndicator = ActiveWorkIndicatorItem & {
   count: number;
   overflowCount: number;
-  tone: SystemStatusTone;
+  items: ActiveWorkIndicatorItem[];
 };
 
 type RuntimeSnapshot = Pick<RuntimeSummary, "runtimeManager" | "workbench">;
@@ -108,7 +112,7 @@ export function deriveActiveWorkIndicator(
     buildActiveWorkCandidate("supervised", active.supervised_evolution_run, runtime, lang),
     buildActiveWorkCandidate("self", active.self_evolution_run, runtime, lang),
     buildActiveWorkCandidate("chat", active.chat_turn, runtime, lang),
-  ].filter((item): item is Omit<ActiveWorkIndicator, "count" | "overflowCount"> => Boolean(item));
+  ].filter((item): item is ActiveWorkIndicatorItem => Boolean(item));
 
   if (!candidates.length) {
     return null;
@@ -118,6 +122,7 @@ export function deriveActiveWorkIndicator(
     ...candidates[0],
     count: candidates.length,
     overflowCount: Math.max(0, candidates.length - 1),
+    items: candidates,
   };
 }
 
@@ -160,7 +165,7 @@ function buildActiveWorkCandidate(
   run: ActiveWorkRunSnapshot | null | undefined,
   runtime: RuntimeWorkSnapshot,
   lang: "zh" | "en",
-): Omit<ActiveWorkIndicator, "count" | "overflowCount"> | null {
+): ActiveWorkIndicatorItem | null {
   if (!run || typeof run !== "object") {
     return null;
   }
