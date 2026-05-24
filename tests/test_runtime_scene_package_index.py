@@ -4,6 +4,11 @@ from datetime import UTC, datetime, timedelta
 from core.web.services import runtime_scene_service
 
 
+def _local_index_key_prefix(iso_value: str) -> str:
+    parsed = datetime.fromisoformat(iso_value.replace("Z", "+00:00")).astimezone()
+    return parsed.strftime("%Y-%m-%d_%H-%M-%S")
+
+
 def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypatch):
     scene_id = "scene-package-index"
     scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}"
@@ -206,3 +211,33 @@ def test_runtime_scene_list_sorts_by_package_timestamp_when_started_at_missing(t
     scenes = runtime_scene_service.list_runtime_scenes(limit=2)
 
     assert [scene["runtimeSceneId"] for scene in scenes] == ["new-scene", "old-scene"]
+    assert scenes[0]["startedAt"] == "2026-05-24T11:20:17+00:00"
+    assert scenes[0]["status"] == "running"
+    assert scenes[0]["packageIndex"]["indexKey"] == (
+        f"{_local_index_key_prefix(scenes[0]['startedAt'])}_workbench-run_running"
+    )
+
+
+def test_runtime_scene_status_defaults_to_running_until_ended(tmp_path, monkeypatch):
+    scene_id = "statusless-running-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
+    scene_dir.mkdir(parents=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T12:00:01Z",
+                "ended_at": "",
+                "project_root": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    scenes = runtime_scene_service.list_runtime_scenes(limit=1)
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    assert scenes[0]["status"] == "running"
+    assert scenes[0]["startedAt"] == "2026-05-24T12:00:01Z"
+    assert detail["status"] == "running"
