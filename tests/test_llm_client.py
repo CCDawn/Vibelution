@@ -394,6 +394,126 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
     assert [event[1]["fields"]["attempt"] for event in retry_events] == [1, 2]
 
 
+def test_stream_records_success_event_with_safe_summary(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return iter(
+            [
+                {"choices": [{"delta": {"content": "ok"}}]},
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call_1",
+                                        "function": {"name": "read_file", "arguments": "{}"},
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            ]
+        )
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}], tools=[{"name": "read_file"}]))
+
+    assert [event.type for event in events] == ["text_delta", "tool_call_final", "done"]
+    success_events = [item for item in recorded if item[0][1] == "llm.stream.succeeded"]
+    assert success_events
+    fields = success_events[-1][1]["fields"]
+    assert fields["messageCount"] == 1
+    assert fields["toolCount"] == 1
+    assert fields["chunkCount"] == 3
+    assert fields["textDeltaCount"] == 1
+    assert fields["toolCallCount"] == 1
+    assert "latencyMs" in fields
+
+
+def test_stream_records_started_event_before_first_provider_chunk(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        def chunks():
+            event_codes = [item[0][1] for item in recorded]
+            assert "llm.stream.started" in event_codes
+            yield {"choices": [{"delta": {"content": "ok"}}]}
+
+        return chunks()
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    started_events = [item for item in recorded if item[0][1] == "llm.stream.started"]
+    assert len(started_events) == 1
+    fields = started_events[0][1]["fields"]
+    assert fields["messageCount"] == 1
+    assert fields["toolCount"] == 0
+
+
+def test_stream_records_safe_message_role_summary(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return iter([{"choices": [{"delta": {"content": "ok"}}]}])
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(
+        client.stream_events(
+            [
+                {"role": "system", "content": "system prompt"},
+                {"role": "user", "content": "## 对话用户输入\nping"},
+            ]
+        )
+    )
+
+    assert [event.type for event in events] == ["text_delta", "done"]
+    started = next(item for item in recorded if item[0][1] == "llm.stream.started")
+    succeeded = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
+    for event in (started, succeeded):
+        fields = event[1]["fields"]
+        assert fields["messageRoles"] == ["system", "user"]
+        assert fields["messageRoleCounts"] == {"system": 1, "user": 1}
+
+
 def test_stream_does_not_replay_after_partial_output(monkeypatch):
     config = make_config(
         **{
@@ -478,6 +598,7 @@ def test_stream_failure_records_category_without_masking_provider_error(monkeypa
     assert 'One of "input"' in str(raised.value)
     assert recorded[-1][1]["message"] == "LLM stream failed before iterator: provider_protocol_error"
     assert recorded[-1][1]["fields"]["errorType"] == "provider_protocol_error"
+    assert recorded[-1][1]["fields"]["messageRoles"] == ["user"]
     assert 'One of "input"' in recorded[-1][1]["fields"]["error"]
 
 
