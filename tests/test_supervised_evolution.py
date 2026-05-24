@@ -269,6 +269,7 @@ def test_selection_policy_proposal_path_is_safe_for_unsafe_case_id(tmp_path: Pat
     bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
     case_summary = SimpleNamespace(
         case_id=r"..\escape",
+        case_type="static",
         baseline_status="success",
         candidate_status="success",
         baseline_reason="baseline ok",
@@ -311,6 +312,104 @@ def test_selection_policy_proposal_path_is_safe_for_unsafe_case_id(tmp_path: Pat
     proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
     assert proposal["case_id"] == r"..\escape"
     assert proposal["proposal_id"].startswith(r"demo_bundle:..\escape:")
+
+
+def test_run_supervised_evolution_session_records_dynamic_and_impossible_case_schema(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "benchmark": "dry",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "cases": [
+                    {
+                        "case_id": "dynamic_calendar_change",
+                        "case_type": "dynamic_replanning",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "dynamic baseline",
+                        "candidate_prompt": "dynamic candidate",
+                        "provenance": {
+                            "source": "stt_arena_fixture",
+                            "source_trace_id": "dynamic_trace_001",
+                        },
+                        "dynamic_events": [
+                            {"at_turn": 2, "event": "deadline_changed"}
+                        ],
+                        "expected_final_state": {
+                            "calendar_event": "rescheduled",
+                            "verified_after_change": True,
+                        },
+                    },
+                    {
+                        "case_id": "impossible_missing_permission",
+                        "case_type": "impossible_task",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "impossible baseline",
+                        "candidate_prompt": "impossible candidate",
+                        "provenance": {
+                            "source": "stt_arena_fixture",
+                            "source_trace_id": "impossible_trace_001",
+                        },
+                        "expected_infeasible_outcome": {
+                            "status": "infeasible",
+                            "reason": "missing_permission",
+                        },
+                    },
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_runner(**kwargs):
+        worktree_name = str(kwargs["prompt"]).replace(" ", "_")
+        return _fake_result("success", "ok", worktree_name)
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    by_case = {case.case_id: case for case in decision.case_summaries}
+    dynamic = by_case["dynamic_calendar_change"]
+    impossible = by_case["impossible_missing_permission"]
+
+    assert dynamic.case_type == "dynamic_replanning"
+    assert "dynamic_replanning_case" in dynamic.failure_taxonomy
+    assert "post_adaptation_verification_missing" in dynamic.failure_taxonomy
+    assert dynamic.intake_provenance["case_type"] == "dynamic_replanning"
+    assert dynamic.intake_provenance["provenance"]["source_trace_id"] == "dynamic_trace_001"
+    assert dynamic.intake_provenance["expected_final_state"]["verified_after_change"] is True
+    assert dynamic.intake_provenance["dynamic_events"][0]["event"] == "deadline_changed"
+    assert dynamic.score_breakdown["basis"]["source"] == "derived_from_harness_metrics"
+    assert Path(dynamic.evidence_paths["baseline_report_path"]).exists()
+
+    assert impossible.case_type == "impossible_task"
+    assert "impossible_task_case" in impossible.failure_taxonomy
+    assert impossible.intake_provenance["case_type"] == "impossible_task"
+    assert impossible.intake_provenance["provenance"]["source_trace_id"] == "impossible_trace_001"
+    assert impossible.intake_provenance["expected_infeasible_outcome"]["status"] == "infeasible"
+    assert Path(impossible.evidence_paths["candidate_report_path"]).exists()
+
+    policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    policy_by_case = {case["case_id"]: case for case in policy_record["case_evidence"]}
+    assert policy_by_case["dynamic_calendar_change"]["case_type"] == "dynamic_replanning"
+    assert policy_by_case["impossible_missing_permission"]["case_type"] == "impossible_task"
+
+    proposal_payloads = [
+        json.loads(Path(path).read_text(encoding="utf-8"))
+        for path in decision.policy_action["proposal_paths"]
+    ]
+    proposal_by_case = {proposal["case_id"]: proposal for proposal in proposal_payloads}
+    assert proposal_by_case["dynamic_calendar_change"]["case_type"] == "dynamic_replanning"
+    assert proposal_by_case["impossible_missing_permission"]["case_type"] == "impossible_task"
 
 
 def test_supervised_run_report_paths_are_safe_for_unsafe_case_id(tmp_path: Path):

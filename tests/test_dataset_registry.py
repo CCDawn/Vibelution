@@ -235,6 +235,109 @@ def test_materialize_custom_prompt_jsonl(tmp_path: Path):
     assert bundle["cases"][0]["expected"] == {"kind": "lint_pass"}
 
 
+def test_materialize_dynamic_and_impossible_case_types_preserves_schema(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "custom_prompt_tasks.jsonl"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "case_id": "dynamic_calendar_change",
+                        "case_type": "dynamic_replanning",
+                        "prompt": "The calendar changes mid-task; replan and verify the final state.",
+                        "provenance": {
+                            "source": "stt_arena_fixture",
+                            "source_trace_id": "dynamic_trace_001",
+                        },
+                        "dynamic_events": [
+                            {"at_turn": 2, "event": "deadline_changed", "new_deadline": "2026-05-25T10:00:00Z"}
+                        ],
+                        "expected_final_state": {
+                            "calendar_event": "rescheduled",
+                            "verified_after_change": True,
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "case_id": "impossible_missing_permission",
+                        "case_type": "impossible_task",
+                        "prompt": "Try to edit a protected resource without permission.",
+                        "provenance": {
+                            "source": "stt_arena_fixture",
+                            "source_trace_id": "impossible_trace_001",
+                        },
+                        "expected_infeasible_outcome": {
+                            "status": "infeasible",
+                            "reason": "missing_permission",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = materialize_dataset_bundle("custom_prompt_jsonl", project_root=tmp_path)
+    bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+    by_case = {case["case_id"]: case for case in bundle["cases"]}
+
+    dynamic = by_case["dynamic_calendar_change"]
+    assert dynamic["case_type"] == "dynamic_replanning"
+    assert dynamic["provenance"]["source_trace_id"] == "dynamic_trace_001"
+    assert dynamic["expected_final_state"]["verified_after_change"] is True
+    assert dynamic["dynamic_events"][0]["event"] == "deadline_changed"
+
+    impossible = by_case["impossible_missing_permission"]
+    assert impossible["case_type"] == "impossible_task"
+    assert impossible["provenance"]["source_trace_id"] == "impossible_trace_001"
+    assert impossible["expected_infeasible_outcome"]["status"] == "infeasible"
+
+
+def test_materialize_dynamic_and_impossible_case_types_require_expected_schema(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "custom_prompt_tasks.jsonl"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "case_id": "bad_dynamic",
+                "case_type": "dynamic_replanning",
+                "prompt": "Replan without expected state.",
+                "provenance": {"source": "test"},
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="expected_final_state"):
+        materialize_dataset_bundle("custom_prompt_jsonl", project_root=tmp_path)
+
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "case_id": "bad_impossible",
+                "case_type": "impossible_task",
+                "prompt": "Fail gracefully without expected infeasible outcome.",
+                "provenance": {"source": "test"},
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="expected_infeasible_outcome"):
+        materialize_dataset_bundle("custom_prompt_jsonl", project_root=tmp_path)
+
+
 def test_materialize_swe_jsonl_marks_external_harness_requirement(tmp_path: Path):
     ensure_dataset_registry(tmp_path)
     dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "swe_bench_lite.jsonl"
