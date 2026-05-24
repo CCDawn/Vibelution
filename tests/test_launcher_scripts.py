@@ -2173,6 +2173,144 @@ Write-Output $payload
     assert payload["remaining"] == []
 
 
+def test_launcher_stop_session_closes_browser_when_backend_stop_is_unconfirmed(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Stop-ManagedSession"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Stop-ManagedSession was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:port = 8000
+$script:selfProcessId = 123
+$script:currentRuntimeSceneId = ""
+$script:browserStopCalls = 0
+$script:browserWaitCalls = 0
+$script:removedState = $false
+$script:notes = @()
+$script:controlEvents = @()
+
+function Get-SessionSnapshot {
+    return [pscustomobject]@{
+        BackendPids = @(6544)
+        BackendPid = 6544
+        BrowserPids = @(40736)
+        BrowserWindowCount = 1
+        State = [pscustomobject]@{
+            supervisorPid = 7777
+            runtimeSceneId = ""
+            runtimeSceneDir = ""
+        }
+    }
+}
+function Stop-ManagedBackendProcesses {
+    return [pscustomobject]@{
+        CandidatePids = @(6544)
+        RemainingPortPid = 14916
+        RemainingLooksManaged = $false
+        RemainingHealthy = $false
+        PortOwnerStopped = $false
+    }
+}
+function Wait-ForPortClosed {
+    param([int]$Port)
+    return $false
+}
+function Stop-ProcessesById { param([int[]]$ProcessIds) }
+function Stop-ManagedBrowserProcesses {
+    $script:browserStopCalls += 1
+}
+function Wait-ForBrowserStopped {
+    param([int]$TimeoutSeconds)
+    $script:browserWaitCalls += 1
+    return $true
+}
+function Get-ManagedSessionClosureSnapshot {
+    return [pscustomobject]@{
+        BackendStopped = $false
+        BrowserStopped = $true
+        ManagerClosed = $false
+        BackendPids = @(6544)
+        BackendHealthy = $false
+        BrowserPids = @()
+        BrowserWindowCount = 0
+        PortOwnerPid = 14916
+        DesiredState = "closed"
+        ObservedState = "open"
+        Phase = "closing"
+        FailureMessage = ""
+    }
+}
+function Test-ManagedSessionClosureSucceeded {
+    param([pscustomobject]$Closure, [bool]$RequireManagerClosed = $true)
+    return $false
+}
+function Write-ManagedSessionClosureRecord {
+    param([pscustomobject]$Closure, [string]$Reason, [string]$Source, [bool]$Success)
+}
+function Remove-State { $script:removedState = $true }
+function Get-ListeningPid { param([int]$Port) return 14916 }
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlEvents += ,@{ event = $Event; level = $Level; fields = $Fields }
+}
+function Write-Note {
+    param([string]$Message)
+    $script:notes += $Message
+}
+
+$errorMessage = ""
+try {
+    Stop-ManagedSession -Reason "web_close_button"
+} catch {
+    $errorMessage = $_.Exception.Message
+}
+
+$payload = @{
+    browserStopCalls = $script:browserStopCalls
+    browserWaitCalls = $script:browserWaitCalls
+    removedState = $script:removedState
+    notes = @($script:notes)
+    controlEvents = @($script:controlEvents)
+    errorMessage = $errorMessage
+} | ConvertTo-Json -Depth 10 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["browserStopCalls"] == 1
+    assert payload["browserWaitCalls"] == 1
+    assert payload["removedState"] is False
+    assert "backend did not stop" in payload["errorMessage"]
+    assert "browser did not stop" not in payload["errorMessage"]
+    assert "launcher.browser.stop.with_backend_unconfirmed" in [item["event"] for item in payload["controlEvents"]]
+    assert any("browser was closed" in note for note in payload["notes"])
+
+
 def test_launcher_stop_backend_logs_traceable_candidates_and_port_owner(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,

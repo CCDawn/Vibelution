@@ -19,17 +19,13 @@ from .constants import (
     RESULTS_DIR,
     ensure_runtime_manager_dirs,
 )
+from .scene_logging import (
+    append_runtime_manager_file_event,
+    command_event_payload,
+    record_runtime_manager_scene_event,
+    truncate_event_text,
+)
 from .state_store import load_pid, load_state
-
-SAFE_COMMAND_ARG_KEYS = {
-    "reason",
-    "noBrowser",
-    "stopManager",
-    "runId",
-    "run_id",
-    "mode",
-    "scope",
-}
 
 
 def _command_timestamp() -> str:
@@ -93,7 +89,7 @@ def submit_command(
         )
         return command
     _atomic_write_json(INBOX_DIR / f"{command['commandId']}.json", command)
-    _append_queue_event("command_queue.command_queued", _command_event_payload(command))
+    _append_queue_event("command_queue.command_queued", command_event_payload(command))
     return command
 
 
@@ -133,7 +129,7 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         except (OSError, json.JSONDecodeError):
             payload = {}
         if isinstance(payload, dict):
-            _append_queue_event("command_queue.command_claimed", _command_event_payload(payload, queue_path=target.name))
+            _append_queue_event("command_queue.command_claimed", command_event_payload(payload, queue_path=target.name))
             return target, payload
         try:
             target.unlink(missing_ok=True)
@@ -155,7 +151,7 @@ def complete_command(path: Path, result: dict[str, Any]) -> None:
             "commandId": command_id,
             "ok": bool(result.get("ok")),
             "completed": bool(result.get("completed")),
-            "message": _truncate_event_text(str(result.get("message") or "")),
+            "message": truncate_event_text(str(result.get("message") or "")),
             "errorType": str(result.get("errorType") or ""),
             "stopDaemon": bool(result.get("stopDaemon")),
         },
@@ -295,99 +291,14 @@ def _state_mentions_runtime_manager_shutdown(state: dict[str, Any]) -> bool:
 
 
 def _append_queue_event(event_type: str, payload: dict[str, Any]) -> None:
-    try:
-        ensure_runtime_manager_dirs()
-        event = {
-            "type": event_type,
-            "at": datetime.now(UTC).isoformat(),
-            "payload": payload,
-        }
-        with EVENTS_PATH.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
-    _record_runtime_manager_scene_event(event_type, payload, phase="queue")
-
-
-def _command_event_payload(command: dict[str, Any], *, queue_path: str = "") -> dict[str, Any]:
-    args = command.get("args") if isinstance(command.get("args"), dict) else {}
-    payload: dict[str, Any] = {
-        "commandId": str(command.get("commandId") or ""),
-        "type": str(command.get("type") or ""),
-        "requestedBy": str(command.get("requestedBy") or ""),
-        "requestedAt": str(command.get("requestedAt") or ""),
-        "args": _safe_command_args(args),
-    }
-    if queue_path:
-        payload["queuePath"] = queue_path
-    return payload
-
-
-def _safe_command_args(args: dict[str, Any]) -> dict[str, Any]:
-    safe: dict[str, Any] = {}
-    for key in sorted(SAFE_COMMAND_ARG_KEYS):
-        if key not in args:
-            continue
-        value = args[key]
-        if isinstance(value, (bool, int, float)) or value is None:
-            safe[key] = value
-        else:
-            safe[key] = _truncate_event_text(str(value), limit=160)
-    extra_keys = sorted(str(key) for key in args.keys() if str(key) not in SAFE_COMMAND_ARG_KEYS)
-    if extra_keys:
-        safe["argKeys"] = extra_keys
-    return safe
-
-
-def _record_runtime_manager_scene_event(event_type: str, payload: dict[str, Any], *, phase: str) -> None:
-    try:
-        from core.web.services.runtime_scene_service import record_runtime_scene_event
-
-        record_runtime_scene_event(
-            "runtime_manager",
-            phase,
-            event_type,
-            message=f"Runtime manager {phase} event: {event_type}",
-            level=_runtime_scene_event_level(event_type, payload),
-            outcome=_runtime_scene_event_outcome(event_type, payload),
-            fields=payload,
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
-def _runtime_scene_event_level(event_type: str, payload: dict[str, Any]) -> str:
-    status = str(payload.get("status") or "").strip().lower()
-    if "failed" in event_type or status == "failed" or payload.get("ok") is False:
-        return "error"
-    if any(marker in event_type for marker in ("rejected", "ignored", "retrying", "joined")):
-        return "warning"
-    return "info"
-
-
-def _runtime_scene_event_outcome(event_type: str, payload: dict[str, Any]) -> str:
-    status = str(payload.get("status") or "").strip().lower()
-    if "failed" in event_type or status == "failed" or payload.get("ok") is False:
-        return "failed"
-    if "queued" in event_type:
-        return "queued"
-    if "claimed" in event_type:
-        return "started"
-    if "completed" in event_type or payload.get("ok") is True:
-        return "succeeded"
-    if "rejected" in event_type:
-        return "rejected"
-    if "joined" in event_type:
-        return "joined"
-    if "ignored" in event_type:
-        return "ignored"
-    return "observed"
-
-
-def _truncate_event_text(value: str, *, limit: int = 240) -> str:
-    text = str(value or "")
-    return text if len(text) <= limit else f"{text[: max(0, limit - 3)]}..."
+    event_at = append_runtime_manager_file_event(
+        event_type,
+        payload,
+        events_path=EVENTS_PATH,
+        ensure_dirs=ensure_runtime_manager_dirs,
+        suppress_io_errors=True,
+    )
+    record_runtime_manager_scene_event(event_type, payload, phase="queue", occurred_at=event_at)
 
 
 def _complete_rejected_shutdown_command(command: dict[str, Any], *, shutdown_state: dict[str, Any]) -> None:

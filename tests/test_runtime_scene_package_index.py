@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 from core.web.services import runtime_scene_service
 
@@ -102,8 +103,106 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     assert summary["event_counts"]["errors"] == 1
     assert summary["event_counts"]["warnings"] == 1
     assert summary["diagnostic_entrypoint"]["first_read"] == "summary.json"
-    assert summary["diagnostic_entrypoint"]["recommended_order"][:3] == [
+    assert summary["diagnostic_entrypoint"]["recommended_order"][:6] == [
         "summary.json",
         "package_index.json",
+        "raw/desktop-entry-vbs.log",
+        "raw/desktop-entry.log",
+        "raw/launcher-control.log",
         "timeline.jsonl",
     ]
+
+
+def test_runtime_scene_event_can_target_recent_completed_package_when_allowed(tmp_path, monkeypatch):
+    scene_id = "recent-failed-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T111509Z__{scene_id}"
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    ended_at = (datetime.now(UTC) - timedelta(seconds=30)).isoformat()
+    (scene_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T11:15:09Z",
+                "ended_at": ended_at,
+                "status": "failed",
+                "trigger": "internal-start",
+                "session_mode": "managed",
+                "project_root": str(tmp_path),
+                "package": {
+                    "schema_version": 2,
+                    "timeline_path": "timeline.jsonl",
+                    "lifecycle_path": "lifecycle.jsonl",
+                    "raw_dir": "raw",
+                    "conversations_dir": "conversations",
+                    "agent_dir": "agent",
+                    "artifacts_dir": "artifacts",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    blocked = runtime_scene_service.record_runtime_scene_event(
+        "runtime_manager",
+        "command",
+        "command.failed",
+        fields={"commandId": "cmd-open"},
+    )
+    accepted = runtime_scene_service.record_runtime_scene_event(
+        "runtime_manager",
+        "command",
+        "command.failed",
+        fields={"commandId": "cmd-open"},
+        level="error",
+        outcome="failed",
+        lifecycle=True,
+        allow_recent_completed=True,
+    )
+
+    assert blocked["accepted"] is False
+    assert accepted["accepted"] is True
+    assert accepted["runtimeSceneId"] == scene_id
+    timeline = (scene_dir / "timeline.jsonl").read_text(encoding="utf-8")
+    assert "command.failed" in timeline
+    summary = json.loads((scene_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["event_counts"]["errors"] == 1
+
+
+def test_runtime_scene_list_sorts_by_package_timestamp_when_started_at_missing(tmp_path, monkeypatch):
+    root = tmp_path / "logs" / "runtime_scenes"
+    old_dir = root / "20260524T104120Z__old-scene"
+    new_dir = root / "20260524T112017Z__new-scene"
+    old_dir.mkdir(parents=True)
+    new_dir.mkdir(parents=True)
+    old_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": "old-scene",
+                "started_at": "2026-05-24T10:41:20Z",
+                "status": "stopped",
+                "project_root": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    new_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": "new-scene",
+                "status": "unknown",
+                "project_root": str(tmp_path),
+                "package": {"started_at": "", "sortable_timestamp": "2026-05-24T11:20:17+00:00"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    scenes = runtime_scene_service.list_runtime_scenes(limit=2)
+
+    assert [scene["runtimeSceneId"] for scene in scenes] == ["new-scene", "old-scene"]

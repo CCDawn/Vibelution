@@ -10,6 +10,7 @@ from core.runtime_manager import daemon
 from core.runtime_manager import constants
 from core.runtime_manager import evolution_store
 from core.runtime_manager import process_inventory
+from core.runtime_manager import scene_logging
 from core.runtime_manager import state_store
 from core.runtime_manager import workbench_controller
 
@@ -30,8 +31,27 @@ def _repeat_last(items):
     return next_value
 
 
+def _patch_command_queue_events(monkeypatch, events_path):
+    def append_event(event_type, payload, *, events_path=None, ensure_dirs=None, suppress_io_errors=True):
+        target_path = events_path or events_path
+        if target_path is None:
+            target_path = events_path
+        target_path.open("a", encoding="utf-8").write(
+            json.dumps({"type": event_type, "payload": payload}, ensure_ascii=False) + "\n"
+        )
+        return ""
+
+    monkeypatch.setattr(command_queue, "append_runtime_manager_file_event", append_event)
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
+
+
 @pytest.fixture(autouse=True)
-def _block_real_process_termination(monkeypatch):
+def _block_real_process_termination(monkeypatch, tmp_path):
+    events_path = tmp_path / "runtime-manager-events.jsonl"
+    monkeypatch.setattr(daemon, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(daemon, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(daemon, "terminate_process_descendants", lambda *args, **kwargs: {"terminated": [], "remaining": []})
     monkeypatch.setattr(
         daemon,
@@ -541,6 +561,63 @@ def test_reconcile_observation_marks_orphaned_browser_failed(monkeypatch):
     ]
 
 
+def test_reconcile_observation_does_not_fail_opening_orphaned_browser(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "backendPid": 0,
+            "browserLaunchPid": 12132,
+            "browserWindowPid": 12132,
+            "backendAlive": False,
+            "backendHealthy": False,
+            "backendObserved": False,
+            "backendPort": 8000,
+            "backendPortListening": False,
+            "backendPortOwnerPid": 0,
+            "backendPortOwnerTrusted": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": True,
+            "browserManaged": True,
+            "backendMissing": True,
+            "frontendOrphaned": True,
+            "lifecycleConsistency": "orphaned_browser",
+            "sessionId": "starting-session",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    state = runtime_daemon._reconcile_observation(
+        {
+            "runtimeState": "running",
+            "command": {"activeCommandId": "cmd-open", "activeType": "open_workbench"},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "closed",
+                "phase": "opening",
+                "failureMessage": "",
+            },
+        }
+    )
+
+    workbench = state["workbench"]
+    assert workbench["desiredState"] == "open"
+    assert workbench["observedState"] == "open"
+    assert workbench["phase"] == "opening"
+    assert workbench["frontendOrphaned"] is True
+    assert workbench["lifecycleConsistency"] == "orphaned_browser"
+    assert workbench["failureMessage"] == ""
+    assert events == []
+
+
 def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
@@ -553,6 +630,7 @@ def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path,
     monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
     monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
     monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
     monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
     monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
@@ -623,10 +701,67 @@ def test_submit_command_ignores_stale_shutdown_state_from_previous_runtime_manag
     assert list(results_dir.glob("*.json")) == []
     queued_payload = json.loads(queued[0].read_text(encoding="utf-8"))
     assert queued_payload["type"] == "open_workbench"
-    event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    event = next(item for item in events if item["type"] == "command_queue.stale_shutdown_state_ignored")
     assert event["type"] == "command_queue.stale_shutdown_state_ignored"
     assert event["payload"]["stateManagerPid"] == 7711
     assert event["payload"]["currentManagerPid"] == 9912
+
+
+def test_command_queue_records_queued_claimed_and_result_written_events(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+    scene_events: list[tuple[str, dict, dict]] = []
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(command_queue, "load_pid", lambda: 0)
+    monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: False)
+    monkeypatch.setattr(
+        command_queue,
+        "record_runtime_manager_scene_event",
+        lambda event_type, payload, **kwargs: scene_events.append((event_type, payload, kwargs)) or True,
+    )
+
+    command = command_queue.submit_command(
+        "open_workbench",
+        args={"reason": "launcher_start", "token": "secret-value", "noBrowser": True},
+        requested_by="launcher_ps",
+    )
+    claimed = command_queue.claim_next_command()
+    assert claimed is not None
+    processing_path, claimed_payload = claimed
+    command_queue.complete_command(
+        processing_path,
+        {
+            "commandId": claimed_payload["commandId"],
+            "ok": True,
+            "completed": True,
+            "message": "Workbench opened.",
+        },
+    )
+
+    file_events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["type"] for event in file_events] == [
+        "command_queue.command_queued",
+        "command_queue.command_claimed",
+        "command_queue.command_result_written",
+    ]
+    queued_payload = file_events[0]["payload"]
+    assert queued_payload["commandId"] == command["commandId"]
+    assert queued_payload["args"] == {"argKeys": ["token"], "noBrowser": True, "reason": "launcher_start"}
+    assert file_events[1]["payload"]["queuePath"] == f"{command['commandId']}.json"
+    assert file_events[2]["payload"]["ok"] is True
+    assert [event_type for event_type, _, _ in scene_events] == [event["type"] for event in file_events]
+    assert {kwargs["phase"] for _, _, kwargs in scene_events} == {"queue"}
+    assert all(kwargs["occurred_at"] for _, _, kwargs in scene_events)
 
 
 def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_path, monkeypatch):
@@ -962,6 +1097,235 @@ def test_is_process_alive_windows_with_real_process():
         proc.wait(timeout=5)
 
     assert daemon._is_process_alive(proc.pid) is False
+
+
+def test_daemon_append_event_mirrors_runtime_scene_event(tmp_path, monkeypatch):
+    events_path = tmp_path / "events.jsonl"
+    scene_events: list[tuple[str, dict, dict]] = []
+
+    monkeypatch.setattr(daemon, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(
+        daemon,
+        "record_runtime_manager_scene_event",
+        lambda event_type, payload, **kwargs: scene_events.append((event_type, payload, kwargs)) or True,
+    )
+
+    daemon._append_event(
+        "workbench.open.verification_succeeded",
+        {"commandId": "cmd-open", "ok": True, "backendPid": 1234},
+    )
+
+    file_event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
+    assert file_event["type"] == "workbench.open.verification_succeeded"
+    assert file_event["payload"]["commandId"] == "cmd-open"
+    assert scene_events == [
+        (
+            "workbench.open.verification_succeeded",
+            {"commandId": "cmd-open", "ok": True, "backendPid": 1234},
+            {"phase": "open", "occurred_at": file_event["at"]},
+        )
+    ]
+
+
+def test_runtime_manager_scene_event_backfills_recent_queue_events(tmp_path, monkeypatch):
+    events_path = tmp_path / "events.jsonl"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / "20260524T104120Z__scene-runtime"
+    (scene_dir / "events").mkdir(parents=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps({"runtime_scene_id": "scene-runtime"}),
+        encoding="utf-8",
+    )
+    events_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "command_queue.command_queued",
+                        "at": "2026-05-24T10:40:40+00:00",
+                        "payload": {"commandId": "cmd-other", "type": "open_workbench"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "command_queue.command_queued",
+                        "at": "2026-05-24T10:40:43+00:00",
+                        "payload": {"commandId": "cmd-open", "type": "open_workbench"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "command_queue.command_claimed",
+                        "at": "2026-05-24T10:40:52+00:00",
+                        "payload": {"commandId": "cmd-open", "type": "open_workbench"},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    recorded: list[dict] = []
+
+    class FakeRuntimeSceneService:
+        @staticmethod
+        def _resolve_current_runtime_scene_dir():
+            return scene_dir
+
+        @staticmethod
+        def _resolve_recent_completed_runtime_scene_dir():
+            raise AssertionError("queued events should not use recent completed package fallback")
+
+        @staticmethod
+        def record_runtime_scene_event(component, phase, event_code, **kwargs):
+            recorded.append(
+                {
+                    "component": component,
+                    "phase": phase,
+                    "eventCode": event_code,
+                    "kwargs": kwargs,
+                }
+            )
+            return {"accepted": True, "runtimeSceneId": "scene-runtime"}
+
+    monkeypatch.setattr(scene_logging, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(scene_logging, "_BACKFILLED_SCENE_KEYS", set())
+    monkeypatch.setattr(scene_logging, "_runtime_scene_service", lambda: FakeRuntimeSceneService)
+
+    accepted = scene_logging.record_runtime_manager_scene_event(
+        "command.completed",
+        {"commandId": "cmd-open", "type": "open_workbench", "ok": True},
+        phase="command",
+        occurred_at="2026-05-24T10:41:27+00:00",
+    )
+
+    assert accepted is True
+    assert [event["eventCode"] for event in recorded] == [
+        "command_queue.command_queued",
+        "command_queue.command_claimed",
+        "command.completed",
+    ]
+    assert [event["phase"] for event in recorded] == ["queue", "queue", "command"]
+    assert recorded[0]["kwargs"]["occurred_at"] == "2026-05-24T10:40:43+00:00"
+    assert recorded[0]["kwargs"]["fields"]["runtimeManagerBackfill"] is True
+    assert recorded[-1]["kwargs"]["fields"]["runtimeManagerEventAt"] == "2026-05-24T10:41:27+00:00"
+
+
+def test_runtime_manager_queue_event_does_not_target_recent_completed_package(tmp_path, monkeypatch):
+    events_path = tmp_path / "events.jsonl"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / "20260524T111509Z__scene-failed"
+    (scene_dir / "events").mkdir(parents=True)
+    events_path.write_text("", encoding="utf-8")
+    recorded: list[dict] = []
+
+    class FakeRuntimeSceneService:
+        @staticmethod
+        def _resolve_current_runtime_scene_dir():
+            return None
+
+        @staticmethod
+        def _resolve_recent_completed_runtime_scene_dir():
+            return scene_dir
+
+        @staticmethod
+        def record_runtime_scene_event(component, phase, event_code, **kwargs):
+            recorded.append({"phase": phase, "eventCode": event_code, "kwargs": kwargs})
+            return {"accepted": False, "reason": "no_runtime_scene"}
+
+    monkeypatch.setattr(scene_logging, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(scene_logging, "_BACKFILLED_SCENE_KEYS", set())
+    monkeypatch.setattr(scene_logging, "_runtime_scene_service", lambda: FakeRuntimeSceneService)
+
+    accepted = scene_logging.record_runtime_manager_scene_event(
+        "command_queue.command_queued",
+        {"commandId": "cmd-new", "type": "open_workbench"},
+        phase="queue",
+        occurred_at="2026-05-24T11:19:55+00:00",
+    )
+
+    assert accepted is False
+    assert recorded == [
+        {
+            "phase": "queue",
+            "eventCode": "command_queue.command_queued",
+            "kwargs": {
+                "message": "Runtime manager queue event: command_queue.command_queued",
+                "level": "info",
+                "outcome": "queued",
+                "fields": {
+                    "commandId": "cmd-new",
+                    "type": "open_workbench",
+                    "runtimeManagerEventAt": "2026-05-24T11:19:55+00:00",
+                },
+                "lifecycle": True,
+                "occurred_at": "2026-05-24T11:19:55+00:00",
+                "allow_recent_completed": False,
+            },
+        }
+    ]
+
+
+def test_runtime_manager_scene_event_backfills_to_recent_completed_package(tmp_path, monkeypatch):
+    events_path = tmp_path / "events.jsonl"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / "20260524T111509Z__scene-failed"
+    (scene_dir / "events").mkdir(parents=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps({"runtime_scene_id": "scene-failed", "status": "failed"}),
+        encoding="utf-8",
+    )
+    events_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "command_queue.command_queued",
+                        "at": "2026-05-24T11:14:37+00:00",
+                        "payload": {"commandId": "cmd-failed", "type": "open_workbench"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "command_queue.command_queued",
+                        "at": "2026-05-24T11:14:38+00:00",
+                        "payload": {"commandId": "cmd-other", "type": "open_workbench"},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    recorded: list[dict] = []
+
+    class FakeRuntimeSceneService:
+        @staticmethod
+        def _resolve_current_runtime_scene_dir():
+            return None
+
+        @staticmethod
+        def _resolve_recent_completed_runtime_scene_dir():
+            return scene_dir
+
+        @staticmethod
+        def record_runtime_scene_event(component, phase, event_code, **kwargs):
+            recorded.append({"phase": phase, "eventCode": event_code, "kwargs": kwargs})
+            return {"accepted": True, "runtimeSceneId": "scene-failed"}
+
+    monkeypatch.setattr(scene_logging, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(scene_logging, "_BACKFILLED_SCENE_KEYS", set())
+    monkeypatch.setattr(scene_logging, "_runtime_scene_service", lambda: FakeRuntimeSceneService)
+
+    accepted = scene_logging.record_runtime_manager_scene_event(
+        "command.failed",
+        {"commandId": "cmd-failed", "type": "open_workbench", "ok": False},
+        phase="command",
+        occurred_at="2026-05-24T11:15:17+00:00",
+    )
+
+    assert accepted is True
+    assert [event["eventCode"] for event in recorded] == ["command_queue.command_queued", "command.failed"]
+    assert recorded[0]["kwargs"]["fields"]["runtimeManagerBackfill"] is True
+    assert all(event["kwargs"]["fields"]["commandId"] == "cmd-failed" for event in recorded)
 
 
 def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_path):

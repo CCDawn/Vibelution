@@ -3590,11 +3590,20 @@ function Stop-ManagedSession {
         Stop-ProcessesById @($supervisorPid)
     }
 
-    $browserStopped = $true
-    if ($backendStopped) {
-        Stop-ManagedBrowserProcesses
-        $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20
+    if (-not $backendStopped) {
+        Write-LauncherControlLog `
+            -Event "launcher.browser.stop.with_backend_unconfirmed" `
+            -Message "Closing the managed browser even though backend shutdown was not fully confirmed." `
+            -Level "warning" `
+            -Fields @{
+                reason = $Reason
+                port = $port
+                port_owner_pid = Get-ListeningPid $port
+                backend_stop_trace = $backendStopTrace
+            }
     }
+    Stop-ManagedBrowserProcesses
+    $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20
 
     $closure = Get-ManagedSessionClosureSnapshot
     if ($script:currentRuntimeSceneId) {
@@ -3633,7 +3642,7 @@ function Stop-ManagedSession {
         if ($portPid) {
             Write-Note "Port $port is still owned by PID=$portPid."
         }
-        Write-Note "Keeping the browser window open until the backend stops."
+        Write-Note "The managed browser was closed; backend shutdown still needs attention."
     }
 
     $stopFailures = @()
