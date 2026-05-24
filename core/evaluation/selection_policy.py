@@ -199,6 +199,9 @@ def _case_evidence_payload(
         "difference_summary": str(getattr(case_summary, "difference_summary", "") or ""),
         "difference_metrics": dict(getattr(case_summary, "difference_metrics", {}) or {}),
         "difference_reasons": list(getattr(case_summary, "difference_reasons", []) or []),
+        "score_breakdown": dict(getattr(case_summary, "score_breakdown", {}) or {}),
+        "failure_taxonomy": list(getattr(case_summary, "failure_taxonomy", []) or []),
+        "evidence_paths": dict(getattr(case_summary, "evidence_paths", {}) or {}),
     }
     if proposal_payload is not None:
         evidence["proposal_id"] = str(proposal_payload.get("proposal_id") or "")
@@ -249,6 +252,9 @@ def _write_proposal(
         "difference_summary": case_summary.difference_summary,
         "difference_metrics": dict(case_summary.difference_metrics or {}),
         "difference_reasons": list(case_summary.difference_reasons or []),
+        "score_breakdown": dict(getattr(case_summary, "score_breakdown", {}) or {}),
+        "failure_taxonomy": list(getattr(case_summary, "failure_taxonomy", []) or []),
+        "evidence_paths": dict(getattr(case_summary, "evidence_paths", {}) or {}),
         "status": status,
         "decision": decision.decision,
         "decision_path": decision.decision_path,

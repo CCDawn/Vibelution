@@ -42,6 +42,9 @@ def test_generate_supervised_dashboard_renders_normal_decision_summary(tmp_path:
     assert "HOLD" in html
     assert "baseline 与 candidate 持平" in html
     assert "candidate 与 baseline 同为 success" in html
+    assert "score Δ -0.05" in html
+    assert "same_status" in html
+    assert "baseline.json" in html
     assert "survival" in html
     assert str(decision_path) in html
 
@@ -237,6 +240,16 @@ def _write_decision(tmp_path: Path, session_id: str, overrides: dict) -> Path:
                 "difference_summary": "candidate 与 baseline 同为 success，validation 持平，runtime +1.0s。",
                 "difference_metrics": {"wall_clock_seconds_delta": 1.0},
                 "difference_reasons": ["same_status"],
+                "score_breakdown": {
+                    "baseline": {"overall_score": 1.0},
+                    "candidate": {"overall_score": 0.95},
+                    "delta": {"overall_score": -0.05},
+                },
+                "failure_taxonomy": ["same_status"],
+                "evidence_paths": {
+                    "baseline_report_path": "workspace/supervised_evolution/sessions/demo/baseline.json",
+                    "candidate_report_path": "workspace/supervised_evolution/sessions/demo/candidate.json",
+                },
             }
         ],
         "gates": [],

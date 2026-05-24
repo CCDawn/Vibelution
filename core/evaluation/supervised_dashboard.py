@@ -494,15 +494,51 @@ def _render_gate(gate: dict[str, Any]) -> str:
 
 def _render_case(case: dict[str, Any]) -> str:
     difference_summary = str(case.get("difference_summary") or "-")
+    score_breakdown = case.get("score_breakdown") if isinstance(case.get("score_breakdown"), dict) else {}
+    failure_taxonomy = case.get("failure_taxonomy") if isinstance(case.get("failure_taxonomy"), list) else []
+    evidence_paths = case.get("evidence_paths") if isinstance(case.get("evidence_paths"), dict) else {}
+    diagnostics = [difference_summary]
+    score_delta = _case_score_delta(score_breakdown)
+    if score_delta:
+        diagnostics.append(score_delta)
+    if failure_taxonomy:
+        diagnostics.append("taxonomy: " + ", ".join(str(item) for item in failure_taxonomy[:4]))
+    evidence_summary = _case_evidence_summary(evidence_paths)
+    if evidence_summary:
+        diagnostics.append(evidence_summary)
     return (
         "<tr>"
         f"<td>{_escape(case.get('case_id') or '-')}</td>"
         f"<td>{_escape(case.get('baseline_status') or '-')}</td>"
         f"<td>{_escape(case.get('candidate_status') or '-')}</td>"
         f"<td>{_escape(case.get('decision_signal') or '-')}</td>"
-        f"<td>{_escape(difference_summary)}</td>"
+        f"<td>{_escape(' | '.join(item for item in diagnostics if item))}</td>"
         "</tr>"
     )
+
+
+def _case_score_delta(score_breakdown: dict[str, Any]) -> str:
+    delta = score_breakdown.get("delta") if isinstance(score_breakdown.get("delta"), dict) else {}
+    if "overall_score" not in delta:
+        return ""
+    try:
+        value = float(delta.get("overall_score"))
+    except (TypeError, ValueError):
+        return ""
+    return f"score Δ {value:+.2f}"
+
+
+def _case_evidence_summary(evidence_paths: dict[str, Any]) -> str:
+    if not evidence_paths:
+        return ""
+    baseline = str(evidence_paths.get("baseline_report_path") or "").strip()
+    candidate = str(evidence_paths.get("candidate_report_path") or "").strip()
+    parts = []
+    if baseline:
+        parts.append(f"baseline={Path(baseline).name}")
+    if candidate:
+        parts.append(f"candidate={Path(candidate).name}")
+    return "evidence: " + ", ".join(parts) if parts else ""
 
 
 def _next_action(record: SupervisedDashboardRecord) -> str:

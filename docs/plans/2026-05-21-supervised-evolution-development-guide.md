@@ -24,6 +24,32 @@
 - 当前记忆显示，历史监督记录多数仍停在 HOLD，说明候选与 baseline 的差异信号还不够强。
 - 最新规划要求监督运行登记为 `WorkRun(supervised_evolution_run)`，并通过 resource lease 与 chat/self-evolution 协调。
 
+## 当前实现快照（2026-05-24）
+
+### 已落地机制
+
+- `core/evaluation/supervised_evolution.py` 已按同一 bundle、同一 case、同一 scenario/mode/timeout 分别运行 baseline 与 candidate，并把每个 role 的 harness report 写入 `workspace/supervised_evolution/sessions/<session_id>/`。
+- 每轮监督运行都会写 `workspace/supervised_evolution/decisions/<session_id>.json`，记录 `baseline_runs`、`candidate_runs`、`baseline_summary`、`candidate_summary`、`case_summaries`、`gates`、`decision`、`reason`、`score_delta`、`policy_action`。
+- 当前 hybrid verification 是“部分结构化”：case 级已有 `difference_summary`、`difference_metrics`、`difference_reasons`，覆盖 validation、wall clock、guarded tools、new logs、restart miss、transaction issue、LLM failure。
+- 当前 gate 顺序为 infrastructure、legality、safety、survival、cost，并在 PROMOTE 前追加 Gym promotion gate；LLM provider transport failure 会进入 `INCONCLUSIVE`，并跳过后续合法性/安全/生存/成本判断。
+- `core/evaluation/dataset_registry.py` 已有 dataset 准入元数据：`review_required`、`source_track`、`allowed_downstream_uses`、`holdout_allowed`、`raw_chat_direct_training_allowed`、`usability_status`、`usability_reason`。
+- `chat_reviewed_multiturn` 已被标记为 dialogue 来源、review required、非 holdout、禁止 raw chat direct training，允许 downstream use 为 `supervised_evaluation`、`gym_candidate_case`、`future_training_export`。
+- `generated_cases` 已要求 provenance，且 `_validate_generated_case_provenance` 和 `_build_generated_case` 都禁止自动进入 `holdout`。
+- `core/evaluation/selection_policy.py` 会按 decision 写 policy 记录、audit log、observation/rejection/rollback pool、lineage index 和 proposal 文件；`INCONCLUSIVE` 只审计，不写候选观察池或回滚池。
+- `core/evaluation/supervised_workbench.py` 与 `core/evaluation/supervised_dashboard.py` 已能读取 Gym proposal lifecycle，并展示 `runtime_effect` 与 `agent_consumption`；active advisory baseline 仍只是 advisory。
+- `core/web/services/evolution_service.py` 已区分 `manual_review` 与 `auto`：自动审查模式会锁定手工 proposal governance action、手工 proposal 编辑和删除。
+- `core/web/services/supervised_control_service.py` 已为普通监督运行提供 active run、pause/resume/terminate、SSE event tail、`evaluation` lease 检查、dataset materialization 和 proposal action。
+- `core/web/services/supervised_worktree_evolution_service.py` 已将工作树式监督闭环登记为 `supervised_worktree_evolution_run`，使用 `evaluation` + `worktree_write` leases；默认 `executionMode=simulation`，真实 LLM 路径需要 `confirmRealLlmCost=true`。
+
+### 仍存在的实现缺口
+
+- `score_breakdown` 已成为 case-level decision schema v1，并从现有 harness metrics 派生 `final_state_score`、`side_effect_score`、`trace_score`、`safety_score`、`semantic_score`、`overall_score`；后续若接入语义裁判，必须保持旧字段兼容。
+- `failure_taxonomy` 已从 `difference_reasons` 与 LLM failure category 派生，覆盖事务、restart、LLM failure、状态回归/改善和成本噪声；dynamic case、impossible task、stale-state execution、post-adaptation verification miss 仍需随 P1 动态 case 扩展。
+- `evidence_paths` 已进入 case summary、policy case evidence、proposal 和 Web case diagnostics，当前统一引用 role report、worktree、新 conversation/debug 文件；Gym trace/diff/log artifact map 仍可继续补强。
+- 动态 case 与不可完成 case 仍主要停留在计划层。现有 dry-run 更偏事务、restart、validation、LLM failure 与安全边界，还缺一组明确的 temporal/spatial/impossible/replanning fixture。
+- PROMOTE 与 accepted baseline 的边界需要更清楚地写入文档和 UI/API 语义：当前 supervised selection policy 可更新监督侧 accepted baseline registry 与 bundle baseline，这仍是 frozen evaluator / supervision artifact，不代表 runtime prompt、模型配置或线上行为已生效。
+- `proposal_action` 目前有审计和生命周期记录，但尚未统一登记为独立 `WorkRun(proposal_action)`；如果后续要和共享底座完全对齐，需要补这个 run kind 或等价 lifecycle event。
+
 ## 职责边界
 
 监督进化线负责：
@@ -66,6 +92,13 @@
 - dataset/bundle 的 review 边界提示，例如 `chat_reviewed_multiturn` 只代表人工审核后的多轮对话 case。
 - 每个 case 的 verification artifacts：trace、final state、side effects、failure taxonomy、score breakdown。
 - decision record 和 proposal action 的 provenance。
+
+当前实现补充：
+
+- 普通监督 run 使用 `runKind=supervised_evolution_run` 和 `leases=["evaluation"]`。
+- 工作树式监督闭环使用 `runKind=supervised_worktree_evolution_run` 和 `leases=["evaluation", "worktree_write"]`。
+- `manual_review` 允许人工治理 proposal；`auto` 锁定人工接纳、激活、回滚、编辑和删除。
+- `simulation` 是工作树式监督闭环默认安全执行模式；`real` 必须显式确认真实 LLM 成本。
 
 ## 论文启发到工程机制
 
@@ -157,68 +190,199 @@
 8. 监督线保护冻结标准。
    自进化、prompt evolution、skill evolution 只能产生候选，不能直接改写 `V_ref` 或 accepted baseline。
 
+9. 接纳入口必须可追溯。
+   reviewed chat case、generated case、self-evolution proposal 进入监督验收时，必须留下来源、review/provenance、允许用途和 evidence path。
+
+10. 自动模式不能绕过治理。
+    `auto` 可以生成候选、运行评测和整理建议，但不能替代人工 governance 直接 apply/activate/rollback/delete proposal。
+
+## 三类输入进入监督验收的规则
+
+### Reviewed Chat Case
+
+准入路径：
+
+1. Chat segment 进入 candidate queue。
+2. 人工 review 后写入 positive/negative decision。
+3. positive case 进入 `chat_reviewed_multiturn`。
+4. dataset registry 将其物化为 `chat_reviewed_multiturn_v1` bundle。
+5. 监督线只能从 materialized bundle 运行，不读取 raw chat transcript。
+
+必须保持：
+
+- `rawChatDirectTrainingAllowed=false`。
+- `review_required=true`。
+- `source_track=dialogue`。
+- `holdout_allowed=false`，除非后续有独立 frozen holdout review 流程。
+- downstream use 只允许 registry 明确列出的用途。
+
+测试锚点：
+
+```powershell
+pytest tests/test_chat_dataset_capture.py -v
+pytest tests/test_dataset_registry.py -k "chat_reviewed or downstream" -v
+pytest tests/test_web_app.py -k "chat_review" -v
+```
+
+### Generated Case
+
+准入路径：
+
+1. Gym、trace diagnosis 或 harness gap 生成 candidate case。
+2. 写入 `workspace/evaluation/datasets/generated_cases.jsonl`。
+3. 每条 case 必须有 provenance：`source_trace_id`、`source_episode_id`、`source_harness_gap`、`generation_reason`、`creator_version`、`created_at`、`allowed_splits`。
+4. `dataset_splits` 必须是 provenance `allowed_splits` 的子集。
+5. 禁止自动进入 `holdout`。
+
+必须保持：
+
+- generated case 可以用于 observe/dev/regression 压力测试。
+- generated case 不能无 review 晋升为 frozen holdout。
+- generated case 的 provenance 要进入 bundle case，供 decision record 回放。
+
+测试锚点：
+
+```powershell
+pytest tests/test_dataset_registry.py -k "generated_cases or holdout or provenance" -v
+```
+
+### Self-Evolution Proposal
+
+准入路径：
+
+1. self-evolution 只能产出 candidate change、candidate case 或 proposal。
+2. 监督线用固定 bundle/dataset 对 baseline 与 candidate 做同条件评测。
+3. decision record 写出 PROMOTE/HOLD/ROLLBACK/REJECT/INCONCLUSIVE 及 gate 证据。
+4. selection policy 生成 proposal/advisory/observation/rejection/rollback 工件。
+5. apply/activate/rollback 只能走 proposal lifecycle action，且 `manual_review` 模式下才允许人工治理动作。
+
+必须保持：
+
+- PROMOTE 是监督结论，不是 runtime 生效。
+- `runtime_effect=not_applied` 与 `agent_consumption=advisory` 必须在 dashboard/workbench/Web 中可见。
+- 无监督线不能直接改 policy、accepted baseline registry、frozen evaluator 或 runtime 配置。
+- 监督侧 accepted baseline registry 属于 `V_ref`/frozen evaluator 工件，不是线上 runtime prompt。
+
+测试锚点：
+
+```powershell
+pytest tests/test_supervised_evolution.py -k "decision or policy or INCONCLUSIVE" -v
+pytest tests/test_supervised_workbench.py -k "promotion or lifecycle" -v
+pytest tests/test_web_app.py -k "proposal or auto_review_mode" -v
+```
+
 ## 优先任务
 
-### 任务 1：增强差异信号
+### P0-1：把 hybrid verification 固化为 decision schema（已完成 v1）
 
-目标：减少“baseline 和 candidate 看起来差不多”的 HOLD 堆积。
+目标：把当前分散在 `difference_metrics`、gate metrics、run reports 里的证据固化成可回放 schema。
 
-可做方向：
+已完成：
 
-- 设计更能暴露行为差异的 case。
-- 把 trace-driven diagnosis 纳入 candidate 对比。
-- 增强每个 case 的 failure reason。
-- 对工具序列、事务开关、停止语义给出更细粒度评分。
-- 引入 final state、side effects、trace quality、safety behavior 的 score breakdown。
+- 在 `CaseDecisionSummary` 上新增正式 `score_breakdown`。
+- 将 `difference_reasons` 升级或映射为 `failure_taxonomy`。
+- 在 decision record 中补 `evidence_paths`，统一引用 role report、trace、diff、logs、proposal、Gym decision。
+- 保留旧字段，保证 dashboard/workbench 对历史记录兼容。
+
+仍可补强：
+
+- `semantic_score` 当前从 final state 派生，尚未接入独立语义裁判。
+- `evidence_paths` 当前覆盖 role report/worktree/conversation/debug 文件，尚未统一 Gym trace、diff artifact 和 runtime scene child log。
+
+文件影响：
+
+- `core/evaluation/supervised_evolution.py`
+- `core/evaluation/selection_policy.py`
+- `core/evaluation/supervised_dashboard.py`
+- `core/web/services/evolution_service.py`
+- `tests/test_supervised_evolution.py`
+- `tests/test_supervised_dashboard.py`
+- `tests/test_web_app.py`
+
+风险：
+
+- 历史 decision record 可能缺字段，读取层必须做默认值。
+- score 名称一旦暴露给 Web，会成为事实 API，先保持小而稳定。
 
 建议测试：
 
 ```powershell
-pytest tests/test_supervised_evolution.py -k "case or score or decision" -v
-pytest tests/test_dataset_registry.py -v
+pytest tests/test_supervised_evolution.py -k "case or score or decision or INCONCLUSIVE" -v
+pytest tests/test_supervised_dashboard.py -k "artifact or decision" -v
+pytest tests/test_web_app.py -k "proposal or evolution_routes_use_real_supervised_records" -v
 ```
 
-### 任务 2：统一监督事实源
+### P0-2：锁定三类输入准入边界
 
-目标：无论记录来自 `decisions/`、`policy/` 还是 gym proposal，都能被 dashboard、workbench 和 Web 稳定读取。
+目标：reviewed chat case、generated case、self-evolution proposal 都能进入监督验收，但不能污染 `V_ref`。
 
 重点检查：
 
-- 是否需要引入或补齐 `core/evaluation/supervised_artifacts.py`。
-- policy-only 历史记录是否能回放。
-- decision 记录里是否包含 proposal path、policy action、runtime effect。
-- decision 记录里是否包含 verification artifacts 和 trace/provenance 路径。
+- `chat_reviewed_multiturn` 的 review/downstream/holdout/raw-chat 边界是否在 API、bundle、UI 中一致。
+- `generated_cases` provenance 是否进入物化 bundle 和 decision evidence。
+- self-evolution 产出的 candidate/proposal 是否只能通过监督 run 与 proposal lifecycle action 进入 accepted/advisory 状态。
+- `manual_review` 与 `auto` 的锁定语义是否覆盖 apply/activate/rollback/edit/delete。
+
+文件影响：
+
+- `core/evaluation/chat_case_lifecycle.py`
+- `core/evaluation/dataset_registry.py`
+- `core/evaluation/selection_policy.py`
+- `core/web/services/evolution_service.py`
+- `core/web/services/supervised_control_service.py`
+- `core/web/routes/evolution.py`
+- `tests/test_chat_dataset_capture.py`
+- `tests/test_dataset_registry.py`
+- `tests/test_supervised_evolution.py`
+- `tests/test_web_app.py`
+
+风险：
+
+- Web 文案容易把 reviewed chat case 说成 training data；必须坚持“reviewed case / supervised pressure / future training export”分层。
+- generated case 的 split 和 provenance 校验如果过严，可能阻塞已有本地实验数据；错误信息要可修复。
 
 建议测试：
 
 ```powershell
-pytest tests/test_supervised_dashboard.py -v
-pytest tests/test_supervised_workbench.py -v
-pytest tests/test_web_app.py -k "evolution_routes_use_real_supervised_records or supervised_run" -v
+pytest tests/test_chat_dataset_capture.py -v
+pytest tests/test_dataset_registry.py -k "chat_reviewed or generated_cases or downstream or holdout" -v
+pytest tests/test_web_app.py -k "chat_review or dataset or auto_review_mode or proposal" -v
 ```
 
-### 任务 3：建立 hybrid verification 结构
+### P0-3：对齐 proposal lifecycle 与 frozen evaluator 边界
 
-目标：每个 case 的结果不再只是 pass/fail 或单一 score，而是包含可解释证据。
+目标：让 PROMOTE、policy accepted baseline、Gym proposal、applied、active、runtime effect 的边界不再混淆。
 
-建议字段：
+重点检查：
 
-- `final_state_score`：最终状态是否满足目标。
-- `side_effect_score`：是否产生不允许的副作用。
-- `trace_score`：工具顺序、重试、停止、事务是否合理。
-- `safety_score`：是否越权、泄露或绕过 gate。
-- `semantic_score`：必要时由语义判断补充。
-- `failure_taxonomy`：失败标签。
-- `evidence_paths`：trace、日志、diff、artifact 路径。
+- decision record 是否明确写出 `supervised_decision`、`policy_action`、`proposal_status`、`runtime_effect`、`agent_consumption`。
+- PROMOTE 后 selection policy 对 accepted baseline registry 的更新是否被描述为监督侧 frozen evaluator 工件，而不是 runtime 改写。
+- active proposal 是否仍禁止直接删除；applied/active/rolled_back/superseded/promoted 是否禁止编辑草稿。
+- proposal action 是否需要补 `WorkRun(proposal_action)`，或先补等价 runtime scene lifecycle event。
+
+文件影响：
+
+- `core/evaluation/selection_policy.py`
+- `core/evaluation/supervised_workbench.py`
+- `core/evaluation/supervised_dashboard.py`
+- `core/web/services/evolution_service.py`
+- `core/web/services/supervised_control_service.py`
+- `tests/test_supervised_workbench.py`
+- `tests/test_web_app.py`
+
+风险：
+
+- 如果把 accepted baseline registry 误写成 runtime baseline，会破坏 PROMOTE 边界。
+- 如果 action 状态过度收紧，会阻塞必要的人工回滚；回滚必须始终保留可解释路径。
 
 建议测试：
 
 ```powershell
-pytest tests/test_supervised_evolution.py -k "verification or score or artifact" -v
-pytest tests/test_supervised_dashboard.py -k "artifact or decision" -v
+pytest tests/test_supervised_workbench.py -k "promotion or lifecycle" -v
+pytest tests/test_web_app.py -k "proposal or delete or action or auto_review_mode" -v
 ```
 
-### 任务 4：增加动态和不可完成 case
+### P1-1：增加动态和不可完成 case
 
 目标：让监督评测覆盖真实 agent 常见失败：环境变化、工具失败、用户改目标、任务不可行、适配后未验证。
 
@@ -238,26 +402,26 @@ pytest tests/test_dataset_registry.py -k "dynamic or generated_cases" -v
 pytest tests/test_supervised_evolution.py -k "dynamic or impossible or replanning" -v
 ```
 
-### 任务 5：收紧 proposal action 语义
+### P1-2：统一监督事实源
 
-目标：apply、activate、rollback、delete 都有清晰前置条件和用户可见解释。
+目标：无论记录来自 `decisions/`、`policy/`、Gym proposal 还是 worktree run，都能被 dashboard、workbench 和 Web 稳定读取。
 
 重点检查：
 
-- active run 存在时 proposal action 是否锁定。
-- active proposal 是否禁止删除。
-- missing/proposed/applied/active/rolled_back 的按钮状态是否合理。
-- Web 和 CLI 文案是否都说明 runtime effect。
-- proposal action 是否作为独立 `WorkRun(proposal_action)` 或等价事件留下证据。
+- 是否需要引入或补齐 `core/evaluation/supervised_artifacts.py`。
+- policy-only 历史记录是否能回放。
+- decision 记录里是否包含 proposal path、policy action、runtime effect。
+- decision 记录里是否包含 verification artifacts 和 trace/provenance 路径。
 
 建议测试：
 
 ```powershell
-pytest tests/test_web_app.py -k "supervised_run_action or proposal or delete" -v
-pytest tests/test_supervised_workbench.py -k "promotion or lifecycle" -v
+pytest tests/test_supervised_dashboard.py -v
+pytest tests/test_supervised_workbench.py -v
+pytest tests/test_web_app.py -k "evolution_routes_use_real_supervised_records or supervised_run or proposal" -v
 ```
 
-### 任务 6：稳定监督运行控制
+### P1-3：稳定监督运行控制
 
 目标：Web 启动、暂停、恢复、停止监督运行时，状态不会卡死或污染下一轮。
 
@@ -278,22 +442,22 @@ pytest tests/test_dataset_registry.py -k "supervised_bundle" -v
 pytest tests/test_work_run_leases.py -v
 ```
 
-### 任务 7：接入 reviewed chat case 和 generated case
+### P2-1：扩展 case 生成与缺口反馈
 
-目标：把对话线与无监督线产生的候选增量纳入监督评测，但保持冻结验收边界。
+目标：用监督结果反向提示 Gym/self-evolution 生成更有区分度的 case，但仍通过 review/provenance 进入 dataset。
 
 重点检查：
 
-- `chat_reviewed_multiturn` 标记为 reviewed-only。
-- `generated_cases` 必须带 provenance、generator、review status 和 allowed downstream uses。
-- 默认不把 chat reviewed case 或 generated case 放入 frozen holdout。
-- UI 明确展示数据来源和风险边界。
+- 从 recent decision 的 `failure_taxonomy` 聚合弱点分布。
+- 生成新 case 时写入 `source_trace_id` 和 `source_harness_gap`。
+- 默认写 observe/regression，不写 holdout。
+- 提供人工 review 入口，再进入更高信任 split。
 
 建议测试：
 
 ```powershell
-pytest tests/test_dataset_registry.py -k "chat_reviewed or generated_cases or downstream" -v
-pytest tests/test_web_app.py -k "dataset or chat_review or evolution_workbench" -v
+pytest tests/test_dataset_registry.py -k "generated_cases or provenance" -v
+pytest tests/test_supervised_evolution.py -k "taxonomy or generated" -v
 ```
 
 ## 与对话线的接口
