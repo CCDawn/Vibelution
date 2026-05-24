@@ -76,7 +76,9 @@
 - `core/evaluation/self_evolution_experience_repository.py` 已提供第一版 terminal experience repository：自进化终态 run 会写入 `workspace/self_evolution/experience/experience.jsonl`，并用 `self_terminal:<runId>` 去重。
 - `core/evaluation/self_evolution_reflection.py` 已提供第一版 bounded reflection：每条 terminal experience 可派生 self-questioning / self-navigating / self-attributing 三段结构化候选，并写入 `workspace/self_evolution/reflection/reflection.jsonl`。
 - `core/evaluation/self_evolution_candidate_pool.py` 已提供第一版 skill / prompt / proposal candidate 池，三类候选分别写入 `workspace/self_evolution/candidates/*_candidates.jsonl`，并强制 `review_state=pending`、`supervised_required=true`、`auto_apply=false`。
-- 目前还没有把 reflection record 自动蒸馏进 candidate pool，也还没有 P4 监督线回流 UI / API。
+- P4 监督线回流已有第一版只读桥接：`GET /api/evolution/self/candidates` 会返回 self-evolution candidate review queue；`GET /api/evolution/library` 会把这些候选作为 `pending` source 暴露；`GET /api/evolution/proposals/{candidate_id}` 会返回只读详情，供现有监督 library 详情面消费。
+- P4 桥接仍不提供 apply / activate / rollback / delete / edit 动作，不写 accepted baseline、selection policy、runtime prompt 或 skill registry。
+- 目前还没有把 reflection record 自动蒸馏进 candidate pool，也还没有专门的前端候选治理 UI；现有 UI 只通过监督 library pending/detail 读取后端只读 payload。
 
 ## 当前文档与实现差距
 
@@ -92,8 +94,8 @@
 4. generated cases 已有部分监督边界；experience repository 已落地第一版，但仍只是候选来源。
    文档需要继续强调：experience record 不自动生效，不写 accepted baseline / selection policy，也还未接入 P2/P3 候选池消费。
 
-5. skill / prompt / proposal candidate 池已有第一版统一契约，但还没有监督线回流。
-   当前 candidate pool 已有 schema、provenance、dedupe、review_state、blocked_downstream_uses 和 supervised_required；下一步需要接入 P4 review / proposal / dataset lifecycle。
+5. skill / prompt / proposal candidate 池已有第一版统一契约，并已接入监督线只读回流。
+   当前 candidate pool 已有 schema、provenance、dedupe、review_state、blocked_downstream_uses 和 supervised_required；P4 第一版已把候选作为 pending review source 暴露给监督 library，但还没有审核动作、dataset lifecycle 写入或专门 UI。
 
 6. self-questioning / self-navigating / self-attributing 已有第一版 bounded artifact，但还未接入候选池。
    当前 reflection record 只从 experience evidence 派生问题、路径建议和归因候选，不自动驱动下一轮运行，也不写 runtime prompt / skill / policy。
@@ -364,28 +366,44 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 
 ### P4：把候选回流监督线
 
+状态：第一版只读桥接已落地。self-evolution candidate pool 现在可作为监督线 pending review source 读取，但不能被无监督线或该桥接自动接纳、激活、删除、编辑或生效。
+
 目标：成功经验和候选进入监督线 review / proposal / dataset lifecycle。
 
-建议文件影响：
+已落地行为：
 
-- 更新 `core/web/services/supervised_control_service.py`
+- `GET /api/evolution/self/candidates` 返回 `enabled`、`pendingCount`、按类型计数和候选 items。
+- `GET /api/evolution/library` 的 `pending` 列表包含 `ingestMode=self_evolution_candidate` 的候选项。
+- `GET /api/evolution/proposals/{candidate_id}` 支持候选只读详情，返回 `canEdit=false`、`canDelete=false`、`availableActions=[]`、`runtimeEffect=not_applied`。
+- 候选项使用 `proposalStatus=self_candidate_pending`、`decision=PENDING_REVIEW`、`candidateOnly=true`、`autoApply=false`、`supervisedRequired=true`。
+- 原始 self run id 保留在 `sourceSelfRunId` / provenance；`sourceRun` 对前端现有 proposal detail 查询保持为 `candidate_id`。
+
+已落地文件影响：
+
 - 更新 `core/web/services/evolution_service.py`
-- 更新 `core/evaluation/dataset_registry.py`
-- 更新 `web/src/routes/EvolutionRoute.tsx`
+- 更新 `core/web/routes/evolution.py`
 - 更新 `web/src/api/types.ts`
 - 更新 `tests/test_web_app.py`
-- 更新 `tests/test_dataset_registry.py`
+
+仍未覆盖：
+
+- 不提供审核通过 / 拒绝 / 转 dataset / 转 proposal 的写入动作。
+- 不做专门前端候选治理 UI。
+- 不自动把 reflection records 蒸馏为 candidate pool 记录。
 
 风险：
 
 - UI 文案必须明确“candidate / pending / reviewed / accepted”的区别。
 - 不能把自进化成功 run 等同于监督验收通过。
+- 只读候选进入现有 library pending 后，详情路由必须使用 candidate id，不能误用 source self run id。
 
 测试锚点：
 
 ```powershell
-pytest tests/test_web_app.py -k "self_evolution or supervised or candidate" -v
-pytest tests/test_dataset_registry.py -k "generated_cases or chat_reviewed or downstream" -v
+.\.venv\Scripts\python.exe -m pytest tests/test_web_app.py -k "self_evolution_candidates_as_pending_review_source or candidate_review_route_hides or evolution_routes_handle_empty_supervised_workspace or evolution_routes_use_real_supervised_records" -v
+.\.venv\Scripts\python.exe -m pytest tests/test_self_evolution_candidate_pool.py -v
+.\.venv\Scripts\python.exe -m pytest tests/test_dataset_registry.py -k "generated_cases or chat_reviewed or downstream" -v
+npm --prefix web run build
 ```
 
 ### P5：强化运行关闭和证据审计
@@ -566,7 +584,7 @@ pytest tests/test_web_app.py -k "chat_review or supervised or self_evolution" -v
    状态：第一版已完成。self-questioning 只从证据生成问题，self-navigating 只生成必须重查当前现场的路径建议，self-attributing 只生成可追溯归因；三者都不能直接修改 runtime 标准。下一步是让 P3 candidate pool 消费这些 reflection records。
 
 3. 建立 skill / prompt / proposal candidate 池并接回监督线。
-   状态：candidate pool 核心持久化已完成，prompt、skill、proposal 已纳入 provenance、review_state、downstream_use 和 supervised_required 契约。下一步是 P4，把候选回流监督线 review / proposal / dataset lifecycle。
+   状态：candidate pool 核心持久化已完成，prompt、skill、proposal 已纳入 provenance、review_state、downstream_use 和 supervised_required 契约；P4 第一版只读回流也已完成。下一步是把只读 pending candidate 转成真正的监督 review action / dataset lifecycle，但仍必须由监督线验收，不能自动 accepted。
 
 ## 提交说明
 

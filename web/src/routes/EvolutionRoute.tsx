@@ -220,6 +220,24 @@ function proposalEditDraftFromDetail(detail: EvolutionProposalDetail): ProposalE
   };
 }
 
+function isSelfEvolutionCandidateItem(item: EvolutionLibraryEntry | null | undefined) {
+  return item?.ingestMode === "self_evolution_candidate";
+}
+
+function proposalDisplaySourceRun(item: EvolutionLibraryEntry | null | undefined) {
+  if (!item) {
+    return "";
+  }
+  if (isSelfEvolutionCandidateItem(item)) {
+    return item.sourceSelfRunId || item.sourceRun;
+  }
+  return item.sourceRun;
+}
+
+function canOpenProposalSourceRun(item: EvolutionLibraryEntry | null | undefined) {
+  return Boolean(item?.sourceRun) && !isSelfEvolutionCandidateItem(item);
+}
+
 export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps) {
   const {
     lang,
@@ -774,6 +792,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       const searchHaystack = [
         item.title,
         item.sourceRun,
+        item.sourceSelfRunId ?? "",
         item.targetLabel,
         item.targetKey,
         item.headline,
@@ -807,6 +826,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const selectedPendingItem =
     filteredPendingItems.find((item) => item.id === selectedPendingItemId) ?? filteredPendingItems[0] ?? null;
   const selectedProposalSummary = libraryView === "items" ? selectedLibraryItem : selectedPendingItem;
+  const selectedProposalIsSelfCandidate = isSelfEvolutionCandidateItem(selectedProposalSummary);
+  const selectedProposalDisplaySourceRun = proposalDisplaySourceRun(selectedProposalSummary);
+  const selectedProposalCanOpenSourceRun = canOpenProposalSourceRun(selectedProposalSummary);
   const selectedProposalRunId = selectedProposalSummary?.sourceRun ?? null;
   const libraryPaneEmpty = currentLibraryEntries.length === 0;
   const libraryFilteredEmpty = !libraryPaneEmpty && visibleLibraryEntries.length === 0;
@@ -819,6 +841,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     enabled:
       activeTrack === "supervised"
       && evolutionView === "library"
+      && !selectedProposalIsSelfCandidate
       && Boolean(selectedProposalRunId),
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
@@ -1154,11 +1177,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   ]);
 
   useEffect(() => {
-    const visibleIds = new Set(
-      visibleLibraryEntries.map((item) => item.sourceRun),
+    const visibleDeletableIds = new Set(
+      visibleLibraryEntries.filter((item) => item.canDelete).map((item) => item.sourceRun),
     );
     setSelectedProposalRunIds((current) => {
-      const next = current.filter((item) => visibleIds.has(item));
+      const next = current.filter((item) => visibleDeletableIds.has(item));
       if (
         next.length === current.length
         && next.every((item, index) => item === current[index])
@@ -1533,7 +1556,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     bulkDeleteRunRecordsMutation.mutate(selectedRunIds);
   }
 
-  function toggleProposalSelection(sessionId: string) {
+  function toggleProposalSelection(item: EvolutionLibraryEntry) {
+    if (!item.canDelete) {
+      return;
+    }
+    const sessionId = item.sourceRun;
     setSelectedProposalRunIds((current) =>
       current.includes(sessionId)
         ? current.filter((item) => item !== sessionId)
@@ -1733,6 +1760,148 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
         <summary>{title}</summary>
         <pre className={styles.rawJson}>{JSON.stringify(payload ?? {}, null, 2)}</pre>
       </details>
+    );
+  }
+
+  function renderSelfEvolutionCandidateDetail(item: EvolutionLibraryEntry) {
+    const evidenceRefs = item.evidenceRefs ?? [];
+    const allowedUses = item.allowedDownstreamUses ?? [];
+    const blockedUses = item.blockedDownstreamUses ?? [];
+    return (
+      <>
+        <div className={styles.detailHeader}>
+          <div>
+            <p className={styles.eyebrow}>{t("pendingReview")}</p>
+            <h2 className={styles.detailTitle}>{item.title}</h2>
+          </div>
+          <span className={styles.statusPill}>{item.outcomeSemantics.proposalStatusLabel}</span>
+        </div>
+
+        <div className={styles.detailSection}>
+          <h3>{t("reviewHeadline")}</h3>
+          <p className={styles.reviewLead}>{item.headline || item.summary}</p>
+          <p>{item.reason || item.outcomeSemantics.runtimeExplanation}</p>
+        </div>
+
+        <div className={styles.detailSection}>
+          <h3>{t("resultLayersTitle")}</h3>
+          <div className={styles.relatedList}>
+            <article className={styles.relatedRow}>
+              <strong>{t("sourceRun")}</strong>
+              <span>{proposalDisplaySourceRun(item) || "--"}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>candidate_id</strong>
+              <span>{item.id}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>{t("proposalUpdatedAt")}</strong>
+              <span>{compactTimestamp(item.updatedAt)}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>{t("proposalLayer")}</strong>
+              <span>{item.outcomeSemantics.proposalStatusLabel}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>{t("runtimeLayer")}</strong>
+              <span>{item.outcomeSemantics.runtimeEffectLabel}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>{t("targetLabelTitle")}</strong>
+              <span>{item.targetLabel || item.candidateType || item.targetKey || "--"}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>{t("availableActions")}</strong>
+              <span>{formatAvailableActions(item.availableActions)}</span>
+            </article>
+          </div>
+          <p className={styles.noticeText}>{item.outcomeSemantics.runtimeExplanation}</p>
+        </div>
+
+        <div className={styles.detailSection}>
+          <h3>{t("currentStateTitle")}</h3>
+          <div className={styles.relatedList}>
+            <article className={styles.relatedRow}>
+              <strong>review_state</strong>
+              <span>{item.reviewState || "--"}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>supervised_required</strong>
+              <span>{item.supervisedRequired ? "true" : "false"}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>candidate_only</strong>
+              <span>{item.candidateOnly ? "true" : "false"}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>auto_apply</strong>
+              <span>{item.autoApply ? "true" : "false"}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>allowed_downstream_uses</strong>
+              <span>{allowedUses.length > 0 ? allowedUses.join(", ") : "--"}</span>
+            </article>
+            <article className={styles.relatedRow}>
+              <strong>blocked_downstream_uses</strong>
+              <span>{blockedUses.length > 0 ? blockedUses.join(", ") : "--"}</span>
+            </article>
+          </div>
+        </div>
+
+        <div className={styles.detailSection}>
+          <h3>{t("deleteAndCleanup")}</h3>
+          <div className={styles.relatedList}>
+            <article className={styles.relatedRow}>
+              <strong>{item.canDelete ? t("deletionAllowed") : t("deletionBlocked")}</strong>
+              <span>{item.canDelete ? t("deleteProposal") : item.deleteBlockReason || "--"}</span>
+            </article>
+          </div>
+        </div>
+
+        <div className={styles.detailSection}>
+          <h3>{t("evidencePaths")}</h3>
+          <div className={styles.relatedList}>
+            {evidenceRefs.length > 0 ? (
+              evidenceRefs.map((path) => (
+                <article key={path} className={styles.relatedRow}>
+                  <strong>evidence</strong>
+                  <span className={styles.pathText}>{path}</span>
+                </article>
+              ))
+            ) : (
+              <article className={styles.relatedRow}>
+                <strong>evidence</strong>
+                <span>--</span>
+              </article>
+            )}
+            {item.sourceExperienceId ? (
+              <article className={styles.relatedRow}>
+                <strong>source_experience_id</strong>
+                <span>{item.sourceExperienceId}</span>
+              </article>
+            ) : null}
+            {item.sourceReflectionId ? (
+              <article className={styles.relatedRow}>
+                <strong>source_reflection_id</strong>
+                <span>{item.sourceReflectionId}</span>
+              </article>
+            ) : null}
+            {item.txnId ? (
+              <article className={styles.relatedRow}>
+                <strong>txn_id</strong>
+                <span>{item.txnId}</span>
+              </article>
+            ) : null}
+          </div>
+        </div>
+
+        <div className={styles.detailSection}>
+          <div className={styles.rawBlockStack}>
+            {renderRawJson("candidate_payload", item.payload ?? null)}
+            {renderRawJson("provenance", item.provenance ?? null)}
+          </div>
+        </div>
+      </>
     );
   }
 
@@ -2890,14 +3059,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               <div className={styles.relatedList}>
                 <article className={styles.relatedRow}>
                   <strong>{t("latestRun")}</strong>
-                  <span>{selectedProposalSummary?.sourceRun || latestRun?.id || "--"}</span>
+                  <span>{selectedProposalDisplaySourceRun || latestRun?.id || "--"}</span>
                 </article>
                 <article className={styles.relatedRow}>
                   <strong>{t("intakeMode")}</strong>
                   <span>{intakeModeLabel(currentIntakeMode)}</span>
                 </article>
               </div>
-              {selectedProposalSummary ? (
+              {selectedProposalSummary && selectedProposalCanOpenSourceRun ? (
                 <div className={styles.actionRow}>
                   <button
                     type="button"
@@ -3015,8 +3184,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           <label className={styles.batchToggle}>
                             <input
                               type="checkbox"
+                              disabled={!item.canDelete}
                               checked={proposalSelected(item.sourceRun)}
-                              onChange={() => toggleProposalSelection(item.sourceRun)}
+                              onChange={() => toggleProposalSelection(item)}
                             />
                             <span>{t("selectForBatchDelete")}</span>
                           </label>
@@ -3035,7 +3205,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </div>
                           <div className={styles.metaRow}>
                             <span>{decisionLabel(item.decision)}</span>
-                            <span>{item.sourceRun}</span>
+                            <span>{proposalDisplaySourceRun(item)}</span>
                           </div>
                           <p className={styles.cardHeadline}>{item.changeSummary || item.headline}</p>
                           <p>{item.summary}</p>
@@ -3063,8 +3233,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           <label className={styles.batchToggle}>
                             <input
                               type="checkbox"
+                              disabled={!item.canDelete}
                               checked={proposalSelected(item.sourceRun)}
-                              onChange={() => toggleProposalSelection(item.sourceRun)}
+                              onChange={() => toggleProposalSelection(item)}
                             />
                             <span>{t("selectForBatchDelete")}</span>
                           </label>
@@ -3083,7 +3254,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           </div>
                           <div className={styles.metaRow}>
                             <span>{decisionLabel(item.decision)}</span>
-                            <span>{item.sourceRun}</span>
+                            <span>{proposalDisplaySourceRun(item)}</span>
                           </div>
                           <p className={styles.cardHeadline}>{item.changeSummary || item.headline}</p>
                           <p>{item.reason || item.summary}</p>
@@ -3108,7 +3279,9 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
             <section className={`${styles.surface} ${styles.detailPanel}`}>
               {selectedProposalSummary ? (
-                proposalDetailQuery.data ? (
+                selectedProposalIsSelfCandidate ? (
+                  renderSelfEvolutionCandidateDetail(selectedProposalSummary)
+                ) : proposalDetailQuery.data ? (
                   <>
                     <div className={styles.detailHeader}>
                       <div>

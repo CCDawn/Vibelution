@@ -23,6 +23,7 @@ from core.web.services.evolution_service import (
     EvolutionProposalValidationError,
     get_evolution_overview,
     get_proposal_detail,
+    get_self_evolution_candidate_review_queue,
     list_library_items,
     list_pending_library_items,
     list_runs,
@@ -229,6 +230,11 @@ def evolution_workbench() -> dict:
 @router.get("/evolution/chat-review")
 def evolution_chat_review() -> dict:
     return get_chat_review_queue()
+
+
+@router.get("/evolution/self/candidates")
+def evolution_self_candidates() -> dict:
+    return get_self_evolution_candidate_review_queue()
 
 
 @router.post("/evolution/chat-review/delete")

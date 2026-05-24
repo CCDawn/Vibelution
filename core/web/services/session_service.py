@@ -1465,6 +1465,7 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
         "readFiles": read_files,
         "messages": detail_messages,
         "lastTurnError": _session_turn_error_to_api(conversation.get("lastTurnError")),
+        "nextStateSignals": _recent_chat_next_state_signal_summaries(conversation["id"], limit=5),
         "stopRequested": bool(turn_snapshot["stopRequested"]),
         "stopRequestedAt": str(turn_snapshot["stopRequestedAt"] or "").strip(),
         "stopReason": str(turn_snapshot["stopReason"] or "").strip(),
@@ -2145,6 +2146,21 @@ def _run_session_continuation_loop(
             },
         )
         result = agent.run_single_turn(initial_prompt=prompt)
+        return_stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
+        if return_stop_reason:
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "stop_observed",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="stopped",
+                fields={
+                    "stage": "agent_return",
+                    "turnIndex": turn_index,
+                    "stopReason": trim_lines(return_stop_reason, max_lines=2),
+                },
+            )
+            return _build_stopped_turn_result(return_stop_reason)
+
         result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else type(result).__name__
         _record_session_turn_lifecycle_event(
             session_id,

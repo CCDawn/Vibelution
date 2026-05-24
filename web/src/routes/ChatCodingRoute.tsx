@@ -1675,6 +1675,7 @@ export function ChatCodingRoute() {
                   composerModeNotice={resolvedEditTarget ? t("editMessageModeNotice") : ""}
                   cancelComposerModeLabel={t("cancelEditMessage")}
                   turnError={detail.lastTurnError}
+                  nextStateSignals={detail.nextStateSignals ?? []}
                   stopLabel={t("stop")}
                   stopPendingLabel={t("stopPending")}
                   editingMessageId={resolvedEditTarget?.messageId}

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { ConversationMessage } from "../../api/types";
+import { ChatNextStateSignalSummary, ConversationMessage } from "../../api/types";
 import { buildTimelineScrollSignal, ConversationView } from "./ConversationView";
 
 function renderConversation(
@@ -11,6 +11,7 @@ function renderConversation(
     editingMessageId?: string;
     editUserMessageDisabled?: boolean;
     composerValue?: string;
+    nextStateSignals?: ChatNextStateSignalSummary[];
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -33,6 +34,7 @@ function renderConversation(
         composerPlaceholder="Type"
         composerDisabled={false}
         composerPending={false}
+        nextStateSignals={options.nextStateSignals}
         editingMessageId={options.editingMessageId}
         editUserMessageDisabled={options.editUserMessageDisabled}
         editUserMessageLabel="Edit and resend"
@@ -137,6 +139,48 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).not.toContain("下轮启用心智模型");
     expect(html).not.toContain("发送选项");
+  });
+
+  it("renders next-state signals outside the message body when available", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-assistant",
+          role: "assistant",
+          content: "Visible assistant answer",
+          timestamp: "2026-05-22T00:01:00Z",
+        },
+      ],
+      {
+        nextStateSignals: [
+          {
+            signalId: "chat-signal-1",
+            sessionId: "session-1",
+            turnId: "turn-1",
+            source: "runtime",
+            kind: "provider_failure",
+            polarity: "negative",
+            mode: "evaluative",
+            relatedEventCode: "conversation.turn_circuit_breaker",
+            createdAt: "2026-05-22T00:01:03Z",
+            summary: "Provider failed after one ReAct pass.",
+          },
+        ],
+      },
+    );
+
+    expect(html).toContain("下轮信号");
+    expect(html).toContain("Provider failed after one ReAct pass.");
+    expect(html).toContain("Visible assistant answer");
+    expect(html.indexOf("Provider failed after one ReAct pass.")).toBeGreaterThan(
+      html.indexOf("Visible assistant answer"),
+    );
+  });
+
+  it("does not render the next-state signal panel when no signals exist", () => {
+    const html = renderConversation([]);
+
+    expect(html).not.toContain("下轮信号");
   });
 });
 
