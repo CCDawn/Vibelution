@@ -26,6 +26,7 @@ from .constants import (
     STATE_PATH,
     ensure_runtime_manager_dirs,
 )
+from .scene_logging import append_runtime_manager_file_event, record_runtime_manager_scene_event, runtime_manager_event_phase
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
 from .process_inventory import (
     list_repo_runtime_processes,
@@ -44,6 +45,7 @@ _SOURCE_SIGNATURE_PATHS = (
     Path("core/runtime_manager/daemon.py"),
     Path("core/runtime_manager/evolution_store.py"),
     Path("core/runtime_manager/process_inventory.py"),
+    Path("core/runtime_manager/scene_logging.py"),
     Path("core/runtime_manager/state_store.py"),
     Path("core/runtime_manager/workbench_controller.py"),
     Path("core/web/services/self_evolution_control_service.py"),
@@ -445,14 +447,18 @@ def is_daemon_running() -> bool:
 
 
 def _append_event(event_type: str, payload: dict[str, Any]) -> None:
-    ensure_runtime_manager_dirs()
-    event = {
-        "type": event_type,
-        "at": datetime.now(UTC).isoformat(),
-        "payload": payload,
-    }
-    with EVENTS_PATH.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+    event_at = append_runtime_manager_file_event(
+        event_type,
+        payload,
+        events_path=EVENTS_PATH,
+        ensure_dirs=ensure_runtime_manager_dirs,
+    )
+    record_runtime_manager_scene_event(
+        event_type,
+        payload,
+        phase=runtime_manager_event_phase(event_type),
+        occurred_at=event_at,
+    )
 
 
 def _creation_flags() -> int:
@@ -548,7 +554,7 @@ def load_runtime_snapshot() -> dict[str, Any]:
     if phase == "failed" and not _workbench_failure_should_stick(state, desired_state=desired_state, observed_state=observed_state):
         phase = "steady"
         workbench["failureMessage"] = ""
-    if orphaned_browser and phase != "closing":
+    if orphaned_browser and phase not in {"opening", "closing"}:
         desired_state = "closed"
         phase = "failed"
         workbench["failureMessage"] = _workbench_orphaned_browser_failure_message(observation)
@@ -969,7 +975,7 @@ class RuntimeManagerDaemon:
         ):
             phase = "steady"
             workbench["failureMessage"] = ""
-        if orphaned_browser and phase != "closing":
+        if orphaned_browser and phase not in {"opening", "closing"}:
             desired_state = "closed"
             phase = "failed"
             workbench["failureMessage"] = _workbench_orphaned_browser_failure_message(observation)

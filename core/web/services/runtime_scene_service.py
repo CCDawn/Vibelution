@@ -183,7 +183,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
                 "title": str(manifest.get("title") or scene_dir.name),
                 "displayName": package_index["displayName"],
                 "packageIndex": package_index,
-                "startedAt": str(manifest.get("started_at") or ""),
+                "startedAt": package_index["startedAt"],
                 "endedAt": str(manifest.get("ended_at") or ""),
                 "status": str(manifest.get("status") or "unknown"),
                 "result": str(manifest.get("result") or ""),
@@ -203,7 +203,13 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
                 "warningCount": severity_summary["warningCount"],
             }
         )
-    scenes.sort(key=lambda item: (item["startedAt"], item["directoryName"]), reverse=True)
+    scenes.sort(
+        key=lambda item: (
+            str((item.get("packageIndex") or {}).get("sortableTimestamp") or item.get("startedAt") or ""),
+            item["directoryName"],
+        ),
+        reverse=True,
+    )
     return scenes[: max(1, int(limit or 80))]
 
 
@@ -228,7 +234,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
         "packageIndex": package_index,
         "manifestPath": str((scene_dir / "manifest.json").relative_to(PROJECT_ROOT).as_posix()),
         "manifest": manifest,
-        "startedAt": str(manifest.get("started_at") or ""),
+        "startedAt": package_index["startedAt"],
         "endedAt": str(manifest.get("ended_at") or ""),
         "status": str(manifest.get("status") or "unknown"),
         "result": str(manifest.get("result") or ""),
@@ -447,17 +453,21 @@ def record_runtime_scene_event(
     child_log_path: str = "",
     child_log_payload: dict[str, Any] | None = None,
     lifecycle: bool = False,
+    occurred_at: str = "",
+    allow_recent_completed: bool = False,
 ) -> dict[str, Any]:
     """Append one structured service/runtime event into the active runtime scene package."""
 
     scene_dir = _resolve_current_runtime_scene_dir()
+    if scene_dir is None and allow_recent_completed:
+        scene_dir = _resolve_recent_completed_runtime_scene_dir()
     if scene_dir is None:
         return {
             "accepted": False,
             "reason": "no_runtime_scene",
         }
 
-    timestamp = _now_utc()
+    timestamp = _normalize_event_timestamp(occurred_at) or _now_utc()
     component_name = _sanitize_path_token(component, default="runtime")
     phase_name = _sanitize_token(phase, default="runtime")
     event_name = _sanitize_token(event_code, default=f"{component_name}.event")
@@ -911,8 +921,9 @@ def _runtime_scene_display_name(scene_dir: Path, manifest: dict, scene_id: str) 
 
 def _runtime_scene_package_index(scene_dir: Path, manifest: dict, scene_id: str) -> dict[str, Any]:
     package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
-    started_at = str(manifest.get("started_at") or package.get("started_at") or "").strip()
-    started = _resolve_scene_started_at(started_at, scene_dir)
+    raw_started_at = str(manifest.get("started_at") or package.get("started_at") or "").strip()
+    started = _resolve_scene_started_at(raw_started_at, scene_dir)
+    started_at = raw_started_at or (started.isoformat() if started else "")
     ended_at = str(manifest.get("ended_at") or "").strip() if _runtime_scene_has_completed(manifest) else ""
     ended = _parse_datetime(ended_at)
     display_name = _runtime_scene_display_name(scene_dir, manifest, scene_id)
@@ -1930,6 +1941,24 @@ def _resolve_current_runtime_scene_dir() -> Path | None:
     return scene_dir
 
 
+def _resolve_recent_completed_runtime_scene_dir(*, max_age_seconds: float = 180.0) -> Path | None:
+    now = datetime.now(UTC)
+    for scene_dir in _scene_dirs():
+        manifest = _load_scene_manifest(scene_dir)
+        if not _runtime_scene_project_matches(manifest):
+            continue
+        status = str(manifest.get("status") or "").strip().lower()
+        if status not in {"failed", "stopped"}:
+            continue
+        ended_at = _parse_datetime(str(manifest.get("ended_at") or ""))
+        if ended_at is None:
+            continue
+        age = max(0.0, (now - ended_at.astimezone(UTC)).total_seconds())
+        if age <= max_age_seconds:
+            return scene_dir
+    return None
+
+
 def _is_current_runtime_scene_manifest(scene_dir: Path, manifest: dict[str, Any], launcher_state: dict[str, Any]) -> bool:
     status = str(manifest.get("status") or "").strip().lower()
     if status and status not in {"running", "starting", "queued", "opening", "stopping", "closing"}:
@@ -1939,6 +1968,12 @@ def _is_current_runtime_scene_manifest(scene_dir: Path, manifest: dict[str, Any]
     if target_scene_id and _scene_id(scene_dir, manifest) != target_scene_id:
         return False
 
+    if not _runtime_scene_project_matches(manifest):
+        return False
+    return True
+
+
+def _runtime_scene_project_matches(manifest: dict[str, Any]) -> bool:
     manifest_project_root = str(
         manifest.get("project_root")
         or manifest.get("projectRoot")
@@ -2203,6 +2238,21 @@ def _sanitize_path_token(value: object, *, default: str) -> str:
 
 def _now_utc() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _normalize_event_timestamp(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
 
 
 def _truncate_text(value: str, limit: int) -> str:
