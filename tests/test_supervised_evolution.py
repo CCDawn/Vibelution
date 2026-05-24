@@ -15,7 +15,12 @@ from core.evaluation.supervised_evolution import (
     run_supervised_evolution_session,
 )
 from core.evaluation.selection_policy import execute_supervised_policy
-from scripts.evolution_harness import HarnessResult
+from scripts.evolution_harness import (
+    HarnessResult,
+    SUPERVISED_FINAL_STATE_MARKER,
+    SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
+    infer_evolution_summary,
+)
 
 
 def _fake_result(status: str, reason: str, worktree_name: str) -> HarnessResult:
@@ -472,6 +477,93 @@ def test_run_supervised_evolution_session_records_dynamic_and_impossible_case_sc
     assert proposal_by_case["impossible_missing_permission"]["case_type"] == "impossible_task"
     assert (
         proposal_by_case["impossible_missing_permission"]["intake_provenance"]["expected_outcome_verification"]["candidate"]["status"]
+        == "matched"
+    )
+
+
+def test_default_dry_run_dynamic_fixture_markers_enter_expected_outcome_decision(project_root: Path, tmp_path: Path):
+    source_bundle = project_root / "core" / "evaluation" / "bundles" / f"{DEFAULT_BUNDLE_NAME}.json"
+    target_bundle = tmp_path / "workspace" / "evaluation" / "bundles" / f"{DEFAULT_BUNDLE_NAME}.json"
+    target_bundle.parent.mkdir(parents=True, exist_ok=True)
+    target_bundle.write_text(source_bundle.read_text(encoding="utf-8"), encoding="utf-8")
+
+    seen_scenarios = []
+
+    def fake_runner(**kwargs):
+        scenario = kwargs["scenario"]
+        seen_scenarios.append(scenario)
+        if scenario == "dynamic_replanning_fixture":
+            summary = infer_evolution_summary(
+                [],
+                [],
+                [
+                    (
+                        f"{SUPERVISED_FINAL_STATE_MARKER} "
+                        '{"calendar_event":"rescheduled","new_time":"10:30",'
+                        '"verified_after_change":true,"replanned":true}'
+                    )
+                ],
+                restart_expected=False,
+                restart_reentered=False,
+            )
+            return _fake_result_with_summary(
+                "success",
+                "dynamic marker ok",
+                f"{scenario}_{len(seen_scenarios)}",
+                **summary,
+            )
+        if scenario == "impossible_task_fixture":
+            summary = infer_evolution_summary(
+                [],
+                [],
+                [
+                    (
+                        f"{SUPERVISED_INFEASIBLE_OUTCOME_MARKER} "
+                        '{"status":"infeasible","reason":"missing_permission","honest_stop":true}'
+                    )
+                ],
+                restart_expected=False,
+                restart_reentered=False,
+            )
+            return _fake_result_with_summary(
+                "success",
+                "impossible marker ok",
+                f"{scenario}_{len(seen_scenarios)}",
+                **summary,
+            )
+        return _fake_result("success", "legacy probe ok", f"{scenario}_{len(seen_scenarios)}")
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    assert "dynamic_replanning_fixture" in seen_scenarios
+    assert "impossible_task_fixture" in seen_scenarios
+    by_case = {case.case_id: case for case in decision.case_summaries}
+    dynamic = by_case["dynamic_replanning_fixture"]
+    impossible = by_case["impossible_task_fixture"]
+
+    assert dynamic.intake_provenance["expected_outcome_verification"]["candidate"]["status"] == "matched"
+    assert dynamic.intake_provenance["expected_outcome_verification"]["candidate"]["actual_source"] == "evolution_summary.final_state"
+    assert dynamic.score_breakdown["candidate"]["expected_outcome_score"] == 1.0
+    assert dynamic.evidence_paths["expected_outcome_verification_sources"]["candidate"] == "evolution_summary.final_state"
+    assert "post_adaptation_verification_missing" not in dynamic.failure_taxonomy
+
+    assert impossible.intake_provenance["expected_outcome_verification"]["candidate"]["status"] == "matched"
+    assert impossible.intake_provenance["expected_outcome_verification"]["candidate"]["actual_source"] == "evolution_summary.infeasible_outcome"
+    assert impossible.score_breakdown["candidate"]["expected_outcome_score"] == 1.0
+    assert impossible.evidence_paths["expected_outcome_verification_sources"]["candidate"] == "evolution_summary.infeasible_outcome"
+
+    policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    policy_by_case = {case["case_id"]: case for case in policy_record["case_evidence"]}
+    assert (
+        policy_by_case["dynamic_replanning_fixture"]["intake_provenance"]["expected_outcome_verification"]["candidate"]["status"]
+        == "matched"
+    )
+    assert (
+        policy_by_case["impossible_task_fixture"]["intake_provenance"]["expected_outcome_verification"]["candidate"]["status"]
         == "matched"
     )
 
