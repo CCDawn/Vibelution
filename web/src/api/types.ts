@@ -1338,6 +1338,7 @@ export type EvolutionLibraryEntry = {
   updatedAt: string;
   canDelete: boolean;
   deleteBlockReason: string;
+  riskLevel?: string;
   candidateType?: string;
   reviewState?: string;
   supervisedRequired?: boolean;

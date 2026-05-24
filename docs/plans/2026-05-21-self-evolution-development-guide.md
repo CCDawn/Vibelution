@@ -75,8 +75,8 @@
 - `docs/plans/2026-05-21-workrun-substrate-and-chat-case-loop.md` 已把 raw chat -> candidate -> review -> reviewed case -> dataset/bundle 定为共享边界。
 - `core/evaluation/self_evolution_experience_repository.py` 已提供第一版 terminal experience repository：自进化终态 run 会写入 `workspace/self_evolution/experience/experience.jsonl`，并用 `self_terminal:<runId>` 去重。
 - `core/evaluation/self_evolution_reflection.py` 已提供第一版 bounded reflection：每条 terminal experience 可派生 self-questioning / self-navigating / self-attributing 三段结构化候选，并写入 `workspace/self_evolution/reflection/reflection.jsonl`。
-- `core/evaluation/self_evolution_candidate_pool.py` 已提供第一版 skill / prompt / proposal candidate 池，三类候选分别写入 `workspace/self_evolution/candidates/*_candidates.jsonl`，并强制 `review_state=pending`、`supervised_required=true`、`auto_apply=false`。
-- P4 监督线回流已有第一版只读桥接：`GET /api/evolution/self/candidates` 会返回 self-evolution candidate review queue；`GET /api/evolution/library` 会把这些候选作为 `pending` source 暴露；`GET /api/evolution/proposals/{candidate_id}` 会返回只读详情，供现有监督 library 详情面消费。
+- `core/evaluation/self_evolution_candidate_pool.py` 已提供第一版 skill / prompt / proposal candidate 池，三类候选分别写入 `workspace/self_evolution/candidates/*_candidates.jsonl`，并强制 `review_state=pending`、`risk_level=pending_review`、`supervised_required=true`、`auto_apply=false`。
+- P4 监督线回流已有第一版只读桥接：`GET /api/evolution/self/candidates` 会返回 self-evolution candidate review queue；`GET /api/evolution/library` 会把这些候选作为 `pending` source 暴露；`GET /api/evolution/proposals/{candidate_id}` 会返回只读详情，供现有监督 library 详情面消费；`core/evaluation/dataset_registry.py` 可只读列出 pending self-evolution candidates 作为监督准入来源，但不会把它们注册为可物化 dataset。
 - P4 桥接仍不提供 apply / activate / rollback / delete / edit 动作，不写 accepted baseline、selection policy、runtime prompt 或 skill registry。
 - 目前还没有把 reflection record 自动蒸馏进 candidate pool，也还没有专门的前端候选治理 UI；现有 UI 只通过监督 library pending/detail 读取后端只读 payload。
 
@@ -95,7 +95,7 @@
    文档需要继续强调：experience record 不自动生效，不写 accepted baseline / selection policy，也还未接入 P2/P3 候选池消费。
 
 5. skill / prompt / proposal candidate 池已有第一版统一契约，并已接入监督线只读回流。
-   当前 candidate pool 已有 schema、provenance、dedupe、review_state、blocked_downstream_uses 和 supervised_required；P4 第一版已把候选作为 pending review source 暴露给监督 library，但还没有审核动作、dataset lifecycle 写入或专门 UI。
+   当前 candidate pool 已有 schema、provenance、dedupe、review_state、risk_level、blocked_downstream_uses 和 supervised_required；P4 第一版已把候选作为 pending review source 暴露给监督 library 和 dataset registry 只读入口，但还没有审核动作、dataset lifecycle 写入或专门 UI。
 
 6. self-questioning / self-navigating / self-attributing 已有第一版 bounded artifact，但还未接入候选池。
    当前 reflection record 只从 experience evidence 派生问题、路径建议和归因候选，不自动驱动下一轮运行，也不写 runtime prompt / skill / policy。
@@ -326,7 +326,7 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 
 ### P3：建立 skill / prompt / proposal candidate 池
 
-状态：核心池已落地。`core/evaluation/self_evolution_candidate_pool.py` 支持从 reflection record 构建 `skill_candidate`、`prompt_candidate`、`proposal_candidate`，按类型写入独立 JSONL，并强制候选保持 `review_state=pending`、`supervised_required=true`、`candidate_only=true`、`auto_apply=false`。本阶段仍不自动安装 skill、不覆盖 prompt、不写 accepted baseline / selection policy。
+状态：核心池已落地。`core/evaluation/self_evolution_candidate_pool.py` 支持从 reflection record 构建 `skill_candidate`、`prompt_candidate`、`proposal_candidate`，按类型写入独立 JSONL，并强制候选保持 `review_state=pending`、`risk_level=pending_review`、`supervised_required=true`、`candidate_only=true`、`auto_apply=false`。本阶段仍不自动安装 skill、不覆盖 prompt、不写 accepted baseline / selection policy。
 
 目标：无监督线可以产出候选，但不能自动安装、启用或 accepted。
 
@@ -347,6 +347,7 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 - `txn_id`
 - `provenance`
 - `review_state=pending`
+- `risk_level=pending_review`，或监督前保守风险等级 `medium` / `high`
 - `allowed_downstream_uses`
 - `blocked_downstream_uses`
 - `supervised_required=true`
@@ -375,21 +376,28 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 - `GET /api/evolution/self/candidates` 返回 `enabled`、`pendingCount`、按类型计数和候选 items。
 - `GET /api/evolution/library` 的 `pending` 列表包含 `ingestMode=self_evolution_candidate` 的候选项。
 - `GET /api/evolution/proposals/{candidate_id}` 支持候选只读详情，返回 `canEdit=false`、`canDelete=false`、`availableActions=[]`、`runtimeEffect=not_applied`。
+- `core/evaluation/dataset_registry.py::list_pending_self_evolution_dataset_candidates()` 只读返回 pending candidates，供监督线或 dataset registry 看见来源；它不注册 dataset、不物化 bundle、不写 accepted baseline。
 - 候选项使用 `proposalStatus=self_candidate_pending`、`decision=PENDING_REVIEW`、`candidateOnly=true`、`autoApply=false`、`supervisedRequired=true`。
+- 候选项和详情均透传 `riskLevel`；默认是 `pending_review`，不是 accepted / low risk 信号。
 - 原始 self run id 保留在 `sourceSelfRunId` / provenance；`sourceRun` 对前端现有 proposal detail 查询保持为 `candidate_id`。
 
 已落地文件影响：
 
 - 更新 `core/web/services/evolution_service.py`
 - 更新 `core/web/routes/evolution.py`
+- 更新 `core/evaluation/dataset_registry.py`
 - 更新 `web/src/api/types.ts`
+- 更新 `web/src/i18n/useAppI18n.ts`
+- 更新 `web/src/i18n/dictionary.ts`
 - 更新 `tests/test_web_app.py`
+- 更新 `tests/test_dataset_registry.py`
 
 仍未覆盖：
 
 - 不提供审核通过 / 拒绝 / 转 dataset / 转 proposal 的写入动作。
 - 不做专门前端候选治理 UI。
 - 不自动把 reflection records 蒸馏为 candidate pool 记录。
+- 不把 self-evolution candidates 当作 accepted baseline、selection policy、supervised policy 或可直接训练/评测的 frozen dataset。
 
 风险：
 
@@ -402,7 +410,7 @@ git diff --check -- docs/plans/2026-05-21-self-evolution-development-guide.md
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/test_web_app.py -k "self_evolution_candidates_as_pending_review_source or candidate_review_route_hides or evolution_routes_handle_empty_supervised_workspace or evolution_routes_use_real_supervised_records" -v
 .\.venv\Scripts\python.exe -m pytest tests/test_self_evolution_candidate_pool.py -v
-.\.venv\Scripts\python.exe -m pytest tests/test_dataset_registry.py -k "generated_cases or chat_reviewed or downstream" -v
+.\.venv\Scripts\python.exe -m pytest tests/test_dataset_registry.py -k "generated_cases or chat_reviewed or downstream or self_evolution_candidates" -v
 npm --prefix web run build
 ```
 

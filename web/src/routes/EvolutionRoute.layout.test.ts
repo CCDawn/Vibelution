@@ -18,6 +18,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("!isSelfEvolutionCandidateItem(item)");
     expect(routeSource).toContain("selectedProposalDisplaySourceRun || latestRun?.id");
     expect(routeSource).toContain("selectedProposalSummary && selectedProposalCanOpenSourceRun");
+    expect(routeSource).toContain("item.riskLevel ? riskLabel(item.riskLevel) : \"--\"");
   });
 
   it("does not let blocked library items enter batch delete selection", () => {

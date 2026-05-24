@@ -15,6 +15,7 @@ from .supervised_intake import (
     self_evolution_allowed_downstream_uses,
     self_evolution_blocked_downstream_uses,
     self_evolution_candidate_boundary,
+    self_evolution_candidate_risk_level,
 )
 
 
@@ -90,6 +91,7 @@ def build_candidate_from_reflection(reflection: dict[str, Any], *, candidate_typ
         },
         "payload": payload,
         "review_state": "pending",
+        "risk_level": supervised_intake_boundary["risk_level"],
         "allowed_downstream_uses": supervised_intake_boundary["allowed_downstream_uses"],
         "blocked_downstream_uses": supervised_intake_boundary["blocked_downstream_uses"],
         "supervised_required": True,
@@ -167,6 +169,7 @@ def _normalize_candidate_record(candidate: dict[str, Any]) -> dict[str, Any]:
             **candidate,
             "candidate_type": candidate_type,
             "allowed_downstream_uses": allowed_downstream_uses,
+            "risk_level": _candidate_risk_level(candidate.get("risk_level")),
         }
     )
     return {
@@ -179,6 +182,7 @@ def _normalize_candidate_record(candidate: dict[str, Any]) -> dict[str, Any]:
         "provenance": provenance,
         "payload": _object(candidate.get("payload")),
         "review_state": "pending",
+        "risk_level": boundary["risk_level"],
         "allowed_downstream_uses": boundary["allowed_downstream_uses"],
         "blocked_downstream_uses": boundary["blocked_downstream_uses"],
         "supervised_required": True,
@@ -229,6 +233,10 @@ def _blocked_downstream_uses(candidate_type: str) -> list[str]:
 def _filter_allowed_downstream_uses(allowed: list[str], blocked: list[str], candidate_type: str) -> list[str]:
     filtered = [item for item in allowed if item not in set(blocked)]
     return filtered or _allowed_downstream_uses(candidate_type)
+
+
+def _candidate_risk_level(value: Any) -> str:
+    return self_evolution_candidate_risk_level(value)
 
 
 def _reflection_evidence_refs(reflection: dict[str, Any]) -> list[str]:

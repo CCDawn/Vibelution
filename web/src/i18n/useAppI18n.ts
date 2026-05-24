@@ -72,6 +72,7 @@ const decisionKeyMap: Record<string, TranslationKey> = {
 };
 
 const riskKeyMap: Record<string, TranslationKey> = {
+  pending_review: "risk_pendingReview",
   none: "risk_none",
   low: "risk_low",
   medium: "risk_medium",

@@ -80,7 +80,9 @@ def test_build_candidate_from_reflection_keeps_candidate_pending(candidate_type:
     assert candidate["supervised_required"] is True
     assert candidate["candidate_only"] is True
     assert candidate["auto_apply"] is False
+    assert candidate["risk_level"] == "pending_review"
     assert candidate["supervised_intake_boundary"]["contract"] == "self_evolution_candidate"
+    assert candidate["supervised_intake_boundary"]["risk_level"] == "pending_review"
     assert candidate["supervised_intake_boundary"]["runtime_effect"] == "not_applied"
     assert blocked_use in candidate["blocked_downstream_uses"]
     assert "accepted_baseline" in candidate["blocked_downstream_uses"]
@@ -140,6 +142,7 @@ def test_append_candidate_record_forces_candidate_only_boundaries(tmp_path: Path
             "supervised_required": False,
             "candidate_only": False,
             "auto_apply": True,
+            "risk_level": "high",
             "allowed_downstream_uses": ["supervised_review", "accepted_baseline", "runtime_prompt_override"],
             "blocked_downstream_uses": "manual_block",
         },
@@ -152,6 +155,7 @@ def test_append_candidate_record_forces_candidate_only_boundaries(tmp_path: Path
     assert record["supervised_required"] is True
     assert record["candidate_only"] is True
     assert record["auto_apply"] is False
+    assert record["risk_level"] == "high"
     assert record["allowed_downstream_uses"] == ["supervised_review"]
     assert "accepted_baseline" not in record["allowed_downstream_uses"]
     assert "runtime_prompt_override" not in record["allowed_downstream_uses"]
@@ -159,4 +163,26 @@ def test_append_candidate_record_forces_candidate_only_boundaries(tmp_path: Path
     assert "manual_block" in record["blocked_downstream_uses"]
     assert "m" not in record["blocked_downstream_uses"]
     assert record["supervised_intake_boundary"]["formal_supervised_review_allowed"] is True
+    assert record["supervised_intake_boundary"]["risk_level"] == "high"
     assert record["supervised_intake_boundary"]["candidate_only"] is True
+
+
+def test_append_candidate_record_defaults_unknown_risk_to_pending_review(tmp_path: Path):
+    result = append_candidate_record(
+        {
+            "candidate_id": "proposal_candidate:unknown-risk",
+            "candidate_type": "proposal_candidate",
+            "source_experience_id": "exp_risk",
+            "source_run_id": "web-self-risk",
+            "risk_level": "accepted",
+            "provenance": {
+                "source_experience_id": "exp_risk",
+                "source_run_id": "web-self-risk",
+                "evidence_refs": ["reflection:web-self-risk"],
+            },
+        },
+        project_root=tmp_path,
+    )
+
+    assert result.record["risk_level"] == "pending_review"
+    assert result.record["supervised_intake_boundary"]["risk_level"] == "pending_review"

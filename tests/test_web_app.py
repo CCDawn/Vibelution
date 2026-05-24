@@ -7224,6 +7224,7 @@ def test_evolution_library_exposes_self_evolution_candidates_as_pending_review_s
             "payload": {
                 "suggested_prompt_change": "Ask for the smallest bounded validation before retrying.",
             },
+            "risk_level": "medium",
             "allowed_downstream_uses": ["supervised_review", "accepted_baseline", "runtime_prompt_override"],
             "blocked_downstream_uses": [],
         },
@@ -7272,6 +7273,7 @@ def test_evolution_library_exposes_self_evolution_candidates_as_pending_review_s
     assert item["candidateType"] == "prompt_candidate"
     assert item["proposalStatus"] == "self_candidate_pending"
     assert item["reviewState"] == "pending"
+    assert item["riskLevel"] == "medium"
     assert item["supervisedRequired"] is True
     assert item["candidateOnly"] is True
     assert item["autoApply"] is False
@@ -7288,6 +7290,7 @@ def test_evolution_library_exposes_self_evolution_candidates_as_pending_review_s
     assert item["provenance"]["source_run_id"] == "web-self-review"
     assert item["evidenceRefs"] == ["logs/runtime_scenes/pkg/agent/self_evolution_runs/web-self-review.jsonl"]
     assert any(pending["id"] == item["id"] for pending in library_payload["pending"])
+    assert next(pending for pending in library_payload["pending"] if pending["id"] == item["id"])["riskLevel"] == "medium"
     assert library_payload["items"] == []
     assert detail_payload["sessionId"] == item["id"]
     assert detail_payload["sourceRun"] == item["id"]
@@ -7300,6 +7303,7 @@ def test_evolution_library_exposes_self_evolution_candidates_as_pending_review_s
     assert detail_payload["proposal"]["status"] == "self_candidate_pending"
     assert detail_payload["outcomeSemantics"]["isRuntimeApplied"] is False
     assert detail_payload["outcomeSemantics"]["decisionLabel"] == "待监督审阅"
+    assert detail_payload["supervised"]["riskLevel"] == "medium"
     assert detail_payload["paths"]["selfEvolutionCandidatePath"].endswith("prompt_candidates.jsonl")
     assert detail_payload["rawProposal"]["candidate_id"] == item["id"]
 
@@ -7342,6 +7346,42 @@ def test_self_evolution_candidate_review_route_hides_when_self_evolution_disable
     assert queue_response.json()["pendingCount"] == 0
     assert queue_response.json()["items"] == []
     assert library_response.json() == {"items": [], "pending": []}
+
+
+def test_self_evolution_candidate_review_route_normalizes_legacy_risk(tmp_path, monkeypatch):
+    append_candidate_record(
+        {
+            "candidate_id": "proposal_candidate:legacy-risk",
+            "candidate_type": "proposal_candidate",
+            "source_experience_id": "exp-legacy-risk",
+            "source_run_id": "web-self-legacy-risk",
+            "risk_level": "accepted",
+            "provenance": {
+                "source_experience_id": "exp-legacy-risk",
+                "source_run_id": "web-self-legacy-risk",
+                "evidence_refs": ["reflection:web-self-legacy-risk"],
+            },
+        },
+        project_root=tmp_path,
+    )
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evolution_service,
+        "get_workbench_contract",
+        lambda: {
+            "modeAvailability": {
+                "chat": True,
+                "self_evolution": True,
+                "supervised_evolution": True,
+            }
+        },
+    )
+
+    response = client.get("/api/evolution/self/candidates")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["riskLevel"] == "pending_review"
 
 
 def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_path, monkeypatch):

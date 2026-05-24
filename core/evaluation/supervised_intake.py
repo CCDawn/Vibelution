@@ -26,6 +26,7 @@ GYM_CANDIDATE_CASE_USE = "gym_candidate_case"
 FUTURE_TRAINING_EXPORT_USE = "future_training_export"
 REGRESSION_OBSERVATION_USE = "regression_observation"
 SUPERVISED_REVIEW_USE = "supervised_review"
+SELF_EVOLUTION_PENDING_REVIEW_RISK_LEVEL = "pending_review"
 
 REVIEWED_CHAT_ALLOWED_DOWNSTREAM_USES = [
     SUPERVISED_EVALUATION_USE,
@@ -44,6 +45,11 @@ BLOCKED_SELF_EVOLUTION_BYPASS_USES = [
     "selection_policy",
     "runtime_prompt_override",
 ]
+SELF_EVOLUTION_ALLOWED_RISK_LEVELS = {
+    SELF_EVOLUTION_PENDING_REVIEW_RISK_LEVEL,
+    "medium",
+    "high",
+}
 
 
 def reviewed_chat_dataset_metadata() -> dict[str, Any]:
@@ -169,6 +175,7 @@ def self_evolution_candidate_boundary(record: dict[str, Any]) -> dict[str, Any]:
     """Build the candidate-only boundary for a self-evolution output."""
 
     candidate_type = str(record.get("candidate_type") or "").strip()
+    risk_level = self_evolution_candidate_risk_level(record.get("risk_level"))
     blocked = _unique_texts(
         _unique_texts(record.get("blocked_downstream_uses"))
         + self_evolution_blocked_downstream_uses(candidate_type)
@@ -182,6 +189,7 @@ def self_evolution_candidate_boundary(record: dict[str, Any]) -> dict[str, Any]:
         "contract": "self_evolution_candidate",
         "formal_supervised_review_allowed": SUPERVISED_REVIEW_USE in allowed,
         "review_state": "pending",
+        "risk_level": risk_level,
         "candidate_only": True,
         "supervised_required": True,
         "auto_apply": False,
@@ -201,6 +209,15 @@ def _unique_texts(value: Any) -> list[str]:
     return items
 
 
+def self_evolution_candidate_risk_level(value: Any) -> str:
+    """Normalize self-evolution candidate risk before supervised review."""
+
+    normalized = str(value or "").strip().lower()
+    if normalized in SELF_EVOLUTION_ALLOWED_RISK_LEVELS:
+        return normalized
+    return SELF_EVOLUTION_PENDING_REVIEW_RISK_LEVEL
+
+
 __all__ = [
     "ALLOWED_SUPERVISED_CASE_TYPES",
     "DYNAMIC_REPLANNING_CASE_TYPE",
@@ -212,6 +229,8 @@ __all__ = [
     "REVIEWED_CHAT_ALLOWED_DOWNSTREAM_USES",
     "REVIEWED_CHAT_CASE_TYPE",
     "REVIEWED_CHAT_DATASET_NAME",
+    "SELF_EVOLUTION_ALLOWED_RISK_LEVELS",
+    "SELF_EVOLUTION_PENDING_REVIEW_RISK_LEVEL",
     "STATIC_CASE_TYPE",
     "SUPERVISED_EVALUATION_USE",
     "SUPERVISED_REVIEW_USE",
@@ -223,4 +242,5 @@ __all__ = [
     "self_evolution_allowed_downstream_uses",
     "self_evolution_blocked_downstream_uses",
     "self_evolution_candidate_boundary",
+    "self_evolution_candidate_risk_level",
 ]
