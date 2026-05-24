@@ -344,6 +344,25 @@
   color: var(--fg-primary);
 }
 
+.featureTogglePrimary {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent 62%),
+    color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+.featureTogglePrimary.featureToggleActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 48%, var(--border-soft));
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-warm) 18%, transparent), transparent 64%),
+    color-mix(in srgb, var(--surface-card) 86%, transparent);
+}
+
+.featureToggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 .featureToggleText {
   display: grid;
   min-width: 0;
@@ -389,6 +408,11 @@
 .featureToggleActive .featureToggleState {
   background: color-mix(in srgb, var(--accent-cool) 24%, transparent);
   color: var(--accent-cool);
+}
+
+.featureTogglePrimary.featureToggleActive .featureToggleState {
+  background: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  color: var(--accent-warm-2);
 }
 
 .featurePresetNote {

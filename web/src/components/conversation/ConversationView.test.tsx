@@ -131,6 +131,13 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Original prompt");
     expect(html).toContain("编辑消息");
   });
+
+  it("does not render the mental-model option in the composer", () => {
+    const html = renderConversation([]);
+
+    expect(html).not.toContain("下轮启用心智模型");
+    expect(html).not.toContain("发送选项");
+  });
 });
 
 describe("ConversationView timeline scroll signal", () => {
