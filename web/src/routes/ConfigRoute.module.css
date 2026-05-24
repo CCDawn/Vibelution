@@ -17,7 +17,6 @@
 .matrixCard,
 .formSurface,
 .modelCard,
-.profileCard,
 .metricCard,
 .applyBar {
   border: 1px solid var(--border-soft);
@@ -381,7 +380,6 @@
 .hashGrid,
 .matrixGrid,
 .healthSummaryGrid,
-.profileGrid,
 .modelGrid,
 .diagnosticsGrid,
 .logHelperGrid,
@@ -404,7 +402,6 @@
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
-.profileGrid,
 .modelGrid {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
@@ -413,10 +410,87 @@
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
 
+.profileTableWrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+}
+
+.profileTable {
+  width: 100%;
+  min-width: 880px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.profileTable th,
+.profileTable td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--border-hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.profileTable th {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--surface-card-subtle);
+}
+
+.profileTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.profileTable tbody tr:hover {
+  background: var(--surface-card-hover);
+}
+
+.profileTaskCell,
+.profileModelCell,
+.profileMetaCell {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.profileTaskCell strong,
+.profileModelCell strong,
+.profileMetaCell strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+}
+
+.profileTaskCell span,
+.profileModelCell span,
+.profileMetaCell span {
+  min-width: 0;
+  color: var(--fg-tertiary);
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.profileTableSelect {
+  min-width: 220px;
+}
+
+.profileTableActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .detailCard,
 .matrixCard,
 .logHelperCard,
-.profileCard,
 .modelCard {
   display: grid;
   gap: 8px;
@@ -761,6 +835,34 @@
   cursor: pointer;
   color: var(--fg-primary);
   font-weight: 600;
+}
+
+.advancedEditorPanel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.advancedEditorPanel summary {
+  display: grid;
+  gap: 3px;
+  cursor: pointer;
+  color: var(--fg-primary);
+  font-weight: 700;
+}
+
+.advancedEditorPanel summary small {
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.advancedEditorPanel[open] summary {
+  padding-bottom: 8px;
 }
 
 .rawToml {
@@ -1130,7 +1232,6 @@
   gap: 8px;
 }
 
-.profileCard,
 .modelCard {
   align-content: start;
 }
@@ -1246,7 +1347,6 @@
   .diagnosticsGrid,
   .findingEvidence,
   .logHelperMetaGrid,
-  .profileGrid,
   .modelGrid,
   .logHelperGrid,
   .formGrid,

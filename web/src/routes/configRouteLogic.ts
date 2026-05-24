@@ -1,4 +1,4 @@
-import type { ConfigDraftMeta, ConfigModelOption, ConfigModelPresetOption } from "../api/types";
+import type { ConfigDraftMeta, ConfigModelOption, ConfigModelPresetOption, ConfigProfileCard } from "../api/types";
 
 export type PublicConfigShape = Record<string, unknown>;
 
@@ -35,6 +35,18 @@ export type ConfigLeaveGuardInput = {
   busy: boolean;
   currentPathname: string;
   nextPathname: string;
+};
+
+export type ProfileDisplayState = {
+  selectedModelId: string;
+  selectedModelLabel: string;
+  providerKind: string;
+  model: string;
+  baseUrl: string;
+  apiKeyEnv: string;
+  apiKeyState: string;
+  apiKeySource: string;
+  selectionDirty: boolean;
 };
 
 export function clonePublicConfig<T>(value: T): T {
@@ -92,6 +104,35 @@ export function deriveConfigEditorSyncState(input: ConfigEditorSyncStateInput): 
 
 export function shouldBlockConfigLeave(input: ConfigLeaveGuardInput): boolean {
   return input.hasPendingApply && !input.busy && input.currentPathname === "/config" && input.nextPathname !== "/config";
+}
+
+export function resolveProfileDisplayState(
+  profile: ConfigProfileCard,
+  selectedModelId: string,
+  selectedModel: ConfigModelOption | null,
+  isEditingProfile: boolean,
+): ProfileDisplayState {
+  const selectionDirty = Boolean(isEditingProfile && selectedModelId && selectedModelId !== profile.selectedModelId);
+  const resolvedSelectedModel = selectionDirty ? selectedModel : null;
+  const providerKind = selectionDirty ? resolvedSelectedModel?.provider_kind ?? profile.providerKind : profile.providerKind;
+  const model = selectionDirty ? resolvedSelectedModel?.model ?? profile.model : profile.model;
+  const baseUrl = selectionDirty
+    ? getString(asRecord(resolvedSelectedModel?.provider).base_url) || profile.baseUrl
+    : profile.baseUrl;
+  const apiKeyEnv = selectionDirty ? resolvedSelectedModel?.api_key_env ?? profile.apiKeyEnv : profile.apiKeyEnv;
+  const apiKeyState = selectionDirty ? resolvedSelectedModel?.api_key_state ?? profile.apiKeyState : profile.apiKeyState;
+  const apiKeySource = selectionDirty ? apiKeyEnv || "-" : profile.apiKeySource || "-";
+  return {
+    selectedModelId,
+    selectedModelLabel: selectionDirty ? selectedModel?.label ?? profile.selectedModelLabel : profile.selectedModelLabel,
+    providerKind,
+    model,
+    baseUrl,
+    apiKeyEnv,
+    apiKeyState,
+    apiKeySource,
+    selectionDirty,
+  };
 }
 
 export function presetCategory(preset: ConfigModelPresetOption): ModelPresetGroupId {

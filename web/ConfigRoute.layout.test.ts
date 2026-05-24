@@ -76,6 +76,30 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).toContain("setModelEditorError(markError(error))");
   });
 
+  it("uses a dense table for task model and key scanning", () => {
+    expect(configRouteSource).toContain("styles.profileTableWrap");
+    expect(configRouteSource).toContain("<table className={styles.profileTable}>");
+    expect(configRouteSource).toContain("copy.profileTableModel");
+    expect(configRouteSource).toContain("resolveProfileDisplayState");
+
+    expect(configRouteCss).toContain(".profileTable");
+    expect(cssRule(".profileTable")).toContain("min-width: 880px");
+    expect(cssRule(".profileTable th")).toContain("text-transform: uppercase");
+  });
+
+  it("keeps model-library advanced transport fields behind a disclosure", () => {
+    expect(configRouteSource).toContain("styles.advancedEditorPanel");
+    expect(configRouteSource).toContain("copy.modelEditorAdvancedTitle");
+
+    const advancedPanelStart = configRouteSource.indexOf('className={styles.advancedEditorPanel}');
+    const saveButtonStart = configRouteSource.indexOf("copy.saveModel", advancedPanelStart);
+    const advancedPanelSource = configRouteSource.slice(advancedPanelStart, saveButtonStart);
+
+    expect(advancedPanelSource).toContain("copy.transport");
+    expect(advancedPanelSource).toContain("copy.contract");
+    expect(advancedPanelSource).toContain("copy.timeout");
+  });
+
   it("guards internal route changes when config changes have not been saved to disk", () => {
     expect(configRouteSource).toContain("useBlocker");
     expect(configRouteSource).toContain("shouldBlockConfigLeave");
