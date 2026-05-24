@@ -194,7 +194,7 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-launcher-calls.jsonl") -Value 
 def _run_vbs_desktop_entry_with_fake_powershell_entry(
     tmp_path: Path,
     args: list[str],
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     project_dir = tmp_path / "project"
     scripts_dir = project_dir / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -228,7 +228,9 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
     )
 
     command = [_cscript_exe(), "//NoLogo", str(scripts_dir / "vibelution_desktop_entry.vbs"), *args]
-    result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, check=False, timeout=30)
+    env = os.environ.copy()
+    env["VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"] = "1"
+    result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, env=env, check=False, timeout=30)
     assert result.returncode == 0, result.stderr or result.stdout
 
     calls_path = project_dir / ".runtime" / "launcher" / "fake-vbs-entry-calls.jsonl"
@@ -236,7 +238,10 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-vbs-entry-calls.jsonl") -Value
     while time.time() < deadline and not calls_path.exists():
         time.sleep(0.05)
     assert calls_path.exists()
-    return [json.loads(line) for line in calls_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    log_path = project_dir / ".runtime" / "launcher" / "desktop-entry-vbs.log"
+    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    return calls, events
 
 
 def _run_launcher_ast_harness(tmp_path: Path, harness_source: str) -> subprocess.CompletedProcess[str]:
@@ -581,11 +586,11 @@ if ($redirectedText -notmatch 'distinct stdout and stderr log paths') {
 }
 
 foreach ($functionName in @("Start-ManagedBackend", "Start-Supervisor")) {
-    $functionAst = $ast.Find({
-        param($node)
-        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -eq $functionName
-    }, $true)
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq $functionName
+}, $true)
     if ($null -eq $functionAst) {
         throw "$functionName was not found."
     }
@@ -884,7 +889,9 @@ $adoptText = Get-LauncherFunctionText -Name "Adopt-Or-FocusSession"
 foreach ($required in @(
     "runtime.scene.focused",
     "runtime.scene.focus.failed",
-    "Focus-ManagedBrowserWindow"
+    "Focus-ManagedBrowserWindow",
+    "backendLaunchPid",
+    "BackendLaunchPid `$backendLaunchPid"
 )) {
     if ($adoptText -notmatch [regex]::Escape($required)) {
         throw "Adopt-Or-FocusSession is missing trace field '$required'."
@@ -1403,6 +1410,15 @@ if ($summary.primary_files.package_index -ne "package_index.json") {{
 if ($summary.primary_files.timeline -ne "timeline.jsonl" -or $summary.primary_files.lifecycle -ne "lifecycle.jsonl") {{
     throw "summary does not point to lifecycle entry files."
 }}
+if ($summary.primary_files.startup -ne "raw/desktop-entry.log") {{
+    throw "summary does not point to startup entry file."
+}}
+if ($summary.sections.startup.path -ne "raw/desktop-entry.log") {{
+    throw "summary missing startup section."
+}}
+if ($summary.sections.startup.launcher_path -ne "raw/launcher-control.log") {{
+    throw "summary startup section does not include launcher control log."
+}}
 if ($summary.sections.supervised_evolution.path -ne "agent/supervised_runs") {{
     throw "summary missing supervised evolution section."
 }}
@@ -1432,6 +1448,9 @@ if ($summary.event_counts.warnings -ne 2) {{
 }}
 if ($summary.diagnostic_entrypoint.recommended_order[0] -ne "summary.json") {{
     throw "summary diagnostic order does not start from summary.json."
+}}
+if ($summary.diagnostic_entrypoint.recommended_order[2] -ne "raw/desktop-entry-vbs.log") {{
+    throw "summary diagnostic order should inspect startup logs before timeline."
 }}
 Write-Output "ok"
 """,
@@ -1513,6 +1532,113 @@ if ($script:logEvents[0].event -ne "launcher.runtime_scene.write.failed") {
 if ($script:logEvents[0].level -ne "warning") {
     throw "Runtime scene JSON write failure should be a warning, not a fatal error."
 }
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_runtime_scene_event_append_is_nonfatal_when_lifecycle_locked(tmp_path):
+    scene_dir = tmp_path / "scene"
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        f"""
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {{
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}}
+
+foreach ($name in @(
+    "Write-RuntimeSceneTextLine",
+    "Test-RuntimeSceneLifecycleEvent",
+    "Write-RuntimeSceneEvent"
+)) {{
+    $functionAst = $ast.Find({{
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }}, $true)
+    if ($null -eq $functionAst) {{
+        throw "$name was not found."
+    }}
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}}
+
+$script:currentRuntimeSceneId = "scene-locked"
+$script:currentRuntimeSceneDir = {json.dumps(str(scene_dir))}
+$script:sceneEventSequence = @{{}}
+$script:runtimeSceneWriteMaxAttempts = 1
+$script:runtimeSceneWriteRetryDelayMilliseconds = 1
+$sceneSchemaVersion = 2
+$script:logEvents = @()
+function Ensure-CurrentRuntimeSceneSubdirs {{
+    New-Item -ItemType Directory -Path $script:currentRuntimeSceneDir -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $script:currentRuntimeSceneDir "events") -Force | Out-Null
+}}
+function Get-CurrentRuntimeSceneFilePath {{
+    param([string]$RelativePath)
+    return Join-Path $script:currentRuntimeSceneDir $RelativePath
+}}
+function Write-LauncherControlLog {{
+    param(
+        [string]$Event,
+        [string]$Message,
+        [string]$Level = "info",
+        [hashtable]$Fields = @{{}}
+    )
+    $script:logEvents += ,@{{
+        event = $Event
+        message = $Message
+        level = $Level
+        fields = $Fields
+    }}
+}}
+
+Ensure-CurrentRuntimeSceneSubdirs
+$lifecyclePath = Join-Path $script:currentRuntimeSceneDir "lifecycle.jsonl"
+[System.IO.File]::WriteAllText($lifecyclePath, "")
+$lock = [System.IO.File]::Open($lifecyclePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+try {{
+    Write-RuntimeSceneEvent `
+        -Component "launcher" `
+        -Phase "session" `
+        -EventCode "runtime.scene.ready" `
+        -Message "ready" `
+        -Outcome "succeeded"
+}} finally {{
+    $lock.Dispose()
+}}
+
+$eventPath = Join-Path $script:currentRuntimeSceneDir "events/launcher.jsonl"
+$timelinePath = Join-Path $script:currentRuntimeSceneDir "timeline.jsonl"
+if (-not (Test-Path -LiteralPath $eventPath)) {{
+    throw "Component event file was not written."
+}}
+if (-not (Test-Path -LiteralPath $timelinePath)) {{
+    throw "Timeline file was not written."
+}}
+if ($script:logEvents.Count -ne 1) {{
+    throw "Expected exactly one append failure log, got $($script:logEvents.Count)."
+}}
+if ($script:logEvents[0].event -ne "launcher.runtime_scene.append.failed") {{
+    throw "Unexpected log event: $($script:logEvents[0].event)"
+}}
+if ($script:logEvents[0].level -ne "warning") {{
+    throw "Runtime scene append failure should be a warning."
+}}
 Write-Output "ok"
 """,
     )
@@ -2398,18 +2524,106 @@ throw "synthetic launcher failure"
         "-Action",
         "open",
     ]
-    result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, check=False, timeout=30)
+    env = os.environ.copy()
+    env["VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"] = "1"
+    result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, env=env, check=False, timeout=30)
 
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr == ""
     log_path = project_dir / ".runtime" / "launcher" / "desktop-entry.log"
     events = [json.loads(line) for line in log_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
-    assert [event["event"] for event in events[-2:]] == [
+    assert [event["event"] for event in events[-3:]] == [
         "desktop_entry.failed",
-        "desktop_entry.failure.notice_suppressed",
+        "desktop_entry.failure.notice.requested",
+        "desktop_entry.feedback.suppressed",
     ]
-    assert "synthetic launcher failure" in events[-1]["fields"]["error"]
+    assert "synthetic launcher failure" in events[-2]["fields"]["error"]
+
+
+def test_desktop_entry_has_nonblocking_start_gate(tmp_path):
+    result = _run_desktop_entry_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopEntryPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $DesktopEntryPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Desktop entry script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Enter-DesktopEntryStartGate", "Exit-DesktopEntryStartGate", "Test-DesktopEntryStartAction", "Show-DesktopEntryFeedback", "Test-DesktopEntryFeedbackSuppressed")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$gateAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Enter-DesktopEntryStartGate"
+}, $true)
+$gateText = $gateAst.Extent.Text
+if ($gateText -notmatch "WaitOne\\(0\\)") {
+    throw "Start gate should use nonblocking mutex acquisition."
+}
+if ($gateText -notmatch "desktop_entry.start.skipped_in_progress") {
+    throw "Start gate should log duplicate start suppression."
+}
+if ($gateText -notmatch "Show-DesktopEntryFeedback") {
+    throw "Start gate should request visible feedback when a duplicate start is skipped."
+}
+if ($gateText -notmatch 'return\\s+\\$false') {
+    throw "Start gate should skip duplicate starts."
+}
+
+if (-not (Test-DesktopEntryStartAction -LauncherAction "start")) {
+    throw "start should be gated."
+}
+if (Test-DesktopEntryStartAction -LauncherAction "stop") {
+    throw "stop should not be gated."
+}
+if (Test-DesktopEntryStartAction -LauncherAction "status") {
+    throw "status should not be gated."
+}
+
+$env:VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK = "1"
+$script:feedbackEvents = @()
+function Write-DesktopEntryLog {
+    param(
+        [string]$Event,
+        [string]$Message,
+        [string]$Level = "info",
+        [hashtable]$Fields = @{}
+    )
+    $script:feedbackEvents += ,@{ event = $Event; fields = $Fields }
+}
+Show-DesktopEntryFeedback -Title "title" -Message "message" -Seconds 1 -Kind "info"
+if ($script:feedbackEvents.Count -ne 1 -or $script:feedbackEvents[0].event -ne "desktop_entry.feedback.suppressed") {
+    throw "Feedback suppression should be logged."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
 def test_desktop_entry_maps_close_to_stop_without_monitor(tmp_path):

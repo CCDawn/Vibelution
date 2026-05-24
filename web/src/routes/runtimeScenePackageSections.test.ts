@@ -79,6 +79,12 @@ function scene(files: {
       userSummary: "No issues",
       agentNextStep: "Read summary.json",
       firstSignal: null,
+      startupTrace: {
+        schemaVersion: 1,
+        summary: "Startup recorded",
+        missingStepIds: [],
+        steps: [],
+      },
       recommendedOrder: ["summary.json", "package_index.json", "timeline.jsonl"],
       keyEntries: [],
     },
@@ -101,6 +107,7 @@ describe("runtimeScenePackageSections", () => {
         file("artifacts/self_evolution/rollback.json"),
       ],
       eventLogs: [
+        file("events/launcher.jsonl"),
         file("events/backend.jsonl"),
         file("events/conversation.jsonl"),
         file("events/llm.jsonl"),
@@ -112,6 +119,7 @@ describe("runtimeScenePackageSections", () => {
     const sections = runtimeScenePackageSections(detail);
 
     expect(Object.fromEntries(sections.map((section) => [section.id, section.files.map((item) => item.path)]))).toEqual({
+      startup: ["events/backend.jsonl", "events/launcher.jsonl"],
       conversations: ["conversations/session-demo.jsonl", "events/conversation.jsonl"],
       supervised: [
         "agent/supervised_runs/web-supervised-demo.jsonl",
@@ -124,7 +132,7 @@ describe("runtimeScenePackageSections", () => {
         "events/self_evolution_run.jsonl",
       ],
       agent: ["agent/tool_calls.jsonl", "events/llm.jsonl"],
-      events: ["events/backend.jsonl"],
+      events: [],
       raw: ["raw/backend.stdout.log"],
       artifacts: ["artifacts/report.json"],
     });
@@ -134,6 +142,7 @@ describe("runtimeScenePackageSections", () => {
     const sections = runtimeScenePackageSections(scene({ rawFiles: [file("raw/backend.stdout.log")] }));
 
     expect(sections.map((section) => section.id)).toEqual([
+      "startup",
       "conversations",
       "supervised",
       "selfEvolution",
@@ -151,10 +160,11 @@ describe("runtimeScenePackageSections", () => {
       conversationLogs: [file("conversations/session-demo.jsonl")],
       agentLogs: [file("agent/self_evolution_runs/web-self-demo.jsonl")],
       eventLogs: [file("events/supervised_run.jsonl")],
-      rawFiles: [file("raw/backend.stdout.log")],
+      rawFiles: [file("raw/desktop-entry.log"), file("raw/backend.stdout.log")],
     });
 
     expect(runtimeScenePackageFiles(detail).map((item) => item.path)).toEqual([
+      "raw/desktop-entry.log",
       "conversations/session-demo.jsonl",
       "events/supervised_run.jsonl",
       "agent/self_evolution_runs/web-self-demo.jsonl",

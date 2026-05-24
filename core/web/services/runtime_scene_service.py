@@ -65,6 +65,9 @@ BROWSER_TELEMETRY_WRITE_LOCK = Lock()
 BACKEND_API_WRITE_LOCK = Lock()
 RUNTIME_SCENE_PACKAGE_WRITE_LOCK = Lock()
 RAW_LABELS = {
+    "raw/desktop-entry.log": "Desktop entry log",
+    "raw/desktop-entry-vbs.log": "Desktop entry VBS log",
+    "raw/launcher-control.log": "Launcher control log",
     "raw/frontend.build.log": "Frontend build log",
     "raw/backend.stdout.log": "Backend stdout",
     "raw/backend.stderr.log": "Backend stderr",
@@ -776,6 +779,7 @@ def _runtime_scene_summary_payload(
             "manifest": "manifest.json",
             "timeline": TIMELINE_PATH,
             "lifecycle": LIFECYCLE_PATH,
+            "startup": "raw/desktop-entry.log",
         },
         "sections": _runtime_scene_summary_sections(),
         "diagnostic_entrypoint": {
@@ -784,6 +788,9 @@ def _runtime_scene_summary_payload(
             "recommended_order": [
                 SUMMARY_PATH,
                 PACKAGE_INDEX_PATH,
+                "raw/desktop-entry-vbs.log",
+                "raw/desktop-entry.log",
+                "raw/launcher-control.log",
                 TIMELINE_PATH,
                 LIFECYCLE_PATH,
                 "conversations/",
@@ -836,6 +843,12 @@ def _count_runtime_scene_files(scene_dir: Path, relative_path: str) -> int:
 
 def _runtime_scene_summary_sections() -> dict[str, dict[str, str]]:
     return {
+        "startup": {
+            "path": "raw/desktop-entry.log",
+            "vbs_path": "raw/desktop-entry-vbs.log",
+            "launcher_path": "raw/launcher-control.log",
+            "purpose": "Desktop entry, launcher handoff, runtime manager, backend, browser, and supervisor startup breadcrumbs.",
+        },
         "lifecycle": {
             "path": LIFECYCLE_PATH,
             "purpose": "Workbench startup, shutdown, recovery, supervision, and lifecycle state changes.",
@@ -1286,7 +1299,9 @@ def _runtime_scene_package_diagnosis(
     first_signal = _runtime_scene_first_signal(timeline)
     if first_signal is None:
         first_signal = _runtime_scene_first_key_event(lifecycle, timeline)
+    startup_trace = _runtime_scene_startup_trace(scene_dir=scene_dir, manifest=manifest, timeline=timeline)
     recommended_order = _runtime_scene_recommended_reading_order(
+        startup_trace=startup_trace,
         raw_files=raw_files,
         conversation_logs=conversation_logs,
         agent_logs=agent_logs,
@@ -1297,6 +1312,7 @@ def _runtime_scene_package_diagnosis(
     key_entries = _runtime_scene_key_entries(
         scene_dir=scene_dir,
         manifest=manifest,
+        startup_trace=startup_trace,
         raw_files=raw_files,
         conversation_logs=conversation_logs,
         agent_logs=agent_logs,
@@ -1315,6 +1331,7 @@ def _runtime_scene_package_diagnosis(
             severity_summary=severity_summary,
             first_signal=first_signal,
             child_log_count=len(raw_files) + len(conversation_logs) + len(agent_logs) + len(artifacts) + len(event_logs),
+            startup_trace=startup_trace,
         ),
         "agentNextStep": _runtime_scene_diagnosis_next_step(
             scene_dir_name=scene_dir.name,
@@ -1323,8 +1340,10 @@ def _runtime_scene_package_diagnosis(
             first_signal=first_signal,
             recommended_order=recommended_order,
             key_entries=key_entries,
+            startup_trace=startup_trace,
         ),
         "firstSignal": _runtime_scene_diagnosis_signal_payload(first_signal),
+        "startupTrace": startup_trace,
         "recommendedOrder": recommended_order,
         "keyEntries": key_entries,
     }
@@ -1348,8 +1367,246 @@ def _runtime_scene_first_key_event(lifecycle: list[dict], timeline: list[dict]) 
     return None
 
 
+STARTUP_TRACE_STEPS = [
+    {
+        "id": "desktop_entry_vbs",
+        "label": "桌面入口 VBS",
+        "eventCodes": {
+            "desktop_entry_vbs.python_runtime.selected",
+            "desktop_entry_vbs.started",
+            "desktop_entry_vbs.launched",
+        },
+        "fallbackPaths": ("raw/desktop-entry-vbs.log",),
+    },
+    {
+        "id": "desktop_entry",
+        "label": "桌面入口",
+        "eventCodes": {
+            "desktop_entry.python_runtime.selected",
+            "desktop_entry.started",
+            "desktop_entry.launcher_action.started",
+        },
+        "fallbackPaths": ("raw/desktop-entry.log",),
+    },
+    {
+        "id": "launcher_control",
+        "label": "启动控制",
+        "eventCodes": {
+            "launcher.python_runtime.selected",
+            "launcher.browser.focus.succeeded",
+        },
+        "fallbackPaths": ("raw/launcher-control.log",),
+    },
+    {
+        "id": "runtime_scene",
+        "label": "日志包创建",
+        "eventCodes": {"runtime.scene.created"},
+        "fallbackPaths": (TIMELINE_PATH,),
+    },
+    {
+        "id": "frontend",
+        "label": "前端依赖与构建",
+        "eventCodes": {
+            "frontend.dependencies.current",
+            "frontend.dependencies.install.started",
+            "frontend.dependencies.install.failed",
+            "frontend.build.current",
+            "frontend.build.started",
+            "frontend.build.succeeded",
+            "frontend.build.failed",
+        },
+        "fallbackPaths": ("raw/frontend.build.log",),
+    },
+    {
+        "id": "backend_dependencies",
+        "label": "后端依赖",
+        "eventCodes": {
+            "backend.dependencies.current",
+            "backend.dependencies.install.started",
+            "backend.dependencies.install.failed",
+        },
+        "fallbackPaths": ("events/launcher.jsonl",),
+    },
+    {
+        "id": "backend_start",
+        "label": "后端启动与健康检查",
+        "eventCodes": {
+            "backend.start.requested",
+            "backend.process.started",
+            "backend.health.succeeded",
+            "backend.health.failed",
+            "runtime.scene.backend_live",
+        },
+        "fallbackPaths": ("raw/backend.stdout.log", "raw/backend.stderr.log", "events/backend.jsonl"),
+    },
+    {
+        "id": "browser",
+        "label": "浏览器窗口",
+        "eventCodes": {
+            "runtime.scene.headless_upgrade.started",
+            "runtime.scene.headless_upgrade.succeeded",
+            "browser.window.launch.requested",
+            "browser.window.opened",
+            "browser.window.launch.failed",
+        },
+        "fallbackPaths": ("raw/browser.log", "events/browser.jsonl"),
+    },
+    {
+        "id": "supervisor",
+        "label": "监督器",
+        "eventCodes": {"supervisor.started", "launcher.monitor.started", "launcher.monitor.workbench_open"},
+        "fallbackPaths": ("events/supervisor.jsonl", "raw/supervisor.log", "raw/supervisor.stderr.log"),
+    },
+    {
+        "id": "ready",
+        "label": "工作台就绪",
+        "eventCodes": {"runtime.scene.ready", "runtime.scene.backend_live"},
+        "fallbackPaths": (LIFECYCLE_PATH,),
+    },
+]
+
+
+def _runtime_scene_startup_trace(
+    *,
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    timeline: list[dict],
+) -> dict[str, Any]:
+    steps: list[dict[str, Any]] = []
+    missing: list[str] = []
+    for spec in STARTUP_TRACE_STEPS:
+        event = _first_event_by_code(timeline, spec["eventCodes"])
+        evidence_path = _startup_step_evidence_path(scene_dir, event, spec["fallbackPaths"])
+        raw_event = event or _startup_step_raw_event(scene_dir, evidence_path, spec["eventCodes"])
+        timestamp = _startup_step_timestamp(raw_event)
+        event_code = str(
+            (raw_event or {}).get("eventCode")
+            or (raw_event or {}).get("event_code")
+            or (raw_event or {}).get("event")
+            or ""
+        )
+        message = _truncate_text(str((raw_event or {}).get("message") or (raw_event or {}).get("details") or ""), 240)
+        status = "recorded" if event or evidence_path else "missing"
+        if status == "missing":
+            missing.append(str(spec["id"]))
+        steps.append(
+            {
+                "id": str(spec["id"]),
+                "label": str(spec["label"]),
+                "status": status,
+                "timestamp": timestamp,
+                "eventCode": event_code,
+                "message": message,
+                "evidencePath": evidence_path,
+            }
+        )
+
+    return {
+        "schemaVersion": 1,
+        "summary": _runtime_scene_startup_trace_summary(manifest, steps, missing),
+        "missingStepIds": missing,
+        "steps": steps,
+    }
+
+
+def _first_event_by_code(events: list[dict], event_codes: set[str]) -> dict[str, Any] | None:
+    for event in events:
+        if str(event.get("eventCode") or "").strip() in event_codes:
+            return event
+    return None
+
+
+def _startup_step_evidence_path(scene_dir: Path, event: dict[str, Any] | None, fallback_paths: tuple[str, ...]) -> str:
+    raw_refs = event.get("rawRefs") if isinstance(event, dict) else []
+    for item in raw_refs if isinstance(raw_refs, list) else []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip().replace("\\", "/")
+        if path and _scene_child_has_content(scene_dir, path):
+            return path
+    for path in fallback_paths:
+        if _scene_child_has_content(scene_dir, path):
+            return path
+    return ""
+
+
+def _startup_step_raw_event(
+    scene_dir: Path,
+    evidence_path: str,
+    event_codes: set[str],
+) -> dict[str, Any] | None:
+    if not evidence_path.startswith("raw/"):
+        return None
+    try:
+        lines = _resolve_scene_child(scene_dir, evidence_path).read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return None
+    fallback: dict[str, Any] | None = None
+    for line in lines:
+        text = str(line or "").strip()
+        if not text:
+            continue
+        payload = _parse_startup_raw_json_line(text)
+        if not isinstance(payload, dict):
+            continue
+        if fallback is None:
+            fallback = payload
+        candidate_code = str(payload.get("event") or payload.get("event_code") or payload.get("eventCode") or "").strip()
+        if candidate_code and candidate_code in event_codes:
+            return payload
+    return fallback
+
+
+def _parse_startup_raw_json_line(text: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        sanitized = "".join(char for char in text if char >= " " or char in "\t\r\n")
+        if sanitized == text:
+            return None
+        try:
+            payload = json.loads(sanitized)
+        except json.JSONDecodeError:
+            return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _startup_step_timestamp(event: dict[str, Any] | None) -> str:
+    if not isinstance(event, dict):
+        return ""
+    return str(event.get("timestamp") or event.get("ts") or "").strip()
+
+
+def _runtime_scene_startup_trace_summary(
+    manifest: dict[str, Any],
+    steps: list[dict[str, Any]],
+    missing: list[str],
+) -> str:
+    recorded = len([step for step in steps if step.get("status") == "recorded"])
+    total = len(steps)
+    status = str(manifest.get("status") or "unknown").strip() or "unknown"
+    if not missing:
+        return f"启动流程 {recorded}/{total} 个关键步骤已有证据，当前周期状态为 {status}。"
+    labels = [
+        str(step.get("label") or step.get("id") or "")
+        for step in steps
+        if step.get("id") in missing
+    ]
+    return f"启动流程 {recorded}/{total} 个关键步骤已有证据，缺少：{'、'.join(labels)}。"
+
+
+def _scene_child_has_content(scene_dir: Path, relative_path: str) -> bool:
+    if not _scene_child_exists(scene_dir, relative_path):
+        return False
+    try:
+        return (_resolve_scene_child(scene_dir, relative_path).stat().st_size or 0) > 0
+    except OSError:
+        return False
+
+
 def _runtime_scene_recommended_reading_order(
     *,
+    startup_trace: dict[str, Any],
     raw_files: list[dict],
     conversation_logs: list[dict],
     agent_logs: list[dict],
@@ -1357,7 +1614,12 @@ def _runtime_scene_recommended_reading_order(
     event_logs: list[dict],
     first_signal: dict[str, Any] | None,
 ) -> list[str]:
-    order = [SUMMARY_PATH, PACKAGE_INDEX_PATH, TIMELINE_PATH, LIFECYCLE_PATH]
+    order = [SUMMARY_PATH, PACKAGE_INDEX_PATH]
+    for step in startup_trace.get("steps", []) if isinstance(startup_trace, dict) else []:
+        if isinstance(step, dict):
+            _append_unique_path(order, str(step.get("evidencePath") or "").strip())
+    _append_unique_path(order, TIMELINE_PATH)
+    _append_unique_path(order, LIFECYCLE_PATH)
     raw_refs = first_signal.get("rawRefs") if isinstance(first_signal, dict) else []
     for item in raw_refs if isinstance(raw_refs, list) else []:
         if isinstance(item, dict):
@@ -1374,6 +1636,7 @@ def _runtime_scene_key_entries(
     *,
     scene_dir: Path,
     manifest: dict[str, Any],
+    startup_trace: dict[str, Any],
     raw_files: list[dict],
     conversation_logs: list[dict],
     agent_logs: list[dict],
@@ -1385,8 +1648,9 @@ def _runtime_scene_key_entries(
     for path, label, reason in (
         (SUMMARY_PATH, "Lifecycle package summary", "Start here for package counts, sections, and diagnostic entrypoint."),
         (PACKAGE_INDEX_PATH, "Package index", "Use this for stable date-based lookup and package identity."),
-        (TIMELINE_PATH, "Unified timeline", "Read chronological events across the full lifecycle."),
-        (LIFECYCLE_PATH, "Lifecycle events", "Check startup, shutdown, supervision, and recovery phases."),
+        ("raw/desktop-entry-vbs.log", "Startup: 桌面入口 VBS", "Use this to reconstruct the Windows Script Host entry that hands off into PowerShell."),
+        ("raw/desktop-entry.log", "Startup: 桌面入口", "Use this to reconstruct the PowerShell desktop entry handoff."),
+        ("raw/launcher-control.log", "Startup: 启动控制", "Use this to reconstruct launcher handoff, backend, browser, and supervisor startup."),
     ):
         if _scene_child_exists(scene_dir, path):
             _append_key_entry(
@@ -1395,6 +1659,33 @@ def _runtime_scene_key_entries(
                 label=label,
                 reason=reason,
             )
+    for path, label in ((TIMELINE_PATH, "Unified timeline"), (LIFECYCLE_PATH, "Lifecycle events")):
+        if _scene_child_exists(scene_dir, path):
+            _append_key_entry(
+                entries,
+                path=path,
+                label=label,
+                reason="Read chronological events across the full lifecycle." if path == TIMELINE_PATH else "Check startup, shutdown, supervision, and recovery phases.",
+            )
+    for step in startup_trace.get("steps", []) if isinstance(startup_trace, dict) else []:
+        if not isinstance(step, dict):
+            continue
+        path = str(step.get("evidencePath") or "").strip()
+        if path and _scene_child_exists(scene_dir, path):
+            label = str(step.get("label") or step.get("id") or "startup").strip()
+            _append_key_entry(
+                entries,
+                path=path,
+                label=f"Startup: {label}",
+                reason="Use this startup breadcrumb to reconstruct the launcher-to-workbench boot chain.",
+            )
+    for path in ("raw/desktop-entry-vbs.log", "raw/desktop-entry.log", "raw/launcher-control.log"):
+        _append_key_entry(
+            entries,
+            path=path,
+            label=f"Startup: {Path(path).name}",
+            reason="Use this startup breadcrumb to reconstruct the launcher-to-workbench boot chain.",
+        )
     if not entries and event_logs:
         _append_key_entry(
             entries,
@@ -1446,6 +1737,7 @@ def _runtime_scene_diagnosis_user_summary(
     severity_summary: dict[str, int],
     first_signal: dict[str, Any] | None,
     child_log_count: int,
+    startup_trace: dict[str, Any],
 ) -> str:
     status = str(manifest.get("status") or "unknown").strip() or "unknown"
     result = str(manifest.get("result") or manifest.get("stop_reason") or "").strip()
@@ -1461,6 +1753,9 @@ def _runtime_scene_diagnosis_user_summary(
     if severity == "warning":
         signal = _runtime_scene_signal_label(first_signal)
         return f"{base}发现 {severity_summary['warningCount']} 个警告信号，首个信号是 {signal}。"
+    startup_summary = str((startup_trace or {}).get("summary") or "").strip()
+    if startup_summary:
+        base = f"{base}{startup_summary}"
     if event_count == 0 and child_log_count == 0:
         return f"{base}当前包缺少可分析事件和子日志，应把缺失日志视为日志系统问题。"
     return f"{base}未发现明显错误或警告，可按推荐顺序抽查关键入口。"
@@ -1474,6 +1769,7 @@ def _runtime_scene_diagnosis_next_step(
     first_signal: dict[str, Any] | None,
     recommended_order: list[str],
     key_entries: list[dict[str, str]],
+    startup_trace: dict[str, Any],
 ) -> str:
     first_path = key_entries[0]["path"] if key_entries else recommended_order[0] if recommended_order else SUMMARY_PATH
     package_anchor = str(scene_dir_name or scene_id).strip() or scene_id
@@ -1482,6 +1778,12 @@ def _runtime_scene_diagnosis_next_step(
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再定位首个信号 {signal}；"
             "若事件含 rawRefs，优先打开对应原始日志。"
+        )
+    missing = startup_trace.get("missingStepIds", []) if isinstance(startup_trace, dict) else []
+    if missing:
+        return (
+            f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再对照 startupTrace.missingStepIds "
+            "确认启动链路缺口是否属于日志系统问题。"
         )
     return (
         f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再按推荐阅读顺序对照 timeline、lifecycle 和子日志确认周期完整性。"

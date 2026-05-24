@@ -217,6 +217,7 @@ function renderPackageDiagnosisPanel(
       : "No error or warning signal";
   const keyEntries = diagnosis.keyEntries ?? [];
   const recommendedOrder = diagnosis.recommendedOrder ?? [];
+  const startupSteps = diagnosis.startupTrace?.steps ?? [];
   return (
     <section className={styles.packageDiagnosisPanel}>
       <div className={styles.packageDiagnosisHeader}>
@@ -227,6 +228,41 @@ function renderPackageDiagnosisPanel(
         <span className={severityClassName(diagnosis.severity)}>{severityLabel(diagnosis.severity, lang)}</span>
       </div>
       <p className={styles.packageDiagnosisSummary}>{diagnosis.userSummary}</p>
+      {diagnosis.startupTrace ? (
+        <div className={styles.startupTracePanel}>
+          <div className={styles.startupTraceHeader}>
+            <span>{lang === "zh" ? "启动流程" : "Startup flow"}</span>
+            <strong>{diagnosis.startupTrace.summary}</strong>
+          </div>
+          <div className={styles.startupTraceSteps}>
+            {startupSteps.map((step) => (
+              <button
+                key={step.id}
+                type="button"
+                className={
+                  step.status === "recorded"
+                    ? styles.startupTraceStep
+                    : `${styles.startupTraceStep} ${styles.startupTraceStepMissing}`
+                }
+                onClick={() => step.evidencePath && handleOpenRawLog(scene.runtimeSceneId, step.evidencePath)}
+                disabled={!step.evidencePath}
+                title={step.message || step.eventCode || step.evidencePath}
+              >
+                <span>{localizeRuntimeSceneText(step.label, lang)}</span>
+                <strong>
+                  {step.status === "recorded"
+                    ? lang === "zh"
+                      ? "已记录"
+                      : "Recorded"
+                    : lang === "zh"
+                      ? "缺失"
+                      : "Missing"}
+                </strong>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className={styles.packageDiagnosisGrid}>
         <article>
           <span>{lang === "zh" ? "首个信号" : "First signal"}</span>
