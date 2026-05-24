@@ -3070,7 +3070,7 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     response = client.post(
         "/api/sessions/session-live/messages/edit-resubmit",
         json={
-            "messageId": "session-live-message-1",
+            "messageId": "session-live-message-3",
             "content": "编辑后的需求",
             "mentalModelEnabled": False,
         },
@@ -3079,14 +3079,70 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "running"
-    assert [item["content"] for item in payload["messages"]] == ["编辑后的需求"]
+    assert [item["content"] for item in payload["messages"]] == ["原始需求", "原始回答", "编辑后的需求"]
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑后的需求"
-    assert scheduled_contexts[0]["history_messages"] == []
+    assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
     assert scheduled_contexts[0]["mental_model_enabled"] is False
     state = load_chat_state(tmp_path)
     stored_messages = state["conversations"][0]["messages"]
-    assert [item["content"] for item in stored_messages] == ["编辑后的需求"]
+    assert [item["content"] for item in stored_messages] == ["原始需求", "原始回答", "编辑后的需求"]
+    assert any(event["eventCode"] == "conversation.message_edited_resubmitted" for event in events)
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+
+
+def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:03:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:03:00",
+                    "last_turn_status": "ready",
+                    "messages": [
+                        {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+                        {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+                        {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
+                        {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
+                    ],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    scheduled_contexts: list[dict] = []
+    events: list[dict] = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda component, phase, event_code, **kwargs: events.append(
+            {"component": component, "phase": phase, "eventCode": event_code, **kwargs}
+        ),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={
+            "messageId": "session-live-message-3",
+            "content": "编辑最新的需求",
+            "mentalModelEnabled": False,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert [item["content"] for item in payload["messages"]] == ["原始需求", "原始回答", "编辑最新的需求"]
+    assert len(scheduled_contexts) == 1
+    assert scheduled_contexts[0]["user_message"] == "编辑最新的需求"
+    assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
     assert any(event["eventCode"] == "conversation.message_edited_resubmitted" for event in events)
 
     session_service._set_session_running("session-live", False)
@@ -3105,6 +3161,39 @@ def test_edit_resubmit_session_message_rejects_assistant_message(tmp_path, monke
 
     assert response.status_code == 422
     assert load_chat_state(tmp_path) == before_state
+
+
+def test_edit_resubmit_session_message_rejects_non_latest_user_message(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    state = load_chat_state(tmp_path)
+    conversation = state["conversations"][0]
+    conversation["messages"].extend(
+        [
+            {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
+            {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
+        ]
+    )
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    before_state = load_chat_state(tmp_path)
+    rejected_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: rejected_events.append({"args": args, "kwargs": kwargs}) or {"accepted": True},
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={"messageId": "session-live-message-1", "content": "不能改旧消息"},
+    )
+
+    assert response.status_code == 422
+    assert load_chat_state(tmp_path) == before_state
+    assert any(
+        event["args"][:3] == ("conversation", "message_edit_resubmit_rejected", "conversation.message_edit_resubmit_rejected")
+        for event in rejected_events
+    )
 
 
 def test_chat_turn_registers_as_work_run_until_finished(tmp_path, monkeypatch):
