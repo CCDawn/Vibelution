@@ -11,6 +11,11 @@ from typing import Any, Optional
 
 from core.gym.models import utcnow_iso
 from core.infrastructure.workspace_manager import get_workspace
+from .supervised_intake import (
+    self_evolution_allowed_downstream_uses,
+    self_evolution_blocked_downstream_uses,
+    self_evolution_candidate_boundary,
+)
 
 
 CANDIDATE_ROOT = Path("workspace/self_evolution/candidates")
@@ -58,6 +63,14 @@ def build_candidate_from_reflection(reflection: dict[str, Any], *, candidate_typ
     payload = _candidate_payload(reflection, normalized_type)
     dedupe_key = f"self_candidate:{normalized_type}:{reflection_id}"
     candidate_id = f"{normalized_type}:{_stable_digest(dedupe_key)[:16]}"
+    allowed_downstream_uses = self_evolution_allowed_downstream_uses(normalized_type)
+    blocked_downstream_uses = self_evolution_blocked_downstream_uses(normalized_type)
+    supervised_intake_boundary = self_evolution_candidate_boundary(
+        {
+            "candidate_type": normalized_type,
+            "allowed_downstream_uses": allowed_downstream_uses,
+        }
+    )
 
     return {
         "candidate_id": candidate_id,
@@ -77,11 +90,12 @@ def build_candidate_from_reflection(reflection: dict[str, Any], *, candidate_typ
         },
         "payload": payload,
         "review_state": "pending",
-        "allowed_downstream_uses": _allowed_downstream_uses(normalized_type),
-        "blocked_downstream_uses": _blocked_downstream_uses(normalized_type),
+        "allowed_downstream_uses": supervised_intake_boundary["allowed_downstream_uses"],
+        "blocked_downstream_uses": supervised_intake_boundary["blocked_downstream_uses"],
         "supervised_required": True,
         "candidate_only": True,
         "auto_apply": False,
+        "supervised_intake_boundary": supervised_intake_boundary,
         "dedupe_key": dedupe_key,
         "quality_score": 0.0,
         "confidence": _safe_float(_first_attribution(reflection).get("confidence"), default=0.0),
@@ -140,12 +154,20 @@ def _normalize_candidate_record(candidate: dict[str, Any]) -> dict[str, Any]:
     dedupe_key = _text(candidate.get("dedupe_key")) or f"self_candidate:{candidate_type}:{candidate_id}"
     blocked_downstream_uses = _merge_unique(
         _string_list(candidate.get("blocked_downstream_uses")),
-        _blocked_downstream_uses(candidate_type),
+        self_evolution_blocked_downstream_uses(candidate_type),
     )
     allowed_downstream_uses = _filter_allowed_downstream_uses(
-        _string_list(candidate.get("allowed_downstream_uses")) or _allowed_downstream_uses(candidate_type),
+        _string_list(candidate.get("allowed_downstream_uses"))
+        or self_evolution_allowed_downstream_uses(candidate_type),
         blocked_downstream_uses,
         candidate_type,
+    )
+    boundary = self_evolution_candidate_boundary(
+        {
+            **candidate,
+            "candidate_type": candidate_type,
+            "allowed_downstream_uses": allowed_downstream_uses,
+        }
     )
     return {
         "candidate_id": candidate_id,
@@ -157,11 +179,12 @@ def _normalize_candidate_record(candidate: dict[str, Any]) -> dict[str, Any]:
         "provenance": provenance,
         "payload": _object(candidate.get("payload")),
         "review_state": "pending",
-        "allowed_downstream_uses": allowed_downstream_uses,
-        "blocked_downstream_uses": blocked_downstream_uses,
+        "allowed_downstream_uses": boundary["allowed_downstream_uses"],
+        "blocked_downstream_uses": boundary["blocked_downstream_uses"],
         "supervised_required": True,
         "candidate_only": True,
         "auto_apply": False,
+        "supervised_intake_boundary": boundary,
         "dedupe_key": dedupe_key,
         "quality_score": _safe_float(candidate.get("quality_score"), default=0.0),
         "confidence": _safe_float(candidate.get("confidence"), default=0.0),
@@ -196,24 +219,11 @@ def _candidate_payload(reflection: dict[str, Any], candidate_type: str) -> dict[
 
 
 def _allowed_downstream_uses(candidate_type: str) -> list[str]:
-    if candidate_type == "skill_candidate":
-        return ["supervised_review", "skill_candidate_review"]
-    if candidate_type == "prompt_candidate":
-        return ["supervised_review", "prompt_candidate_review"]
-    if candidate_type == "proposal_candidate":
-        return ["supervised_review", "proposal_review"]
-    return ["supervised_review"]
+    return self_evolution_allowed_downstream_uses(candidate_type)
 
 
 def _blocked_downstream_uses(candidate_type: str) -> list[str]:
-    blocked = ["accepted_baseline", "selection_policy", "runtime_prompt_override"]
-    if candidate_type == "skill_candidate":
-        blocked.append("skill_registry_install")
-    if candidate_type == "prompt_candidate":
-        blocked.append("runtime_prompt_override")
-    if candidate_type == "proposal_candidate":
-        blocked.append("accepted_baseline")
-    return _merge_unique(blocked)
+    return self_evolution_blocked_downstream_uses(candidate_type)
 
 
 def _filter_allowed_downstream_uses(allowed: list[str], blocked: list[str], candidate_type: str) -> list[str]:

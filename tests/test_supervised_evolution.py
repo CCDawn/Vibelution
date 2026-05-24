@@ -142,6 +142,24 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
       "case_id": "probe",
       "scenario": "transaction",
       "mode": "single_turn",
+      "source_track": "generated",
+      "dataset_splits": ["train", "observe"],
+      "allowed_downstream_uses": ["supervised_evaluation", "gym_candidate_case"],
+      "provenance": {
+        "source_trace_id": "trace_001",
+        "source_episode_id": "episode_001",
+        "source_harness_gap": "validation",
+        "generation_reason": "test provenance propagation",
+        "creator_version": "pytest",
+        "created_at": "2026-05-15T00:00:00Z",
+        "allowed_splits": ["train", "observe"]
+      },
+      "intake_boundary": {
+        "contract": "generated_case",
+        "formal_supervised_evaluation_allowed": true,
+        "holdout_allowed": false,
+        "raw_chat_direct_training_allowed": false
+      },
       "baseline_prompt": "baseline",
       "candidate_prompt": "candidate"
     }
@@ -195,6 +213,7 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert proposal["score_breakdown"] == decision.case_summaries[0].score_breakdown
     assert proposal["failure_taxonomy"] == decision.case_summaries[0].failure_taxonomy
     assert proposal["evidence_paths"] == decision.case_summaries[0].evidence_paths
+    assert proposal["intake_provenance"] == decision.case_summaries[0].intake_provenance
     assert proposal["baseline_status"] == "success"
     assert proposal["candidate_status"] == "success"
     assert proposal["target"]["kind"] == "bundle_prompt_case"
@@ -204,6 +223,9 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert case_summary.score_breakdown["candidate"]["final_state_score"] == 1.0
     assert case_summary.score_breakdown["delta"]["overall_score"] == 0.0
     assert case_summary.failure_taxonomy == ["no_failure_detected"]
+    assert case_summary.intake_provenance["source_track"] == "generated"
+    assert case_summary.intake_provenance["provenance"]["source_trace_id"] == "trace_001"
+    assert case_summary.intake_provenance["intake_boundary"]["contract"] == "generated_case"
     assert Path(case_summary.evidence_paths["baseline_report_path"]).exists()
     assert Path(case_summary.evidence_paths["candidate_report_path"]).exists()
     policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
@@ -213,6 +235,7 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert policy_record["case_evidence"][0]["score_breakdown"] == decision.case_summaries[0].score_breakdown
     assert policy_record["case_evidence"][0]["failure_taxonomy"] == decision.case_summaries[0].failure_taxonomy
     assert policy_record["case_evidence"][0]["evidence_paths"] == decision.case_summaries[0].evidence_paths
+    assert policy_record["case_evidence"][0]["intake_provenance"] == decision.case_summaries[0].intake_provenance
     lineage_index_path = Path(decision.policy_action["lineage_index_path"])
     assert lineage_index_path.exists()
     lineage_index = json.loads(lineage_index_path.read_text(encoding="utf-8"))

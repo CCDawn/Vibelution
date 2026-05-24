@@ -175,6 +175,7 @@ class CaseDecisionSummary:
     score_breakdown: Dict[str, Any] = field(default_factory=dict)
     failure_taxonomy: List[str] = field(default_factory=list)
     evidence_paths: Dict[str, Any] = field(default_factory=dict)
+    intake_provenance: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -348,9 +349,15 @@ def _build_run_aggregate(items: List[SupervisedEvolutionRun]) -> RunAggregate:
 def _build_case_summaries(
     baseline_runs: List[SupervisedEvolutionRun],
     candidate_runs: List[SupervisedEvolutionRun],
+    cases: Optional[List[Dict[str, Any]]] = None,
 ) -> List[CaseDecisionSummary]:
     baseline_by_case = {item.case_id: item for item in baseline_runs}
     candidate_by_case = {item.case_id: item for item in candidate_runs}
+    case_payloads = {
+        str(item.get("case_id") or "").strip(): item
+        for item in list(cases or [])
+        if isinstance(item, dict) and str(item.get("case_id") or "").strip()
+    }
     case_ids = sorted(set(baseline_by_case) | set(candidate_by_case))
     summaries: List[CaseDecisionSummary] = []
     for case_id in case_ids:
@@ -380,6 +387,7 @@ def _build_case_summaries(
         )
         failure_taxonomy = _build_failure_taxonomy(difference_reasons, difference_metrics)
         evidence_paths = _build_case_evidence_paths(baseline=baseline, candidate=candidate)
+        intake_provenance = _build_case_intake_provenance(case_payloads.get(case_id) or {})
         summaries.append(
             CaseDecisionSummary(
                 case_id=case_id,
@@ -394,9 +402,33 @@ def _build_case_summaries(
                 score_breakdown=score_breakdown,
                 failure_taxonomy=failure_taxonomy,
                 evidence_paths=evidence_paths,
+                intake_provenance=intake_provenance,
             )
         )
     return summaries
+
+
+def _build_case_intake_provenance(case_payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(case_payload, dict) or not case_payload:
+        return {}
+    provenance: Dict[str, Any] = {}
+    for key in (
+        "generated",
+        "source_track",
+        "dataset_splits",
+        "allowed_downstream_uses",
+        "intake_boundary",
+        "provenance",
+        "dataset_ref",
+        "review",
+        "approval",
+        "quality_signals",
+        "next_state_signals",
+    ):
+        value = case_payload.get(key)
+        if value not in (None, "", [], {}):
+            provenance[key] = value
+    return provenance
 
 
 def _build_case_score_breakdown(
@@ -1382,7 +1414,7 @@ def run_supervised_evolution_session(
 
     baseline_summary = _build_run_aggregate(baseline_runs)
     candidate_summary = _build_run_aggregate(candidate_runs)
-    case_summaries = _build_case_summaries(baseline_runs, candidate_runs)
+    case_summaries = _build_case_summaries(baseline_runs, candidate_runs, cases)
     gates, decision, reason, score_delta = _evaluate_gates(baseline_runs, candidate_runs)
     decision, reason, gates = _apply_promotion_gate(
         decision=decision,

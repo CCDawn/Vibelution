@@ -1835,6 +1835,10 @@ def _dataset_payload(item: dict[str, Any]) -> dict[str, Any]:
         ],
         "holdoutAllowed": bool(item.get("holdout_allowed", True)),
         "rawChatDirectTrainingAllowed": bool(item.get("raw_chat_direct_training_allowed", True)),
+        "intakeBoundary": item.get("intake_boundary") if isinstance(item.get("intake_boundary"), dict) else {},
+        "formalSupervisedEvaluationAllowed": bool(
+            item.get("formal_supervised_evaluation_allowed", False)
+        ),
     }
 
 
