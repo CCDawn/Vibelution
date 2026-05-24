@@ -119,6 +119,53 @@ export function shutdownRequestUnconfirmedBody(lang: string): string {
     : "关闭流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
 }
 
+export function shutdownLocallyCompleteBody(lang: string): string {
+  return lang === "en"
+    ? "The backend is no longer reachable, so the close flow has already passed the point where this window can receive a final confirmation. You can close this remaining window."
+    : "后端已经不可达，关闭流程已经越过这个窗口能收到最终确认的阶段。可以直接关闭这个残留窗口。";
+}
+
+export function buildShutdownLocallyCompleteTelemetry(reason: string): BrowserTelemetryEventInput {
+  return {
+    phase: "shutdown",
+    eventCode: "browser.user_action.shutdown_locally_completed",
+    message: "Shutdown was inferred locally after the backend became unreachable.",
+    level: "info",
+    fields: {
+      action: "shutdown",
+      source: "app_shell",
+      reason,
+    },
+  };
+}
+
+function isFrontendOrphanedWorkbench(workbench: RuntimeSummary["workbench"] | null | undefined): boolean {
+  const lifecycleConsistency = String(workbench?.lifecycleConsistency ?? "").trim().toLowerCase();
+  return Boolean(workbench?.frontendOrphaned) || lifecycleConsistency === "orphaned_browser";
+}
+
+export function shouldTreatShutdownAsLocallyComplete({
+  shutdownRequested,
+  backendState,
+  backendUnavailable,
+  runtimeSummaryUnavailable,
+  workbench,
+}: {
+  shutdownRequested: boolean;
+  backendState: string;
+  backendUnavailable?: boolean;
+  runtimeSummaryUnavailable: boolean;
+  workbench?: RuntimeSummary["workbench"] | null;
+}): boolean {
+  if (!shutdownRequested) {
+    return false;
+  }
+  if (isFrontendOrphanedWorkbench(workbench)) {
+    return true;
+  }
+  return (backendState === "offline" || Boolean(backendUnavailable)) && runtimeSummaryUnavailable;
+}
+
 export function AppShell() {
   const { lang, t, statusLabel } = useAppI18n();
   const location = useLocation();
@@ -137,6 +184,7 @@ export function AppShell() {
     () => (typeof navigator === "undefined" ? true : navigator.onLine),
   );
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
+  const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(`page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
@@ -193,6 +241,8 @@ export function AppShell() {
     ? "The runtime manager could not close the workbench. Check the launcher and runtime-manager logs."
     : "运行时管理器没有成功关闭工作台。请检查 launcher 和 runtime-manager 日志。";
   const shutdownUnconfirmedBody = shutdownRequestUnconfirmedBody(lang);
+  const shutdownLocallyCompleteTitle = lang === "en" ? "Workbench backend stopped" : "工作台后端已停止";
+  const shutdownLocallyCompleteDetail = shutdownLocallyCompleteBody(lang);
   const locale = lang === "zh" ? "zh-CN" : "en-US";
   const timezone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || (lang === "en" ? "Local time" : "本地时间"),
@@ -223,6 +273,13 @@ export function AppShell() {
     health: backendHealthQuery.data,
   });
   const runtimeControllerState = deriveRuntimeControllerState(runtimeQuery.data);
+  const shutdownLocallyComplete = shouldTreatShutdownAsLocallyComplete({
+    shutdownRequested,
+    backendState,
+    backendUnavailable: backendHealthQuery.isError || backendHealthQuery.isRefetchError,
+    runtimeSummaryUnavailable: runtimeQuery.isError || runtimeQuery.isRefetchError,
+    workbench,
+  });
   const activeWorkIndicator = deriveActiveWorkIndicator(runtimeQuery.data, lang);
   const activeWorkDetailsTitle = activeWorkIndicator?.items.map((item) => item.detail).join(" · ") ?? "";
   const currentTime = clockFormatter.format(clockNow);
@@ -290,6 +347,7 @@ export function AppShell() {
       setShutdownOpen(true);
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(shutdownBody);
+      shutdownLocalCompletionLoggedRef.current = false;
       emitBrowserTelemetry(buildShutdownRequestedTelemetry(), { preferBeacon: true });
 
       const payload = await fetchJson<ShutdownResponse>("/api/runtime/shutdown", {
@@ -571,12 +629,32 @@ export function AppShell() {
   }, [emitBrowserTelemetry]);
 
   useEffect(() => {
+    if (shutdownLocallyComplete) {
+      setShutdownOpen(true);
+      setShutdownFailed(true);
+      setShutdownTitle(shutdownLocallyCompleteTitle);
+      setShutdownDetail(shutdownLocallyCompleteDetail);
+      if (!shutdownLocalCompletionLoggedRef.current) {
+        shutdownLocalCompletionLoggedRef.current = true;
+        emitBrowserTelemetry(
+          buildShutdownLocallyCompleteTelemetry(
+            workbench?.frontendOrphaned || workbench?.lifecycleConsistency === "orphaned_browser"
+              ? "frontend_orphaned"
+              : "backend_unreachable",
+          ),
+          { preferBeacon: true },
+        );
+      }
+      return;
+    }
+
     if (!workbench) {
       return;
     }
 
     const closing = workbench.desiredState === "closed" && workbench.observedState !== "closed";
-    const failed = workbench.phase === "failed" && workbench.desiredState === "closed";
+    const failed = (workbench.phase === "failed" && workbench.desiredState === "closed")
+      || isFrontendOrphanedWorkbench(workbench);
 
     if (failed) {
       setShutdownRequested(false);
@@ -605,7 +683,17 @@ export function AppShell() {
       setShutdownTitle(shutdownHeading);
       setShutdownDetail(workbench.statusLine || shutdownBody);
     }
-  }, [shutdownBody, shutdownErrorBody, shutdownHeading, shutdownRequested, workbench]);
+  }, [
+    emitBrowserTelemetry,
+    shutdownBody,
+    shutdownErrorBody,
+    shutdownHeading,
+    shutdownLocallyComplete,
+    shutdownLocallyCompleteDetail,
+    shutdownLocallyCompleteTitle,
+    shutdownRequested,
+    workbench,
+  ]);
 
   const systemStatusCards: Array<{
     id: string;
