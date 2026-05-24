@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.evaluation.chat_next_state_signals import list_chat_next_state_signals
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
 from core.evaluation.chat_segmenter import ChatTurnRecord
 from config.public_config import UNCONFIGURED_MODEL_REF, load_public_config, public_config_hash
@@ -2560,6 +2561,10 @@ def _seed_chat_state(project_root, *, task_status="reading", active_task=None):
     )
 
 
+def _read_next_state_signals(project_root: Path, *, session_id: str = "", turn_id: str = "") -> list[dict]:
+    return list_chat_next_state_signals(project_root=project_root, session_id=session_id, turn_id=turn_id)
+
+
 def test_session_detail_exists(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -3001,6 +3006,7 @@ def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_p
     assert payload["messages"][-1]["content"] == content
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["messages"][-1]["content"] == content
+    assert _read_next_state_signals(tmp_path, session_id="session-live") == []
 
 
 def test_submit_session_message_rejects_encoding_replacement_pollution(tmp_path, monkeypatch):
@@ -3218,6 +3224,8 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     stored_messages = state["conversations"][0]["messages"]
     assert [item["content"] for item in stored_messages] == ["原始需求", "原始回答", "编辑后的需求"]
     assert any(event["eventCode"] == "conversation.message_edited_resubmitted" for event in events)
+    signals = _read_next_state_signals(tmp_path, session_id="session-live")
+    assert any(item["kind"] == "assistant_output_edited" and item["turnId"] for item in signals)
 
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
@@ -3714,6 +3722,41 @@ def test_submit_session_message_rejects_blank_message_without_mutating_session(t
     assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
 
 
+def test_submit_session_message_records_provider_failure_next_state_signal(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    class ProviderFailureAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "failed",
+                "summary": "litellm.BadGatewayError: BadGatewayError: OpenAIException - {\"error\":{\"message\":\"Upstream request failed\"}}",
+                "raw_output": "litellm.BadGatewayError: BadGatewayError: OpenAIException - {\"error\":{\"message\":\"Upstream request failed\"}}",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ProviderFailureAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续检查上游失败"},
+    )
+
+    assert response.status_code == 202
+    signals = _read_next_state_signals(tmp_path, session_id="session-live")
+    assert any(item["kind"] == "provider_failure" for item in signals)
+    assert any(item["relatedEventCode"] == "conversation.turn_error" for item in signals)
+
+
 def test_submit_session_message_recovers_when_scheduler_fails(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -3809,6 +3852,8 @@ def test_request_stop_session_turn_persists_stop_snapshot_and_releases_session(t
         assert payload["stopRequested"] is False
         assert payload["messages"][-1]["role"] == "assistant"
         assert "本轮已按请求停止" in payload["messages"][-1]["content"]
+        stop_signals = _read_next_state_signals(tmp_path, session_id="session-live")
+        assert any(item["kind"] == "user_stops" and item["turnId"] for item in stop_signals)
 
         continue_response = client.post(
             "/api/sessions/session-live/messages",
@@ -3816,6 +3861,8 @@ def test_request_stop_session_turn_persists_stop_snapshot_and_releases_session(t
         )
         assert continue_response.status_code == 202
         assert continue_response.json()["currentPhase"] == "running"
+        continue_signals = _read_next_state_signals(tmp_path, session_id="session-live")
+        assert any(item["kind"] == "user_continues" for item in continue_signals)
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
