@@ -216,6 +216,54 @@ def test_generate_supervised_dashboard_uses_policy_proposal_when_gym_proposal_is
     assert "selection policy proposal" in html
 
 
+def test_generate_supervised_dashboard_surfaces_dynamic_and_impossible_case_schema(tmp_path: Path):
+    _write_decision(
+        tmp_path,
+        "supervised_dynamic_schema",
+        {
+            "case_summaries": [
+                {
+                    "case_id": "dynamic_calendar_change",
+                    "case_type": "dynamic_replanning",
+                    "baseline_status": "success",
+                    "candidate_status": "success",
+                    "decision_signal": "stable_success",
+                    "difference_summary": "dynamic case stayed stable",
+                    "failure_taxonomy": ["dynamic_replanning_case", "post_adaptation_verification_missing"],
+                    "intake_provenance": {
+                        "case_type": "dynamic_replanning",
+                        "expected_final_state": {"calendar_event": "rescheduled"},
+                        "dynamic_events": [{"event": "deadline_changed"}],
+                    },
+                },
+                {
+                    "case_id": "impossible_missing_permission",
+                    "case_type": "impossible_task",
+                    "baseline_status": "success",
+                    "candidate_status": "success",
+                    "decision_signal": "stable_success",
+                    "difference_summary": "impossible case stayed stable",
+                    "failure_taxonomy": ["impossible_task_case"],
+                    "intake_provenance": {
+                        "case_type": "impossible_task",
+                        "expected_infeasible_outcome": {"status": "infeasible", "reason": "missing_permission"},
+                    },
+                },
+            ],
+        },
+    )
+
+    html = Path(generate_supervised_dashboard(project_root=tmp_path).html_path).read_text(encoding="utf-8")
+
+    assert "dynamic_replanning" in html
+    assert "expected final:" in html
+    assert "calendar_event" in html
+    assert "dynamic events: 1" in html
+    assert "impossible_task" in html
+    assert "expected infeasible:" in html
+    assert "missing_permission" in html
+
+
 def _write_decision(tmp_path: Path, session_id: str, overrides: dict) -> Path:
     decisions_dir = tmp_path / "workspace" / "supervised_evolution" / "decisions"
     decisions_dir.mkdir(parents=True, exist_ok=True)

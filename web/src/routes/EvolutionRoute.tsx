@@ -238,6 +238,14 @@ function canOpenProposalSourceRun(item: EvolutionLibraryEntry | null | undefined
   return Boolean(item?.sourceRun) && !isSelfEvolutionCandidateItem(item);
 }
 
+function compactCaseObject(value: Record<string, unknown> | undefined) {
+  if (!value || Object.keys(value).length === 0) {
+    return "";
+  }
+  const text = JSON.stringify(value);
+  return text.length > 160 ? `${text.slice(0, 159)}...` : text;
+}
+
 export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps) {
   const {
     lang,
@@ -2794,9 +2802,15 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           <article key={item.caseId || item.summary} className={styles.relatedRow}>
                             <div className={styles.listRowTop}>
                               <strong>{item.caseId || "--"}</strong>
-                              <span>{item.decisionSignal || "--"}</span>
+                              <span>{item.caseType && item.caseType !== "static" ? item.caseType : item.decisionSignal || "--"}</span>
                             </div>
                             <p>{item.summary}</p>
+                            {compactCaseObject(item.expectedFinalState) ? (
+                              <p>expected final: {compactCaseObject(item.expectedFinalState)}</p>
+                            ) : null}
+                            {compactCaseObject(item.expectedInfeasibleOutcome) ? (
+                              <p>expected infeasible: {compactCaseObject(item.expectedInfeasibleOutcome)}</p>
+                            ) : null}
                           </article>
                         ))}
                       </div>
@@ -3501,6 +3515,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                             <article key={item.caseId || item.summary} className={styles.relatedRow}>
                               <strong>{item.caseId || "--"}</strong>
                               <span>{item.summary}</span>
+                              {item.caseType && item.caseType !== "static" ? <span>{item.caseType}</span> : null}
+                              {compactCaseObject(item.expectedFinalState) ? (
+                                <span>expected final: {compactCaseObject(item.expectedFinalState)}</span>
+                              ) : null}
+                              {compactCaseObject(item.expectedInfeasibleOutcome) ? (
+                                <span>expected infeasible: {compactCaseObject(item.expectedInfeasibleOutcome)}</span>
+                              ) : null}
                             </article>
                           ))}
                         </div>

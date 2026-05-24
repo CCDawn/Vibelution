@@ -7101,6 +7101,75 @@ def test_evolution_routes_use_real_supervised_records(tmp_path, monkeypatch):
     assert library_payload["items"][0]["outcomeSemantics"]["proposalStatus"] == "active"
 
 
+def test_evolution_runs_route_exposes_case_type_and_expected_outcome(tmp_path, monkeypatch):
+    _write_supervised_decision_record(
+        tmp_path,
+        "web_dynamic_case_schema",
+        {
+            "case_summaries": [
+                {
+                    "case_id": "dynamic_calendar_change",
+                    "case_type": "dynamic_replanning",
+                    "baseline_status": "success",
+                    "candidate_status": "success",
+                    "decision_signal": "stable_success",
+                    "difference_summary": "dynamic case stayed stable",
+                    "failure_taxonomy": ["dynamic_replanning_case", "post_adaptation_verification_missing"],
+                    "intake_provenance": {
+                        "case_type": "dynamic_replanning",
+                        "expected_final_state": {"calendar_event": "rescheduled"},
+                        "dynamic_events": [{"event": "deadline_changed"}],
+                    },
+                },
+                {
+                    "case_id": "impossible_missing_permission",
+                    "case_type": "impossible_task",
+                    "baseline_status": "success",
+                    "candidate_status": "success",
+                    "decision_signal": "stable_success",
+                    "difference_summary": "impossible case stayed stable",
+                    "failure_taxonomy": ["impossible_task_case"],
+                    "intake_provenance": {
+                        "case_type": "impossible_task",
+                        "expected_infeasible_outcome": {"status": "infeasible", "reason": "missing_permission"},
+                    },
+                },
+            ],
+        },
+    )
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        evolution_service,
+        "get_workbench_contract",
+        lambda: {
+            "defaultMode": "supervised_evolution",
+            "defaultRoute": "/evolution",
+            "intakeMode": "manual_review",
+            "modeAvailability": {
+                "chat": True,
+                "self_evolution": True,
+                "supervised_evolution": True,
+            },
+            "domainAvailability": {
+                "chat": True,
+                "evolution": True,
+                "config": True,
+            },
+        },
+    )
+
+    response = client.get("/api/evolution/runs")
+
+    assert response.status_code == 200
+    diagnostics = response.json()[0]["caseDiagnostics"]
+    by_case = {item["caseId"]: item for item in diagnostics}
+    assert by_case["dynamic_calendar_change"]["caseType"] == "dynamic_replanning"
+    assert by_case["dynamic_calendar_change"]["expectedFinalState"]["calendar_event"] == "rescheduled"
+    assert by_case["dynamic_calendar_change"]["dynamicEvents"][0]["event"] == "deadline_changed"
+    assert by_case["impossible_missing_permission"]["caseType"] == "impossible_task"
+    assert by_case["impossible_missing_permission"]["expectedInfeasibleOutcome"]["status"] == "infeasible"
+
+
 def test_evolution_routes_handle_empty_supervised_workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -9211,6 +9280,7 @@ def _write_supervised_decision_record(project_root: Path, session_id: str, overr
 def _assert_seeded_case_diagnostic(diagnostic: dict) -> None:
     assert diagnostic == {
         "caseId": "case_1",
+        "caseType": "static",
         "baselineStatus": "success",
         "candidateStatus": "success",
         "decisionSignal": "stable_success",

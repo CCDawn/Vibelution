@@ -979,12 +979,16 @@ export type EvolutionRun = {
 
 export type EvolutionCaseDiagnostic = {
   caseId: string;
+  caseType?: string;
   baselineStatus: string;
   candidateStatus: string;
   decisionSignal: string;
   summary: string;
   metrics: Record<string, unknown>;
   reasons: string[];
+  expectedFinalState?: Record<string, unknown>;
+  expectedInfeasibleOutcome?: Record<string, unknown>;
+  dynamicEvents?: Array<Record<string, unknown>>;
 };
 
 export type EvolutionDatasetOption = {

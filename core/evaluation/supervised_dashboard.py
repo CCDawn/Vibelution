@@ -497,7 +497,13 @@ def _render_case(case: dict[str, Any]) -> str:
     score_breakdown = case.get("score_breakdown") if isinstance(case.get("score_breakdown"), dict) else {}
     failure_taxonomy = case.get("failure_taxonomy") if isinstance(case.get("failure_taxonomy"), list) else []
     evidence_paths = case.get("evidence_paths") if isinstance(case.get("evidence_paths"), dict) else {}
+    case_type = _case_type(case)
     diagnostics = [difference_summary]
+    if case_type and case_type != "static":
+        diagnostics.append(f"type: {case_type}")
+    expected_summary = _case_expected_summary(case)
+    if expected_summary:
+        diagnostics.append(expected_summary)
     score_delta = _case_score_delta(score_breakdown)
     if score_delta:
         diagnostics.append(score_delta)
@@ -508,13 +514,47 @@ def _render_case(case: dict[str, Any]) -> str:
         diagnostics.append(evidence_summary)
     return (
         "<tr>"
-        f"<td>{_escape(case.get('case_id') or '-')}</td>"
+        f"<td>{_escape(case.get('case_id') or '-')}<br><span class=\"path\">{_escape(case_type or 'static')}</span></td>"
         f"<td>{_escape(case.get('baseline_status') or '-')}</td>"
         f"<td>{_escape(case.get('candidate_status') or '-')}</td>"
         f"<td>{_escape(case.get('decision_signal') or '-')}</td>"
         f"<td>{_escape(' | '.join(item for item in diagnostics if item))}</td>"
         "</tr>"
     )
+
+
+def _case_type(case: dict[str, Any]) -> str:
+    intake = case.get("intake_provenance") if isinstance(case.get("intake_provenance"), dict) else {}
+    return str(case.get("case_type") or intake.get("case_type") or "static").strip()
+
+
+def _case_expected_summary(case: dict[str, Any]) -> str:
+    intake = case.get("intake_provenance") if isinstance(case.get("intake_provenance"), dict) else {}
+    expected_final_state = _dict_from_case_or_intake(case, intake, "expected_final_state")
+    expected_infeasible_outcome = _dict_from_case_or_intake(case, intake, "expected_infeasible_outcome")
+    dynamic_events = case.get("dynamic_events") or intake.get("dynamic_events")
+    parts: list[str] = []
+    if expected_final_state:
+        parts.append(f"expected final: {_compact_json(expected_final_state)}")
+    if expected_infeasible_outcome:
+        parts.append(f"expected infeasible: {_compact_json(expected_infeasible_outcome)}")
+    if isinstance(dynamic_events, list) and dynamic_events:
+        parts.append(f"dynamic events: {len(dynamic_events)}")
+    return " | ".join(parts)
+
+
+def _dict_from_case_or_intake(case: dict[str, Any], intake: dict[str, Any], key: str) -> dict[str, Any]:
+    value = case.get(key)
+    if not isinstance(value, dict):
+        value = intake.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _compact_json(value: dict[str, Any], *, limit: int = 180) -> str:
+    text = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
 
 
 def _case_score_delta(score_breakdown: dict[str, Any]) -> str:
