@@ -31,6 +31,7 @@ from core.runtime_manager.evolution_store import (
     load_run_snapshot as load_manager_run_snapshot,
     persist_run_snapshot as persist_manager_run_snapshot,
 )
+from core.runtime_manager.restart_coordinator import create_restart_intent
 from core.runtime_manager.work_run_leases import (
     EVOLUTION_TRANSACTION_LEASE,
     MEMORY_WRITE_LEASE,
@@ -1745,6 +1746,179 @@ def _snapshot_from_memory_locked(run_id: str, *, decorate: bool = True) -> dict[
     return snapshot
 
 
+def request_self_evolution_restart(run_id: str = "", *, reason: str = "self_evolution_restart") -> dict[str, Any]:
+    """Ask the runtime-manager supervisor to restart a self-evolution run."""
+
+    normalized_run_id = str(run_id or "").strip()
+    if _runtime_manager_live_control_enabled():
+        return _submit_self_runtime_manager_command(
+            "restart_self_evolution_run",
+            run_id=normalized_run_id,
+            payload={"reason": reason},
+        )
+    return _LOCAL_REQUEST_SELF_EVOLUTION_RESTART(run_id=normalized_run_id, reason=reason)
+
+
+def _LOCAL_REQUEST_SELF_EVOLUTION_RESTART(*, run_id: str = "", reason: str = "self_evolution_restart") -> dict[str, Any]:
+    normalized_run_id = str(run_id or "").strip()
+    snapshot = get_self_evolution_run_snapshot(normalized_run_id) if normalized_run_id else get_active_self_evolution_run()
+    if not isinstance(snapshot, dict) or not str(snapshot.get("runId") or "").strip():
+        snapshot = get_latest_self_evolution_run() or {}
+    resolved_run_id = str(snapshot.get("runId") or normalized_run_id or "").strip()
+    intent = create_restart_intent(
+        "self_evolution_run",
+        reason=reason,
+        requested_by="self_evolution",
+        source_command_id=resolved_run_id,
+        payload={
+            "runId": resolved_run_id,
+            "action": "restart_self_evolution_run",
+            "status": str(snapshot.get("status") or ""),
+            "phase": str(snapshot.get("phase") or ""),
+        },
+    )
+    updated_at = _now_timestamp()
+    if resolved_run_id:
+        _merge_run_state(
+            resolved_run_id,
+            {
+                "updatedAt": updated_at,
+                "runtimeStatus": "restart_requested",
+                "latestMessage": text_for(
+                    get_web_language(),
+                    zh="已登记自进化重启意图，将由 runtime manager 在安全点接管。",
+                    en="A self-evolution restart intent was registered for the runtime manager to coordinate at a safe point.",
+                ),
+                "restartIntent": {
+                    "intentId": str(intent.get("intentId") or ""),
+                    "status": str(intent.get("status") or ""),
+                    "reason": str(intent.get("reason") or ""),
+                    "createdAt": str(intent.get("createdAt") or ""),
+                },
+            },
+        )
+        snapshot = get_self_evolution_run_snapshot(resolved_run_id) or snapshot
+    _record_self_scene_event(
+        "restart",
+        "self_evolution_run.restart_intent_created",
+        run_id=resolved_run_id,
+        message="Self-evolution restart intent registered.",
+        outcome="succeeded",
+        fields={
+            "intentId": str(intent.get("intentId") or ""),
+            "reason": str(intent.get("reason") or ""),
+            "status": str((snapshot or {}).get("status") or ""),
+        },
+        lifecycle=True,
+    )
+    return {**intent, "snapshot": snapshot or {"runId": resolved_run_id}}
+
+
+def _LOCAL_FULFILL_SELF_EVOLUTION_RESTART(intent: dict[str, Any]) -> dict[str, Any]:
+    payload = intent.get("payload") if isinstance(intent.get("payload"), dict) else {}
+    run_id = str(payload.get("runId") or intent.get("sourceCommandId") or "").strip()
+    reason = str(intent.get("reason") or "self_evolution_restart").strip() or "self_evolution_restart"
+    if not run_id:
+        raise SelfEvolutionRunValidationError("Self-evolution restart intent is missing runId.")
+    snapshot = _requeue_self_evolution_run_for_restart(run_id, reason=reason)
+    return {
+        "runId": str(snapshot.get("runId") or run_id),
+        "snapshot": snapshot,
+        "message": "Self-evolution restart queued.",
+    }
+
+
+def _requeue_self_evolution_run_for_restart(run_id: str, *, reason: str) -> dict[str, Any]:
+    lang = get_web_language()
+    normalized = str(run_id or "").strip()
+    now = _now_timestamp()
+    state_snapshot: dict[str, Any] | None = None
+    with _RUN_STATE_LOCK:
+        current = _RUN_STATES.get(normalized)
+        if current is None:
+            stored = load_manager_run_snapshot("self", normalized)
+            if stored is None:
+                raise SelfEvolutionRunNotFoundError(
+                    text_for(lang, zh="未找到要重启的自进化记录。", en="Self-evolution run not found for restart.")
+                )
+            _RUN_STATES[normalized] = _clone_payload(stored)
+            current = _RUN_STATES[normalized]
+        status = str(current.get("status") or "").strip().lower()
+        if status in _RUN_EXECUTING_STATUSES:
+            return _decorate_runtime_snapshot(_clone_payload(current))
+        current.update(
+            {
+                "status": "queued",
+                "phase": "queued",
+                "updatedAt": now,
+                "finishedAt": "",
+                "runtimeStatus": "idle",
+                "latestMessage": text_for(
+                    lang,
+                    zh="Runtime manager 已接管自进化重启，正在重新排队这一轮。",
+                    en="Runtime manager accepted the self-evolution restart and queued this pass again.",
+                ),
+                "summary": "",
+                "error": "",
+                "cancelRequested": False,
+                "cancelRequestedAt": "",
+                "stopReason": str(reason or "").strip(),
+                "controlAction": "",
+                "controlRequestedAt": "",
+                "resumeCount": max(0, int(current.get("resumeCount") or 0)) + 1,
+                _MANAGER_CONTROL_KEY: _build_manager_control_payload(),
+            }
+        )
+        _append_run_message_locked(
+            current,
+            role="user",
+            content=text_for(
+                lang,
+                zh=f"Runtime manager 重新启动这一轮自进化\n原因：{reason or 'self_evolution_restart'}",
+                en=f"Runtime manager restarted this self-evolution pass\nReason: {reason or 'self_evolution_restart'}",
+            ),
+            timestamp=now,
+        )
+        _RUN_INTERNALS.setdefault(normalized, {}).setdefault("carryover", {})
+        global _ACTIVE_RUN_ID
+        _ACTIVE_RUN_ID = normalized
+        state_snapshot = _clone_payload(current)
+
+    assert state_snapshot is not None
+    _publish_run_snapshot(normalized, record_scene_state=True)
+    _record_self_scene_event(
+        "restart",
+        "self_evolution_run.restart_queued",
+        run_id=normalized,
+        message="Self-evolution run queued from restart intent.",
+        outcome="succeeded",
+        fields={
+            "reason": str(reason or ""),
+            **_self_snapshot_event_fields(state_snapshot),
+        },
+        lifecycle=True,
+    )
+    try:
+        _RUN_EXECUTOR.submit(
+            _run_self_evolution_turn,
+            {
+                "runId": normalized,
+                "goal": str(state_snapshot.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL),
+            },
+        )
+    except Exception as exc:
+        _mark_run_failed(
+            normalized,
+            text_for(
+                lang,
+                zh=f"无法重启自进化：{type(exc).__name__}: {exc}",
+                en=f"Failed to restart self evolution: {type(exc).__name__}: {exc}",
+            ),
+        )
+        raise
+    return get_self_evolution_run_snapshot(normalized) or state_snapshot
+
+
 def _persist_self_snapshot(run_id: str, *, decorate: bool = True) -> dict[str, Any] | None:
     with _RUN_STATE_LOCK:
         snapshot = _snapshot_from_memory_locked(run_id, decorate=decorate)
@@ -2802,6 +2976,8 @@ def _submit_self_runtime_manager_command(command_type: str, *, run_id: str = "",
         args["runId"] = run_id
     if payload is not None:
         args["payload"] = payload
+        if command_type == "restart_self_evolution_run" and str(payload.get("reason") or "").strip():
+            args["reason"] = str(payload.get("reason") or "").strip()
     command = submit_command(command_type, args=args, requested_by="web_ui")
     result = wait_for_result(command["commandId"])
     if not bool(result.get("ok")):
@@ -2823,6 +2999,30 @@ def _submit_self_runtime_manager_command(command_type: str, *, run_id: str = "",
             str(result.get("message") or "Runtime manager command failed."),
             str(result.get("errorType") or ""),
         )
+    if command_type == "restart_self_evolution_run":
+        snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else {}
+        target_run_id = str(result.get("runId") or snapshot.get("runId") or run_id or "").strip()
+        loaded = load_manager_run_snapshot("self", target_run_id) if target_run_id else None
+        effective_snapshot = loaded if loaded is not None else snapshot
+        _record_self_scene_event(
+            "runtime_manager",
+            f"self_evolution_run.manager.{command_type}.succeeded",
+            run_id=target_run_id,
+            message="Self-evolution restart intent accepted by runtime manager.",
+            outcome="succeeded",
+            fields={
+                "commandType": command_type,
+                "commandId": str(command.get("commandId") or ""),
+                "intentId": str((result.get("restartIntent") or {}).get("intentId") or ""),
+                **(_self_snapshot_event_fields(effective_snapshot) if isinstance(effective_snapshot, dict) else {}),
+            },
+            lifecycle=True,
+        )
+        return {
+            "runId": target_run_id,
+            "snapshot": effective_snapshot if isinstance(effective_snapshot, dict) else {},
+            "restartIntent": result.get("restartIntent") if isinstance(result.get("restartIntent"), dict) else {},
+        }
     snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else None
     if snapshot is not None and str(snapshot.get("runId") or run_id or "").strip():
         _record_self_scene_event(

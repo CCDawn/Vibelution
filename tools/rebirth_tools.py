@@ -116,6 +116,58 @@ def validate_restarter_available() -> tuple[bool, str]:
         return False, f"Restarter 模块不可用: {e}"
 
 
+def _runtime_manager_controls_current_project() -> bool:
+    """Return True when the local runtime manager is already supervising this repo."""
+
+    try:
+        from core.runtime_manager.daemon import is_daemon_running, load_runtime_snapshot
+
+        if not is_daemon_running():
+            return False
+        snapshot = load_runtime_snapshot()
+        snapshot_root = str((snapshot or {}).get("projectRoot") or "").strip()
+        return bool(snapshot_root) and Path(snapshot_root).resolve() == PROJECT_ROOT.resolve()
+    except Exception as exc:
+        debug_logger.warning(f"Runtime manager 检测失败，降级为 legacy restarter: {exc}")
+        return False
+
+
+def _request_runtime_manager_restart(reason: str) -> Optional[str]:
+    """Submit a restart intent to the runtime manager when it is live."""
+
+    if not _runtime_manager_controls_current_project():
+        return None
+    try:
+        from core.runtime_manager.command_queue import submit_command, wait_for_result
+
+        command = submit_command(
+            "restart_self_evolution_run",
+            args={"reason": reason or "legacy_self_restart", "payload": {"reason": reason or "legacy_self_restart"}},
+            requested_by="trigger_self_restart_tool",
+        )
+        result = wait_for_result(command["commandId"], timeout_seconds=10.0)
+    except Exception as exc:
+        debug_logger.error(f"Runtime manager 重启意图提交失败，降级为 legacy restarter: {exc}")
+        return None
+    if not bool(result.get("ok")):
+        debug_logger.error(f"Runtime manager 拒绝重启意图，降级为 legacy restarter: {result}")
+        return None
+    intent = result.get("restartIntent") if isinstance(result.get("restartIntent"), dict) else {}
+    intent_id = str(intent.get("intentId") or "").strip()
+    return "\n".join(
+        [
+            "✓ 重启意图已交给 Runtime Manager",
+            f"Command: {command['commandId']}",
+            f"Intent: {intent_id or '-'}",
+            f"原因: {reason}",
+            "",
+            "状态: 由统一生命周期管理器在安全点协调重启",
+            "",
+            "当前进程将退出，请等待 Runtime Manager 接管...",
+        ]
+    )
+
+
 # ============================================================================
 # 跨平台进程脱离逻辑
 # ============================================================================
@@ -366,6 +418,11 @@ def trigger_self_restart_tool(reason: str = "") -> str:
     debug_logger.info(f"当前 PID: {current_pid}")
     debug_logger.info(f"脚本路径: {script_path}")
     debug_logger.info(f"重启原因: {reason}")
+
+    manager_result = _request_runtime_manager_restart(reason)
+    if manager_result:
+        debug_logger.info("重启已交由 Runtime Manager 协调")
+        return manager_result
     
     # 2. 验证 restarter 可用性
     is_available, error_msg = validate_restarter_available()

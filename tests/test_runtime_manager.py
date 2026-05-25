@@ -124,6 +124,28 @@ def test_cli_command_forwards_no_browser_without_stop_manager(monkeypatch):
     ]
 
 
+def test_cli_command_forwards_run_id(monkeypatch):
+    calls = []
+
+    monkeypatch.setattr(runtime_cli, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_cli,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
+        or {"commandId": "cmd-run-id"},
+    )
+
+    exit_code = runtime_cli.main(
+        ["command", "restart_self_evolution_run", "--run-id", "web-self-123", "--reason", "code_update"]
+    )
+
+    assert exit_code == 0
+    assert calls == [
+        "ensure",
+        ("restart_self_evolution_run", {"reason": "code_update", "runId": "web-self-123"}, "cli"),
+    ]
+
+
 def test_backend_health_probe_treats_connection_reset_as_unhealthy(monkeypatch):
     def fake_urlopen(*args, **kwargs):
         raise ConnectionResetError(10054, "An existing connection was forcibly closed")
@@ -140,6 +162,49 @@ def test_backend_health_probe_treats_http_protocol_error_as_unhealthy(monkeypatc
     monkeypatch.setattr(workbench_controller.urllib.request, "urlopen", fake_urlopen)
 
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
+
+
+def test_launcher_action_passes_runtime_manager_process_protection(monkeypatch, tmp_path):
+    calls = []
+
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_SCRIPT_PATH", tmp_path / "launcher.ps1")
+    monkeypatch.setattr(workbench_controller, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(workbench_controller, "configured_backend_port", lambda: 8000)
+    monkeypatch.setattr(workbench_controller.os, "getpid", lambda: 29960)
+    monkeypatch.setattr(workbench_controller.os, "getppid", lambda: 31096)
+
+    def fake_run(*args, **kwargs):
+        calls.append({"args": args, "kwargs": kwargs})
+        stdout_handle = kwargs["stdout"]
+        stderr_handle = kwargs["stderr"]
+        stdout_handle.write(b"[Vibelution] ok\n")
+        stderr_handle.write(b"")
+        return subprocess.CompletedProcess(args=args[0], returncode=0)
+
+    monkeypatch.setattr(workbench_controller.subprocess, "run", fake_run)
+
+    result = workbench_controller.run_launcher_action("internal-stop")
+
+    assert result.returncode == 0
+    assert calls
+    env = calls[0]["kwargs"]["env"]
+    assert env["VIBELUTION_PROTECTED_PROCESS_IDS"] == "29960;31096"
+
+
+def test_launcher_error_detail_prioritizes_stderr_over_progress_stdout():
+    detail = daemon._launcher_error_detail(
+        subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="[Vibelution] Stopping Vibelution session (runtime manager stop)...\n",
+            stderr="actual failure",
+        ),
+        "fallback",
+    )
+
+    assert "actual failure" in detail
+    assert "Launcher progress before exit" in detail
+    assert "Launcher exit code: 1" in detail
 
 
 def test_workbench_controller_trusts_only_launcher_marked_backend(monkeypatch):
@@ -800,7 +865,7 @@ def test_reconcile_observation_does_not_fail_opening_orphaned_browser(monkeypatc
     assert events == []
 
 
-def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path, monkeypatch):
+def test_submit_command_defers_open_while_runtime_manager_is_stopping(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
     results_dir = tmp_path / "results"
@@ -814,6 +879,16 @@ def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path,
     monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
     monkeypatch.setattr(command_queue, "record_runtime_manager_scene_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(
+        command_queue,
+        "create_restart_intent",
+        lambda *args, **kwargs: {
+            "intentId": "intent-reopen",
+            "target": args[0],
+            "reason": kwargs.get("reason", ""),
+            "payload": kwargs.get("payload", {}),
+        },
+    )
     monkeypatch.setattr(command_queue, "load_pid", lambda: 9912)
     monkeypatch.setattr(command_queue, "_process_is_alive", lambda pid: True)
     monkeypatch.setattr(
@@ -836,12 +911,13 @@ def test_submit_command_rejects_open_while_runtime_manager_is_stopping(tmp_path,
 
     assert list(inbox_dir.glob("*.json")) == []
     result = json.loads(result_path.read_text(encoding="utf-8"))
-    assert result["ok"] is False
-    assert result["errorType"] == "RuntimeManagerStoppingError"
+    assert result["ok"] is True
+    assert result["deferredUntilShutdownComplete"] is True
+    assert result["restartIntentId"] == "intent-reopen"
     assert result["runtimeManagerStopping"] is True
     assert result["stateVersion"] == 42
     event = json.loads(events_path.read_text(encoding="utf-8").splitlines()[-1])
-    assert event["type"] == "command_queue.command_rejected_shutdown"
+    assert event["type"] == "command_queue.open_deferred_until_shutdown_complete"
     assert event["payload"]["managerPid"] == 9912
 
 
@@ -944,6 +1020,64 @@ def test_command_queue_records_queued_claimed_and_result_written_events(tmp_path
     assert [event_type for event_type, _, _ in scene_events] == [event["type"] for event in file_events]
     assert {kwargs["phase"] for _, _, kwargs in scene_events} == {"queue"}
     assert all(kwargs["occurred_at"] for _, _, kwargs in scene_events)
+
+
+def test_recover_processing_queue_completes_stale_satisfied_stop_manager_close(tmp_path, monkeypatch):
+    inbox_dir = tmp_path / "inbox"
+    processing_dir = tmp_path / "processing"
+    results_dir = tmp_path / "results"
+    events_path = tmp_path / "events.jsonl"
+    for path in (inbox_dir, processing_dir, results_dir):
+        path.mkdir(parents=True)
+
+    old_close = {
+        "commandId": "cmd_20260525T125402Z_4e072b74",
+        "type": "close_workbench",
+        "requestedBy": "web_ui",
+        "requestedAt": "2026-05-25T12:54:02.877170+00:00",
+        "args": {"reason": "web_close_button", "stopManager": True},
+    }
+    new_open = {
+        "commandId": "cmd_20260525T141736Z_38094da2",
+        "type": "open_workbench",
+        "requestedBy": "launcher_ps",
+        "requestedAt": "2026-05-25T14:17:36.134373+00:00",
+        "args": {"reason": "launcher_start"},
+    }
+    (processing_dir / f"{old_close['commandId']}.json").write_text(json.dumps(old_close), encoding="utf-8")
+    (inbox_dir / f"{new_open['commandId']}.json").write_text(json.dumps(new_open), encoding="utf-8")
+
+    monkeypatch.setattr(command_queue, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(command_queue, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(command_queue, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(command_queue, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(command_queue, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(
+        command_queue,
+        "load_state",
+        lambda: {
+            "stateVersion": 5857,
+            "runtimeState": "idle",
+            "managerPid": 0,
+            "daemonRunning": False,
+            "workbench": {"desiredState": "closed", "observedState": "closed", "phase": "steady"},
+        },
+    )
+
+    command_queue.recover_processing_queue()
+    claimed = command_queue.claim_next_command()
+
+    assert claimed is not None
+    _, claimed_payload = claimed
+    assert claimed_payload["commandId"] == new_open["commandId"]
+    skipped_result = json.loads((results_dir / f"{old_close['commandId']}.json").read_text(encoding="utf-8"))
+    assert skipped_result["ok"] is True
+    assert skipped_result["completed"] is True
+    assert skipped_result["staleRecoveredCommand"] is True
+    assert skipped_result["stopDaemon"] is False
+    assert not (processing_dir / f"{old_close['commandId']}.json").exists()
+    events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+    assert "command_queue.recovered_stale_close_completed" in [event["type"] for event in events]
 
 
 def test_submit_command_treats_duplicate_stop_manager_close_as_idempotent(tmp_path, monkeypatch):
@@ -2559,7 +2693,7 @@ def test_handle_open_workbench_logs_focus_failure_for_existing_browser_session(m
     assert events[1][1] == {
         "commandId": "cmd-open",
         "returnCode": 1,
-        "detail": "No managed browser window was available to focus.",
+        "detail": "No managed browser window was available to focus.\nLauncher exit code: 1",
     }
 
 
@@ -2811,6 +2945,184 @@ def test_handle_close_workbench_closes_active_evolution_runs(monkeypatch):
         {"kind": "supervised_evolution_run", "runId": "web-supervised-active", "status": "cancelled"},
     ]
     assert result["stopDaemon"] is True
+
+
+def test_handle_close_workbench_claims_deferred_reopen_intent(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-close"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    intent = {
+        "intentId": "intent-reopen",
+        "target": "workbench",
+        "reason": "launcher_start",
+        "requestedBy": "launcher_ps",
+        "sourceCommandId": "cmd-open",
+        "payload": {"action": "reopen_after_close", "noBrowser": True},
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T09:00:00+00:00")
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        _repeat_last(
+            [
+                {
+                    "observedState": "open",
+                    "launcherStatePresent": True,
+                    "browserManaged": True,
+                    "browserWindowAlive": True,
+                    "backendPid": 28888,
+                    "browserLaunchPid": 29999,
+                    "browserWindowPid": 29999,
+                    "backendAlive": True,
+                    "backendHealthy": True,
+                    "backendObserved": True,
+                    "backendPortListening": True,
+                    "backendPortOwnerPid": 28888,
+                    "sessionId": "managed-session",
+                    "url": "http://127.0.0.1:8000",
+                },
+                {
+                    "observedState": "closed",
+                    "launcherStatePresent": False,
+                    "browserManaged": True,
+                    "browserWindowAlive": False,
+                    "backendPid": 0,
+                    "browserLaunchPid": 0,
+                    "browserWindowPid": 0,
+                    "backendAlive": False,
+                    "backendHealthy": False,
+                    "backendObserved": False,
+                    "backendPortListening": False,
+                    "backendPortOwnerPid": 0,
+                    "sessionId": "",
+                    "url": "http://127.0.0.1:8000",
+                },
+            ]
+        ),
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(daemon, "_close_active_evolution_runs_for_shutdown", lambda: [])
+    monkeypatch.setattr(daemon, "_claim_workbench_reopen_intent", lambda: intent)
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    result = runtime_daemon._handle_close_workbench(command_id="cmd-close", args={"stopManager": True})
+
+    assert result["ok"] is True
+    assert result["stopDaemon"] is False
+    assert result["runDeferredWorkbenchOpen"] is True
+    assert result["restartIntent"]["intentId"] == "intent-reopen"
+    assert ("workbench.reopen_after_close.claimed", daemon._workbench_reopen_intent_event_payload(intent, command_id="cmd-close")) in events
+
+
+def test_handle_restart_self_evolution_run_creates_restart_intent(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "backendPid": 28888,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 28888,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "browserWindowPid": 29999,
+        },
+    )
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon.self_evolution_control_service,
+        "_LOCAL_REQUEST_SELF_EVOLUTION_RESTART",
+        lambda run_id="", reason="": {
+            "intentId": "intent-self",
+            "target": "self_evolution_run",
+            "reason": reason,
+            "snapshot": {"runId": run_id, "status": "running"},
+        },
+    )
+
+    result = runtime_daemon._handle_restart_self_evolution_run(
+        command_id="cmd-restart",
+        args={"runId": "web-self-123", "payload": {"reason": "code_update"}},
+    )
+
+    assert result["ok"] is True
+    assert result["runId"] == "web-self-123"
+    assert result["restartIntent"]["intentId"] == "intent-self"
+    assert result["restartIntent"]["reason"] == "code_update"
+
+
+def test_daemon_processes_pending_self_evolution_restart_intent(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+    completions: list[tuple[str, str, str]] = []
+    intent = {
+        "intentId": "intent-self",
+        "target": "self_evolution_run",
+        "reason": "code_update",
+        "payload": {"runId": "web-self-123"},
+    }
+
+    monkeypatch.setattr(daemon, "claim_next_restart_intent", lambda target="": intent if target == "self_evolution_run" else None)
+    monkeypatch.setattr(
+        daemon.self_evolution_control_service,
+        "_LOCAL_FULFILL_SELF_EVOLUTION_RESTART",
+        lambda claimed: {
+            "runId": "web-self-123",
+            "message": "queued",
+            "snapshot": {"runId": "web-self-123", "status": "queued"},
+        },
+    )
+    monkeypatch.setattr(
+        daemon,
+        "complete_restart_intent",
+        lambda intent_id, status="completed", message="": completions.append((intent_id, status, message)) or {},
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    runtime_daemon._process_self_evolution_restart_intent()
+
+    assert completions == [("intent-self", "completed", "queued")]
+    assert events == [
+        (
+            "self_evolution.restarted_from_intent",
+            {
+                "intentId": "intent-self",
+                "runId": "web-self-123",
+                "status": "queued",
+                "reason": "code_update",
+            },
+        )
+    ]
 
 
 def test_handle_close_workbench_does_not_short_circuit_when_backend_port_is_still_owned(monkeypatch):

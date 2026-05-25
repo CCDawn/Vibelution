@@ -85,6 +85,16 @@ $script:launcherStateWriteMaxAttempts = 25
 $script:launcherStateWriteRetryDelayMilliseconds = 120
 $script:runtimeSceneWriteMaxAttempts = 8
 $script:runtimeSceneWriteRetryDelayMilliseconds = 120
+$script:protectedProcessIds = @(
+    @([string]($env:VIBELUTION_PROTECTED_PROCESS_IDS -or "") -split "[,; ]+") |
+        ForEach-Object {
+            $candidate = 0
+            if ([int]::TryParse([string]$_, [ref]$candidate) -and $candidate -gt 0) {
+                $candidate
+            }
+        } |
+        Sort-Object -Unique
+)
 
 function Set-LauncherEndpoint {
     param(
@@ -1653,17 +1663,39 @@ function Test-ProcessAlive {
 }
 
 function Stop-ProcessesById {
-    param([int[]]$ProcessIds)
+    param(
+        [int[]]$ProcessIds,
+        [int[]]$ExcludePids = @()
+    )
 
+    $protectedProcessIds = @()
+    $protectedProcessVar = Get-Variable -Scope Script -Name "protectedProcessIds" -ErrorAction SilentlyContinue
+    if ($protectedProcessVar) {
+        $protectedProcessIds = @($protectedProcessVar.Value)
+    }
+    $excluded = @{}
+    foreach ($excludedPid in @(($ExcludePids + $protectedProcessIds + $selfProcessId) | Sort-Object -Unique)) {
+        if ($excludedPid) {
+            $excluded[[int]$excludedPid] = $true
+        }
+    }
     foreach ($processId in @($ProcessIds | Sort-Object -Unique)) {
         if (-not $processId) {
+            continue
+        }
+        if ($excluded.ContainsKey([int]$processId)) {
+            Write-LauncherControlLog `
+                -Event "launcher.process.stop.skipped_protected" `
+                -Message "Skipped stopping a protected lifecycle process." `
+                -Level "warning" `
+                -Fields @{ pid = [int]$processId }
             continue
         }
         $childPids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $processId" -ErrorAction SilentlyContinue | ForEach-Object {
             [int]$_.ProcessId
         })
         if ($childPids.Count -gt 0) {
-            Stop-ProcessesById -ProcessIds $childPids
+            Stop-ProcessesById -ProcessIds $childPids -ExcludePids @($excluded.Keys)
         }
         Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     }
@@ -2794,8 +2826,11 @@ function Get-ManagedBackendCandidatePids {
     $listenerPid = Get-ListeningPid $port
     if ($listenerPid) {
         $listenerProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" -ErrorAction SilentlyContinue
-        $listenerLooksManaged = Test-CommandLineLooksLikeManagedBackend -CommandLine ([string]$listenerProcess.CommandLine)
-        if ($listenerLooksManaged) {
+        $listenerCommandLine = ""
+        if ($listenerProcess) {
+            $listenerCommandLine = [string](Get-ObjectPropertyValue -Object $listenerProcess -Name "CommandLine" -Default "")
+        }
+        if (Test-CommandLineLooksLikeManagedBackend -CommandLine $listenerCommandLine) {
             [void]$pids.Add([int]$listenerPid)
         }
     }
@@ -3794,11 +3829,17 @@ function Stop-ManagedBrowserProcesses {
 
 function Stop-ManagedBackendProcesses {
     $candidatePids = @(Get-ManagedBackendCandidatePids)
+    $protectedProcessIds = @()
+    $protectedProcessVar = Get-Variable -Scope Script -Name "protectedProcessIds" -ErrorAction SilentlyContinue
+    if ($protectedProcessVar) {
+        $protectedProcessIds = @($protectedProcessVar.Value)
+    }
     Write-LauncherControlLog `
         -Event "launcher.backend.stop.requested" `
         -Message "Stopping managed backend candidates." `
         -Fields @{
             candidate_pids = @($candidatePids)
+            protected_pids = @($protectedProcessIds)
             port = $port
         }
     Stop-ProcessesById $candidatePids

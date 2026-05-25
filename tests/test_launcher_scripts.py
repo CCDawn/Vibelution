@@ -2390,6 +2390,78 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_backend_candidates_ignore_missing_listener_process_under_strict_mode(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @(
+    "ConvertTo-LauncherComparableText",
+    "Test-CommandLineMentionsWorkbenchScript",
+    "Test-CommandLineLooksLikeManagedBackend",
+    "Get-ObjectPropertyValue",
+    "Get-ManagedBackendCandidatePids"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:port = 8000
+function Get-State {
+    return [pscustomobject]@{
+        backendPid = 0
+        backendLaunchPid = 0
+        port = 8000
+    }
+}
+function Test-ProcessAlive { param([int]$ProcessId) return $false }
+function Get-ListeningPid {
+    param([int]$Port)
+    if ($Port -eq 8000) {
+        return 14916
+    }
+    return $null
+}
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    return @()
+}
+
+$pids = @(Get-ManagedBackendCandidatePids)
+if ($pids.Count -ne 0) {
+    throw "Expected missing listener process to stay unadopted, got $($pids -join ',')."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_backend_candidates_do_not_adopt_unmarked_manual_listener(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -2633,6 +2705,78 @@ Write-Output $payload
     assert result.returncode == 0, result.stderr or result.stdout
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["calls"] == [6544, 14916]
+
+
+def test_launcher_stop_processes_preserves_protected_runtime_manager_child(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Stop-ProcessesById"
+}, $true)
+if ($null -eq $functionAst) {
+    throw "Stop-ProcessesById was not found."
+}
+. ([scriptblock]::Create($functionAst.Extent.Text))
+
+$script:selfProcessId = 111
+$script:protectedProcessIds = @(29960, 46992)
+$script:stopped = @()
+$script:controlEvents = @()
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if ($Filter -match "ParentProcessId = 8976") {
+        return @(
+            [pscustomobject]@{ ProcessId = 31096 },
+            [pscustomobject]@{ ProcessId = 29960 }
+        )
+    }
+    if ($Filter -match "ParentProcessId = 29960") {
+        return @([pscustomobject]@{ ProcessId = 46992 })
+    }
+    return @()
+}
+function Stop-Process {
+    param([int]$Id, [switch]$Force, [string]$ErrorAction)
+    $script:stopped += $Id
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlEvents += ,@{ event = $Event; fields = $Fields }
+}
+
+Stop-ProcessesById -ProcessIds @(8976)
+
+$payload = @{
+    stopped = @($script:stopped)
+    skipped = @($script:controlEvents | Where-Object { $_.event -eq "launcher.process.stop.skipped_protected" } | ForEach-Object { $_.fields.pid })
+} | ConvertTo-Json -Depth 8 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["stopped"] == [31096, 8976]
+    assert payload["skipped"] == [29960]
 
 
 def test_launcher_stop_browser_processes_retry_until_profile_processes_exit(tmp_path):

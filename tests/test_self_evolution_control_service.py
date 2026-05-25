@@ -1047,6 +1047,76 @@ def test_resume_self_evolution_run_requeues_paused_run(monkeypatch):
     assert submitted == [{"fn": "_run_self_evolution_turn", "runId": run_id, "goal": "resume me"}]
 
 
+def test_fulfill_self_evolution_restart_intent_requeues_run(monkeypatch):
+    run_id = "web-self-restart"
+    submitted = []
+    events = []
+    with service._RUN_STATE_LOCK:
+        service._RUN_STATES[run_id] = {
+            "runId": run_id,
+            "goal": "restart me",
+            "status": "done",
+            "phase": "completed",
+            "startedAt": "2026-05-18T12:00:00Z",
+            "updatedAt": "2026-05-18T12:00:00Z",
+            "finishedAt": "2026-05-18T12:01:00Z",
+            "latestMessage": "done",
+            "currentGoal": "restart me",
+            "lastToolName": "",
+            "runtimeStatus": "idle",
+            "toolCallCount": 0,
+            "summary": "done",
+            "error": "",
+            "cancelRequested": False,
+            "cancelRequestedAt": "",
+            "stopReason": "",
+            "controlAction": "",
+            "controlRequestedAt": "",
+            "messages": [],
+            "turnCount": 1,
+            "resumeCount": 0,
+            "rollback": {
+                "status": "idle",
+                "reason": "",
+                "baseRev": "",
+                "rolledBackAt": "",
+                "entryCount": 0,
+                "touchedFiles": [],
+                "conflictFiles": [],
+                "blockedHint": "",
+            },
+        }
+    monkeypatch.setattr(
+        service._RUN_EXECUTOR,
+        "submit",
+        lambda fn, context: submitted.append({"fn": fn.__name__, "runId": context["runId"], "goal": context["goal"]}),
+    )
+    monkeypatch.setattr(
+        service,
+        "_record_self_scene_event",
+        lambda phase, event_code, **kwargs: events.append({"phase": phase, "event": event_code, **kwargs}),
+    )
+
+    result = service._LOCAL_FULFILL_SELF_EVOLUTION_RESTART(
+        {
+            "intentId": "intent-self",
+            "reason": "code_update",
+            "sourceCommandId": run_id,
+            "payload": {"runId": run_id},
+        }
+    )
+
+    snapshot = result["snapshot"]
+    assert snapshot["status"] == "queued"
+    assert snapshot["phase"] == "queued"
+    assert snapshot["resumeCount"] == 1
+    assert snapshot["stopReason"] == "code_update"
+    assert snapshot["messages"][-1]["role"] == "user"
+    assert "code_update" in snapshot["messages"][-1]["content"]
+    assert submitted == [{"fn": "_run_self_evolution_turn", "runId": run_id, "goal": "restart me"}]
+    assert any(item["event"] == "self_evolution_run.restart_queued" for item in events)
+
+
 def test_self_evolution_pause_route(monkeypatch):
     monkeypatch.setattr(
         evolution_routes,
