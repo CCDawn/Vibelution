@@ -15,6 +15,11 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryCount).toBeTypeOf("string");
   });
 
+  it("exposes the research preview from the primary navigation", () => {
+    expect(shellSource).toContain('to="/research"');
+    expect(shellSource).toContain('t("navResearch")');
+  });
+
   it("keeps active work details out of the primary top bar chip", () => {
     expect(shellSource).toContain("activeWorkDetailPanel");
     expect(shellSource).toContain("activeWorkIndicator.items.map");
