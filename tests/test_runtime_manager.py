@@ -664,39 +664,62 @@ def test_reconcile_observation_keeps_daemon_running_true_and_preserves_stopping(
     assert state["managerPid"] == runtime_daemon._pid
 
 
-def test_reconcile_observation_marks_orphaned_browser_failed(monkeypatch):
+def test_reconcile_observation_cleans_up_orphaned_browser(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     events: list[tuple[str, dict]] = []
-
-    monkeypatch.setattr(
-        daemon,
-        "observe_workbench",
-        lambda: {
-            "observedState": "open",
-            "backendPid": 0,
-            "browserLaunchPid": 12132,
-            "browserWindowPid": 12132,
-            "backendAlive": False,
-            "backendHealthy": False,
-            "backendObserved": False,
-            "backendPort": 8000,
-            "backendPortListening": False,
-            "backendPortOwnerPid": 0,
-            "backendPortOwnerTrusted": False,
-            "backendPortConflict": False,
-            "browserWindowAlive": True,
-            "browserManaged": True,
-            "backendMissing": True,
-            "frontendOrphaned": True,
-            "lifecycleConsistency": "orphaned_browser",
-            "sessionId": "stale-session",
-            "url": "http://127.0.0.1:8000",
-        },
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "open",
+                "backendPid": 0,
+                "browserLaunchPid": 12132,
+                "browserWindowPid": 12132,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "browserWindowAlive": True,
+                "browserManaged": True,
+                "backendMissing": True,
+                "frontendOrphaned": True,
+                "lifecycleConsistency": "orphaned_browser",
+                "sessionId": "stale-session",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "closed",
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "backendMissing": False,
+                "frontendOrphaned": False,
+                "lifecycleConsistency": "consistent",
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+        ]
     )
+
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
     monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon, "close_workbench", lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="closed", stderr=""))
 
     state = runtime_daemon._reconcile_observation(
         {
@@ -708,25 +731,17 @@ def test_reconcile_observation_marks_orphaned_browser_failed(monkeypatch):
 
     workbench = state["workbench"]
     assert workbench["desiredState"] == "closed"
-    assert workbench["observedState"] == "open"
-    assert workbench["phase"] == "failed"
-    assert workbench["frontendOrphaned"] is True
-    assert workbench["lifecycleConsistency"] == "orphaned_browser"
-    assert "frontend window is still open" in workbench["failureMessage"]
-    assert events == [
-        (
-            "workbench.consistency.orphaned_browser_detected",
-            {
-                "observedState": "open",
-                "browserWindowPid": 12132,
-                "backendPid": 0,
-                "backendPort": 8000,
-                "backendPortListening": False,
-                "backendPortOwnerPid": 0,
-                "sessionId": "stale-session",
-            },
-        )
+    assert workbench["observedState"] == "closed"
+    assert workbench["phase"] == "steady"
+    assert workbench["frontendOrphaned"] is False
+    assert workbench["lifecycleConsistency"] == "consistent"
+    assert workbench["failureMessage"] == ""
+    assert [event_type for event_type, _ in events] == [
+        "workbench.consistency.orphaned_browser_detected",
+        "workbench.consistency.orphaned_browser_cleanup_requested",
+        "workbench.consistency.orphaned_browser_cleanup_succeeded",
     ]
+    assert events[0][1]["browserWindowPid"] == 12132
 
 
 def test_reconcile_observation_does_not_fail_opening_orphaned_browser(monkeypatch):

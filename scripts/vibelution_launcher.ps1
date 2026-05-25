@@ -3609,7 +3609,7 @@ function Start-ManagedBackend {
             -EventCode "backend.start.requested" `
             -Message "Starting bundled backend service." `
             -Outcome "started" `
-            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label; managed_marker = $managedBackendMarkerArg }
+            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; managed_marker = $managedBackendMarkerArg }
     }
     $proc = Start-RedirectedBackgroundProcess `
         -CommandPath $PythonRuntime.FilePath `

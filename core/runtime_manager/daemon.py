@@ -170,6 +170,18 @@ def _workbench_orphaned_browser_failure_message(observation: dict[str, Any]) -> 
     )
 
 
+def _orphaned_browser_event_payload(observation: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "observedState": str(observation.get("observedState") or "closed"),
+        "browserWindowPid": int(observation.get("browserWindowPid") or 0),
+        "backendPid": int(observation.get("backendPid") or 0),
+        "backendPort": int(observation.get("backendPort") or 0),
+        "backendPortListening": bool(observation.get("backendPortListening")),
+        "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+        "sessionId": str(observation.get("sessionId") or "").strip(),
+    }
+
+
 def _snapshot_should_persist_reconciliation(original_state: dict[str, Any], snapshot: dict[str, Any]) -> bool:
     if not isinstance(original_state, dict):
         return True
@@ -662,9 +674,9 @@ def load_runtime_snapshot() -> dict[str, Any]:
     if phase == "failed" and not _workbench_failure_should_stick(state, desired_state=desired_state, observed_state=observed_state):
         phase = "steady"
         workbench["failureMessage"] = ""
-    if orphaned_browser and phase not in {"opening", "closing"}:
+    if orphaned_browser and phase not in {"opening", "closing", "failed"}:
         desired_state = "closed"
-        phase = "failed"
+        phase = "closing"
         workbench["failureMessage"] = _workbench_orphaned_browser_failure_message(observation)
 
     if (not manager_running or not active_command) and phase != "failed":
@@ -681,6 +693,7 @@ def load_runtime_snapshot() -> dict[str, Any]:
 
     if observed_state == desired_state and phase != "failed":
         phase = "steady"
+        workbench["failureMessage"] = ""
     elif desired_state == "closed" and observed_state != "closed" and phase != "failed":
         phase = "closing"
     elif desired_state == "open" and observed_state != "open" and phase != "failed":
@@ -1130,23 +1143,35 @@ class RuntimeManagerDaemon:
         ):
             phase = "steady"
             workbench["failureMessage"] = ""
-        if orphaned_browser and phase not in {"opening", "closing"}:
+        if orphaned_browser and phase not in {"opening", "closing", "failed"}:
             desired_state = "closed"
-            phase = "failed"
+            phase = "closing"
             workbench["failureMessage"] = _workbench_orphaned_browser_failure_message(observation)
+            payload = _orphaned_browser_event_payload(observation)
             if not previous_frontend_orphaned:
                 _append_event(
                     "workbench.consistency.orphaned_browser_detected",
-                    {
-                        "observedState": observed_state,
-                        "browserWindowPid": int(observation.get("browserWindowPid") or 0),
-                        "backendPid": int(observation.get("backendPid") or 0),
-                        "backendPort": int(observation.get("backendPort") or 0),
-                        "backendPortListening": bool(observation.get("backendPortListening")),
-                        "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
-                        "sessionId": str(observation.get("sessionId") or "").strip(),
-                    },
+                    payload,
                 )
+            _append_event("workbench.consistency.orphaned_browser_cleanup_requested", payload)
+            result = close_workbench()
+            cleanup_payload = payload | {
+                "returnCode": int(result.returncode),
+                "stdout": str(getattr(result, "stdout", "") or "").strip()[-400:],
+                "stderr": str(getattr(result, "stderr", "") or "").strip()[-400:],
+            }
+            if result.returncode == 0:
+                _append_event("workbench.consistency.orphaned_browser_cleanup_succeeded", cleanup_payload)
+                observation = observe_workbench()
+                observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
+                consistency_fields = _workbench_consistency_fields(observation)
+                orphaned_browser = bool(consistency_fields["frontendOrphaned"])
+                if not orphaned_browser and observed_state == "closed":
+                    phase = "steady"
+                    workbench["failureMessage"] = ""
+            else:
+                phase = "failed"
+                _append_event("workbench.consistency.orphaned_browser_cleanup_failed", cleanup_payload)
 
         if not active_command and phase != "failed":
             if observed_state == "open" and desired_state != "open":
