@@ -24,6 +24,7 @@ import {
   RuntimeSceneListItem,
 } from "../api/types";
 import { FilePreview } from "../components/preview/FilePreview";
+import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
 import { classifyRuntimeSceneEvent, type LogSeverityFilter, matchesSeverityFilter } from "../logs/logSeverity";
@@ -671,6 +672,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") {
       return DEFAULT_RUNTIME_SCENES_SIDEBAR_WIDTH;
@@ -981,9 +983,9 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
   const layoutStyle = useMemo(
     () =>
       ({
-        "--logs-sidebar-width": `${sidebarWidth}px`,
+        "--logs-sidebar-width": sidebarCollapsed ? "0px" : `${sidebarWidth}px`,
       }) as CSSProperties,
-    [sidebarWidth],
+    [sidebarCollapsed, sidebarWidth],
   );
 
   function beginResize(clientX: number) {
@@ -997,6 +999,9 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
     if (event.button !== 0) {
       return;
     }
+    if (sidebarCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginResize(event.clientX);
   }
@@ -1005,12 +1010,18 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
     if (event.button !== 0) {
       return;
     }
+    if (sidebarCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginResize(event.clientX);
   }
 
   function handleResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (!layoutRef.current) {
+      return;
+    }
+    if (sidebarCollapsed) {
       return;
     }
 
@@ -1248,7 +1259,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
 
   return (
     <div ref={layoutRef} className={styles.resizableLayout} style={layoutStyle}>
-      <aside className={styles.sidebar}>
+      <aside className={sidebarCollapsed ? `${styles.sidebar} ${styles.paneCollapsed}` : styles.sidebar} aria-hidden={sidebarCollapsed}>
         <div className={styles.sidebarHeader}>
           <div>
             <p className={styles.sidebarEyebrow}>{t("logsRootRuntimeScenes")}</p>
@@ -1406,16 +1417,16 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
         </div>
       </aside>
 
-      <button
-        type="button"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t("resizeLeftPanel")}
-        title={t("resizeLeftPanel")}
-        tabIndex={0}
-        className={
-          dragState ? `${styles.resizeHandle} ${styles.resizeHandleActive}` : styles.resizeHandle
-        }
+      <PaneCollapseHandle
+        side="left"
+        collapsed={sidebarCollapsed}
+        separatorLabel={t("resizeLeftPanel")}
+        collapseLabel={lang === "zh" ? "收起左栏" : "Collapse left pane"}
+        expandLabel={lang === "zh" ? "展开左栏" : "Expand left pane"}
+        className={styles.resizeHandle}
+        active={Boolean(dragState)}
+        activeClassName={styles.resizeHandleActive}
+        onToggle={() => setSidebarCollapsed((current) => !current)}
         onPointerDown={handleResizeStart}
         onMouseDown={handleResizeMouseDown}
         onKeyDown={handleResizeKeyDown}

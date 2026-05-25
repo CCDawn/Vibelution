@@ -62,6 +62,7 @@ from .settings import (
     get_config,
     get_settings,
     normalize_public_config_dict,
+    reload_config,
 )
 
 __all__ = [
@@ -119,6 +120,7 @@ __all__ = [
     "get_settings",
     "list_models",
     "normalize_public_config_dict",
+    "reload_config",
     "resolve_api_key",
     "resolve_model_alias",
     "show_model_info",

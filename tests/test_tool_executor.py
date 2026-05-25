@@ -58,6 +58,29 @@ class TestToolExecutorInit:
         for tool_name in expected_tools:
             assert tool_name in executor._tool_map, f"工具 {tool_name} 应该已注册"
 
+    def test_web_search_tool_executes_registered_callable(self, monkeypatch):
+        """web_search_tool should call the raw implementation, not a LangChain StructuredTool."""
+        import tools.Key_Tools as key_tools_module
+
+        seen = {}
+
+        def fake_web_search(query: str, max_results: int = 10) -> str:
+            seen["query"] = query
+            seen["max_results"] = max_results
+            return "[搜索] ok"
+
+        monkeypatch.setattr(key_tools_module, "_web_search_impl", fake_web_search)
+
+        executor = ToolExecutor()
+        result, action = executor.execute(
+            "web_search_tool",
+            {"query": "latest ai news", "max_results": 3},
+        )
+
+        assert action is None
+        assert result == "[搜索] ok"
+        assert seen == {"query": "latest ai news", "max_results": 3}
+
     def test_default_timeouts_configured(self):
         """测试默认超时配置"""
         executor = ToolExecutor()
@@ -114,8 +137,12 @@ class TestToolExecutorExecute:
         
         assert action is None
         assert result is not None
-        # 应该包含当前目录的文件
-        assert "test_security.py" in str(result) or "test_tool_executor.py" in str(result)
+        payload = json.loads(str(result))
+        assert payload["status"] == "success"
+        assert Path(payload["path"]) == test_dir
+        assert payload["total"] >= len(payload["files"])
+        assert payload["truncated"] is True
+        assert any(item["name"].startswith("test_") for item in payload["files"])
 
     def test_execute_check_python_syntax_valid(self, executor):
         """测试语法检查 - 有效文件"""

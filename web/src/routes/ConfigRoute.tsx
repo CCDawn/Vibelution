@@ -52,6 +52,7 @@ import {
   modelLibraryIdFromParts,
   PROVIDER_KIND_OPTIONS,
   resolveProfileDisplayState,
+  resolveModelEditability,
   shouldBlockConfigLeave,
   uniqueModelLibraryId,
   type ModelPresetGroupLabels,
@@ -330,7 +331,8 @@ export const CONFIG_COPY = {
     modelEditorEdit: "编辑模型",
     preset: "预设",
     presetGroupOfficial: "官方供应商",
-    presetGroupRelay: "中转站 API",
+    presetGroupRelay: "Relay Responses",
+    presetGroupOpenAiCompatible: "OpenAI 兼容 API",
     presetGroupLocal: "本地模型",
     customEntry: "手填",
     autoValue: "自动生成",
@@ -343,8 +345,14 @@ export const CONFIG_COPY = {
     discoveryEmpty: "没有发现可用模型",
     discoveryFailed: "模型发现失败",
     providerKind: "服务商类型",
-    providerKeyEnv: "服务商密钥环境变量",
-    modelKeyEnv: "模型密钥环境变量",
+    providerKeyEnv: "服务商密钥变量名",
+    modelKeyEnv: "模型密钥变量名",
+    modelKeyInput: "API Key",
+    keyStorageHint: "填写后先进入本次修改；点击“保存到 config.toml”时才会写入本机用户级环境变量。",
+    keyEnvAdvancedHint: "变量名会自动生成。只有要复用已有环境变量，或需要精确控制变量名时再改。",
+    deleteModelHint: "删除模型只移除配置项，不会删除系统环境变量。要清除密钥，请先编辑模型并勾选清除密钥。",
+    keyLocation: "密钥存放位置",
+    keyLocationHint: "这是系统环境变量名，不是要填写的 API Key。",
     baseUrl: "基础地址",
     compatMode: "兼容模式",
     contextWindow: "上下文窗口",
@@ -361,7 +369,7 @@ export const CONFIG_COPY = {
     timeout: "超时（秒）",
     connectTimeout: "连接超时（秒）",
     pendingSecret: "待写入新密钥",
-    clearSecret: "保存时清除此密钥",
+    clearSecret: "保存时同时清除这个环境变量里的密钥",
     saveModel: "确认模型修改",
     deleteModel: "删除模型",
     cancelEditing: "清空表单",
@@ -409,6 +417,7 @@ export const CONFIG_COPY = {
     testScopeDraft: "按当前修改测试",
     testScopeSaved: "按已保存配置测试",
     testRouteLabel: "测试路由",
+    testRuntimeLabel: "运行路径",
     testKeyLabel: "API key",
     testKeyNotRequired: "当前路由不要求",
     testKeySourceLabel: "来源",
@@ -532,7 +541,8 @@ export const CONFIG_COPY = {
     modelEditorEdit: "Edit model",
     preset: "Preset",
     presetGroupOfficial: "Official providers",
-    presetGroupRelay: "Relay APIs",
+    presetGroupRelay: "Relay Responses",
+    presetGroupOpenAiCompatible: "OpenAI-compatible APIs",
     presetGroupLocal: "Local models",
     customEntry: "Manual",
     autoValue: "Auto",
@@ -545,8 +555,14 @@ export const CONFIG_COPY = {
     discoveryEmpty: "No models discovered",
     discoveryFailed: "Model discovery failed",
     providerKind: "Provider kind",
-    providerKeyEnv: "Provider API key env",
-    modelKeyEnv: "Model API key env",
+    providerKeyEnv: "Provider key variable",
+    modelKeyEnv: "Model key variable",
+    modelKeyInput: "API key",
+    keyStorageHint: "This is staged first. It is written to the local user environment only when you save to config.toml.",
+    keyEnvAdvancedHint: "Variable names are generated automatically. Edit them only when reusing an existing env var or controlling the exact name.",
+    deleteModelHint: "Deleting a model only removes the config entry. It does not delete the system environment variable. Edit the model and enable key clearing first if needed.",
+    keyLocation: "Key storage",
+    keyLocationHint: "This is the system environment variable name, not the API key value.",
     baseUrl: "Base URL",
     compatMode: "Compat mode",
     contextWindow: "Context window",
@@ -563,7 +579,7 @@ export const CONFIG_COPY = {
     timeout: "Timeout (s)",
     connectTimeout: "Connect timeout (s)",
     pendingSecret: "Pending new secret",
-    clearSecret: "Clear this secret on save",
+    clearSecret: "Also clear this environment key on save",
     saveModel: "Confirm model changes",
     deleteModel: "Delete model",
     cancelEditing: "Clear form",
@@ -611,6 +627,7 @@ export const CONFIG_COPY = {
     testScopeDraft: "Testing current changes",
     testScopeSaved: "Testing saved config",
     testRouteLabel: "Route",
+    testRuntimeLabel: "Runtime path",
     testKeyLabel: "API key",
     testKeyNotRequired: "not required for this route",
     testKeySourceLabel: "source",
@@ -1825,6 +1842,7 @@ export function ConfigRoute() {
       const labels: ModelPresetGroupLabels = {
         official: copy.presetGroupOfficial,
         relay: copy.presetGroupRelay,
+        openai_compatible: copy.presetGroupOpenAiCompatible,
         local: copy.presetGroupLocal,
       };
       return groupModelPresets(workspace?.modelPresetOptions ?? [], labels);
@@ -2461,6 +2479,7 @@ export function ConfigRoute() {
     const detailParts = [
       testScopeLabel(result.config_scope),
       `${copy.testRouteLabel}: ${[result.provider_kind, result.base_url].filter(Boolean).join(" · ") || "-"}`,
+      `${copy.testRuntimeLabel}: ${[result.transport, result.contract].filter(Boolean).join(" · ") || "-"}`,
       `${copy.testKeyLabel}: ${formatTestKeyDetail(result)}`,
     ];
     return `${result.profile_id} / ${result.model}: ${result.message} [${detailParts.join(" | ")}]`;
@@ -2885,7 +2904,6 @@ export function ConfigRoute() {
                       </td>
                       <td className={styles.profileMetaCell}>
                         <span className={keyStateClassName}>{keyStateLabel(displayState.apiKeyState)}</span>
-                        <span>{displayState.apiKeyEnv || "-"}</span>
                       </td>
                       <td>
                         <div className={styles.profileTableActions}>
@@ -3076,25 +3094,16 @@ export function ConfigRoute() {
                     />
                   </label>
                   <label className={styles.field}>
-                    <span>{copy.providerKeyEnv}</span>
+                    <span>{copy.modelKeyInput}</span>
                     <input
-                      value={modelEditor.provider.api_key_env}
-                      onChange={(event) =>
-                        setModelEditor((current) => ({
-                          ...current,
-                          provider: { ...current.provider, api_key_env: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.modelKeyEnv}</span>
-                    <input
-                      value={modelEditor.api_key_env}
-                      onChange={(event) => setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))}
+                      type="password"
+                      value={modelEditor.api_key}
+                      onChange={(event) => setModelEditor((current) => ({ ...current, api_key: event.target.value }))}
+                      placeholder={modelEditor.api_key_env || copy.autoValue}
                     />
                   </label>
                 </div>
+                <p className={styles.fieldHint}>{copy.keyStorageHint}</p>
 
                 <div className={styles.actionsRow}>
                   <button
@@ -3138,7 +3147,27 @@ export function ConfigRoute() {
                     <span>{copy.modelEditorAdvancedTitle}</span>
                     <small>{copy.modelEditorAdvancedHint}</small>
                   </summary>
+                  <p className={styles.fieldHint}>{copy.keyEnvAdvancedHint}</p>
                   <div className={styles.formGridWide}>
+                    <label className={styles.field}>
+                      <span>{copy.providerKeyEnv}</span>
+                      <input
+                        value={modelEditor.provider.api_key_env}
+                        onChange={(event) =>
+                          setModelEditor((current) => ({
+                            ...current,
+                            provider: { ...current.provider, api_key_env: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className={styles.field}>
+                      <span>{copy.modelKeyEnv}</span>
+                      <input
+                        value={modelEditor.api_key_env}
+                        onChange={(event) => setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))}
+                      />
+                    </label>
                     <label className={styles.field}>
                       <span>{copy.compatMode}</span>
                       <input
@@ -3324,15 +3353,7 @@ export function ConfigRoute() {
                     <span>{copy.clearSecret}</span>
                   </label>
                 </div>
-
-                <label className={styles.field}>
-                  <span>{copy.pendingSecret}</span>
-                  <input
-                    type="password"
-                    value={modelEditor.api_key}
-                    onChange={(event) => setModelEditor((current) => ({ ...current, api_key: event.target.value }))}
-                  />
-                </label>
+                <p className={styles.fieldHint}>{copy.deleteModelHint}</p>
 
                 <div className={styles.actionsRow}>
                   <button type="button" className={styles.primaryButton} disabled={structuredActionsDisabled} onClick={handleSaveModel}>
@@ -3409,32 +3430,43 @@ export function ConfigRoute() {
                           <div className={styles.cardMeta}>
                             <span>{option.provider_kind}</span>
                             <span>{option.model}</span>
-                            <span>{option.api_key_env}</span>
-                            <span>{keyStateLabel(option.api_key_state)}</span>
+                            <span className={styles.keyLocationLine}>
+                              <strong>{copy.keyLocation}</strong>
+                              <span>{option.api_key_env || copy.autoValue}</span>
+                            </span>
+                            <span>{copy.keyLocationHint}</span>
                           </div>
-                          <div className={styles.cardActionsGrid}>
-                            <button
-                              type="button"
-                              className={`${styles.actionButton} ${styles.buttonBlock}`}
-                              onClick={() => {
-                                setModelEditorError("");
-                                setModelEditor(hydrateModelEditorFromOption(option));
-                                setModelEditorExpanded(true);
-                              }}
-                            >
-                              <Pencil size={14} />
-                              {copy.modelEditorEdit}
-                            </button>
-                            <button
-                              type="button"
-                              className={`${styles.dangerButton} ${styles.buttonBlock}`}
-                              disabled={structuredActionsDisabled}
-                              onClick={() => handleDeleteModel(option.model_id)}
-                            >
-                              <Trash2 size={14} />
-                              {copy.deleteModel}
-                            </button>
-                          </div>
+                          {(() => {
+                            const modelEditability = resolveModelEditability(option);
+                            if (!modelEditability.editable) {
+                              return <p className={styles.fieldHint}>{copy.sourceProfileGenerated}</p>;
+                            }
+                            return (
+                              <div className={styles.cardActionsGrid}>
+                                <button
+                                  type="button"
+                                  className={`${styles.actionButton} ${styles.buttonBlock}`}
+                                  onClick={() => {
+                                    setModelEditorError("");
+                                    setModelEditor(hydrateModelEditorFromOption(option));
+                                    setModelEditorExpanded(true);
+                                  }}
+                                >
+                                  <Pencil size={14} />
+                                  {copy.modelEditorEdit}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={`${styles.dangerButton} ${styles.buttonBlock}`}
+                                  disabled={structuredActionsDisabled}
+                                  onClick={() => handleDeleteModel(option.model_id)}
+                                >
+                                  <Trash2 size={14} />
+                                  {copy.deleteModel}
+                                </button>
+                              </div>
+                            );
+                          })()}
                         </>
                       ) : null}
                     </>

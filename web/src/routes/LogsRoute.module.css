@@ -178,7 +178,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 16px var(--logs-right-rail-width, 280px);
+  grid-template-columns: minmax(0, 1fr) 12px var(--logs-right-rail-width, 260px);
   min-height: 0;
 }
 
@@ -205,8 +205,8 @@
 .sidebar {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 14px;
-  padding: 18px;
+  gap: 10px;
+  padding: 12px;
   border-right: 1px solid var(--border-soft);
   background: var(--surface-panel-muted);
 }
@@ -219,10 +219,17 @@
   border-right: 0;
 }
 
+.paneCollapsed {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
 .sidebarHeader {
   display: grid;
-  gap: 12px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -230,7 +237,7 @@
 
 .selectionToolbar {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .selectionPill {
@@ -250,7 +257,7 @@
 .selectionActions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .filterGroup,
@@ -258,7 +265,7 @@
 .sceneCardHeaderRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .sceneHeaderControls,
@@ -271,14 +278,14 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 34px;
-  padding: 6px 10px;
+  min-height: 30px;
+  padding: 5px 8px;
   border-radius: 999px;
   border: 1px solid var(--border-soft);
   background: var(--surface-card);
   color: var(--fg-secondary);
   cursor: pointer;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
 }
 
 .filterButton:hover {
@@ -298,9 +305,9 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 38px;
+  min-height: 32px;
   width: 100%;
-  padding: 7px 12px;
+  padding: 6px 9px;
   border-radius: 8px;
   border: 1px solid var(--border-soft);
   background: var(--surface-card);
@@ -352,7 +359,7 @@
 .panelSearch {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   color: var(--fg-tertiary);
 }
 
@@ -362,7 +369,7 @@
   border-radius: 8px;
   background: var(--surface-panel);
   color: var(--fg-primary);
-  padding: 9px 12px;
+  padding: 7px 9px;
   font: inherit;
 }
 
@@ -370,7 +377,7 @@
   overflow: auto;
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 8px;
   padding-right: 4px;
 }
 
@@ -409,21 +416,21 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  padding: 18px 20px;
+  padding: 12px 14px;
   background: var(--surface-panel-strong);
 }
 
 .logPreviewStack {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 10px;
+  gap: 8px;
   min-height: 0;
   height: 100%;
 }
 
 .diagnosticsPanel {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   padding: 0;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
@@ -434,9 +441,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
-  padding: 9px 10px;
+  padding: 7px 8px;
   cursor: pointer;
   list-style: none;
 }
@@ -449,7 +456,7 @@
   flex: 1 1 auto;
   min-width: 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -461,7 +468,7 @@
   gap: 4px;
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   white-space: nowrap;
 }
 
@@ -472,7 +479,7 @@
 .diagnosticsExpandLabel {
   flex: 0 0 auto;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   white-space: nowrap;
 }
 
@@ -482,8 +489,8 @@
 
 .diagnosticsDetails {
   display: grid;
-  gap: 10px;
-  padding: 0 10px 10px;
+  gap: 8px;
+  padding: 0 8px 8px;
 }
 
 .diagnosticPill {
@@ -524,14 +531,14 @@
 .diagnosticHintGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .diagnosticHintGrid article {
   display: grid;
   align-content: start;
-  gap: 6px;
-  padding: 12px;
+  gap: 5px;
+  padding: 9px;
   min-width: 0;
 }
 
@@ -562,9 +569,9 @@
 
 .resizeHandle {
   position: relative;
-  flex: 0 0 16px;
-  width: 16px;
-  min-width: 16px;
+  flex: 0 0 12px;
+  width: 12px;
+  min-width: 12px;
   min-height: 0;
   padding: 0;
   border: 0;
@@ -598,8 +605,8 @@
 .rightRail {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 14px;
-  padding: 18px;
+  gap: 10px;
+  padding: 12px;
   border-left: 1px solid var(--border-soft);
   background: var(--surface-panel-muted);
 }
@@ -611,8 +618,8 @@
 
 .railHeader {
   display: grid;
-  gap: 8px;
-  padding: 14px;
+  gap: 6px;
+  padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -621,30 +628,34 @@
 .railTitle {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.02rem;
+  font-size: 0.9rem;
 }
 
 .railText {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.84rem;
-  line-height: 1.45;
+  font-size: 0.76rem;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .rootNav {
   display: grid;
   align-content: start;
-  gap: 10px;
+  gap: 8px;
   min-height: 0;
   overflow: auto;
 }
 
 .packageButton {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
-  padding: 12px;
+  padding: 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -692,18 +703,22 @@
 
 .packageButtonPath {
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .packageFilesPanel {
   display: grid;
-  grid-template-columns: minmax(140px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
   align-items: stretch;
-  gap: 10px;
+  gap: 8px;
   min-height: 0;
-  max-height: 92px;
-  padding: 10px;
+  max-height: 78px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-input);
@@ -715,12 +730,12 @@
 
 .packageFilesTitle {
   margin: 0;
-  font-size: 0.96rem;
+  font-size: 0.86rem;
 }
 
 .packageFileList {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -730,7 +745,7 @@
 .packageFileRow {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
+  gap: 6px;
   align-items: stretch;
   flex: 0 0 clamp(220px, 24vw, 320px);
   min-width: 0;
@@ -1475,7 +1490,7 @@
 .sceneMetricGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .sceneMetricCard,
@@ -1488,33 +1503,33 @@
 }
 
 .sceneMetricCard {
-  min-height: 88px;
-  padding: 12px;
+  min-height: 58px;
+  padding: 8px;
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .sceneMetricCard span {
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.7rem;
 }
 
 .sceneMetricCard strong {
   color: var(--fg-primary);
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   overflow-wrap: anywhere;
 }
 
 .sceneInfoGrid {
   grid-template-columns: minmax(300px, 0.82fr) minmax(420px, 1.18fr);
-  gap: 12px;
+  gap: 8px;
 }
 
 .sceneInfoCard {
   display: grid;
   align-content: start;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 9px;
   min-height: 0;
 }
 
@@ -1531,7 +1546,7 @@
 
 .timelineList {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   max-height: 520px;
   overflow: auto;
   padding-right: 4px;
@@ -1539,8 +1554,8 @@
 
 .timelineItem {
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  gap: 5px;
+  padding: 8px;
 }
 
 .timelineItemError {
@@ -1572,19 +1587,19 @@
 }
 
 .timelineCode {
-  font-size: 0.84rem;
+  font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
 
 .timelineFields {
-  gap: 6px;
+  gap: 5px;
 }
 
 .timelineField {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
-  padding: 0 8px;
+  min-height: 22px;
+  padding: 0 7px;
   border-radius: 999px;
   background: var(--surface-panel-strong);
 }
@@ -1601,7 +1616,7 @@
 
 .packageSectionList {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   max-height: 260px;
   overflow: auto;
   padding-right: 4px;
@@ -1609,8 +1624,8 @@
 
 .packageSection {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card-subtle);
@@ -1655,14 +1670,14 @@
 .rawFileTabs {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .rawFileButton {
   display: grid;
   gap: 3px;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 7px 8px;
   text-align: left;
   color: var(--fg-secondary);
   cursor: pointer;

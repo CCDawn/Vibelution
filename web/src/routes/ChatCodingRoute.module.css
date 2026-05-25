@@ -21,14 +21,21 @@
 .leftRail {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px;
   background: var(--surface-panel-muted);
   overflow: auto;
 }
 
+.paneCollapsed {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
 .leftBlock {
-  padding: 11px 12px;
+  padding: 9px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -37,16 +44,16 @@
 .blockEyebrow {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
 }
 
 .sectionHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
 }
 
 .sectionIdentity {
@@ -58,7 +65,7 @@
 .sectionTitle {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 0.98rem;
+  font-size: 0.88rem;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -76,25 +83,25 @@
 }
 
 .contextLineCompact {
-  margin: 7px 0 0;
+  margin: 6px 0 0;
   color: var(--fg-secondary);
-  font-size: 0.88rem;
-  line-height: 1.38;
-  -webkit-line-clamp: 2;
+  font-size: 0.8rem;
+  line-height: 1.32;
+  -webkit-line-clamp: 1;
 }
 
 .sectionMetaLine {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   line-height: 1.25;
   -webkit-line-clamp: 1;
 }
 
 .oneLineValue {
-  margin: 7px 0 0;
+  margin: 6px 0 0;
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   line-height: 1.36;
   -webkit-line-clamp: 1;
 }
@@ -107,7 +114,7 @@
 
 .metricValue {
   color: var(--accent-warm-2);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   white-space: nowrap;
 }
 
@@ -250,23 +257,23 @@
 .inlineMetaList {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 5px;
+  margin-top: 6px;
   min-width: 0;
 }
 
 .inlineMetaPill {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   max-width: 100%;
   min-width: 0;
-  padding: 5px 8px;
+  padding: 4px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 76%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
 }
 
 .inlineMetaPill span,
@@ -287,7 +294,7 @@
 
 .featurePresetBlock {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .featurePresetScope {
@@ -305,17 +312,17 @@
 .featurePresetGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 5px;
 }
 
 .featureToggle {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 7px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
   align-items: center;
   min-width: 0;
-  min-height: 58px;
-  padding: 7px 8px;
+  min-height: 46px;
+  padding: 7px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 74%, transparent);
@@ -366,7 +373,7 @@
 .featureToggleText {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: 2px;
 }
 
 .featureToggleText strong,
@@ -378,7 +385,7 @@
 
 .featureToggleText strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   line-height: 1.15;
   white-space: nowrap;
 }
@@ -386,20 +393,20 @@
 .featureToggleText span {
   display: -webkit-box;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   line-height: 1.25;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 1;
 }
 
 .featureToggleState {
-  align-self: start;
-  min-width: 34px;
-  padding: 3px 5px;
+  justify-self: start;
+  min-width: 32px;
+  padding: 2px 5px;
   border-radius: 999px;
   background: rgba(236, 230, 220, 0.06);
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: 0.64rem;
   line-height: 1;
   text-align: center;
   white-space: nowrap;
@@ -418,14 +425,18 @@
 .featurePresetNote {
   margin: 0;
   color: var(--fg-tertiary);
-  font-size: 0.74rem;
-  line-height: 1.35;
+  font-size: 0.68rem;
+  line-height: 1.3;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
 }
 
 .compactDetails {
-  margin-top: 8px;
-  padding-top: 6px;
+  margin-top: 6px;
+  padding-top: 5px;
   border-top: 1px solid rgba(236, 230, 220, 0.06);
 }
 
@@ -435,7 +446,7 @@
   gap: 4px;
   color: var(--fg-tertiary);
   cursor: pointer;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   list-style: none;
   user-select: none;
 }
@@ -467,15 +478,15 @@
 .inlineStatGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin-top: 8px;
+  gap: 5px;
+  margin-top: 6px;
 }
 
 .inlineStat {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
@@ -490,19 +501,51 @@
   white-space: nowrap;
 }
 
+.compressionStrategyList {
+  display: grid;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.compressionStrategyRow {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 3px 8px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.compressionStrategyRow strong {
+  grid-row: span 3;
+  min-width: 0;
+  color: var(--accent-warm-2);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.compressionStrategyRow span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .detailNote {
   display: grid;
   gap: 3px;
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   line-height: 1.35;
 }
 
 .vitalStackCompact {
   display: grid;
-  gap: 7px;
-  margin-top: 8px;
+  gap: 5px;
+  margin-top: 6px;
 }
 
 .vitalItemCompact {
@@ -523,8 +566,9 @@
 }
 
 .contextUsageValue {
-  margin: 10px 0 0;
-  line-height: 1.45;
+  margin: 7px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
@@ -536,7 +580,7 @@
 }
 
 .progressTrack {
-  height: 7px;
+  height: 6px;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(236, 230, 220, 0.08);
@@ -559,12 +603,12 @@
 .petShowcase {
   position: relative;
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr);
-  gap: 10px 12px;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 8px 10px;
   align-items: center;
-  min-height: 132px;
-  margin-top: auto;
-  padding: 10px;
+  min-height: 96px;
+  margin-top: 0;
+  padding: 8px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 20%, var(--border-soft));
   border-radius: 8px;
@@ -577,8 +621,8 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 82px;
-  height: 82px;
+  width: 54px;
+  height: 54px;
   overflow: hidden;
   border: 1px solid rgba(236, 230, 220, 0.08);
   border-radius: 8px;
@@ -587,8 +631,8 @@
 
 .petShowcaseAura {
   position: absolute;
-  width: 66px;
-  height: 66px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   background: radial-gradient(circle, color-mix(in srgb, var(--accent-warm) 36%, transparent), transparent 70%);
   filter: blur(3px);
@@ -602,8 +646,8 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 58px;
-  height: 58px;
+  width: 40px;
+  height: 40px;
   border: 1px solid color-mix(in srgb, var(--pet-body-deep) 64%, rgba(255, 255, 255, 0.08));
   border-radius: 45% 45% 42% 42%;
   background:
@@ -612,7 +656,7 @@
   box-shadow: 0 16px 24px rgba(0, 0, 0, 0.28);
   color: color-mix(in srgb, var(--accent-warm-2) 70%, white);
   font-family: var(--font-display);
-  font-size: 0.68rem;
+  font-size: 0.56rem;
   font-weight: 800;
   letter-spacing: 0.03em;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.34);
@@ -638,9 +682,9 @@
 .petShowcaseEarLeft,
 .petShowcaseEarRight {
   z-index: 0;
-  width: 19px;
-  height: 23px;
-  top: -8px;
+  width: 13px;
+  height: 16px;
+  top: -6px;
   border: 1px solid color-mix(in srgb, var(--pet-body-deep) 70%, rgba(255, 255, 255, 0.08));
   background: linear-gradient(145deg, var(--pet-body), var(--pet-body-deep));
 }
@@ -659,7 +703,7 @@
 
 .petShowcaseFace {
   z-index: 1;
-  inset: 17px 12px auto;
+  inset: 12px 9px auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -667,8 +711,8 @@
 }
 
 .petShowcaseEye {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
   border-radius: 999px;
   background: var(--pet-feature);
   opacity: 0.82;
@@ -676,9 +720,9 @@
 
 .petShowcaseMuzzle {
   left: 50%;
-  top: 8px;
-  width: 12px;
-  height: 5px;
+  top: 7px;
+  width: 9px;
+  height: 4px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--pet-feature) 66%, transparent);
   transform: translateX(-50%);
@@ -687,9 +731,9 @@
 .petShowcaseFootLeft,
 .petShowcaseFootRight {
   z-index: 1;
-  bottom: -4px;
-  width: 17px;
-  height: 10px;
+  bottom: -3px;
+  width: 12px;
+  height: 7px;
   border-radius: 999px 999px 6px 6px;
   background: color-mix(in srgb, var(--pet-body-deep) 74%, black);
   opacity: 0.9;
@@ -697,11 +741,11 @@
 }
 
 .petShowcaseFootLeft {
-  left: 11px;
+  left: 8px;
 }
 
 .petShowcaseFootRight {
-  right: 11px;
+  right: 8px;
 }
 
 .petShowcaseAvatar_cat {
@@ -719,8 +763,8 @@
 
 .petShowcaseAvatar_bunny .petShowcaseEarLeft,
 .petShowcaseAvatar_bunny .petShowcaseEarRight {
-  height: 31px;
-  top: -16px;
+  height: 21px;
+  top: -11px;
   border-radius: 999px 999px 52% 52%;
 }
 
@@ -758,8 +802,8 @@
 
 .petShowcaseAvatar_moose .petShowcaseEarLeft,
 .petShowcaseAvatar_moose .petShowcaseEarRight {
-  width: 24px;
-  height: 12px;
+  width: 17px;
+  height: 9px;
   top: -1px;
   border-radius: 999px 999px 6px 999px;
 }
@@ -787,7 +831,7 @@
 .petShowcaseInfo {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 3px;
 }
 
 .petShowcaseTop {
@@ -800,7 +844,7 @@
 
 .petShowcaseTop span {
   color: var(--accent-warm-2);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   white-space: nowrap;
 }
 
@@ -808,7 +852,7 @@
   margin: 0;
   color: var(--fg-primary);
   font-family: var(--font-display);
-  font-size: 1.1rem;
+  font-size: 0.9rem;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -818,8 +862,8 @@
 .petShowcaseLine {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
-  line-height: 1.35;
+  font-size: 0.74rem;
+  line-height: 1.3;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -830,8 +874,8 @@
 .petShowcaseActions {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
-  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
   min-width: 0;
 }
 
@@ -842,14 +886,18 @@
   justify-content: center;
   gap: 5px;
   min-width: 0;
-  min-height: 28px;
-  padding: 0 8px;
+  min-height: 26px;
+  padding: 0 7px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   white-space: nowrap;
+}
+
+.petShowcaseActionHint {
+  display: none;
 }
 
 .petShowcaseAction span,
@@ -880,7 +928,7 @@
   grid-column: 1 / -1;
   margin: 0;
   color: var(--accent-warm-2);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   line-height: 1.32;
   overflow-wrap: anywhere;
 }

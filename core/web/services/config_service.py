@@ -9,7 +9,7 @@ import secrets
 import subprocess
 import time
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -35,8 +35,8 @@ from config.public_config import (
     validate_llm_api_key_env,
     validate_llm_public_config,
 )
-
 from config.llm_security import validate_llm_provider_target
+from config.settings import reload_config
 
 from .config_editor_schema import build_editor_meta, build_editor_sections
 from .git_status_service import with_git_config_defaults
@@ -536,9 +536,9 @@ def _run_draft_test_llm_connection(
                     break
     try:
         try:
-            result = public_config_module._probe_llm_http(provider, profile, api_key)
+            result = public_config_module._probe_llm_runtime(provider, profile, api_key)
         except TypeError:
-            result = public_config_module._probe_llm_http(provider, profile)
+            result = public_config_module._probe_llm_runtime(provider, profile)
     except Exception as exc:
         _record_config_scene_event(
             "llm_test",
@@ -553,6 +553,8 @@ def _run_draft_test_llm_connection(
                 "model": profile.model,
                 "apiKeySource": api_key_source,
                 "requiresApiKey": bool(provider.requires_api_key),
+                "transport": profile.transport,
+                "contract": profile.contract,
                 "configScope": _llm_test_config_scope(public_config, draft_meta),
                 "errorType": type(exc).__name__,
                 "error": str(exc),
@@ -574,6 +576,8 @@ def _run_draft_test_llm_connection(
             "model": profile.model,
             "apiKeySource": api_key_source,
             "requiresApiKey": bool(provider.requires_api_key),
+            "transport": profile.transport,
+            "contract": profile.contract,
             "configScope": _llm_test_config_scope(public_config, draft_meta),
             "ok": success,
             "status": str(result.get("status") if isinstance(result, dict) else "").strip(),
@@ -588,6 +592,8 @@ def _run_draft_test_llm_connection(
         "provider_kind": provider.kind,
         "base_url": provider.base_url,
         "model": profile.model,
+        "transport": profile.transport,
+        "contract": profile.contract,
         "api_key_source": api_key_source,
         "config_scope": _llm_test_config_scope(public_config, draft_meta),
         "requires_api_key": bool(provider.requires_api_key),
@@ -989,14 +995,69 @@ def _normalize_discovered_models(data: Any) -> list[dict[str, Any]]:
     return models
 
 
-def _discover_openai_compatible_model_list(api_base: str, *, api_key: str = "", timeout: int = 10) -> list[dict[str, Any]]:
+def _model_discovery_urls(api_base: str) -> list[str]:
+    normalized_base = str(api_base or "").strip().rstrip("/")
+    if not normalized_base:
+        return []
+    parsed = urlparse(normalized_base)
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if path_parts and path_parts[-1] == "models":
+        return [normalized_base]
+    endpoints = ("models",) if path_parts and path_parts[-1] == "v1" else _MODEL_DISCOVERY_ENDPOINTS
+    urls: list[str] = []
+    seen: set[str] = set()
+    for endpoint in endpoints:
+        candidate = urljoin(normalized_base + "/", endpoint)
+        if candidate not in seen:
+            seen.add(candidate)
+            urls.append(candidate)
+    return urls
+
+
+def _discovery_key_source_label(*, explicit_api_key: str, api_key_env: str, draft_meta: dict[str, object]) -> tuple[str, str]:
+    if str(explicit_api_key or "").strip():
+        return str(explicit_api_key or "").strip(), "手动输入"
+    env_name = validate_llm_api_key_env(api_key_env, required=False, context="api_key_env")
+    if env_name:
+        pending = draft_meta.get("pending_api_keys", {})
+        token = pending.get(env_name) if isinstance(pending, dict) else None
+        pending_secret = _resolve_pending_api_key(env_name, token)
+        if pending_secret:
+            return pending_secret, f"草稿环境变量 {env_name}"
+        env_secret = str(os.environ.get(env_name) or "").strip()
+        if env_secret:
+            return env_secret, f"系统环境变量 {env_name}"
+        return "", f"未找到环境变量 {env_name}"
+    return "", "未提供密钥"
+
+
+def _http_status_hint(error: Exception) -> str:
+    if isinstance(error, httpx.HTTPStatusError):
+        status_code = error.response.status_code
+        if status_code == 401:
+            return "认证失败（HTTP 401），请检查 API Key 是否正确、是否属于这个中转服务。"
+        if status_code == 403:
+            return "无权限（HTTP 403），请检查 API Key 权限或服务商访问限制。"
+        if status_code == 404:
+            return "接口不存在（HTTP 404），请检查服务地址是否填到了正确的 API 根路径。"
+        return f"HTTP {status_code}"
+    return str(error)
+
+
+def _discover_openai_compatible_model_list(
+    api_base: str,
+    *,
+    api_key: str = "",
+    timeout: int = 10,
+    api_key_source: str = "",
+) -> list[dict[str, Any]]:
     last_error: Exception | None = None
-    normalized_base = str(api_base or "").strip().rstrip("/") + "/"
+    attempted_urls = _model_discovery_urls(api_base)
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     with httpx.Client(timeout=timeout, headers=headers) as client:
-        for endpoint in _MODEL_DISCOVERY_ENDPOINTS:
+        for url in attempted_urls:
             try:
-                response = client.get(urljoin(normalized_base, endpoint))
+                response = client.get(url)
                 response.raise_for_status()
                 models = _normalize_discovered_models(response.json())
                 if models:
@@ -1005,7 +1066,9 @@ def _discover_openai_compatible_model_list(api_base: str, *, api_key: str = "", 
                 last_error = exc
                 continue
     if last_error is not None:
-        raise ValueError(f"模型发现失败：{last_error}") from last_error
+        attempted_text = ", ".join(attempted_urls) if attempted_urls else "(无)"
+        key_source = api_key_source or ("已提供密钥" if api_key else "未提供密钥")
+        raise ValueError(f"{_http_status_hint(last_error)} 已尝试：{attempted_text}。密钥来源：{key_source}。") from last_error
     raise ValueError("模型发现没有返回可用模型。")
 
 
@@ -1023,20 +1086,22 @@ def discover_config_models(
     provider_input = copy.deepcopy(provider or {})
     validate_llm_provider_target(provider_input, context="llm.model_discovery")
     api_key_env = str(provider_input.get("api_key_env", "") or "").strip()
-    resolved_api_key = str(api_key or "").strip()
-    if not resolved_api_key and api_key_env:
-        pending = current_meta.get("pending_api_keys", {})
-        token = pending.get(api_key_env) if isinstance(pending, dict) else None
-        resolved_api_key = _resolve_pending_api_key(api_key_env, token) or ""
+    resolved_api_key, api_key_source = _discovery_key_source_label(
+        explicit_api_key=api_key,
+        api_key_env=api_key_env,
+        draft_meta=current_meta,
+    )
     models = _normalize_discovered_models(_discover_openai_compatible_model_list(
         str(provider_input.get("base_url", "") or "").strip(),
         api_key=resolved_api_key,
         timeout=10,
+        api_key_source=api_key_source,
     ))
     return {
         "models": models,
         "providerKind": str(provider_input.get("kind", "") or "").strip(),
         "baseUrl": str(provider_input.get("base_url", "") or "").strip(),
+        "apiKeySource": api_key_source,
     }
 
 
@@ -1193,6 +1258,14 @@ def apply_config_workspace(
         _drop_pending_api_key_token(api_key)
 
     persisted = with_git_config_defaults(load_public_config())
+    runtime_config = reload_config(str(CONFIG_PATH))
+    primary_profile = runtime_config.llm.get_profile(role="primary")
+    primary_provider = runtime_config.llm.get_provider(primary_profile.provider_id)
+    primary_transport = (
+        primary_profile.transport
+        or getattr(primary_provider, "transport", "")
+        or ("responses" if primary_provider.kind == "relay" else "chat_completions")
+    )
     workspace = _build_workspace(
         persisted,
         message=text_for(
@@ -1215,6 +1288,11 @@ def apply_config_workspace(
             "pendingApiKeyEnvs": updated_envs,
             "clearedApiKeyEnvCount": len(cleared_envs),
             "clearedApiKeyEnvs": cleared_envs,
+            "runtimeConfigReloaded": True,
+            "primaryProviderId": primary_profile.provider_id,
+            "primaryProviderKind": primary_provider.kind,
+            "primaryTransport": primary_transport,
+            "primaryModel": primary_profile.model,
         },
         lifecycle=True,
     )

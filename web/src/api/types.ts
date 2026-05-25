@@ -733,6 +733,39 @@ export type RuntimeSummary = {
     source: string;
   };
   contextUsage: { used: number; limit: number };
+  contextCompression: {
+    enabled: boolean;
+    currentTokens: number;
+    effectiveTokenLimit: number;
+    contextWindowLimit: number;
+    usageRatio: number;
+    currentLevel: string;
+    compressionCount: number;
+    lastCompression: null | {
+      level: string;
+      reason: string;
+      beforeTokens: number;
+      afterTokens: number;
+      savedTokens: number;
+      iteration: number;
+      summaryWritten: boolean;
+      timestamp: string;
+    };
+    strategy: {
+      levels: Array<{
+        level: string;
+        thresholdRatio: number;
+        thresholdTokens: number;
+        keepAiMessages: number;
+        summaryMaxChars: number;
+      }>;
+      preserveErrors: boolean;
+      errorProtectionKeywords: string[];
+      summaryStorage: string;
+      algorithm: string;
+    };
+    updatedAt: string;
+  };
   activeTools: string[];
   changedFilesCount: number;
   recentAction: string;
@@ -1824,7 +1857,7 @@ export type ConfigDiagnosis = {
 export type ConfigModelPresetOption = {
   preset_id: string;
   label: string;
-  category?: string;
+  category?: "official" | "relay" | "openai_compatible" | "local" | string;
   provider_id: string;
   model_id: string;
   provider: Record<string, unknown>;
@@ -1884,6 +1917,8 @@ export type ConfigLlmTestResult = {
   provider_kind: string;
   base_url: string;
   model: string;
+  transport: string;
+  contract: string;
   api_key_source: string;
   config_scope: "saved" | "draft";
   requires_api_key: boolean;
@@ -1899,6 +1934,7 @@ export type ConfigModelDiscoveryResult = {
   models: ConfigDiscoveredModel[];
   providerKind: string;
   baseUrl: string;
+  apiKeySource: string;
 };
 
 export type PetSummary = {
@@ -2040,5 +2076,164 @@ export type ResetExecuteResponse = {
   totals: ResetTotals;
   warnings: string[];
   rebuildHints: string[];
+  summary: string;
+};
+
+export type ResearchDiscoverySessionSummary = ResearchDiscoverySession & {
+  summary: ResearchDiscoverySummary;
+};
+
+export type ResearchDiscoverySessionList = {
+  sessions: ResearchDiscoverySessionSummary[];
+  summary: {
+    sessionCount: number;
+    selectedCount: number;
+  };
+};
+
+export type ResearchDiscoverySessionPayload = {
+  session: ResearchDiscoverySession;
+  searchRuns: ResearchSearchRun[];
+  sources: ResearchSource[];
+  evidence: ResearchEvidenceRecord[];
+  candidateThemes: ResearchCandidateTheme[];
+  themeCards: ResearchThemeCard[];
+  events: ResearchEvent[];
+  summary: ResearchDiscoverySummary;
+  agentReport: ResearchAgentReport;
+};
+
+export type ResearchPromptItem = {
+  key: "broad" | "deep" | "review" | "themes" | "card" | string;
+  filename: string;
+  path: string;
+  content: string;
+};
+
+export type ResearchPromptWorkspace = {
+  root: string;
+  prompts: ResearchPromptItem[];
+};
+
+export type ResearchDiscoverySession = {
+  sessionId: string;
+  openGoal: string;
+  constraints: string;
+  preferences: string;
+  candidateCount: number;
+  status: "draft" | "running" | "reviewing" | "selected" | "archived" | "failed" | string;
+  createdAt: string;
+  updatedAt: string;
+  selectedThemeId: string | null;
+};
+
+export type ResearchSearchRun = {
+  runId: string;
+  sessionId: string;
+  phase: "broad" | "deep" | string;
+  queries: string[];
+  provider: string;
+  status: "draft" | "running" | "completed" | "failed" | string;
+  startedAt: string;
+  completedAt: string | null;
+  modelProfile: Record<string, unknown>;
+};
+
+export type ResearchSource = {
+  sourceId: string;
+  sessionId: string;
+  searchRunId: string;
+  kind: "paper" | "github" | "dataset" | "web" | string;
+  title: string;
+  url: string;
+  snippet: string;
+  reliability: "verified" | "normal" | "weak" | string;
+  retrievedAt: string;
+};
+
+export type ResearchEvidenceRecord = {
+  evidenceId: string;
+  sessionId: string;
+  sourceId: string;
+  claim: string;
+  evidenceType: "method" | "dataset" | "result" | "gap" | "implementation" | "background" | string;
+  confidence: "high" | "medium" | "low" | string;
+  note: string;
+};
+
+export type ResearchCandidateTheme = {
+  themeId: string;
+  sessionId: string;
+  title: string;
+  oneLine: string;
+  interdisciplinaryCombination: string[];
+  coreQuestion: string;
+  noveltyPath: "problem_perspective" | "method_transfer" | "discipline_combination" | "application_scenario" | string;
+  scores: Record<string, number>;
+  recommendationScore: number;
+  sourceIds: string[];
+  evidenceIds: string[];
+  uncertainty: string;
+  agentReview: string;
+  status: "draft" | "shortlisted" | "selected" | "rejected" | "stale" | string;
+  version: number;
+  parentRunId: string;
+};
+
+export type ResearchThemeCard = {
+  cardId: string;
+  sessionId: string;
+  themeId: string;
+  title: string;
+  oneLine: string;
+  coreScientificQuestion: string;
+  whyNovel: string;
+  whyCompetitionFit: string;
+  interdisciplinaryCombination: string[];
+  possibleDatasets: string[];
+  possibleMethods: string[];
+  possibleExperiments: string[];
+  risks: string[];
+  references: string[];
+  nextResearchSteps: string[];
+  agentReview: string;
+  status: "draft" | "approved" | "stale" | string;
+  version: number;
+};
+
+export type ResearchEvent = {
+  eventCode: string;
+  timestamp: string;
+  fields: Record<string, unknown>;
+};
+
+export type ResearchDiscoverySummary = {
+  searchRunCount: number;
+  sourceCount: number;
+  evidenceCount: number;
+  candidateThemeCount: number;
+  staleThemeCount: number;
+  themeCardCount: number;
+  approvedThemeCardCount: number;
+};
+
+export type ResearchAgentReport = {
+  mode: "live_public_network" | "mixed_or_legacy" | string;
+  status: "idle" | "ready" | "partial" | "legacy_data" | string;
+  provider: string;
+  lastRunAt: string;
+  queries: string[];
+  plan: string[];
+  observations: string[];
+  warnings: string[];
+  sourceKindCounts: Record<string, number>;
+  evidenceTypeCounts: Record<string, number>;
+  failedAttempts: Array<{
+    runId?: string;
+    phase?: string;
+    kind?: string;
+    query?: string;
+    error?: string;
+  }>;
   summary: string;
 };

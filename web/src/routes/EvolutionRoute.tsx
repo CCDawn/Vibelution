@@ -47,6 +47,7 @@ import {
   SelfEvolutionTransaction,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useShellStore } from "../store/shellStore";
 import { SelfEvolutionTrack } from "./SelfEvolutionTrack";
@@ -340,6 +341,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       EVOLUTION_LIVE_IO_HEIGHT_BOUNDS,
     ),
   );
+  const [runsQueueCollapsed, setRunsQueueCollapsed] = useState(false);
+  const [libraryListCollapsed, setLibraryListCollapsed] = useState(false);
+  const [liveLaunchCollapsed, setLiveLaunchCollapsed] = useState(false);
+  const [liveRunCollapsed, setLiveRunCollapsed] = useState(false);
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -1255,25 +1260,25 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const runsWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-runs-queue-width": `${runsQueueWidth}px`,
+        "--evolution-runs-queue-width": runsQueueCollapsed ? "0px" : `${runsQueueWidth}px`,
       }) as CSSProperties,
-    [runsQueueWidth],
+    [runsQueueCollapsed, runsQueueWidth],
   );
   const libraryWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-library-list-width": `${libraryListWidth}px`,
+        "--evolution-library-list-width": libraryListCollapsed ? "0px" : `${libraryListWidth}px`,
       }) as CSSProperties,
-    [libraryListWidth],
+    [libraryListCollapsed, libraryListWidth],
   );
   const liveWorkspaceStyle = useMemo(
     () =>
       ({
-        "--evolution-live-launch-width": `${liveLaunchWidth}px`,
-        "--evolution-live-run-width": `${liveRunWidth}px`,
+        "--evolution-live-launch-width": liveLaunchCollapsed ? "0px" : `${liveLaunchWidth}px`,
+        "--evolution-live-run-width": liveRunCollapsed ? "0px" : `${liveRunWidth}px`,
         "--evolution-live-io-height": `${liveIoHeight}px`,
       }) as CSSProperties,
-    [liveIoHeight, liveLaunchWidth, liveRunWidth],
+    [liveIoHeight, liveLaunchCollapsed, liveLaunchWidth, liveRunCollapsed, liveRunWidth],
   );
   const resizeLiveLaunchLabel = lang === "zh" ? "调整启动卡片宽度" : "Resize launch card";
   const resizeLiveRunLabel = lang === "zh" ? "调整当前任务卡片宽度" : "Resize active run card";
@@ -1668,11 +1673,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     if (event.button !== 0) {
       return;
     }
+    if (runsQueueCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginPaneResize(event.clientX, runsQueueWidth, EVOLUTION_RUNS_QUEUE_BOUNDS, setRunsQueueWidth);
   }
 
   function handleRunsResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (runsQueueCollapsed) {
+      return;
+    }
     const nextWidth = keyboardPaneWidth(runsQueueWidth, event.key, EVOLUTION_RUNS_QUEUE_BOUNDS);
     if (nextWidth === null) {
       return;
@@ -1685,11 +1696,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     if (event.button !== 0) {
       return;
     }
+    if (liveLaunchCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginPaneResize(event.clientX, liveLaunchWidth, EVOLUTION_LIVE_LAUNCH_BOUNDS, setLiveLaunchWidth);
   }
 
   function handleLiveLaunchResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (liveLaunchCollapsed) {
+      return;
+    }
     const nextWidth = keyboardPaneWidth(liveLaunchWidth, event.key, EVOLUTION_LIVE_LAUNCH_BOUNDS);
     if (nextWidth === null) {
       return;
@@ -1702,11 +1719,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     if (event.button !== 0) {
       return;
     }
+    if (liveRunCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginPaneResize(event.clientX, liveRunWidth, EVOLUTION_LIVE_RUN_BOUNDS, setLiveRunWidth, true);
   }
 
   function handleLiveRunResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (liveRunCollapsed) {
+      return;
+    }
     const nextWidth = keyboardPaneWidth(liveRunWidth, event.key, EVOLUTION_LIVE_RUN_BOUNDS, true);
     if (nextWidth === null) {
       return;
@@ -1736,11 +1759,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     if (event.button !== 0) {
       return;
     }
+    if (libraryListCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginPaneResize(event.clientX, libraryListWidth, EVOLUTION_LIBRARY_LIST_BOUNDS, setLibraryListWidth);
   }
 
   function handleLibraryResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (libraryListCollapsed) {
+      return;
+    }
     const nextWidth = keyboardPaneWidth(libraryListWidth, event.key, EVOLUTION_LIBRARY_LIST_BOUNDS);
     if (nextWidth === null) {
       return;
@@ -1995,7 +2024,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
       {activeTrack === "supervised" && evolutionView === "live" ? (
         <div className={styles.overviewGrid} style={liveWorkspaceStyle}>
-          <section className={`${styles.surface} ${styles.launchSurface} ${styles.dashboardLaunch}`}>
+          <section
+            className={
+              liveLaunchCollapsed
+                ? `${styles.surface} ${styles.launchSurface} ${styles.dashboardLaunch} ${styles.paneCollapsed}`
+                : `${styles.surface} ${styles.launchSurface} ${styles.dashboardLaunch}`
+            }
+            aria-hidden={liveLaunchCollapsed}
+          >
             <div className={styles.surfaceHeaderCompact}>
               <div>
                 <p className={styles.eyebrow}>{t("supervisedControl")}</p>
@@ -2200,16 +2236,26 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </div>
           </section>
 
-          <button
-            type="button"
+          <PaneCollapseHandle
+            side="left"
+            collapsed={liveLaunchCollapsed}
+            separatorLabel={resizeLiveLaunchLabel}
+            collapseLabel={lang === "zh" ? "收起启动卡片" : "Collapse launch card"}
+            expandLabel={lang === "zh" ? "展开启动卡片" : "Expand launch card"}
             className={`${styles.resizeHandle} ${styles.liveResizeHandle} ${styles.liveResizeHandleLaunch}`}
-            aria-label={resizeLiveLaunchLabel}
-            title={resizeLiveLaunchLabel}
+            onToggle={() => setLiveLaunchCollapsed((current) => !current)}
             onPointerDown={handleLiveLaunchResizeStart}
             onKeyDown={handleLiveLaunchResizeKeyDown}
           />
 
-          <section className={`${styles.surface} ${styles.liveSurface} ${styles.dashboardRun}`}>
+          <section
+            className={
+              liveRunCollapsed
+                ? `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun} ${styles.paneCollapsed}`
+                : `${styles.surface} ${styles.liveSurface} ${styles.dashboardRun}`
+            }
+            aria-hidden={liveRunCollapsed}
+          >
               <div className={styles.surfaceHeaderCompact}>
                 <div>
                   <p className={styles.eyebrow}>{t("activeSupervisedRun")}</p>
@@ -2409,11 +2455,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               )}
           </section>
 
-          <button
-            type="button"
+          <PaneCollapseHandle
+            side="right"
+            collapsed={liveRunCollapsed}
+            separatorLabel={resizeLiveRunLabel}
+            collapseLabel={lang === "zh" ? "收起当前任务卡片" : "Collapse active run card"}
+            expandLabel={lang === "zh" ? "展开当前任务卡片" : "Expand active run card"}
             className={`${styles.resizeHandle} ${styles.liveResizeHandle} ${styles.liveResizeHandleRun}`}
-            aria-label={resizeLiveRunLabel}
-            title={resizeLiveRunLabel}
+            onToggle={() => setLiveRunCollapsed((current) => !current)}
             onPointerDown={handleLiveRunResizeStart}
             onKeyDown={handleLiveRunResizeKeyDown}
           />
@@ -2557,7 +2606,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           </section>
 
           <div className={styles.runsWorkspace} style={runsWorkspaceStyle}>
-            <section className={`${styles.surface} ${styles.runQueuePanel}`}>
+            <section
+              className={
+                runsQueueCollapsed
+                  ? `${styles.surface} ${styles.runQueuePanel} ${styles.paneCollapsed}`
+                  : `${styles.surface} ${styles.runQueuePanel}`
+              }
+              aria-hidden={runsQueueCollapsed}
+            >
               <div className={styles.panelHeader}>
                 <div>
                   <p className={styles.eyebrow}>{t("runQueue")}</p>
@@ -2693,11 +2749,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               )}
             </section>
 
-            <button
-              type="button"
+            <PaneCollapseHandle
+              side="left"
+              collapsed={runsQueueCollapsed}
+              separatorLabel={resizeRunsQueueLabel}
+              collapseLabel={lang === "zh" ? "收起运行列表" : "Collapse run list"}
+              expandLabel={lang === "zh" ? "展开运行列表" : "Expand run list"}
               className={styles.resizeHandle}
-              aria-label={resizeRunsQueueLabel}
-              title={resizeRunsQueueLabel}
+              onToggle={() => setRunsQueueCollapsed((current) => !current)}
               onPointerDown={handleRunsResizeStart}
               onKeyDown={handleRunsResizeKeyDown}
             />
@@ -3100,7 +3159,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           </div>
 
           <div className={styles.masterDetail} style={libraryWorkspaceStyle}>
-            <section className={`${styles.surface} ${styles.listPanel}`}>
+            <section
+              className={
+                libraryListCollapsed
+                  ? `${styles.surface} ${styles.listPanel} ${styles.paneCollapsed}`
+                  : `${styles.surface} ${styles.listPanel}`
+              }
+              aria-hidden={libraryListCollapsed}
+            >
               <>
                 <div className={styles.bulkToolbar}>
                   <div className={styles.bulkToolbarText}>
@@ -3286,11 +3352,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               </>
             </section>
 
-            <button
-              type="button"
+            <PaneCollapseHandle
+              side="left"
+              collapsed={libraryListCollapsed}
+              separatorLabel={resizeLibraryListLabel}
+              collapseLabel={lang === "zh" ? "收起提案列表" : "Collapse proposal list"}
+              expandLabel={lang === "zh" ? "展开提案列表" : "Expand proposal list"}
               className={styles.resizeHandle}
-              aria-label={resizeLibraryListLabel}
-              title={resizeLibraryListLabel}
+              onToggle={() => setLibraryListCollapsed((current) => !current)}
               onPointerDown={handleLibraryResizeStart}
               onKeyDown={handleLibraryResizeKeyDown}
             />

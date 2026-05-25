@@ -343,6 +343,10 @@ class WorkspaceManager:
         """提示词目录"""
         return self._workspace / "prompts"
 
+    def research_prompts_dir(self) -> Path:
+        """科研提示词目录"""
+        return self.prompts_dir / "research"
+
     @property
     def logs_dir(self) -> Path:
         """日志目录"""
@@ -353,6 +357,10 @@ class WorkspaceManager:
     def get_prompt_path(self, name: str) -> Path:
         """获取提示词文件路径"""
         return self._workspace / "prompts" / name
+
+    def get_research_prompt_path(self, name: str) -> Path:
+        """获取科研提示词文件路径"""
+        return self.research_prompts_dir() / name
 
     def get_archive_path(self, generation: int) -> Path:
         """获取指定世代的档案路径。"""
@@ -590,6 +598,14 @@ class WorkspaceManager:
                 return f.read()
         return ""
 
+    def read_research_prompt(self, filename: str) -> str:
+        """读取科研提示词文件"""
+        path = self.get_research_prompt_path(filename)
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+        return ""
+
     def write_prompt(self, filename: str, content: str) -> bool:
         """写入提示词文件"""
         try:
@@ -601,6 +617,20 @@ class WorkspaceManager:
             from core.logging import debug_logger
 
             debug_logger.error(f"[Workspace] 写入提示词失败: {e}")
+            return False
+
+    def write_research_prompt(self, filename: str, content: str) -> bool:
+        """写入科研提示词文件"""
+        try:
+            path = self.get_research_prompt_path(filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+            return True
+        except Exception as e:
+            from core.logging import debug_logger
+
+            debug_logger.error(f"[Workspace] 写入科研提示词失败: {e}")
             return False
 
     # ==================== 状态报告 ====================

@@ -25,7 +25,7 @@ from tools.memory_tools import (
 )
 from tools.search_tools import grep_search_tool as _grep_search_impl
 from tools.web_search_tool import (
-    web_search_tool as _web_search_impl,
+    web_search as _web_search_impl,
 )
 from tools.git_tools import (
     get_git_status_summary_tool as _get_git_status_summary_impl,

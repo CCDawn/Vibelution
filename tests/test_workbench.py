@@ -6,12 +6,23 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from config import AppConfig
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService, resolve_chat_dataset_paths
 from core.evaluation.chat_review_queue import get_review_item
 from core.evaluation.chat_segmenter import ChatTurnRecord
 from core.ui.chat_state import build_chat_state, load_chat_state, save_chat_state
 from core.ui.workbench import AgentWorkbenchShell
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_panel_port(monkeypatch):
+    import core.ui.workbench as workbench_module
+
+    monkeypatch.delenv("VIBELUTION_PORT", raising=False)
+    monkeypatch.delenv("AGENT_WORKBENCH_BACKEND_PORT", raising=False)
+    monkeypatch.setattr(workbench_module, "CONFIG_PANEL_PORT", 8000)
 
 
 class _FakeConsole:

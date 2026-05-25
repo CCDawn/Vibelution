@@ -135,6 +135,21 @@ def _public_inline_provider_payload(provider: Any) -> Dict[str, Any]:
     return payload
 
 
+def _normalize_profile_transport_for_provider(
+    profile: Dict[str, Any],
+    provider_payload: Dict[str, Any] | None = None,
+) -> None:
+    provider = (
+        _inline_provider_payload(provider_payload)
+        if provider_payload is not None
+        else _inline_provider_payload(profile.get("provider"))
+    )
+    provider_kind = str(provider.get("kind", "") or "").strip().lower()
+    transport = str(profile.get("transport", "") or "").strip().lower()
+    if transport == "responses" and provider_kind not in {"relay", "openai"}:
+        profile["transport"] = "chat_completions"
+
+
 def _profile_reference_override_payload(overrides: Any) -> Dict[str, Any]:
     if not isinstance(overrides, dict):
         return {}
@@ -178,10 +193,11 @@ def _materialize_model_ref_profiles(llm_section: Dict[str, Any]) -> None:
     for profile in profiles.values():
         if not isinstance(profile, dict):
             continue
+        model_ref = str(profile.get("model_ref", "") or "").strip()
         if "model_ref" not in profile and "overrides" not in profile:
             continue
-
-        model_ref = str(profile.get("model_ref", "") or "").strip()
+        if not model_ref and "provider" in profile:
+            continue
         overrides = _profile_reference_override_payload(profile.get("overrides"))
         materialized: Dict[str, Any] = {}
 
@@ -251,6 +267,7 @@ def _materialize_inline_llm_providers(llm_section: Dict[str, Any]) -> None:
             if not isinstance(profile, dict):
                 continue
             provider_payload = _resolve_owner_provider_payload(profile, legacy_providers)
+            _normalize_profile_transport_for_provider(profile, provider_payload)
             profile.pop("provider", None)
             profile.pop("provider_id", None)
             if not provider_payload:
@@ -651,6 +668,8 @@ class ConfigLoader:
             f"{prefix}NETWORK_RETRY_DELAY": "network.retry_delay",
             f"{prefix}NETWORK_USER_AGENT": "network.user_agent",
             f"{prefix}NETWORK_VERIFY_SSL": "network.verify_ssl",
+            f"{prefix}NETWORK_PROXY_ENABLED": "network.proxy_enabled",
+            f"{prefix}NETWORK_PROXY_URL": "network.proxy_url",
 
             # === 进化引擎配置 ===
             f"{prefix}EVOLUTION_ENABLED": "evolution.enabled",
@@ -720,7 +739,7 @@ class ConfigLoader:
             "tools.web.search_enabled",
             "security.enabled",
             "log.file_enabled", "log.detailed_traceback",
-            "network.verify_ssl",
+            "network.verify_ssl", "network.proxy_enabled",
             "evolution.enabled", "evolution.test_gate_enabled",
             "evolution.chat_dataset.enabled", "evolution.chat_dataset.auto_capture",
             "evolution.chat_dataset.require_tool_call_or_analysis_or_conclusion",
@@ -1069,6 +1088,25 @@ def get_config(**kwargs) -> AppConfig:
     return get_settings().config
 
 
+def reload_config(config_path: Optional[str] = None, **kwargs) -> AppConfig:
+    """
+    重新加载全局配置单例。
+
+    设置页保存 config.toml 后需要让同一后端进程内的后续 agent/LLM 创建
+    立即看到新配置，而不是继续沿用 Settings.config 的懒加载缓存。
+    """
+    global _settings, _config_path
+
+    if _settings is None:
+        _settings = Settings(config_path, **kwargs)
+        _config_path = config_path
+        return _settings.config
+
+    if config_path is not None:
+        _config_path = config_path
+    return _settings.reload(config_path, **kwargs)
+
+
 # ============================================================================
 # 便捷配置访问函数
 # ============================================================================
@@ -1222,6 +1260,7 @@ __all__ = [
     # 函数
     "get_settings",
     "get_config",
+    "reload_config",
     # 便捷配置访问函数
     "get_llm_config",
     "get_agent_config",

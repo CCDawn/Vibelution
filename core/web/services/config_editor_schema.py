@@ -121,6 +121,8 @@ FIELD_LABELS = {
         "prompt.default_components": "默认提示词组件",
         "git.commit_message_profile": "提交说明使用的模型",
         "git.commit_message_prompt": "AI 提交说明提示词",
+        "network.proxy_enabled": "启用代理",
+        "network.proxy_url": "代理地址",
         "evolution.chat_dataset.enabled": "启用 chat 数据采样",
         "evolution.chat_dataset.source_modes": "采样来源模式",
         "evolution.chat_dataset.auto_capture": "自动采样",
@@ -195,6 +197,8 @@ FIELD_LABELS = {
         "prompt.default_components": "Default Prompt Components",
         "git.commit_message_profile": "Commit Message Model",
         "git.commit_message_prompt": "AI Commit Message Prompt",
+        "network.proxy_enabled": "Enable Proxy",
+        "network.proxy_url": "Proxy URL",
         "evolution.chat_dataset.enabled": "Enable Chat Dataset Capture",
         "evolution.chat_dataset.source_modes": "Capture Source Modes",
         "evolution.chat_dataset.auto_capture": "Auto Capture",
@@ -328,6 +332,8 @@ FIELD_HINTS = {
         "ui.max_log_entries": "UI 内部保留的日志条目数。",
         "git.commit_message_profile": "点击“AI 生成说明”时使用的任务模型。",
         "git.commit_message_prompt": "生成提交说明时的模板。可使用 {summary}、{files}、{diff}、{branch} 占位符。",
+        "network.proxy_enabled": "启用后，科研调研等真实公网请求会通过下方代理地址访问。",
+        "network.proxy_url": "填写 HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。",
     },
     "en": {
         "runtime.profile": "Sets the default runtime posture. Start with safe_local or debug in most cases.",
@@ -351,6 +357,8 @@ FIELD_HINTS = {
         "ui.max_log_entries": "How many UI log entries are retained.",
         "git.commit_message_profile": "Task model used by the AI commit message button.",
         "git.commit_message_prompt": "Prompt template for generated commit messages. Supports {summary}, {files}, {diff}, and {branch}.",
+        "network.proxy_enabled": "When enabled, real public research requests use the proxy URL below.",
+        "network.proxy_url": "HTTP/HTTPS proxy URL, for example http://127.0.0.1:7890.",
     },
 }
 

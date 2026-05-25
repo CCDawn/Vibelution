@@ -1045,6 +1045,36 @@ class NetworkConfig(BaseModel):
         default=True,
         description="是否验证 SSL 证书"
     )
+    proxy_enabled: bool = Field(
+        default=False,
+        description="是否启用 HTTP/HTTPS 代理"
+    )
+    proxy_url: str = Field(
+        default="",
+        description="代理服务器地址，例如 http://127.0.0.1:7890"
+    )
+
+    @field_validator("proxy_url")
+    @classmethod
+    def validate_proxy_url(cls, v: str) -> str:
+        """验证代理地址。"""
+        value = str(v or "").strip()
+        if not value:
+            return ""
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError(
+                "network.proxy_url must be an http(s) URL, "
+                "for example http://127.0.0.1:7890"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_proxy_settings(self) -> "NetworkConfig":
+        """启用代理时必须提供代理地址。"""
+        if self.proxy_enabled and not self.proxy_url:
+            raise ValueError("network.proxy_url is required when network.proxy_enabled is true")
+        return self
 
 
 # ============================================================================

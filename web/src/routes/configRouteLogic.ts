@@ -2,7 +2,7 @@ import type { ConfigDraftMeta, ConfigModelOption, ConfigModelPresetOption, Confi
 
 export type PublicConfigShape = Record<string, unknown>;
 
-export type ModelPresetGroupId = "official" | "relay" | "local";
+export type ModelPresetGroupId = "official" | "relay" | "openai_compatible" | "local";
 
 export type ModelPresetGroup = {
   id: ModelPresetGroupId;
@@ -52,6 +52,11 @@ export type ProfileDisplayState = {
   apiKeyState: string;
   apiKeySource: string;
   selectionDirty: boolean;
+};
+
+export type ModelEditability = {
+  editable: boolean;
+  deletable: boolean;
 };
 
 export function clonePublicConfig<T>(value: T): T {
@@ -140,16 +145,25 @@ export function resolveProfileDisplayState(
   };
 }
 
+export function resolveModelEditability(option: ConfigModelOption): ModelEditability {
+  return option.source === "model_library"
+    ? { editable: true, deletable: true }
+    : { editable: false, deletable: false };
+}
+
 export function presetCategory(preset: ConfigModelPresetOption): ModelPresetGroupId {
   const explicit = getString(preset.category).trim().toLowerCase();
-  if (explicit === "relay" || explicit === "local" || explicit === "official") {
+  if (explicit === "relay" || explicit === "openai_compatible" || explicit === "local" || explicit === "official") {
     return explicit;
   }
   const provider = asRecord(preset.provider);
   const kind = getString(provider.kind).trim().toLowerCase();
   const baseUrl = getString(provider.base_url).trim().toLowerCase();
-  if (kind === "relay" || kind === "openai_compatible") {
+  if (kind === "relay") {
     return "relay";
+  }
+  if (kind === "openai_compatible") {
+    return "openai_compatible";
   }
   if (kind === "local" || kind === "ollama" || baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1")) {
     return "local";
@@ -164,6 +178,7 @@ export function groupModelPresets(
   const groups: ModelPresetGroup[] = [
     { id: "official", label: labels.official, presets: [] },
     { id: "relay", label: labels.relay, presets: [] },
+    { id: "openai_compatible", label: labels.openai_compatible, presets: [] },
     { id: "local", label: labels.local, presets: [] },
   ];
   const groupById = new Map(groups.map((group) => [group.id, group]));
@@ -204,8 +219,8 @@ export function uniqueModelLibraryId(baseId: string, existingIds: Iterable<strin
 }
 
 export const PROVIDER_KIND_OPTIONS: ProviderKindOption[] = [
-  { value: "openai_compatible", label: "OpenAI 兼容" },
-  { value: "relay", label: "中转站" },
+  { value: "relay", label: "Relay Responses" },
+  { value: "openai_compatible", label: "OpenAI 兼容 API" },
   { value: "openai", label: "OpenAI" },
   { value: "deepseek", label: "DeepSeek" },
   { value: "minimax", label: "MiniMax" },
@@ -227,12 +242,21 @@ export function applyModelOptionToProfileDraft(
   const profile = ensureRecord(profiles, profileId);
 
   delete profile.overrides;
-  delete profile.model_ref;
   delete profile.provider_id;
   for (const key of modelDetailKeys) {
     delete profile[key];
   }
 
+  if (option.source === "model_library") {
+    profile.model_ref = option.model_id;
+    profile.overrides = {};
+    delete profile.provider;
+    delete profile.model;
+    delete profile.api_key_env;
+    return;
+  }
+
+  delete profile.model_ref;
   profile.provider = clonePublicConfig(asRecord(option.provider));
   profile.model = option.model;
   if (option.api_key_env) {

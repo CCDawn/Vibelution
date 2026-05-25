@@ -46,13 +46,13 @@
   --font-body: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
 
-  --route-topbar-padding: 10px 14px;
-  --route-topbar-gap: 12px;
-  --route-topbar-title-size: 1.28rem;
-  --route-topbar-subtitle-size: 0.84rem;
-  --route-summary-gap: 8px;
-  --route-summary-padding: 8px 10px;
-  --route-workspace-padding: 12px 14px 14px;
+  --route-topbar-padding: 8px 12px;
+  --route-topbar-gap: 10px;
+  --route-topbar-title-size: 1.12rem;
+  --route-topbar-subtitle-size: 0.78rem;
+  --route-summary-gap: 6px;
+  --route-summary-padding: 6px 8px;
+  --route-workspace-padding: 10px 12px 12px;
 }
 
 [data-theme="light"] {

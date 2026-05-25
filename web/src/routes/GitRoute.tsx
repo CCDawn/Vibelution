@@ -14,6 +14,7 @@ import {
   GitStatusSummary,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { GitDiffView } from "./GitDiffView";
 import {
@@ -94,6 +95,7 @@ export function GitRoute() {
   const [changePanelWidth, setChangePanelWidth] = useState(() =>
     storedPaneWidth(GIT_CHANGE_PANEL_WIDTH_KEY, GIT_CHANGE_PANEL_DEFAULT_WIDTH, GIT_CHANGE_PANEL_BOUNDS),
   );
+  const [changePanelCollapsed, setChangePanelCollapsed] = useState(false);
   const pageVisible = usePageVisibility();
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
@@ -270,9 +272,9 @@ export function GitRoute() {
   const workspaceStyle = useMemo(
     () =>
       ({
-        "--git-change-panel-width": `${changePanelWidth}px`,
+        "--git-change-panel-width": changePanelCollapsed ? "0px" : `${changePanelWidth}px`,
       }) as CSSProperties,
-    [changePanelWidth],
+    [changePanelCollapsed, changePanelWidth],
   );
   const resizeChangePanelLabel = lang === "zh" ? "调整变更列表宽度" : "Resize changed files";
 
@@ -297,11 +299,17 @@ export function GitRoute() {
     if (event.button !== 0) {
       return;
     }
+    if (changePanelCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginChangePanelResize(event.clientX);
   }
 
   function handleChangePanelResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (changePanelCollapsed) {
+      return;
+    }
     const nextWidth = keyboardPaneWidth(changePanelWidth, event.key, GIT_CHANGE_PANEL_BOUNDS);
     if (nextWidth === null) {
       return;
@@ -348,7 +356,7 @@ export function GitRoute() {
       ) : null}
 
       <div className={styles.workspace} style={workspaceStyle}>
-        <aside className={styles.changePanel}>
+        <aside className={changePanelCollapsed ? `${styles.changePanel} ${styles.paneCollapsed}` : styles.changePanel} aria-hidden={changePanelCollapsed}>
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{t("gitChangedScope")}</p>
@@ -416,11 +424,14 @@ export function GitRoute() {
           </div>
         </aside>
 
-        <button
-          type="button"
+        <PaneCollapseHandle
+          side="left"
+          collapsed={changePanelCollapsed}
+          separatorLabel={resizeChangePanelLabel}
+          collapseLabel={lang === "zh" ? "收起变更列表" : "Collapse changed files"}
+          expandLabel={lang === "zh" ? "展开变更列表" : "Expand changed files"}
           className={styles.resizeHandle}
-          aria-label={resizeChangePanelLabel}
-          title={resizeChangePanelLabel}
+          onToggle={() => setChangePanelCollapsed((current) => !current)}
           onPointerDown={handleChangePanelResizeStart}
           onKeyDown={handleChangePanelResizeKeyDown}
         />

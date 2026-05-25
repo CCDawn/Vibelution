@@ -1,10 +1,10 @@
 .page {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
   height: 100%;
   min-height: 0;
-  padding: 10px 14px 14px;
+  padding: 8px 12px 12px;
   overflow: hidden;
 }
 
@@ -12,14 +12,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--route-topbar-gap);
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .toolbarIntro {
   display: grid;
   gap: 2px;
   min-width: 260px;
+  max-width: min(760px, 100%);
 }
 
 .eyebrow {
@@ -33,14 +35,16 @@
 .title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.32rem;
+  font-size: var(--route-topbar-title-size);
   line-height: 1.08;
+  white-space: nowrap;
 }
 
 .subtitle {
   margin: 0;
-  max-width: 58ch;
+  max-width: none;
   color: var(--fg-secondary);
+  font-size: var(--route-topbar-subtitle-size);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -50,7 +54,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -69,8 +73,8 @@
 .segmentButton,
 .intakeButton,
 .filterButton {
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: 28px;
+  padding: 0 9px;
   border: 0;
   border-radius: 999px;
   background: transparent;
@@ -1293,6 +1297,13 @@
 .resizeHandle:focus-visible::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
   box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+}
+
+.paneCollapsed {
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  visibility: hidden;
 }
 
 .panelHeader {

@@ -140,6 +140,7 @@ class UIManager:
         self._current_context_tokens = 0
         self._context_token_limit = 0
         self._last_request_input_tokens = 0
+        self._context_compression_state: Dict[str, Any] = {}
         self._completed_evolutions = 0
         self._seen_closed_evolution_txns: set[str] = set()
         self._runtime_state_path = Path("workspace") / "ui_runtime_state.json"
@@ -199,6 +200,7 @@ class UIManager:
         self._current_context_tokens = 0
         self._context_token_limit = 0
         self._last_request_input_tokens = 0
+        self._context_compression_state = {}
         self._current_goal = ""
         self._status = "IDLE"
         self._shell_mode = "chat"
@@ -217,6 +219,8 @@ class UIManager:
             data = json.loads(self._runtime_state_path.read_text(encoding="utf-8"))
             self._total_input_tokens = max(0, int(data.get("total_input_tokens") or 0))
             self._total_output_tokens = max(0, int(data.get("total_output_tokens") or 0))
+            compression = data.get("context_compression")
+            self._context_compression_state = compression if isinstance(compression, dict) else {}
             if "completed_evolutions" in data:
                 self._completed_evolutions = max(0, int(data.get("completed_evolutions") or 0))
             else:
@@ -259,6 +263,7 @@ class UIManager:
                 "seen_closed_evolution_txns": sorted(self._seen_closed_evolution_txns)[-200:],
                 "current_context_tokens": max(0, int(self._current_context_tokens or 0)),
                 "context_token_limit": max(0, int(self._context_token_limit or 0)),
+                "context_compression": dict(self._context_compression_state or {}),
                 "turn_input_tokens": max(0, int(self._turn_input_tokens or 0)),
                 "turn_output_tokens": max(0, int(self._turn_output_tokens or 0)),
                 "status": str(self._status or "").upper(),
@@ -783,6 +788,53 @@ class UIManager:
         self._current_context_tokens = max(0, int(current_tokens or 0))
         self._last_request_input_tokens = self._current_context_tokens
         self._context_token_limit = max(0, int(total_tokens or 0))
+        self._save_runtime_state()
+        self._update_status_line()
+
+    def note_context_compression_config(
+        self,
+        *,
+        enabled: bool,
+        effective_token_limit: int,
+        context_window_limit: int,
+    ):
+        self._context_compression_state = {
+            **dict(self._context_compression_state or {}),
+            "enabled": bool(enabled),
+            "effectiveTokenLimit": max(0, int(effective_token_limit or 0)),
+            "contextWindowLimit": max(0, int(context_window_limit or 0)),
+            "updatedAt": datetime.now().isoformat(timespec="seconds"),
+        }
+        self._save_runtime_state()
+        self._update_status_line()
+
+    def note_context_compression_event(
+        self,
+        *,
+        level: str,
+        reason: str,
+        before_tokens: int,
+        after_tokens: int,
+        saved_tokens: int,
+        iteration: int,
+        summary_written: bool,
+    ):
+        event = {
+            "level": str(level or "").strip(),
+            "reason": str(reason or "").strip(),
+            "beforeTokens": max(0, int(before_tokens or 0)),
+            "afterTokens": max(0, int(after_tokens or 0)),
+            "savedTokens": max(0, int(saved_tokens or 0)),
+            "iteration": max(0, int(iteration or 0)),
+            "summaryWritten": bool(summary_written),
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        }
+        self._context_compression_state = {
+            **dict(self._context_compression_state or {}),
+            "lastCompression": event,
+            "compressionCount": max(0, int((self._context_compression_state or {}).get("compressionCount") or 0)) + 1,
+            "updatedAt": event["timestamp"],
+        }
         self._save_runtime_state()
         self._update_status_line()
 

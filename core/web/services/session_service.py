@@ -202,6 +202,7 @@ class SessionLiveOutputState:
 
     session_id: str
     turn_id: str = ""
+    stage: str = ""
     thought: str = ""
     content: str = ""
     mental_snapshot: dict[str, Any] | None = None
@@ -1910,6 +1911,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "mentalModelEnabled": mental_model_enabled,
         },
     )
+    _set_session_turn_progress_live_output(session_id, "agent_prepare", turn_id=turn_id)
     try:
         with mental_model_enabled_override(mental_model_enabled), _session_tool_workspace_override(session_workspace):
             initial_stop_reason = _get_turn_control_stop_reason(turn_control)
@@ -2107,9 +2109,15 @@ def _run_session_continuation_loop(
         resume_goal = _latest_unfinished_task_goal(session_id)
         if resume_goal:
             prompt = f"继续完成上一任务：{resume_goal}"
+            _set_session_turn_progress_live_output(
+                session_id,
+                "history_restore",
+                turn_id=getattr(turn_control, "turn_id", ""),
+            )
             _record_session_turn_lifecycle_event(
                 session_id,
                 "resume_goal_resolved",
+                turn_id=getattr(turn_control, "turn_id", ""),
                 outcome="running",
                 fields={
                     "resumeGoalLength": len(resume_goal),
@@ -2146,6 +2154,11 @@ def _run_session_continuation_loop(
                 "promptLength": len(prompt),
                 "historyMessageCount": len(history_messages),
             },
+        )
+        _set_session_turn_progress_live_output(
+            session_id,
+            "model_request",
+            turn_id=getattr(turn_control, "turn_id", ""),
         )
         result = agent.run_single_turn(initial_prompt=prompt)
         return_stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
@@ -2223,6 +2236,11 @@ def _run_session_continuation_loop(
             latest_result=result,
             history_messages=history_messages,
             turn_index=turn_index,
+        )
+        _set_session_turn_progress_live_output(
+            session_id,
+            "followup_prepare",
+            turn_id=getattr(turn_control, "turn_id", ""),
         )
         _record_session_turn_lifecycle_event(
             session_id,
@@ -3540,6 +3558,7 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         state = _SESSION_LIVE_OUTPUTS.get(session_id)
         if state is None:
             return None
+        stage = str(state.stage or "").strip()
         thought = str(state.thought or "").strip()
         content = str(state.content or "").strip()
         mental_snapshot = _normalize_mental_snapshot(state.mental_snapshot)
@@ -3554,6 +3573,8 @@ def _build_live_output_message(session_id: str) -> dict[str, Any] | None:
         "timestamp": timestamp,
         "streaming": True,
     }
+    if stage:
+        message["streamStage"] = stage
     if thought:
         message["thought"] = thought
     if mental_snapshot is not None:
@@ -3567,6 +3588,7 @@ def _set_session_live_output(
     session_id: str,
     *,
     turn_id: str = "",
+    stage: Any = _UNSET,
     thought: Any = _UNSET,
     content: Any = _UNSET,
     mental_snapshot: Any = _UNSET,
@@ -3588,6 +3610,8 @@ def _set_session_live_output(
             _SESSION_LIVE_OUTPUTS[session_id] = state
         elif output_turn_id and not state.turn_id:
             state.turn_id = output_turn_id
+        if stage is not _UNSET:
+            state.stage = str(stage or "").strip()
         if thought is not _UNSET:
             state.thought = _sanitize_thought_text(thought)
         if content is not _UNSET:
@@ -3603,14 +3627,53 @@ def _set_session_live_output(
 
 
 def _set_session_waiting_live_output(session_id: str, *, turn_id: str = "") -> None:
-    _set_session_live_output(
-        session_id,
-        turn_id=turn_id,
-        content=text_for(
-            get_web_language(),
-            zh="正在等待模型响应...",
-            en="Waiting for the model response...",
+    _set_session_turn_progress_live_output(session_id, "context_prepare", turn_id=turn_id)
+
+
+def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_id: str = "") -> None:
+    language = get_web_language()
+    stage_key = str(stage or "").strip().lower()
+    labels = {
+        "context_prepare": text_for(
+            language,
+            zh="正在准备对话上下文...",
+            en="Preparing the conversation context...",
         ),
+        "agent_prepare": text_for(
+            language,
+            zh="正在唤起对话 agent...",
+            en="Preparing the conversation agent...",
+        ),
+        "history_restore": text_for(
+            language,
+            zh="正在恢复上一轮对话记忆...",
+            en="Restoring the previous conversation memory...",
+        ),
+        "model_request": text_for(
+            language,
+            zh="正在请求模型，等待首个响应片段...",
+            en="Requesting the model and waiting for the first response chunk...",
+        ),
+        "followup_prepare": text_for(
+            language,
+            zh="正在准备继续推进下一步...",
+            en="Preparing the next continuation step...",
+        ),
+    }
+    content = labels.get(
+        stage_key,
+        text_for(language, zh="正在等待模型响应...", en="Waiting for the model response..."),
+    )
+    _set_session_live_output(session_id, turn_id=turn_id, stage=stage_key, content=content)
+    _record_session_turn_lifecycle_event(
+        session_id,
+        f"ui_progress_{stage_key or 'waiting'}",
+        turn_id=turn_id,
+        outcome="running",
+        fields={
+            "progressStage": stage_key,
+            "messageLength": len(content),
+        },
     )
 
 
@@ -3627,6 +3690,7 @@ def _snapshot_session_live_output(session_id: str) -> SessionLiveOutputState | N
         return SessionLiveOutputState(
             session_id=session_id,
             turn_id=state.turn_id,
+            stage=state.stage,
             thought=state.thought,
             content=state.content,
             mental_snapshot=dict(state.mental_snapshot or {}) if isinstance(state.mental_snapshot, dict) else None,

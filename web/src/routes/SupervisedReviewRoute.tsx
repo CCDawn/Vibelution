@@ -13,6 +13,7 @@ import {
   EvolutionWorkbench,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { SupervisedWorkspaceControls } from "./SupervisedWorkspaceControls";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
@@ -45,6 +46,7 @@ export function SupervisedReviewRoute() {
   const [queuePanelWidth, setQueuePanelWidth] = useState(() =>
     storedPaneWidth(REVIEW_QUEUE_WIDTH_KEY, REVIEW_QUEUE_DEFAULT_WIDTH, REVIEW_QUEUE_BOUNDS),
   );
+  const [queuePanelCollapsed, setQueuePanelCollapsed] = useState(false);
   const pageVisible = usePageVisibility();
 
   const reviewQuery = useQuery({
@@ -212,9 +214,9 @@ export function SupervisedReviewRoute() {
   const workspaceStyle = useMemo(
     () =>
       ({
-        "--review-queue-width": `${queuePanelWidth}px`,
+        "--review-queue-width": queuePanelCollapsed ? "0px" : `${queuePanelWidth}px`,
       }) as CSSProperties,
-    [queuePanelWidth],
+    [queuePanelCollapsed, queuePanelWidth],
   );
   const resizeQueueLabel = lang === "zh" ? "调整样本列表宽度" : "Resize sample list";
 
@@ -308,11 +310,17 @@ export function SupervisedReviewRoute() {
     if (event.button !== 0) {
       return;
     }
+    if (queuePanelCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginQueueResize(event.clientX);
   }
 
   function handleQueueResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (queuePanelCollapsed) {
+      return;
+    }
     const nextWidth = keyboardPaneWidth(queuePanelWidth, event.key, REVIEW_QUEUE_BOUNDS);
     if (nextWidth === null) {
       return;
@@ -402,7 +410,7 @@ export function SupervisedReviewRoute() {
       </section>
 
       <div className={styles.workspace} style={workspaceStyle}>
-        <aside className={styles.queuePanel}>
+        <aside className={queuePanelCollapsed ? `${styles.queuePanel} ${styles.paneCollapsed}` : styles.queuePanel} aria-hidden={queuePanelCollapsed}>
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.eyebrow}>{lang === "zh" ? "待审队列" : "Review queue"}</p>
@@ -548,11 +556,14 @@ export function SupervisedReviewRoute() {
           )}
         </aside>
 
-        <button
-          type="button"
+        <PaneCollapseHandle
+          side="left"
+          collapsed={queuePanelCollapsed}
+          separatorLabel={resizeQueueLabel}
+          collapseLabel={lang === "zh" ? "收起样本列表" : "Collapse sample list"}
+          expandLabel={lang === "zh" ? "展开样本列表" : "Expand sample list"}
           className={styles.resizeHandle}
-          aria-label={resizeQueueLabel}
-          title={resizeQueueLabel}
+          onToggle={() => setQueuePanelCollapsed((current) => !current)}
           onPointerDown={handleQueueResizeStart}
           onKeyDown={handleQueueResizeKeyDown}
         />

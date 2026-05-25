@@ -603,6 +603,14 @@ class SelfEvolvingAgent:
             token_budget=self._effective_max_token_limit,
             compression_llm=get_llm_client(role="compression", config=self.config),
         )
+        try:
+            get_ui().note_context_compression_config(
+                enabled=bool(self.config.context_compression.enabled),
+                effective_token_limit=self._effective_max_token_limit,
+                context_window_limit=getattr(self, "_context_window_limit", self._effective_max_token_limit),
+            )
+        except Exception:
+            pass
 
     def _compress_messages(self, messages: list, iteration: int, reason: str = ""):
         """执行消息压缩。返回 (messages, should_break)。"""
@@ -661,13 +669,28 @@ class SelfEvolvingAgent:
         )
 
         # 写入 COMPRESS_SUMMARY.md
+        summary_written = False
         if summary:
             try:
                 self.prompt_manager.update_state_memory(
                     f"[压缩摘要 | iter={iteration} | {level.value}]\n{summary}"
                 )
+                summary_written = True
             except Exception:
                 pass
+
+        try:
+            ui.note_context_compression_event(
+                level=level.value,
+                reason=combined_reason,
+                before_tokens=current_tokens,
+                after_tokens=after_tokens,
+                saved_tokens=token_saved,
+                iteration=iteration,
+                summary_written=summary_written,
+            )
+        except Exception:
+            pass
 
         # 更新状态
         try:

@@ -29,6 +29,7 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { ConversationView } from "../components/conversation/ConversationView";
+import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./SelfEvolutionTrack.module.css";
@@ -227,7 +228,7 @@ export function SelfEvolutionTrack({
   transactions,
   loading,
 }: SelfEvolutionTrackProps) {
-  const { t, statusLabel } = useAppI18n();
+  const { lang, t, statusLabel } = useAppI18n();
   const [worktreePage, setWorktreePage] = useState(1);
   const [activePage, setActivePage] = useState<"workspace" | "status">("workspace");
   const [selectedHistoryTxnIds, setSelectedHistoryTxnIds] = useState<string[]>([]);
@@ -238,6 +239,7 @@ export function SelfEvolutionTrack({
     const saved = Number(window.localStorage.getItem(SELF_SIDEBAR_WIDTH_STORAGE_KEY) || "");
     return Number.isFinite(saved) ? Math.max(280, Math.min(420, saved)) : 320;
   });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pageVisible = usePageVisibility();
   const petQuery = useQuery({
     queryKey: queryKeys.petSummary(),
@@ -489,6 +491,9 @@ export function SelfEvolutionTrack({
   }, [visibleTransactionIds]);
 
   function beginSidebarResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    if (sidebarCollapsed) {
+      return;
+    }
     const startX = event.clientX;
     const startWidth = sidebarWidth;
 
@@ -567,8 +572,18 @@ export function SelfEvolutionTrack({
       </div>
 
       {activePage === "workspace" ? (
-        <div className={styles.workspaceLayout} style={{ ["--self-sidebar-width" as string]: `${sidebarWidth}px` }}>
-          <aside className={`${styles.sideColumn} ${styles.sideColumnScrollable}`}>
+        <div
+          className={styles.workspaceLayout}
+          style={{ ["--self-sidebar-width" as string]: sidebarCollapsed ? "0px" : `${sidebarWidth}px` }}
+        >
+          <aside
+            className={
+              sidebarCollapsed
+                ? `${styles.sideColumn} ${styles.sideColumnScrollable} ${styles.paneCollapsed}`
+                : `${styles.sideColumn} ${styles.sideColumnScrollable}`
+            }
+            aria-hidden={sidebarCollapsed}
+          >
             <section className={styles.surface}>
               <div className={styles.sectionHeader}>
                 <div>
@@ -681,10 +696,14 @@ export function SelfEvolutionTrack({
             </section>
           </aside>
 
-          <button
-            type="button"
+          <PaneCollapseHandle
+            side="left"
+            collapsed={sidebarCollapsed}
+            separatorLabel={lang === "zh" ? "调整自进化侧栏宽度" : "Resize self-evolution sidebar"}
+            collapseLabel={lang === "zh" ? "收起自进化侧栏" : "Collapse self-evolution sidebar"}
+            expandLabel={lang === "zh" ? "展开自进化侧栏" : "Expand self-evolution sidebar"}
             className={styles.sidebarResizer}
-            aria-label={t("petSpace")}
+            onToggle={() => setSidebarCollapsed((current) => !current)}
             onPointerDown={beginSidebarResize}
           />
 

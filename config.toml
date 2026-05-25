@@ -531,6 +531,8 @@ user_agent = "Mozilla/5.0 (compatible; SelfEvolvingAgent/1.0)"
 max_retries = 3
 retry_delay = 1
 verify_ssl = true
+proxy_enabled = false
+proxy_url = ""
 
 [evolution]
 enabled = true
