@@ -6,6 +6,7 @@ import {
 import {
   applyModelOptionToProfileDraft,
   collectModelDetailKeys,
+  defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
   groupModelPresets,
   hasPendingSecretChanges,
@@ -117,6 +118,13 @@ describe("configRouteLogic", () => {
     expect(profile.primary.transport).toBe("chat_completions");
     expect(profile.primary.contract).toBe("tool_chat");
     expect(profile.primary.timeout).toBe(120);
+  });
+
+  it("derives the backend default model api key env for custom relay presets", () => {
+    expect(defaultModelApiKeyEnv("custom_openai_compatible_relay")).toBe(
+      "VIBELUTION_LLM_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
+    );
+    expect(defaultModelApiKeyEnv("custom-relay.gpt")).toBe("VIBELUTION_LLM_CUSTOM_RELAY_GPT_API_KEY");
   });
 
   it("removes profile api_key_env when the selected model has none", () => {

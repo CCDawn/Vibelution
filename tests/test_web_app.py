@@ -6834,6 +6834,85 @@ def test_config_workspace_draft_model_allows_approved_ai_pixel_relay_host(monkey
     assert updated["provider"]["base_url"] == "https://ai-pixel.online"
 
 
+def test_config_workspace_draft_model_allows_custom_openai_compatible_relay(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/draft/add-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "presetId": "custom_openai_compatible_relay",
+            "modelId": "custom_relay",
+            "provider": {
+                "kind": "openai_compatible",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://relay.example.com/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 65536,
+            },
+            "model": "custom-gpt",
+            "label": "Custom Relay",
+            "details": {
+                "transport": "chat_completions",
+                "contract": "tool_chat",
+                "streaming": True,
+            },
+            "apiKeyEnv": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+            "apiKey": "draft-secret",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    updated = payload["publicConfig"]["llm"]["model_library"]["custom_relay"]
+    assert updated["provider"]["kind"] == "openai_compatible"
+    assert updated["provider"]["base_url"] == "https://relay.example.com/v1"
+    assert updated["api_key_env"] == "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY"
+    assert "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY" in payload["draftMeta"]["pending_api_keys"]
+
+
+def test_config_workspace_draft_model_rejects_custom_relay_localhost(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/draft/add-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "presetId": "custom_openai_compatible_relay",
+            "modelId": "custom_relay",
+            "provider": {
+                "kind": "openai_compatible",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "http://127.0.0.1:11434/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 65536,
+            },
+            "model": "custom-gpt",
+            "label": "Custom Relay",
+            "details": {
+                "transport": "chat_completions",
+                "contract": "tool_chat",
+                "streaming": True,
+            },
+            "apiKeyEnv": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "localhost" in response.json()["detail"] or "https" in response.json()["detail"]
+
+
 def test_config_workspace_apply_rejects_stale_base_hash(monkeypatch):
     original = copy.deepcopy(load_public_config())
     stale_hash = public_config_hash(original)

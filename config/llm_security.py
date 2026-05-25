@@ -188,6 +188,12 @@ def validate_llm_provider_target(provider: Any, *, context: str = "provider", re
             raise ValueError(f"{context}.{label}.base_url targets a non-public network address")
         raise ValueError(f"{context}.{label}.base_url for remote providers must use an approved provider host")
 
+    if kind == "openai_compatible":
+        if resolve_dns:
+            port = parsed.port or (443 if scheme == "https" else 80)
+            _assert_resolved_host_is_public(host, port, context=f"{context}.{label}.base_url")
+        return
+
     allowed_hosts = _REMOTE_PROVIDER_HOSTS.get(kind)
     if not allowed_hosts or host not in allowed_hosts:
         raise ValueError(f"{context}.{label}.base_url host is not approved for provider kind `{kind or 'unknown'}`")
