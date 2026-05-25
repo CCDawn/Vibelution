@@ -68,13 +68,18 @@ def default_port() -> int:
     return configured_backend_port()
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Launch the Vibelution web workbench")
     parser.add_argument("--host", default=DEFAULT_WORKBENCH_HOST)
     parser.add_argument("--port", type=int, default=default_port())
     parser.add_argument("--reload", action="store_true")
     parser.add_argument("--no-browser", action="store_true")
-    return parser.parse_args()
+    parser.add_argument(
+        "--managed-by-launcher",
+        action="store_true",
+        help="Mark this process as owned by the Vibelution launcher/runtime manager.",
+    )
+    return parser.parse_args(argv)
 
 
 def install_access_log_filters() -> None:

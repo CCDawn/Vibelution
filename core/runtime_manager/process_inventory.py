@@ -17,6 +17,7 @@ except Exception:  # pragma: no cover - dependency fallback for degraded install
 
 
 RESIDUAL_RUNTIME_KINDS = {"unmanaged_workbench", "unmanaged_frontend_dev_server"}
+MANAGED_WORKBENCH_MARKER = "--managed-by-launcher"
 
 
 @dataclass(frozen=True)
@@ -305,6 +306,8 @@ def _classify_repo_runtime_process(*, command_line: str, cwd: str, project_root:
         return ""
     normalized = command_line.replace("\\", "/").lower()
     if "scripts/web_workbench.py" in normalized:
+        if _has_token(normalized, MANAGED_WORKBENCH_MARKER):
+            return "managed_workbench_backend"
         return "unmanaged_workbench"
     if _looks_like_frontend_dev_server(normalized):
         return "unmanaged_frontend_dev_server"

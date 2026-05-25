@@ -28,6 +28,7 @@ $pythonDepsStampPath = Join-Path $launcherDir "python-deps.stamp"
 $frontendDepsStampPath = Join-Path $launcherDir "frontend-deps.stamp"
 $bindHost = "127.0.0.1"
 $configPath = Join-Path $projectDir "config.toml"
+$managedBackendMarkerArg = "--managed-by-launcher"
 
 function Resolve-ConfiguredWorkbenchPort {
     param([int]$DefaultPort = 8000)
@@ -2793,21 +2794,14 @@ function Get-ManagedBackendCandidatePids {
     $listenerPid = Get-ListeningPid $port
     if ($listenerPid) {
         $listenerProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid" -ErrorAction SilentlyContinue
-        $listenerLooksManaged = [bool](
-            $listenerProcess `
-            -and $listenerProcess.CommandLine `
-            -and $listenerProcess.CommandLine -match "scripts[\\/]+web_workbench\.py"
-        )
-        if ((-not $listenerLooksManaged) -and $state -and [int]$state.port -eq $port -and (Test-WebHealthy)) {
-            $listenerLooksManaged = $true
-        }
+        $listenerLooksManaged = Test-CommandLineLooksLikeManagedBackend -CommandLine ([string]$listenerProcess.CommandLine)
         if ($listenerLooksManaged) {
             [void]$pids.Add([int]$listenerPid)
         }
     }
 
     $scanPids = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.CommandLine -and $_.CommandLine -match "scripts[\\/]+web_workbench\.py" -and $_.CommandLine -match "--port\s+$port\b"
+        $_.CommandLine -and (Test-CommandLineLooksLikeManagedBackend -CommandLine ([string]$_.CommandLine)) -and $_.CommandLine -match "--port\s+$port\b"
     } | ForEach-Object {
         [int]$_.ProcessId
     })
@@ -2817,6 +2811,19 @@ function Get-ManagedBackendCandidatePids {
     }
 
     return @($pids | Sort-Object -Unique)
+}
+
+function Test-CommandLineLooksLikeManagedBackend {
+    param([string]$CommandLine)
+
+    if (-not $CommandLine) {
+        return $false
+    }
+
+    return [bool](
+        $CommandLine -match "scripts[\\/]+web_workbench\.py" -and
+        $CommandLine -match "(^|\s)--managed-by-launcher(\s|$)"
+    )
 }
 
 function Get-PrimaryManagedBackendPid {
@@ -3079,6 +3086,7 @@ function Start-ManagedBackend {
                 health_status = "starting"
                 python_label = $PythonRuntime.Label
                 python_command = $PythonRuntime.FilePath
+                managed_marker = $managedBackendMarkerArg
             }
         }
         Write-RuntimeSceneEvent `
@@ -3087,11 +3095,11 @@ function Start-ManagedBackend {
             -EventCode "backend.start.requested" `
             -Message "Starting bundled backend service." `
             -Outcome "started" `
-            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label }
+            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label; managed_marker = $managedBackendMarkerArg }
     }
     $proc = Start-RedirectedBackgroundProcess `
         -CommandPath $PythonRuntime.FilePath `
-        -ArgumentList @($PythonRuntime.PrefixArgs + @("scripts/web_workbench.py", "--host", $bindHost, "--port", "$port", "--no-browser")) `
+        -ArgumentList @($PythonRuntime.PrefixArgs + @("scripts/web_workbench.py", "--host", $bindHost, "--port", "$port", "--no-browser", $managedBackendMarkerArg)) `
         -WorkingDirectory $projectDir `
         -StdoutPath $backendStdoutLog `
         -StderrPath $backendStderrLog
@@ -3104,7 +3112,7 @@ function Start-ManagedBackend {
             -EventCode "backend.process.started" `
             -Message "Backend process started." `
             -Outcome "started" `
-            -Fields @{ pid = $proc.Id }
+            -Fields @{ pid = $proc.Id; managed_marker = $managedBackendMarkerArg }
     }
 
     if (-not (Wait-ForBackendHealthy -ProcessId $proc.Id)) {
@@ -3564,14 +3572,7 @@ function Stop-ManagedBackendProcesses {
 
     $remainingProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $remainingPortPid" -ErrorAction SilentlyContinue
     $remainingHealthy = [bool](Test-WebHealthy)
-    $remainingLooksManaged = [bool](
-        $remainingProcess `
-        -and $remainingProcess.CommandLine `
-        -and $remainingProcess.CommandLine -match "scripts[\\/]+web_workbench\.py"
-    )
-    if ((-not $remainingLooksManaged) -and $state -and [int]$state.port -eq $port -and $remainingHealthy) {
-        $remainingLooksManaged = $true
-    }
+    $remainingLooksManaged = Test-CommandLineLooksLikeManagedBackend -CommandLine ([string]$remainingProcess.CommandLine)
     Write-LauncherControlLog `
         -Event "launcher.backend.stop.port_owner_detected" `
         -Message "Backend port still had a listener after stopping tracked candidates." `

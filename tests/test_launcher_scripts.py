@@ -59,6 +59,23 @@ def test_web_workbench_access_log_filter_installs_once(monkeypatch):
         logger.filters = original_filters
 
 
+def test_web_workbench_accepts_managed_launcher_marker():
+    from scripts import web_workbench
+
+    args = web_workbench.parse_args(
+        [
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "8000",
+            "--no-browser",
+            "--managed-by-launcher",
+        ]
+    )
+
+    assert args.managed_by_launcher is True
+
+
 def _powershell_exe() -> str:
     exe = shutil.which("powershell") or shutil.which("pwsh")
     if not exe:
@@ -639,6 +656,21 @@ $functionAst = $ast.Find({
     if ($functionText -notmatch "Start-RedirectedBackgroundProcess") {
         throw "$functionName does not use the redirected no-window helper."
     }
+}
+
+$managedBackendAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Start-ManagedBackend"
+}, $true)
+$managedBackendText = $managedBackendAst.Extent.Text
+if ($managedBackendText -notmatch '--managed-by-launcher') {
+    if ($managedBackendText -notmatch 'managedBackendMarkerArg' -or $managedBackendText -notmatch 'managed_marker') {
+        throw "Start-ManagedBackend does not tag backend processes as launcher-managed."
+    }
+}
+if ($managedBackendText -notmatch 'managed_marker') {
+    throw "Start-ManagedBackend does not log the managed backend marker."
 }
 
 $browserAst = $ast.Find({
@@ -2304,6 +2336,15 @@ $functionAst = $ast.Find({
 if ($null -eq $functionAst) {
     throw "Get-ManagedBackendCandidatePids was not found."
 }
+$managedBackendFunctionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Test-CommandLineLooksLikeManagedBackend"
+}, $true)
+if ($null -eq $managedBackendFunctionAst) {
+    throw "Test-CommandLineLooksLikeManagedBackend was not found."
+}
+. ([scriptblock]::Create($managedBackendFunctionAst.Extent.Text))
 . ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:port = 8000
@@ -2331,7 +2372,7 @@ function Get-CimInstance {
     if ($Filter -match "ProcessId = 14916") {
         return [pscustomobject]@{
             ProcessId = 14916
-            CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser"
+            CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser --managed-by-launcher"
         }
     }
     return @()
@@ -2341,6 +2382,79 @@ function Test-WebHealthy { return [bool]$script:healthy }
 $pids = @(Get-ManagedBackendCandidatePids)
 if (($pids -join ",") -ne "6544,14916") {
     throw "Expected tracked launch and listener PIDs, got $($pids -join ',')."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_backend_candidates_do_not_adopt_unmarked_manual_listener(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @("Test-CommandLineLooksLikeManagedBackend", "Get-ManagedBackendCandidatePids")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:port = 8000
+function Get-State {
+    return [pscustomobject]@{
+        backendPid = 0
+        backendLaunchPid = 0
+        port = 8000
+    }
+}
+function Test-ProcessAlive { param([int]$ProcessId) return $false }
+function Get-ListeningPid {
+    param([int]$Port)
+    if ($Port -eq 8000) {
+        return 14916
+    }
+    return $null
+}
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if ($Filter -match "ProcessId = 14916") {
+        return [pscustomobject]@{
+            ProcessId = 14916
+            CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser"
+        }
+    }
+    return @()
+}
+function Test-WebHealthy { return $true }
+
+$pids = @(Get-ManagedBackendCandidatePids)
+if ($pids.Count -ne 0) {
+    throw "Expected unmarked manual backend listener to stay unadopted, got $($pids -join ',')."
 }
 
 Write-Output "ok"
@@ -2442,7 +2556,7 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-foreach ($functionName in @("Stop-ManagedBackendProcesses")) {
+foreach ($functionName in @("Test-CommandLineLooksLikeManagedBackend", "Stop-ManagedBackendProcesses")) {
     $functionAst = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -2468,6 +2582,8 @@ function Write-LauncherControlLog {
 function Get-State {
     return [pscustomobject]@{
         port = 8000
+        backendPid = 14916
+        backendLaunchPid = 6544
     }
 }
 function Get-ListeningPid {
@@ -2483,7 +2599,7 @@ function Get-CimInstance {
     if ($Filter -match "ProcessId = 14916") {
         return [pscustomobject]@{
             ProcessId = 14916
-            CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser"
+            CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser --managed-by-launcher"
         }
     }
     return @()
@@ -2748,15 +2864,17 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-$functionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq "Stop-ManagedBackendProcesses"
-}, $true)
-if ($null -eq $functionAst) {
-    throw "Stop-ManagedBackendProcesses was not found."
+foreach ($functionName in @("Test-CommandLineLooksLikeManagedBackend", "Stop-ManagedBackendProcesses")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
 }
-. ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:port = 8000
 $script:controlEvents = @()
@@ -2772,7 +2890,7 @@ function Get-CimInstance {
     param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
     return [pscustomobject]@{
         ProcessId = 14916
-        CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser"
+        CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser --managed-by-launcher"
     }
 }
 function Test-WebHealthy { return $true }
