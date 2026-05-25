@@ -2766,6 +2766,43 @@ function Write-PythonRuntimeSelectedLog {
     }
 }
 
+function Resolve-ManagedBackendPythonRuntime {
+    param([pscustomobject]$PythonRuntime)
+
+    if (-not $PythonRuntime) {
+        throw "Python runtime was not resolved before backend startup."
+    }
+
+    $prefixArgs = @($PythonRuntime.PrefixArgs)
+    $runtimePath = [string]$PythonRuntime.FilePath
+    $runtimeLabel = [string]$PythonRuntime.Label
+    $selectedPath = $runtimePath
+    $selectedLabel = $runtimeLabel
+    $avoidance = "hidden_redirected_process"
+    $baseRuntimePath = $runtimePath
+
+    if ($prefixArgs.Count -eq 0 -and $runtimePath) {
+        $fileName = [System.IO.Path]::GetFileName($runtimePath)
+        if ($fileName -and $fileName.Equals("python.exe", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $pythonwPath = Join-Path (Split-Path -Parent $runtimePath) "pythonw.exe"
+            if (Test-Path -LiteralPath $pythonwPath) {
+                $selectedPath = (Resolve-Path -LiteralPath $pythonwPath).Path
+                $selectedLabel = "$runtimeLabel service pythonw"
+                $avoidance = "pythonw_service_runtime"
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        FilePath = $selectedPath
+        PrefixArgs = $prefixArgs
+        Label = $selectedLabel
+        BaseFilePath = $baseRuntimePath
+        BaseLabel = $runtimeLabel
+        ConsoleHostAvoidance = $avoidance
+    }
+}
+
 function Resolve-EdgeExecutable {
     $pathCandidates = @()
 
@@ -3580,6 +3617,7 @@ function Focus-ManagedBrowserWindow {
 function Start-ManagedBackend {
     param([pscustomobject]$PythonRuntime)
 
+    $serviceRuntime = Resolve-ManagedBackendPythonRuntime -PythonRuntime $PythonRuntime
     $backendStdoutLog = if ($script:currentRuntimeSceneId) {
         Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).BackendStdout
     } else {
@@ -3592,14 +3630,17 @@ function Start-ManagedBackend {
     }
 
     Write-Note "Starting bundled web service at $url ..."
-    Write-Note "Python runtime: $($PythonRuntime.Label) -> $($PythonRuntime.FilePath)"
+    Write-Note "Python runtime: $($serviceRuntime.Label) -> $($serviceRuntime.FilePath)"
     if ($script:currentRuntimeSceneId) {
         Update-RuntimeSceneManifest @{
             backend = @{
                 pid = 0
                 health_status = "starting"
-                python_label = $PythonRuntime.Label
-                python_command = $PythonRuntime.FilePath
+                python_label = $serviceRuntime.Label
+                python_command = $serviceRuntime.FilePath
+                python_base_label = $serviceRuntime.BaseLabel
+                python_base_command = $serviceRuntime.BaseFilePath
+                console_host_avoidance = $serviceRuntime.ConsoleHostAvoidance
                 managed_marker = $managedBackendMarkerArg
             }
         }
@@ -3609,11 +3650,20 @@ function Start-ManagedBackend {
             -EventCode "backend.start.requested" `
             -Message "Starting bundled backend service." `
             -Outcome "started" `
-            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; managed_marker = $managedBackendMarkerArg }
+            -Fields @{
+                host = $bindHost
+                port = $port
+                python_label = $serviceRuntime.Label
+                python_command = $serviceRuntime.FilePath
+                python_base_label = $serviceRuntime.BaseLabel
+                python_base_command = $serviceRuntime.BaseFilePath
+                console_host_avoidance = $serviceRuntime.ConsoleHostAvoidance
+                managed_marker = $managedBackendMarkerArg
+            }
     }
     $proc = Start-RedirectedBackgroundProcess `
-        -CommandPath $PythonRuntime.FilePath `
-        -ArgumentList @($PythonRuntime.PrefixArgs + @("scripts/web_workbench.py", "--host", $bindHost, "--port", "$port", "--no-browser", $managedBackendMarkerArg)) `
+        -CommandPath $serviceRuntime.FilePath `
+        -ArgumentList @($serviceRuntime.PrefixArgs + @("scripts/web_workbench.py", "--host", $bindHost, "--port", "$port", "--no-browser", $managedBackendMarkerArg)) `
         -WorkingDirectory $projectDir `
         -StdoutPath $backendStdoutLog `
         -StderrPath $backendStderrLog
@@ -3626,7 +3676,12 @@ function Start-ManagedBackend {
             -EventCode "backend.process.started" `
             -Message "Backend process started." `
             -Outcome "started" `
-            -Fields @{ pid = $proc.Id; managed_marker = $managedBackendMarkerArg }
+            -Fields @{
+                pid = $proc.Id
+                managed_marker = $managedBackendMarkerArg
+                python_command = $serviceRuntime.FilePath
+                console_host_avoidance = $serviceRuntime.ConsoleHostAvoidance
+            }
     }
 
     if (-not (Wait-ForBackendHealthy -ProcessId $proc.Id)) {
