@@ -147,6 +147,7 @@ DISPLAY_NAME_RESULT_LABELS = {
     "app window closed": "窗口关闭",
     "startup_failed": "启动失败",
     "backend_exited": "后端退出",
+    "state_reconciled": "状态校准",
     "success": "成功",
     "succeeded": "成功",
     "failed": "失败",
@@ -177,6 +178,7 @@ PACKAGE_INDEX_RESULT_TOKENS = {
     "app window closed": "window-closed",
     "startup_failed": "startup-failed",
     "backend_exited": "backend-exited",
+    "state_reconciled": "state-reconciled",
     "success": "success",
     "succeeded": "success",
     "failed": "failed",
@@ -189,6 +191,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
     scenes: list[dict] = []
     for scene_dir in _scene_dirs():
         manifest = _load_scene_manifest(scene_dir)
+        _repair_runtime_scene_from_reconciliation_history(scene_dir, manifest)
         scene_id = _scene_id(scene_dir, manifest)
         if not scene_id:
             continue
@@ -243,6 +246,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
 
     scene_dir = _resolve_scene_dir(scene_id)
     manifest = _load_scene_manifest(scene_dir)
+    _repair_runtime_scene_from_reconciliation_history(scene_dir, manifest)
     detail_scene_id = _scene_id(scene_dir, manifest)
     timeline = _read_scene_timeline(scene_dir)
     raw_files = _list_raw_files(scene_dir)
@@ -615,6 +619,7 @@ def record_runtime_scene_event(
         if lifecycle:
             event_payload["lifecycle"] = True
         _append_scene_event(scene_dir, component_name, event_payload)
+        _maybe_close_runtime_scene_from_reconciliation(scene_dir, manifest, event_name, normalized_fields, timestamp)
         _update_runtime_scene_package_manifest(scene_dir, manifest)
 
     return {
@@ -622,6 +627,116 @@ def record_runtime_scene_event(
         "runtimeSceneId": scene_id,
         "recordedAt": timestamp,
         "path": normalized_child_path,
+    }
+
+
+def _maybe_close_runtime_scene_from_reconciliation(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    event_name: str,
+    fields: dict[str, Any],
+    timestamp: str,
+) -> bool:
+    if event_name != "runtime.snapshot.reconciled":
+        return False
+    if str(manifest.get("status") or "").strip().lower() not in {"", "running", "starting", "queued", "opening", "stopping", "closing"}:
+        return False
+    observed_state = str(fields.get("observedState") or "").strip().lower()
+    desired_state = str(fields.get("desiredState") or "").strip().lower()
+    manager_running = bool(fields.get("managerRunning"))
+    backend_pid = _coerce_int(fields.get("backendPid"), default=0)
+    browser_pid = _coerce_int(fields.get("browserWindowPid"), default=0)
+    if observed_state != "closed" or desired_state != "closed" or manager_running or backend_pid or browser_pid:
+        return False
+
+    manifest["status"] = "stopped"
+    manifest["result"] = str(manifest.get("result") or "state_reconciled")
+    manifest["stop_reason"] = str(manifest.get("stop_reason") or "runtime manager observed all workbench processes closed")
+    manifest["ended_at"] = str(manifest.get("ended_at") or timestamp or _now_utc())
+
+    backend = manifest.get("backend") if isinstance(manifest.get("backend"), dict) else {}
+    backend.update({"health_status": "stopped", "pid": 0})
+    manifest["backend"] = backend
+
+    browser = manifest.get("browser") if isinstance(manifest.get("browser"), dict) else {}
+    browser.update({"status": "stopped", "window_pid": 0, "launch_pid": 0})
+    manifest["browser"] = browser
+
+    supervisor = manifest.get("supervisor") if isinstance(manifest.get("supervisor"), dict) else {}
+    if supervisor:
+        supervisor.update({"status": "stopped", "pid": 0})
+        manifest["supervisor"] = supervisor
+
+    runtime_manager = manifest.get("runtime_manager") if isinstance(manifest.get("runtime_manager"), dict) else {}
+    runtime_manager.update(
+        {
+            "desired_state": "closed",
+            "observed_state": "closed",
+            "phase": "steady",
+            "failure_message": "",
+            "reconciled_at": timestamp,
+        }
+    )
+    manifest["runtime_manager"] = runtime_manager
+    return True
+
+
+def _repair_runtime_scene_from_reconciliation_history(scene_dir: Path, manifest: dict[str, Any]) -> bool:
+    if str(manifest.get("status") or "").strip().lower() not in {"", "running", "starting", "queued", "opening", "stopping", "closing"}:
+        return False
+    reconciliation = _latest_closed_reconciliation_event(scene_dir)
+    if reconciliation is None:
+        return False
+    changed = _maybe_close_runtime_scene_from_reconciliation(
+        scene_dir,
+        manifest,
+        "runtime.snapshot.reconciled",
+        reconciliation["fields"],
+        reconciliation["timestamp"],
+    )
+    if changed:
+        _update_runtime_scene_package_manifest(scene_dir, manifest)
+    return changed
+
+
+def _latest_closed_reconciliation_event(scene_dir: Path) -> dict[str, Any] | None:
+    latest: dict[str, Any] | None = None
+    latest_timestamp = ""
+    for row in _read_jsonl_file(scene_dir / TIMELINE_PATH):
+        event_name = str(row.get("event_code") or "").strip()
+        timestamp = str(row.get("ts") or "").strip()
+        if not timestamp:
+            continue
+        if _is_runtime_scene_reopen_event(event_name) and latest_timestamp and timestamp > latest_timestamp:
+            latest = None
+            latest_timestamp = ""
+            continue
+        if event_name != "runtime.snapshot.reconciled":
+            continue
+        fields = row.get("fields") if isinstance(row.get("fields"), dict) else {}
+        if not _closed_reconciliation_fields(fields):
+            continue
+        latest = {"timestamp": _normalize_event_timestamp(timestamp) or timestamp, "fields": fields}
+        latest_timestamp = timestamp
+    return latest
+
+
+def _closed_reconciliation_fields(fields: dict[str, Any]) -> bool:
+    observed_state = str(fields.get("observedState") or "").strip().lower()
+    desired_state = str(fields.get("desiredState") or "").strip().lower()
+    manager_running = bool(fields.get("managerRunning"))
+    backend_pid = _coerce_int(fields.get("backendPid"), default=0)
+    browser_pid = _coerce_int(fields.get("browserWindowPid"), default=0)
+    return observed_state == "closed" and desired_state == "closed" and not manager_running and backend_pid == 0 and browser_pid == 0
+
+
+def _is_runtime_scene_reopen_event(event_name: str) -> bool:
+    return str(event_name or "").strip() in {
+        "runtime.scene.ready",
+        "backend.health.succeeded",
+        "browser.window.opened",
+        "workbench.open.already_satisfied",
+        "workbench.open.verification_succeeded",
     }
 
 

@@ -784,6 +784,7 @@ def submit_session_message(
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
         )
+    _set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
     _record_session_cycle_message(
         conversation_id,
         user_entry,
@@ -964,6 +965,7 @@ def edit_and_resubmit_session_message(
             updated_at=user_entry["timestamp"],
         )
 
+    _set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
     _record_session_message_edit_resubmit_event(
         conversation_id,
         target_message_id=target_message_id,
@@ -3598,6 +3600,18 @@ def _set_session_live_output(
         if not state.thought and not state.content and state.mental_snapshot is None and not state.tool_calls:
             _SESSION_LIVE_OUTPUTS.pop(session_id, None)
     _publish_session_detail_snapshot(session_id)
+
+
+def _set_session_waiting_live_output(session_id: str, *, turn_id: str = "") -> None:
+    _set_session_live_output(
+        session_id,
+        turn_id=turn_id,
+        content=text_for(
+            get_web_language(),
+            zh="正在等待模型响应...",
+            en="Waiting for the model response...",
+        ),
+    )
 
 
 def _clear_session_live_output(session_id: str) -> None:

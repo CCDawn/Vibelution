@@ -1712,6 +1712,109 @@ def test_runtime_scene_event_helper_records_structured_lifecycle_event(tmp_path,
     assert manifest["package"]["lifecycle_path"] == "lifecycle.jsonl"
 
 
+def test_runtime_scene_reconciliation_closes_running_package(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-reconciled", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-reconciled",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = runtime_scene_service.record_runtime_scene_event(
+        "runtime_manager",
+        "runtime",
+        "runtime.snapshot.reconciled",
+        message="Runtime manager runtime event: runtime.snapshot.reconciled",
+        outcome="observed",
+        occurred_at="2026-05-18T12:05:00Z",
+        fields={
+            "managerRunning": False,
+            "managerPid": 0,
+            "desiredState": "closed",
+            "observedState": "closed",
+            "backendPid": 0,
+            "browserWindowPid": 0,
+            "lifecycleConsistency": "consistent",
+        },
+        lifecycle=True,
+    )
+
+    assert response["accepted"] is True
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "stopped"
+    assert manifest["result"] == "state_reconciled"
+    assert manifest["ended_at"] == "2026-05-18T12:05:00+00:00"
+    assert manifest["backend"]["pid"] == 0
+    assert manifest["backend"]["health_status"] == "stopped"
+    assert manifest["browser"]["window_pid"] == 0
+    assert manifest["browser"]["status"] == "stopped"
+    assert manifest["runtime_manager"]["observed_state"] == "closed"
+
+    package_index = json.loads((scene_dir / "package_index.json").read_text(encoding="utf-8"))
+    assert package_index["ended_at"] == "2026-05-18T12:05:00+00:00"
+    assert package_index["duration_seconds"] == 300
+    assert package_index["index_key"].endswith("_workbench-start_state-reconciled")
+    assert "state-reconciled" in package_index["tags"]
+
+    summary = json.loads((scene_dir / "summary.json").read_text(encoding="utf-8"))
+    assert summary["status"] == "stopped"
+    assert summary["result"] == "state_reconciled"
+    assert summary["display_name"].endswith("状态校准")
+
+
+def test_runtime_scene_detail_repairs_historical_running_package_from_reconciliation(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-history", status="running")
+    with (scene_dir / "timeline.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "runtime_scene_id": "scene-history",
+                    "ts": "2026-05-18T12:05:00Z",
+                    "seq": 1,
+                    "component": "runtime_manager",
+                    "phase": "runtime",
+                    "event_code": "runtime.snapshot.reconciled",
+                    "level": "info",
+                    "outcome": "observed",
+                    "message": "Runtime manager runtime event: runtime.snapshot.reconciled",
+                    "fields": {
+                        "managerRunning": False,
+                        "managerPid": 0,
+                        "desiredState": "closed",
+                        "observedState": "closed",
+                        "backendPid": 0,
+                        "browserWindowPid": 0,
+                        "lifecycleConsistency": "consistent",
+                    },
+                    "raw_refs": [],
+                    "lifecycle": True,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+    manifest_before = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest_before["status"] == "running"
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    detail = runtime_scene_service.get_runtime_scene_detail("scene-history")
+
+    assert detail["status"] == "stopped"
+    assert detail["result"] == "state_reconciled"
+    assert detail["packageIndex"]["indexKey"].endswith("_workbench-start_state-reconciled")
+    manifest_after = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest_after["status"] == "stopped"
+    assert manifest_after["ended_at"] == "2026-05-18T12:05:00+00:00"
+
+
 def test_runtime_scene_lifecycle_fallback_indexes_operational_phases(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-lifecycle-fallback", status="running")
     timeline_path = scene_dir / "timeline.jsonl"
@@ -3024,8 +3127,10 @@ def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, m
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["role"] == "user"
-    assert payload["messages"][-1]["content"] == content
+    assert payload["messages"][-2]["role"] == "user"
+    assert payload["messages"][-2]["content"] == content
+    assert payload["messages"][-1]["role"] == "assistant"
+    assert payload["messages"][-1]["streaming"] is True
 
     state = load_chat_state(tmp_path)
     persisted = state["conversations"][0]["messages"][-1]
@@ -3035,6 +3140,30 @@ def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, m
     workspace_log = tmp_path / "workspace" / "sessions" / "session-live" / "logs" / "conversation.jsonl"
     log_records = [json.loads(line) for line in workspace_log.read_text(encoding="utf-8").splitlines()]
     assert log_records[-1]["content"] == content
+
+
+def test_submit_session_message_shows_waiting_live_message_while_turn_runs(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    try:
+        response = client.post(
+            "/api/sessions/session-live/messages",
+            json={"content": "检查为什么对话看起来卡住"},
+        )
+
+        assert response.status_code == 202
+        payload = response.json()
+        assert payload["currentPhase"] == "running"
+        live_message = payload["messages"][-1]
+        assert live_message["role"] == "assistant"
+        assert live_message["streaming"] is True
+        assert live_message["content"] == "正在等待模型响应..."
+    finally:
+        session_service._set_session_running("session-live", False)
+        session_service._clear_session_turn_control("session-live")
+        session_service._clear_session_live_output("session-live")
 
 
 def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_path, monkeypatch):
@@ -3052,7 +3181,9 @@ def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_p
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["content"] == content
+    assert payload["messages"][-2]["content"] == content
+    assert payload["messages"][-1]["streaming"] is True
+    assert payload["messages"][-1]["content"] == "正在等待模型响应..."
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["messages"][-1]["content"] == content
     assert _read_next_state_signals(tmp_path, session_id="session-live") == []
@@ -3212,7 +3343,9 @@ def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallbac
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["content"] == content
+    assert payload["messages"][-2]["content"] == content
+    assert payload["messages"][-1]["streaming"] is True
+    assert payload["messages"][-1]["content"] == "正在等待模型响应..."
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["messages"][-1]["content"] == content
 
@@ -3264,7 +3397,9 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     assert response.status_code == 202
     payload = response.json()
     assert payload["currentPhase"] == "running"
-    assert [item["content"] for item in payload["messages"]] == ["原始需求", "原始回答", "编辑后的需求"]
+    assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑后的需求"]
+    assert payload["messages"][-1]["streaming"] is True
+    assert payload["messages"][-1]["content"] == "正在等待模型响应..."
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑后的需求"
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
@@ -3278,6 +3413,7 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
 
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
 
 
 def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monkeypatch):
@@ -3326,7 +3462,9 @@ def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monk
 
     assert response.status_code == 202
     payload = response.json()
-    assert [item["content"] for item in payload["messages"]] == ["原始需求", "原始回答", "编辑最新的需求"]
+    assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑最新的需求"]
+    assert payload["messages"][-1]["streaming"] is True
+    assert payload["messages"][-1]["content"] == "正在等待模型响应..."
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑最新的需求"
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
@@ -3334,6 +3472,7 @@ def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monk
 
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
 
 
 def test_edit_resubmit_session_message_rejects_assistant_message(tmp_path, monkeypatch):
@@ -4231,8 +4370,11 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
         payload = detail_response.json()
         assert stale_agent_called is False
         assert payload["currentPhase"] == "running"
-        assert payload["messages"][-1]["role"] == "user"
-        assert payload["messages"][-1]["content"] == "第二轮已经开始"
+        assert payload["messages"][-2]["role"] == "user"
+        assert payload["messages"][-2]["content"] == "第二轮已经开始"
+        assert payload["messages"][-1]["role"] == "assistant"
+        assert payload["messages"][-1]["streaming"] is True
+        assert payload["messages"][-1]["content"] == "正在等待模型响应..."
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
