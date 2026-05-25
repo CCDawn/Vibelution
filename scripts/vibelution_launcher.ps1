@@ -2821,9 +2821,253 @@ function Test-CommandLineLooksLikeManagedBackend {
     }
 
     return [bool](
-        $CommandLine -match "scripts[\\/]+web_workbench\.py" -and
+        (Test-CommandLineMentionsWorkbenchScript -CommandLine $CommandLine) -and
         $CommandLine -match "(^|\s)--managed-by-launcher(\s|$)"
     )
+}
+
+function ConvertTo-LauncherComparableText {
+    param([string]$Value)
+
+    $text = if ($null -eq $Value) { "" } else { [string]$Value }
+    return $text.Replace("\", "/").ToLowerInvariant()
+}
+
+function Test-NormalizedTextContainsPathSegment {
+    param(
+        [string]$Text,
+        [string]$PathText
+    )
+
+    if (-not $Text -or -not $PathText) {
+        return $false
+    }
+
+    $startIndex = 0
+    while ($true) {
+        $index = $Text.IndexOf($PathText, $startIndex, [System.StringComparison]::Ordinal)
+        if ($index -lt 0) {
+            return $false
+        }
+
+        $afterIndex = $index + $PathText.Length
+        $beforeOk = $index -eq 0
+        if (-not $beforeOk) {
+            $before = [char]$Text[$index - 1]
+            $beforeOk = [char]::IsWhiteSpace($before) -or $before -in @([char]34, [char]39, [char]61, [char]58)
+        }
+
+        $afterOk = $afterIndex -ge $Text.Length
+        if (-not $afterOk) {
+            $after = [char]$Text[$afterIndex]
+            $afterOk = [char]::IsWhiteSpace($after) -or $after -in @([char]34, [char]39, [char]47)
+        }
+
+        if ($beforeOk -and $afterOk) {
+            return $true
+        }
+        $startIndex = $index + 1
+    }
+}
+
+function Test-TextReferencesProjectPath {
+    param([string]$Text)
+
+    if (-not $Text) {
+        return $false
+    }
+
+    $normalizedText = ConvertTo-LauncherComparableText -Value $Text
+    $projectFullPath = ([System.IO.Path]::GetFullPath($projectDir)).TrimEnd([char[]]@([char]92, [char]47))
+    $normalizedProjectDir = ConvertTo-LauncherComparableText -Value $projectFullPath
+    return Test-NormalizedTextContainsPathSegment -Text $normalizedText -PathText $normalizedProjectDir
+}
+
+function Test-CommandLineMentionsWorkbenchScript {
+    param([string]$CommandLine)
+
+    if (-not $CommandLine) {
+        return $false
+    }
+    return [bool]((ConvertTo-LauncherComparableText -Value $CommandLine) -match "scripts[\\/]+web_workbench\.py")
+}
+
+function Test-CommandLineUsesRelativeWorkbenchScript {
+    param([string]$CommandLine)
+
+    if (-not $CommandLine) {
+        return $false
+    }
+    return [bool]((ConvertTo-LauncherComparableText -Value $CommandLine) -match "(^|\s)scripts[\\/]+web_workbench\.py(\s|$)")
+}
+
+function Get-LauncherProcessPropertyValue {
+    param(
+        $Process,
+        [string]$Name,
+        $Default = $null
+    )
+
+    if ($null -eq $Process) {
+        return $Default
+    }
+    $property = $Process.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $Default
+    }
+    return $property.Value
+}
+
+function Test-CommandLineLooksLikeRepoWorkbenchBackend {
+    param([string]$CommandLine)
+
+    return [bool](
+        (Test-CommandLineMentionsWorkbenchScript -CommandLine $CommandLine) -and
+        (Test-TextReferencesProjectPath -Text $CommandLine)
+    )
+}
+
+function Test-ProcessLooksLikeRepoWorkbenchBackend {
+    param($Process)
+
+    if ($null -eq $Process) {
+        return $false
+    }
+
+    $commandLine = [string](Get-LauncherProcessPropertyValue -Process $Process -Name "CommandLine" -Default "")
+    if (-not (Test-CommandLineMentionsWorkbenchScript -CommandLine $commandLine)) {
+        return $false
+    }
+    if (Test-CommandLineLooksLikeRepoWorkbenchBackend -CommandLine $commandLine) {
+        return $true
+    }
+
+    $executablePath = [string](Get-LauncherProcessPropertyValue -Process $Process -Name "ExecutablePath" -Default "")
+    if (Test-TextReferencesProjectPath -Text $executablePath) {
+        return $true
+    }
+
+    if (-not (Test-CommandLineUsesRelativeWorkbenchScript -CommandLine $commandLine)) {
+        return $false
+    }
+
+    $parentPid = 0
+    [void][int]::TryParse([string](Get-LauncherProcessPropertyValue -Process $Process -Name "ParentProcessId" -Default "0"), [ref]$parentPid)
+    $visited = @{}
+    for ($depth = 0; $depth -lt 8 -and $parentPid -gt 0; $depth++) {
+        if ($visited.ContainsKey($parentPid)) {
+            break
+        }
+        $visited[$parentPid] = $true
+        $parentProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $parentPid" -ErrorAction SilentlyContinue
+        if ($null -eq $parentProcess) {
+            break
+        }
+        $parentCommandLine = [string](Get-LauncherProcessPropertyValue -Process $parentProcess -Name "CommandLine" -Default "")
+        $parentExecutablePath = [string](Get-LauncherProcessPropertyValue -Process $parentProcess -Name "ExecutablePath" -Default "")
+        if ((Test-TextReferencesProjectPath -Text $parentCommandLine) -or (Test-TextReferencesProjectPath -Text $parentExecutablePath)) {
+            return $true
+        }
+        $parentPid = 0
+        [void][int]::TryParse([string](Get-LauncherProcessPropertyValue -Process $parentProcess -Name "ParentProcessId" -Default "0"), [ref]$parentPid)
+    }
+
+    return $false
+}
+
+function Resolve-ResidualCleanupPythonPath {
+    if ($launcherPythonOverride -and (Test-Path $launcherPythonOverride)) {
+        return (Resolve-Path -LiteralPath $launcherPythonOverride).Path
+    }
+    if (Test-Path $preferredPythonExe) {
+        return (Resolve-Path -LiteralPath $preferredPythonExe).Path
+    }
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($pythonCommand) {
+        return $pythonCommand.Source
+    }
+    return ""
+}
+
+function Invoke-RepoResidualWorkbenchCleanup {
+    param([int[]]$ExcludePids = @())
+
+    $pythonPath = Resolve-ResidualCleanupPythonPath
+    if (-not $pythonPath) {
+        return [pscustomobject]@{
+            supported = $false
+            reason = "python_unavailable"
+            requested = @()
+            terminated = @()
+            remaining = @()
+        }
+    }
+
+    $arguments = @(
+        "-m",
+        "core.runtime_manager.process_inventory",
+        "--cleanup-residual-workbench",
+        "--json",
+        "--timeout-seconds",
+        "4"
+    )
+    foreach ($excludePid in @(($ExcludePids + $selfProcessId) | Sort-Object -Unique)) {
+        if ($excludePid -gt 0) {
+            $arguments += @("--exclude-pid", "$excludePid")
+        }
+    }
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $pythonPath
+    $psi.WorkingDirectory = $projectDir
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    foreach ($argument in $arguments) {
+        [void]$psi.ArgumentList.Add($argument)
+    }
+
+    try {
+        $process = [System.Diagnostics.Process]::Start($psi)
+        if (-not $process.WaitForExit(8000)) {
+            try {
+                $process.Kill()
+            } catch {
+            }
+            return [pscustomobject]@{
+                supported = $false
+                reason = "cleanup_timeout"
+                requested = @()
+                terminated = @()
+                remaining = @()
+            }
+        }
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        if ($process.ExitCode -ne 0) {
+            return [pscustomobject]@{
+                supported = $false
+                reason = "cleanup_failed"
+                exitCode = $process.ExitCode
+                stderr = $stderr
+                requested = @()
+                terminated = @()
+                remaining = @()
+            }
+        }
+        $parsed = $stdout | ConvertFrom-Json -ErrorAction Stop
+        return $parsed
+    } catch {
+        return [pscustomobject]@{
+            supported = $false
+            reason = "cleanup_exception"
+            error = $_.Exception.Message
+            requested = @()
+            terminated = @()
+            remaining = @()
+        }
+    }
 }
 
 function Get-PrimaryManagedBackendPid {
@@ -3572,27 +3816,64 @@ function Stop-ManagedBackendProcesses {
 
     $remainingProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $remainingPortPid" -ErrorAction SilentlyContinue
     $remainingHealthy = [bool](Test-WebHealthy)
-    $remainingLooksManaged = Test-CommandLineLooksLikeManagedBackend -CommandLine ([string]$remainingProcess.CommandLine)
+    $remainingCommandLine = [string](Get-LauncherProcessPropertyValue -Process $remainingProcess -Name "CommandLine" -Default "")
+    $remainingLooksManaged = Test-CommandLineLooksLikeManagedBackend -CommandLine $remainingCommandLine
+    $remainingMentionsWorkbench = Test-CommandLineMentionsWorkbenchScript -CommandLine $remainingCommandLine
+    $remainingLooksRepoWorkbench = Test-ProcessLooksLikeRepoWorkbenchBackend -Process $remainingProcess
+    $cleanupResult = $null
+    $cleanupReason = ""
+    $portOwnerStopped = $false
+    if ($remainingLooksManaged) {
+        Stop-ProcessesById @([int]$remainingPortPid)
+        $portOwnerStopped = $true
+        $cleanupReason = "managed_backend_marker"
+    } elseif ($remainingMentionsWorkbench) {
+        $cleanupResult = Invoke-RepoResidualWorkbenchCleanup -ExcludePids $candidatePids
+        $cleanupRequestedPids = @()
+        if ($cleanupResult) {
+            $rawCleanupPids = @($cleanupResult.requested) + @($cleanupResult.terminated)
+            $cleanupRequestedPids = @($rawCleanupPids | ForEach-Object { [int]$_ })
+        }
+        if ($cleanupRequestedPids -contains [int]$remainingPortPid) {
+            $portOwnerStopped = $true
+            $cleanupReason = "repo_runtime_inventory"
+        } elseif ($remainingLooksRepoWorkbench) {
+            Stop-ProcessesById @([int]$remainingPortPid)
+            $portOwnerStopped = $true
+            $cleanupReason = "repo_workbench_ancestor"
+        }
+    }
+    $finalPortPid = Get-ListeningPid $port
+    $finalPortOwnerPid = if ($finalPortPid) { [int]$finalPortPid } else { $null }
+    $cleanupResultForLog = if ($cleanupResult) { $cleanupResult } else { $null }
     Write-LauncherControlLog `
         -Event "launcher.backend.stop.port_owner_detected" `
         -Message "Backend port still had a listener after stopping tracked candidates." `
-        -Level $(if ($remainingLooksManaged) { "warning" } else { "error" }) `
+        -Level $(if ($portOwnerStopped) { "warning" } else { "error" }) `
         -Fields @{
             candidate_pids = @($candidatePids)
             port_owner_pid = [int]$remainingPortPid
             remaining_looks_managed = [bool]$remainingLooksManaged
+            remaining_mentions_workbench = [bool]$remainingMentionsWorkbench
+            remaining_looks_repo_workbench = [bool]$remainingLooksRepoWorkbench
             remaining_healthy = [bool]$remainingHealthy
+            port_owner_stop_requested = [bool]$portOwnerStopped
+            port_owner_cleanup_reason = $cleanupReason
+            final_port_owner_pid = $finalPortOwnerPid
+            cleanup_result = $cleanupResultForLog
             port = $port
         }
-    if ($remainingLooksManaged) {
-        Stop-ProcessesById @([int]$remainingPortPid)
-    }
     return [pscustomobject]@{
         CandidatePids = @($candidatePids)
         RemainingPortPid = [int]$remainingPortPid
         RemainingLooksManaged = [bool]$remainingLooksManaged
+        RemainingMentionsWorkbench = [bool]$remainingMentionsWorkbench
+        RemainingLooksRepoWorkbench = [bool]$remainingLooksRepoWorkbench
         RemainingHealthy = [bool]$remainingHealthy
-        PortOwnerStopped = [bool]$remainingLooksManaged
+        PortOwnerStopped = [bool]$portOwnerStopped
+        PortOwnerCleanupReason = $cleanupReason
+        CleanupResult = $cleanupResult
+        FinalPortPid = $finalPortOwnerPid
     }
 }
 
@@ -3963,7 +4244,32 @@ function Start-ManagedSession {
 
     $portPid = Get-ListeningPid $port
     if ($portPid) {
-        throw "Port $port is already in use by PID=$portPid. Stop that process first."
+        Write-LauncherControlLog `
+            -Event "launcher.backend.prestart_port_owner_detected" `
+            -Message "Backend port had a listener before starting a new managed backend." `
+            -Level "warning" `
+            -Fields @{
+                port = $port
+                port_owner_pid = [int]$portPid
+            }
+        $prestartCleanupTrace = Stop-ManagedBackendProcesses
+        if ($prestartCleanupTrace.PortOwnerStopped) {
+            [void](Wait-ForPortClosed -Port $port -TimeoutSeconds 8)
+        }
+        $portPid = Get-ListeningPid $port
+        $postCleanupPortOwnerPid = if ($portPid) { [int]$portPid } else { $null }
+        Write-LauncherControlLog `
+            -Event $(if ($portPid) { "launcher.backend.prestart_port_owner_remaining" } else { "launcher.backend.prestart_port_owner_cleared" }) `
+            -Message $(if ($portPid) { "Backend port still had a listener after prestart cleanup." } else { "Backend port owner was cleared before managed startup." }) `
+            -Level $(if ($portPid) { "error" } else { "info" }) `
+            -Fields @{
+                port = $port
+                port_owner_pid = $postCleanupPortOwnerPid
+                cleanup_trace = $prestartCleanupTrace
+            }
+        if ($portPid) {
+            throw "Port $port is already in use by PID=$portPid. Stop that process first."
+        }
     }
 
     Initialize-RuntimeScene -Trigger $Action -BrowserManaged (-not $NoBrowser)

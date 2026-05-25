@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+from config.workbench import configured_backend_port
 
 from .constants import PROJECT_ROOT
 
@@ -76,6 +80,8 @@ def list_repo_runtime_processes(
         if not kind:
             continue
         port = _extract_port_from_command_line(command_line)
+        if port == 0 and kind in {"managed_workbench_backend", "unmanaged_workbench"}:
+            port = configured_backend_port()
         if port == 0 and kind == "unmanaged_frontend_dev_server":
             port = 5173
         processes.append(
@@ -449,3 +455,35 @@ def _process_depth(proc: Any) -> int:
             break
         depth += 1
     return depth
+
+
+def _main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Inspect or clean repo-owned runtime processes.")
+    parser.add_argument("--json", action="store_true", help="Write machine-readable JSON.")
+    parser.add_argument(
+        "--cleanup-residual-workbench",
+        action="store_true",
+        help="Terminate repo-local unmanaged workbench residual processes.",
+    )
+    parser.add_argument("--exclude-pid", action="append", type=int, default=[], help="PID to exclude from cleanup.")
+    parser.add_argument("--timeout-seconds", type=float, default=5.0)
+    args = parser.parse_args(argv)
+
+    if args.cleanup_residual_workbench:
+        payload = terminate_unmanaged_workbench_processes(
+            project_root=PROJECT_ROOT,
+            exclude_pids=args.exclude_pid,
+            timeout_seconds=args.timeout_seconds,
+        )
+    else:
+        payload = residual_process_payload(project_root=PROJECT_ROOT, exclude_pids=args.exclude_pid)
+
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    else:
+        print(payload)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

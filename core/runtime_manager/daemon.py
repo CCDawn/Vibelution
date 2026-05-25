@@ -190,6 +190,10 @@ def _snapshot_should_persist_reconciliation(original_state: dict[str, Any], snap
         "backendObserved",
         "backendPortListening",
         "backendPortOwnerPid",
+        "backendPortOwnerKind",
+        "backendPortOwnerResidual",
+        "backendPortOwnerTrusted",
+        "backendPortConflict",
         "browserWindowAlive",
         "backendMissing",
         "frontendOrphaned",
@@ -239,6 +243,8 @@ def _open_verification_failure_message(observation: dict[str, Any], *, no_browse
         f"backendObserved={bool(observation.get('backendObserved'))}",
         f"backendPortListening={bool(observation.get('backendPortListening'))}",
         f"backendPortOwnerPid={int(observation.get('backendPortOwnerPid') or 0)}",
+        f"backendPortOwnerKind={str(observation.get('backendPortOwnerKind') or '')}",
+        f"backendPortOwnerResidual={bool(observation.get('backendPortOwnerResidual'))}",
         f"backendPortConflict={bool(observation.get('backendPortConflict'))}",
         f"browserManaged={bool(observation.get('browserManaged', True))}",
         f"browserWindowAlive={bool(observation.get('browserWindowAlive'))}",
@@ -277,6 +283,14 @@ def _open_verification_event_payload(
         "url": str(observation.get("url") or ""),
         "healthUrl": str(observation.get("healthUrl") or ""),
     }
+    port_owner_kind = str(observation.get("backendPortOwnerKind") or "")
+    lifecycle_consistency = str(observation.get("lifecycleConsistency") or "consistent")
+    if port_owner_kind:
+        payload["backendPortOwnerKind"] = port_owner_kind
+    if bool(observation.get("backendPortOwnerResidual")):
+        payload["backendPortOwnerResidual"] = True
+    if lifecycle_consistency != "consistent":
+        payload["lifecycleConsistency"] = lifecycle_consistency
     if not message:
         payload.pop("message", None)
     if not command_id:
@@ -367,6 +381,9 @@ def _close_verification_failure_message(observation: dict[str, Any]) -> str:
         f"backendObserved={bool(observation.get('backendObserved'))}",
         f"backendPortListening={bool(observation.get('backendPortListening'))}",
         f"backendPortOwnerPid={int(observation.get('backendPortOwnerPid') or 0)}",
+        f"backendPortOwnerKind={str(observation.get('backendPortOwnerKind') or '')}",
+        f"backendPortOwnerResidual={bool(observation.get('backendPortOwnerResidual'))}",
+        f"backendPortConflict={bool(observation.get('backendPortConflict'))}",
         f"browserWindowAlive={bool(observation.get('browserWindowAlive'))}",
         f"browserWindowPid={int(observation.get('browserWindowPid') or 0)}",
     ]
@@ -404,6 +421,14 @@ def _close_verification_event_payload(
         "healthUrl": str(observation.get("healthUrl") or ""),
         "residualCleanup": cleanup_result if isinstance(cleanup_result, dict) else {},
     }
+    port_owner_kind = str(observation.get("backendPortOwnerKind") or "")
+    lifecycle_consistency = str(observation.get("lifecycleConsistency") or "consistent")
+    if port_owner_kind:
+        payload["backendPortOwnerKind"] = port_owner_kind
+    if bool(observation.get("backendPortOwnerResidual")):
+        payload["backendPortOwnerResidual"] = True
+    if lifecycle_consistency != "consistent":
+        payload["lifecycleConsistency"] = lifecycle_consistency
     if launcher_result is not None:
         payload["launcher"] = {
             "returnCode": int(getattr(launcher_result, "returncode", 0) or 0),
@@ -626,7 +651,9 @@ def load_runtime_snapshot() -> dict[str, Any]:
             "backendPort": int(observation.get("backendPort") or 0),
             "backendPortListening": bool(observation.get("backendPortListening")),
             "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+            "backendPortOwnerKind": str(observation.get("backendPortOwnerKind") or ""),
             "backendPortOwnerTrusted": bool(observation.get("backendPortOwnerTrusted")),
+            "backendPortOwnerResidual": bool(observation.get("backendPortOwnerResidual")),
             "backendPortConflict": bool(observation.get("backendPortConflict")),
             "browserWindowAlive": bool(observation.get("browserWindowAlive")),
             "browserManaged": bool(observation.get("browserManaged", True)),
@@ -686,13 +713,19 @@ def _snapshot_residual_excluded_pids(
     excluded = {os.getpid(), int(manager_pid or 0)}
     if not include_workbench:
         return {pid for pid in excluded if pid > 0}
-    for key in ("backendPid", "backendLaunchPid", "backendPortOwnerPid", "browserLaunchPid", "browserWindowPid"):
+    for key in ("backendPid", "backendLaunchPid", "browserLaunchPid", "browserWindowPid"):
         try:
             value = int(observation.get(key) or 0)
         except (TypeError, ValueError):
             value = 0
         if value > 0:
             excluded.add(value)
+    try:
+        port_owner_pid = int(observation.get("backendPortOwnerPid") or 0)
+    except (TypeError, ValueError):
+        port_owner_pid = 0
+    if port_owner_pid > 0 and bool(observation.get("backendPortOwnerTrusted")):
+        excluded.add(port_owner_pid)
     return _expand_excluded_workbench_ancestors(excluded)
 
 
@@ -828,7 +861,9 @@ def _finalize_daemon_stopped_state(*, manager_pid: int) -> None:
             "backendObserved": False,
             "backendPortListening": False,
             "backendPortOwnerPid": 0,
+            "backendPortOwnerKind": "",
             "backendPortOwnerTrusted": False,
+            "backendPortOwnerResidual": False,
             "backendPortConflict": False,
             "browserWindowAlive": False,
             "backendMissing": False,
@@ -1095,7 +1130,9 @@ class RuntimeManagerDaemon:
                 "backendPort": int(observation.get("backendPort") or 0),
                 "backendPortListening": bool(observation.get("backendPortListening")),
                 "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+                "backendPortOwnerKind": str(observation.get("backendPortOwnerKind") or ""),
                 "backendPortOwnerTrusted": bool(observation.get("backendPortOwnerTrusted")),
+                "backendPortOwnerResidual": bool(observation.get("backendPortOwnerResidual")),
                 "backendPortConflict": bool(observation.get("backendPortConflict")),
                 "browserWindowAlive": bool(observation.get("browserWindowAlive")),
                 "browserManaged": bool(observation.get("browserManaged", True)),
@@ -1175,6 +1212,18 @@ class RuntimeManagerDaemon:
             }
         )
         save_state(self._reconcile_observation(state))
+        if bool(observation.get("backendPortOwnerResidual")):
+            cleanup_result = self._cleanup_residual_workbench_processes()
+            _append_event(
+                "workbench.open.residual_cleanup",
+                {
+                    "commandId": command_id,
+                    "backendPort": int(observation.get("backendPort") or 0),
+                    "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
+                    "backendPortOwnerKind": str(observation.get("backendPortOwnerKind") or ""),
+                    "cleanup": cleanup_result,
+                },
+            )
         result = open_workbench(no_browser=no_browser)
         if result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(result, "Opening the workbench failed."))
