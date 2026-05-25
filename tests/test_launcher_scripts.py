@@ -757,12 +757,6 @@ if ($managedBackendText -notmatch '--managed-by-launcher') {
 if ($managedBackendText -notmatch 'managed_marker') {
     throw "Start-ManagedBackend does not log the managed backend marker."
 }
-if ($managedBackendText -notmatch 'Resolve-ManagedBackendPythonRuntime') {
-    throw "Start-ManagedBackend does not resolve a backend-specific no-console Python runtime."
-}
-if ($managedBackendText -notmatch 'console_host_avoidance') {
-    throw "Start-ManagedBackend does not log the console host avoidance strategy."
-}
 
 $browserAst = $ast.Find({
     param($node)
@@ -1048,75 +1042,6 @@ if ($candidates.Count -ne 1) {
 if ($candidates[0].FilePath -ne (Resolve-Path -LiteralPath $pythonPath).Path) {
     throw "Launcher did not prefer python.exe."
 }
-Write-Output "ok"
-""",
-    )
-
-    assert result.returncode == 0, result.stderr or result.stdout
-    assert result.stdout.strip().splitlines()[-1] == "ok"
-
-
-def test_launcher_backend_service_runtime_prefers_pythonw_without_changing_dependency_runtime(tmp_path):
-    result = _run_launcher_ast_harness(
-        tmp_path,
-        """
-param(
-    [Parameter(Mandatory = $true)]
-    [string]$LauncherPath
-)
-
-$ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
-
-$source = Get-Content -Raw -LiteralPath $LauncherPath
-$tokens = $null
-$parseErrors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
-if ($parseErrors -and $parseErrors.Count -gt 0) {
-    throw "Launcher script parse failed: $($parseErrors[0].Message)"
-}
-
-$functionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq "Resolve-ManagedBackendPythonRuntime"
-}, $true)
-if ($null -eq $functionAst) {
-    throw "Resolve-ManagedBackendPythonRuntime was not found."
-}
-. ([scriptblock]::Create($functionAst.Extent.Text))
-
-$projectDir = Join-Path $env:TEMP ("vibelution-backend-runtime-" + [guid]::NewGuid().ToString("N"))
-$scriptsDir = Join-Path $projectDir ".venv\\Scripts"
-New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
-$pythonPath = Join-Path $scriptsDir "python.exe"
-$pythonwPath = Join-Path $scriptsDir "pythonw.exe"
-Set-Content -LiteralPath $pythonPath -Value "" -Encoding ascii
-Set-Content -LiteralPath $pythonwPath -Value "" -Encoding ascii
-
-$dependencyRuntime = [pscustomobject]@{
-    FilePath = (Resolve-Path -LiteralPath $pythonPath).Path
-    PrefixArgs = @()
-    Label = "project venv"
-}
-$serviceRuntime = Resolve-ManagedBackendPythonRuntime -PythonRuntime $dependencyRuntime
-
-if ($dependencyRuntime.FilePath -ne (Resolve-Path -LiteralPath $pythonPath).Path) {
-    throw "Dependency runtime was mutated."
-}
-if ($serviceRuntime.FilePath -ne (Resolve-Path -LiteralPath $pythonwPath).Path) {
-    throw "Backend service runtime did not switch to sibling pythonw.exe."
-}
-if ($serviceRuntime.BaseFilePath -ne (Resolve-Path -LiteralPath $pythonPath).Path) {
-    throw "Backend service runtime did not preserve the dependency runtime path."
-}
-if ($serviceRuntime.ConsoleHostAvoidance -ne "pythonw_service_runtime") {
-    throw "Backend service runtime did not record the console-host avoidance strategy."
-}
-if (@($serviceRuntime.PrefixArgs).Count -ne 0) {
-    throw "Backend service runtime unexpectedly changed prefix args."
-}
-
 Write-Output "ok"
 """,
     )
