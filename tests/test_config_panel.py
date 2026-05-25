@@ -4,6 +4,7 @@
 """
 
 import json
+import copy
 import os
 import threading
 import tomllib
@@ -16,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from config.toml_writer import dumps_public_config
+from config.public_config import _probe_llm_runtime
 from scripts.config_panel import (
     ConfigPanelHandler,
     HEADER_LINES,
@@ -532,10 +534,31 @@ def test_label_localization_prefers_exact_and_fallback_rules():
     assert localize_label("tools.shell.default_timeout", "default_timeout", "en") == "Default Timeout"
     assert localize_label("git.commit_message_profile", "commit_message_profile", "zh") == "AI 提交说明模型"
     assert localize_label("git.commit_message_profile", "commit_message_profile", "en") == "AI Commit Message Model"
+    assert localize_label("network.proxy_enabled", "proxy_enabled", "zh") == "启用代理"
+    assert localize_label("network.proxy_url", "proxy_url", "en") == "Proxy URL"
     assert localize_section_label("llm.profiles", "profiles", "zh") == "模型"
     assert localize_section_label("llm.profiles", "profiles", "en") == "Models"
     assert localize_section_label("llm.discovery", "discovery", "zh") == "模型发现"
     assert localize_section_label("network", "network", "en") == "Network"
+
+
+def test_network_proxy_config_is_public_and_validated():
+    public_config = load_public_config()
+
+    assert public_config["network"]["proxy_enabled"] is False
+    assert public_config["network"]["proxy_url"] == ""
+
+    updated = copy.deepcopy(public_config)
+    updated["network"]["proxy_enabled"] = True
+    updated["network"]["proxy_url"] = "http://127.0.0.1:7890"
+    effective = build_effective_config(updated)
+
+    assert effective.network.proxy_enabled is True
+    assert effective.network.proxy_url == "http://127.0.0.1:7890"
+
+    updated["network"]["proxy_url"] = ""
+    with pytest.raises(ValueError, match="network.proxy_url is required"):
+        build_effective_config(updated)
 
 
 def test_model_preset_options_include_codex_preset():
@@ -554,6 +577,12 @@ def test_model_preset_options_include_codex_preset():
     assert presets["relay_openai_gpt_5_5"]["model"]["contract"] == "tool_chat"
     assert presets["relay_openai_gpt_5_5"]["provider"]["kind"] == "relay"
     assert presets["relay_openai_gpt_5_5"]["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
+    assert presets["custom_openai_compatible_relay"]["category"] == "openai_compatible"
+    assert presets["custom_openai_compatible_relay"]["provider"]["kind"] == "openai_compatible"
+    assert presets["custom_openai_compatible_relay"]["model"]["transport"] == "chat_completions"
+    assert presets["custom_relay_responses"]["category"] == "relay"
+    assert presets["custom_relay_responses"]["provider"]["kind"] == "relay"
+    assert presets["custom_relay_responses"]["model"]["transport"] == "responses"
     assert "deepseek_v4_flash" in presets
     assert presets["deepseek_v4_flash"]["model"]["model"] == "deepseek-v4-flash"
     assert presets["deepseek_v4_flash"]["model"]["contract"] == "reasoning_chat"
@@ -632,17 +661,49 @@ def test_apply_custom_openai_compatible_relay_preset_accepts_user_base_url():
     build_effective_config(updated)
 
 
+def test_apply_custom_relay_responses_preset_accepts_approved_relay_host():
+    public_config = load_public_config()
+
+    updated = apply_llm_model_preset(
+        public_config,
+        "custom_relay_responses",
+        model_id="custom_relay_responses_model",
+        provider_id={
+            "kind": "relay",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://ai-pixel.online",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 1000000,
+        },
+        model="gpt-5.5",
+        label="Custom Relay Responses",
+        api_key_env="VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY",
+    )
+    model = updated["llm"]["model_library"]["custom_relay_responses_model"]
+
+    assert model["provider"]["kind"] == "relay"
+    assert model["provider"]["base_url"] == "https://ai-pixel.online"
+    assert model["transport"] == "responses"
+    assert model["api_key_env"] == "VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY"
+    build_effective_config(updated)
+
+
 def test_default_public_config_includes_new_official_model_templates():
     public_config = load_public_config()
     relay_model = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
 
     assert relay_model["provider"]["kind"] == "relay"
     assert relay_model["provider"]["context_window"] == 1000000
-    assert relay_model["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
+    assert relay_model["provider"]["base_url"] in {
+        "https://pixel.try-chatapi.com/v1",
+        "https://ai-pixel.online",
+    }
     assert relay_model["model"] == "gpt-5.5"
     assert relay_model["contract"] == "tool_chat"
     assert relay_model["max_output_tokens"] == 128000
     assert relay_model["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+    assert "custom_relay_responses" not in public_config["llm"]["model_library"]
 
     deepseek_model = public_config["llm"]["model_library"]["deepseek_v4_flash"]
 
@@ -706,6 +767,21 @@ def test_add_update_and_delete_llm_model_with_inline_provider():
     deleted = delete_llm_model(edited, "custom_codex")
     assert "custom_codex" not in deleted["llm"]["model_library"]
     build_effective_config(deleted)
+
+
+def test_update_llm_model_rejects_unknown_model_id():
+    public_config = load_public_config()
+    provider = _provider("openai", "https://api.openai.com/v1", "OPENAI_API_KEY")
+
+    with pytest.raises(ValueError, match="unknown LLM model"):
+        update_llm_model(
+            public_config,
+            "missing_model",
+            provider,
+            "gpt-5.3-codex",
+            "Missing",
+            {},
+        )
 
 
 def test_delete_generated_profile_model_clears_matching_profiles():
@@ -792,18 +868,31 @@ def test_llm_connection_uses_selected_profile_inline_provider(monkeypatch):
     _set_subagent_explorer_deepseek(public_config)
     calls = []
 
-    def fake_http_probe(provider, profile):
+    def fake_runtime_probe(provider, profile, api_key=None):
         calls.append((provider.kind, profile.profile_id, profile.model))
-        return {"ok": True, "message": "ok"}
+        return {"ok": True, "message": "ok", "runtime_route": f"{profile.transport}:{profile.model}"}
 
-    monkeypatch.setattr("scripts.config_panel._probe_llm_http", fake_http_probe)
+    monkeypatch.setattr("scripts.config_panel._probe_llm_runtime", fake_runtime_probe)
 
     result = run_llm_connection_test(public_config, "subagent_explorer")
 
     assert result["ok"] is True
     assert result["profile_id"] == "subagent_explorer"
     assert result["provider_kind"] == "deepseek"
+    assert result["transport"] == "chat_completions"
     assert calls == [("deepseek", "subagent_explorer", "deepseek-v4-pro")]
+
+
+def test_inline_profile_provider_switch_resets_incompatible_responses_transport():
+    public_config = load_public_config()
+    _set_subagent_explorer_deepseek(public_config)
+
+    config = build_effective_config(public_config)
+    profile = config.llm.get_profile("subagent_explorer")
+    provider = config.llm.get_provider(profile.provider_id)
+
+    assert provider.kind == "deepseek"
+    assert profile.transport == "chat_completions"
 
 
 def test_llm_connection_returns_route_diagnostics(monkeypatch):
@@ -811,29 +900,82 @@ def test_llm_connection_returns_route_diagnostics(monkeypatch):
     _set_subagent_explorer_deepseek(public_config)
     monkeypatch.setenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", "model-secret")
 
-    def fake_http_probe(provider, profile, api_key=None):
+    def fake_runtime_probe(provider, profile, api_key=None):
         assert api_key == "model-secret"
         return {"ok": False, "message": "HTTP 401: Unauthorized"}
 
-    monkeypatch.setattr("scripts.config_panel._probe_llm_http", fake_http_probe)
+    monkeypatch.setattr("scripts.config_panel._probe_llm_runtime", fake_runtime_probe)
 
     result = run_llm_connection_test(public_config, "subagent_explorer")
 
     assert result["ok"] is False
     assert result["provider_kind"] == "deepseek"
     assert result["base_url"] == "https://api.deepseek.com"
+    assert result["contract"] == "tool_chat"
     assert result["api_key_source"] == "profile-env:VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY"
+
+
+def test_llm_connection_reports_responses_runtime_route(monkeypatch):
+    public_config = load_public_config()
+    public_config["llm"]["profiles"]["primary"] = {
+        "model_ref": "relay_openai_gpt_5_5",
+        "overrides": {},
+    }
+    calls = []
+
+    def fake_runtime_probe(provider, profile, api_key=None):
+        calls.append((provider.kind, profile.transport, profile.contract, profile.model))
+        return {"ok": True, "message": "ok", "runtime_route": "openai/responses/gpt-5.5"}
+
+    monkeypatch.setenv("VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY", "relay-secret")
+    monkeypatch.setattr("scripts.config_panel._probe_llm_runtime", fake_runtime_probe)
+
+    result = run_llm_connection_test(public_config, "primary")
+
+    assert result["ok"] is True
+    assert result["provider_kind"] == "relay"
+    assert result["transport"] == "responses"
+    assert result["contract"] == "tool_chat"
+    assert calls == [("relay", "responses", "tool_chat", "gpt-5.5")]
+
+
+def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
+    public_config = load_public_config()
+    effective = build_effective_config(public_config)
+    profile = effective.llm.get_profile("primary")
+    provider = effective.llm.get_provider(profile.provider_id)
+    captured = {}
+
+    def fake_backend(payload):
+        captured.update(payload)
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    monkeypatch.setenv("VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY", "relay-secret")
+    monkeypatch.setattr("core.llm.client._default_completion_backend", fake_backend)
+
+    result = _probe_llm_runtime(provider, profile, "relay-secret")
+
+    assert result["ok"] is True
+    assert result["probe"] == "runtime_provider"
+    assert result["runtime_route"] == "openai/responses/gpt-5.5"
+    assert result["max_tokens"] == 1
+    assert captured["max_tokens"] == 1
+    assert captured["stream"] is False
+    assert captured["api_key"] == "relay-secret"
 
 
 def test_llm_connection_prefers_pending_draft_api_key(monkeypatch):
     public_config = load_public_config()
     _set_subagent_explorer_deepseek(public_config)
 
-    def fake_http_probe(provider, profile, api_key=None):
+    def fake_runtime_probe(provider, profile, api_key=None):
         assert api_key == "draft-secret"
         return {"ok": True, "message": "ok"}
 
-    monkeypatch.setattr("scripts.config_panel._probe_llm_http", fake_http_probe)
+    monkeypatch.setattr("scripts.config_panel._probe_llm_runtime", fake_runtime_probe)
 
     result = run_llm_connection_test(
         public_config,
@@ -873,12 +1015,12 @@ def test_llm_connection_allows_localhost_without_api_key(monkeypatch):
     public_config["llm"]["profiles"]["primary"]["model"] = "llama3.2"
     monkeypatch.setenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", "should-not-be-sent")
 
-    def fake_http_probe(provider, profile, api_key=None):
+    def fake_runtime_probe(provider, profile, api_key=None):
         assert provider.kind == "local"
         assert api_key is None
         return {"ok": True, "message": "ok"}
 
-    monkeypatch.setattr("scripts.config_panel._probe_llm_http", fake_http_probe)
+    monkeypatch.setattr("scripts.config_panel._probe_llm_runtime", fake_runtime_probe)
 
     result = run_llm_connection_test(public_config, "primary")
 
@@ -1150,3 +1292,28 @@ def test_inspect_public_config_summarizes_effective_state():
     assert summary["warning_count"] == len(diagnosis["warnings"])
     assert summary["action_count"] == len(diagnosis["suggested_actions"])
     assert summary["active_profile_id"] == effective.llm.get_profile(role="primary").profile_id
+
+
+def test_inspect_public_config_warns_when_profiles_bypass_matching_relay_responses_route():
+    public_config = load_public_config()
+    public_config["llm"]["profiles"]["primary"] = {
+        "provider": {
+            "kind": "openai_compatible",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://ai-pixel.online",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 128000,
+        },
+        "model": "gpt-5.5",
+        "api_key_env": "VIBELUTION_LLM_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "strict_compatibility": False,
+        "tool_calling_mode": "auto",
+    }
+
+    snapshot = inspect_public_config(public_config)
+
+    assert any("openai_compatible/chat_completions" in item for item in snapshot["diagnosis"]["warnings"])
+    assert any("relay_openai_gpt_5_5" in item for item in snapshot["diagnosis"]["suggested_actions"])

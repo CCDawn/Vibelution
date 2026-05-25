@@ -21,7 +21,7 @@ from .llm_security import (
     validate_llm_provider_target,
     validate_llm_public_config,
 )
-from .models import AppConfig
+from .models import AppConfig, RetryPolicyConfig
 from .profiles import apply_runtime_profile
 from .settings import (
     PROFILE_REFERENCE_OVERRIDE_FIELDS,
@@ -115,8 +115,8 @@ LLM_MODEL_PRESETS = {
         },
     },
     "custom_openai_compatible_relay": {
-        "label": "自定义 API 中转",
-        "category": "relay",
+        "label": "自定义 OpenAI 兼容 API",
+        "category": "openai_compatible",
         "provider_id": "custom_openai_compatible_relay",
         "model_id": "custom_openai_compatible_relay",
         "provider": {
@@ -135,6 +135,34 @@ LLM_MODEL_PRESETS = {
             "contract": "tool_chat",
             "temperature": 0.7,
             "max_output_tokens": 32000,
+            "timeout": 120,
+            "connect_timeout": 20,
+            "streaming": True,
+            "tool_calling_mode": "auto",
+            "discovery_enabled": True,
+        },
+    },
+    "custom_relay_responses": {
+        "label": "自定义 Relay Responses",
+        "category": "relay",
+        "provider_id": "custom_relay_responses",
+        "model_id": "custom_relay_responses",
+        "provider": {
+            "kind": "relay",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://ai-pixel.online",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 1000000,
+        },
+        "model": {
+            "model": "gpt-5.5",
+            "label": "自定义 Relay Responses 模型",
+            "api_key_env": "VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_API_KEY",
+            "transport": "responses",
+            "contract": "tool_chat",
+            "temperature": 0.7,
+            "max_output_tokens": 128000,
             "timeout": 120,
             "connect_timeout": 20,
             "streaming": True,
@@ -733,8 +761,10 @@ def _llm_model_preset_category(preset: dict[str, Any]) -> str:
     base_url = str(provider.get("base_url", "") or "").strip().lower()
     if kind in {"local", "ollama"} or "localhost" in base_url or "127.0.0.1" in base_url:
         return "local"
-    if kind in {"relay", "openai_compatible"}:
+    if kind == "relay":
         return "relay"
+    if kind == "openai_compatible":
+        return "openai_compatible"
     return "official"
 
 
@@ -769,7 +799,7 @@ def apply_llm_model_preset(
 
     preset = LLM_MODEL_PRESETS[preset_id]
     resolved_model_id = (model_id or "").strip()
-    if not resolved_model_id and preset_id != "custom_openai_compatible_relay":
+    if not resolved_model_id and preset_id not in {"custom_openai_compatible_relay", "custom_relay_responses"}:
         resolved_model_id = str(preset["model_id"]).strip()
     resolved_provider = _resolve_public_provider_input(public_config, provider_id, fallback=preset["provider"])
     validate_llm_provider_target(resolved_provider, context="llm.model_library")
@@ -788,7 +818,7 @@ def apply_llm_model_preset(
     if not isinstance(model_library, dict):
         raise ValueError("llm.model_library must be an object")
     if not resolved_model_id:
-        provider_label = "" if preset_id == "custom_openai_compatible_relay" else str(preset.get("provider_id") or "").strip()
+        provider_label = "" if preset_id in {"custom_openai_compatible_relay", "custom_relay_responses"} else str(preset.get("provider_id") or "").strip()
         resolved_model_id = _model_library_id(provider_label or resolved_label, resolved_model)
         resolved_model_id = _unique_model_library_id(model_library, resolved_model_id)
     elif resolved_model_id in model_library:
@@ -928,6 +958,8 @@ def update_llm_model(
     if not isinstance(model_library, dict):
         raise ValueError("llm.model_library must be an object")
     existing = model_library.get(model_id, {}) if isinstance(model_library.get(model_id, {}), dict) else {}
+    if not existing:
+        raise ValueError(f"unknown LLM model: {model_id}")
     provider = _resolve_public_provider_input(updated, provider_id, fallback=existing.get("provider"))
     validate_llm_provider_target(provider, context="llm.model_library")
     if api_key_env:
@@ -1011,6 +1043,77 @@ def clear_llm_model_api_key(public_config: dict, model_id: str) -> str:
     item["api_key_env"] = api_key_env
     _delete_user_env_var(api_key_env)
     return api_key_env
+
+
+def _append_unique(items: list[str], value: str) -> None:
+    if value and value not in items:
+        items.append(value)
+
+
+def _route_transport(item: dict[str, Any]) -> str:
+    return str(item.get("transport") or "chat_completions").strip().lower() or "chat_completions"
+
+
+def _provider_host(provider: dict[str, Any]) -> str:
+    try:
+        from urllib.parse import urlparse
+
+        return (urlparse(str(provider.get("base_url") or "")).hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def _inspect_llm_route_consistency(public_config: dict, effective: AppConfig, diagnosis: dict[str, Any]) -> None:
+    warnings = diagnosis.setdefault("warnings", [])
+    suggested_actions = diagnosis.setdefault("suggested_actions", [])
+    llm = public_config.get("llm", {}) if isinstance(public_config, dict) else {}
+    model_library = llm.get("model_library", {}) if isinstance(llm, dict) else {}
+    if not isinstance(model_library, dict):
+        return
+
+    relay_routes: dict[tuple[str, str], str] = {}
+    for model_id, item in model_library.items():
+        if not isinstance(item, dict):
+            continue
+        provider = _owner_provider(item)
+        model = str(item.get("model") or "").strip()
+        if not provider or not model:
+            continue
+        kind = str(provider.get("kind") or "").strip().lower()
+        transport = _route_transport(item)
+        host = _provider_host(provider)
+        if kind == "relay" and transport != "responses":
+            _append_unique(
+                warnings,
+                f"模型库 {model_id} 使用 relay provider 但 transport={transport}；Relay 路线建议使用 responses，避免测试通过但真实对话断流。",
+            )
+            _append_unique(
+                suggested_actions,
+                f"检查模型库 {model_id}：如果它是 Vibelution Relay，请改为 transport=responses；如果只是普通 OpenAI 兼容 API，请把服务商类型改为 openai_compatible。",
+            )
+        if kind == "relay" and transport == "responses":
+            relay_routes[(host, model)] = str(model_id)
+
+    for profile_id, profile in effective.llm.profiles.items():
+        provider = effective.llm.get_provider(profile.provider_id)
+        kind = str(provider.kind or "").strip().lower()
+        transport = str(profile.transport or "chat_completions").strip().lower()
+        host = _provider_host(
+            {
+                "base_url": provider.base_url,
+            }
+        )
+        model = str(profile.model or "").strip()
+        relay_model_id = relay_routes.get((host, model))
+        if relay_model_id and kind == "openai_compatible" and transport == "chat_completions":
+            _append_unique(
+                warnings,
+                f"任务模型 {profile_id} 当前走 openai_compatible/chat_completions，但同一 host/model 已有 Relay Responses 模型 {relay_model_id}；这容易出现连接测试通过、对话流式失败。",
+            )
+            _append_unique(
+                suggested_actions,
+                f"把任务模型 {profile_id} 绑定到 {relay_model_id}，或明确保留 OpenAI 兼容路线并接受 chat_completions 风险。",
+            )
 
 
 def _find_profile_id_for_provider(public_config: dict, provider_id: str) -> str:
@@ -1117,6 +1220,87 @@ def _probe_llm_http(provider, profile, api_key: str | None = None) -> dict:
         return {"ok": False, "message": redact_llm_probe_error(str(exc), api_key=api_key)}
 
 
+def _probe_llm_runtime(provider, profile, api_key: str | None = None) -> dict:
+    if provider.requires_api_key and not api_key:
+        return {"ok": False, "message": f"missing API key for provider `{provider.provider_id}`"}
+    if not provider.requires_api_key:
+        api_key = None
+    if not provider.base_url:
+        return {"ok": False, "message": f"missing base_url for provider `{provider.provider_id}`"}
+    try:
+        validate_llm_provider_target(provider, context="probe", resolve_dns=True)
+    except ValueError as exc:
+        return {"ok": False, "message": str(exc)}
+
+    try:
+        from core.llm.client import LLMClient, _default_completion_backend
+    except Exception:
+        return _probe_llm_http(provider, profile, api_key)
+
+    probe_timeout = coerce_llm_probe_timeout(profile.connect_timeout, profile.timeout)
+    try:
+        probe_profile = profile.model_copy(
+            update={
+                "max_output_tokens": 1,
+                "timeout": probe_timeout,
+                "connect_timeout": min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout),
+                "streaming": False,
+                "retry_policy": RetryPolicyConfig(max_attempts=1, backoff_base_seconds=0.1),
+            }
+        )
+    except AttributeError:
+        probe_profile = copy.deepcopy(profile)
+        probe_profile.max_output_tokens = 1
+        probe_profile.timeout = probe_timeout
+        probe_profile.connect_timeout = min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout)
+        probe_profile.streaming = False
+        probe_profile.retry_policy = RetryPolicyConfig(max_attempts=1, backoff_base_seconds=0.1)
+
+    class _ProbeConfig:
+        llm = type(
+            "_ProbeLlm",
+            (),
+            {
+                "get_role_profile_id": lambda self, role="primary": profile.profile_id,
+                "get_profile": lambda self, profile_id=None, role="primary": probe_profile,
+                "get_provider": lambda self, provider_id=None, role="primary": provider,
+            },
+        )()
+
+        def get_api_key_for_profile(self, profile_id=None, role="primary"):
+            return api_key
+
+    captured_payload: dict[str, Any] = {}
+
+    def real_backend(payload: dict[str, Any]) -> dict[str, Any]:
+        captured_payload.update(
+            {
+                "model": payload.get("model"),
+                "base_url": payload.get("base_url"),
+                "stream": payload.get("stream"),
+                "max_tokens": payload.get("max_tokens"),
+                "timeout": payload.get("timeout"),
+            }
+        )
+        return _default_completion_backend(payload)
+
+    try:
+        client = LLMClient(config=_ProbeConfig(), profile_id=profile.profile_id, backend=real_backend)
+        client.invoke([{"role": "user", "content": "ping"}], tools=[])
+    except Exception as exc:
+        return {"ok": False, "message": redact_llm_probe_error(str(exc), api_key=api_key)}
+
+    return {
+        "ok": True,
+        "message": f"provider responded from {profile.model}",
+        "runtime_route": captured_payload.get("model", ""),
+        "probe": "runtime_provider",
+        "stream": bool(captured_payload.get("stream")),
+        "max_tokens": captured_payload.get("max_tokens"),
+        "transport": profile.transport,
+    }
+
+
 def test_llm_connection(public_config: dict, profile_id: str | None = None) -> dict:
     validate_llm_public_config(public_config)
     effective = build_effective_config(public_config)
@@ -1128,9 +1312,9 @@ def test_llm_connection(public_config: dict, profile_id: str | None = None) -> d
         api_key = None
         api_key_source = "not-required"
     try:
-        result = _probe_llm_http(provider, profile, api_key)
+        result = _probe_llm_runtime(provider, profile, api_key)
     except TypeError:
-        result = _probe_llm_http(provider, profile)
+        result = _probe_llm_runtime(provider, profile)
     return {
         **result,
         "profile_id": profile.profile_id,
@@ -1138,6 +1322,8 @@ def test_llm_connection(public_config: dict, profile_id: str | None = None) -> d
         "provider_kind": provider.kind,
         "base_url": provider.base_url,
         "model": profile.model,
+        "transport": profile.transport,
+        "contract": profile.contract,
         "api_key_source": api_key_source,
     }
 
@@ -1195,6 +1381,7 @@ def _profile_api_key_status(effective: AppConfig) -> tuple[int, int]:
 def inspect_public_config(public_config: dict) -> dict[str, Any]:
     effective = build_effective_config(public_config)
     diagnosis = effective.diagnose_config()
+    _inspect_llm_route_consistency(public_config, effective, diagnosis)
     try:
         validate_llm_public_config(public_config)
     except ValueError as exc:

@@ -35,6 +35,7 @@ import {
   LogRoot,
   LogTreeResponse,
 } from "../api/types";
+import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { FilePreview } from "../components/preview/FilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
@@ -279,6 +280,8 @@ export function LogsRoute() {
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [rightRailDragState, setRightRailDragState] = useState<DragState | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [rightRailCollapsed, setRightRailCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") {
       return DEFAULT_LOG_SIDEBAR_WIDTH;
@@ -700,10 +703,10 @@ export function LogsRoute() {
   const layoutStyle = useMemo(
     () =>
       ({
-        "--logs-sidebar-width": `${sidebarWidth}px`,
-        "--logs-right-rail-width": `${rightRailWidth}px`,
+        "--logs-sidebar-width": sidebarCollapsed ? "0px" : `${sidebarWidth}px`,
+        "--logs-right-rail-width": rightRailCollapsed ? "0px" : `${rightRailWidth}px`,
       }) as CSSProperties,
-    [rightRailWidth, sidebarWidth],
+    [rightRailCollapsed, rightRailWidth, sidebarCollapsed, sidebarWidth],
   );
 
   async function handleCopy() {
@@ -839,6 +842,9 @@ export function LogsRoute() {
     if (event.button !== 0) {
       return;
     }
+    if (sidebarCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginResize(event.clientX);
   }
@@ -847,12 +853,18 @@ export function LogsRoute() {
     if (event.button !== 0) {
       return;
     }
+    if (sidebarCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginResize(event.clientX);
   }
 
   function handleResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (!layoutRef.current) {
+      return;
+    }
+    if (sidebarCollapsed) {
       return;
     }
 
@@ -879,6 +891,9 @@ export function LogsRoute() {
     if (event.button !== 0) {
       return;
     }
+    if (rightRailCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginRightRailResize(event.clientX);
   }
@@ -887,12 +902,18 @@ export function LogsRoute() {
     if (event.button !== 0) {
       return;
     }
+    if (rightRailCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginRightRailResize(event.clientX);
   }
 
   function handleRightRailResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (!workspaceRef.current) {
+      return;
+    }
+    if (rightRailCollapsed) {
       return;
     }
 
@@ -1000,7 +1021,7 @@ export function LogsRoute() {
           <RuntimeScenesPane activeRoot={activeRoot} lang={lang} t={t} statusLabel={statusLabel} />
         ) : (
           <div ref={layoutRef} className={styles.resizableLayout}>
-            <aside className={styles.sidebar}>
+            <aside className={sidebarCollapsed ? `${styles.sidebar} ${styles.paneCollapsed}` : styles.sidebar} aria-hidden={sidebarCollapsed}>
               <div className={styles.sidebarHeader}>
                 <div>
                   <p className={styles.sidebarEyebrow}>{activeRootLabelKey ? t(activeRootLabelKey) : t("navLogs")}</p>
@@ -1116,16 +1137,16 @@ export function LogsRoute() {
               </div>
             </aside>
 
-            <button
-              type="button"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t("resizeLeftPanel")}
-              title={t("resizeLeftPanel")}
-              tabIndex={0}
-              className={
-                dragState ? `${styles.resizeHandle} ${styles.resizeHandleActive}` : styles.resizeHandle
-              }
+            <PaneCollapseHandle
+              side="left"
+              collapsed={sidebarCollapsed}
+              separatorLabel={t("resizeLeftPanel")}
+              collapseLabel={lang === "zh" ? "收起日志列表" : "Collapse log list"}
+              expandLabel={lang === "zh" ? "展开日志列表" : "Expand log list"}
+              className={styles.resizeHandle}
+              active={Boolean(dragState)}
+              activeClassName={styles.resizeHandleActive}
+              onToggle={() => setSidebarCollapsed((current) => !current)}
               onPointerDown={handleResizeStart}
               onMouseDown={handleResizeMouseDown}
               onKeyDown={handleResizeKeyDown}
@@ -1216,24 +1237,22 @@ export function LogsRoute() {
           </div>
         )}
 
-        <button
-          type="button"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label={resizeRightRailLabel}
-          title={resizeRightRailLabel}
-          tabIndex={0}
-          className={
-            rightRailDragState
-              ? `${styles.resizeHandle} ${styles.resizeHandleActive} ${styles.rightRailResizeHandle}`
-              : `${styles.resizeHandle} ${styles.rightRailResizeHandle}`
-          }
+        <PaneCollapseHandle
+          side="right"
+          collapsed={rightRailCollapsed}
+          separatorLabel={resizeRightRailLabel}
+          collapseLabel={lang === "zh" ? "收起右侧日志导航" : "Collapse right log navigation"}
+          expandLabel={lang === "zh" ? "展开右侧日志导航" : "Expand right log navigation"}
+          className={`${styles.resizeHandle} ${styles.rightRailResizeHandle}`}
+          active={Boolean(rightRailDragState)}
+          activeClassName={styles.resizeHandleActive}
+          onToggle={() => setRightRailCollapsed((current) => !current)}
           onPointerDown={handleRightRailResizeStart}
           onMouseDown={handleRightRailResizeMouseDown}
           onKeyDown={handleRightRailResizeKeyDown}
         />
 
-        <aside className={styles.rightRail}>
+        <aside className={rightRailCollapsed ? `${styles.rightRail} ${styles.paneCollapsed}` : styles.rightRail} aria-hidden={rightRailCollapsed}>
           <div className={styles.railHeader}>
             <p className={styles.sidebarEyebrow}>{t("logsRootNavigation")}</p>
             <h2 className={styles.railTitle}>{t("navLogs")}</h2>

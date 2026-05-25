@@ -13,6 +13,7 @@ import {
   ToolTestResponse,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
@@ -221,6 +222,7 @@ export function ToolsRoute() {
   const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
     storedPaneWidth(TOOLS_LEFT_PANEL_WIDTH_KEY, TOOLS_LEFT_PANEL_DEFAULT_WIDTH, TOOLS_LEFT_PANEL_BOUNDS),
   );
+  const [leftPanelCollapsed, setLeftPanelCollapsed] = useState(false);
   const [notice, setNotice] = useState<{ tone: "neutral" | "success" | "error"; text: string }>({
     tone: "neutral",
     text: "",
@@ -366,9 +368,9 @@ export function ToolsRoute() {
   const workspaceStyle = useMemo(
     () =>
       ({
-        "--tools-left-panel-width": `${leftPanelWidth}px`,
+        "--tools-left-panel-width": leftPanelCollapsed ? "0px" : `${leftPanelWidth}px`,
       }) as CSSProperties,
-    [leftPanelWidth],
+    [leftPanelCollapsed, leftPanelWidth],
   );
   const resizeLeftPanelLabel = lang === "zh" ? "调整工具列表宽度" : "Resize tool list";
 
@@ -399,11 +401,17 @@ export function ToolsRoute() {
     if (event.button !== 0) {
       return;
     }
+    if (leftPanelCollapsed) {
+      return;
+    }
     event.preventDefault();
     beginPanelResize(event.clientX, leftPanelWidth, TOOLS_LEFT_PANEL_BOUNDS, setLeftPanelWidth);
   }
 
   function handleLeftPanelResizeKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (leftPanelCollapsed) {
+      return;
+    }
     const nextWidth = keyboardPaneWidth(leftPanelWidth, event.key, TOOLS_LEFT_PANEL_BOUNDS);
     if (nextWidth === null) {
       return;
@@ -479,7 +487,7 @@ export function ToolsRoute() {
       </section>
 
       <div className={styles.workspace} style={workspaceStyle}>
-        <aside className={styles.listPanel}>
+        <aside className={leftPanelCollapsed ? `${styles.listPanel} ${styles.paneCollapsed}` : styles.listPanel} aria-hidden={leftPanelCollapsed}>
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{t("toolsRegistry")}</p>
@@ -531,11 +539,14 @@ export function ToolsRoute() {
           </div>
         </aside>
 
-        <button
-          type="button"
+        <PaneCollapseHandle
+          side="left"
+          collapsed={leftPanelCollapsed}
+          separatorLabel={resizeLeftPanelLabel}
+          collapseLabel={lang === "zh" ? "收起工具列表" : "Collapse tool list"}
+          expandLabel={lang === "zh" ? "展开工具列表" : "Expand tool list"}
           className={styles.resizeHandle}
-          aria-label={resizeLeftPanelLabel}
-          title={resizeLeftPanelLabel}
+          onToggle={() => setLeftPanelCollapsed((current) => !current)}
           onPointerDown={handleLeftPanelResizeStart}
           onKeyDown={handleLeftPanelResizeKeyDown}
         />

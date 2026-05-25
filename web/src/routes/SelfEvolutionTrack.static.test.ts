@@ -9,6 +9,13 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).not.toContain("https://");
     expect(selfEvolutionSource).not.toContain("<img");
   });
+
+  it("keeps the workspace side column collapsible from the centered divider", () => {
+    expect(selfEvolutionSource).toContain("PaneCollapseHandle");
+    expect(selfEvolutionSource).toContain("sidebarCollapsed");
+    expect(selfEvolutionSource).toContain("setSidebarCollapsed");
+    expect(selfEvolutionSource).toContain("--self-sidebar-width");
+  });
 });
 
 describe("self-evolution history selection pruning", () => {

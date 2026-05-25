@@ -12,6 +12,7 @@ import threading
 import time
 
 from config.public_config import load_public_config
+from config import get_config
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
 from core.runtime_manager import ensure_daemon_running, load_runtime_snapshot, submit_command
@@ -79,6 +80,7 @@ def get_runtime_summary() -> dict:
     session_state = _derive_session_state(lang, active_session, runtime_state)
     active_tools = _active_tools(active_session, runtime_state)
     context_usage = _context_usage(runtime_state)
+    context_compression = _context_compression_summary(runtime_state, context_usage)
     runtime_manager = _load_runtime_manager_snapshot()
     work_runs = _work_run_summary()
     workbench = _workbench_payload(lang, runtime_manager)
@@ -121,6 +123,7 @@ def get_runtime_summary() -> dict:
         "sessionUpdatedAt": session_updated_at,
         "mentalState": _mental_state_summary(lang, public_config=public_config),
         "contextUsage": context_usage,
+        "contextCompression": context_compression,
         "activeTools": active_tools,
         "changedFilesCount": len(active_session.get("changedFiles") or []),
         "recentAction": _recent_action(lang, active_session, runtime_state),
@@ -1148,6 +1151,116 @@ def _context_usage(runtime_state: dict) -> dict[str, int]:
     used = max(0, int(runtime_state.get("current_context_tokens") or 0))
     limit = max(0, int(runtime_state.get("context_token_limit") or 0)) or 128000
     return {"used": min(used, limit), "limit": limit}
+
+
+def _context_compression_summary(runtime_state: dict, context_usage: dict[str, int]) -> dict[str, object]:
+    try:
+        cfg = get_config().context_compression
+    except Exception:
+        cfg = None
+
+    persisted = runtime_state.get("context_compression")
+    persisted = persisted if isinstance(persisted, dict) else {}
+    enabled = bool(getattr(cfg, "enabled", True)) if cfg is not None else bool(persisted.get("enabled", True))
+    effective_limit = _positive_int(
+        persisted.get("effectiveTokenLimit"),
+        context_usage.get("limit"),
+        getattr(cfg, "max_token_limit", 0) if cfg is not None else 0,
+    )
+    context_window = _positive_int(
+        persisted.get("contextWindowLimit"),
+        runtime_state.get("context_token_limit"),
+        effective_limit,
+    )
+    used = max(0, int(context_usage.get("used") or 0))
+    ratio = round(min(1.0, used / effective_limit), 4) if effective_limit > 0 else 0.0
+    level = _compression_level_for_ratio(ratio)
+    strategy_levels = _compression_strategy_payload(cfg, effective_limit=effective_limit)
+    last_compression = persisted.get("lastCompression")
+    if not isinstance(last_compression, dict):
+        last_compression = {}
+
+    return {
+        "enabled": enabled,
+        "currentTokens": used,
+        "effectiveTokenLimit": effective_limit,
+        "contextWindowLimit": context_window,
+        "usageRatio": ratio,
+        "currentLevel": level,
+        "compressionCount": max(0, int(persisted.get("compressionCount") or 0)),
+        "lastCompression": _last_compression_payload(last_compression),
+        "strategy": {
+            "levels": strategy_levels,
+            "preserveErrors": bool(getattr(getattr(cfg, "preservation", None), "preserve_errors", True)),
+            "errorProtectionKeywords": ["error", "exception", "traceback", "failed", "错误", "异常", "失败", "超时", "权限"],
+            "summaryStorage": "state_memory",
+            "algorithm": "old messages become a runtime summary while recent AI context is kept",
+        },
+        "updatedAt": str(persisted.get("updatedAt") or runtime_state.get("updated_at") or "").strip(),
+    }
+
+
+def _positive_int(*values: object) -> int:
+    for value in values:
+        try:
+            parsed = int(value or 0)
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            return parsed
+    return 0
+
+
+def _compression_level_for_ratio(ratio: float) -> str:
+    if ratio >= 0.95:
+        return "emergency"
+    if ratio >= 0.9:
+        return "deep"
+    if ratio >= 0.8:
+        return "standard"
+    if ratio >= 0.6:
+        return "light"
+    return "normal"
+
+
+def _compression_strategy_payload(cfg, *, effective_limit: int) -> list[dict[str, object]]:
+    levels = getattr(cfg, "levels", None)
+    summary_chars = getattr(cfg, "summary_chars", None)
+    preservation = getattr(cfg, "preservation", None)
+    keep_ai = max(0, int(getattr(preservation, "keep_ai_messages", 5) or 0))
+    rows = [
+        ("light", float(getattr(levels, "light", 0.6) if levels is not None else 0.6), keep_ai, int(getattr(summary_chars, "light", 500) if summary_chars is not None else 500)),
+        ("standard", float(getattr(levels, "standard", 0.8) if levels is not None else 0.8), max(keep_ai - 2, 1), int(getattr(summary_chars, "standard", 1000) if summary_chars is not None else 1000)),
+        ("deep", float(getattr(levels, "deep", 0.9) if levels is not None else 0.9), max(keep_ai - 3, 1), int(getattr(summary_chars, "deep", 2000) if summary_chars is not None else 2000)),
+        ("emergency", float(getattr(levels, "emergency", 0.95) if levels is not None else 0.95), 1, int(getattr(summary_chars, "emergency", 3000) if summary_chars is not None else 3000)),
+    ]
+    return [
+        {
+            "level": level,
+            "thresholdRatio": threshold,
+            "thresholdTokens": int(threshold * max(0, int(effective_limit or 0))),
+            "keepAiMessages": keep,
+            "summaryMaxChars": chars,
+        }
+        for level, threshold, keep, chars in rows
+    ]
+
+
+def _last_compression_payload(payload: dict) -> dict[str, object] | None:
+    if not payload:
+        return None
+    before = max(0, int(payload.get("beforeTokens") or 0))
+    after = max(0, int(payload.get("afterTokens") or 0))
+    return {
+        "level": str(payload.get("level") or "").strip(),
+        "reason": str(payload.get("reason") or "").strip(),
+        "beforeTokens": before,
+        "afterTokens": after,
+        "savedTokens": max(0, int(payload.get("savedTokens") or max(0, before - after))),
+        "iteration": max(0, int(payload.get("iteration") or 0)),
+        "summaryWritten": bool(payload.get("summaryWritten")),
+        "timestamp": str(payload.get("timestamp") or "").strip(),
+    }
 
 
 def _active_tools(active_session: dict, runtime_state: dict) -> list[str]:

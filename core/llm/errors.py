@@ -25,6 +25,10 @@ def classify_exception(exc: Exception) -> LLMError:
     if (
         "unexpected_eof_while_reading" in lower
         or "eof occurred in violation of protocol" in lower
+        or "peer closed connection" in lower
+        or "incomplete chunked read" in lower
+        or "midstreamfallbackerror" in lower_type
+        or "midstreamfallbackerror" in lower
         or ("ssl" in lower and "eof" in lower)
         or "remoteprotocolerror" in lower
         or "connection reset" in lower

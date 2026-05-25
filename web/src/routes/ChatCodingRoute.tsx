@@ -44,6 +44,7 @@ import {
 import { ConversationView } from "../components/conversation/ConversationView";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import type { TranslationKey } from "../i18n/dictionary";
+import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { petAvatarPresetLabel } from "../i18n/petLabels";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
@@ -321,6 +322,8 @@ export function ChatCodingRoute() {
   const [sessionFilter, setSessionFilter] = useState("");
   const [fileFilter, setFileFilter] = useState("");
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
+  const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
@@ -813,13 +816,19 @@ export function ChatCodingRoute() {
       const delta = event.clientX - activeDrag.startX;
 
       if (activeDrag.side === "left") {
-        const bounds = getResizeBounds("left", layoutWidth, activeDrag.startRightWidth);
+        if (leftRailCollapsed) {
+          return;
+        }
+        const bounds = getResizeBounds("left", layoutWidth, rightPaneCollapsed ? 0 : activeDrag.startRightWidth);
         const nextLeftWidth = clamp(activeDrag.startLeftWidth + delta, bounds.min, bounds.max);
         setChatPanelWidths({ leftPanelWidth: Math.round(nextLeftWidth) });
         return;
       }
 
-      const bounds = getResizeBounds("right", layoutWidth, activeDrag.startLeftWidth);
+      if (rightPaneCollapsed) {
+        return;
+      }
+      const bounds = getResizeBounds("right", layoutWidth, leftRailCollapsed ? 0 : activeDrag.startLeftWidth);
       const nextRightWidth = clamp(activeDrag.startRightWidth - delta, bounds.min, bounds.max);
       setChatPanelWidths({ rightPanelWidth: Math.round(nextRightWidth) });
     }
@@ -835,7 +844,7 @@ export function ChatCodingRoute() {
       window.removeEventListener("pointerup", stopDragging);
       window.removeEventListener("pointercancel", stopDragging);
     };
-  }, [dragState, setChatPanelWidths]);
+  }, [dragState, leftRailCollapsed, rightPaneCollapsed, setChatPanelWidths]);
 
   const locale = lang === "zh" ? "zh-CN" : "en-US";
 
@@ -949,6 +958,27 @@ export function ChatCodingRoute() {
     : runtime
       ? contextUsageLabel
       : t("loadingContext");
+  const compression = runtime?.contextCompression;
+  const compressionCurrentPercent = compression
+    ? Math.round(Math.max(0, Math.min(1, compression.usageRatio || 0)) * 100)
+    : contextPercent;
+  const compressionLevelLabel = compression?.enabled === false
+    ? t("compressionDisabled")
+    : compression?.currentLevel
+      ? compression.currentLevel
+      : "--";
+  const compressionMainLine = compression
+    ? `${numberFormatter.format(compression.currentTokens)} / ${numberFormatter.format(compression.effectiveTokenLimit)} · ${compressionCurrentPercent}%`
+    : t("loadingContext");
+  const lastCompression = compression?.lastCompression ?? null;
+  const lastCompressionLine = lastCompression
+    ? `${lastCompression.level || "--"} · ${numberFormatter.format(lastCompression.beforeTokens)} -> ${numberFormatter.format(lastCompression.afterTokens)} · -${numberFormatter.format(lastCompression.savedTokens)}`
+    : t("compressionNoRecord");
+  const compressionUpdatedLine = lastCompression?.timestamp
+    ? formatRelativeTime(lastCompression.timestamp, Date.now(), locale) || formatTime(lastCompression.timestamp)
+    : compression?.updatedAt
+      ? formatRelativeTime(compression.updatedAt, Date.now(), locale) || formatTime(compression.updatedAt)
+      : "";
   const sessionStateLabel = (() => {
     switch (runtime?.sessionState) {
       case "thinking":
@@ -1275,6 +1305,9 @@ export function ChatCodingRoute() {
     if (event.button !== 0) {
       return;
     }
+    if ((side === "left" && leftRailCollapsed) || (side === "right" && rightPaneCollapsed)) {
+      return;
+    }
     event.preventDefault();
     setDragState({
       side,
@@ -1286,6 +1319,9 @@ export function ChatCodingRoute() {
 
   function handleResizeKeyDown(side: ResizableSide, event: KeyboardEvent<HTMLDivElement>) {
     if (!layoutRef.current) {
+      return;
+    }
+    if ((side === "left" && leftRailCollapsed) || (side === "right" && rightPaneCollapsed)) {
       return;
     }
 
@@ -1300,7 +1336,7 @@ export function ChatCodingRoute() {
     const layoutWidth = layoutRef.current.getBoundingClientRect().width;
 
     if (side === "left") {
-      const bounds = getResizeBounds("left", layoutWidth, rightPanelWidth);
+      const bounds = getResizeBounds("left", layoutWidth, rightPaneCollapsed ? 0 : rightPanelWidth);
       const nextLeftWidth =
         direction === "min"
           ? bounds.min
@@ -1311,7 +1347,7 @@ export function ChatCodingRoute() {
       return;
     }
 
-    const bounds = getResizeBounds("right", layoutWidth, leftPanelWidth);
+    const bounds = getResizeBounds("right", layoutWidth, leftRailCollapsed ? 0 : leftPanelWidth);
     const delta =
       direction === "min"
         ? bounds.min
@@ -1331,15 +1367,15 @@ export function ChatCodingRoute() {
   const layoutStyle = useMemo(
     () =>
       ({
-        "--chat-left-pane-width": `${leftPanelWidth}px`,
-        "--chat-right-pane-width": `${rightPanelWidth}px`,
+        "--chat-left-pane-width": leftRailCollapsed ? "0px" : `${leftPanelWidth}px`,
+        "--chat-right-pane-width": rightPaneCollapsed ? "0px" : `${rightPanelWidth}px`,
       }) as CSSProperties,
-    [leftPanelWidth, rightPanelWidth],
+    [leftPanelWidth, leftRailCollapsed, rightPanelWidth, rightPaneCollapsed],
   );
 
   return (
     <div ref={layoutRef} className={styles.layout} style={layoutStyle}>
-      <aside className={styles.leftRail}>
+      <aside className={leftRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={leftRailCollapsed}>
         <section className={styles.leftBlock}>
           <div className={styles.sectionHeader}>
             <div className={styles.sectionIdentity}>
@@ -1518,6 +1554,52 @@ export function ChatCodingRoute() {
           </p>
         </section>
 
+        <section className={styles.leftBlock}>
+          <div className={styles.sectionHeader}>
+            <div className={styles.sectionIdentity}>
+              <p className={styles.blockEyebrow}>{t("contextCompression")}</p>
+              <p className={styles.sectionMetaLine}>
+                {compression?.enabled === false ? t("compressionDisabled") : `${t("compressionCurrentLevel")} ${compressionLevelLabel}`}
+              </p>
+            </div>
+            <span className={styles.metricValue}>{compressionCurrentPercent}%</span>
+          </div>
+          <p className={styles.contextUsageValue}>{compressionMainLine}</p>
+          <div className={styles.progressTrack}>
+            <div className={styles.progressFillWarm} style={{ width: `${compressionCurrentPercent}%` }} />
+          </div>
+          <p className={styles.oneLineValue} title={lastCompression?.reason || lastCompressionLine}>
+            <span>{t("compressionLastRun")}</span>
+            {lastCompressionLine}
+          </p>
+          <p className={styles.backendNote}>
+            {lastCompression
+              ? lastCompression.summaryWritten ? t("compressionSummaryStored") : t("compressionSummaryNotStored")
+              : compressionUpdatedLine || t("compressionNoRecord")}
+          </p>
+          <details className={styles.compactDetails}>
+            <summary>
+              <ChevronRight size={14} />
+              <span className={styles.compactDetailsClosedLabel}>{t("compressionStrategy")}</span>
+              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
+            </summary>
+            <div className={styles.compressionStrategyList}>
+              {(compression?.strategy.levels ?? []).map((level) => (
+                <div key={level.level} className={styles.compressionStrategyRow}>
+                  <strong>{level.level}</strong>
+                  <span>{t("compressionThreshold")} {Math.round(level.thresholdRatio * 100)}% / {numberFormatter.format(level.thresholdTokens)}</span>
+                  <span>{t("compressionKeepAi")} {level.keepAiMessages}</span>
+                  <span>{t("compressionSummary")} {numberFormatter.format(level.summaryMaxChars)}</span>
+                </div>
+              ))}
+            </div>
+            <p className={styles.detailNote}>
+              <span>{t("compressionErrorProtection")}</span>
+              {(compression?.strategy.errorProtectionKeywords ?? []).join(" / ") || "--"}
+            </p>
+          </details>
+        </section>
+
         <section className={styles.petShowcase} aria-label={t("petSpace")}>
           <div className={styles.petShowcaseStage} aria-hidden="true">
             <div className={styles.petShowcaseAura} />
@@ -1584,17 +1666,16 @@ export function ChatCodingRoute() {
         </section>
       </aside>
 
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t("resizeLeftPanel")}
-        title={t("resizeLeftPanel")}
-        tabIndex={0}
-        className={
-          dragState?.side === "left"
-            ? `${styles.resizeHandle} ${styles.resizeHandleActive}`
-            : styles.resizeHandle
-        }
+      <PaneCollapseHandle
+        side="left"
+        collapsed={leftRailCollapsed}
+        separatorLabel={t("resizeLeftPanel")}
+        collapseLabel={lang === "zh" ? "收起左栏" : "Collapse left pane"}
+        expandLabel={lang === "zh" ? "展开左栏" : "Expand left pane"}
+        className={styles.resizeHandle}
+        active={dragState?.side === "left"}
+        activeClassName={styles.resizeHandleActive}
+        onToggle={() => setLeftRailCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("left", event)}
         onKeyDown={(event) => handleResizeKeyDown("left", event)}
       />
@@ -1709,22 +1790,21 @@ export function ChatCodingRoute() {
         </div>
       </section>
 
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label={t("resizeRightPanel")}
-        title={t("resizeRightPanel")}
-        tabIndex={0}
-        className={
-          dragState?.side === "right"
-            ? `${styles.resizeHandle} ${styles.resizeHandleActive}`
-            : styles.resizeHandle
-        }
+      <PaneCollapseHandle
+        side="right"
+        collapsed={rightPaneCollapsed}
+        separatorLabel={t("resizeRightPanel")}
+        collapseLabel={lang === "zh" ? "收起右栏" : "Collapse right pane"}
+        expandLabel={lang === "zh" ? "展开右栏" : "Expand right pane"}
+        className={styles.resizeHandle}
+        active={dragState?.side === "right"}
+        activeClassName={styles.resizeHandleActive}
+        onToggle={() => setRightPaneCollapsed((current) => !current)}
         onPointerDown={(event) => handleResizeStart("right", event)}
         onKeyDown={(event) => handleResizeKeyDown("right", event)}
       />
 
-      <aside className={styles.rightPane}>
+      <aside className={rightPaneCollapsed ? `${styles.rightPane} ${styles.paneCollapsed}` : styles.rightPane} aria-hidden={rightPaneCollapsed}>
         <div className={styles.segmented}>
           <button
             type="button"

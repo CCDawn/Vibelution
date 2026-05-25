@@ -46,4 +46,11 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("styles.packageClusterList");
     expect(paneSource).toContain("handleOpenRawLog(scene.runtimeSceneId, cluster.rawRefs[0].path)");
   });
+
+  it("keeps the runtime scene sidebar collapsible from the resize handle", () => {
+    expect(paneSource).toContain("PaneCollapseHandle");
+    expect(paneSource).toContain("sidebarCollapsed");
+    expect(paneSource).toContain("setSidebarCollapsed");
+    expect(paneSource).toContain("--logs-sidebar-width");
+  });
 });

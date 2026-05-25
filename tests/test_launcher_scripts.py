@@ -2332,6 +2332,7 @@ foreach ($name in @(
     "ConvertTo-LauncherComparableText",
     "Test-CommandLineMentionsWorkbenchScript",
     "Test-CommandLineLooksLikeManagedBackend",
+    "Get-ObjectPropertyValue",
     "Get-ManagedBackendCandidatePids"
 )) {
     $functionAst = $ast.Find({
@@ -2486,6 +2487,7 @@ foreach ($name in @(
     "ConvertTo-LauncherComparableText",
     "Test-CommandLineMentionsWorkbenchScript",
     "Test-CommandLineLooksLikeManagedBackend",
+    "Get-ObjectPropertyValue",
     "Get-ManagedBackendCandidatePids"
 )) {
     $functionAst = $ast.Find({

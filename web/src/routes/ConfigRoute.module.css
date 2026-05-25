@@ -294,12 +294,22 @@
 }
 
 .sectionHeader,
-.cardHeader,
 .formHeader {
   display: flex;
   align-items: start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.cardHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.cardHeader > div:first-child {
+  min-width: 0;
 }
 
 .sectionHeaderMain {
@@ -370,6 +380,22 @@
 .cardTitle {
   font-size: 0.96rem;
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardSubtle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardHeaderActions {
+  min-width: max-content;
+  justify-content: end;
 }
 
 .sectionIcon {
@@ -895,6 +921,13 @@
   gap: 5px;
 }
 
+.fieldHint {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
 .field span,
 .toggleField span,
 .cardMeta span,
@@ -945,6 +978,22 @@
   display: grid;
   gap: 6px;
   font-size: 0.88rem;
+  min-width: 0;
+}
+
+.keyLocationLine {
+  display: grid;
+  gap: 2px;
+}
+
+.keyLocationLine strong {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.keyLocationLine span {
+  overflow-wrap: anywhere;
 }
 
 .sidebarNavPanel {
@@ -1056,6 +1105,15 @@
   flex-wrap: wrap;
   color: var(--fg-tertiary);
   font-size: 0.84rem;
+  min-width: 0;
+}
+
+.cardSummaryLine span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cardActionsGrid {

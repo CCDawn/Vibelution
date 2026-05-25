@@ -69,6 +69,22 @@ def test_ssl_eof_is_retryable_network_error():
     assert decision.action == "retry_with_backoff"
 
 
+def test_incomplete_chunked_read_is_retryable_network_error():
+    error = Exception(
+        "litellm.MidStreamFallbackError: litellm.APIConnectionError: "
+        "OpenAIException - peer closed connection without sending complete message body "
+        "(incomplete chunked read)"
+    )
+
+    normalized = classify_exception(error)
+    decision = plan_recovery(error, attempt=1, max_attempts=5)
+
+    assert normalized.category == "network_error"
+    assert normalized.retryable is True
+    assert decision.category == "network_error"
+    assert decision.action == "retry_with_backoff"
+
+
 def test_service_temporarily_unavailable_is_retryable_server_error():
     error = Exception(
         'litellm.ServiceUnavailableError: ServiceUnavailableError: OpenAIException - '
@@ -115,7 +131,9 @@ def test_stream_upstream_failure_records_retryable_server_error(monkeypatch):
 
     assert raised.category == "server_error"
     assert raised.retryable is True
-    assert recorded[-1][1]["message"] == "LLM stream failed before iterator: server_error"
+    messages = [item[1]["message"] for item in recorded]
+    assert "LLM stream failed before iterator: server_error" in messages
+    assert recorded[-1][1]["message"] == "LLM stream fallback invoke failed: server_error"
     assert recorded[-1][1]["fields"]["errorType"] == "server_error"
     assert recorded[-1][1]["fields"]["retryable"] is True
 

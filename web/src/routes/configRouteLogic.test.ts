@@ -14,6 +14,7 @@ import {
   PROVIDER_KIND_OPTIONS,
   presetCategory,
   resolveProfileDisplayState,
+  resolveModelEditability,
   shouldBlockConfigLeave,
   type PublicConfigShape,
 } from "./configRouteLogic";
@@ -72,19 +73,22 @@ describe("configRouteLogic", () => {
     const groups = groupModelPresets(
       [
         preset("local_model", { kind: "local", base_url: "http://localhost:11434/v1" }),
+        preset("compatible_model", { kind: "openai_compatible", base_url: "https://relay.example.com/v1" }),
         preset("relay_model", { kind: "relay", base_url: "https://pixel.try-chatapi.com/v1" }),
       ],
       {
         official: "Official",
         relay: "Relay",
+        openai_compatible: "OpenAI Compatible",
         local: "Local",
       },
     );
 
-    expect(groups.map((group) => group.id)).toEqual(["relay", "local"]);
-    expect(groups.map((group) => group.label)).toEqual(["Relay", "Local"]);
+    expect(groups.map((group) => group.id)).toEqual(["relay", "openai_compatible", "local"]);
+    expect(groups.map((group) => group.label)).toEqual(["Relay", "OpenAI Compatible", "Local"]);
     expect(groups[0].presets.map((item) => item.preset_id)).toEqual(["relay_model"]);
-    expect(groups[1].presets.map((item) => item.preset_id)).toEqual(["local_model"]);
+    expect(groups[1].presets.map((item) => item.preset_id)).toEqual(["compatible_model"]);
+    expect(groups[2].presets.map((item) => item.preset_id)).toEqual(["local_model"]);
   });
 
   it("applies a model option to a profile draft and removes stale model binding fields", () => {
@@ -111,15 +115,15 @@ describe("configRouteLogic", () => {
     applyModelOptionToProfileDraft(publicConfig, "primary", selected, detailKeys);
 
     const profile = (publicConfig.llm as Record<string, unknown>).profiles as Record<string, Record<string, unknown>>;
-    expect(profile.primary.model_ref).toBeUndefined();
+    expect(profile.primary.model_ref).toBe("relay_openai_gpt_5_5");
     expect(profile.primary.provider_id).toBeUndefined();
-    expect(profile.primary.overrides).toBeUndefined();
-    expect(profile.primary.provider).toEqual(selected.provider);
-    expect(profile.primary.model).toBe("gpt-5.5");
-    expect(profile.primary.api_key_env).toBe("VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY");
-    expect(profile.primary.transport).toBe("chat_completions");
-    expect(profile.primary.contract).toBe("tool_chat");
-    expect(profile.primary.timeout).toBe(120);
+    expect(profile.primary.overrides).toEqual({});
+    expect(profile.primary.provider).toBeUndefined();
+    expect(profile.primary.model).toBeUndefined();
+    expect(profile.primary.api_key_env).toBeUndefined();
+    expect(profile.primary.transport).toBeUndefined();
+    expect(profile.primary.contract).toBeUndefined();
+    expect(profile.primary.timeout).toBeUndefined();
   });
 
   it("derives the backend default model api key env for custom relay presets", () => {
@@ -134,6 +138,7 @@ describe("configRouteLogic", () => {
     expect(modelLibraryIdFromParts("", "gpt-5.5")).toBe("gpt_5_5");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("openai_compatible");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("relay");
+    expect(PROVIDER_KIND_OPTIONS[0].value).toBe("relay");
   });
 
   it("removes profile api_key_env when the selected model has none", () => {
@@ -151,6 +156,7 @@ describe("configRouteLogic", () => {
     applyModelOptionToProfileDraft(publicConfig, "primary", selected, collectModelDetailKeys([selected]));
 
     const profile = (publicConfig.llm as Record<string, unknown>).profiles as Record<string, Record<string, unknown>>;
+    expect(profile.primary.model_ref).toBe("relay_openai_gpt_5_5");
     expect(profile.primary.api_key_env).toBeUndefined();
   });
 
@@ -196,6 +202,17 @@ describe("configRouteLogic", () => {
     expect(view.apiKeyEnv).toBe("NEW_KEY");
     expect(view.apiKeyState).toBe("missing");
     expect(view.apiKeySource).toBe("NEW_KEY");
+  });
+
+  it("only allows editing and deleting real model-library entries", () => {
+    expect(resolveModelEditability(option({ source: "model_library" }))).toEqual({
+      editable: true,
+      deletable: true,
+    });
+    expect(resolveModelEditability(option({ source: "profile" }))).toEqual({
+      editable: false,
+      deletable: false,
+    });
   });
 
   it("treats pending secret writes and clears as unsaved user changes", () => {

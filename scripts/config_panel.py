@@ -37,6 +37,7 @@ from config.public_config import (  # noqa: E402
     list_llm_model_options,
     list_llm_model_preset_options,
     load_public_config,
+    _probe_llm_runtime,
     preserve_secret_blanks,
     public_config_hash,
     save_public_config,
@@ -428,6 +429,8 @@ FIELD_LABELS = {
         "prompt.default_components": "默认提示词组件",
         "git.commit_message_profile": "AI 提交说明模型",
         "git.commit_message_prompt": "AI 提交说明提示词",
+        "network.proxy_enabled": "启用代理",
+        "network.proxy_url": "代理地址",
         "evolution.chat_dataset.enabled": "启用 chat 数据采样",
         "evolution.chat_dataset.source_modes": "采样来源模式",
         "evolution.chat_dataset.auto_capture": "自动采样",
@@ -531,6 +534,8 @@ FIELD_LABELS = {
         "prompt.default_components": "Default Prompt Components",
         "git.commit_message_profile": "AI Commit Message Model",
         "git.commit_message_prompt": "AI Commit Message Prompt",
+        "network.proxy_enabled": "Enable Proxy",
+        "network.proxy_url": "Proxy URL",
         "evolution.chat_dataset.enabled": "Enable Chat Dataset Capture",
         "evolution.chat_dataset.source_modes": "Capture Source Modes",
         "evolution.chat_dataset.auto_capture": "Auto Capture",
@@ -575,6 +580,8 @@ FIELD_HINTS = {
         "evolution.chat_dataset.segmentation_strategy": "chat 采样如何切分连续多轮上下文。",
         "ui.refresh_rate": "终端工作台刷新频率。",
         "ui.max_log_entries": "UI 内部保留的日志条目数。",
+        "network.proxy_enabled": "启用后，科研调研等真实公网请求会通过下方代理地址访问。",
+        "network.proxy_url": "填写 HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。",
     },
     "en": {
         "runtime.profile": "Sets the default runtime posture. Start with safe_local or debug in most cases.",
@@ -603,6 +610,8 @@ FIELD_HINTS = {
         "evolution.chat_dataset.segmentation_strategy": "How chat capture segments contiguous multi-turn context.",
         "ui.refresh_rate": "Refresh cadence for the terminal workbench.",
         "ui.max_log_entries": "How many UI log entries are retained.",
+        "network.proxy_enabled": "When enabled, real public research requests use the proxy URL below.",
+        "network.proxy_url": "HTTP/HTTPS proxy URL, for example http://127.0.0.1:7890.",
     },
 }
 
@@ -1310,9 +1319,9 @@ def test_llm_connection(public_config: dict, profile_id: str | None = None, draf
             api_key = pending[provider_api_key_env]
             api_key_source = f"pending-env:{provider_api_key_env}"
     try:
-        result = _probe_llm_http(provider, profile, api_key)
+        result = _probe_llm_runtime(provider, profile, api_key)
     except TypeError:
-        result = _probe_llm_http(provider, profile)
+        result = _probe_llm_runtime(provider, profile)
     return {
         **result,
         "profile_id": profile.profile_id,
@@ -1320,6 +1329,8 @@ def test_llm_connection(public_config: dict, profile_id: str | None = None, draf
         "provider_kind": provider.kind,
         "base_url": provider.base_url,
         "model": profile.model,
+        "transport": profile.transport,
+        "contract": profile.contract,
         "api_key_source": api_key_source,
     }
 

@@ -417,6 +417,53 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
     assert [event[1]["fields"]["attempt"] for event in retry_events] == [1, 2]
 
 
+def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.retry_policy.max_attempts": 2,
+            "llm.profiles.primary.retry_policy.backoff_base_seconds": 0.1,
+        }
+    )
+    recorded = []
+    payloads = []
+
+    def failing_before_first_chunk():
+        raise Exception(
+            "litellm.MidStreamFallbackError: peer closed connection without sending complete message body "
+            "(incomplete chunked read)"
+        )
+        yield {"choices": [{"delta": {"content": "unreachable"}}]}
+
+    def backend(payload):
+        payloads.append(dict(payload))
+        if payload.get("stream"):
+            return failing_before_first_chunk()
+        return {
+            "choices": [
+                {"message": {"role": "assistant", "content": "fallback ok"}}
+            ],
+            "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+        }
+
+    monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    events = list(client.stream_events([{"role": "user", "content": "ping"}]))
+
+    assert [payload["stream"] for payload in payloads] == [True, True, False]
+    assert [event.type for event in events] == ["text_delta", "done"]
+    assert events[0].text == "fallback ok"
+    event_codes = [item[0][1] for item in recorded]
+    assert "llm.stream.fallback.invoke_started" in event_codes
+    assert "llm.stream.fallback.invoke_succeeded" in event_codes
+
+
 def test_stream_records_success_event_with_safe_summary(monkeypatch):
     config = make_config(
         **{
@@ -499,6 +546,11 @@ def test_stream_records_started_event_before_first_provider_chunk(monkeypatch):
     fields = started_events[0][1]["fields"]
     assert fields["messageCount"] == 1
     assert fields["toolCount"] == 0
+    assert fields["runtimeRoute"] == "openai/qwen-32b-awq"
+    assert fields["transport"] == "chat_completions"
+    assert fields["baseUrlHost"] == "localhost"
+    assert fields["stream"] is True
+    assert fields["maxTokens"] == config.llm.get_profile("primary").max_output_tokens
 
 
 def test_stream_records_safe_message_role_summary(monkeypatch):

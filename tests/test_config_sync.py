@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from config import AppConfig, ConfigLoader, Settings, denormalize_config_dict, normalize_public_config_dict
+from config import AppConfig, ConfigLoader, Settings, denormalize_config_dict, normalize_public_config_dict, reload_config
 from config import workbench as workbench_config
 
 
@@ -164,6 +164,25 @@ def test_workbench_frontend_port_can_be_overridden_from_environment(monkeypatch)
     config = ConfigLoader(str(MAIN_CONFIG)).load()
 
     assert config.workbench.frontend_port == 6400
+
+
+def test_reload_config_refreshes_cached_settings_config(tmp_path):
+    first_config = tmp_path / "first.toml"
+    second_config = tmp_path / "second.toml"
+    first_config.write_text(
+        "[llm.profiles.primary]\nmodel = \"first-model\"\n",
+        encoding="utf-8",
+    )
+    second_config.write_text(
+        "[llm.profiles.primary]\nmodel = \"second-model\"\n",
+        encoding="utf-8",
+    )
+
+    try:
+        assert reload_config(str(first_config)).llm.get_profile("primary").model == "first-model"
+        assert reload_config(str(second_config)).llm.get_profile("primary").model == "second-model"
+    finally:
+        reload_config(str(MAIN_CONFIG))
 
 
 def test_config_loader_accepts_agent_workbench_port_aliases(monkeypatch, tmp_path):

@@ -372,11 +372,61 @@ def test_runtime_summary_shape():
     assert "sessionUpdatedAt" in payload
     assert "mentalState" in payload
     assert "runtimeManager" in payload
+    assert "contextCompression" in payload
+    assert "strategy" in payload["contextCompression"]
+    assert [item["level"] for item in payload["contextCompression"]["strategy"]["levels"]] == [
+        "light",
+        "standard",
+        "deep",
+        "emergency",
+    ]
     assert "workbench" in payload
     assert "workRuns" in payload
     assert "lifecycleProof" in payload
     assert "overallState" in payload["lifecycleProof"]
     assert "components" in payload["lifecycleProof"]
+
+
+def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_state",
+        lambda: {
+            "current_context_tokens": 7000,
+            "context_token_limit": 12000,
+            "updated_at": "2026-05-25T10:00:00",
+            "context_compression": {
+                "enabled": True,
+                "effectiveTokenLimit": 12000,
+                "contextWindowLimit": 24000,
+                "compressionCount": 2,
+                "updatedAt": "2026-05-25T10:01:00",
+                "lastCompression": {
+                    "level": "standard",
+                    "reason": "测试压缩",
+                    "beforeTokens": 13000,
+                    "afterTokens": 6200,
+                    "savedTokens": 6800,
+                    "iteration": 8,
+                    "summaryWritten": True,
+                    "timestamp": "2026-05-25T10:01:00",
+                },
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+    compression = payload["contextCompression"]
+
+    assert compression["currentTokens"] == 7000
+    assert compression["effectiveTokenLimit"] == 12000
+    assert compression["contextWindowLimit"] == 24000
+    assert compression["usageRatio"] == pytest.approx(0.5833)
+    assert compression["compressionCount"] == 2
+    assert compression["lastCompression"]["level"] == "standard"
+    assert compression["lastCompression"]["summaryWritten"] is True
+    assert compression["strategy"]["levels"][0]["thresholdTokens"] == 7200
 
 
 def test_ignores_windows_proactor_disconnect_noise(monkeypatch):
@@ -2926,6 +2976,26 @@ def test_session_detail_uses_live_phase_while_turn_is_running(tmp_path, monkeypa
     assert payload["currentPhase"] == "running"
 
 
+def test_session_detail_exposes_pre_model_progress_stage(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    session_service._set_session_running("session-live", True, turn_id="turn-progress")
+    try:
+        session_service._set_session_waiting_live_output("session-live", turn_id="turn-progress")
+        response = client.get("/api/sessions/session-live")
+    finally:
+        session_service._clear_session_live_output("session-live")
+        session_service._set_session_running("session-live", False, turn_id="turn-progress")
+
+    assert response.status_code == 200
+    payload = response.json()
+    live_message = payload["messages"][-1]
+    assert live_message["streaming"] is True
+    assert live_message["streamStage"] == "context_prepare"
+    assert live_message["content"] == "正在准备对话上下文..."
+
+
 def test_session_detail_hydrates_file_context_from_saved_active_task(tmp_path, monkeypatch):
     (tmp_path / "web" / "src" / "routes").mkdir(parents=True, exist_ok=True)
     (tmp_path / "core" / "web" / "services").mkdir(parents=True, exist_ok=True)
@@ -3159,7 +3229,7 @@ def test_submit_session_message_shows_waiting_live_message_while_turn_runs(tmp_p
         live_message = payload["messages"][-1]
         assert live_message["role"] == "assistant"
         assert live_message["streaming"] is True
-        assert live_message["content"] == "正在等待模型响应..."
+        assert live_message["content"] == "正在准备对话上下文..."
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -3183,7 +3253,7 @@ def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_p
     payload = response.json()
     assert payload["messages"][-2]["content"] == content
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "正在等待模型响应..."
+    assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["messages"][-1]["content"] == content
     assert _read_next_state_signals(tmp_path, session_id="session-live") == []
@@ -3345,7 +3415,7 @@ def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallbac
     payload = response.json()
     assert payload["messages"][-2]["content"] == content
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "正在等待模型响应..."
+    assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["messages"][-1]["content"] == content
 
@@ -3399,7 +3469,7 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     assert payload["currentPhase"] == "running"
     assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑后的需求"]
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "正在等待模型响应..."
+    assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑后的需求"
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
@@ -3464,7 +3534,7 @@ def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monk
     payload = response.json()
     assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑最新的需求"]
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "正在等待模型响应..."
+    assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑最新的需求"
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
@@ -4374,7 +4444,7 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
         assert payload["messages"][-2]["content"] == "第二轮已经开始"
         assert payload["messages"][-1]["role"] == "assistant"
         assert payload["messages"][-1]["streaming"] is True
-        assert payload["messages"][-1]["content"] == "正在等待模型响应..."
+        assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -6431,6 +6501,10 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert relay_preset["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
     assert relay_preset["model"]["transport"] == "responses"
     assert relay_preset["model"]["contract"] == "tool_chat"
+    assert preset_options["custom_openai_compatible_relay"]["category"] == "openai_compatible"
+    assert preset_options["custom_openai_compatible_relay"]["provider"]["kind"] == "openai_compatible"
+    assert preset_options["custom_relay_responses"]["category"] == "relay"
+    assert preset_options["custom_relay_responses"]["model"]["transport"] == "responses"
     assert "modelOptions" in payload
     assert "profileCards" in payload
 
@@ -6469,6 +6543,11 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_meta["workbench.backend_port"]["label"] == "后端服务端口"
     assert editor_meta["workbench.frontend_port"]["kind"] == "number"
     assert editor_meta["workbench.frontend_port"]["label"] == "前端页面端口"
+    assert editor_meta["network.proxy_enabled"]["kind"] == "boolean"
+    assert editor_meta["network.proxy_enabled"]["label"] == "启用代理"
+    assert editor_meta["network.proxy_url"]["kind"] == "url"
+    assert editor_meta["network.proxy_url"]["label"] == "代理地址"
+    assert "科研调研" in editor_meta["network.proxy_enabled"]["hint"]
     assert editor_meta["tools.file.editable_extensions"]["kind"] == "string_list"
     assert editor_meta["prompt.sections"]["kind"] == "object_list"
     assert editor_meta["prompt.sections"]["badge"] == "列表"
@@ -6711,11 +6790,11 @@ def test_config_workspace_test_llm_uses_pending_draft_key(monkeypatch):
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
-    def fake_http_probe(provider, profile, api_key=None):
+    def fake_runtime_probe(provider, profile, api_key=None):
         assert api_key == "draft-secret"
-        return {"ok": True, "message": "ok"}
+        return {"ok": True, "message": "ok", "runtime_route": f"{profile.transport}:{profile.model}"}
 
-    monkeypatch.setattr("config.public_config._probe_llm_http", fake_http_probe)
+    monkeypatch.setattr("config.public_config._probe_llm_runtime", fake_runtime_probe)
 
     draft_response = client.post(
         "/api/config/draft/update-model",
@@ -6754,6 +6833,8 @@ def test_config_workspace_test_llm_uses_pending_draft_key(monkeypatch):
     assert payload["api_key_source"] == "pending-env:VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY"
     assert payload["config_scope"] == "draft"
     assert payload["requires_api_key"] is True
+    assert payload["transport"] == "chat_completions"
+    assert payload["contract"] == "tool_chat"
 
 
 def test_config_workspace_test_llm_ignores_forged_pending_draft_key(monkeypatch):
@@ -6769,11 +6850,11 @@ def test_config_workspace_test_llm_ignores_forged_pending_draft_key(monkeypatch)
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
-    def fake_http_probe(provider, profile, api_key=None):
+    def fake_runtime_probe(provider, profile, api_key=None):
         assert api_key is None
         return {"ok": False, "message": "missing"}
 
-    monkeypatch.setattr("config.public_config._probe_llm_http", fake_http_probe)
+    monkeypatch.setattr("config.public_config._probe_llm_runtime", fake_runtime_probe)
 
     response = client.post(
         "/api/config/test-llm",
@@ -6801,12 +6882,12 @@ def test_config_workspace_test_llm_reports_local_draft_route_clearly(monkeypatch
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(saved_config))
 
-    def fake_http_probe(provider, profile, api_key=None):
+    def fake_runtime_probe(provider, profile, api_key=None):
         assert provider.kind == "local"
         assert provider.base_url == "http://localhost:11434/v1"
         return {"ok": False, "message": "<urlopen error [WinError 10061] connection refused>"}
 
-    monkeypatch.setattr("config.public_config._probe_llm_http", fake_http_probe)
+    monkeypatch.setattr("config.public_config._probe_llm_runtime", fake_runtime_probe)
 
     response = client.post(
         "/api/config/test-llm",
@@ -6898,13 +6979,13 @@ def test_config_workspace_test_llm_allows_localhost_for_local_provider(monkeypat
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(load_public_config()))
 
-    def fake_http_probe(provider, profile, api_key=None):
+    def fake_runtime_probe(provider, profile, api_key=None):
         assert provider.kind == "local"
         assert provider.base_url == "http://127.0.0.1:11434/v1"
         assert api_key is None
         return {"ok": True, "message": "local-ok"}
 
-    monkeypatch.setattr("config.public_config._probe_llm_http", fake_http_probe)
+    monkeypatch.setattr("config.public_config._probe_llm_runtime", fake_runtime_probe)
 
     response = client.post(
         "/api/config/test-llm",
@@ -7018,6 +7099,73 @@ def test_config_workspace_draft_model_allows_custom_openai_compatible_relay(monk
     assert "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY" in payload["draftMeta"]["pending_api_keys"]
 
 
+def test_config_workspace_draft_model_allows_custom_relay_responses(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/draft/add-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "presetId": "custom_relay_responses",
+            "modelId": "custom_relay_responses_model",
+            "provider": {
+                "kind": "relay",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://ai-pixel.online",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 1000000,
+            },
+            "model": "gpt-5.5",
+            "label": "Custom Relay Responses",
+            "details": {
+                "transport": "responses",
+                "contract": "tool_chat",
+                "streaming": True,
+            },
+            "apiKeyEnv": "VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY",
+            "apiKey": "draft-secret",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    updated = payload["publicConfig"]["llm"]["model_library"]["custom_relay_responses_model"]
+    assert updated["provider"]["kind"] == "relay"
+    assert updated["provider"]["base_url"] == "https://ai-pixel.online"
+    assert updated["transport"] == "responses"
+    assert updated["api_key_env"] == "VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY"
+
+
+def test_config_workspace_draft_model_rejects_unknown_model_id(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/draft/update-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelId": "generated_from_profile",
+            "provider": public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]["provider"],
+            "model": "gpt-5.5",
+            "label": "Generated from profile",
+            "details": public_config["llm"]["model_library"]["relay_openai_gpt_5_5"],
+            "apiKeyEnv": "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "unknown LLM model" in response.json()["detail"]
+
+
 def test_config_workspace_draft_model_auto_generates_custom_relay_model_id(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
 
@@ -7101,9 +7249,10 @@ def test_config_workspace_discovers_custom_openai_compatible_models(monkeypatch)
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
 
-    def fake_discover_model_list(api_base, *, api_key="", timeout=10):
+    def fake_discover_model_list(api_base, *, api_key="", timeout=10, api_key_source=""):
         seen["api_base"] = api_base
         seen["api_key"] = api_key
+        seen["api_key_source"] = api_key_source
         seen["timeout"] = timeout
         return [
             {"id": "gpt-5.5", "label": "GPT-5.5", "context_window": 1000000},
@@ -7134,7 +7283,66 @@ def test_config_workspace_discovers_custom_openai_compatible_models(monkeypatch)
     assert payload["models"][0]["id"] == "gpt-5.5"
     assert payload["models"][0]["contextWindow"] == 1000000
     assert payload["models"][1]["id"] == "gpt-5.5-mini"
-    assert seen == {"api_base": "https://example.com/v1", "api_key": "draft-secret", "timeout": 10}
+    assert seen == {
+        "api_base": "https://example.com/v1",
+        "api_key": "draft-secret",
+        "api_key_source": "手动输入",
+        "timeout": 10,
+    }
+
+
+def test_config_workspace_model_discovery_uses_configured_environment_key(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    seen = {}
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setenv("VIBELUTION_LLM_CUSTOM_RELAY_API_KEY", "env-secret")
+
+    def fake_discover_model_list(api_base, *, api_key="", timeout=10, api_key_source=""):
+        seen["api_base"] = api_base
+        seen["api_key"] = api_key
+        seen["api_key_source"] = api_key_source
+        return [{"id": "relay-model", "label": "Relay Model"}]
+
+    monkeypatch.setattr(config_service, "_discover_openai_compatible_model_list", fake_discover_model_list)
+
+    response = client.post(
+        "/api/config/discover-models",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "provider": {
+                "kind": "openai_compatible",
+                "api_key_env": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+                "base_url": "https://example.com/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 65536,
+            },
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["apiKeySource"] == "系统环境变量 VIBELUTION_LLM_CUSTOM_RELAY_API_KEY"
+    assert seen == {
+        "api_base": "https://example.com/v1",
+        "api_key": "env-secret",
+        "api_key_source": "系统环境变量 VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+    }
+
+
+def test_config_workspace_model_discovery_url_candidates_do_not_duplicate_v1():
+    assert config_service._model_discovery_urls("https://ai-pixel.online") == [
+        "https://ai-pixel.online/models",
+        "https://ai-pixel.online/v1/models",
+    ]
+    assert config_service._model_discovery_urls("https://ai-pixel.online/v1") == [
+        "https://ai-pixel.online/v1/models",
+    ]
+    assert config_service._model_discovery_urls("https://ai-pixel.online/v1/models") == [
+        "https://ai-pixel.online/v1/models",
+    ]
 
 
 def test_config_workspace_model_discovery_rejects_localhost(monkeypatch):
@@ -7189,6 +7397,8 @@ def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
     writes = []
     deletes = []
+    reloads = []
+    scene_events = []
 
     def fake_load_public_config():
         return copy.deepcopy(public_config)
@@ -7201,6 +7411,13 @@ def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):
     monkeypatch.setattr(config_service, "save_public_config", fake_save_public_config)
     monkeypatch.setattr(config_service, "_set_user_env_var", lambda name, value: writes.append((name, value)))
     monkeypatch.setattr(config_service, "_delete_user_env_var", lambda name: deletes.append(name))
+    monkeypatch.setattr(
+        config_service,
+        "reload_config",
+        lambda config_path=None: reloads.append((config_path, copy.deepcopy(public_config)))
+        or config_service.build_effective_config(public_config),
+    )
+    monkeypatch.setattr(config_service, "_record_config_scene_event", lambda *args, **kwargs: scene_events.append((args, kwargs)))
 
     payload = copy.deepcopy(public_config)
     payload.setdefault("ui", {})["language"] = "en"
@@ -7239,6 +7456,14 @@ def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):
     assert writes == [("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", "draft-secret")]
     assert deletes == []
     assert persisted["baseHash"] == persisted["hash"]
+    assert len(reloads) == 1
+    assert reloads[0][0] == str(config_service.CONFIG_PATH)
+    assert reloads[0][1]["ui"]["language"] == "en"
+    applied_event = scene_events[-1][1]["fields"]
+    assert applied_event["runtimeConfigReloaded"] is True
+    assert applied_event["primaryProviderKind"]
+    assert applied_event["primaryTransport"]
+    assert applied_event["primaryModel"] == config_service.build_effective_config(public_config).llm.get_profile(role="primary").model
 
 
 def test_config_workspace_apply_ignores_forged_pending_env(monkeypatch):

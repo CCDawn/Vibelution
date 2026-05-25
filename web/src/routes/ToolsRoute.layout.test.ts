@@ -48,4 +48,11 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("<summary>");
     expect(routeSource).toContain("toolsShowSchema");
   });
+
+  it("lets the left tool list collapse from the centered resize handle", () => {
+    expect(routeSource).toContain("PaneCollapseHandle");
+    expect(routeSource).toContain("leftPanelCollapsed");
+    expect(routeSource).toContain("setLeftPanelCollapsed");
+    expect(routeSource).toContain("--tools-left-panel-width");
+  });
 });

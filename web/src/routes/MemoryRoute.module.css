@@ -121,12 +121,14 @@
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: var(--route-summary-gap);
-  padding: 10px 14px 0;
+  padding: 8px 12px 0;
 }
 
 .summaryCard {
   display: grid;
-  gap: 3px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
   padding: var(--route-summary-padding);
   border: 1px solid var(--border-soft);
@@ -136,14 +138,17 @@
 
 .summaryCard span {
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 .summaryCard strong {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.96rem;
+  font-size: 0.86rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

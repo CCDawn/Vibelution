@@ -29,4 +29,12 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("if (!item.canDelete)");
     expect(routeSource).toContain("onChange={() => toggleProposalSelection(item)}");
   });
+
+  it("adds collapse handles to the supervised split panes", () => {
+    expect(routeSource).toContain("PaneCollapseHandle");
+    expect(routeSource).toContain("liveLaunchCollapsed");
+    expect(routeSource).toContain("liveRunCollapsed");
+    expect(routeSource).toContain("runsQueueCollapsed");
+    expect(routeSource).toContain("libraryListCollapsed");
+  });
 });
