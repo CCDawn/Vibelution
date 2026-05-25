@@ -318,7 +318,7 @@ export const CONFIG_COPY = {
     profileTableModel: "当前模型",
     profileTableProvider: "服务商",
     profileTableKey: "Key 状态",
-    profileTableActions: "操作",
+    profileTableActions: "连接",
     profileTableCurrent: "当前配置",
     profileTableStaged: "本次修改预览",
     modelEditorCreate: "新增模型",
@@ -358,7 +358,9 @@ export const CONFIG_COPY = {
     profileCards: "当前模型",
     testConnection: "测试连接",
     selectedModel: "使用模型",
-    saveSelectedModel: "确认修改",
+    editProfiles: "编辑任务模型",
+    saveProfileBatch: "确认任务模型",
+    cancelProfileBatch: "取消编辑",
     testSelectedModel: "测试当前内容",
     profileSavePendingInline: "保存任务模型修改中",
     profilePrepared: "已准备好新增任务模型",
@@ -366,8 +368,6 @@ export const CONFIG_COPY = {
     currentRoute: "当前配置",
     stagedRoute: "本次修改预览",
     apiKeySource: "密钥来源",
-    editProfile: "编辑",
-    cancelProfileEdit: "取消",
     profileDraftSaved: "本次修改已更新，保存到 config.toml 后生效。",
     routeSummary: "路由信息",
     expandSection: "展开内容",
@@ -514,7 +514,7 @@ export const CONFIG_COPY = {
     profileTableModel: "Current model",
     profileTableProvider: "Provider",
     profileTableKey: "Key status",
-    profileTableActions: "Actions",
+    profileTableActions: "Connection",
     profileTableCurrent: "Current config",
     profileTableStaged: "Change preview",
     modelEditorCreate: "Create model",
@@ -554,7 +554,9 @@ export const CONFIG_COPY = {
     profileCards: "Current models",
     testConnection: "Test connection",
     selectedModel: "Model",
-    saveSelectedModel: "Confirm changes",
+    editProfiles: "Edit task models",
+    saveProfileBatch: "Confirm task models",
+    cancelProfileBatch: "Cancel editing",
     testSelectedModel: "Test current values",
     profileSavePendingInline: "Saving task model changes",
     profilePrepared: "Task model is ready",
@@ -562,8 +564,6 @@ export const CONFIG_COPY = {
     currentRoute: "Current values",
     stagedRoute: "Change preview",
     apiKeySource: "API key source",
-    editProfile: "Edit",
-    cancelProfileEdit: "Cancel",
     profileDraftSaved: "Changes are ready. Save to config.toml to persist them.",
     routeSummary: "Route details",
     expandSection: "Expand",
@@ -1856,6 +1856,7 @@ export function ConfigRoute() {
     canCheckCurrentChanges,
     canRestoreEditorText,
   } = editorSyncState;
+  const profilesEditing = Object.keys(profileEditors).length > 0;
   const shouldBlockLeave = useCallback<BlockerFunction>(
     ({ currentLocation, nextLocation }) =>
       shouldBlockConfigLeave({
@@ -2063,19 +2064,16 @@ export function ConfigRoute() {
     return profileEditors[profileId]?.modelId ?? fallback;
   }
 
-  function beginProfileEdit(profileId: string, fallbackModelId = "") {
-    setProfileEditors((current) => ({
-      ...current,
-      [profileId]: emptyProfileEditState(fallbackModelId),
-    }));
+  function beginProfilesEdit() {
+    const nextEditors: Record<string, ProfileEditState> = {};
+    for (const profile of workspace?.profileCards ?? []) {
+      nextEditors[profile.profileId] = emptyProfileEditState(profile.selectedModelId);
+    }
+    setProfileEditors(nextEditors);
   }
 
-  function cancelProfileEdit(profileId: string) {
-    setProfileEditors((current) => {
-      const next = { ...current };
-      delete next[profileId];
-      return next;
-    });
+  function cancelProfilesEdit() {
+    setProfileEditors({});
   }
 
   function updateProfileModelDraft(profileId: string, modelId: string) {
@@ -2158,6 +2156,24 @@ export function ConfigRoute() {
     const next = clonePublicConfig(requireDraft());
     applyModelOptionToProfileDraft(next, profileId, option, modelDetailKeys);
     return { next, option };
+  }
+
+  function buildDraftWithSelectedProfileModels() {
+    let next = clonePublicConfig(requireDraft());
+    let changedCount = 0;
+    for (const profile of workspace?.profileCards ?? []) {
+      const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
+      if (!selectedModelId || selectedModelId === profile.selectedModelId) {
+        continue;
+      }
+      const option = modelOptionsById.get(selectedModelId);
+      if (!option) {
+        throw new Error(`Unknown model: ${selectedModelId}`);
+      }
+      applyModelOptionToProfileDraft(next, profile.profileId, option, modelDetailKeys);
+      changedCount += 1;
+    }
+    return { next, changedCount };
   }
 
   function applyPreset(presetId: string) {
@@ -2259,15 +2275,17 @@ export function ConfigRoute() {
     }
   }
 
-  async function handleApplySelectedProfileModel(profileId: string, fallbackModelId = "") {
+  async function handleApplySelectedProfileModels() {
     if (structuredActionsDisabled) {
       return;
     }
     try {
-      const { next } = buildDraftWithSelectedProfileModel(profileId, fallbackModelId);
-      await previewDraft(next, draftMeta, copy.profileSavePendingInline);
-      cancelProfileEdit(profileId);
-      setNotice({ tone: "success", text: copy.profileDraftSaved });
+      const { next, changedCount } = buildDraftWithSelectedProfileModels();
+      if (changedCount > 0) {
+        await previewDraft(next, draftMeta, copy.profileSavePendingInline);
+        setNotice({ tone: "success", text: copy.profileDraftSaved });
+      }
+      cancelProfilesEdit();
     } catch (error) {
       markError(error);
     }
@@ -2685,7 +2703,40 @@ export function ConfigRoute() {
               <p className={styles.eyebrow}>{sectionTitle("profiles", copy.profilesTitle)}</p>
               <h2 className={styles.sectionTitle}>{copy.profilesTitle}</h2>
             </div>
-            <Play size={16} className={styles.sectionIcon} />
+            <div className={styles.sectionHeaderActions}>
+              {profilesEditing ? (
+                <>
+                  <button
+                    type="button"
+                    className={`${styles.primaryButton} ${styles.compactButton}`}
+                    disabled={structuredActionsDisabled}
+                    onClick={handleApplySelectedProfileModels}
+                  >
+                    <Save size={14} />
+                    {copy.saveProfileBatch}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.actionButton} ${styles.compactButton}`}
+                    disabled={structuredActionsDisabled}
+                    onClick={cancelProfilesEdit}
+                  >
+                    <RotateCcw size={14} />
+                    {copy.cancelProfileBatch}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className={`${styles.actionButton} ${styles.compactButton}`}
+                  disabled={structuredActionsDisabled}
+                  onClick={beginProfilesEdit}
+                >
+                  <Pencil size={14} />
+                  {copy.editProfiles}
+                </button>
+              )}
+            </div>
           </div>
           <p className={styles.sectionText}>{copy.profilesBody}</p>
           <div className={styles.profileTableWrap}>
@@ -2702,7 +2753,7 @@ export function ConfigRoute() {
               <tbody>
                 {workspace.profileCards.map((profile) => {
                   const profileEditor = profileEditors[profile.profileId];
-                  const isEditingProfile = Boolean(profileEditor);
+                  const isEditingProfile = profilesEditing && Boolean(profileEditor);
                   const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
                   const selectedModel = modelOptionsById.get(selectedModelId) ?? null;
                   const displayState = resolveProfileDisplayState(profile, selectedModelId, selectedModel, isEditingProfile);
@@ -2751,38 +2802,6 @@ export function ConfigRoute() {
                       </td>
                       <td>
                         <div className={styles.profileTableActions}>
-                          {isEditingProfile ? (
-                            <>
-                              <button
-                                type="button"
-                                className={`${styles.primaryButton} ${styles.compactButton}`}
-                                disabled={structuredActionsDisabled || !selectedModelId}
-                                onClick={() => handleApplySelectedProfileModel(profile.profileId, profile.selectedModelId)}
-                              >
-                                <Save size={14} />
-                                {copy.saveSelectedModel}
-                              </button>
-                              <button
-                                type="button"
-                                className={`${styles.actionButton} ${styles.compactButton}`}
-                                disabled={structuredActionsDisabled}
-                                onClick={() => cancelProfileEdit(profile.profileId)}
-                              >
-                                <RotateCcw size={14} />
-                                {copy.cancelProfileEdit}
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              className={`${styles.actionButton} ${styles.compactButton}`}
-                              disabled={structuredActionsDisabled}
-                              onClick={() => beginProfileEdit(profile.profileId, profile.selectedModelId)}
-                            >
-                              <Pencil size={14} />
-                              {copy.editProfile}
-                            </button>
-                          )}
                           <button
                             type="button"
                             className={`${styles.actionButton} ${styles.compactButton}`}
