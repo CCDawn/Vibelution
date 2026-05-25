@@ -42,6 +42,7 @@ import {
   asRecord,
   clonePublicConfig,
   collectModelDetailKeys,
+  defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
   getString,
   groupModelPresets,
@@ -2168,13 +2169,14 @@ export function ConfigRoute() {
       return;
     }
     const presetModel = asRecord(preset.model);
+    const presetModelId = getString(preset.model_id);
     setModelEditor({
       mode: "create",
       preset_id: presetId,
-      model_id: getString(preset.model_id),
+      model_id: presetModelId,
       label: getString(presetModel.label) || preset.label,
       model: getString(presetModel.model),
-      api_key_env: getString(presetModel.api_key_env),
+      api_key_env: getString(presetModel.api_key_env) || defaultModelApiKeyEnv(presetModelId),
       api_key: "",
       clear_api_key: false,
       provider: buildProviderDraft(asRecord(preset.provider)),

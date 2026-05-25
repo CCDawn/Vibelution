@@ -168,6 +168,14 @@ export function groupModelPresets(
   return groups.filter((group) => group.presets.length);
 }
 
+export function defaultModelApiKeyEnv(modelId: string): string {
+  const token = modelId
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return token ? `VIBELUTION_LLM_${token}_API_KEY` : "VIBELUTION_LLM_MODEL_API_KEY";
+}
+
 export function applyModelOptionToProfileDraft(
   config: PublicConfigShape,
   profileId: string,

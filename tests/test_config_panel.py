@@ -603,6 +603,35 @@ def test_apply_relay_model_preset_materializes_openai_compatible_provider():
     build_effective_config(updated)
 
 
+def test_apply_custom_openai_compatible_relay_preset_accepts_user_base_url():
+    public_config = load_public_config()
+
+    updated = apply_llm_model_preset(
+        public_config,
+        "custom_openai_compatible_relay",
+        model_id="custom_relay",
+        provider_id={
+            "kind": "openai_compatible",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://relay.example.com/v1",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 65536,
+        },
+        model="custom-gpt",
+        label="Custom Relay",
+        api_key_env="VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+    )
+    model = updated["llm"]["model_library"]["custom_relay"]
+
+    assert model["provider"]["kind"] == "openai_compatible"
+    assert model["provider"]["base_url"] == "https://relay.example.com/v1"
+    assert model["provider"]["compat_mode"] == "openai"
+    assert model["model"] == "custom-gpt"
+    assert model["api_key_env"] == "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY"
+    build_effective_config(updated)
+
+
 def test_default_public_config_includes_new_official_model_templates():
     public_config = load_public_config()
     relay_model = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
