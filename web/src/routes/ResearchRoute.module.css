@@ -1,0 +1,386 @@
+.route {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 5%, transparent), transparent 34%),
+    var(--surface-page);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--route-topbar-gap);
+  min-width: 0;
+  padding: var(--route-topbar-padding);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-header);
+}
+
+.header > div {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.eyebrow,
+.panelEyebrow {
+  margin: 0 0 2px;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--route-topbar-title-size);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.subtitle {
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--route-topbar-subtitle-size);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: minmax(1.25fr, 2fr) repeat(3, minmax(0, 1fr));
+  gap: var(--route-summary-gap);
+  padding: 10px 14px 0;
+}
+
+.summaryCard,
+.pipelinePanel,
+.evidencePanel,
+.outputPanel,
+.guardrailPanel {
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+.summaryCard {
+  display: grid;
+  gap: 5px;
+  padding: var(--route-summary-padding);
+}
+
+.summaryCard span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.summaryCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.88rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(520px, 1.35fr) minmax(360px, 0.8fr);
+  gap: 12px;
+  min-height: 0;
+  padding: var(--route-workspace-padding);
+}
+
+.pipelinePanel,
+.evidencePanel,
+.outputPanel,
+.guardrailPanel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.pipelinePanel {
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.sideColumn {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.panelHeader h2,
+.guardrailPanel h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.panelHeader svg {
+  color: var(--accent-cool);
+  flex: 0 0 auto;
+}
+
+.countPill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: var(--accent-cool);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.stageList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.stageCard {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 132px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 44%),
+    var(--surface-card);
+}
+
+.stageIndex {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
+  border-radius: 8px;
+  color: var(--accent-cool);
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+}
+
+.stageIndex span {
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.stageBody {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stageHeader,
+.evidenceHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stageHeader strong,
+.evidenceHeader strong,
+.outputCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stageHeader span {
+  flex: 0 0 auto;
+  color: var(--accent-warm-2);
+  font-size: 0.76rem;
+}
+
+.stageBody p,
+.evidenceCard p,
+.guardrailPanel p,
+.outputCard p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.stageBody code {
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 4px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidenceList,
+.outputList {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.evidenceCard,
+.outputCard {
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.evidenceCard {
+  display: grid;
+  gap: 7px;
+}
+
+.evidenceCard > span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.statePill {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.state_ready {
+  color: var(--state-success);
+}
+
+.state_draft {
+  color: var(--accent-warm-2);
+}
+
+.state_blocked {
+  color: var(--fg-tertiary);
+}
+
+.outputCard {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.outputCard > span {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  border-radius: 999px;
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+}
+
+.outputCard > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.guardrailPanel {
+  border-color: color-mix(in srgb, var(--state-warning) 24%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 7%, var(--surface-panel));
+}
+
+.guardrailPanel > div {
+  min-width: 0;
+}
+
+@media (max-width: 1180px) {
+  .summaryGrid,
+  .workspace,
+  .stageList {
+    grid-template-columns: 1fr;
+  }
+
+  .stageList {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 760px) {
+  .route {
+    overflow: auto;
+  }
+
+  .header > div {
+    grid-template-columns: 1fr;
+  }
+
+  .title,
+  .subtitle,
+  .summaryCard strong {
+    white-space: normal;
+  }
+
+  .stageCard {
+    grid-template-columns: 1fr;
+  }
+
+  .stageIndex {
+    grid-template-columns: auto auto;
+    justify-content: start;
+    min-height: 42px;
+    padding: 0 10px;
+  }
+}
