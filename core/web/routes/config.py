@@ -13,6 +13,7 @@ from core.web.services.config_service import (
     draft_add_model,
     draft_add_profile,
     draft_delete_model,
+    discover_config_models,
     draft_update_model,
     get_config_summary,
     get_config_workspace,
@@ -75,6 +76,11 @@ class ConfigDraftAddProfilePayload(ConfigDraftPayload):
 
 class ConfigDraftTestPayload(ConfigDraftPayload):
     profileId: str | None = None
+
+
+class ConfigDiscoverModelsPayload(ConfigDraftPayload):
+    provider: dict[str, Any] = Field(default_factory=dict)
+    apiKey: str = ""
 
 
 def _raise_config_http_error(exc: Exception) -> None:
@@ -184,6 +190,19 @@ def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             profile_id=payload.profileId,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
+
+
+@router.post("/config/discover-models")
+def config_discover_models(payload: ConfigDiscoverModelsPayload) -> dict:
+    try:
+        return discover_config_models(
+            payload.publicConfig,
+            draft_meta=payload.draftMeta,
+            provider=payload.provider,
+            api_key=payload.apiKey,
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)

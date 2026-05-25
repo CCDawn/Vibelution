@@ -10,6 +10,8 @@ import {
   deriveConfigEditorSyncState,
   groupModelPresets,
   hasPendingSecretChanges,
+  modelLibraryIdFromParts,
+  PROVIDER_KIND_OPTIONS,
   presetCategory,
   resolveProfileDisplayState,
   shouldBlockConfigLeave,
@@ -125,6 +127,13 @@ describe("configRouteLogic", () => {
       "VIBELUTION_LLM_CUSTOM_OPENAI_COMPATIBLE_RELAY_API_KEY",
     );
     expect(defaultModelApiKeyEnv("custom-relay.gpt")).toBe("VIBELUTION_LLM_CUSTOM_RELAY_GPT_API_KEY");
+  });
+
+  it("derives readable internal model ids and exposes provider kind choices", () => {
+    expect(modelLibraryIdFromParts("pixel-open", "gpt-5.5")).toBe("pixel_open_gpt_5_5");
+    expect(modelLibraryIdFromParts("", "gpt-5.5")).toBe("gpt_5_5");
+    expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("openai_compatible");
+    expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("relay");
   });
 
   it("removes profile api_key_env when the selected model has none", () => {

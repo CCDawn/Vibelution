@@ -12,6 +12,11 @@ export type ModelPresetGroup = {
 
 export type ModelPresetGroupLabels = Record<ModelPresetGroupId, string>;
 
+export type ProviderKindOption = {
+  value: string;
+  label: string;
+};
+
 export type ConfigEditorSyncStateInput = {
   editorText: string;
   formattedConfigText: string;
@@ -175,6 +180,41 @@ export function defaultModelApiKeyEnv(modelId: string): string {
     .replace(/^_+|_+$/g, "");
   return token ? `VIBELUTION_LLM_${token}_API_KEY` : "VIBELUTION_LLM_MODEL_API_KEY";
 }
+
+export function modelLibraryIdFromParts(label: string, model: string): string {
+  const raw = `${label}-${model}`.trim();
+  const token = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return token || "custom_model";
+}
+
+export function uniqueModelLibraryId(baseId: string, existingIds: Iterable<string>): string {
+  const existing = new Set(Array.from(existingIds, (value) => value.trim()).filter(Boolean));
+  const base = modelLibraryIdFromParts(baseId, "") || "custom_model";
+  if (!existing.has(base)) {
+    return base;
+  }
+  let index = 2;
+  while (existing.has(`${base}_${index}`)) {
+    index += 1;
+  }
+  return `${base}_${index}`;
+}
+
+export const PROVIDER_KIND_OPTIONS: ProviderKindOption[] = [
+  { value: "openai_compatible", label: "OpenAI 兼容" },
+  { value: "relay", label: "中转站" },
+  { value: "openai", label: "OpenAI" },
+  { value: "deepseek", label: "DeepSeek" },
+  { value: "minimax", label: "MiniMax" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "google", label: "Google" },
+  { value: "aliyun", label: "DashScope" },
+  { value: "siliconflow", label: "SiliconFlow" },
+  { value: "local", label: "Local" },
+];
 
 export function applyModelOptionToProfileDraft(
   config: PublicConfigShape,

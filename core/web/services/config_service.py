@@ -9,6 +9,9 @@ import secrets
 import subprocess
 import time
 from typing import Any
+from urllib.parse import urljoin
+
+import httpx
 
 import config.public_config as public_config_module
 from config.public_config import (
@@ -32,6 +35,8 @@ from config.public_config import (
     validate_llm_api_key_env,
     validate_llm_public_config,
 )
+
+from config.llm_security import validate_llm_provider_target
 
 from .config_editor_schema import build_editor_meta, build_editor_sections
 from .git_status_service import with_git_config_defaults
@@ -58,6 +63,7 @@ _PENDING_API_KEY_SECRETS: dict[str, tuple[str, str]] = {}
 _PENDING_CLEAR_ENVS: set[str] = set()
 _OPEN_ENVIRONMENT_TASK_NAME = r"\Vibelution\OpenEnvironmentVariables"
 _ENVIRONMENT_WINDOW_TITLE_PARTS = ("环境变量", "Environment Variables")
+_MODEL_DISCOVERY_ENDPOINTS = ("models", "v1/models")
 _SW_RESTORE = 9
 _SW_SHOW = 5
 _HWND_TOPMOST = -1
@@ -950,6 +956,88 @@ def run_draft_llm_test(
     submitted = _prepare_submitted_public_config(public_config, old_public)
     validate_llm_public_config(submitted)
     return _run_draft_test_llm_connection(submitted, profile_id, _normalize_draft_meta(draft_meta))
+
+
+def _normalize_discovered_models(data: Any) -> list[dict[str, Any]]:
+    raw_models: list[Any]
+    if isinstance(data, dict) and isinstance(data.get("data"), list):
+        raw_models = data["data"]
+    elif isinstance(data, list):
+        raw_models = data
+    elif isinstance(data, dict) and data.get("id"):
+        raw_models = [data]
+    else:
+        raw_models = []
+
+    models: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in raw_models:
+        if not isinstance(raw, dict):
+            continue
+        model_id = str(raw.get("id") or raw.get("model") or raw.get("name") or "").strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        context_window = raw.get("contextWindow") or raw.get("context_window") or raw.get("max_model_len") or raw.get("context_length") or raw.get("max_tokens")
+        item: dict[str, Any] = {
+            "id": model_id,
+            "label": str(raw.get("name") or raw.get("label") or model_id),
+        }
+        if isinstance(context_window, int) and context_window > 0:
+            item["contextWindow"] = context_window
+        models.append(item)
+    return models
+
+
+def _discover_openai_compatible_model_list(api_base: str, *, api_key: str = "", timeout: int = 10) -> list[dict[str, Any]]:
+    last_error: Exception | None = None
+    normalized_base = str(api_base or "").strip().rstrip("/") + "/"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    with httpx.Client(timeout=timeout, headers=headers) as client:
+        for endpoint in _MODEL_DISCOVERY_ENDPOINTS:
+            try:
+                response = client.get(urljoin(normalized_base, endpoint))
+                response.raise_for_status()
+                models = _normalize_discovered_models(response.json())
+                if models:
+                    return models
+            except Exception as exc:
+                last_error = exc
+                continue
+    if last_error is not None:
+        raise ValueError(f"模型发现失败：{last_error}") from last_error
+    raise ValueError("模型发现没有返回可用模型。")
+
+
+def discover_config_models(
+    public_config: dict[str, Any] | None,
+    *,
+    draft_meta: dict | None = None,
+    provider: dict[str, Any] | None = None,
+    api_key: str = "",
+) -> dict[str, Any]:
+    old_public = with_git_config_defaults(load_public_config())
+    current = _prepare_submitted_public_config(public_config, old_public)
+    current_meta = _normalize_draft_meta(draft_meta)
+    validate_llm_public_config(current)
+    provider_input = copy.deepcopy(provider or {})
+    validate_llm_provider_target(provider_input, context="llm.model_discovery")
+    api_key_env = str(provider_input.get("api_key_env", "") or "").strip()
+    resolved_api_key = str(api_key or "").strip()
+    if not resolved_api_key and api_key_env:
+        pending = current_meta.get("pending_api_keys", {})
+        token = pending.get(api_key_env) if isinstance(pending, dict) else None
+        resolved_api_key = _resolve_pending_api_key(api_key_env, token) or ""
+    models = _normalize_discovered_models(_discover_openai_compatible_model_list(
+        str(provider_input.get("base_url", "") or "").strip(),
+        api_key=resolved_api_key,
+        timeout=10,
+    ))
+    return {
+        "models": models,
+        "providerKind": str(provider_input.get("kind", "") or "").strip(),
+        "baseUrl": str(provider_input.get("base_url", "") or "").strip(),
+    }
 
 
 def _run_schtasks(command: list[str]) -> subprocess.CompletedProcess[str]:
