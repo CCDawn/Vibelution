@@ -2328,24 +2328,22 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-$functionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq "Get-ManagedBackendCandidatePids"
-}, $true)
-if ($null -eq $functionAst) {
-    throw "Get-ManagedBackendCandidatePids was not found."
+foreach ($name in @(
+    "ConvertTo-LauncherComparableText",
+    "Test-CommandLineMentionsWorkbenchScript",
+    "Test-CommandLineLooksLikeManagedBackend",
+    "Get-ManagedBackendCandidatePids"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
 }
-$managedBackendFunctionAst = $ast.Find({
-    param($node)
-    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $node.Name -eq "Test-CommandLineLooksLikeManagedBackend"
-}, $true)
-if ($null -eq $managedBackendFunctionAst) {
-    throw "Test-CommandLineLooksLikeManagedBackend was not found."
-}
-. ([scriptblock]::Create($managedBackendFunctionAst.Extent.Text))
-. ([scriptblock]::Create($functionAst.Extent.Text))
 
 $script:port = 8000
 $script:healthy = $true
@@ -2412,7 +2410,12 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-foreach ($name in @("Test-CommandLineLooksLikeManagedBackend", "Get-ManagedBackendCandidatePids")) {
+foreach ($name in @(
+    "ConvertTo-LauncherComparableText",
+    "Test-CommandLineMentionsWorkbenchScript",
+    "Test-CommandLineLooksLikeManagedBackend",
+    "Get-ManagedBackendCandidatePids"
+)) {
     $functionAst = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -2556,7 +2559,18 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-foreach ($functionName in @("Test-CommandLineLooksLikeManagedBackend", "Stop-ManagedBackendProcesses")) {
+foreach ($functionName in @(
+    "ConvertTo-LauncherComparableText",
+    "Test-NormalizedTextContainsPathSegment",
+    "Test-TextReferencesProjectPath",
+    "Test-CommandLineMentionsWorkbenchScript",
+    "Test-CommandLineUsesRelativeWorkbenchScript",
+    "Get-LauncherProcessPropertyValue",
+    "Test-CommandLineLooksLikeRepoWorkbenchBackend",
+    "Test-ProcessLooksLikeRepoWorkbenchBackend",
+    "Test-CommandLineLooksLikeManagedBackend",
+    "Stop-ManagedBackendProcesses"
+)) {
     $functionAst = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -2569,6 +2583,7 @@ foreach ($functionName in @("Test-CommandLineLooksLikeManagedBackend", "Stop-Man
 }
 
 $script:port = 8000
+$script:projectDir = "C:\\Users\\17533\\Desktop\\Vibelution"
 $script:stopCalls = @()
 $script:listenerCalls = 0
 function Get-ManagedBackendCandidatePids { return @(6544) }
@@ -2864,7 +2879,18 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Launcher script parse failed: $($parseErrors[0].Message)"
 }
 
-foreach ($functionName in @("Test-CommandLineLooksLikeManagedBackend", "Stop-ManagedBackendProcesses")) {
+foreach ($functionName in @(
+    "ConvertTo-LauncherComparableText",
+    "Test-NormalizedTextContainsPathSegment",
+    "Test-TextReferencesProjectPath",
+    "Test-CommandLineMentionsWorkbenchScript",
+    "Test-CommandLineUsesRelativeWorkbenchScript",
+    "Get-LauncherProcessPropertyValue",
+    "Test-CommandLineLooksLikeRepoWorkbenchBackend",
+    "Test-ProcessLooksLikeRepoWorkbenchBackend",
+    "Test-CommandLineLooksLikeManagedBackend",
+    "Stop-ManagedBackendProcesses"
+)) {
     $functionAst = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -2877,6 +2903,7 @@ foreach ($functionName in @("Test-CommandLineLooksLikeManagedBackend", "Stop-Man
 }
 
 $script:port = 8000
+$script:projectDir = "C:\\Users\\17533\\Desktop\\Vibelution"
 $script:controlEvents = @()
 function Write-LauncherControlLog {
     param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
@@ -2915,6 +2942,124 @@ Write-Output $payload
         "launcher.backend.stop.port_owner_detected",
     ]
     assert payload["events"][1]["level"] == "warning"
+
+
+def test_launcher_stop_backend_cleans_repo_local_unmarked_residual_port_owner(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @(
+    "ConvertTo-LauncherComparableText",
+    "Test-NormalizedTextContainsPathSegment",
+    "Test-TextReferencesProjectPath",
+    "Test-CommandLineMentionsWorkbenchScript",
+    "Test-CommandLineUsesRelativeWorkbenchScript",
+    "Get-LauncherProcessPropertyValue",
+    "Test-CommandLineLooksLikeRepoWorkbenchBackend",
+    "Test-ProcessLooksLikeRepoWorkbenchBackend",
+    "Test-CommandLineLooksLikeManagedBackend",
+    "Stop-ManagedBackendProcesses"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:port = 8000
+$script:projectDir = "C:\\Users\\17533\\Desktop\\Vibelution"
+$script:controlEvents = @()
+$script:stopCalls = @()
+$script:listenerCalls = 0
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlEvents += ,@{ event = $Event; level = $Level; fields = $Fields }
+}
+function Get-ManagedBackendCandidatePids { return @() }
+function Stop-ProcessesById {
+    param([int[]]$ProcessIds)
+    $script:stopCalls += ,@($ProcessIds)
+}
+function Get-State { return [pscustomobject]@{ port = 8000 } }
+function Get-ListeningPid {
+    param([int]$Port)
+    $script:listenerCalls += 1
+    if ($script:listenerCalls -eq 1) {
+        return 31832
+    }
+    return $null
+}
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if ($Filter -match "ProcessId = 31832") {
+        return [pscustomobject]@{
+            ProcessId = 31832
+            ParentProcessId = 50404
+            CommandLine = "`"C:\\Users\\17533\\AppData\\Local\\Programs\\Python\\Python312\\python.exe`" scripts\\web_workbench.py --no-browser"
+            ExecutablePath = "C:\\Users\\17533\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
+        }
+    }
+    if ($Filter -match "ProcessId = 50404") {
+        return [pscustomobject]@{
+            ProcessId = 50404
+            ParentProcessId = 1
+            CommandLine = "`"C:\\Users\\17533\\Desktop\\Vibelution\\.venv\\Scripts\\python.exe`" scripts\\web_workbench.py --no-browser"
+            ExecutablePath = "C:\\Users\\17533\\Desktop\\Vibelution\\.venv\\Scripts\\python.exe"
+        }
+    }
+    return @()
+}
+function Test-WebHealthy { return $true }
+function Invoke-RepoResidualWorkbenchCleanup {
+    param([int[]]$ExcludePids = @())
+    return [pscustomobject]@{
+        supported = $true
+        requested = @()
+        terminated = @()
+        remaining = @()
+    }
+}
+
+$trace = Stop-ManagedBackendProcesses
+$payload = @{
+    trace = $trace
+    stopCalls = @($script:stopCalls | ForEach-Object { @($_) })
+    events = @($script:controlEvents)
+} | ConvertTo-Json -Depth 10 -Compress
+Write-Output $payload
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["trace"]["RemainingLooksManaged"] is False
+    assert payload["trace"]["RemainingLooksRepoWorkbench"] is True
+    assert payload["trace"]["PortOwnerStopped"] is True
+    assert payload["trace"]["PortOwnerCleanupReason"] == "repo_workbench_ancestor"
+    assert payload["stopCalls"] == [31832]
+    assert payload["events"][1]["fields"]["remaining_looks_repo_workbench"] is True
+    assert payload["events"][1]["fields"]["port_owner_cleanup_reason"] == "repo_workbench_ancestor"
 
 
 def test_launcher_wait_for_backend_healthy_does_not_abort_on_wrapper_pid_exit(tmp_path):

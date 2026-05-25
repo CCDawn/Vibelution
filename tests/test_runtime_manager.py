@@ -3177,7 +3177,11 @@ def test_observe_workbench_treats_repo_port_owner_as_open_when_tracked_pid_is_de
     monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: False)
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 52396)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: False)
-    monkeypatch.setattr(workbench_controller, "_pid_is_repo_workbench_backend", lambda pid: pid == 52396)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_repo_workbench_backend_kind",
+        lambda pid: "managed_workbench_backend" if pid == 52396 else "",
+    )
 
     observation = workbench_controller.observe_workbench()
 
@@ -3185,7 +3189,9 @@ def test_observe_workbench_treats_repo_port_owner_as_open_when_tracked_pid_is_de
     assert observation["backendObserved"] is True
     assert observation["backendPortListening"] is True
     assert observation["backendPortOwnerPid"] == 52396
+    assert observation["backendPortOwnerKind"] == "managed_workbench_backend"
     assert observation["backendPortOwnerTrusted"] is True
+    assert observation["backendPortOwnerResidual"] is False
     assert observation["backendPortConflict"] is False
 
 
@@ -3208,7 +3214,7 @@ def test_observe_workbench_does_not_treat_external_port_owner_as_open(tmp_path, 
     monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 52396)
     monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
-    monkeypatch.setattr(workbench_controller, "_pid_is_repo_workbench_backend", lambda pid: False)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda pid: "")
 
     observation = workbench_controller.observe_workbench()
 
@@ -3216,8 +3222,91 @@ def test_observe_workbench_does_not_treat_external_port_owner_as_open(tmp_path, 
     assert observation["backendObserved"] is False
     assert observation["backendPortListening"] is True
     assert observation["backendPortOwnerPid"] == 52396
+    assert observation["backendPortOwnerKind"] == ""
     assert observation["backendPortOwnerTrusted"] is False
+    assert observation["backendPortOwnerResidual"] is False
     assert observation["backendPortConflict"] is True
+
+
+def test_observe_workbench_reports_unmanaged_repo_port_owner_as_residual(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / "state.json"
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "backendPid": 19964,
+                "browserWindowPid": 0,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8766",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 52396)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+    monkeypatch.setattr(
+        workbench_controller,
+        "_repo_workbench_backend_kind",
+        lambda pid: "unmanaged_workbench" if pid == 52396 else "",
+    )
+
+    observation = workbench_controller.observe_workbench()
+
+    assert observation["observedState"] == "closed"
+    assert observation["backendObserved"] is False
+    assert observation["backendHealthy"] is True
+    assert observation["backendPortListening"] is True
+    assert observation["backendPortOwnerPid"] == 52396
+    assert observation["backendPortOwnerKind"] == "unmanaged_workbench"
+    assert observation["backendPortOwnerTrusted"] is False
+    assert observation["backendPortOwnerResidual"] is True
+    assert observation["backendPortConflict"] is False
+    assert observation["lifecycleConsistency"] == "residual_backend"
+
+
+def test_snapshot_residual_exclusions_keep_untrusted_residual_port_owner(monkeypatch):
+    monkeypatch.setattr(daemon.os, "getpid", lambda: 700)
+    monkeypatch.setattr(daemon, "list_repo_runtime_processes", lambda project_root: [])
+
+    excluded = daemon._snapshot_residual_excluded_pids(
+        {
+            "backendPid": 0,
+            "backendLaunchPid": 0,
+            "backendPortOwnerPid": 52396,
+            "backendPortOwnerTrusted": False,
+            "backendPortOwnerResidual": True,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+        },
+        manager_pid=701,
+    )
+
+    assert 700 in excluded
+    assert 701 in excluded
+    assert 52396 not in excluded
+
+
+def test_snapshot_residual_exclusions_keep_trusted_port_owner_out_of_residuals(monkeypatch):
+    monkeypatch.setattr(daemon.os, "getpid", lambda: 700)
+    monkeypatch.setattr(daemon, "list_repo_runtime_processes", lambda project_root: [])
+
+    excluded = daemon._snapshot_residual_excluded_pids(
+        {
+            "backendPid": 0,
+            "backendLaunchPid": 0,
+            "backendPortOwnerPid": 52396,
+            "backendPortOwnerTrusted": True,
+            "backendPortOwnerResidual": False,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+        },
+        manager_pid=701,
+    )
+
+    assert 52396 in excluded
 
 
 def test_listening_pid_for_port_prefers_psutil(monkeypatch):
@@ -3292,6 +3381,40 @@ def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, 
     assert payload["count"] == 1
     assert payload["items"][0]["pid"] == 49780
     assert payload["items"][0]["port"] == 8001
+
+
+def test_residual_process_payload_uses_configured_port_for_workbench_without_port_arg(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(process_inventory, "configured_backend_port", lambda: 8000)
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 31832,
+                        "ppid": 50404,
+                        "name": "python.exe",
+                        "cmdline": ["python", "scripts/web_workbench.py", "--no-browser"],
+                        "cwd": str(repo),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo)
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["pid"] == 31832
+    assert payload["items"][0]["kind"] == "unmanaged_workbench"
+    assert payload["items"][0]["port"] == 8000
 
 
 def test_residual_process_payload_ignores_launcher_managed_backend(monkeypatch, tmp_path):

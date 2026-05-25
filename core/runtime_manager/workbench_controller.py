@@ -170,16 +170,20 @@ def _listening_pid_for_port_psutil(port: int) -> int:
     return 0
 
 
-def _pid_is_repo_workbench_backend(pid: int) -> bool:
+def _repo_workbench_backend_kind(pid: int) -> str:
     if pid <= 0:
-        return False
+        return ""
     try:
-        return any(
-            item.pid == int(pid) and item.kind == "managed_workbench_backend"
-            for item in list_repo_runtime_processes(project_root=PROJECT_ROOT)
-        )
+        for item in list_repo_runtime_processes(project_root=PROJECT_ROOT):
+            if item.pid == int(pid) and item.kind in {"managed_workbench_backend", "unmanaged_workbench"}:
+                return item.kind
     except Exception:
-        return False
+        return ""
+    return ""
+
+
+def _pid_is_repo_workbench_backend(pid: int) -> bool:
+    return _repo_workbench_backend_kind(pid) == "managed_workbench_backend"
 
 
 def observe_workbench() -> dict[str, Any]:
@@ -198,15 +202,22 @@ def observe_workbench() -> dict[str, Any]:
     port_owner_pid = _listening_pid_for_port(port)
     port_listening = bool(port_owner_pid) or _port_is_listening_socket(port)
     browser_window_alive = _is_process_alive(browser_window_pid)
+    port_owner_kind = _repo_workbench_backend_kind(port_owner_pid) if port_owner_pid > 0 else ""
     port_owner_trusted = bool(
         port_owner_pid > 0
         and (
             (state_backend_pid > 0 and port_owner_pid == state_backend_pid)
-            or _pid_is_repo_workbench_backend(port_owner_pid)
+            or port_owner_kind == "managed_workbench_backend"
         )
     )
-    port_conflict = bool(port_owner_pid > 0 and not port_owner_trusted)
-    trusted_health = healthy and not port_conflict and (backend_alive or port_owner_trusted or port_owner_pid <= 0)
+    port_owner_residual = bool(port_owner_pid > 0 and not port_owner_trusted and port_owner_kind == "unmanaged_workbench")
+    port_conflict = bool(port_owner_pid > 0 and not port_owner_trusted and not port_owner_residual)
+    trusted_health = (
+        healthy
+        and not port_conflict
+        and not port_owner_residual
+        and (backend_alive or port_owner_trusted or port_owner_pid <= 0)
+    )
     backend_observed = (backend_alive and not port_conflict) or port_owner_trusted or trusted_health
     backend_pid = state_backend_pid if backend_alive else port_owner_pid if port_owner_trusted else 0
     if not backend_observed and not browser_window_alive:
@@ -215,7 +226,9 @@ def observe_workbench() -> dict[str, Any]:
         observed_state = "open"
     frontend_orphaned = bool(browser_managed and browser_window_alive and not backend_observed)
     backend_missing = bool(observed_state == "open" and not backend_observed)
-    if port_conflict:
+    if port_owner_residual:
+        lifecycle_consistency = "residual_backend"
+    elif port_conflict:
         lifecycle_consistency = "port_conflict"
     elif frontend_orphaned:
         lifecycle_consistency = "orphaned_browser"
@@ -242,7 +255,9 @@ def observe_workbench() -> dict[str, Any]:
         "backendPort": port,
         "backendPortListening": port_listening,
         "backendPortOwnerPid": port_owner_pid,
+        "backendPortOwnerKind": port_owner_kind,
         "backendPortOwnerTrusted": port_owner_trusted,
+        "backendPortOwnerResidual": port_owner_residual,
         "backendPortConflict": port_conflict,
         "browserWindowAlive": browser_window_alive,
         "observedState": observed_state,
