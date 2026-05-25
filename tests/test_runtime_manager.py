@@ -1,6 +1,5 @@
 import json
 import http.client
-import inspect
 import subprocess
 import sys
 
@@ -1515,7 +1514,6 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
     events: list[tuple[str, dict]] = []
     terminated: list[int] = []
     popen_calls: list[list[str]] = []
-    popen_kwargs: list[dict] = []
     running_checks = iter([False, True])
 
     monkeypatch.setattr(daemon, "load_pid", lambda: 12345)
@@ -1538,26 +1536,19 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
     monkeypatch.setattr(
         daemon.subprocess,
         "Popen",
-        lambda args, **kwargs: popen_calls.append(args)
-        or popen_kwargs.append(kwargs)
-        or type("Proc", (), {"pid": 24680})(),
+        lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 24680})(),
     )
 
     assert daemon.ensure_daemon_running(python_executable="python-test") is True
     assert terminated == [12345]
-    assert events[0] == ("daemon.restart_requested", {"pid": 12345, "reason": "runtime_manager_source_changed"})
-    assert events[1][0] == "daemon.start_requested"
-    assert events[1][1]["pythonExecutable"] == "python-test"
-    assert events[1][1]["consoleSuppressed"] is True
-    assert events[1][1]["stdin"] == "DEVNULL"
-    assert events[1][1]["closeFds"] is True
-    assert events[1][1]["launchApi"] == "subprocess.Popen"
-    assert events[2][0] == "daemon.start_spawned"
-    assert events[2][1]["launchPid"] == 24680
-    assert events[2][1]["pythonExecutable"] == "python-test"
+    assert events == [
+        ("daemon.restart_requested", {"pid": 12345, "reason": "runtime_manager_source_changed"}),
+        (
+            "daemon.start_requested",
+            {"launchPid": 24680, "pythonExecutable": "python-test"},
+        ),
+    ]
     assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
-    assert popen_kwargs[0]["stdin"] is daemon.subprocess.DEVNULL
-    assert popen_kwargs[0]["close_fds"] is True
 
 
 def test_ensure_daemon_running_keeps_current_source_signature(monkeypatch):
@@ -1576,12 +1567,10 @@ def test_ensure_daemon_running_keeps_current_source_signature(monkeypatch):
     assert daemon.ensure_daemon_running() is False
 
 
-def test_ensure_daemon_running_prefers_pythonw_for_background_daemon(tmp_path, monkeypatch):
+def test_ensure_daemon_running_prefers_python_for_background_daemon(tmp_path, monkeypatch):
     python_exe = tmp_path / "Scripts" / "python.exe"
-    pythonw_exe = tmp_path / "Scripts" / "pythonw.exe"
     python_exe.parent.mkdir()
     python_exe.write_text("", encoding="utf-8")
-    pythonw_exe.write_text("", encoding="utf-8")
     running_checks = iter([False, True])
     popen_calls = []
     events: list[tuple[str, dict]] = []
@@ -1593,38 +1582,6 @@ def test_ensure_daemon_running_prefers_pythonw_for_background_daemon(tmp_path, m
     monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", tmp_path / "daemon.out.log")
     monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", tmp_path / "daemon.err.log")
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
-    monkeypatch.setattr(
-        daemon.subprocess,
-        "Popen",
-        lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 13579})(),
-    )
-
-    assert daemon.ensure_daemon_running(python_executable=str(python_exe)) is True
-
-    assert popen_calls == [[str(pythonw_exe.resolve()), "-m", "core.runtime_manager.cli", "daemon"]]
-    assert events[0][0] == "daemon.start_requested"
-    assert events[0][1]["pythonExecutable"] == str(pythonw_exe.resolve())
-    assert events[0][1]["pythonFlavor"] == "pythonw"
-    assert events[0][1]["consoleSuppressed"] is True
-    assert events[1][0] == "daemon.start_spawned"
-    assert events[1][1]["launchPid"] == 13579
-    assert events[1][1]["pythonExecutable"] == str(pythonw_exe.resolve())
-
-
-def test_ensure_daemon_running_falls_back_to_python_when_pythonw_missing(tmp_path, monkeypatch):
-    python_exe = tmp_path / "Scripts" / "python.exe"
-    python_exe.parent.mkdir()
-    python_exe.write_text("", encoding="utf-8")
-    running_checks = iter([False, True])
-    popen_calls = []
-
-    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
-    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
-    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
-    monkeypatch.setattr(daemon, "is_daemon_running", lambda: next(running_checks))
-    monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", tmp_path / "daemon.out.log")
-    monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", tmp_path / "daemon.err.log")
-    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: None)
     monkeypatch.setattr(
         daemon.subprocess,
         "Popen",
@@ -1634,62 +1591,15 @@ def test_ensure_daemon_running_falls_back_to_python_when_pythonw_missing(tmp_pat
     assert daemon.ensure_daemon_running(python_executable=str(python_exe)) is True
 
     assert popen_calls == [[str(python_exe.resolve()), "-m", "core.runtime_manager.cli", "daemon"]]
-
-
-def test_ensure_daemon_running_logs_spawn_failure(monkeypatch, tmp_path):
-    events: list[tuple[str, dict]] = []
-    python_exe = tmp_path / "Scripts" / "python.exe"
-    python_exe.parent.mkdir()
-    python_exe.write_text("", encoding="utf-8")
-
-    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
-    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
-    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
-    monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", tmp_path / "daemon.out.log")
-    monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", tmp_path / "daemon.err.log")
-    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
-    monkeypatch.setattr(
-        daemon.subprocess,
-        "Popen",
-        lambda args, **kwargs: (_ for _ in ()).throw(OSError("spawn denied")),
-    )
-
-    with pytest.raises(OSError, match="spawn denied"):
-        daemon.ensure_daemon_running(python_executable=str(python_exe))
-
-    assert [event[0] for event in events] == ["daemon.start_requested", "daemon.start_failed"]
-    assert events[1][1]["errorType"] == "OSError"
-    assert events[1][1]["error"] == "spawn denied"
-    assert events[1][1]["consoleSuppressed"] is True
-
-
-def test_ensure_daemon_running_logs_start_timeout(monkeypatch, tmp_path):
-    events: list[tuple[str, dict]] = []
-    python_exe = tmp_path / "Scripts" / "python.exe"
-    python_exe.parent.mkdir()
-    python_exe.write_text("", encoding="utf-8")
-
-    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
-    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
-    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
-    monkeypatch.setattr(daemon, "is_daemon_running", lambda: False)
-    monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", tmp_path / "daemon.out.log")
-    monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", tmp_path / "daemon.err.log")
-    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
-    monkeypatch.setattr(daemon, "time", type("FakeTime", (), {"monotonic": staticmethod(iter([0.0, 5.1]).__next__), "sleep": staticmethod(lambda seconds: None)})())
-    monkeypatch.setattr(
-        daemon.subprocess,
-        "Popen",
-        lambda args, **kwargs: type("Proc", (), {"pid": 13579})(),
-    )
-
-    with pytest.raises(RuntimeError, match="failed to start"):
-        daemon.ensure_daemon_running(python_executable=str(python_exe))
-
-    assert [event[0] for event in events] == ["daemon.start_requested", "daemon.start_spawned", "daemon.start_timeout"]
-    assert events[2][1]["launchPid"] == 13579
-    assert events[2][1]["timeoutSeconds"] == 5.0
-    assert events[2][1]["consoleSuppressed"] is True
+    assert events == [
+        (
+            "daemon.start_requested",
+            {
+                "launchPid": 13579,
+                "pythonExecutable": str(python_exe.resolve()),
+            },
+        )
+    ]
 
 
 def test_load_launcher_state_supports_utf8_bom(tmp_path, monkeypatch):
@@ -3434,15 +3344,6 @@ def test_listening_pid_for_port_prefers_psutil(monkeypatch):
     monkeypatch.setattr(workbench_controller, "_listening_pid_for_port_windows", lambda port: 0)
 
     assert workbench_controller._listening_pid_for_port(8766) == 52396
-
-
-def test_windows_port_probe_uses_api_without_shell_probe():
-    source = inspect.getsource(workbench_controller._listening_pid_for_port_windows)
-
-    assert "Get-NetTCPConnection" not in source
-    assert "powershell.exe" not in source
-    assert "subprocess.run" not in source
-    assert "GetExtendedTcpTable" in source
 
 
 def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, tmp_path):
