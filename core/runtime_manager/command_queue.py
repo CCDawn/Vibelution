@@ -26,6 +26,7 @@ from .scene_logging import (
     truncate_event_text,
 )
 from .state_store import load_pid, load_state
+from .restart_coordinator import create_restart_intent
 
 
 def _command_timestamp() -> str:
@@ -63,6 +64,9 @@ def submit_command(
     command = build_command(command_type, args=args, requested_by=requested_by)
     shutdown_state = _shutdown_in_progress_state()
     if shutdown_state is not None:
+        if _should_defer_open_during_shutdown(command):
+            _complete_deferred_open_command(command, shutdown_state=shutdown_state)
+            return command
         _append_queue_event(
             "command_queue.command_rejected_shutdown",
             {
@@ -109,9 +113,18 @@ def wait_for_result(command_id: str, *, timeout_seconds: float = DEFAULT_COMMAND
 def recover_processing_queue() -> None:
     ensure_runtime_manager_dirs()
     for path in sorted(PROCESSING_DIR.glob("*.json")):
+        command = _load_command_file(path)
+        if _complete_recovered_satisfied_stop_manager_close(path, command):
+            continue
         target = INBOX_DIR / path.name
         try:
             os.replace(path, target)
+            _append_queue_event(
+                "command_queue.processing_recovered",
+                command_event_payload(command, queue_path=target.name)
+                if isinstance(command, dict)
+                else {"queuePath": target.name},
+            )
         except OSError:
             continue
 
@@ -136,6 +149,65 @@ def claim_next_command() -> tuple[Path, dict[str, Any]] | None:
         except OSError:
             pass
     return None
+
+
+def _should_defer_open_during_shutdown(command: dict[str, Any]) -> bool:
+    return str(command.get("type") or "").strip() == "open_workbench"
+
+
+def _load_command_file(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _complete_recovered_satisfied_stop_manager_close(path: Path, command: dict[str, Any]) -> bool:
+    if not _is_stop_manager_close(command):
+        return False
+    state = load_state()
+    if not _workbench_is_already_closed(state):
+        return False
+    command_id = str(command.get("commandId") or path.stem).strip() or path.stem
+    result = {
+        "commandId": command_id,
+        "accepted": True,
+        "completed": True,
+        "ok": True,
+        "message": "Recovered stale close command was already satisfied.",
+        "stateVersion": int(state.get("stateVersion") or 0) if isinstance(state, dict) else 0,
+        "staleRecoveredCommand": True,
+        "stopDaemon": False,
+    }
+    complete_command(path, result)
+    _append_queue_event(
+        "command_queue.recovered_stale_close_completed",
+        {
+            "commandId": command_id,
+            "type": str(command.get("type") or ""),
+            "requestedBy": str(command.get("requestedBy") or ""),
+            "requestedAt": str(command.get("requestedAt") or ""),
+            "queuePath": path.name,
+            "reason": "workbench_already_closed",
+        },
+    )
+    return True
+
+
+def _is_stop_manager_close(command: dict[str, Any]) -> bool:
+    args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    return str(command.get("type") or "").strip() == "close_workbench" and bool(args.get("stopManager"))
+
+
+def _workbench_is_already_closed(state: Any) -> bool:
+    if not isinstance(state, dict):
+        return False
+    workbench = state.get("workbench") if isinstance(state.get("workbench"), dict) else {}
+    desired = str(workbench.get("desiredState") or "").strip()
+    observed = str(workbench.get("observedState") or "").strip()
+    phase = str(workbench.get("phase") or "").strip()
+    return desired == "closed" and observed == "closed" and phase in {"", "steady"}
 
 
 def complete_command(path: Path, result: dict[str, Any]) -> None:
@@ -321,6 +393,43 @@ def _complete_rejected_shutdown_command(command: dict[str, Any], *, shutdown_sta
     }
     if not duplicate_shutdown:
         result["errorType"] = "RuntimeManagerStoppingError"
+    _atomic_write_json(RESULTS_DIR / f"{command['commandId']}.json", result)
+
+
+def _complete_deferred_open_command(command: dict[str, Any], *, shutdown_state: dict[str, Any]) -> None:
+    args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    intent = create_restart_intent(
+        "workbench",
+        reason=str(args.get("reason") or "reopen_after_close"),
+        requested_by=str(command.get("requestedBy") or "unknown"),
+        source_command_id=str(command.get("commandId") or ""),
+        payload={
+            "action": "reopen_after_close",
+            "noBrowser": bool(args.get("noBrowser")),
+            "stateVersion": int(shutdown_state.get("stateVersion") or 0),
+        },
+    )
+    _append_queue_event(
+        "command_queue.open_deferred_until_shutdown_complete",
+        {
+            "commandId": str(command.get("commandId") or ""),
+            "intentId": str(intent.get("intentId") or ""),
+            "requestedBy": str(command.get("requestedBy") or ""),
+            "stateVersion": int(shutdown_state.get("stateVersion") or 0),
+            "managerPid": int(shutdown_state.get("managerPid") or 0),
+        },
+    )
+    result = {
+        "commandId": str(command.get("commandId") or "").strip(),
+        "accepted": True,
+        "completed": True,
+        "ok": True,
+        "message": "Workbench reopen was queued until shutdown completes.",
+        "stateVersion": int(shutdown_state.get("stateVersion") or 0),
+        "runtimeManagerStopping": True,
+        "deferredUntilShutdownComplete": True,
+        "restartIntentId": str(intent.get("intentId") or ""),
+    }
     _atomic_write_json(RESULTS_DIR / f"{command['commandId']}.json", result)
 
 

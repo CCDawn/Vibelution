@@ -51,6 +51,7 @@ def no_real_restart(monkeypatch):
         "spawn_detached_process",
         lambda command, env=None: 424242,
     )
+    monkeypatch.setattr(rebirth_tools_module, "_runtime_manager_controls_current_project", lambda: False)
 
 
 @pytest.fixture
@@ -162,6 +163,36 @@ class TestHelperFunctions:
 
 class TestTriggerSelfRestart:
     """自我重启工具测试"""
+
+    def test_trigger_restart_delegates_to_runtime_manager_when_live(self, monkeypatch):
+        """runtime manager 在线时，自重启应进入统一生命周期管理器。"""
+        calls = []
+
+        monkeypatch.setattr(rebirth_tools_module, "_runtime_manager_controls_current_project", lambda: True)
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.submit_command",
+            lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
+            or {"commandId": "cmd-restart"},
+        )
+        monkeypatch.setattr(
+            "core.runtime_manager.command_queue.wait_for_result",
+            lambda command_id, timeout_seconds=0: {
+                "ok": True,
+                "restartIntent": {"intentId": "intent-self"},
+            },
+        )
+
+        result = trigger_self_restart_tool(reason="code_update")
+
+        assert "Runtime Manager" in result
+        assert "intent-self" in result
+        assert calls == [
+            (
+                "restart_self_evolution_run",
+                {"reason": "code_update", "payload": {"reason": "code_update"}},
+                "trigger_self_restart_tool",
+            )
+        ]
 
     def test_trigger_restart_returns_string(self):
         """测试重启返回字符串结果"""

@@ -299,6 +299,11 @@ def run_launcher_action(action: str, *, no_browser: bool = False) -> subprocess.
         args.append("-NoBrowser")
     env = os.environ.copy()
     env["VIBELUTION_PORT"] = str(configured_backend_port())
+    env["VIBELUTION_PROTECTED_PROCESS_IDS"] = ";".join(
+        str(pid)
+        for pid in (os.getpid(), os.getppid())
+        if int(pid or 0) > 0
+    )
     stdout_fd, stdout_path = tempfile.mkstemp(prefix="vibelution-launcher-stdout-", suffix=".log")
     stderr_fd, stderr_path = tempfile.mkstemp(prefix="vibelution-launcher-stderr-", suffix=".log")
     try:

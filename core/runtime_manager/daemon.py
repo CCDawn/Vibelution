@@ -26,6 +26,7 @@ from .constants import (
     STATE_PATH,
     ensure_runtime_manager_dirs,
 )
+from .restart_coordinator import claim_next_restart_intent, complete_restart_intent
 from .scene_logging import append_runtime_manager_file_event, record_runtime_manager_scene_event, runtime_manager_event_phase
 from .state_store import clear_pid, default_state, load_pid, load_state, now_iso, save_pid, save_state
 from .process_inventory import (
@@ -45,6 +46,7 @@ _SOURCE_SIGNATURE_PATHS = (
     Path("core/runtime_manager/daemon.py"),
     Path("core/runtime_manager/evolution_store.py"),
     Path("core/runtime_manager/process_inventory.py"),
+    Path("core/runtime_manager/restart_coordinator.py"),
     Path("core/runtime_manager/scene_logging.py"),
     Path("core/runtime_manager/state_store.py"),
     Path("core/runtime_manager/workbench_controller.py"),
@@ -528,6 +530,30 @@ def _append_event(event_type: str, payload: dict[str, Any]) -> None:
     )
 
 
+def _claim_workbench_reopen_intent() -> dict[str, Any] | None:
+    intent = claim_next_restart_intent(target="workbench")
+    if not intent:
+        return None
+    payload = intent.get("payload") if isinstance(intent.get("payload"), dict) else {}
+    if str(payload.get("action") or "") != "reopen_after_close":
+        complete_restart_intent(str(intent.get("intentId") or ""), status="failed", message="Unsupported workbench restart intent action.")
+        return None
+    return intent
+
+
+def _workbench_reopen_intent_event_payload(intent: dict[str, Any], *, command_id: str) -> dict[str, Any]:
+    payload = intent.get("payload") if isinstance(intent.get("payload"), dict) else {}
+    return {
+        "commandId": command_id,
+        "intentId": str(intent.get("intentId") or ""),
+        "target": str(intent.get("target") or ""),
+        "reason": str(intent.get("reason") or ""),
+        "requestedBy": str(intent.get("requestedBy") or ""),
+        "sourceCommandId": str(intent.get("sourceCommandId") or ""),
+        "noBrowser": bool(payload.get("noBrowser")),
+    }
+
+
 def _creation_flags() -> int:
     flags = 0
     for name in ("DETACHED_PROCESS", "CREATE_NEW_PROCESS_GROUP", "CREATE_NO_WINDOW"):
@@ -792,7 +818,22 @@ def _build_workbench_status_line(
 def _launcher_error_detail(result: Any, fallback: str) -> str:
     if not result:
         return fallback
-    parts = [str(part or "").strip() for part in (getattr(result, "stdout", ""), getattr(result, "stderr", ""))]
+    stderr = str(getattr(result, "stderr", "") or "").strip()
+    stdout = str(getattr(result, "stdout", "") or "").strip()
+    return_code = int(getattr(result, "returncode", 0) or 0)
+    parts: list[str] = []
+    if stderr:
+        parts.append(stderr)
+    if stdout:
+        stdout_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+        progress_lines = [line for line in stdout_lines if line.startswith("[Vibelution]")]
+        diagnostic_lines = [line for line in stdout_lines if not line.startswith("[Vibelution]")]
+        if diagnostic_lines:
+            parts.append("\n".join(diagnostic_lines))
+        elif progress_lines:
+            parts.append(f"Launcher progress before exit: {progress_lines[-1]}")
+    if return_code:
+        parts.append(f"Launcher exit code: {return_code}")
     detail = "\n".join(part for part in parts if part)
     return detail or fallback
 
@@ -957,6 +998,8 @@ class RuntimeManagerDaemon:
                             save_state(state)
                         _append_event("daemon.stopped", {"commandId": str(result.get("commandId") or "")})
                     complete_command(path, result)
+                    if bool(result.get("runDeferredWorkbenchOpen")):
+                        self._run_deferred_workbench_open(result)
                     if bool(result.get("stopDaemon")):
                         _finalize_daemon_stopped_state(manager_pid=self._pid)
                         clear_pid(self._pid)
@@ -964,6 +1007,7 @@ class RuntimeManagerDaemon:
                         return
                     continue
 
+                self._process_self_evolution_restart_intent()
                 state = self._reconcile_observation(load_state())
                 save_state(state)
                 time.sleep(DAEMON_LOOP_INTERVAL_SECONDS)
@@ -1184,6 +1228,41 @@ class RuntimeManagerDaemon:
         state["residualProcesses"] = residual_processes
         return state
 
+    def _process_self_evolution_restart_intent(self) -> None:
+        intent = claim_next_restart_intent(target="self_evolution_run")
+        if not intent:
+            return
+        intent_id = str(intent.get("intentId") or "").strip()
+        try:
+            result = self_evolution_control_service._LOCAL_FULFILL_SELF_EVOLUTION_RESTART(intent)
+            snapshot = result.get("snapshot") if isinstance(result.get("snapshot"), dict) else {}
+            complete_restart_intent(
+                intent_id,
+                status="completed",
+                message=str(result.get("message") or "Self-evolution restart queued."),
+            )
+            _append_event(
+                "self_evolution.restarted_from_intent",
+                {
+                    "intentId": intent_id,
+                    "runId": str(snapshot.get("runId") or result.get("runId") or ""),
+                    "status": str(snapshot.get("status") or ""),
+                    "reason": str(intent.get("reason") or ""),
+                },
+            )
+        except Exception as exc:
+            if intent_id:
+                complete_restart_intent(intent_id, status="failed", message=f"{type(exc).__name__}: {exc}")
+            _append_event(
+                "self_evolution.restart_intent_failed",
+                {
+                    "intentId": intent_id,
+                    "reason": str(intent.get("reason") or ""),
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                },
+            )
+
     def _handle_open_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
@@ -1319,8 +1398,15 @@ class RuntimeManagerDaemon:
             workbench["failureMessage"] = ""
             save_state(self._reconcile_observation(state))
             cleanup_result = self._cleanup_residual_workbench_processes()
+            reopen_intent = _claim_workbench_reopen_intent() if bool(args.get("stopManager")) else None
             if bool(args.get("stopManager")):
-                _append_event("daemon.stop_requested", {"commandId": command_id, "reason": "close_workbench"})
+                if reopen_intent:
+                    _append_event(
+                        "workbench.reopen_after_close.claimed",
+                        _workbench_reopen_intent_event_payload(reopen_intent, command_id=command_id),
+                    )
+                else:
+                    _append_event("daemon.stop_requested", {"commandId": command_id, "reason": "close_workbench"})
             return self._finish_command(
                 command_id,
                 ok=True,
@@ -1328,7 +1414,9 @@ class RuntimeManagerDaemon:
                 result_data={
                     "residualCleanup": cleanup_result,
                     "closedEvolutionRuns": closed_runs,
-                    "stopDaemon": bool(args.get("stopManager")),
+                    "stopDaemon": bool(args.get("stopManager")) and not bool(reopen_intent),
+                    "runDeferredWorkbenchOpen": bool(reopen_intent),
+                    "restartIntent": reopen_intent or {},
                 },
             )
 
@@ -1373,6 +1461,7 @@ class RuntimeManagerDaemon:
             )
             | {"attempts": verification_attempts},
         )
+        reopen_intent = _claim_workbench_reopen_intent() if bool(args.get("stopManager")) else None
         final_result = self._finish_command(
             command_id,
             ok=True,
@@ -1380,12 +1469,54 @@ class RuntimeManagerDaemon:
             result_data={
                 "residualCleanup": cleanup_result,
                 "closedEvolutionRuns": closed_runs,
-                "stopDaemon": bool(args.get("stopManager")),
+                "stopDaemon": bool(args.get("stopManager")) and not bool(reopen_intent),
+                "runDeferredWorkbenchOpen": bool(reopen_intent),
+                "restartIntent": reopen_intent or {},
             },
         )
         if bool(args.get("stopManager")):
-            _append_event("daemon.stop_requested", {"commandId": command_id, "reason": "close_workbench"})
+            if reopen_intent:
+                _append_event(
+                    "workbench.reopen_after_close.claimed",
+                    _workbench_reopen_intent_event_payload(reopen_intent, command_id=command_id),
+                )
+            else:
+                _append_event("daemon.stop_requested", {"commandId": command_id, "reason": "close_workbench"})
         return final_result
+
+    def _run_deferred_workbench_open(self, result: dict[str, Any]) -> None:
+        intent = result.get("restartIntent") if isinstance(result.get("restartIntent"), dict) else {}
+        intent_id = str(intent.get("intentId") or "").strip()
+        payload = intent.get("payload") if isinstance(intent.get("payload"), dict) else {}
+        command_id = str(intent.get("sourceCommandId") or intent_id or "deferred-open").strip()
+        try:
+            _append_event(
+                "workbench.reopen_after_close.started",
+                _workbench_reopen_intent_event_payload(intent, command_id=command_id),
+            )
+            open_result = self._handle_open_workbench(
+                command_id=command_id,
+                args={
+                    "reason": "reopen_after_close",
+                    "noBrowser": bool(payload.get("noBrowser")),
+                    "source": "restart_coordinator",
+                },
+            )
+            if intent_id:
+                complete_restart_intent(intent_id, status="completed", message=str(open_result.get("message") or "Workbench reopened."))
+            _append_event(
+                "workbench.reopen_after_close.completed",
+                _workbench_reopen_intent_event_payload(intent, command_id=command_id)
+                | {"ok": bool(open_result.get("ok")), "message": str(open_result.get("message") or "")},
+            )
+        except Exception as exc:
+            if intent_id:
+                complete_restart_intent(intent_id, status="failed", message=f"{type(exc).__name__}: {exc}")
+            _append_event(
+                "workbench.reopen_after_close.failed",
+                _workbench_reopen_intent_event_payload(intent, command_id=command_id)
+                | {"errorType": type(exc).__name__, "message": str(exc)},
+            )
 
     def _cleanup_residual_workbench_processes(self) -> dict[str, Any]:
         return terminate_unmanaged_workbench_processes(
@@ -1457,6 +1588,23 @@ class RuntimeManagerDaemon:
             ok=True,
             message="Self-evolution stop requested.",
             result_data={"runId": run_id, "snapshot": snapshot},
+        )
+
+    def _handle_restart_self_evolution_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(args.get("runId") or "").strip()
+        payload = args.get("payload") if isinstance(args.get("payload"), dict) else {}
+        reason = str(args.get("reason") or payload.get("reason") or "self_evolution_restart").strip() or "self_evolution_restart"
+        intent = self_evolution_control_service._LOCAL_REQUEST_SELF_EVOLUTION_RESTART(run_id=run_id, reason=reason)
+        snapshot = intent.get("snapshot") if isinstance(intent.get("snapshot"), dict) else {}
+        return self._finish_command(
+            command_id,
+            ok=True,
+            message="Self-evolution restart requested.",
+            result_data={
+                "runId": str(snapshot.get("runId") or run_id),
+                "snapshot": snapshot,
+                "restartIntent": {key: value for key, value in intent.items() if key != "snapshot"},
+            },
         )
 
     def _handle_start_supervised_run(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
