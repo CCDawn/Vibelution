@@ -17,6 +17,7 @@ from typing import Any
 from config.workbench import configured_backend_port
 
 from .constants import DEFAULT_HEALTH_URL, DEFAULT_URL, LAUNCHER_SCRIPT_PATH, LAUNCHER_STATE_PATH, PROJECT_ROOT
+from .process_inventory import list_repo_runtime_processes
 
 
 def _is_process_alive_windows(pid: int) -> bool:
@@ -173,12 +174,8 @@ def _pid_is_repo_workbench_backend(pid: int) -> bool:
     if pid <= 0:
         return False
     try:
-        from .process_inventory import list_repo_runtime_processes
-    except Exception:
-        return False
-    try:
         return any(
-            item.pid == int(pid) and item.kind == "unmanaged_workbench"
+            item.pid == int(pid) and item.kind == "managed_workbench_backend"
             for item in list_repo_runtime_processes(project_root=PROJECT_ROOT)
         )
     except Exception:

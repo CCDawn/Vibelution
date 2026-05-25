@@ -142,6 +142,36 @@ def test_backend_health_probe_treats_http_protocol_error_as_unhealthy(monkeypatc
     assert workbench_controller._is_backend_healthy("http://127.0.0.1:8000") is False
 
 
+def test_workbench_controller_trusts_only_launcher_marked_backend(monkeypatch):
+    monkeypatch.setattr(
+        workbench_controller,
+        "list_repo_runtime_processes",
+        lambda project_root: [
+            process_inventory.RuntimeProcess(
+                pid=22416,
+                parent_pid=1,
+                kind="managed_workbench_backend",
+                name="pythonw.exe",
+                command_line="pythonw scripts/web_workbench.py --port 8000 --no-browser --managed-by-launcher",
+                cwd=str(project_root),
+                port=8000,
+            ),
+            process_inventory.RuntimeProcess(
+                pid=49780,
+                parent_pid=1,
+                kind="unmanaged_workbench",
+                name="python.exe",
+                command_line="python scripts/web_workbench.py --port 8000 --no-browser",
+                cwd=str(project_root),
+                port=8000,
+            ),
+        ],
+    )
+
+    assert workbench_controller._pid_is_repo_workbench_backend(22416) is True
+    assert workbench_controller._pid_is_repo_workbench_backend(49780) is False
+
+
 def test_load_runtime_snapshot_aligns_legacy_open_session(monkeypatch):
     saved_states: list[dict] = []
 
@@ -3262,6 +3292,55 @@ def test_residual_process_payload_reports_only_unmanaged_workbench(monkeypatch, 
     assert payload["count"] == 1
     assert payload["items"][0]["pid"] == 49780
     assert payload["items"][0]["port"] == 8001
+
+
+def test_residual_process_payload_ignores_launcher_managed_backend(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 22416,
+                        "ppid": 1,
+                        "name": "pythonw.exe",
+                        "cmdline": [
+                            str(repo / ".venv" / "Scripts" / "pythonw.exe"),
+                            "scripts/web_workbench.py",
+                            "--port",
+                            "8001",
+                            "--no-browser",
+                            "--managed-by-launcher",
+                        ],
+                        "cwd": str(repo),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 49780,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8001", "--no-browser"],
+                        "cwd": str(repo),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.residual_process_payload(project_root=repo)
+    processes = process_inventory.list_repo_runtime_processes(project_root=repo)
+
+    assert {item.kind for item in processes} == {"managed_workbench_backend", "unmanaged_workbench"}
+    assert payload["count"] == 1
+    assert payload["items"][0]["pid"] == 49780
 
 
 def test_residual_process_payload_ignores_descendants_of_active_backend(monkeypatch, tmp_path):
