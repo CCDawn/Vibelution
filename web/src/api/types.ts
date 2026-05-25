@@ -1889,6 +1889,18 @@ export type ConfigLlmTestResult = {
   requires_api_key: boolean;
 };
 
+export type ConfigDiscoveredModel = {
+  id: string;
+  label: string;
+  contextWindow?: number;
+};
+
+export type ConfigModelDiscoveryResult = {
+  models: ConfigDiscoveredModel[];
+  providerKind: string;
+  baseUrl: string;
+};
+
 export type PetSummary = {
   name: string;
   avatarPreset: string;

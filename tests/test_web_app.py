@@ -7018,6 +7018,46 @@ def test_config_workspace_draft_model_allows_custom_openai_compatible_relay(monk
     assert "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY" in payload["draftMeta"]["pending_api_keys"]
 
 
+def test_config_workspace_draft_model_auto_generates_custom_relay_model_id(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/draft/add-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "presetId": "custom_openai_compatible_relay",
+            "modelId": "",
+            "provider": {
+                "kind": "openai_compatible",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://example.com/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 65536,
+            },
+            "model": "gpt-5.5",
+            "label": "GPT-5.5",
+            "details": {
+                "transport": "chat_completions",
+                "contract": "tool_chat",
+                "streaming": True,
+            },
+            "apiKeyEnv": "",
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    model_library = response.json()["publicConfig"]["llm"]["model_library"]
+    assert "gpt_5_5_gpt_5_5" in model_library
+    assert "custom_openai_compatible_relay" not in model_library
+    assert model_library["gpt_5_5_gpt_5_5"]["api_key_env"] == "VIBELUTION_LLM_GPT_5_5_GPT_5_5_API_KEY"
+
+
 def test_config_workspace_draft_model_rejects_custom_relay_localhost(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
 
@@ -7047,6 +7087,74 @@ def test_config_workspace_draft_model_rejects_custom_relay_localhost(monkeypatch
                 "streaming": True,
             },
             "apiKeyEnv": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "localhost" in response.json()["detail"] or "https" in response.json()["detail"]
+
+
+def test_config_workspace_discovers_custom_openai_compatible_models(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    seen = {}
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    def fake_discover_model_list(api_base, *, api_key="", timeout=10):
+        seen["api_base"] = api_base
+        seen["api_key"] = api_key
+        seen["timeout"] = timeout
+        return [
+            {"id": "gpt-5.5", "label": "GPT-5.5", "context_window": 1000000},
+            {"id": "gpt-5.5-mini", "label": "GPT-5.5 Mini", "context_window": 128000},
+        ]
+
+    monkeypatch.setattr(config_service, "_discover_openai_compatible_model_list", fake_discover_model_list)
+
+    response = client.post(
+        "/api/config/discover-models",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "provider": {
+                "kind": "openai_compatible",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "https://example.com/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 65536,
+            },
+            "apiKey": "draft-secret",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["models"][0]["id"] == "gpt-5.5"
+    assert payload["models"][0]["contextWindow"] == 1000000
+    assert payload["models"][1]["id"] == "gpt-5.5-mini"
+    assert seen == {"api_base": "https://example.com/v1", "api_key": "draft-secret", "timeout": 10}
+
+
+def test_config_workspace_model_discovery_rejects_localhost(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    response = client.post(
+        "/api/config/discover-models",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "provider": {
+                "kind": "openai_compatible",
+                "api_key_env": "OPENAI_API_KEY",
+                "base_url": "http://127.0.0.1:11434/v1",
+                "compat_mode": "openai",
+                "requires_api_key": True,
+                "context_window": 65536,
+            },
             "apiKey": "",
         },
     )

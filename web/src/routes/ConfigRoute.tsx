@@ -26,8 +26,10 @@ import { queryKeys } from "../api/queryKeys";
 import {
   ConfigEditorMeta,
   ConfigEditorSection,
+  ConfigDiscoveredModel,
   ConfigDraftMeta,
   ConfigLlmTestResult,
+  ConfigModelDiscoveryResult,
   ConfigModelOption,
   ConfigModelPresetOption,
   ConfigWorkspace,
@@ -47,8 +49,11 @@ import {
   getString,
   groupModelPresets,
   hasPendingSecretChanges,
+  modelLibraryIdFromParts,
+  PROVIDER_KIND_OPTIONS,
   resolveProfileDisplayState,
   shouldBlockConfigLeave,
+  uniqueModelLibraryId,
   type ModelPresetGroupLabels,
   type PublicConfigShape,
 } from "./configRouteLogic";
@@ -328,9 +333,15 @@ export const CONFIG_COPY = {
     presetGroupRelay: "中转站 API",
     presetGroupLocal: "本地模型",
     customEntry: "手填",
+    autoValue: "自动生成",
     modelId: "模型 ID",
     label: "显示名",
     modelName: "模型名",
+    discoverModels: "发现模型",
+    discoveryPending: "发现模型中",
+    discoveredModel: "发现结果",
+    discoveryEmpty: "没有发现可用模型",
+    discoveryFailed: "模型发现失败",
     providerKind: "服务商类型",
     providerKeyEnv: "服务商密钥环境变量",
     modelKeyEnv: "模型密钥环境变量",
@@ -524,9 +535,15 @@ export const CONFIG_COPY = {
     presetGroupRelay: "Relay APIs",
     presetGroupLocal: "Local models",
     customEntry: "Manual",
+    autoValue: "Auto",
     modelId: "Model ID",
     label: "Label",
     modelName: "Model",
+    discoverModels: "Discover models",
+    discoveryPending: "Discovering models",
+    discoveredModel: "Discovered model",
+    discoveryEmpty: "No models discovered",
+    discoveryFailed: "Model discovery failed",
     providerKind: "Provider kind",
     providerKeyEnv: "Provider API key env",
     modelKeyEnv: "Model API key env",
@@ -622,7 +639,7 @@ function emptyDraftMeta(): ConfigDraftMeta {
 
 function emptyProviderDraft(): ProviderDraft {
   return {
-    kind: "",
+    kind: "openai_compatible",
     api_key_env: "",
     base_url: "",
     compat_mode: "openai",
@@ -1688,6 +1705,9 @@ export function ConfigRoute() {
   const [busyAction, setBusyAction] = useState("");
   const [modelEditor, setModelEditor] = useState<ModelEditorState>(emptyModelEditorState());
   const [modelEditorError, setModelEditorError] = useState("");
+  const [modelDiscoveryError, setModelDiscoveryError] = useState("");
+  const [discoveredModels, setDiscoveredModels] = useState<ConfigDiscoveredModel[]>([]);
+  const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
   const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfileDraft());
   const [profileEditors, setProfileEditors] = useState<Record<string, ProfileEditState>>({});
   const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({});
@@ -2179,6 +2199,9 @@ export function ConfigRoute() {
   function applyPreset(presetId: string) {
     setModelEditorExpanded(true);
     setModelEditorError("");
+    setModelDiscoveryError("");
+    setDiscoveredModels([]);
+    setSelectedDiscoveredModelId("");
     const preset = workspace?.modelPresetOptions.find((item) => item.preset_id === presetId);
     if (!preset) {
       setModelEditor((current) => ({ ...current, preset_id: presetId }));
@@ -2186,18 +2209,76 @@ export function ConfigRoute() {
     }
     const presetModel = asRecord(preset.model);
     const presetModelId = getString(preset.model_id);
+    const presetModelName = getString(presetModel.model);
     setModelEditor({
       mode: "create",
       preset_id: presetId,
-      model_id: presetModelId,
+      model_id: presetId === "custom_openai_compatible_relay" ? "" : presetModelId,
       label: getString(presetModel.label) || preset.label,
-      model: getString(presetModel.model),
-      api_key_env: getString(presetModel.api_key_env) || defaultModelApiKeyEnv(presetModelId),
+      model: presetModelName,
+      api_key_env:
+        getString(presetModel.api_key_env) ||
+        defaultModelApiKeyEnv(
+          presetId === "custom_openai_compatible_relay"
+            ? modelLibraryIdFromParts(getString(presetModel.label) || preset.label, presetModelName)
+            : presetModelId,
+        ),
       api_key: "",
       clear_api_key: false,
       provider: buildProviderDraft(asRecord(preset.provider)),
       details: buildModelDetailsDraft(presetModel),
     });
+  }
+
+  function applyDiscoveredModel(model: ConfigDiscoveredModel) {
+    const modelName = model.id;
+    const nextLabel = model.label || modelName;
+    const existingIds = modelOptions.map((option) => option.model_id);
+    const nextModelId = modelLibraryIdFromParts(nextLabel, modelName);
+    const uniqueModelId = uniqueModelLibraryId(nextModelId, existingIds);
+    setSelectedDiscoveredModelId(modelName);
+    setModelEditor((current) => ({
+      ...current,
+      model_id: current.mode === "edit" ? current.model_id : uniqueModelId,
+      label: current.mode === "create" ? nextLabel : current.label.trim() || nextLabel,
+      model: modelName,
+      api_key_env: current.mode === "create" ? defaultModelApiKeyEnv(uniqueModelId) : current.api_key_env.trim() || defaultModelApiKeyEnv(uniqueModelId),
+      provider: {
+        ...current.provider,
+        context_window:
+          !current.provider.context_window.trim() && typeof model.contextWindow === "number"
+            ? String(model.contextWindow)
+            : current.provider.context_window,
+      },
+    }));
+  }
+
+  async function handleDiscoverModels() {
+    if (structuredActionsDisabled) {
+      return;
+    }
+    setBusyAction(copy.discoveryPending);
+    setModelDiscoveryError("");
+    setDiscoveredModels([]);
+    try {
+      const response = await requestJson<ConfigModelDiscoveryResult>("/api/config/discover-models", {
+        publicConfig: requireDraft(),
+        draftMeta,
+        baseHash,
+        provider: buildProviderPayload(modelEditor.provider),
+        apiKey: modelEditor.api_key,
+      });
+      setDiscoveredModels(response.models);
+      if (response.models.length) {
+        applyDiscoveredModel(response.models[0]);
+      } else {
+        setModelDiscoveryError(copy.discoveryEmpty);
+      }
+    } catch (error) {
+      setModelDiscoveryError(markError(error));
+    } finally {
+      setBusyAction("");
+    }
   }
 
   async function handleSaveModel() {
@@ -2208,17 +2289,23 @@ export function ConfigRoute() {
     setModelEditorError("");
     try {
       const endpoint = modelEditor.mode === "edit" ? "/api/config/draft/update-model" : "/api/config/draft/add-model";
+      const resolvedModelId =
+        modelEditor.mode === "edit"
+          ? modelEditor.model_id
+          : modelEditor.model_id.trim() ||
+            uniqueModelLibraryId(modelLibraryIdFromParts(modelEditor.label || modelEditor.model, modelEditor.model), modelOptions.map((option) => option.model_id));
+      const resolvedApiKeyEnv = modelEditor.api_key_env.trim() || defaultModelApiKeyEnv(resolvedModelId);
       const response = await requestJson<ConfigWorkspace>(endpoint, {
         publicConfig: requireDraft(),
         draftMeta,
         baseHash,
         presetId: modelEditor.mode === "create" ? modelEditor.preset_id : "",
-        modelId: modelEditor.model_id,
+        modelId: resolvedModelId,
         provider: buildProviderPayload(modelEditor.provider),
         model: modelEditor.model,
         label: modelEditor.label,
         details: buildModelDetailsPayload(modelEditor.details),
-        apiKeyEnv: modelEditor.api_key_env,
+        apiKeyEnv: resolvedApiKeyEnv,
         apiKey: modelEditor.api_key,
         clearApiKey: modelEditor.clear_api_key,
       });
@@ -2947,6 +3034,7 @@ export function ConfigRoute() {
                       value={modelEditor.model_id}
                       onChange={(event) => setModelEditor((current) => ({ ...current, model_id: event.target.value }))}
                       disabled={modelEditor.mode === "edit"}
+                      placeholder={copy.autoValue}
                     />
                   </label>
                   <label className={styles.field}>
@@ -2959,7 +3047,7 @@ export function ConfigRoute() {
                   </label>
                   <label className={styles.field}>
                     <span>{copy.providerKind}</span>
-                    <input
+                    <select
                       value={modelEditor.provider.kind}
                       onChange={(event) =>
                         setModelEditor((current) => ({
@@ -2967,7 +3055,13 @@ export function ConfigRoute() {
                           provider: { ...current.provider, kind: event.target.value },
                         }))
                       }
-                    />
+                    >
+                      {PROVIDER_KIND_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className={styles.field}>
                     <span>{copy.baseUrl}</span>
@@ -3000,6 +3094,43 @@ export function ConfigRoute() {
                       onChange={(event) => setModelEditor((current) => ({ ...current, api_key_env: event.target.value }))}
                     />
                   </label>
+                </div>
+
+                <div className={styles.actionsRow}>
+                  <button
+                    type="button"
+                    className={styles.actionButton}
+                    disabled={structuredActionsDisabled || busyAction === copy.discoveryPending || !modelEditor.provider.base_url.trim()}
+                    onClick={handleDiscoverModels}
+                  >
+                    <RefreshCw size={14} />
+                    {busyAction === copy.discoveryPending ? copy.discoveryPending : copy.discoverModels}
+                  </button>
+                  {discoveredModels.length ? (
+                    <label className={`${styles.field} ${styles.profileTableSelect}`}>
+                      <span>{copy.discoveredModel}</span>
+                      <select
+                        value={selectedDiscoveredModelId}
+                        onChange={(event) => {
+                          const selected = discoveredModels.find((item) => item.id === event.target.value);
+                          if (selected) {
+                            applyDiscoveredModel(selected);
+                          }
+                        }}
+                      >
+                        {discoveredModels.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label || model.id}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {modelDiscoveryError ? (
+                    <span className={styles.inlineFormError}>
+                      {copy.discoveryFailed}: {modelDiscoveryError}
+                    </span>
+                  ) : null}
                 </div>
 
                 <details className={styles.advancedEditorPanel}>

@@ -526,6 +526,16 @@ def _model_library_id(provider_id: str, model: str) -> str:
     return "".join(char if char.isalnum() else "_" for char in raw).strip("_") or "model"
 
 
+def _unique_model_library_id(model_library: dict, model_id: str) -> str:
+    base = (model_id or "model").strip("_") or "model"
+    if base not in model_library:
+        return base
+    index = 2
+    while f"{base}_{index}" in model_library:
+        index += 1
+    return f"{base}_{index}"
+
+
 def _default_model_api_key_env(model_id: str) -> str:
     token = "".join(char if char.isalnum() else "_" for char in str(model_id or "").upper()).strip("_")
     return f"VIBELUTION_LLM_{token}_API_KEY" if token else "VIBELUTION_LLM_MODEL_API_KEY"
@@ -758,7 +768,9 @@ def apply_llm_model_preset(
         raise ValueError(f"unknown LLM model preset: {preset_id}")
 
     preset = LLM_MODEL_PRESETS[preset_id]
-    resolved_model_id = (model_id or str(preset["model_id"])).strip()
+    resolved_model_id = (model_id or "").strip()
+    if not resolved_model_id and preset_id != "custom_openai_compatible_relay":
+        resolved_model_id = str(preset["model_id"]).strip()
     resolved_provider = _resolve_public_provider_input(public_config, provider_id, fallback=preset["provider"])
     validate_llm_provider_target(resolved_provider, context="llm.model_library")
     if api_key_env:
@@ -767,8 +779,6 @@ def apply_llm_model_preset(
     model_defaults.update(_model_library_details(details or {}))
     resolved_model = (model or str(model_defaults.get("model", ""))).strip()
     resolved_label = (label or str(model_defaults.get("label", "")) or resolved_model).strip()
-    if not resolved_model_id:
-        raise ValueError("model_id is required")
     if not resolved_model:
         raise ValueError("model is required")
 
@@ -777,7 +787,11 @@ def apply_llm_model_preset(
     model_library = llm.setdefault("model_library", {})
     if not isinstance(model_library, dict):
         raise ValueError("llm.model_library must be an object")
-    if resolved_model_id in model_library:
+    if not resolved_model_id:
+        provider_label = "" if preset_id == "custom_openai_compatible_relay" else str(preset.get("provider_id") or "").strip()
+        resolved_model_id = _model_library_id(provider_label or resolved_label, resolved_model)
+        resolved_model_id = _unique_model_library_id(model_library, resolved_model_id)
+    elif resolved_model_id in model_library:
         raise ValueError(f"LLM model already exists: {resolved_model_id}")
 
     model_defaults["model"] = resolved_model
@@ -864,8 +878,6 @@ def add_llm_model(
     model_id = (model_id or "").strip()
     model = (model or "").strip()
     label = (label or "").strip()
-    if not model_id:
-        raise ValueError("model_id is required")
     if not model:
         raise ValueError("model is required")
 
@@ -878,7 +890,11 @@ def add_llm_model(
     model_library = llm.setdefault("model_library", {})
     if not isinstance(model_library, dict):
         raise ValueError("llm.model_library must be an object")
-    if model_id in model_library:
+    if not model_id:
+        provider_label = str(provider.get("kind") or "").strip()
+        model_id = _model_library_id(label or provider_label, model)
+        model_id = _unique_model_library_id(model_library, model_id)
+    elif model_id in model_library:
         raise ValueError(f"LLM model already exists: {model_id}")
     entry = _model_library_entry(provider, model, label or model, details)
     entry["api_key_env"] = (
