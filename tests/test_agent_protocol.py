@@ -628,8 +628,23 @@ class TestToolMessageFlow:
         assert state.total_output_tokens == 20
         assert state.total_tool_calls == 2
         assert state.no_new_evidence_steps == 2
+        assert state.consecutive_tool_only_steps == 0
         assert state.finish_success(False) is True
         assert state.final_stats()["tool_calls"] == 2
+
+    def test_round_state_tracks_consecutive_tool_only_steps(self):
+        state = RoundStateController(max_iterations=5)
+
+        state.note_response_tools(1, "")
+        state.note_response_tools(1, "")
+        assert state.consecutive_tool_only_steps == 2
+
+        state.note_response_tools(1, "已形成阶段性结论")
+        assert state.consecutive_tool_only_steps == 0
+
+        state.note_response_tools(1, "")
+        state.note_response_tools(0, "")
+        assert state.consecutive_tool_only_steps == 0
 
     def test_turn_outcome_controller_handles_lifecycle_and_finalization(self):
         state = RoundStateController(max_iterations=5)
@@ -1142,6 +1157,66 @@ class TestToolMessageFlow:
         assert result["summary"] == "configuration_error: LiteLLM 未安装，无法执行模型调用；请安装 litellm"
         assert result["raw_output"] == result["summary"]
         assert result["error"] == result["summary"]
+
+    def test_run_single_turn_surfaces_tool_loop_guard_when_no_visible_reply(self, monkeypatch):
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.name = "tester"
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(model_name="demo"),
+            agent=SimpleNamespace(max_iterations=3, awake_interval=1),
+        )
+        agent.mode_policy = ModePolicy(
+            mode=AgentMode.CHAT,
+            orchestrator_kind="chat",
+            keep_multi_turn_context=True,
+            allow_auto_loop=False,
+            capture_chat_dataset_candidates=False,
+            reset_context_before_turn=False,
+            reset_context_between_cases=False,
+            allow_direct_supervised_payload=False,
+            finish_after_direct_response=False,
+            runtime_input_builder=lambda text: text,
+        )
+        agent._effective_max_token_limit = 1024
+        agent.key_tools = [object()]
+        agent._last_turn_failed = False
+
+        def fake_think_and_act(user_prompt=None, goal_override=None):
+            agent._last_visible_response_text = ""
+            agent._last_response_tool_calls = 1
+            agent._recent_tool_records = [
+                {
+                    "name": "read_file_tool",
+                    "args": {"file_path": "core/infrastructure/tool_executor.py"},
+                    "result_preview": "read ok",
+                },
+                {
+                    "name": "read_file_tool",
+                    "args": {"file_path": "core/infrastructure/tool_executor.py"},
+                    "result_preview": "[短路] 继续顺着续读会造成工具循环",
+                },
+            ]
+            return True
+
+        agent.think_and_act = fake_think_and_act
+        monkeypatch.setattr(agent_module.logger, "start_session", lambda metadata=None, **kwargs: None)
+        monkeypatch.setattr(agent_module.logger, "end_session", lambda summary=None: None)
+        monkeypatch.setattr(agent_module._debug_logger, "start_session", lambda session_id: None)
+        monkeypatch.setattr(agent_module._debug_logger, "system", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "info", lambda *args, **kwargs: None)
+        monkeypatch.setattr(agent_module._debug_logger, "end_session", lambda: None)
+        monkeypatch.setattr(
+            agent_module,
+            "get_session_state",
+            lambda: SimpleNamespace(get_attention_snapshot=lambda: {}),
+        )
+
+        result = agent.run_single_turn(initial_prompt="probe")
+
+        assert result["status"] == "completed"
+        assert "工具循环保护" in result["summary"]
+        assert "tool_executor.py" in result["summary"]
+        assert result["raw_output"] == result["summary"]
 
     def test_run_single_turn_keeps_full_visible_reply_text(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -2388,6 +2463,23 @@ class TestRuntimeStateMemoryFlow:
 
         assert reason is not None
         assert "未形成最小反馈环" in reason
+
+    def test_should_stop_for_consecutive_tool_only_responses(self):
+        controller = TurnOutcomeController(
+            max_consecutive_failures=3,
+            get_attention_snapshot=lambda: {"convergence_state": "open"},
+        )
+
+        reason = controller.should_stop_for_convergence(
+            iteration=3,
+            no_new_evidence_steps=0,
+            consecutive_tool_only_steps=3,
+            delegation_failures=0,
+            total_tool_calls=3,
+        )
+
+        assert reason is not None
+        assert "只有工具调用" in reason
 
     def test_readonly_platform_judgment_completion_is_detected(self):
         goal = (

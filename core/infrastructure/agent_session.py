@@ -302,6 +302,14 @@ class AgentSessionState:
                     overlaps.append(dict(item))
         return overlaps
 
+    def get_read_ranges(self, path: str) -> List[Dict[str, Any]]:
+        """返回目标文件本轮已读取区间。"""
+        if not path:
+            return []
+        normalized = path.replace("\\", "/")
+        with self._lock:
+            return [dict(item) for item in self.read_ranges.get(normalized, [])]
+
     def record_read_entity(self, path: str, entity_name: str):
         """记录本轮已读取的实体。"""
         if not path or not entity_name:

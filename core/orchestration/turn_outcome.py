@@ -64,12 +64,15 @@ class TurnOutcomeController:
         *,
         iteration: int,
         no_new_evidence_steps: int,
+        consecutive_tool_only_steps: int = 0,
         delegation_failures: int,
         total_tool_calls: int,
     ) -> Optional[str]:
         snapshot = self._get_attention_snapshot() or {}
         if snapshot.get("convergence_state") == "ready_to_stop":
             return snapshot.get("stop_reason") or "当前轮已满足停止条件，直接收束。"
+        if consecutive_tool_only_steps >= 3 and total_tool_calls >= 3:
+            return "连续多轮只有工具调用但没有可见回答，本轮停止继续调用工具，先输出已掌握证据和下一步。"
         if delegation_failures >= 1 and snapshot.get("diagnostic_drift") and iteration >= 2:
             return "委派未带来新证据，且当前仍处于诊断漂移，直接结束本轮并等待下一轮重规划。"
         if (
