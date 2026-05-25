@@ -101,29 +101,69 @@ def _port_for_url(url: str) -> int:
 def _listening_pid_for_port_windows(port: int) -> int:
     if port <= 0:
         return 0
-    command = (
-        "Get-NetTCPConnection -LocalPort "
-        f"{int(port)} -State Listen -ErrorAction SilentlyContinue | "
-        "Select-Object -First 1 -ExpandProperty OwningProcess"
-    )
     try:
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", command],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=2.0,
-            creationflags=_creation_flags(),
-            check=False,
+        import ctypes
+        from ctypes import wintypes
+    except Exception:
+        return 0
+
+    AF_INET = 2
+    ERROR_INSUFFICIENT_BUFFER = 122
+    MIB_TCP_STATE_LISTEN = 2
+    NO_ERROR = 0
+    TCP_TABLE_OWNER_PID_ALL = 5
+
+    class MIB_TCPROW_OWNER_PID(ctypes.Structure):
+        _fields_ = [
+            ("dwState", wintypes.DWORD),
+            ("dwLocalAddr", wintypes.DWORD),
+            ("dwLocalPort", wintypes.DWORD),
+            ("dwRemoteAddr", wintypes.DWORD),
+            ("dwRemotePort", wintypes.DWORD),
+            ("dwOwningPid", wintypes.DWORD),
+        ]
+
+    try:
+        iphlpapi = ctypes.WinDLL("iphlpapi", use_last_error=True)
+        size = wintypes.DWORD(0)
+        result = iphlpapi.GetExtendedTcpTable(
+            None,
+            ctypes.byref(size),
+            False,
+            AF_INET,
+            TCP_TABLE_OWNER_PID_ALL,
+            0,
         )
-    except (OSError, subprocess.TimeoutExpired):
+        if result not in (NO_ERROR, ERROR_INSUFFICIENT_BUFFER) or size.value <= ctypes.sizeof(wintypes.DWORD):
+            return 0
+
+        buffer = ctypes.create_string_buffer(size.value)
+        result = iphlpapi.GetExtendedTcpTable(
+            buffer,
+            ctypes.byref(size),
+            False,
+            AF_INET,
+            TCP_TABLE_OWNER_PID_ALL,
+            0,
+        )
+        if result != NO_ERROR:
+            return 0
+
+        row_count = ctypes.cast(buffer, ctypes.POINTER(wintypes.DWORD)).contents.value
+        row_size = ctypes.sizeof(MIB_TCPROW_OWNER_PID)
+        row_offset = ctypes.sizeof(wintypes.DWORD)
+        for index in range(int(row_count)):
+            row = MIB_TCPROW_OWNER_PID.from_buffer_copy(buffer, row_offset + index * row_size)
+            if int(row.dwState) != MIB_TCP_STATE_LISTEN:
+                continue
+            if socket.ntohs(int(row.dwLocalPort)) != int(port):
+                continue
+            pid = int(row.dwOwningPid)
+            if pid > 0:
+                return pid
+    except Exception:
         return 0
-    if result.returncode != 0:
-        return 0
-    try:
-        return int(str(result.stdout or "").strip().splitlines()[0])
-    except (IndexError, ValueError):
-        return 0
+    return 0
 
 
 def _port_is_listening_socket(port: int) -> bool:

@@ -551,6 +551,91 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_frontend_npm_invocation_avoids_cmd_wrapper(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$resolveAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Resolve-NpmInvocation"
+}, $true)
+if ($null -eq $resolveAst) {
+    throw "Resolve-NpmInvocation was not found."
+}
+$resolveText = $resolveAst.Extent.Text
+if ($source -match "function\\s+Resolve-NpmCommand") {
+    throw "Legacy Resolve-NpmCommand still exists."
+}
+if ($resolveText -notmatch "node_modules\\\\npm\\\\bin\\\\npm-cli\\.js") {
+    throw "npm invocation does not resolve npm-cli.js."
+}
+if ($resolveText -notmatch 'LaunchStrategy\\s*=\\s*"node_npm_cli"') {
+    throw "npm invocation does not record the node npm-cli launch strategy."
+}
+
+foreach ($functionName in @("Ensure-FrontendDependencies", "Ensure-WebBuild")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    $text = $functionAst.Extent.Text
+    if ($text -match "Resolve-NpmCommand" -or $text -match '\\$npmCommand') {
+        throw "$functionName still uses the legacy npm command wrapper."
+    }
+    if ($text -notmatch "Resolve-NpmInvocation") {
+        throw "$functionName does not resolve a shell-free npm invocation."
+    }
+    if ($text -notmatch '\\$npmInvocation\\.CommandPath') {
+        throw "$functionName does not launch npm through the invocation command path."
+    }
+    if ($text -notmatch '\\$npmInvocation\\.PrefixArgs') {
+        throw "$functionName does not pass npm-cli.js as prefix args."
+    }
+    if ($text -notmatch "npm_launch_strategy") {
+        throw "$functionName does not log the npm launch strategy."
+    }
+}
+
+$nativeCommandAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Invoke-NativeCommand"
+}, $true)
+$nativeCommandText = $nativeCommandAst.Extent.Text
+if ($nativeCommandText -notmatch "launcher.native_command.started" -or
+    $nativeCommandText -notmatch "launcher.native_command.completed" -or
+    $nativeCommandText -notmatch "console_window_suppressed") {
+    throw "hidden native command lifecycle logging is incomplete."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_background_processes_are_started_without_windows(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,

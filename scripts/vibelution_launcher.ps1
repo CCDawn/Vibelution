@@ -1758,15 +1758,84 @@ function Test-WebHealthy {
     }
 }
 
-function Resolve-NpmCommand {
-    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
-    if (-not $npm) {
-        $npm = Get-Command npm -ErrorAction SilentlyContinue
+function Resolve-NpmInvocation {
+    $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
+    if (-not $nodeCommand) {
+        $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     }
-    if (-not $npm) {
-        throw "npm is not available on PATH."
+    if (-not $nodeCommand -or -not $nodeCommand.Source) {
+        throw "Node.js is not available on PATH."
     }
-    return $npm.Source
+
+    $nodePath = [string]$nodeCommand.Source
+    if (Test-Path -LiteralPath $nodePath) {
+        $nodePath = (Resolve-Path -LiteralPath $nodePath).Path
+    }
+
+    $npmSources = New-Object System.Collections.Generic.List[string]
+    foreach ($commandName in @("npm.cmd", "npm.ps1", "npm")) {
+        $npmCommand = Get-Command $commandName -ErrorAction SilentlyContinue
+        if ($npmCommand -and $npmCommand.Source) {
+            $source = [string]$npmCommand.Source
+            if (Test-Path -LiteralPath $source) {
+                $source = (Resolve-Path -LiteralPath $source).Path
+            }
+            if (-not $npmSources.Contains($source)) {
+                [void]$npmSources.Add($source)
+            }
+        }
+    }
+
+    $npmCliCandidates = New-Object System.Collections.Generic.List[string]
+    $nodeDir = Split-Path -Parent $nodePath
+    if ($nodeDir) {
+        [void]$npmCliCandidates.Add((Join-Path $nodeDir "node_modules\npm\bin\npm-cli.js"))
+    }
+    foreach ($source in $npmSources) {
+        $sourceDir = Split-Path -Parent $source
+        if ($sourceDir) {
+            [void]$npmCliCandidates.Add((Join-Path $sourceDir "node_modules\npm\bin\npm-cli.js"))
+        }
+    }
+    if ($env:APPDATA) {
+        [void]$npmCliCandidates.Add((Join-Path $env:APPDATA "npm\node_modules\npm\bin\npm-cli.js"))
+    }
+
+    $seenCandidates = @{}
+    foreach ($candidate in $npmCliCandidates) {
+        if (-not $candidate -or $seenCandidates.ContainsKey($candidate)) {
+            continue
+        }
+        $seenCandidates[$candidate] = $true
+        if (Test-Path -LiteralPath $candidate) {
+            $npmCliPath = (Resolve-Path -LiteralPath $candidate).Path
+            return [pscustomobject]@{
+                CommandPath = $nodePath
+                PrefixArgs = @($npmCliPath)
+                DisplayName = "node.exe npm-cli.js"
+                SourceCommand = if ($npmSources.Count -gt 0) { $npmSources[0] } else { "" }
+                LaunchStrategy = "node_npm_cli"
+                ShellAdapter = "none"
+            }
+        }
+    }
+
+    $directNpm = $npmSources | Where-Object {
+        $extension = [System.IO.Path]::GetExtension([string]$_).ToLowerInvariant()
+        -not (@(".cmd", ".bat", ".ps1") -contains $extension)
+    } | Select-Object -First 1
+    if ($directNpm) {
+        return [pscustomobject]@{
+            CommandPath = [string]$directNpm
+            PrefixArgs = @()
+            DisplayName = [System.IO.Path]::GetFileName([string]$directNpm)
+            SourceCommand = [string]$directNpm
+            LaunchStrategy = "direct_executable"
+            ShellAdapter = "none"
+        }
+    }
+
+    throw "npm is available only through a shell wrapper. Install a standard Node.js/npm distribution so npm-cli.js can be launched through node.exe without opening cmd.exe."
 }
 
 function ConvertTo-ProcessArgument {
@@ -1812,6 +1881,43 @@ function ConvertTo-ProcessArgumentString {
     param([string[]]$ArgumentList = @())
 
     return (@($ArgumentList) | ForEach-Object { ConvertTo-ProcessArgument -Value $_ }) -join " "
+}
+
+function Get-SafeProcessArgumentPreview {
+    param(
+        [string[]]$ArgumentList = @(),
+        [int]$MaxArguments = 8
+    )
+
+    $preview = New-Object System.Collections.Generic.List[string]
+    $redactNext = $false
+    $arguments = @($ArgumentList)
+    for ($index = 0; $index -lt $arguments.Count -and $index -lt $MaxArguments; $index++) {
+        $text = [string]$arguments[$index]
+        if ($redactNext) {
+            [void]$preview.Add("<redacted>")
+            $redactNext = $false
+            continue
+        }
+        if ($text -match '(?i)(api[_-]?key|token|secret|password|credential)') {
+            if ($text -match '^(--?[^=]+)=') {
+                [void]$preview.Add("$($Matches[1])=<redacted>")
+            } else {
+                [void]$preview.Add("<redacted>")
+                $redactNext = $true
+            }
+            continue
+        }
+        if ($text.Length -gt 160) {
+            $text = $text.Substring(0, 157) + "..."
+        }
+        [void]$preview.Add($text)
+    }
+
+    if ($arguments.Count -gt $MaxArguments) {
+        [void]$preview.Add("...(+$($arguments.Count - $MaxArguments))")
+    }
+    return @($preview)
 }
 
 function Invoke-HiddenProcessCapture {
@@ -2109,6 +2215,20 @@ function Invoke-NativeCommand {
     $token = [guid]::NewGuid().ToString("N")
     $stdoutPath = Join-Path $launcherDir "native-command-$token.out.log"
     $stderrPath = Join-Path $launcherDir "native-command-$token.err.log"
+    $workingDirectory = (Get-Location).Path
+    $launchFields = @{
+        command_path = $CommandPath
+        argument_count = @($ArgumentList).Count
+        argument_preview = @(Get-SafeProcessArgumentPreview -ArgumentList $ArgumentList)
+        working_directory = $workingDirectory
+        redirect_path = $RedirectPath
+        stdout_log = $stdoutPath
+        stderr_log = $stderrPath
+        use_shell_execute = $false
+        create_no_window = $true
+        console_window_suppressed = $true
+        launch_api = "System.Diagnostics.Process"
+    }
 
     if ($RedirectPath) {
         $redirectDir = Split-Path -Parent $RedirectPath
@@ -2117,11 +2237,25 @@ function Invoke-NativeCommand {
         }
     }
 
+    Write-LauncherControlLog `
+        -Event "launcher.native_command.started" `
+        -Message "Starting hidden native command." `
+        -Fields $launchFields
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "lifecycle" `
+            -EventCode "launcher.native_command.started" `
+            -Message "Starting hidden native command." `
+            -Outcome "started" `
+            -Fields $launchFields
+    }
+
     try {
         $result = Invoke-HiddenProcessCapture `
             -FilePath $CommandPath `
             -ArgumentList $ArgumentList `
-            -WorkingDirectory (Get-Location).Path
+            -WorkingDirectory $workingDirectory
         $stdout = $result.Stdout
         $stderr = $result.Stderr
         if ($stdout) {
@@ -2146,7 +2280,45 @@ function Invoke-NativeCommand {
             }
         }
 
-        return [int]$result.ExitCode
+        $exitCode = [int]$result.ExitCode
+        $completedFields = @{} + $launchFields
+        $completedFields["process_id"] = [int]$result.ProcessId
+        $completedFields["exit_code"] = $exitCode
+        Write-LauncherControlLog `
+            -Event "launcher.native_command.completed" `
+            -Message "Hidden native command completed." `
+            -Fields $completedFields
+        if ($script:currentRuntimeSceneId) {
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "lifecycle" `
+                -EventCode "launcher.native_command.completed" `
+                -Message "Hidden native command completed." `
+                -Outcome "completed" `
+                -Fields $completedFields
+        }
+
+        return $exitCode
+    } catch {
+        $failedFields = @{} + $launchFields
+        $failedFields["errorType"] = $_.Exception.GetType().Name
+        $failedFields["error"] = $_.Exception.Message
+        Write-LauncherControlLog `
+            -Event "launcher.native_command.spawn_failed" `
+            -Message "Hidden native command could not be started." `
+            -Level "error" `
+            -Fields $failedFields
+        if ($script:currentRuntimeSceneId) {
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "lifecycle" `
+                -EventCode "launcher.native_command.spawn_failed" `
+                -Message "Hidden native command could not be started." `
+                -Level "error" `
+                -Outcome "failed" `
+                -Fields $failedFields
+        }
+        throw
     } finally {
         Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
     }
@@ -2163,6 +2335,32 @@ function Invoke-HiddenNativeCommand {
     $token = [guid]::NewGuid().ToString("N")
     $stdoutPath = Join-Path $launcherDir "runtime-manager-client-$token.out.log"
     $stderrPath = Join-Path $launcherDir "runtime-manager-client-$token.err.log"
+    $launchFields = @{
+        command_path = $CommandPath
+        argument_count = @($ArgumentList).Count
+        argument_preview = @(Get-SafeProcessArgumentPreview -ArgumentList $ArgumentList)
+        working_directory = $projectDir
+        stdout_log = $stdoutPath
+        stderr_log = $stderrPath
+        use_shell_execute = $false
+        create_no_window = $true
+        console_window_suppressed = $true
+        launch_api = "System.Diagnostics.Process"
+    }
+
+    Write-LauncherControlLog `
+        -Event "launcher.runtime_manager_client.started" `
+        -Message "Starting hidden runtime manager client command." `
+        -Fields $launchFields
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "lifecycle" `
+            -EventCode "launcher.runtime_manager_client.started" `
+            -Message "Starting hidden runtime manager client command." `
+            -Outcome "started" `
+            -Fields $launchFields
+    }
 
     try {
         $result = Invoke-HiddenProcessCapture `
@@ -2186,34 +2384,64 @@ function Invoke-HiddenNativeCommand {
         }
 
         $exitCode = [int]$result.ExitCode
+        $completedFields = @{} + $launchFields
+        $completedFields["process_id"] = [int]$result.ProcessId
+        $completedFields["exit_code"] = $exitCode
+        Write-LauncherControlLog `
+            -Event "launcher.runtime_manager_client.completed" `
+            -Message "Hidden runtime manager client command completed." `
+            -Fields $completedFields
+        if ($script:currentRuntimeSceneId) {
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "lifecycle" `
+                -EventCode "launcher.runtime_manager_client.completed" `
+                -Message "Hidden runtime manager client command completed." `
+                -Outcome "completed" `
+                -Fields $completedFields
+        }
         if ($exitCode -ne 0) {
+            $failedResultFields = @{} + $completedFields
+            $failedResultFields["stdout_log"] = $stdoutPath
+            $failedResultFields["stderr_log"] = $stderrPath
             Write-LauncherControlLog `
                 -Event "launcher.runtime_manager_client.failed" `
                 -Message "Runtime manager client command failed." `
                 -Level "error" `
-                -Fields @{
-                    command_path = $CommandPath
-                    arguments = @($ArgumentList)
-                    exit_code = $exitCode
-                    stdout_log = $stdoutPath
-                    stderr_log = $stderrPath
-                }
+                -Fields $failedResultFields
+            if ($script:currentRuntimeSceneId) {
+                Write-RuntimeSceneEvent `
+                    -Component "launcher" `
+                    -Phase "lifecycle" `
+                    -EventCode "launcher.runtime_manager_client.failed" `
+                    -Message "Runtime manager client command failed." `
+                    -Level "error" `
+                    -Outcome "failed" `
+                    -Fields $failedResultFields
+            }
         } else {
             Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
         }
         return $exitCode
     } catch {
+        $failedFields = @{} + $launchFields
+        $failedFields["error"] = $_.Exception.Message
+        $failedFields["errorType"] = $_.Exception.GetType().Name
         Write-LauncherControlLog `
             -Event "launcher.runtime_manager_client.spawn_failed" `
             -Message "Runtime manager client command could not be started." `
             -Level "error" `
-            -Fields @{
-                command_path = $CommandPath
-                arguments = @($ArgumentList)
-                error = $_.Exception.Message
-                stdout_log = $stdoutPath
-                stderr_log = $stderrPath
-            }
+            -Fields $failedFields
+        if ($script:currentRuntimeSceneId) {
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "lifecycle" `
+                -EventCode "launcher.runtime_manager_client.spawn_failed" `
+                -Message "Runtime manager client command could not be started." `
+                -Level "error" `
+                -Outcome "failed" `
+                -Fields $failedFields
+        }
         throw
     }
 }
@@ -2626,7 +2854,7 @@ function Ensure-FrontendDependencies {
         return
     }
 
-    $npmCommand = Resolve-NpmCommand
+    $npmInvocation = Resolve-NpmInvocation
     $installCommandName = if ((-not (Test-Path $nodeModulesDir)) -and (Test-Path $packageLockPath)) {
         "ci"
     } else {
@@ -2646,21 +2874,28 @@ function Ensure-FrontendDependencies {
     if ($script:currentRuntimeSceneId) {
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).FrontendBuild -Message "Installing frontend dependencies ($installReason)."
         Write-RuntimeSceneEvent `
-            -Component "frontend" `
-            -Phase "dependencies" `
-            -EventCode "frontend.dependencies.install.started" `
-            -Message "Installing frontend dependencies." `
-            -Outcome "started" `
-            -Fields @{ reason = $installReason }
+                -Component "frontend" `
+                -Phase "dependencies" `
+                -EventCode "frontend.dependencies.install.started" `
+                -Message "Installing frontend dependencies." `
+                -Outcome "started" `
+                -Fields @{
+                    reason = $installReason
+                    command = $installCommandName
+                    command_path = $npmInvocation.CommandPath
+                    npm_source = $npmInvocation.SourceCommand
+                    npm_launch_strategy = $npmInvocation.LaunchStrategy
+                    shell_adapter = $npmInvocation.ShellAdapter
+                }
     }
     Push-Location $webDir
     try {
         $frontendBuildLogPath = $null
         if ($script:currentRuntimeSceneId) {
-            $frontendBuildLogPath = Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).FrontendBuild
+                $frontendBuildLogPath = Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).FrontendBuild
         }
-        $installArgs = @($installCommandName)
-        $exitCode = Invoke-NativeCommand -CommandPath $npmCommand -ArgumentList $installArgs -RedirectPath $frontendBuildLogPath
+        $installArgs = @(@($npmInvocation.PrefixArgs) + @($installCommandName))
+        $exitCode = Invoke-NativeCommand -CommandPath $npmInvocation.CommandPath -ArgumentList $installArgs -RedirectPath $frontendBuildLogPath
         if ($exitCode -ne 0) {
             if ($script:currentRuntimeSceneId) {
                 Write-RuntimeSceneEvent `
@@ -2670,10 +2905,18 @@ function Ensure-FrontendDependencies {
                     -Message "Installing frontend dependencies failed." `
                     -Level "error" `
                     -Outcome "failed" `
-                    -Fields @{ reason = $installReason; exit_code = $exitCode } `
+                    -Fields @{
+                        reason = $installReason
+                        command = $installCommandName
+                        command_path = $npmInvocation.CommandPath
+                        npm_source = $npmInvocation.SourceCommand
+                        npm_launch_strategy = $npmInvocation.LaunchStrategy
+                        shell_adapter = $npmInvocation.ShellAdapter
+                        exit_code = $exitCode
+                    } `
                     -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).FrontendBuild -TailLines 80)
             }
-            throw "npm $installCommandName failed with exit code $exitCode."
+            throw "$($npmInvocation.DisplayName) $installCommandName failed with exit code $exitCode."
         }
     } finally {
         Pop-Location
@@ -2687,7 +2930,14 @@ function Ensure-FrontendDependencies {
             -EventCode "frontend.dependencies.install.succeeded" `
             -Message "Frontend dependencies installed successfully." `
             -Outcome "succeeded" `
-            -Fields @{ reason = $installReason; command = $installCommandName }
+            -Fields @{
+                reason = $installReason
+                command = $installCommandName
+                command_path = $npmInvocation.CommandPath
+                npm_source = $npmInvocation.SourceCommand
+                npm_launch_strategy = $npmInvocation.LaunchStrategy
+                shell_adapter = $npmInvocation.ShellAdapter
+            }
     }
 }
 
@@ -2709,7 +2959,7 @@ function Ensure-WebBuild {
         return
     }
 
-    $npmCommand = Resolve-NpmCommand
+    $npmInvocation = Resolve-NpmInvocation
     Push-Location $webDir
     try {
         Write-Note "Building frontend bundle ($buildReason)..."
@@ -2721,13 +2971,19 @@ function Ensure-WebBuild {
                 -EventCode "frontend.build.started" `
                 -Message "Starting frontend build." `
                 -Outcome "started" `
-                -Fields @{ reason = $buildReason }
+                -Fields @{
+                    reason = $buildReason
+                    command_path = $npmInvocation.CommandPath
+                    npm_source = $npmInvocation.SourceCommand
+                    npm_launch_strategy = $npmInvocation.LaunchStrategy
+                    shell_adapter = $npmInvocation.ShellAdapter
+                }
             $exitCode = Invoke-NativeCommand `
-                -CommandPath $npmCommand `
-                -ArgumentList @("run", "build") `
+                -CommandPath $npmInvocation.CommandPath `
+                -ArgumentList @(@($npmInvocation.PrefixArgs) + @("run", "build")) `
                 -RedirectPath (Get-CurrentRuntimeSceneFilePath (Get-RuntimeSceneRelativePaths).FrontendBuild)
         } else {
-            $exitCode = Invoke-NativeCommand -CommandPath $npmCommand -ArgumentList @("run", "build")
+            $exitCode = Invoke-NativeCommand -CommandPath $npmInvocation.CommandPath -ArgumentList @(@($npmInvocation.PrefixArgs) + @("run", "build"))
         }
         if ($exitCode -ne 0) {
             if ($script:currentRuntimeSceneId) {
@@ -2739,7 +2995,14 @@ function Ensure-WebBuild {
                     -Message "Frontend build failed." `
                     -Level "error" `
                     -Outcome "failed" `
-                    -Fields @{ reason = $buildReason; exit_code = $exitCode } `
+                    -Fields @{
+                        reason = $buildReason
+                        command_path = $npmInvocation.CommandPath
+                        npm_source = $npmInvocation.SourceCommand
+                        npm_launch_strategy = $npmInvocation.LaunchStrategy
+                        shell_adapter = $npmInvocation.ShellAdapter
+                        exit_code = $exitCode
+                    } `
                     -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).FrontendBuild -TailLines 120)
             }
             throw (Get-FrontendBuildFailureSummary -ExitCode $exitCode)
@@ -2771,7 +3034,14 @@ function Ensure-WebBuild {
             -EventCode "frontend.build.succeeded" `
             -Message "Frontend build completed successfully." `
             -Outcome "succeeded" `
-            -Fields @{ reason = $buildReason; output = "web/dist/index.html" }
+            -Fields @{
+                reason = $buildReason
+                output = "web/dist/index.html"
+                command_path = $npmInvocation.CommandPath
+                npm_source = $npmInvocation.SourceCommand
+                npm_launch_strategy = $npmInvocation.LaunchStrategy
+                shell_adapter = $npmInvocation.ShellAdapter
+            }
     }
 }
 

@@ -524,7 +524,7 @@ def _creation_flags() -> int:
 
 
 def _prefer_python_executable(python_executable: str) -> str:
-    """Prefer python.exe for background Windows daemons when it is available."""
+    """Prefer pythonw.exe for background Windows daemons when it is available."""
 
     raw = str(python_executable or "").strip()
     if not raw:
@@ -532,14 +532,31 @@ def _prefer_python_executable(python_executable: str) -> str:
     candidate = Path(raw)
     if os.name != "nt":
         return raw
-    if candidate.name.lower() == "python.exe":
+    if candidate.name.lower() == "pythonw.exe":
         return str(candidate.resolve()) if candidate.exists() else raw
-    sibling = candidate.with_name("python.exe")
-    if sibling.exists():
-        return str(sibling.resolve())
+
+    path_like = candidate.is_absolute() or "\\" in raw or "/" in raw
+    if candidate.name.lower() == "python.exe":
+        sibling = candidate.with_name("pythonw.exe")
+        if sibling.exists():
+            return str(sibling.resolve())
+        return str(candidate.resolve()) if candidate.exists() else raw
+    if path_like:
+        sibling = candidate.with_name("pythonw.exe")
+        if sibling.exists():
+            return str(sibling.resolve())
     if candidate.exists():
         return str(candidate.resolve())
     return raw
+
+
+def _python_executable_flavor(python_executable: str) -> str:
+    name = Path(str(python_executable or "")).name.lower()
+    if name == "pythonw.exe":
+        return "pythonw"
+    if name == "python.exe":
+        return "python"
+    return name or "unknown"
 
 
 def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
@@ -557,23 +574,50 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
 
     ensure_runtime_manager_dirs()
     python_cmd = _prefer_python_executable(python_executable or sys.executable)
+    creation_flags = _creation_flags()
     with DAEMON_STDOUT_PATH.open("a", encoding="utf-8") as stdout_handle, DAEMON_STDERR_PATH.open(
         "a", encoding="utf-8"
     ) as stderr_handle:
-        process = subprocess.Popen(
-            [python_cmd, "-m", "core.runtime_manager.cli", "daemon"],
-            cwd=str(PROJECT_ROOT),
-            stdin=subprocess.DEVNULL,
-            stdout=stdout_handle,
-            stderr=stderr_handle,
-            creationflags=_creation_flags(),
-            close_fds=True,
-        )
-    _append_event(
-        "daemon.start_requested",
-        {
-            "launchPid": int(getattr(process, "pid", 0) or 0),
+        start_payload = {
             "pythonExecutable": python_cmd,
+            "pythonFlavor": _python_executable_flavor(python_cmd),
+            "creationFlags": creation_flags,
+            "consoleSuppressed": True,
+            "stdin": "DEVNULL",
+            "stdoutPath": str(DAEMON_STDOUT_PATH),
+            "stderrPath": str(DAEMON_STDERR_PATH),
+            "closeFds": True,
+            "launchApi": "subprocess.Popen",
+        }
+        _append_event(
+            "daemon.start_requested",
+            start_payload,
+        )
+        try:
+            process = subprocess.Popen(
+                [python_cmd, "-m", "core.runtime_manager.cli", "daemon"],
+                cwd=str(PROJECT_ROOT),
+                stdin=subprocess.DEVNULL,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                creationflags=creation_flags,
+                close_fds=True,
+            )
+        except OSError as exc:
+            _append_event(
+                "daemon.start_failed",
+                {
+                    **start_payload,
+                    "errorType": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            raise
+    _append_event(
+        "daemon.start_spawned",
+        {
+            **start_payload,
+            "launchPid": int(getattr(process, "pid", 0) or 0),
         },
     )
 
@@ -582,6 +626,14 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
         if is_daemon_running():
             return True
         time.sleep(0.2)
+    _append_event(
+        "daemon.start_timeout",
+        {
+            **start_payload,
+            "launchPid": int(getattr(process, "pid", 0) or 0),
+            "timeoutSeconds": 5.0,
+        },
+    )
     raise RuntimeError("Runtime manager daemon failed to start.")
 
 
