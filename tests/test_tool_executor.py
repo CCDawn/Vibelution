@@ -622,6 +622,35 @@ class TestToolExecutorErrorHandling:
             for item in snapshot["recent_blockers"]
         )
 
+    def test_read_file_continuation_is_weak_after_paged_read(self, executor, tmp_path):
+        reset_session_state()
+        file_path = tmp_path / "demo_weak_continuation.txt"
+        file_path.write_text("\n".join(f"line {i}" for i in range(1, 120)), encoding="utf-8")
+
+        result, action = executor.execute("read_file", {"file_path": str(file_path), "offset": 0, "max_lines": 40})
+
+        assert action is None
+        assert "[续读]" in str(result)
+        snapshot = get_session_state().get_attention_snapshot()
+        assert snapshot["pending_continuations"][-1]["path"] == str(file_path).replace("\\", "/")
+        assert snapshot["pending_continuations"][-1]["strength"] == "weak"
+
+    def test_read_file_short_circuits_after_too_many_segments_for_same_file(self, executor, tmp_path):
+        session = reset_session_state()
+        file_path = tmp_path / "demo_loop_guard.txt"
+        file_path.write_text("\n".join(f"line {i}" for i in range(1, 240)), encoding="utf-8")
+        session.record_read_range(str(file_path), 1, 40, source="read_file_tool")
+        session.record_read_range(str(file_path), 41, 80, source="read_file_tool")
+        session.record_read_range(str(file_path), 81, 120, source="read_file_tool")
+
+        result, action = executor.execute("read_file", {"file_path": str(file_path), "offset": 120, "max_lines": 40})
+
+        assert action is None
+        assert "[短路]" in str(result)
+        assert "工具循环" in str(result)
+        snapshot = get_session_state().get_attention_snapshot()
+        assert any(item["kind"] == "tool_loop_guard" for item in snapshot["recent_blockers"])
+
     def test_read_file_short_circuits_on_high_overlap(self, executor, tmp_path):
         session = reset_session_state()
         file_path = tmp_path / "demo_overlap.txt"

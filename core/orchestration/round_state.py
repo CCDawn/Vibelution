@@ -19,6 +19,7 @@ class RoundStateController:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     no_new_evidence_steps: int = 0
+    consecutive_tool_only_steps: int = 0
     delegation_failures: int = 0
 
     def next_iteration(self) -> int:
@@ -51,11 +52,16 @@ class RoundStateController:
         self.no_new_evidence_steps = 0
         self.reset_failures()
 
-    def note_response_tools(self, tool_call_count: int) -> None:
+    def note_response_tools(self, tool_call_count: int, visible_text: str = "") -> None:
         if tool_call_count > 0:
             self.no_new_evidence_steps = 0
+            if str(visible_text or "").strip():
+                self.consecutive_tool_only_steps = 0
+            else:
+                self.consecutive_tool_only_steps += 1
         else:
             self.no_new_evidence_steps += 1
+            self.consecutive_tool_only_steps = 0
 
     def add_tool_calls(self, count: int) -> None:
         self.total_tool_calls += max(0, int(count or 0))
@@ -71,6 +77,7 @@ class RoundStateController:
             "tool_count": self.total_tool_calls,
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
+            "tool_only_steps": self.consecutive_tool_only_steps,
         }
 
     def current_status(self) -> Dict[str, int]:

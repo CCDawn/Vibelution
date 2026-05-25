@@ -745,6 +745,7 @@ class ToolExecutor:
         max_lines = int((tool_args or {}).get("max_lines") or 0)
         start_line = offset + 1
         end_line = offset + max_lines if max_lines > 0 else offset
+        existing_ranges = session.get_read_ranges(normalized_file_path)
 
         latest_pending = session.get_latest_pending_continuation()
         if latest_pending:
@@ -779,6 +780,19 @@ class ToolExecutor:
                     return None
 
         if max_lines >= 40:
+            if len(existing_ranges) >= 3:
+                first_start = min(int(item.get("start_line", 0) or 0) for item in existing_ranges)
+                last_end = max(int(item.get("end_line", 0) or 0) for item in existing_ranges)
+                session.record_blocker(
+                    "tool_loop_guard",
+                    f"{file_path} 本轮已连续读取 {len(existing_ranges)} 段（约第 {first_start}-{last_end} 行）。",
+                    "停止继续顺着续读读取，先基于已读证据总结、修改或验证。",
+                    severity="block",
+                )
+                return (
+                    f"[短路] {file_path} 本轮已连续读取 {len(existing_ranges)} 段。"
+                    " 继续顺着续读会造成工具循环；请先基于已读证据总结、修改或验证。"
+                )
             overlaps = session.get_overlapping_read_ranges(normalized_file_path, start_line, end_line)
             for item in overlaps:
                 existing_start = int(item.get("start_line", 0))
@@ -1058,7 +1072,7 @@ class ToolExecutor:
                 tool_name,
                 continuation_match.group(1).strip(),
                 file_path,
-                strength="strong",
+                strength="weak",
             )
 
     @staticmethod

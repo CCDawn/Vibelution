@@ -485,6 +485,41 @@ class SelfEvolvingAgent:
         if len(self._recent_tool_outputs) > 6:
             self._recent_tool_outputs = self._recent_tool_outputs[-6:]
 
+    def _build_tool_loop_guard_summary(self) -> str:
+        """Build a visible fallback when the turn stops in a tool-only loop."""
+        records = list(getattr(self, "_recent_tool_records", []) or [])
+        if not records:
+            return ""
+        guard_records = [
+            item
+            for item in records
+            if "工具循环" in str(item.get("result_preview") or "")
+            or "tool_loop_guard" in str(item.get("result_preview") or "")
+        ]
+        if not guard_records:
+            return ""
+        read_paths: List[str] = []
+        tool_names: List[str] = []
+        for item in records:
+            name = str(item.get("name") or "").strip()
+            if name:
+                tool_names.append(name)
+            args = item.get("args") if isinstance(item.get("args"), dict) else {}
+            path = str(args.get("file_path") or args.get("path") or "").strip()
+            if path:
+                read_paths.append(path)
+        unique_tools = list(dict.fromkeys(tool_names))[-6:]
+        unique_paths = list(dict.fromkeys(read_paths))[-3:]
+        path_text = "、".join(unique_paths) if unique_paths else "当前目标文件"
+        tool_text = " -> ".join(unique_tools) if unique_tools else "工具调用"
+        return (
+            "本轮已触发工具循环保护：系统检测到连续工具调用没有形成可见回答，"
+            f"且读取集中在 {path_text}。"
+            f"已执行的主要工具链为 {tool_text}。"
+            "我先停止继续顺着续读调用工具；下一步应基于已读证据总结结论、直接修改，"
+            "或在新一轮中重新规划更窄的读取目标。"
+        )
+
     def _build_delegation_request(
         self,
         *,
@@ -1118,6 +1153,7 @@ class SelfEvolvingAgent:
                     stop_reason = self._get_turn_outcome_controller().should_stop_for_convergence(
                         iteration=iteration,
                         no_new_evidence_steps=round_state.no_new_evidence_steps,
+                        consecutive_tool_only_steps=round_state.consecutive_tool_only_steps,
                         delegation_failures=round_state.delegation_failures,
                         total_tool_calls=round_state.total_tool_calls,
                     )
@@ -1280,7 +1316,10 @@ class SelfEvolvingAgent:
                     }
 
                 tool_calls = processed.tool_calls
-                round_state.note_response_tools(tool_call_count)
+                round_state.note_response_tools(
+                    tool_call_count,
+                    self._last_visible_response_text,
+                )
                 for tool_call in tool_calls:
                     tool_name = str(tool_call.get("name") or "").strip()
                     if tool_name:
@@ -1344,6 +1383,7 @@ class SelfEvolvingAgent:
                 stop_reason = self._get_turn_outcome_controller().should_stop_for_convergence(
                     iteration=iteration,
                     no_new_evidence_steps=round_state.no_new_evidence_steps,
+                    consecutive_tool_only_steps=round_state.consecutive_tool_only_steps,
                     delegation_failures=round_state.delegation_failures,
                     total_tool_calls=round_state.total_tool_calls,
                 )
@@ -1358,6 +1398,19 @@ class SelfEvolvingAgent:
                         )
                     else:
                         ui.add_log(stop_reason, "WARN")
+                        if round_state.consecutive_tool_only_steps >= 3:
+                            _record_agent_scene_event(
+                                "tool_loop_guard",
+                                "agent.tool_loop_guard.triggered",
+                                message=stop_reason,
+                                fields={
+                                    "iteration": iteration,
+                                    "totalToolCalls": round_state.total_tool_calls,
+                                    "consecutiveToolOnlySteps": round_state.consecutive_tool_only_steps,
+                                    "inputTokens": round_state.total_input_tokens,
+                                    "outputTokens": round_state.total_output_tokens,
+                                },
+                            )
                         break
 
         except TurnStopRequested as stop_request:
@@ -1850,6 +1903,8 @@ class SelfEvolvingAgent:
             if not summary:
                 if error_message:
                     summary = error_message
+                elif self._build_tool_loop_guard_summary():
+                    summary = self._build_tool_loop_guard_summary()
                 elif status == "failed":
                     summary = "当前轮执行失败，请检查 LLM 配置或日志。"
                 elif status == "stopped":
