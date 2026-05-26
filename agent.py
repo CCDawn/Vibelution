@@ -1906,7 +1906,13 @@ class SelfEvolvingAgent:
                 result.update(self._last_turn_metadata)
                 result["status"] = result.get("status") or status
             if policy.mode == AgentMode.CHAT:
+                explicit_outcome = str(result.get("outcome") or result.get("task_outcome") or "").strip().lower()
                 result.update(build_chat_coding_result_contract(result))
+                metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), dict) else {}
+                metadata["chat_contract_outcome_source"] = "explicit" if explicit_outcome else "inferred"
+                if explicit_outcome:
+                    metadata["chat_contract_explicit_outcome"] = explicit_outcome
+                result["metadata"] = metadata
             return result
         finally:
             self._single_turn_mode_active = False
