@@ -14,6 +14,7 @@ from core.evaluation.supervised_evolution import (
     load_supervised_bundle,
     run_supervised_evolution_session,
 )
+from core.evaluation.dataset_registry import ensure_dataset_registry, materialize_dataset_bundle
 from core.evaluation.selection_policy import execute_supervised_policy
 from scripts.evolution_harness import (
     HarnessResult,
@@ -277,6 +278,150 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert "runtime(avg):" in rendered
     assert "guarded tools:" in rendered
     assert "policy:" in rendered
+
+
+def test_materialized_reviewed_chat_case_enters_supervised_run_with_review_provenance(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "chat_reviewed_multiturn.jsonl"
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "case_id": "reviewed_chat_session_case",
+                "prompt": "Continue this reviewed chat task with grounded evidence and a clear next step.",
+                "approval": {
+                    "status": "positive",
+                    "reviewed_at": "2026-05-26T00:00:00Z",
+                    "reviewer_note": "keep as supervised dialogue pressure",
+                },
+                "review": {
+                    "decision": "positive",
+                    "reviewed_at": "2026-05-26T00:00:00Z",
+                    "reviewer_note": "reviewed before supervised intake",
+                },
+                "quality_signals": ["tool_call", "analysis", "conclusion"],
+                "next_state_signals": [
+                    {
+                        "signalId": "signal-reviewed-1",
+                        "kind": "user_continues",
+                        "summary": "User asked the agent to continue the same supervised task.",
+                    }
+                ],
+                "conversation_turns": [
+                    {
+                        "turn_number": 1,
+                        "user_message": "审查监督进化",
+                        "assistant_message": "我先读取当前实现和测试。",
+                        "tool_calls": ["read_file_tool"],
+                    },
+                    {
+                        "turn_number": 2,
+                        "user_message": "继续",
+                        "assistant_message": "结论：需要保留 review provenance。",
+                        "tool_calls": ["python_lint_tool"],
+                    },
+                ],
+                "dataset_ref": {
+                    "session_id": "chat_session_reviewed",
+                    "mode": "chat",
+                    "source_log_path": "log_info/conversation_reviewed.jsonl",
+                    "raw_excerpt_path": "workspace/evaluation/chat_candidates/raw/reviewed.json",
+                    "turn_range": [1, 2],
+                },
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    materialized = materialize_dataset_bundle("chat_reviewed_multiturn", project_root=tmp_path)
+    bundle = json.loads(Path(materialized.bundle_path).read_text(encoding="utf-8"))
+    case = bundle["cases"][0]
+
+    assert case["case_type"] == "reviewed_chat"
+    assert case["review"]["status"] == "positive"
+    assert case["approval"]["status"] == "positive"
+    assert case["dataset_ref"]["session_id"] == "chat_session_reviewed"
+    assert case["dataset_ref"]["source_log_path"] == "log_info/conversation_reviewed.jsonl"
+    assert case["intake_boundary"]["contract"] == "reviewed_chat_case"
+
+    def fake_runner(**kwargs):
+        prompt = kwargs["prompt"]
+        assert "reviewed chat task" in prompt
+        return _fake_result("success", "reviewed chat ok", f"{kwargs['scenario']}_{len(prompt)}")
+
+    decision = run_supervised_evolution_session(
+        bundle_name=materialized.bundle_name,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    summary = decision.case_summaries[0]
+    assert summary.case_type == "reviewed_chat"
+    assert summary.intake_provenance["review"]["status"] == "positive"
+    assert summary.intake_provenance["approval"]["status"] == "positive"
+    assert summary.intake_provenance["dataset_ref"]["session_id"] == "chat_session_reviewed"
+    assert summary.intake_provenance["dataset_ref"]["raw_excerpt_path"].endswith("reviewed.json")
+    assert summary.intake_provenance["source_track"] == "dialogue"
+    assert "supervised_evaluation" in summary.intake_provenance["allowed_downstream_uses"]
+    assert summary.intake_provenance["intake_boundary"]["raw_chat_direct_training_allowed"] is False
+
+    policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    policy_case = policy_record["case_evidence"][0]
+    assert policy_case["case_type"] == "reviewed_chat"
+    assert policy_case["intake_provenance"]["dataset_ref"]["source_log_path"] == "log_info/conversation_reviewed.jsonl"
+
+    proposal = json.loads(Path(policy_case["proposal_path"]).read_text(encoding="utf-8"))
+    assert proposal["intake_provenance"]["dataset_ref"]["session_id"] == "chat_session_reviewed"
+    assert proposal["intake_provenance"]["review"]["status"] == "positive"
+
+
+def test_materialized_generated_case_enters_supervised_run_with_intake_boundary(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "generated_cases.jsonl"
+    dataset_path.write_text(
+        json.dumps(
+            {
+                "case_id": "generated_gap_case",
+                "prompt": "Run validation before closing the transaction.",
+                "dataset_splits": ["train", "observe"],
+                "provenance": {
+                    "source_trace_id": "trace_generated_001",
+                    "source_episode_id": "episode_generated_001",
+                    "source_harness_gap": "validation_missing",
+                    "generation_reason": "candidate skipped validation before close",
+                    "creator_version": "pytest-generated",
+                    "created_at": "2026-05-26T00:00:00Z",
+                    "allowed_splits": ["train", "observe"],
+                },
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    materialized = materialize_dataset_bundle("generated_cases", project_root=tmp_path)
+
+    def fake_runner(**kwargs):
+        return _fake_result("success", "generated case ok", kwargs["prompt"][:12] or "generated")
+
+    decision = run_supervised_evolution_session(
+        bundle_name=materialized.bundle_name,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+    )
+
+    summary = decision.case_summaries[0]
+    assert summary.case_type == "generated_case"
+    assert summary.intake_provenance["generated"] is True
+    assert summary.intake_provenance["source_track"] == "generated"
+    assert summary.intake_provenance["provenance"]["source_trace_id"] == "trace_generated_001"
+    assert summary.intake_provenance["dataset_splits"] == ["train", "observe"]
+    assert summary.intake_provenance["intake_boundary"]["holdout_allowed"] is False
+
+    policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
+    assert policy_record["case_evidence"][0]["intake_provenance"] == summary.intake_provenance
 
 
 def test_selection_policy_proposal_path_is_safe_for_unsafe_case_id(tmp_path: Path):
