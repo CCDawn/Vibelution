@@ -1007,7 +1007,12 @@ def _file_item(
 ) -> dict[str, Any]:
     file_payload = _read_text(path)
     exists = path.exists()
-    final_summary = summary or _summarize_text(file_payload["content"]) or ("存在" if exists else "文件不存在")
+    content_type = _content_type(path)
+    final_summary = (
+        summary
+        or _file_content_summary(path, file_payload["content"], content_type=content_type, exists=exists)
+        or ("存在" if exists else "文件不存在")
+    )
     return _memory_item_payload(
         item_id=item_id,
         title=title,
@@ -1022,7 +1027,7 @@ def _file_item(
         visibility_class=visibility_class,
         summary=_clip(final_summary, 360),
         content=file_payload["content"],
-        content_type=_content_type(path),
+        content_type=content_type,
         content_truncated=file_payload["truncated"],
         exists=exists,
     )
@@ -1553,6 +1558,22 @@ def _summarize_text(text: str) -> str:
     if not normalized:
         return ""
     return _clip(normalized, 240)
+
+
+def _file_content_summary(path: Path, content: str, *, content_type: str, exists: bool) -> str:
+    if not exists:
+        return "文件不存在"
+    if content_type == "html":
+        title = _extract_html_title(content) or path.name
+        return f"HTML 页面：{title}。列表只展示页面身份；完整源码可在详情中显式检查。"
+    return _summarize_text(content)
+
+
+def _extract_html_title(content: str) -> str:
+    match = re.search(r"<title[^>]*>(.*?)</title>", str(content or ""), flags=re.IGNORECASE | re.DOTALL)
+    if not match:
+        return ""
+    return _clip(" ".join(match.group(1).split()), 120)
 
 
 def _clip(text: str, limit: int) -> str:

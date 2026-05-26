@@ -625,6 +625,7 @@
 .itemButton {
   width: 100%;
   min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
@@ -713,6 +714,7 @@
 .sourceCopy span,
 .itemPath,
 .itemSummary {
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -748,6 +750,7 @@
   gap: 7px;
   width: 100%;
   min-width: 0;
+  overflow: hidden;
   padding: 0;
   border: 0;
   background: transparent;
