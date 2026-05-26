@@ -258,6 +258,7 @@ class SelfEvolvingAgent:
         self._last_llm_failure_max_attempts: int = 0
         self._last_visible_response_text: str = ""
         self._last_response_tool_calls: int = 0
+        self._last_tool_loop_guard_reason: str = ""
         self._recent_tool_outputs: List[str] = []
         self._recent_tool_records: List[Dict[str, Any]] = []
         self._active_goal: str = ""
@@ -496,7 +497,8 @@ class SelfEvolvingAgent:
             if "工具循环" in str(item.get("result_preview") or "")
             or "tool_loop_guard" in str(item.get("result_preview") or "")
         ]
-        if not guard_records and not self._recent_tool_records_suggest_tool_loop(records):
+        guard_reason = str(getattr(self, "_last_tool_loop_guard_reason", "") or "").strip()
+        if not guard_records and not guard_reason and not self._recent_tool_records_suggest_tool_loop(records):
             return ""
         read_paths: List[str] = []
         tool_names: List[str] = []
@@ -1416,6 +1418,7 @@ class SelfEvolvingAgent:
                     else:
                         ui.add_log(stop_reason, "WARN")
                         if round_state.consecutive_tool_only_steps >= 3:
+                            self._last_tool_loop_guard_reason = stop_reason
                             _record_agent_scene_event(
                                 "tool_loop_guard",
                                 "agent.tool_loop_guard.triggered",
@@ -1883,6 +1886,7 @@ class SelfEvolvingAgent:
         })
         self._last_visible_response_text = ""
         self._last_response_tool_calls = 0
+        self._last_tool_loop_guard_reason = ""
         self._recent_tool_outputs = []
         self._recent_tool_records = []
         self._last_turn_metadata = {}
