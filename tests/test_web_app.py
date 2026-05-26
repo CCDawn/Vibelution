@@ -3390,7 +3390,7 @@ def test_submit_session_message_continue_uses_previous_meaningful_goal_not_punct
     )
 
     assert response.status_code == 202
-    assert captured["prompt"] == "继续完成上一任务：修复对话消息流程"
+    assert captured["prompt"] == "修复对话消息流程"
     assert all(item["content"] != "?" for item in captured["seeded"])
 
 
@@ -5165,7 +5165,10 @@ def test_submit_session_message_surfaces_continuation_limit(tmp_path, monkeypatc
     payload = response.json()
     assert "任务级持续上限" in payload["messages"][-1]["content"]
     assert "发送“继续”" in payload["messages"][-1]["content"]
-    assert payload["currentPhase"] == "ready"
+    assert payload["currentPhase"] == "paused_limit"
+    latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
+    assert latest_run["status"] == "paused_limit"
+    assert latest_run["finishedAt"]
 
 
 def test_submit_session_continue_preserves_unfinished_task_goal(tmp_path, monkeypatch):
@@ -5223,7 +5226,7 @@ def test_submit_session_continue_preserves_unfinished_task_goal(tmp_path, monkey
 
     assert response.status_code == 202
     payload = response.json()
-    assert prompts[0] == "继续完成上一任务：做一个 BDD 调试测试工具规划并汇报"
+    assert prompts[0] == "做一个 BDD 调试测试工具规划并汇报"
     state = load_chat_state(tmp_path)
     active_task = state["conversations"][0]["active_task"]
     assert active_task["goal"] == "做一个 BDD 调试测试工具规划并汇报"
@@ -5365,9 +5368,7 @@ def test_submit_session_continue_recovers_goal_when_active_task_is_continue(tmp_
     )
 
     assert response.status_code == 202
-    assert prompts[0] == (
-        "继续完成上一任务：做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报"
-    )
+    assert prompts[0] == "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报"
     payload = response.json()
     assert "任务级持续上限" in payload["messages"][-1]["content"]
     assert "<state" not in payload["messages"][-1]["content"]
