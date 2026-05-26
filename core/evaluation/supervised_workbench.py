@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from .supervised_artifacts import load_project_json_artifact
+from .supervised_artifacts import load_project_json_artifact, load_project_json_object
 from .lineage import summarize_lineage
 
 
@@ -181,8 +181,9 @@ def format_lineage_summary(lineage_index_path: str, bundle_name: str, limit: int
     return "\n".join(lines)
 
 
-def extract_gym_promotion_proposal_path(decision_source: Any) -> str | None:
-    for gate in _decision_gates(decision_source):
+def extract_gym_promotion_proposal_path(decision_source: Any, *, project_root: Path | None = None) -> str | None:
+    root = _resolve_project_root(project_root)
+    for gate in _decision_gates(decision_source, project_root=root):
         metrics = gate.get("metrics") if isinstance(gate.get("metrics"), dict) else {}
         proposal_path = str(metrics.get("promotion_proposal_path") or "").strip()
         if proposal_path:
@@ -197,7 +198,7 @@ def load_gym_promotion_lifecycle(
 ) -> SupervisedGymProposalLifecycle:
     root = _resolve_project_root(project_root)
     supervised_decision_path = _decision_path_from_source(decision_source)
-    proposal_path_text = extract_gym_promotion_proposal_path(decision_source)
+    proposal_path_text = extract_gym_promotion_proposal_path(decision_source, project_root=root)
 
     if not proposal_path_text:
         return SupervisedGymProposalLifecycle(
@@ -678,15 +679,15 @@ def _decision_path_from_source(decision_source: Any) -> str | None:
     return str(Path(value_text).resolve()) if value_text else None
 
 
-def _decision_gates(decision_source: Any) -> list[dict[str, Any]]:
+def _decision_gates(decision_source: Any, *, project_root: Path) -> list[dict[str, Any]]:
     if isinstance(decision_source, DecisionHistoryRecord):
-        payload = _load_decision_payload(Path(decision_source.decision_path))
+        payload = _load_decision_payload(Path(decision_source.decision_path), project_root=project_root)
         return _coerce_gates(payload.get("gates"))
     if isinstance(decision_source, Path):
-        payload = _load_decision_payload(decision_source)
+        payload = _load_decision_payload(decision_source, project_root=project_root)
         return _coerce_gates(payload.get("gates"))
     if isinstance(decision_source, str):
-        payload = _load_decision_payload(Path(decision_source))
+        payload = _load_decision_payload(Path(decision_source), project_root=project_root)
         return _coerce_gates(payload.get("gates"))
     if isinstance(decision_source, dict):
         return _coerce_gates(decision_source.get("gates"))
@@ -699,12 +700,8 @@ def _coerce_gates(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
-def _load_decision_payload(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+def _load_decision_payload(path: Path, *, project_root: Path) -> dict[str, Any]:
+    return load_project_json_object(path, project_root=project_root) or {}
 
 
 def _resolve_project_root(project_root: Path | None) -> Path:
