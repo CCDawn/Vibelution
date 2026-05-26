@@ -457,11 +457,13 @@ pytest tests/test_supervised_evolution.py -k "dynamic or impossible or replannin
 
 - 已新增 `core/evaluation/supervised_artifacts.py` 作为监督事实源读取 helper，先统一 policy proposal artifact、project path 安全解析和 target key 生成。
 - `supervised_dashboard.py` 已改用共享 helper 读取 policy-only proposal，避免 dashboard 独立维护一套 proposal path / target key 解析。
-- workbench/Web 仍有各自的 decision history、lifecycle 和 detail payload 组装逻辑；后续可继续把 decision record、policy record、case diagnostics 与 worktree run artifact 聚合迁移到同一 helper。
+- Web `caseDiagnostics` 已改用共享 helper 生成，保留 `caseType`、expected final/infeasible outcome、dynamic events、score breakdown、failure taxonomy 和 evidence paths 的 API 形状不变。
+- workbench/Web 仍有各自的 decision history、lifecycle 和 detail payload 组装逻辑；后续可继续把 decision record、policy record 与 worktree run artifact 聚合迁移到同一 helper。
 
 重点检查：
 
 - `core/evaluation/supervised_artifacts.py` 是否继续承载更多 decision/policy/worktree artifact 读取，而不是让 UI 层散读文件。
+- Web/API 的 `caseDiagnostics` 是否只消费共享 helper 输出，不在路由服务里重新解释 case schema。
 - policy-only 历史记录是否能回放。
 - decision 记录里是否包含 proposal path、policy action、runtime effect。
 - decision 记录里是否包含 verification artifacts 和 trace/provenance 路径。
@@ -472,6 +474,7 @@ pytest tests/test_supervised_evolution.py -k "dynamic or impossible or replannin
 pytest tests/test_supervised_dashboard.py -v
 pytest tests/test_supervised_workbench.py -v
 pytest tests/test_web_app.py -k "evolution_routes_use_real_supervised_records or supervised_run or proposal" -v
+pytest tests/test_supervised_artifacts.py -v
 ```
 
 ### P1-3：稳定监督运行控制
