@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from .supervised_artifacts import load_project_json_artifact
 from .lineage import summarize_lineage
 
 
@@ -211,8 +212,13 @@ def load_gym_promotion_lifecycle(
             note="该监督结果没有可操作的 Gym promotion proposal。",
         )
 
-    proposal_path = Path(proposal_path_text).resolve()
-    if not proposal_path.exists():
+    proposal_artifact = load_project_json_artifact(
+        proposal_path_text,
+        project_root=root,
+        label="Gym promotion proposal",
+    )
+    proposal_path = proposal_artifact.path or str(Path(proposal_path_text).resolve())
+    if proposal_artifact.status == "missing":
         return SupervisedGymProposalLifecycle(
             supervised_decision_path=supervised_decision_path or "-",
             proposal_path=str(proposal_path),
@@ -225,9 +231,7 @@ def load_gym_promotion_lifecycle(
             note="Gym promotion proposal 文件不存在。",
         )
 
-    try:
-        proposal = _load_json_object(proposal_path, label="Gym promotion proposal")
-    except ValueError as exc:
+    if proposal_artifact.status != "loaded" or proposal_artifact.payload is None:
         return SupervisedGymProposalLifecycle(
             supervised_decision_path=supervised_decision_path or "-",
             proposal_path=str(proposal_path),
@@ -237,9 +241,10 @@ def load_gym_promotion_lifecycle(
             trace_index_path=None,
             status="invalid",
             available_actions=(),
-            error=str(exc),
+            error=proposal_artifact.error,
         )
 
+    proposal = proposal_artifact.payload
     proposal_id = _optional_text(proposal, "proposal_id")
     episode_id = _optional_text(proposal, "episode_id")
     status = _optional_text(proposal, "status") or "unknown"
@@ -287,7 +292,7 @@ def load_gym_promotion_lifecycle(
 
     return SupervisedGymProposalLifecycle(
         supervised_decision_path=supervised_decision_path or "-",
-        proposal_path=str(proposal_path),
+        proposal_path=proposal_path,
         proposal_id=proposal_id,
         episode_id=episode_id,
         gym_decision_path=gym_decision_path,
@@ -700,18 +705,6 @@ def _load_decision_payload(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
-
-
-def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
-    if not path.exists():
-        raise ValueError(f"Missing {label}: {path}")
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid {label}: {path}") from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"Invalid {label}: expected object at {path}")
-    return payload
 
 
 def _resolve_project_root(project_root: Path | None) -> Path:

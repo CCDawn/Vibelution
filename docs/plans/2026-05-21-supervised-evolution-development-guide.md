@@ -459,6 +459,7 @@ pytest tests/test_supervised_evolution.py -k "dynamic or impossible or replannin
 - `supervised_dashboard.py` 已改用共享 helper 读取 policy-only proposal，避免 dashboard 独立维护一套 proposal path / target key 解析。
 - Web `caseDiagnostics` 已改用共享 helper 生成，保留 `caseType`、expected final/infeasible outcome、dynamic events、score breakdown、failure taxonomy 和 evidence paths 的 API 形状不变。
 - Web detail/preview 的只读 JSON artifact 加载已改用共享 helper，项目外路径、坏 JSON、非 object JSON 都不会进入 detail payload。
+- `load_gym_promotion_lifecycle()` 已改用共享 JSON artifact loader 读取 Gym proposal，保持 missing/invalid lifecycle 语义，并阻止项目外 proposal 路径进入 proposal action 链。
 - workbench/Web 仍有各自的 decision history、lifecycle 和 detail payload 组装逻辑；后续可继续把 decision record、policy record 与 worktree run artifact 聚合迁移到同一 helper。
 
 重点检查：
@@ -466,6 +467,7 @@ pytest tests/test_supervised_evolution.py -k "dynamic or impossible or replannin
 - `core/evaluation/supervised_artifacts.py` 是否继续承载更多 decision/policy/worktree artifact 读取，而不是让 UI 层散读文件。
 - Web/API 的 `caseDiagnostics` 是否只消费共享 helper 输出，不在路由服务里重新解释 case schema。
 - Web/API 的 detail raw payload 是否只通过项目内 JSON object artifact loader 读取，避免路径逃逸或非 object payload 污染监督事实面。
+- Gym proposal lifecycle 是否继续通过共享 artifact loader 区分 loaded/missing/invalid/unsafe，而不是在 workbench 内部散读 JSON。
 - policy-only 历史记录是否能回放。
 - decision 记录里是否包含 proposal path、policy action、runtime effect。
 - decision 记录里是否包含 verification artifacts 和 trace/provenance 路径。
