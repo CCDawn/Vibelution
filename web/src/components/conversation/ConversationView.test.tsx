@@ -276,6 +276,58 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("opened session_service.py");
     expect(html).not.toContain("执行了 1 个操作");
   });
+
+  it("shows spinners only for active conversation sections", () => {
+    const html = renderConversation([
+      {
+        id: "message-running",
+        role: "assistant",
+        content: "正在读取文件。",
+        timestamp: "2026-05-26T00:01:00Z",
+        streaming: true,
+        toolCalls: [{ name: "read_file", status: "running", summary: "opening session_service.py" }],
+      },
+      {
+        id: "message-done",
+        role: "assistant",
+        content: "已读取文件。",
+        timestamp: "2026-05-26T00:02:00Z",
+        streaming: false,
+        toolCalls: [{ name: "read_file", status: "done", summary: "opened session_service.py" }],
+      },
+    ]);
+
+    expect(html.match(/statusSpinner/g)?.length).toBe(3);
+    expect(html).toContain("opening session_service.py");
+    expect(html).toContain("已读取文件。");
+  });
+
+  it("shows a spinner for an active mental model section", () => {
+    const html = renderConversation([
+      {
+        id: "message-mental-running",
+        role: "assistant",
+        content: "",
+        timestamp: "2026-05-26T00:01:00Z",
+        streaming: true,
+        mentalSnapshot: {
+          mood: "focused",
+          feeling: "tracking state",
+          whisper: "",
+          summary: "Following the active turn",
+          cognitiveState: "productive",
+          confidence: 0.7,
+          sampleSize: 1,
+          interventionCount: 0,
+          updatedAt: "2026-05-26T00:01:05Z",
+          source: "runtime",
+        },
+      },
+    ]);
+
+    expect(html).toContain("心智模型");
+    expect(html.match(/statusSpinner/g)?.length).toBe(2);
+  });
 });
 
 describe("ConversationView timeline scroll signal", () => {

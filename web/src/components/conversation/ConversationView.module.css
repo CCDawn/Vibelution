@@ -437,6 +437,23 @@
   white-space: nowrap;
 }
 
+.statusSpinner {
+  flex: 0 0 auto;
+  animation: status-spin 0.9s linear infinite;
+}
+
+@keyframes status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusSpinner {
+    animation: none;
+  }
+}
+
 .operationDuration {
   min-width: 48px;
   color: var(--fg-tertiary);
