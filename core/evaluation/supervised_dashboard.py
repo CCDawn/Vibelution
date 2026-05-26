@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .supervised_artifacts import load_policy_proposal_artifact, policy_target_key
 from .supervised_workbench import load_gym_promotion_lifecycle
 
 
@@ -248,13 +249,13 @@ def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashb
         gym_proposal_path = gym_proposal_path or metrics.get("promotion_proposal_path")
         gym_decision_path = gym_decision_path or metrics.get("decision_path")
     lifecycle = load_gym_promotion_lifecycle(payload, project_root=project_root)
-    policy_proposal = _load_policy_proposal(payload, project_root=project_root)
+    policy_proposal = load_policy_proposal_artifact(payload, project_root=project_root)
     if lifecycle.status == "missing" and policy_proposal:
-        policy_payload = policy_proposal["payload"]
-        gym_proposal_path = policy_proposal["path"]
+        policy_payload = policy_proposal.payload
+        gym_proposal_path = policy_proposal.path
         gym_decision_path = None
         lifecycle_status = str(policy_payload.get("status") or "unknown")
-        lifecycle_target_key = _policy_target_key(policy_payload)
+        lifecycle_target_key = policy_target_key(policy_payload)
         lifecycle_runtime_effect = str(policy_payload.get("runtime_effect") or "not_applied")
         lifecycle_agent_consumption = str(policy_payload.get("agent_consumption") or "advisory")
         lifecycle_note = "该条目来自 supervised selection policy proposal。"
@@ -298,48 +299,6 @@ def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashb
             advisory_context.get("entries") if isinstance(advisory_context.get("entries"), list) else []
         ),
     )
-
-
-def _load_policy_proposal(payload: dict[str, Any], *, project_root: Path) -> dict[str, Any] | None:
-    policy_action = payload.get("policy_action") if isinstance(payload.get("policy_action"), dict) else {}
-    raw_paths = policy_action.get("proposal_paths") if isinstance(policy_action.get("proposal_paths"), list) else []
-    for raw_path in raw_paths:
-        proposal_path = _resolve_project_path(raw_path, project_root=project_root)
-        if proposal_path is None or not proposal_path.exists():
-            continue
-        try:
-            proposal_payload = json.loads(proposal_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if isinstance(proposal_payload, dict):
-            return {"path": str(proposal_path), "payload": proposal_payload}
-    return None
-
-
-def _resolve_project_path(raw_path: Any, *, project_root: Path) -> Path | None:
-    text = str(raw_path or "").strip()
-    if not text:
-        return None
-    path = Path(text)
-    if path.is_absolute():
-        resolved = path.resolve()
-    else:
-        resolved = (project_root / path).resolve()
-    try:
-        resolved.relative_to(project_root.resolve())
-    except ValueError:
-        return None
-    return resolved
-
-
-def _policy_target_key(payload: dict[str, Any]) -> str | None:
-    target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
-    if not target:
-        return None
-    try:
-        return "target:" + json.dumps(target, ensure_ascii=False, sort_keys=True)
-    except TypeError:
-        return str(target)
 
 
 def _assess_risk(payload: dict[str, Any], gates: list[Any]) -> tuple[str, list[str]]:
