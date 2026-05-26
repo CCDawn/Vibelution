@@ -135,6 +135,10 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     ]
     assert "RUNTIME_LOG_INDEX" in sections["runtime-scene-evidence"]["agentVisibility"]
     assert any("tools.memory_tools" in item["usedBy"] for item in sections["runtime-memory"]["items"])
+    project_items = {item["title"]: item for item in sections["project-memory"]["items"]}
+    assert project_items["overview.html"]["contentType"] == "html"
+    assert project_items["overview.html"]["summary"].startswith("HTML 页面：")
+    assert "<html" not in project_items["overview.html"]["summary"].lower()
 
 
 def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path, monkeypatch):
