@@ -51,6 +51,7 @@ from core.web.services.self_evolution_control_service import (
     rollback_self_evolution_run,
     resume_self_evolution_run,
     start_self_evolution_run,
+    start_self_evolution_worktree_run,
     stream_self_evolution_run_events,
 )
 from core.web.services.supervised_control_service import (
@@ -116,9 +117,22 @@ class SupervisedWorktreeRunStartPayload(BaseModel):
     clientAction: str = "start_supervised_worktree_run"
 
 
+class SelfEvolutionWorktreeRunStartPayload(BaseModel):
+    goal: str = ""
+    sourceKind: str = "bundle"
+    datasetName: str = ""
+    datasetLimit: int | None = None
+    bundleName: str = ""
+    mode: str = "manual"
+    executionMode: str = "simulation"
+    confirmRealLlmCost: bool = False
+    uiRoute: str = "/evolution?track=self"
+
+
 class SupervisedWorktreeRunActionPayload(BaseModel):
     action: str = ""
     force: bool = False
+    reviewerNote: str = ""
 
 
 class ProposalUpdatePayload(BaseModel):
@@ -332,6 +346,16 @@ def evolution_start_worktree_run(payload: SupervisedWorktreeRunStartPayload) -> 
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/evolution/self/worktree-runs", status_code=status.HTTP_202_ACCEPTED)
+def self_evolution_start_worktree_run(payload: SelfEvolutionWorktreeRunStartPayload) -> dict:
+    try:
+        return start_self_evolution_worktree_run(payload.model_dump())
+    except (SelfEvolutionRunBusyError, SupervisedWorktreeRunBusyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (SelfEvolutionRunValidationError, SupervisedWorktreeRunValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/evolution/worktree-runs/{run_id}")
 def evolution_worktree_run(run_id: str) -> dict:
     snapshot = get_supervised_worktree_run(run_id)
@@ -358,7 +382,12 @@ def evolution_worktree_run_events(run_id: str) -> StreamingResponse:
 @router.post("/evolution/worktree-runs/{run_id}/actions")
 def evolution_worktree_run_action(run_id: str, payload: SupervisedWorktreeRunActionPayload) -> dict:
     try:
-        return execute_supervised_worktree_action(run_id, payload.action, force=payload.force)
+        return execute_supervised_worktree_action(
+            run_id,
+            payload.action,
+            force=payload.force,
+            reviewer_note=payload.reviewerNote,
+        )
     except SupervisedWorktreeRunNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SupervisedWorktreeRunValidationError as exc:

@@ -53,7 +53,10 @@ from .session_service import (
     submit_session_message,
 )
 from .supervised_control_service import get_active_supervised_run
-from .supervised_worktree_evolution_service import get_active_supervised_worktree_run
+from .supervised_worktree_evolution_service import (
+    get_active_supervised_worktree_run,
+    start_supervised_worktree_run,
+)
 from .workbench_contract_service import get_workbench_contract
 
 
@@ -256,6 +259,69 @@ def _raise_if_self_evolution_requires_worktree_isolation(payload: dict[str, Any]
             ),
         )
     )
+
+
+def start_self_evolution_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
+    """Delegate a risky self-evolution write goal to the supervised worktree path."""
+
+    lang = get_web_language()
+    contract = get_workbench_contract()
+    availability = contract.get("modeAvailability") if isinstance(contract.get("modeAvailability"), dict) else {}
+    if not bool(availability.get("self_evolution")) or not bool(availability.get("supervised_evolution")):
+        raise SelfEvolutionRunValidationError(
+            text_for(
+                lang,
+                zh="需要同时启用 self_evolution 和 supervised_evolution，才能把 risky write 转入监督工作树。",
+                en="Both self_evolution and supervised_evolution must be enabled before delegating risky writes to a supervised worktree.",
+            )
+        )
+
+    data = payload if isinstance(payload, dict) else {}
+    goal = str(data.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    reason = _self_evolution_worktree_isolation_reason(data, goal)
+    if not reason:
+        raise SelfEvolutionRunValidationError(
+            text_for(
+                lang,
+                zh="这个入口只接收需要 worktree isolation 的 risky self-evolution 写入目标。",
+                en="This entry point only accepts risky self-evolution write goals that require worktree isolation.",
+            )
+        )
+
+    delegated_payload = {
+        "sourceKind": str(data.get("sourceKind") or "bundle").strip() or "bundle",
+        "datasetName": str(data.get("datasetName") or "").strip(),
+        "datasetLimit": data.get("datasetLimit"),
+        "bundleName": str(data.get("bundleName") or "").strip(),
+        "keepWorktree": True,
+        "mode": str(data.get("mode") or "manual").strip() or "manual",
+        "executionMode": str(data.get("executionMode") or "simulation").strip() or "simulation",
+        "confirmRealLlmCost": bool(data.get("confirmRealLlmCost")),
+        "requestSource": "api:evolution.self.worktree-runs",
+        "uiRoute": str(data.get("uiRoute") or "/evolution?track=self").strip() or "/evolution?track=self",
+        "initiator": "self_evolution_risky_write",
+        "clientAction": "start_self_evolution_worktree_run",
+        "selfEvolutionGoal": goal,
+        "selfEvolutionRiskReason": reason,
+        "requiresSupervisedReview": True,
+        "reviewReason": "Self-evolution risky write candidate must return to supervised review before merge.",
+    }
+    snapshot = start_supervised_worktree_run(delegated_payload)
+    _record_self_scene_event(
+        "control",
+        "self_evolution_run.worktree_delegated",
+        run_id=str(snapshot.get("runId") or ""),
+        message="Risky self-evolution write delegated to supervised worktree run.",
+        outcome="succeeded",
+        fields={
+            "riskReason": reason,
+            "goalPreview": goal[:160],
+            "supervisedWorktreeRunId": str(snapshot.get("runId") or ""),
+            "requiresSupervisedReview": True,
+        },
+        lifecycle=True,
+    )
+    return snapshot
 
 
 def _record_self_scene_event(

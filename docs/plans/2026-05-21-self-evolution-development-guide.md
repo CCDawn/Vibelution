@@ -39,6 +39,8 @@
   - write / evaluation / evolution_transaction 之间按冲突矩阵互斥。
 - Web self-evolution 启动入口已增加 risky write worktree isolation gate：带 `writeIntent` / `requiresWorktreeIsolation`、risky `riskProfile` / `riskLevel`，或 goal 明显要求修复、实现、提交、patch、merge 等写入行为时，主工作树 `self_evolution` 会直接 422 拒绝，并记录 `self_evolution_run.start.blocked_requires_worktree` runtime scene 事件。
 - 该 gate 只阻止主工作树入口，不创建新 worktree、不提交、不合并；真正的写入型自进化必须走 worktree-backed / supervised worktree 路径并回到监督线 review。
+- `POST /api/evolution/self/worktree-runs` 已提供 self-evolution risky write 的 worktree-backed 启动入口：请求会被委派为 `supervised_worktree_evolution_run`，写入 `selfEvolutionOrigin` 和 `reviewGate`，默认 `mode=manual`、`keepWorktree=true`，并记录 `self_evolution_run.worktree_delegated`。
+- self-origin supervised worktree run 合并前必须显式 `approve_review`；`supervised_review_pending` 会阻止 merge，且不能被 `force` 绕过。review 通过后才允许进入已有 merge / rollback 流程。
 - `core/web/services/session_service.py` 已把 chat turn 注册为 `WorkRun(chat_turn)`，并用 `infer_chat_turn_leases()` 区分 readonly 与 write intent。
 - `core/web/services/runtime_service.py` 已在 runtime summary 中暴露 `workRuns.active/latest`，覆盖 chat、self、supervised、supervised worktree。
 
@@ -108,7 +110,7 @@
 - 不能自改评判标准：不得直接修改冻结评测集、accepted baseline、selection policy、supervised policy 或 holdout。
 - 不能直接写入 accepted baseline 或 selection policy。
 - risky write 必须走事务，并且事务内仍必须遵守 allowed target dirs。
-- risky write intent 不能从主工作树 self-evolution 启动；必须使用 worktree isolation / supervised worktree 路径，经 review 后再合并。
+- risky write intent 不能从主工作树 self-evolution 启动；必须使用 worktree isolation / supervised worktree 路径，经 review approve 后再合并。
 - 成功经验只能先进入 experience repository / candidate pool，再回到监督线验收。
 - generated case 默认不能进入 holdout；必须带 provenance 和 allowed splits。
 - raw chat 不能直接变成训练/评测压力；必须经过 review。
@@ -595,7 +597,7 @@ pytest tests/test_web_app.py -k "chat_review or supervised or self_evolution" -v
    状态：第一版已完成。self-questioning 只从证据生成问题，self-navigating 只生成必须重查当前现场的路径建议，self-attributing 只生成可追溯归因；三者都不能直接修改 runtime 标准。下一步是让 P3 candidate pool 消费这些 reflection records。
 
 3. 建立 skill / prompt / proposal candidate 池并接回监督线。
-   状态：candidate pool 核心持久化已完成，prompt、skill、proposal 已纳入 provenance、review_state、downstream_use 和 supervised_required 契约；P4 第一版只读回流也已完成。主工作树 self-evolution 现在会拒绝 risky write 启动请求，避免候选生成入口被误用成写入执行器。下一步是把只读 pending candidate 转成真正的监督 review action / dataset lifecycle，并补 worktree-backed 写入型自进化入口，但仍必须由监督线验收，不能自动 accepted。
+   状态：candidate pool 核心持久化已完成，prompt、skill、proposal 已纳入 provenance、review_state、downstream_use 和 supervised_required 契约；P4 第一版只读回流也已完成。主工作树 self-evolution 现在会拒绝 risky write 启动请求，避免候选生成入口被误用成写入执行器；self-origin worktree-backed 启动入口和 merge review gate 已落地。下一步是把只读 pending candidate 转成真正的监督 review action / dataset lifecycle，但仍必须由监督线验收，不能自动 accepted。
 
 ## 提交说明
 

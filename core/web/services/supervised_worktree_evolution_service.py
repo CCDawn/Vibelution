@@ -69,6 +69,10 @@ _HIGH_RISK_PATHS = {
     "config.local.toml",
     "AGENTS.md",
 }
+SELF_EVOLUTION_RISKY_WRITE_INITIATOR = "self_evolution_risky_write"
+SELF_EVOLUTION_WORKTREE_ROUTE = "api:evolution.self.worktree-runs"
+REVIEW_GATE_APPROVED = "approved"
+REVIEW_GATE_PENDING = "pending"
 
 
 class SupervisedWorktreeRunBusyError(RuntimeError):
@@ -133,6 +137,8 @@ def start_supervised_worktree_run(payload: dict[str, Any]) -> dict[str, Any]:
             "bundleName": options["bundleName"],
             "keepWorktree": bool(options["keepWorktree"]),
             "startRequest": options["startRequest"],
+            "selfEvolutionOrigin": options["selfEvolutionOrigin"],
+            "reviewGate": options["reviewGate"],
             "startedAt": now,
             "updatedAt": now,
             "finishedAt": "",
@@ -191,6 +197,8 @@ def run_supervised_worktree_flow(
         "bundleName": options["bundleName"],
         "keepWorktree": bool(options["keepWorktree"]),
         "startRequest": options["startRequest"],
+        "selfEvolutionOrigin": options["selfEvolutionOrigin"],
+        "reviewGate": options["reviewGate"],
         "startedAt": now,
         "updatedAt": now,
         "finishedAt": "",
@@ -357,7 +365,28 @@ def stream_supervised_worktree_run_events(run_id: str, initial_snapshot: dict[st
         _unregister_subscriber(normalized, subscriber)
 
 
-def execute_supervised_worktree_action(run_id: str, action: str, *, force: bool = False) -> dict[str, Any]:
+def execute_supervised_worktree_action(
+    run_id: str,
+    action: str,
+    *,
+    force: bool = False,
+    reviewer_note: str = "",
+) -> dict[str, Any]:
+    return _execute_supervised_worktree_action(
+        run_id,
+        action,
+        force=force,
+        reviewer_note=reviewer_note,
+    )
+
+
+def _execute_supervised_worktree_action(
+    run_id: str,
+    action: str,
+    *,
+    force: bool = False,
+    reviewer_note: str = "",
+) -> dict[str, Any]:
     normalized = str(run_id or "").strip()
     normalized_action = str(action or "").strip().lower().replace("-", "_")
     if not normalized:
@@ -377,6 +406,10 @@ def execute_supervised_worktree_action(run_id: str, action: str, *, force: bool 
     if normalized_action == "discard":
         updated = _discard_candidate(snapshot)
         _append_event(updated, "discard", "候选工作树已丢弃。")
+        return _decorate_snapshot(updated)
+    if normalized_action in {"approve_review", "approve_merge_review", "mark_reviewed"}:
+        updated = _approve_review_gate(snapshot, reviewer_note=reviewer_note)
+        _append_event(updated, "review_approved", "监督 review 已批准，候选允许进入合并分析。")
         return _decorate_snapshot(updated)
     if normalized_action == "merge":
         updated = _merge_candidate(snapshot, force=force)
@@ -491,6 +524,8 @@ def _normalize_start_payload(
     dataset_name = str(payload.get("datasetName") or "").strip()
     bundle_name = str(payload.get("bundleName") or "").strip()
     dataset_limit = _coerce_optional_int(payload.get("datasetLimit"))
+    self_origin = _normalize_self_evolution_origin(payload)
+    review_gate = _normalize_review_gate(payload, self_origin)
 
     if mode not in {"auto", "manual"}:
         raise SupervisedWorktreeRunValidationError("mode must be auto or manual.")
@@ -533,6 +568,65 @@ def _normalize_start_payload(
         "keepWorktree": keep_worktree,
         "costEstimate": estimate,
         "startRequest": _normalize_start_request_metadata(payload),
+        "selfEvolutionOrigin": self_origin,
+        "reviewGate": review_gate,
+    }
+
+
+def _normalize_self_evolution_origin(payload: dict[str, Any]) -> dict[str, Any]:
+    request_source = str(payload.get("requestSource") or "").strip()
+    initiator = str(payload.get("initiator") or "").strip()
+    goal = str(
+        payload.get("selfEvolutionGoal")
+        or payload.get("self_evolution_goal")
+        or payload.get("goal")
+        or ""
+    ).strip()
+    risk_reason = str(
+        payload.get("selfEvolutionRiskReason")
+        or payload.get("self_evolution_risk_reason")
+        or payload.get("riskReason")
+        or ""
+    ).strip()
+    source_run_id = str(payload.get("sourceSelfRunId") or payload.get("sourceRunId") or "").strip()
+    source_candidate_id = str(payload.get("sourceCandidateId") or payload.get("candidateId") or "").strip()
+    self_origin_requested = (
+        bool(payload.get("requiresSupervisedReview"))
+        or request_source == SELF_EVOLUTION_WORKTREE_ROUTE
+        or initiator == SELF_EVOLUTION_RISKY_WRITE_INITIATOR
+        or bool(goal)
+    )
+    if not self_origin_requested:
+        return {}
+    return {
+        "sourceTrack": "self_evolution",
+        "goal": _safe_metadata_text(goal, limit=500),
+        "riskReason": _safe_metadata_text(risk_reason),
+        "sourceSelfRunId": _safe_metadata_text(source_run_id),
+        "sourceCandidateId": _safe_metadata_text(source_candidate_id),
+        "requiresSupervisedReview": True,
+    }
+
+
+def _normalize_review_gate(payload: dict[str, Any], self_origin: dict[str, Any]) -> dict[str, Any]:
+    required = bool(payload.get("requiresSupervisedReview")) or bool(self_origin)
+    if not required:
+        return {
+            "required": False,
+            "status": "not_required",
+            "reason": "",
+            "approvedAt": "",
+            "reviewerNote": "",
+        }
+    reason = str(payload.get("reviewReason") or "").strip()
+    if not reason:
+        reason = "Self-evolution risky write output must be reviewed before merge."
+    return {
+        "required": True,
+        "status": REVIEW_GATE_PENDING,
+        "reason": _safe_metadata_text(reason, limit=300),
+        "approvedAt": "",
+        "reviewerNote": "",
     }
 
 
@@ -764,6 +858,15 @@ def _build_reflection(snapshot: dict[str, Any], baseline: dict[str, Any]) -> dic
     successes = int(baseline.get("successes") or 0)
     total = int(baseline.get("total") or 0)
     failures = max(0, total - successes)
+    self_origin = snapshot.get("selfEvolutionOrigin") if isinstance(snapshot.get("selfEvolutionOrigin"), dict) else {}
+    requested_goal = str(self_origin.get("goal") or "").strip()
+    goal_section = ""
+    if requested_goal:
+        goal_section = (
+            "\n\n本轮来自 self-evolution risky write worktree 请求。\n"
+            f"用户请求目标：{requested_goal}\n"
+            "你可以在隔离 worktree 中实现候选改动，但候选必须等待监督 review 后才能合并。"
+        )
     prompt = (
         "你正在隔离 worktree 中执行监督自改闭环。\n"
         "先用中文简短反思基线运行，再直接修改本项目中你认为最能提升同一题集表现的内容。\n"
@@ -772,6 +875,7 @@ def _build_reflection(snapshot: dict[str, Any], baseline: dict[str, Any]) -> dic
         f"基线结果：{successes}/{total} 通过，失败数 {failures}。\n"
         f"基线摘要：{baseline.get('summary') or '-'}\n"
         "目标：让候选 agent 在同一题集复测时比基线分数更高。"
+        f"{goal_section}"
     )
     return {
         "summary": f"基线 {successes}/{total} 通过，候选需要针对失败点自改。",
@@ -954,15 +1058,18 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
         blockers.append("high_risk_files")
     if not changed_files:
         blockers.append("empty_candidate_diff")
+    if _review_gate_requires_approval(snapshot):
+        blockers.append("supervised_review_pending")
     return {
         "status": "blocked" if blockers else "ready",
         "mergeAllowed": not blockers,
-        "reason": "合并前检查通过。" if not blockers else "合并前检查发现冲突或高风险项。",
+        "reason": "合并前检查通过。" if not blockers else "合并前检查发现冲突、高风险项或待审核项。",
         "changedFiles": changed_files,
         "overlapFiles": [item["path"] for item in overlap],
         "highRiskFiles": [item["path"] for item in high_risk],
         "blockers": blockers,
         "mainDirtyFiles": sorted(dirty_main),
+        "reviewGate": snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {},
         "analyzedAt": _now_iso(),
     }
 
@@ -970,6 +1077,11 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
 def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]:
     updated = _with_merge_analysis(snapshot)
     analysis = updated.get("mergeAnalysis") if isinstance(updated.get("mergeAnalysis"), dict) else {}
+    blockers = set(str(item) for item in list(analysis.get("blockers") or []))
+    if "supervised_review_pending" in blockers:
+        raise SupervisedWorktreeRunActionError(
+            "self-evolution 来源的候选仍处于 pending review，必须先完成监督 review approve，不能用 force 绕过。"
+        )
     if not bool(analysis.get("mergeAllowed")) and not force:
         raise SupervisedWorktreeRunActionError(
             "合并分析未通过。请先处理冲突/高风险项，或在明确确认后使用 force。"
@@ -1004,6 +1116,47 @@ def _merge_candidate(snapshot: dict[str, Any], *, force: bool) -> dict[str, Any]
         run_id=str(updated.get("runId") or ""),
         outcome="succeeded",
         fields={"force": force, "fileCount": len(changed_files)},
+        lifecycle=True,
+    )
+    return updated
+
+
+def _review_gate_requires_approval(snapshot: dict[str, Any]) -> bool:
+    gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
+    if not bool(gate.get("required")):
+        return False
+    return str(gate.get("status") or "").strip().lower() != REVIEW_GATE_APPROVED
+
+
+def _approve_review_gate(snapshot: dict[str, Any], *, reviewer_note: str = "") -> dict[str, Any]:
+    status = str(snapshot.get("status") or "").strip().lower()
+    if status not in _TERMINAL_STATUSES:
+        raise SupervisedWorktreeRunActionError("候选运行尚未结束，不能提前批准合并 review。")
+    gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
+    if not bool(gate.get("required")):
+        raise SupervisedWorktreeRunValidationError("此候选不需要 self-evolution merge review。")
+    updated = _clone(snapshot)
+    updated["reviewGate"] = {
+        **gate,
+        "required": True,
+        "status": REVIEW_GATE_APPROVED,
+        "approvedAt": _now_iso(),
+        "reviewerNote": _safe_metadata_text(reviewer_note, limit=500),
+    }
+    updated["updatedAt"] = _now_iso()
+    updated["mergeAnalysis"] = _build_merge_analysis(updated)
+    _persist_snapshot(updated, active_run_id="")
+    self_origin = updated.get("selfEvolutionOrigin") if isinstance(updated.get("selfEvolutionOrigin"), dict) else {}
+    _record_worktree_scene_event(
+        "review",
+        "supervised_worktree_run.review.approved",
+        run_id=str(updated.get("runId") or ""),
+        outcome="succeeded",
+        fields={
+            "reviewGateStatus": REVIEW_GATE_APPROVED,
+            "sourceTrack": str(self_origin.get("sourceTrack") or ""),
+            "reviewerNotePreview": str(reviewer_note or "")[:160],
+        },
         lifecycle=True,
     )
     return updated
@@ -1372,6 +1525,8 @@ def _child_log_path(run_id: str) -> str:
 
 def _snapshot_event_fields(snapshot: dict[str, Any]) -> dict[str, Any]:
     decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+    review_gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
+    self_origin = snapshot.get("selfEvolutionOrigin") if isinstance(snapshot.get("selfEvolutionOrigin"), dict) else {}
     return {
         "status": str(snapshot.get("status") or ""),
         "phase": str(snapshot.get("phase") or ""),
@@ -1383,6 +1538,9 @@ def _snapshot_event_fields(snapshot: dict[str, Any]) -> dict[str, Any]:
         "baselineScore": decision.get("baselineScore"),
         "candidateScore": decision.get("candidateScore"),
         "scoreDelta": decision.get("scoreDelta"),
+        "reviewGateRequired": bool(review_gate.get("required")),
+        "reviewGateStatus": str(review_gate.get("status") or ""),
+        "sourceTrack": str(self_origin.get("sourceTrack") or ""),
     }
 
 
@@ -1405,6 +1563,8 @@ def _compact_start_request_for_child_log(snapshot: dict[str, Any]) -> dict[str, 
         "uiRoute": start_request.get("uiRoute"),
         "initiator": start_request.get("initiator"),
         "clientAction": start_request.get("clientAction"),
+        "selfEvolutionOrigin": snapshot.get("selfEvolutionOrigin"),
+        "reviewGate": snapshot.get("reviewGate"),
     }
 
 
@@ -1418,6 +1578,7 @@ def _compact_snapshot_for_child_log(snapshot: dict[str, Any]) -> dict[str, Any]:
         "latestMessage": snapshot.get("latestMessage"),
         "decision": snapshot.get("decision"),
         "mergeAnalysis": snapshot.get("mergeAnalysis"),
+        "reviewGate": snapshot.get("reviewGate"),
     }
 
 
@@ -1471,11 +1632,21 @@ def _action_states(snapshot: dict[str, Any]) -> dict[str, Any]:
     merge = snapshot.get("merge") if isinstance(snapshot.get("merge"), dict) else {}
     rollback = snapshot.get("rollback") if isinstance(snapshot.get("rollback"), dict) else {}
     done = status in _TERMINAL_STATUSES
+    review_pending = _review_gate_requires_approval(snapshot)
+    review_gate = snapshot.get("reviewGate") if isinstance(snapshot.get("reviewGate"), dict) else {}
     return {
         "preserve": {"enabled": done and has_worktree and outcome not in {"preserved", "merged"}},
         "discard": {"enabled": done and has_worktree and outcome not in {"discarded", "merged"}},
         "analyzeMerge": {"enabled": done and has_worktree},
-        "merge": {"enabled": done and has_worktree and str(merge.get("status") or "") != "merged"},
+        "approveReview": {
+            "enabled": done and has_worktree and bool(review_gate.get("required")) and review_pending,
+        },
+        "merge": {
+            "enabled": done
+            and has_worktree
+            and str(merge.get("status") or "") != "merged"
+            and not review_pending
+        },
         "rollback": {"enabled": str(rollback.get("status") or "") == "available"},
     }
 

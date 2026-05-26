@@ -155,6 +155,57 @@ def test_supervised_worktree_flow_preserves_improved_candidate_and_records_merge
     assert snapshot["mergeAnalysis"]["changedFiles"][0]["path"] == "agent.py"
 
 
+def test_self_origin_worktree_flow_carries_goal_and_requires_review(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    captured_prompt: dict[str, str] = {}
+
+    def worktree_factory(root: Path, run_id: str) -> dict:
+        candidate = _make_candidate_repo(tmp_path, root)
+        return {
+            "path": str(candidate),
+            "baseHead": "base",
+            "checkpointCommit": "base",
+            "checkpointRef": "",
+            "trackedDirty": False,
+            "untrackedFiles": [],
+        }
+
+    def modifier(_: Path, prompt: str, __: dict) -> dict:
+        captured_prompt["value"] = prompt
+        return {"status": "success", "summary": "candidate edited from self goal"}
+
+    snapshot = service.run_supervised_worktree_flow(
+        {
+            "sourceKind": "bundle",
+            "bundleName": "closed_loop_v1",
+            "mode": "manual",
+            "selfEvolutionGoal": "修复自进化候选回流并补测试",
+            "selfEvolutionRiskReason": "goal_write_marker",
+            "requiresSupervisedReview": True,
+        },
+        project_root=project_root,
+        dependencies=service.WorktreeRunDependencies(
+            evaluation_runner=_fake_evaluator,
+            candidate_modifier=modifier,
+            worktree_factory=worktree_factory,
+        ),
+    )
+
+    assert "修复自进化候选回流并补测试" in captured_prompt["value"]
+    assert snapshot["selfEvolutionOrigin"]["sourceTrack"] == "self_evolution"
+    assert snapshot["reviewGate"]["required"] is True
+    assert snapshot["reviewGate"]["status"] == "pending"
+    assert snapshot["mergeAnalysis"]["mergeAllowed"] is False
+    assert "supervised_review_pending" in snapshot["mergeAnalysis"]["blockers"]
+    assert snapshot["actionStates"]["approveReview"]["enabled"] is True
+    assert snapshot["actionStates"]["merge"]["enabled"] is False
+
+
 def test_supervised_worktree_flow_stops_when_baseline_provider_transport_fails(tmp_path):
     project_root = tmp_path / "project"
     _write_bundle(project_root)
@@ -245,6 +296,56 @@ def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_pa
 
     assert rolled_back["rollback"]["status"] == "rolled_back"
     assert (project_root / "agent.py").read_text(encoding="utf-8") == "print('user edit')\n"
+
+
+def test_self_origin_merge_requires_review_even_when_forced(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", ".")
+    _run_git(project_root, "commit", "-m", "init")
+    candidate = _make_candidate_repo(tmp_path, project_root)
+    snapshot = {
+        "runId": "swte-self-review",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": {"path": str(candidate), "preserved": True},
+        "selfEvolutionOrigin": {
+            "sourceTrack": "self_evolution",
+            "goal": "修复核心代码",
+            "riskReason": "goal_write_marker",
+            "requiresSupervisedReview": True,
+        },
+        "reviewGate": {
+            "required": True,
+            "status": "pending",
+            "reason": "must review",
+            "approvedAt": "",
+            "reviewerNote": "",
+        },
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    blocked = service.execute_supervised_worktree_action("swte-self-review", "analyze_merge")
+
+    assert blocked["mergeAnalysis"]["mergeAllowed"] is False
+    assert "supervised_review_pending" in blocked["mergeAnalysis"]["blockers"]
+    with pytest.raises(service.SupervisedWorktreeRunActionError, match="pending review"):
+        service.execute_supervised_worktree_action("swte-self-review", "merge", force=True)
+
+    approved = service.execute_supervised_worktree_action(
+        "swte-self-review",
+        "approve_review",
+        reviewer_note="reviewed by supervised line",
+    )
+    merged = service.execute_supervised_worktree_action("swte-self-review", "merge")
+
+    assert approved["reviewGate"]["status"] == "approved"
+    assert approved["reviewGate"]["reviewerNote"] == "reviewed by supervised line"
+    assert merged["merge"]["status"] == "merged"
+    assert "# candidate edit" in (project_root / "agent.py").read_text(encoding="utf-8")
 
 
 def test_real_llm_mode_requires_explicit_cost_confirmation(tmp_path):
