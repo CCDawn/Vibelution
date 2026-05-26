@@ -59,6 +59,7 @@ log_info/
 /web/vite-*.log
 
 # Root-level review artifacts
+/.codex-temp/
 /tmp-*.png
 /tmp-*.html
 /edge-*.png

@@ -8,7 +8,6 @@ __all__ = [
     "file_service",
     "i18n",
     "log_service",
-    "mock_data",
     "pet_service",
     "reset_service",
     "runtime_service",
