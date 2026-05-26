@@ -115,6 +115,38 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Answer");
   });
 
+  it("renders assistant responses as semantic labeled blocks", () => {
+    const html = renderConversation([
+      {
+        id: "message-assistant",
+        role: "assistant",
+        content: [
+          "已继续完成并提交。",
+          "",
+          "根因已经收口：任务管理工具不应算作有效推进。",
+          "",
+          "已提交：",
+          "",
+          "8697ecf fix(chat): keep bookkeeping guard resumable",
+          "",
+          "验证已跑：",
+          "",
+          "```text",
+          "101 passed, 245 deselected",
+          "```",
+        ].join("\n"),
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+    ]);
+
+    expect(html).toContain("状态");
+    expect(html).toContain("提交");
+    expect(html).toContain("验证");
+    expect(html).toContain("8697ecf fix(chat): keep bookkeeping guard resumable");
+    expect(html).toContain("101 passed, 245 deselected");
+    expect(html).not.toContain("```text");
+  });
+
   it("marks the active edit target and disables edit controls while busy", () => {
     const html = renderConversation(
       [
