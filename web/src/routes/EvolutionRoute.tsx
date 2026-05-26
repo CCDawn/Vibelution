@@ -15,6 +15,9 @@ import {
   Pencil,
   Trash2,
   TriangleAlert,
+  GitMerge,
+  SearchCheck,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
@@ -116,6 +119,32 @@ const EVOLUTION_LIVE_RUN_DEFAULT_WIDTH = 380;
 const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
 const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
 const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 440;
+const WORKTREE_ACTION_ITEMS = [
+  {
+    action: "analyze_merge",
+    stateKey: "analyzeMerge",
+    labelKey: "analyzeWorktreeMerge",
+    icon: SearchCheck,
+  },
+  {
+    action: "preserve",
+    stateKey: "preserve",
+    labelKey: "preserveWorktree",
+    icon: Save,
+  },
+  {
+    action: "discard",
+    stateKey: "discard",
+    labelKey: "discardWorktree",
+    icon: Trash2,
+  },
+  {
+    action: "merge",
+    stateKey: "merge",
+    labelKey: "mergeWorktree",
+    icon: GitMerge,
+  },
+] as const;
 
 type ProposalEditDraft = {
   improvementType: string;
@@ -802,6 +831,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     && highlightedReviewStatus !== "approved";
   const highlightedApproveReviewAction = highlightedWorktreeRun?.actionStates?.approveReview;
   const highlightedMergeBlockers = highlightedWorktreeRun?.mergeAnalysis?.blockers ?? [];
+  const highlightedWorktreeActions = WORKTREE_ACTION_ITEMS.map((item) => ({
+    ...item,
+    state: highlightedWorktreeRun?.actionStates?.[item.stateKey],
+  }));
   const latestSelfRunSnapshot = selectRunSnapshotWithRunId(selfLatestRunQuery.data);
   const latestRun = runs[0] ?? null;
   const selfTrackEnabled = configQuery.data?.modeAvailability.self_evolution ?? false;
@@ -1651,6 +1684,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     });
   }
 
+  function triggerWorktreeAction(run: SupervisedWorktreeRun | null, action: string) {
+    if (!run?.runId) {
+      return;
+    }
+    worktreeActionMutation.mutate({
+      runId: run.runId,
+      action,
+    });
+  }
+
   function toggleRunSelection(run: EvolutionRun) {
     if (!run.canDelete) {
       return;
@@ -2376,11 +2419,32 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         onClick={() => triggerWorktreeReviewApproval(highlightedWorktreeRun)}
                         title={disabledReason(highlightedApproveReviewAction) || t("approveSelfWorktreeReview")}
                       >
-                        {worktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <CheckCircle2 size={15} />}
+                        {worktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <ShieldCheck size={15} />}
                         {t("approveSelfWorktreeReview")}
                       </button>
+                      {highlightedWorktreeActions.map((item) => {
+                        const Icon = item.icon;
+                        const disabled = !item.state?.enabled || worktreeActionMutation.isPending;
+                        const reason = disabledReason(item.state);
+                        return (
+                          <button
+                            key={item.action}
+                            type="button"
+                            className={styles.inlineAction}
+                            disabled={disabled}
+                            onClick={() => triggerWorktreeAction(highlightedWorktreeRun, item.action)}
+                            title={reason || t(item.labelKey)}
+                          >
+                            {worktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <Icon size={15} />}
+                            {t(item.labelKey)}
+                          </button>
+                        );
+                      })}
                       {!highlightedApproveReviewAction?.enabled && disabledReason(highlightedApproveReviewAction) ? (
                         <p className={styles.noticeText}>{disabledReason(highlightedApproveReviewAction)}</p>
+                      ) : null}
+                      {highlightedReviewPending ? (
+                        <p className={styles.noticeText}>{t("selfWorktreeMergeRequiresReview")}</p>
                       ) : null}
                     </div>
                   </div>
