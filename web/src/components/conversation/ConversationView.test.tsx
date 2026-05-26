@@ -147,6 +147,30 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("```text");
   });
 
+  it("renders inline code and simple lists inside semantic response blocks", () => {
+    const html = renderConversation([
+      {
+        id: "message-assistant",
+        role: "assistant",
+        content: [
+          "根因：`task_create_tool` 和 `task_update_tool` 被当成真实推进。",
+          "",
+          "改动文件：",
+          "",
+          "- web/src/components/conversation/ConversationView.tsx",
+          "- web/src/components/conversation/messageResponseSegments.ts",
+        ].join("\n"),
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+    ]);
+
+    expect(html).toContain("inlineCode");
+    expect(html).toContain("task_create_tool");
+    expect(html).not.toContain("`task_create_tool`");
+    expect(html).toContain("<ul");
+    expect(html).toContain("ConversationView.tsx");
+  });
+
   it("marks the active edit target and disables edit controls while busy", () => {
     const html = renderConversation(
       [
