@@ -58,4 +58,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("approveSelfWorktreeReview");
     expect(routeSource).toContain("selfWorktreeReviewHint");
   });
+
+  it("keeps worktree follow-up actions explicit and separate from review approval", () => {
+    expect(routeSource).toContain("WORKTREE_ACTION_ITEMS");
+    expect(routeSource).toContain('action: "analyze_merge"');
+    expect(routeSource).toContain('action: "preserve"');
+    expect(routeSource).toContain('action: "discard"');
+    expect(routeSource).toContain('action: "merge"');
+    expect(routeSource).toContain("highlightedWorktreeActions.map");
+    expect(routeSource).toContain("triggerWorktreeAction(highlightedWorktreeRun, item.action)");
+    expect(routeSource).toContain("selfWorktreeMergeRequiresReview");
+  });
 });
