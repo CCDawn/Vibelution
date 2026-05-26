@@ -55,7 +55,7 @@
 - `evidence_paths` 已进入 case summary、policy case evidence、proposal 和 Web case diagnostics，当前统一引用 role report、worktree、新 conversation/debug 文件；`intake_provenance` 已补上 case 来源和准入边界，但 Gym trace/diff/log artifact map 仍可继续补强。
 - 动态 case 与不可完成 case 已有 dataset schema、最小监督 run 记录路径、expected outcome verification decision path 和 harness fixture marker 提取；内置 dry-run bundle 已包含 `dynamic_replanning_fixture` 与 `impossible_task_fixture`，可分别产出 `final_state` / `infeasible_outcome` 作为监督核验证据。现有 fixture 仍是轻量可回放探针，还不是完整 STT-Arena 风格动态执行器。
 - PROMOTE 与 accepted baseline 的边界已写入 selection policy 产物和 Web/API 可读字段；后续仍需在更多 UI 文案里持续避免把 supervised baseline registry 说成 runtime baseline。
-- `proposal_action` 目前有审计和生命周期记录，但尚未统一登记为独立 `WorkRun(proposal_action)`；如果后续要和共享底座完全对齐，需要补这个 run kind 或等价 lifecycle event。
+- `proposal_action` 目前有审计、policy/proposal 记录和 `supervised_proposal_action.*` runtime scene lifecycle event；如果后续要和共享底座完全对齐，仍可补独立 `WorkRun(proposal_action)`。
 
 ## 职责边界
 
@@ -385,6 +385,7 @@ pytest tests/test_web_app.py -k "chat_review or dataset or auto_review_mode or p
 - 已完成 policy proposal 明示边界：selection policy 写出的 proposal 会带 `supervised_decision`、`policy_action`、`proposal_status`、`runtime_effect=not_applied`、`agent_consumption=advisory` 和 `supervision_boundary`。
 - 已完成 accepted baseline registry 明示边界：`accepted_baselines.json` 每条记录带 `scope=supervised_frozen_evaluator` 与 `supervision_boundary.accepted_baseline_registry_scope=supervised_policy_artifact`。
 - 已完成 Web/API 读取边界：policy-only proposal 被 dashboard/evolution service 读取时会保留 proposal 内的 `runtime_effect` 与 `agent_consumption`。
+- 已完成等价 runtime scene lifecycle event：apply/activate/rollback 成功会记录 `supervised_proposal_action.executed`，状态不允许时会记录 `supervised_proposal_action.blocked`。
 - 尚未完成独立 `WorkRun(proposal_action)`；当前仍通过 audit log、policy record、proposal file 和 runtime scene lifecycle event 提供可回放证据。
 
 重点检查：
@@ -392,7 +393,7 @@ pytest tests/test_web_app.py -k "chat_review or dataset or auto_review_mode or p
 - decision record / policy record / proposal 是否明确写出 `supervised_decision`、`policy_action`、`proposal_status`、`runtime_effect`、`agent_consumption`。
 - PROMOTE 后 selection policy 对 accepted baseline registry 的更新是否持续被描述为监督侧 frozen evaluator 工件，而不是 runtime 改写。
 - active proposal 是否仍禁止直接删除；applied/active/rolled_back/superseded/promoted 是否禁止编辑草稿。
-- proposal action 是否需要补 `WorkRun(proposal_action)`，或先补等价 runtime scene lifecycle event。
+- proposal action 后续是否需要从等价 lifecycle event 升级为独立 `WorkRun(proposal_action)`。
 
 文件影响：
 
