@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import time
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,48 @@ def test_web_workbench_accepts_managed_launcher_marker():
     )
 
     assert args.managed_by_launcher is True
+
+
+def test_web_workbench_is_headless_by_default():
+    from scripts import web_workbench
+
+    args = web_workbench.parse_args([])
+
+    assert args.open_browser is False
+    assert args.no_browser is False
+
+
+def test_web_workbench_open_browser_is_explicit_and_no_browser_wins():
+    from scripts import web_workbench
+
+    assert web_workbench.parse_args(["--open-browser"]).open_browser is True
+    assert web_workbench.parse_args(["--open-browser", "--no-browser"]).open_browser is False
+
+
+def test_web_workbench_main_does_not_open_browser_by_default(monkeypatch):
+    from scripts import web_workbench
+
+    opened: list[str] = []
+    uvicorn_calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr(
+        web_workbench,
+        "parse_args",
+        lambda: Namespace(host="127.0.0.1", port=8000, reload=False, open_browser=False),
+    )
+    monkeypatch.setattr(web_workbench.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(
+        web_workbench.uvicorn,
+        "run",
+        lambda app, **kwargs: uvicorn_calls.append({"app": app, **kwargs}),
+    )
+
+    web_workbench.main()
+
+    assert opened == []
+    assert uvicorn_calls == [
+        {"app": "core.web.app:app", "host": "127.0.0.1", "port": 8000, "reload": False}
+    ]
 
 
 def _powershell_exe() -> str:

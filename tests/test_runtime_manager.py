@@ -865,6 +865,166 @@ def test_reconcile_observation_does_not_fail_opening_orphaned_browser(monkeypatc
     assert events == []
 
 
+def test_reconcile_observation_cleans_closed_residual_processes(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "closed",
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 53180,
+                "backendPortOwnerKind": "unmanaged_workbench",
+                "backendPortOwnerTrusted": False,
+                "backendPortOwnerResidual": True,
+                "backendPortConflict": False,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "backendMissing": False,
+                "frontendOrphaned": False,
+                "lifecycleConsistency": "residual_backend",
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "closed",
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendAlive": False,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerKind": "",
+                "backendPortOwnerTrusted": False,
+                "backendPortOwnerResidual": False,
+                "backendPortConflict": False,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "backendMissing": False,
+                "frontendOrphaned": False,
+                "lifecycleConsistency": "consistent",
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+        ]
+    )
+    residual_payloads = iter(
+        [
+            {
+                "count": 2,
+                "items": [
+                    {"pid": 11956, "kind": "unmanaged_frontend_dev_server", "port": 5173},
+                    {"pid": 53180, "kind": "unmanaged_workbench", "port": 8000},
+                ],
+            },
+            {"count": 0, "items": []},
+        ]
+    )
+
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: next(residual_payloads))
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        runtime_daemon,
+        "_cleanup_residual_workbench_processes",
+        lambda: {
+            "supported": True,
+            "requested": [11956, 53180],
+            "terminated": [11956, 53180],
+            "remaining": [],
+        },
+    )
+
+    state = runtime_daemon._reconcile_observation(
+        {
+            "runtimeState": "running",
+            "command": {"activeCommandId": ""},
+            "workbench": {"desiredState": "closed", "observedState": "closed", "phase": "steady"},
+        }
+    )
+
+    assert state["workbench"]["desiredState"] == "closed"
+    assert state["residualProcesses"] == {"count": 0, "items": []}
+    assert [event_type for event_type, _payload in events] == [
+        "workbench.consistency.closed_residual_cleanup_requested",
+        "workbench.consistency.closed_residual_cleanup_succeeded",
+    ]
+    assert events[0][1]["residualProcesses"]["count"] == 2
+    assert events[1][1]["cleanup"]["terminated"] == [11956, 53180]
+
+
+def test_reconcile_observation_clears_completed_active_command(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "backendPid": 6288,
+            "browserLaunchPid": 49564,
+            "browserWindowPid": 49564,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPort": 8000,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 6288,
+            "backendPortOwnerKind": "managed_workbench_backend",
+            "backendPortOwnerTrusted": True,
+            "backendPortOwnerResidual": False,
+            "backendPortConflict": False,
+            "browserWindowAlive": True,
+            "browserManaged": True,
+            "backendMissing": False,
+            "frontendOrphaned": False,
+            "lifecycleConsistency": "consistent",
+            "sessionId": "managed-session",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "residual_process_payload", lambda **kwargs: {"count": 0, "items": []})
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_process_source_signature", lambda: "sig-current")
+    monkeypatch.setattr(daemon, "_command_result_is_completed", lambda command_id: command_id == "cmd-open")
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+
+    state = runtime_daemon._reconcile_observation(
+        {
+            "runtimeState": "running",
+            "command": {
+                "activeCommandId": "cmd-open",
+                "activeType": "open_workbench",
+                "requestedBy": "codex",
+                "startedAt": "2026-05-26T07:13:22+00:00",
+            },
+            "workbench": {"desiredState": "open", "observedState": "open", "phase": "steady"},
+        }
+    )
+
+    assert state["command"]["activeCommandId"] == ""
+    assert state["command"]["activeType"] == ""
+    assert events == [
+        (
+            "command.active_completed_cleared",
+            {"commandId": "cmd-open", "activeType": "open_workbench", "requestedBy": "codex"},
+        )
+    ]
+
+
 def test_submit_command_defers_open_while_runtime_manager_is_stopping(tmp_path, monkeypatch):
     inbox_dir = tmp_path / "inbox"
     processing_dir = tmp_path / "processing"
