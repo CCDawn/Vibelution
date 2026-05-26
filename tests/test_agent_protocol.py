@@ -1177,7 +1177,7 @@ class TestToolMessageFlow:
         assert result["raw_output"] == result["summary"]
         assert result["error"] == result["summary"]
 
-    def test_run_single_turn_surfaces_tool_loop_guard_when_no_visible_reply(self, monkeypatch):
+    def test_run_single_turn_preserves_tool_progress_without_loop_guard_reply(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.name = "tester"
         agent.config = SimpleNamespace(
@@ -1232,13 +1232,13 @@ class TestToolMessageFlow:
 
         result = agent.run_single_turn(initial_prompt="probe")
 
-        assert result["status"] == "partial"
+        assert result["status"] == "completed"
         assert result["outcome"] == "progress"
-        assert "工具循环保护" in result["summary"]
-        assert "tool_executor.py" in result["summary"]
-        assert result["raw_output"] == result["summary"]
+        assert result["summary"] == ""
+        assert result["raw_output"] == ""
+        assert result["read_files"] == ["core/infrastructure/tool_executor.py"]
 
-    def test_run_single_turn_infers_tool_loop_guard_without_guard_tool_result(self, monkeypatch):
+    def test_run_single_turn_does_not_infer_loop_guard_from_repeated_tools(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.name = "tester"
         agent.config = SimpleNamespace(
@@ -1298,13 +1298,13 @@ class TestToolMessageFlow:
 
         result = agent.run_single_turn(initial_prompt="probe")
 
-        assert result["status"] == "partial"
+        assert result["status"] == "completed"
         assert result["outcome"] == "progress"
-        assert "工具循环保护" in result["summary"]
-        assert "grep_search_tool" in result["summary"]
-        assert result["raw_output"] == result["summary"]
+        assert result["summary"] == ""
+        assert result["raw_output"] == ""
+        assert result["tool_call_count"] == 4
 
-    def test_run_single_turn_uses_recorded_tool_loop_guard_reason(self, monkeypatch):
+    def test_run_single_turn_ignores_legacy_tool_loop_guard_reason(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.name = "tester"
         agent.config = SimpleNamespace(
@@ -1330,7 +1330,6 @@ class TestToolMessageFlow:
         def fake_think_and_act(user_prompt=None, goal_override=None):
             agent._last_visible_response_text = ""
             agent._last_response_tool_calls = 0
-            agent._last_tool_loop_guard_reason = "连续多轮只有工具调用但没有可见回答，本轮停止继续调用工具。"
             agent._recent_tool_records = [
                 {"name": "get_git_status_summary_tool", "args": {"limit": 20}, "result_preview": "ok"},
                 {"name": "get_recent_changes_tool", "args": {"limit": 10}, "result_preview": "ok"},
@@ -1353,12 +1352,11 @@ class TestToolMessageFlow:
 
         result = agent.run_single_turn(initial_prompt="probe")
 
-        assert result["status"] == "partial"
+        assert result["status"] == "completed"
         assert result["outcome"] == "progress"
-        assert "工具循环保护" in result["summary"]
-        assert "任务管理" in result["summary"]
-        assert "get_git_status_summary_tool" in result["summary"]
-        assert result["raw_output"] == result["summary"]
+        assert result["summary"] == ""
+        assert result["raw_output"] == ""
+        assert result["tool_call_count"] == 3
 
     def test_run_single_turn_keeps_full_visible_reply_text(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
@@ -2212,9 +2210,22 @@ class TestDelegationExposure:
         assert "task_stop_tool" not in names
         assert "update_self_model_tool" not in names
         assert "record_learning_tool" not in names
+        assert "apply_patch_tool" in names
         assert "apply_diff_edit_tool" in names
         assert "read_file_tool" in names
+        assert "plan_update_tool" in names
         assert "run_test_for_tool" in names
+
+    def test_llm_facing_tool_descriptions_are_capability_contracts(self):
+        hard_cognitive_markers = ("必须", "禁止", "禁用", "强制")
+        violations = []
+        for tool in create_llm_facing_tools():
+            description = str(getattr(tool, "description", "") or "")
+            for marker in hard_cognitive_markers:
+                if marker in description:
+                    violations.append(f"{tool.name}: {marker}")
+
+        assert violations == []
 
 
 class TestResolvedApiKeyUsage:
@@ -2606,7 +2617,7 @@ class TestRuntimeStateMemoryFlow:
         assert reason is not None
         assert "未形成最小反馈环" in reason
 
-    def test_should_stop_for_consecutive_tool_only_responses(self):
+    def test_consecutive_tool_only_responses_do_not_force_stop(self):
         controller = TurnOutcomeController(
             max_consecutive_failures=3,
             get_attention_snapshot=lambda: {"convergence_state": "open"},
@@ -2621,10 +2632,9 @@ class TestRuntimeStateMemoryFlow:
             substantive_tool_calls=3,
         )
 
-        assert reason is not None
-        assert "只有工具调用" in reason
+        assert reason is None
 
-    def test_should_stop_for_bookkeeping_only_responses(self):
+    def test_bookkeeping_only_responses_do_not_force_stop(self):
         controller = TurnOutcomeController(
             max_consecutive_failures=3,
             get_attention_snapshot=lambda: {"convergence_state": "open"},
@@ -2640,8 +2650,7 @@ class TestRuntimeStateMemoryFlow:
             substantive_tool_calls=0,
         )
 
-        assert reason is not None
-        assert "任务管理" in reason
+        assert reason is None
 
     def test_readonly_platform_judgment_completion_is_detected(self):
         goal = (

@@ -24,6 +24,25 @@ from core.pet_system.pet_system import reset_pet_system
 from core.infrastructure import evolution_governor as governor_module
 from core.infrastructure.tool_executor import ToolExecutor, get_tool_executor
 from core.infrastructure.agent_session import get_session_state, reset_session_state
+from tools.Key_Tools import create_key_tools
+
+
+LEGACY_AGENT_TOOL_NAMES = {
+    "read_file",
+    "list_directory",
+    "check_python_syntax",
+    "create_file",
+    "execute_shell_command",
+    "run_powershell",
+    "run_batch",
+    "find_definitions_tool",
+    "find_function_calls_tool",
+    "get_file_entities",
+    "get_file_entities_tool",
+    "list_file_entities_tool",
+    "get_code_entity_tool",
+    "python_symbol_tool",
+}
 
 
 class TestToolExecutorInit:
@@ -49,7 +68,8 @@ class TestToolExecutorInit:
         
         # 检查关键工具是否已注册
         expected_tools = [
-            "list_directory", "execute_shell_command", "run_powershell", "check_python_syntax",
+            "read_file_tool", "glob_tool", "code_symbol_tool", "python_lint_tool",
+            "apply_patch_tool", "plan_update_tool",
             "trigger_self_restart_tool", "grep_search_tool",
             "task_create_tool", "task_update_tool", "task_list_tool",
             "cli_tool",
@@ -57,6 +77,32 @@ class TestToolExecutorInit:
         
         for tool_name in expected_tools:
             assert tool_name in executor._tool_map, f"工具 {tool_name} 应该已注册"
+
+    def test_default_tool_map_contains_only_canonical_tools_and_internal_spawn(self):
+        """执行器默认只注册 canonical agent 工具和内部委派入口。"""
+        executor = ToolExecutor()
+        canonical_names = {tool.name for tool in create_key_tools()}
+
+        assert set(executor._tool_map) == canonical_names | {"spawn_agent_tool"}
+        assert not (LEGACY_AGENT_TOOL_NAMES & set(executor._tool_map))
+
+    def test_tools_package_does_not_reexport_compat_aliases(self):
+        """tools 包入口不再把底层 helper 伪装成 agent 工具别名。"""
+        import tools
+
+        compat_exports = {
+            "read_file_tool",
+            "list_directory_tool",
+            "check_python_syntax_tool",
+            "create_file_tool",
+            "execute_shell_command_tool",
+            "run_powershell_tool",
+            "run_batch_tool",
+            "find_definitions_tool",
+            "find_function_calls_tool",
+            "get_file_entities_tool",
+        }
+        assert not any(hasattr(tools, name) for name in compat_exports)
 
     def test_web_search_tool_executes_registered_callable(self, monkeypatch):
         """web_search_tool should call the raw implementation, not a LangChain StructuredTool."""
@@ -86,11 +132,10 @@ class TestToolExecutorInit:
         executor = ToolExecutor()
         
         # 检查关键工具的超时配置
-        assert "execute_shell_command" in executor._timeout_map
-        assert executor._timeout_map["execute_shell_command"] == 60
-        
-        assert "check_python_syntax" in executor._timeout_map
-        assert executor._timeout_map["check_python_syntax"] == 10
+        assert executor._timeout_map["cli_tool"] == 60
+        assert executor._timeout_map["python_lint_tool"] == 60
+        assert executor._timeout_map["spawn_agent_tool"] == 150
+        assert not (LEGACY_AGENT_TOOL_NAMES & set(executor._timeout_map))
 
 
 class TestToolExecutorExecute:
@@ -106,7 +151,45 @@ class TestToolExecutorExecute:
         result, action = executor.execute("nonexistent_tool", {})
         assert result is not None
         assert "[错误] 未知工具" in result
+        assert "nonexistent_tool" not in str(result)
+        assert "当前可用工具包括" in str(result)
+        assert "read_file_tool" in str(result)
         assert action is None
+
+    @pytest.mark.parametrize("tool_name", sorted(LEGACY_AGENT_TOOL_NAMES))
+    def test_legacy_agent_tool_names_are_unknown(self, executor, tool_name):
+        """旧工具名不再走兼容层，也不在错误文本中回显污染下一轮。"""
+        result, action = executor.execute(tool_name, {})
+
+        assert action is None
+        assert "[错误] 未知工具" in str(result)
+        assert f"未知工具：{tool_name}" not in str(result)
+        assert f"`{tool_name}`" not in str(result)
+
+    def test_unknown_tool_does_not_publish_raw_tool_name(self, executor):
+        """未知工具事件使用通用标签，避免旧名进入可见事件流。"""
+        events = []
+        bus = get_event_bus()
+        callback_id = "test_unknown_tool_name_sanitized"
+        bus.subscribe(EventNames.TOOL_START, lambda event: events.append(("start", event.data)), callback_id=f"{callback_id}_start")
+        bus.subscribe(EventNames.TOOL_ERROR, lambda event: events.append(("error", event.data)), callback_id=f"{callback_id}_error")
+
+        try:
+            result, action = executor.execute("read_file", {})
+        finally:
+            bus.unsubscribe_by_id(f"{callback_id}_start")
+            bus.unsubscribe_by_id(f"{callback_id}_error")
+
+        assert action is None
+        assert "[错误] 未知工具" in str(result)
+        assert not any(kind == "start" for kind, _data in events)
+        kind, event_data = events[-1]
+        assert kind == "error"
+        assert event_data["name"] == "[unknown_tool]"
+        assert "[错误] 未知工具" in event_data["error"]
+        assert "当前可用工具包括" in event_data["error"]
+        assert "read_file_tool" in event_data["error"]
+        assert "read_file" not in event_data["error"].replace("read_file_tool", "")
 
     def test_execute_read_file(self, executor):
         """测试读取文件工具"""
@@ -116,7 +199,7 @@ class TestToolExecutorExecute:
         test_file.write_text(test_content, encoding='utf-8')
         
         try:
-            result, action = executor.execute("read_file", {
+            result, action = executor.execute("read_file_tool", {
                 "file_path": str(test_file)
             })
             
@@ -127,40 +210,36 @@ class TestToolExecutorExecute:
             if test_file.exists():
                 test_file.unlink()
 
-    def test_execute_list_directory(self, executor):
-        """测试列出目录工具"""
+    def test_execute_glob_tool(self, executor):
+        """测试文件模式匹配工具"""
         test_dir = Path(__file__).parent
         
-        result, action = executor.execute("list_directory", {
-            "path": str(test_dir)
+        result, action = executor.execute("glob_tool", {
+            "pattern": "test_*.py",
+            "search_dir": str(test_dir),
         })
         
         assert action is None
         assert result is not None
-        payload = json.loads(str(result))
-        assert payload["status"] == "success"
-        assert Path(payload["path"]) == test_dir
-        assert payload["total"] >= len(payload["files"])
-        assert payload["truncated"] is True
-        assert any(item["name"].startswith("test_") for item in payload["files"])
+        assert any(item["name"].startswith("test_") for item in result)
 
-    def test_execute_check_python_syntax_valid(self, executor):
-        """测试语法检查 - 有效文件"""
-        # 使用当前测试文件（语法正确）
-        result, action = executor.execute("check_python_syntax", {
-            "file_path": __file__
+    def test_execute_python_lint_valid(self, executor):
+        """测试 canonical Python lint 工具可执行并返回结构化结果。"""
+        result, action = executor.execute("python_lint_tool", {
+            "target": __file__,
+            "max_issues": 5,
         })
         
         assert action is None
         assert result is not None
-        # 语法正确应该返回成功消息
-        assert "语法正确" in str(result) or "Syntax OK" in str(result) or "通过" in str(result)
+        assert '"status"' in str(result)
 
     def test_execute_with_timeout(self, executor):
         """测试超时控制"""
         # 执行一个快速命令验证超时机制工作
-        result, action = executor.execute("list_directory", {
-            "path": str(Path(__file__).parent)
+        result, action = executor.execute("glob_tool", {
+            "pattern": "test_tool_executor.py",
+            "search_dir": str(Path(__file__).parent),
         },)
         
         # 应该正常返回，不超时
@@ -189,8 +268,9 @@ class TestToolExecutorTimeout:
         """测试未配置超时工具的默认超时"""
         # execute 方法内部使用默认超时 30 秒
         # 这里验证工具执行不会因为缺少超时配置而崩溃
-        result, action = executor.execute("list_directory", {
-            "path": str(Path(__file__).parent)
+        result, action = executor.execute("glob_tool", {
+            "pattern": "test_tool_executor.py",
+            "search_dir": str(Path(__file__).parent),
         })
         assert result is not None
 
@@ -207,8 +287,43 @@ class TestToolExecutorTimeout:
     def test_spawn_agent_tool_is_registered_for_internal_governor(self, executor):
         assert "spawn_agent_tool" in executor._tool_map
 
-    def test_get_file_entities_tool_compat_alias_is_registered(self, executor):
-        assert "get_file_entities_tool" in executor._tool_map
+    def test_get_file_entities_tool_compat_alias_is_not_registered(self, executor):
+        assert "get_file_entities_tool" not in executor._tool_map
+
+    def test_code_symbol_tool_outline_and_entity_modes(self, executor, tmp_path):
+        source = tmp_path / "demo_symbols.py"
+        source.write_text(
+            "class Demo:\n"
+            "    def run(self):\n"
+            "        return helper()\n\n"
+            "def helper():\n"
+            "    return 1\n",
+            encoding="utf-8",
+        )
+
+        outline, outline_action = executor.execute(
+            "code_symbol_tool",
+            {"mode": "outline", "file_path": str(source)},
+        )
+        entity, entity_action = executor.execute(
+            "code_symbol_tool",
+            {"mode": "entity", "file_path": str(source), "symbol": "Demo.run"},
+        )
+
+        assert outline_action is None
+        assert entity_action is None
+        assert "Demo" in str(outline)
+        assert "helper" in str(outline)
+        assert "def run" in str(entity)
+        assert "return helper()" in str(entity)
+
+    def test_code_symbol_tool_returns_parameter_correction_example(self, executor):
+        result, action = executor.execute("code_symbol_tool", {"mode": "entity"})
+
+        assert action is None
+        assert '"status": "error"' in str(result)
+        assert "entity 模式需要 file_path 和 symbol 或 entity_name" in str(result)
+        assert '"example"' in str(result)
 
     def test_spawn_agent_tool_requires_internal_delegate_flag(self, executor):
         result, action = executor.execute("spawn_agent_tool", {"goal": "分析重复调用"})
@@ -299,8 +414,9 @@ class TestToolExecutorEvents:
         assert executor._event_bus is not None
         
         # 执行一个工具，验证不会抛出异常
-        result, action = executor.execute("list_directory", {
-            "path": str(Path(__file__).parent)
+        result, action = executor.execute("glob_tool", {
+            "pattern": "test_tool_executor.py",
+            "search_dir": str(Path(__file__).parent),
         })
         
         # 如果事件总线有问题，这里会抛出异常
@@ -334,13 +450,77 @@ class TestToolExecutorErrorHandling:
     def test_execute_tool_with_invalid_args(self, executor):
         """测试执行工具时参数错误"""
         # 传递错误参数类型
-        result, action = executor.execute("read_file", {
+        result, action = executor.execute("read_file_tool", {
             "file_path": 12345  # 应该是字符串
         })
         
         # 应该返回错误而不是抛出异常
         assert result is not None
         assert action is None
+        assert "[工具参数错误]" in str(result)
+        assert "file_path 需要 str" in str(result)
+        assert "示例：read_file_tool" in str(result)
+
+    def test_cli_tool_accepts_cwd_and_truncates_output(self, executor, tmp_path):
+        marker = tmp_path / "marker.txt"
+        marker.write_text("ok", encoding="utf-8")
+
+        result, action = executor.execute(
+            "cli_tool",
+            {
+                "command": "python -c \"print('x' * 80)\"",
+                "cwd": str(tmp_path),
+                "max_output_chars": 40,
+            },
+        )
+
+        assert action is None
+        assert "输出已截断" in str(result)
+
+    def test_plan_update_tool_writes_transient_plan_to_active_workspace(self, executor, tmp_path):
+        from tools.shell_tools import workspace_root_override
+
+        with workspace_root_override(tmp_path):
+            result, action = executor.execute(
+                "plan_update_tool",
+                {
+                    "plan": [
+                        {"step": "审查工具", "status": "completed"},
+                        {"step": "补齐测试", "status": "in_progress"},
+                    ],
+                    "explanation": "对齐 Codex 计划工具",
+                },
+            )
+
+        assert action is None
+        payload = json.loads(str(result))
+        assert payload["status"] == "ok"
+        plan_path = tmp_path / "plans" / "current.json"
+        assert plan_path.exists()
+        saved = json.loads(plan_path.read_text(encoding="utf-8"))
+        assert saved["plan"][1]["status"] == "in_progress"
+
+    def test_apply_patch_tool_updates_file(self, executor, tmp_path):
+        target = tmp_path / "demo.txt"
+        target.write_text("hello\n", encoding="utf-8")
+
+        result, action = executor.execute(
+            "apply_patch_tool",
+            {
+                "cwd": str(tmp_path),
+                "patch_text": """*** Begin Patch
+*** Update File: demo.txt
+@@
+-hello
++hello codex
+*** End Patch""",
+            },
+        )
+
+        assert action is None
+        payload = json.loads(str(result))
+        assert payload["status"] == "ok"
+        assert target.read_text(encoding="utf-8") == "hello codex\n"
 
     def test_python_lint_publishes_validation_event(self, executor):
         events = []
@@ -436,8 +616,8 @@ class TestToolExecutorErrorHandling:
         assert event["fields"]["semanticStatus"] == "degraded"
         assert event["fields"]["issueCount"] == 2
 
-    def test_cli_pipe_pattern_short_circuits_within_same_turn(self, executor):
-        """同轮同类 pipe 模式被拦截后，第二次应直接短路。"""
+    def test_cli_pipe_pattern_executes_again_after_security_feedback(self, executor):
+        """同轮同类 pipe 模式不再二次短路，由工具自身继续返回安全反馈。"""
         reset_session_state()
 
         call_counter = {"count": 0}
@@ -452,8 +632,9 @@ class TestToolExecutorErrorHandling:
         second, _ = executor.execute("cli_tool", {"command": "git show :x | head -20"})
 
         assert "[安全拦截]" in str(first)
-        assert "[短路]" in str(second)
-        assert call_counter["count"] == 1
+        assert "[安全拦截]" in str(second)
+        assert "[短路]" not in str(second)
+        assert call_counter["count"] == 2
         snapshot = get_session_state().get_attention_snapshot()
         assert "cli_tool:pipe" in snapshot["blocked_tool_patterns"]
 
@@ -503,8 +684,8 @@ class TestToolExecutorErrorHandling:
         assert snapshot["scope_frozen"] is True
         assert snapshot["scope_anchor"] == "agent.py"
 
-    def test_cli_command_chain_short_circuits_within_same_turn(self, executor):
-        """同轮同类命令链模式被拦截后，第二次应直接短路。"""
+    def test_cli_command_chain_executes_again_after_security_feedback(self, executor):
+        """同轮同类命令链不再二次短路，由工具自身继续返回安全反馈。"""
         reset_session_state()
 
         call_counter = {"count": 0}
@@ -519,8 +700,9 @@ class TestToolExecutorErrorHandling:
         second, _ = executor.execute("cli_tool", {"command": "cd workspace && dir"})
 
         assert "[安全拦截]" in str(first)
-        assert "[短路]" in str(second)
-        assert call_counter["count"] == 1
+        assert "[安全拦截]" in str(second)
+        assert "[短路]" not in str(second)
+        assert call_counter["count"] == 2
         snapshot = get_session_state().get_attention_snapshot()
         assert "cli_tool:command_chain" in snapshot["blocked_tool_patterns"]
 
@@ -529,7 +711,7 @@ class TestToolExecutorErrorHandling:
         file_path = tmp_path / "demo.txt"
         file_path.write_text("a\nb\nc\nd\n", encoding="utf-8")
 
-        result, action = executor.execute("read_file", {
+        result, action = executor.execute("read_file_tool", {
             "file_path": str(file_path),
             "offset": 1,
             "max_lines": 2,
@@ -550,7 +732,7 @@ class TestToolExecutorErrorHandling:
         file_path.write_text("a\nb\nc\nd\n", encoding="utf-8")
 
         result, action = executor.execute(
-            "read_file",
+            "read_file_tool",
             {
                 "file_path": str(file_path),
                 "offset": "1",
@@ -562,18 +744,18 @@ class TestToolExecutorErrorHandling:
         assert "[文件读取] 错误" not in str(result)
         assert "第     2 行" in str(result)
 
-    def test_duplicate_read_records_blocker(self, executor, tmp_path):
+    def test_duplicate_read_allows_reread_without_blocker(self, executor, tmp_path):
         reset_session_state()
         file_path = tmp_path / "demo_repeat.txt"
         file_path.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
 
-        executor.execute("read_file", {"file_path": str(file_path), "offset": 0, "max_lines": 2})
-        second, _ = executor.execute("read_file", {"file_path": str(file_path), "offset": 0, "max_lines": 2})
+        executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 2})
+        second, _ = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 2})
 
         snapshot = get_session_state().get_attention_snapshot()
-        assert "[短路]" in str(second) or any(
-            item["kind"] in {"duplicate_read", "duplicate_read_guard"} for item in snapshot["recent_blockers"]
-        )
+        assert "[短路]" not in str(second)
+        assert "第     1 行" in str(second)
+        assert not any(item["kind"] in {"duplicate_read", "duplicate_read_guard"} for item in snapshot["recent_blockers"])
 
     def test_read_file_records_hint_when_continuation_is_ignored(self, executor, tmp_path):
         session = reset_session_state()
@@ -585,17 +767,13 @@ class TestToolExecutorErrorHandling:
             str(file_path),
         )
 
-        result, action = executor.execute("read_file", {"file_path": str(file_path), "offset": 10, "max_lines": 40})
+        result, action = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 10, "max_lines": 40})
 
         assert action is None
         assert "[短路]" not in str(result)
         assert "第    11 行" in str(result) or "第     11 行" in str(result)
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "continuation_drift" for item in snapshot["recent_blockers"])
-        assert any(
-            item["kind"] == "continuation_drift" and item.get("severity") == "hint"
-            for item in snapshot["recent_blockers"]
-        )
+        assert not any(item["kind"] == "continuation_drift" for item in snapshot["recent_blockers"])
 
     def test_read_file_allows_switching_away_from_latest_pending_continuation_but_records_hint(self, executor, tmp_path):
         session = reset_session_state()
@@ -610,24 +788,20 @@ class TestToolExecutorErrorHandling:
             str(first),
         )
 
-        result, action = executor.execute("read_file", {"file_path": str(second), "offset": 0, "max_lines": 40})
+        result, action = executor.execute("read_file_tool", {"file_path": str(second), "offset": 0, "max_lines": 40})
 
         assert action is None
         assert "[短路]" not in str(result)
         assert "第     1 行" in str(result)
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "continuation_focus" for item in snapshot["recent_blockers"])
-        assert any(
-            item["kind"] == "continuation_focus" and item.get("severity") == "hint"
-            for item in snapshot["recent_blockers"]
-        )
+        assert not any(item["kind"] == "continuation_focus" for item in snapshot["recent_blockers"])
 
     def test_read_file_returns_navigation_instead_of_executable_continuation(self, executor, tmp_path):
         reset_session_state()
         file_path = tmp_path / "demo_weak_continuation.txt"
         file_path.write_text("\n".join(f"line {i}" for i in range(1, 120)), encoding="utf-8")
 
-        result, action = executor.execute("read_file", {"file_path": str(file_path), "offset": 0, "max_lines": 40})
+        result, action = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 0, "max_lines": 40})
 
         assert action is None
         assert "[阅读导航]" in str(result)
@@ -635,9 +809,9 @@ class TestToolExecutorErrorHandling:
         assert "read_file_tool(" not in str(result)
         snapshot = get_session_state().get_attention_snapshot()
         assert not snapshot["pending_continuations"]
-        assert any(item["kind"] == "read_navigation" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "read_navigation" for item in snapshot["recent_blockers"])
 
-    def test_read_file_redirects_after_too_many_segments_for_same_file(self, executor, tmp_path):
+    def test_read_file_allows_many_segments_for_same_file(self, executor, tmp_path):
         session = reset_session_state()
         file_path = tmp_path / "demo_loop_guard.txt"
         file_path.write_text("\n".join(f"line {i}" for i in range(1, 240)), encoding="utf-8")
@@ -645,29 +819,29 @@ class TestToolExecutorErrorHandling:
         session.record_read_range(str(file_path), 41, 80, source="read_file_tool")
         session.record_read_range(str(file_path), 81, 120, source="read_file_tool")
 
-        result, action = executor.execute("read_file", {"file_path": str(file_path), "offset": 120, "max_lines": 40})
+        result, action = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 120, "max_lines": 40})
 
         assert action is None
-        assert "[阅读纠偏]" in str(result)
-        assert "不要继续线性翻页" in str(result)
-        assert "grep_search_tool" in str(result)
+        assert "[阅读纠偏]" not in str(result)
+        assert "第   121 行" in str(result) or "第    121 行" in str(result)
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "read_navigation_redirect" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "read_navigation_redirect" for item in snapshot["recent_blockers"])
 
-    def test_read_file_short_circuits_on_high_overlap(self, executor, tmp_path):
+    def test_read_file_allows_high_overlap(self, executor, tmp_path):
         session = reset_session_state()
         file_path = tmp_path / "demo_overlap.txt"
         file_path.write_text("\n".join(f"line {i}" for i in range(1, 160)), encoding="utf-8")
         session.record_read_range(str(file_path), 21, 80, source="read_file_tool")
 
-        result, action = executor.execute("read_file", {"file_path": str(file_path), "offset": 30, "max_lines": 60})
+        result, action = executor.execute("read_file_tool", {"file_path": str(file_path), "offset": 30, "max_lines": 60})
 
         assert action is None
-        assert "[短路]" in str(result)
+        assert "[短路]" not in str(result)
+        assert "第    31 行" in str(result) or "第     31 行" in str(result)
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "duplicate_read_guard" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "duplicate_read_guard" for item in snapshot["recent_blockers"])
 
-    def test_duplicate_search_records_blocker(self, executor):
+    def test_duplicate_search_records_state_without_blocker(self, executor):
         reset_session_state()
 
         def fake_grep_search_tool(regex_pattern="", include_ext=".py", search_dir=".", case_sensitive=True, max_results=50, max_output_chars=8000):
@@ -687,10 +861,10 @@ class TestToolExecutorErrorHandling:
         executor.execute("grep_search_tool", {"regex_pattern": "Demo", "search_dir": "core"})
 
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "duplicate_search" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "duplicate_search" for item in snapshot["recent_blockers"])
         assert snapshot["pending_continuations"][-1]["path"] == "core/demo.py"
 
-    def test_duplicate_search_short_circuits_before_execution(self, executor):
+    def test_duplicate_search_executes_again(self, executor):
         session = reset_session_state()
         session.record_search_query("Demo", "core")
 
@@ -704,10 +878,10 @@ class TestToolExecutorErrorHandling:
         result, action = executor.execute("grep_search_tool", {"regex_pattern": "Demo", "search_dir": "core"})
 
         assert action is None
-        assert "[短路]" in str(result)
-        assert called["count"] == 0
+        assert "[短路]" not in str(result)
+        assert called["count"] == 1
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "duplicate_search" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "duplicate_search" for item in snapshot["recent_blockers"])
 
     def test_search_allows_progress_when_pending_continuation_exists(self, executor):
         session = reset_session_state()
@@ -730,7 +904,7 @@ class TestToolExecutorErrorHandling:
         assert "[短路]" not in str(result)
         assert called["count"] == 1
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "continuation_focus" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "continuation_focus" for item in snapshot["recent_blockers"])
 
     def test_weak_search_continuation_does_not_block_switching_to_another_file(self, executor, tmp_path):
         session = reset_session_state()
@@ -745,38 +919,38 @@ class TestToolExecutorErrorHandling:
             strength="weak",
         )
 
-        result, action = executor.execute("read_file", {"file_path": str(second), "offset": 0, "max_lines": 40})
+        result, action = executor.execute("read_file_tool", {"file_path": str(second), "offset": 0, "max_lines": 40})
 
         assert action is None
         assert "[短路]" not in str(result)
         snapshot = get_session_state().get_attention_snapshot()
         assert not any(item["kind"] == "continuation_focus" for item in snapshot["recent_blockers"])
 
-    def test_duplicate_entity_short_circuits_before_execution(self, executor):
+    def test_duplicate_entity_executes_again(self, executor):
         session = reset_session_state()
         session.record_read_entity("core/demo.py", "Demo.run")
 
         called = {"count": 0}
 
-        def fake_get_code_entity_tool(**_kwargs):
+        def fake_code_symbol_tool(**_kwargs):
             called["count"] += 1
             return "should not execute"
 
-        executor.register_tool("get_code_entity_tool", fake_get_code_entity_tool, timeout=5)
+        executor.register_tool("code_symbol_tool", fake_code_symbol_tool, timeout=5)
         result, action = executor.execute(
-            "get_code_entity_tool",
-            {"file_path": "core/demo.py", "entity_name": "Demo.run"},
+            "code_symbol_tool",
+            {"mode": "entity", "file_path": "core/demo.py", "entity_name": "Demo.run"},
         )
 
         assert action is None
-        assert "[短路]" in str(result)
-        assert called["count"] == 0
+        assert "[短路]" not in str(result)
+        assert called["count"] == 1
         snapshot = get_session_state().get_attention_snapshot()
-        assert any(item["kind"] == "duplicate_entity_guard" for item in snapshot["recent_blockers"])
+        assert not any(item["kind"] == "duplicate_entity_guard" for item in snapshot["recent_blockers"])
 
     def test_cli_tool_records_deviation_when_recommendation_exists(self, executor):
         session = reset_session_state()
-        session.set_tool_decision("inspect_entity", ["get_code_entity_tool", "read_file_tool"], ["cli_tool"])
+        session.set_tool_decision("inspect_entity", ["code_symbol_tool", "read_file_tool"], ["cli_tool"])
 
         def fake_cli_tool(command="", timeout=60):
             return "[命令执行完成，无输出]"
@@ -791,11 +965,14 @@ class TestToolExecutorErrorHandling:
     def test_execute_tool_missing_required_args(self, executor):
         """测试执行工具时缺少必需参数"""
         # 缺少 file_path 参数
-        result, action = executor.execute("read_file", {})
+        result, action = executor.execute("read_file_tool", {})
         
         # 应该返回错误而不是抛出异常
         assert result is not None
         assert action is None
+        assert "[工具参数错误]" in str(result)
+        assert "必填参数：file_path" in str(result)
+        assert "示例：read_file_tool" in str(result)
 
     def test_python_lint_records_validation_signal(self, executor, monkeypatch):
         reset_session_state()
@@ -1012,23 +1189,25 @@ class TestToolExecutorIntegration:
         # 1. 获取执行器
         executor = get_tool_executor()
         
-        # 2. 列出目录
-        result, action = executor.execute("list_directory", {
-            "path": str(Path(__file__).parent)
+        # 2. 匹配测试文件
+        result, action = executor.execute("glob_tool", {
+            "pattern": "test_tool_executor.py",
+            "search_dir": str(Path(__file__).parent),
         })
         assert result is not None
         assert action is None
         
         # 3. 读取文件
-        result, action = executor.execute("read_file", {
+        result, action = executor.execute("read_file_tool", {
             "file_path": __file__
         })
         assert result is not None
         assert action is None
         
-        # 4. 检查语法
-        result, action = executor.execute("check_python_syntax", {
-            "file_path": __file__
+        # 4. 运行 canonical lint 工具
+        result, action = executor.execute("python_lint_tool", {
+            "target": __file__,
+            "max_issues": 5,
         })
         assert result is not None
 
