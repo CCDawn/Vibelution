@@ -35,6 +35,7 @@
 - `core/evaluation/dataset_registry.py` 已有 dataset 准入元数据：`review_required`、`source_track`、`allowed_downstream_uses`、`holdout_allowed`、`raw_chat_direct_training_allowed`、`usability_status`、`usability_reason`。
 - `core/evaluation/supervised_intake.py` 已成为监督准入契约层，统一描述 reviewed chat、generated case 和 self-evolution candidate 的 downstream use、holdout/raw-chat 禁止项与 candidate-only 边界。
 - `chat_reviewed_multiturn` 已被标记为 dialogue 来源、review required、非 holdout、禁止 raw chat direct training，允许 downstream use 为 `supervised_evaluation`、`gym_candidate_case`、`future_training_export`；物化 bundle 时只接受 `positive` review row。
+- `chat_reviewed_multiturn` 物化时会保留 row 自带 `dataset_ref`，包括 `session_id`、`source_log_path`、`raw_excerpt_path` 和 `turn_range` 等来源证据；这些字段会进入 `intake_provenance`，并继续传播到 decision record、policy case evidence 和 proposal。
 - `generated_cases` 已被标记为 generated 来源、非 holdout、禁止 raw chat direct training，允许 downstream use 为 `supervised_evaluation`、`gym_candidate_case`、`regression_observation`；每条 case 要求 provenance，且 `_validate_generated_case_provenance` 和 `_build_generated_case` 都禁止自动进入 `holdout`。
 - `core/evaluation/supervised_intake.py` 已定义监督 case 类型集合：`static`、`dynamic_replanning`、`impossible_task`、`reviewed_chat`、`generated_case`。
 - `core/evaluation/dataset_registry.py` 已能从 JSONL row 物化 dynamic/impossible case：`dynamic_replanning` 必须带 `provenance` 与 `expected_final_state`，`impossible_task` 必须带 `provenance` 与 `expected_infeasible_outcome`，并保留 `dynamic_events`。
@@ -222,12 +223,14 @@
 - downstream use 只允许 registry 明确列出的用途。
 - `intake_boundary.contract=reviewed_chat_case`。
 - bundle case 必须携带 positive review/approval 证据；pending/negative/discard/raw row 不得物化为正式监督 case。
+- bundle case 必须保留审核后样本的 `dataset_ref`，至少能回溯到 `session_id`、`source_log_path`、`raw_excerpt_path` 或等价 evidence reference；监督 run 的 `intake_provenance`、policy evidence 和 proposal 不得丢失这条来源链。
 
 测试锚点：
 
 ```powershell
 pytest tests/test_chat_dataset_capture.py -v
 pytest tests/test_dataset_registry.py -k "chat_reviewed or downstream" -v
+pytest tests/test_supervised_evolution.py -k "materialized_reviewed_chat_case" -v
 pytest tests/test_web_app.py -k "chat_review" -v
 ```
 
@@ -332,6 +335,7 @@ pytest tests/test_web_app.py -k "proposal or evolution_routes_use_real_supervise
 
 - 新增 `core/evaluation/supervised_intake.py`，集中定义 reviewed chat、generated case、self-evolution candidate 的准入 contract。
 - `chat_reviewed_multiturn` 现在只物化 positive reviewed row，bundle dataset/case 都携带 intake boundary。
+- reviewed chat 物化时优先保留 row 自带 `dataset_ref`，确保会话来源、source log、raw excerpt 和 turn range 进入 `intake_provenance`，并随 decision/policy/proposal 回放。
 - `generated_cases` registry 会强制回填 generated 来源、非 holdout、禁止 raw-chat direct training 和 allowed downstream uses；bundle case 携带 provenance、source track 与 intake boundary。
 - `CaseDecisionSummary`、selection policy case evidence 和 proposal 均携带 `intake_provenance`，可回放 case 来源和准入证据。
 - self-evolution candidate pool 写入 `supervised_intake_boundary`，并继续强制 candidate-only/pending/supervised-required/no-auto-apply。

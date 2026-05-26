@@ -480,6 +480,13 @@ def _case_id_from_row(row: Dict[str, Any], index: int) -> str:
     return f"case_{index:04d}"
 
 
+def _dataset_ref_from_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    explicit_ref = row.get("dataset_ref")
+    if isinstance(explicit_ref, dict) and explicit_ref:
+        return dict(explicit_ref)
+    return {key: row.get(key) for key in ("id", "task_id", "instance_id", "repo", "base_commit") if key in row}
+
+
 def _normalize_case_type(row: Dict[str, Any], *, default: str = "static") -> str:
     case_type = str(row.get("case_type") or default).strip().lower()
     if case_type not in ALLOWED_SUPERVISED_CASE_TYPES:
@@ -535,7 +542,7 @@ def _build_prompt_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Di
         "baseline_prompt": str(row.get("baseline_prompt") or prompt).strip(),
         "candidate_prompt": str(row.get("candidate_prompt") or prompt).strip(),
         "training_tier": _normalize_training_tier(row.get("training_tier")),
-        "dataset_ref": {key: row.get(key) for key in ("id", "task_id", "instance_id", "repo", "base_commit") if key in row},
+        "dataset_ref": _dataset_ref_from_row(row),
     }
     _copy_case_schema_fields(case, row, case_type=case_type)
     if spec.name == "chat_reviewed_multiturn":
