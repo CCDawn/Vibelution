@@ -146,6 +146,18 @@ function isFrontendOrphanedWorkbench(workbench: RuntimeSummary["workbench"] | nu
   return Boolean(workbench?.frontendOrphaned) || lifecycleConsistency === "orphaned_browser";
 }
 
+function isShutdownResidualFrontendFailure(workbench: RuntimeSummary["workbench"] | null | undefined): boolean {
+  if (workbench?.desiredState !== "closed" || workbench?.phase !== "failed") {
+    return false;
+  }
+  if (isFrontendOrphanedWorkbench(workbench)) {
+    return true;
+  }
+  const failureMessage = String(workbench?.failureMessage ?? "").trim().toLowerCase();
+  return failureMessage.includes("frontend window is still open")
+    || failureMessage.includes("no backend service is reachable");
+}
+
 export function shouldTreatShutdownAsLocallyComplete({
   shutdownRequested,
   backendState,
@@ -163,6 +175,9 @@ export function shouldTreatShutdownAsLocallyComplete({
     return false;
   }
   if (isFrontendOrphanedWorkbench(workbench)) {
+    return true;
+  }
+  if (isShutdownResidualFrontendFailure(workbench)) {
     return true;
   }
   return (backendState === "offline" || Boolean(backendUnavailable)) && runtimeSummaryUnavailable;

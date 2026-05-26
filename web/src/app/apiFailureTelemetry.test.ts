@@ -168,4 +168,35 @@ describe("api failure telemetry", () => {
       }),
     ).toBe(true);
   });
+
+  it("treats residual frontend shutdown diagnostics as locally complete during shutdown", () => {
+    expect(
+      shouldTreatShutdownAsLocallyComplete({
+        shutdownRequested: true,
+        backendState: "healthy",
+        runtimeSummaryUnavailable: false,
+        workbench: {
+          desiredState: "closed",
+          phase: "failed",
+          failureMessage:
+            "Workbench frontend window is still open, but no backend service is reachable. Close this remaining window manually.",
+        } as never,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps ordinary closed-state runtime-manager failures visible during shutdown", () => {
+    expect(
+      shouldTreatShutdownAsLocallyComplete({
+        shutdownRequested: true,
+        backendState: "healthy",
+        runtimeSummaryUnavailable: false,
+        workbench: {
+          desiredState: "closed",
+          phase: "failed",
+          failureMessage: "Failed to stop backend process.",
+        } as never,
+      }),
+    ).toBe(false);
+  });
 });
