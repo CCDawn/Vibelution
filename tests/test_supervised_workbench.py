@@ -11,6 +11,7 @@ from core.gym import run_gym_collection_episode
 from core.gym.promotion import activate_gym_promotion_proposal, apply_gym_promotion_proposal
 from core.evaluation.supervised_workbench import (
     execute_gym_promotion_action,
+    extract_gym_promotion_proposal_path,
     format_bundle_preview,
     format_decision_history,
     format_file_excerpt,
@@ -371,6 +372,42 @@ def test_load_gym_promotion_lifecycle_rejects_proposal_outside_project(tmp_path:
     assert lifecycle.status == "invalid"
     assert lifecycle.proposal_path == str(outside_path.resolve())
     assert "outside project root" in lifecycle.error
+    assert lifecycle.available_actions == ()
+
+
+def test_load_gym_promotion_lifecycle_ignores_decision_record_outside_project(tmp_path: Path):
+    result = run_gym_collection_episode(
+        collection_id="foundation_local_stability",
+        project_root=tmp_path,
+        adapter=RunnerFakeAdapter(),
+        episode_id="supervised_lifecycle_outside_decision",
+    )
+    outside_decision_path = tmp_path.parent / "outside-supervised-decision.json"
+    outside_decision_path.write_text(
+        json.dumps(
+            {
+                "session_id": "outside_supervised_decision",
+                "gates": [
+                    {
+                        "name": "gym_promotion",
+                        "status": "pass",
+                        "metrics": {
+                            "promotion_proposal_path": result.promotion_proposal_path,
+                            "decision_path": result.decision_path,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    assert extract_gym_promotion_proposal_path(str(outside_decision_path), project_root=tmp_path) is None
+    lifecycle = load_gym_promotion_lifecycle(str(outside_decision_path), project_root=tmp_path)
+
+    assert lifecycle.status == "missing"
+    assert lifecycle.proposal_path is None
     assert lifecycle.available_actions == ()
 
 
