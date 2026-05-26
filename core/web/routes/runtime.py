@@ -11,7 +11,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
-from core.web.services.runtime_service import get_runtime_summary, request_runtime_shutdown
+from core.web.services.runtime_service import get_runtime_summary, request_runtime_restart, request_runtime_shutdown
 from core.web.services.runtime_scene_service import record_browser_telemetry
 
 
@@ -34,6 +34,11 @@ def runtime_summary() -> dict:
 @router.post("/runtime/shutdown", status_code=202)
 def runtime_shutdown() -> dict:
     return request_runtime_shutdown()
+
+
+@router.post("/runtime/restart", status_code=202)
+def runtime_restart() -> dict:
+    return request_runtime_restart()
 
 
 @router.post("/runtime/browser-telemetry", status_code=202)

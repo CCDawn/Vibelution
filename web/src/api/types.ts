@@ -807,9 +807,10 @@ export type BackendHealth = {
   status: string;
 };
 
-export type ShutdownResponse = {
+export type RuntimeControlResponse = {
   accepted: boolean;
   mode: string;
+  commandId?: string;
   message: string;
   chatTurns: Array<{
     sessionId: string;
@@ -824,6 +825,10 @@ export type ShutdownResponse = {
     error?: string;
   }>;
 };
+
+export type ShutdownResponse = RuntimeControlResponse;
+
+export type RuntimeRestartResponse = RuntimeControlResponse;
 
 export type SessionSummary = {
   id: string;

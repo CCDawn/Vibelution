@@ -505,6 +505,111 @@ def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, mon
     assert accepted_event[3]["fields"]["mode"] == "runtime_manager"
     assert accepted_event[3]["fields"]["chatTurnCount"] == 0
 
+def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatch):
+    calls: list[object] = []
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
+        or {"commandId": "cmd-restart-web"},
+    )
+
+    response = client.post("/api/runtime/restart")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["mode"] == "runtime_manager"
+    assert payload["commandId"] == "cmd-restart-web"
+    assert payload["chatTurns"] == []
+    assert calls == [
+        "ensure",
+        (
+            "restart_workbench",
+            {"reason": "web_restart_button", "source": "web_ui", "noBrowser": False},
+            "web_ui",
+        ),
+    ]
+    event_codes = [item[2] for item in scene_events]
+    assert "runtime.restart.requested" in event_codes
+    assert "runtime.restart.accepted" in event_codes
+    accepted_event = next(item for item in scene_events if item[2] == "runtime.restart.accepted")
+    assert accepted_event[1] == "restart"
+    assert accepted_event[3]["lifecycle"] is True
+    assert accepted_event[3]["fields"]["mode"] == "runtime_manager"
+    assert accepted_event[3]["fields"]["commandId"] == "cmd-restart-web"
+
+
+def test_runtime_restart_releases_active_work_before_manager_restart(monkeypatch):
+    calls: list[object] = []
+    self_calls: list[str] = []
+    supervised_calls: list[str] = []
+    worktree_calls: list[str] = []
+
+    def fail_stop(session_id):
+        raise RuntimeError(f"stop failed for {session_id}")
+
+    monkeypatch.setattr(
+        runtime_service,
+        "list_active_session_work_runs",
+        lambda: [{"sessionId": "session-live", "runId": "chat-turn-live", "status": "running"}],
+    )
+    monkeypatch.setattr(runtime_service, "request_stop_session_turn", fail_stop)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
+        or {"commandId": "cmd-restart-web"},
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_self_evolution_for_shutdown",
+        lambda reason: self_calls.append(reason) or [{"runId": "web-self-active", "status": "cancelled"}],
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_supervised_evolution_for_shutdown",
+        lambda reason: supervised_calls.append(reason) or [{"runId": "web-supervised-active", "status": "cancelled"}],
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_force_cancel_supervised_worktree_evolution_for_shutdown",
+        lambda reason: worktree_calls.append(reason) or [{"runId": "web-worktree-active", "status": "cancelled"}],
+        raising=False,
+    )
+
+    response = client.post("/api/runtime/restart")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["chatTurns"][0]["sessionId"] == "session-live"
+    assert payload["chatTurns"][0]["status"] == "failed"
+    assert "RuntimeError" in payload["chatTurns"][0]["error"]
+    assert payload["evolutionRuns"] == [
+        {"kind": "self_evolution_run", "runId": "web-self-active", "status": "cancelled"},
+        {"kind": "supervised_evolution_run", "runId": "web-supervised-active", "status": "cancelled"},
+        {"kind": "supervised_worktree_evolution_run", "runId": "web-worktree-active", "status": "cancelled"},
+    ]
+    assert self_calls
+    assert supervised_calls
+    assert worktree_calls
+    assert calls[-1] == (
+        "restart_workbench",
+        {"reason": "web_restart_button", "source": "web_ui", "noBrowser": False},
+        "web_ui",
+    )
+
 
 def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
