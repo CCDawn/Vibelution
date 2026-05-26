@@ -586,8 +586,9 @@ export function ConversationView({
 
   function renderResponseSegment(segment: ResponseSegment) {
     const label = responseSegmentLabel(segment);
-    const isCodeLike = ["code", "commit", "verification", "files", "logs"].includes(segment.kind)
-      && (segment.language || segment.content.includes("\n") || segment.kind === "code");
+    const isCodeLike = segment.kind === "code"
+      || Boolean(segment.language)
+      || (["commit", "verification", "logs"].includes(segment.kind) && segment.content.includes("\n"));
     return (
       <section
         key={segment.id}
@@ -604,10 +605,46 @@ export function ConversationView({
             <code>{segment.content}</code>
           </pre>
         ) : (
-          <p className={styles.messageBody}>{segment.content}</p>
+          renderResponseText(segment.content)
         )}
       </section>
     );
+  }
+
+  function renderResponseText(content: string) {
+    const listItems = parseSimpleList(content);
+    if (listItems.length > 0) {
+      return (
+        <ul className={styles.responseSegmentList}>
+          {listItems.map((item, index) => (
+            <li key={`${item}-${index}`}>{renderInlineContent(item)}</li>
+          ))}
+        </ul>
+      );
+    }
+    return <p className={styles.messageBody}>{renderInlineContent(content)}</p>;
+  }
+
+  function renderInlineContent(content: string) {
+    const parts = content.split(/(`[^`\n]+`)/g).filter((part) => part.length > 0);
+    return parts.map((part, index) => {
+      if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+        return (
+          <code key={`${part}-${index}`} className={styles.inlineCode}>
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      return part;
+    });
+  }
+
+  function parseSimpleList(content: string) {
+    const lines = content.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (lines.length < 2 || !lines.every((line) => /^[-*]\s+/.test(line))) {
+      return [];
+    }
+    return lines.map((line) => line.replace(/^[-*]\s+/, "").trim()).filter(Boolean);
   }
 
   return (
