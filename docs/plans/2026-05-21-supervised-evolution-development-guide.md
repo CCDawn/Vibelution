@@ -453,9 +453,15 @@ pytest tests/test_supervised_evolution.py -k "dynamic or impossible or replannin
 
 目标：无论记录来自 `decisions/`、`policy/`、Gym proposal 还是 worktree run，都能被 dashboard、workbench 和 Web 稳定读取。
 
+当前状态：
+
+- 已新增 `core/evaluation/supervised_artifacts.py` 作为监督事实源读取 helper，先统一 policy proposal artifact、project path 安全解析和 target key 生成。
+- `supervised_dashboard.py` 已改用共享 helper 读取 policy-only proposal，避免 dashboard 独立维护一套 proposal path / target key 解析。
+- workbench/Web 仍有各自的 decision history、lifecycle 和 detail payload 组装逻辑；后续可继续把 decision record、policy record、case diagnostics 与 worktree run artifact 聚合迁移到同一 helper。
+
 重点检查：
 
-- 是否需要引入或补齐 `core/evaluation/supervised_artifacts.py`。
+- `core/evaluation/supervised_artifacts.py` 是否继续承载更多 decision/policy/worktree artifact 读取，而不是让 UI 层散读文件。
 - policy-only 历史记录是否能回放。
 - decision 记录里是否包含 proposal path、policy action、runtime effect。
 - decision 记录里是否包含 verification artifacts 和 trace/provenance 路径。

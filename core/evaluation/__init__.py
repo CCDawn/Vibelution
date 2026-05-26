@@ -22,6 +22,12 @@ from .supervised_dashboard import (
     load_dashboard_records,
 )
 from .selection_policy import PolicyExecutionRecord, execute_supervised_policy
+from .supervised_artifacts import (
+    SupervisedPolicyProposalArtifact,
+    load_policy_proposal_artifact,
+    policy_target_key,
+    resolve_project_artifact_path,
+)
 from .lineage import (
     LineageCaseRecord,
     LineageChainNode,
@@ -136,6 +142,10 @@ __all__ = [
     "load_supervised_bundle",
     "PolicyExecutionRecord",
     "execute_supervised_policy",
+    "SupervisedPolicyProposalArtifact",
+    "load_policy_proposal_artifact",
+    "policy_target_key",
+    "resolve_project_artifact_path",
     "LineageCaseRecord",
     "LineageChainNode",
     "LineageIndex",
