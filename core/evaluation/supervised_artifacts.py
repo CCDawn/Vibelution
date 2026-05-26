@@ -36,6 +36,17 @@ def resolve_project_artifact_path(raw_path: Any, *, project_root: Path) -> Path 
     return resolved
 
 
+def load_project_json_object(raw_path: Any, *, project_root: Path) -> dict[str, Any] | None:
+    path = resolve_project_artifact_path(raw_path, project_root=project_root)
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def policy_target_key(payload: dict[str, Any]) -> str | None:
     target = payload.get("target") if isinstance(payload.get("target"), dict) else {}
     if not target:
@@ -145,6 +156,7 @@ __all__ = [
     "SupervisedPolicyProposalArtifact",
     "build_case_diagnostic",
     "build_case_diagnostics",
+    "load_project_json_object",
     "load_policy_proposal_artifact",
     "policy_target_key",
     "resolve_project_artifact_path",

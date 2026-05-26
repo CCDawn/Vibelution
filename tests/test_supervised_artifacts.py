@@ -7,6 +7,7 @@ from pathlib import Path
 from core.evaluation.supervised_artifacts import (
     build_case_diagnostic,
     build_case_diagnostics,
+    load_project_json_object,
     load_policy_proposal_artifact,
     policy_target_key,
     resolve_project_artifact_path,
@@ -53,6 +54,27 @@ def test_load_policy_proposal_artifact_rejects_paths_outside_project(tmp_path: P
 
     assert artifact is None
     assert resolve_project_artifact_path(str(outside_path), project_root=tmp_path) is None
+
+
+def test_load_project_json_object_reads_only_safe_object_payloads(tmp_path: Path):
+    payload_path = tmp_path / "workspace" / "supervised_evolution" / "decisions" / "run.json"
+    payload_path.parent.mkdir(parents=True, exist_ok=True)
+    payload_path.write_text(json.dumps({"session_id": "run"}, ensure_ascii=False), encoding="utf-8")
+    list_path = tmp_path / "workspace" / "list.json"
+    list_path.write_text(json.dumps(["not", "object"], ensure_ascii=False), encoding="utf-8")
+    broken_path = tmp_path / "workspace" / "broken.json"
+    broken_path.write_text("{", encoding="utf-8")
+    outside_path = tmp_path.parent / "outside-object.json"
+    outside_path.write_text(json.dumps({"unsafe": True}, ensure_ascii=False), encoding="utf-8")
+
+    assert load_project_json_object(str(payload_path), project_root=tmp_path) == {"session_id": "run"}
+    assert load_project_json_object("workspace/supervised_evolution/decisions/run.json", project_root=tmp_path) == {
+        "session_id": "run"
+    }
+    assert load_project_json_object(str(list_path), project_root=tmp_path) is None
+    assert load_project_json_object(str(broken_path), project_root=tmp_path) is None
+    assert load_project_json_object(str(outside_path), project_root=tmp_path) is None
+    assert load_project_json_object("", project_root=tmp_path) is None
 
 
 def test_build_case_diagnostic_filters_empty_static_case():
