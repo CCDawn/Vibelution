@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ConversationMessage } from "../../api/types";
-import { buildConversationOperations } from "./conversationOperations";
+import { buildConversationOperationGroups, buildConversationOperations } from "./conversationOperations";
 
 const labels = {
   thought: "Deep thinking",
@@ -142,5 +142,34 @@ describe("conversationOperations", () => {
         durationSeconds: 2.5,
       },
     ]);
+  });
+
+  it("groups thought, mental model, and tool calls separately", () => {
+    const message: ConversationMessage = {
+      id: "message-4",
+      role: "assistant",
+      content: "Done",
+      timestamp: "2026-05-22T00:00:00Z",
+      thought: "Plan",
+      mentalSnapshot: {
+        mood: "focused",
+        feeling: "",
+        whisper: "",
+        summary: "Stable",
+        cognitiveState: "productive",
+        confidence: 0.8,
+        sampleSize: 1,
+        interventionCount: 0,
+        updatedAt: "2026-05-22T00:00:01Z",
+        source: "test",
+      },
+      toolCalls: [{ name: "rg", status: "done" }],
+    };
+
+    const grouped = buildConversationOperationGroups(message, labels);
+
+    expect(grouped.thoughts.map((item) => item.kind)).toEqual(["thought"]);
+    expect(grouped.mental.map((item) => item.kind)).toEqual(["mental"]);
+    expect(grouped.tools.map((item) => item.kind)).toEqual(["tool"]);
   });
 });

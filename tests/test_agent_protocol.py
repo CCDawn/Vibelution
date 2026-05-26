@@ -629,6 +629,8 @@ class TestToolMessageFlow:
         assert state.total_tool_calls == 2
         assert state.no_new_evidence_steps == 2
         assert state.consecutive_tool_only_steps == 0
+        assert "tool_only_steps" not in state.thinking_status("demo")
+        assert state.runtime_telemetry()["consecutive_tool_only_steps"] == 0
         assert state.finish_success(False) is True
         assert state.final_stats()["tool_calls"] == 2
 

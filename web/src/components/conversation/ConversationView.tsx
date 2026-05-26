@@ -23,7 +23,7 @@ import {
 import { useAppI18n } from "../../i18n/useAppI18n";
 import { shouldSubmitComposerOnKeydown } from "./composerShortcuts";
 import {
-  buildConversationOperations,
+  buildConversationOperationGroups,
   ConversationOperation,
   ConversationOperationKind,
 } from "./conversationOperations";
@@ -472,6 +472,86 @@ export function ConversationView({
     return normalized;
   }
 
+  function operationGroupTitle(kind: ConversationOperationKind, count: number) {
+    if (kind === "thought") {
+      return t("thoughtProcess");
+    }
+    if (kind === "mental") {
+      return t("mentalProcess");
+    }
+    return `${t("toolProcess")} ${count}`;
+  }
+
+  function renderOperationTimeline(operations: ConversationOperation[]) {
+    return (
+      <div className={styles.operationTimeline}>
+        {operations.map((operation) => {
+          const duration = formatDuration(operation.durationSeconds);
+          return (
+            <div key={operation.id} className={styles.operationItem}>
+              <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
+                {operationIcon(operation.kind, operation.label)}
+              </span>
+              <div className={styles.operationText}>
+                <span className={styles.operationName}>{operationLabel(operation)}</span>
+                {operation.summary ? (
+                  <span className={styles.operationSummaryText}>{operation.summary}</span>
+                ) : null}
+              </div>
+              <span className={styles.operationStatus}>
+                {operationStatusIcon(operation)}
+                <span>{statusLabel(operation.status)}</span>
+              </span>
+              {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
+              <ChevronRight className={styles.operationChevron} size={16} />
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderOperationGroup(
+    messageId: string,
+    section: "thought" | "mental" | "tools",
+    operations: ConversationOperation[],
+    defaultExpanded: boolean,
+  ) {
+    if (operations.length === 0) {
+      return null;
+    }
+    const expanded = getExpansionState(messageId, section, defaultExpanded);
+    const kind = operations[0]?.kind ?? "tool";
+    const title = operationGroupTitle(kind, operations.length);
+    const toggleTitle = expanded
+      ? section === "thought"
+        ? t("thoughtProcessVisible")
+        : section === "mental"
+          ? t("mentalProcessVisible")
+          : t("toolProcessVisible")
+      : section === "thought"
+        ? t("thoughtProcessHidden")
+        : section === "mental"
+          ? t("mentalProcessHidden")
+          : t("toolProcessHidden");
+    return (
+      <section className={styles.operationGroup}>
+        <button
+          type="button"
+          className={styles.operationSummary}
+          aria-expanded={expanded}
+          onClick={() => toggleSection(messageId, section, defaultExpanded)}
+          title={toggleTitle}
+        >
+          {operationIcon(kind, title)}
+          <span>{title}</span>
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+        {expanded ? renderOperationTimeline(operations) : null}
+      </section>
+    );
+  }
+
   return (
     <div className={styles.surface}>
       {showHeader ? (
@@ -542,8 +622,7 @@ export function ConversationView({
           <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
         ) : (
           messages.map((message) => {
-            const operations = buildConversationOperations(message, operationLabels);
-            const toolsExpanded = getExpansionState(message.id, "tools", Boolean(message.streaming));
+            const operationGroups = buildConversationOperationGroups(message, operationLabels);
             const responseExpanded = getExpansionState(message.id, "response", true);
             const isEditingMessage = message.role === "user" && message.id === editingMessageId;
             const turnClassName = [
@@ -593,47 +672,9 @@ export function ConversationView({
                     <p className={styles.userMessageBody}>{message.content}</p>
                   ) : null}
 
-                  {operations.length > 0 ? (
-                    <section className={styles.operationGroup}>
-                      <button
-                        type="button"
-                        className={styles.operationSummary}
-                        aria-expanded={toolsExpanded}
-                        onClick={() => toggleSection(message.id, "tools", Boolean(message.streaming))}
-                        title={toolsExpanded ? t("toolProcessVisible") : t("toolProcessHidden")}
-                      >
-                        <Wrench size={18} />
-                        <span>{t("conversationOperationsExecuted").replace("{count}", String(operations.length))}</span>
-                        {toolsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                      </button>
-                      {toolsExpanded ? (
-                        <div className={styles.operationTimeline}>
-                          {operations.map((operation) => {
-                            const duration = formatDuration(operation.durationSeconds);
-                            return (
-                              <div key={operation.id} className={styles.operationItem}>
-                                <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
-                                  {operationIcon(operation.kind, operation.label)}
-                                </span>
-                                <div className={styles.operationText}>
-                                  <span className={styles.operationName}>{operationLabel(operation)}</span>
-                                  {operation.summary ? (
-                                    <span className={styles.operationSummaryText}>{operation.summary}</span>
-                                  ) : null}
-                                </div>
-                                <span className={styles.operationStatus}>
-                                  {operationStatusIcon(operation)}
-                                  <span>{statusLabel(operation.status)}</span>
-                                </span>
-                                {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
-                                <ChevronRight className={styles.operationChevron} size={16} />
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                    </section>
-                  ) : null}
+                  {renderOperationGroup(message.id, "thought", operationGroups.thoughts, Boolean(message.streaming))}
+                  {renderOperationGroup(message.id, "mental", operationGroups.mental, Boolean(message.streaming))}
+                  {renderOperationGroup(message.id, "tools", operationGroups.tools, Boolean(message.streaming))}
 
                   {hasResponseBlock(message) ? (
                     <section className={styles.responseSection}>

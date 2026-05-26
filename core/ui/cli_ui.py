@@ -2845,7 +2845,10 @@ class UIManager:
         tool_count: int = None,
         input_tokens: int = None,
         output_tokens: int = None,
+        **runtime_telemetry,
     ):
+        if runtime_telemetry:
+            self._last_status_telemetry = dict(runtime_telemetry)
         self._status = status.upper()
         if goal is not None:
             self._current_goal = goal
