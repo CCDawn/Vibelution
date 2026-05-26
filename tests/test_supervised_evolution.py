@@ -234,6 +234,13 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert proposal_path.exists()
     proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
     assert proposal["status"] == "observing"
+    assert proposal["supervised_decision"] == "HOLD"
+    assert proposal["policy_action"] == "HOLD"
+    assert proposal["proposal_status"] == "observing"
+    assert proposal["runtime_effect"] == "not_applied"
+    assert proposal["agent_consumption"] == "advisory"
+    assert proposal["supervision_boundary"]["scope"] == "supervised_frozen_evaluator"
+    assert proposal["supervision_boundary"]["promote_updates_runtime"] is False
     assert proposal["observation_count"] == 1
     assert proposal["difference_summary"] == decision.case_summaries[0].difference_summary
     assert proposal["difference_metrics"] == decision.case_summaries[0].difference_metrics
@@ -259,6 +266,9 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
     assert policy_record["case_evidence"][0]["case_id"] == "probe"
     assert policy_record["case_evidence"][0]["proposal_status"] == "observing"
+    assert policy_record["case_evidence"][0]["runtime_effect"] == "not_applied"
+    assert policy_record["case_evidence"][0]["agent_consumption"] == "advisory"
+    assert policy_record["case_evidence"][0]["supervision_boundary"]["promote_updates_runtime"] is False
     assert policy_record["case_evidence"][0]["difference_summary"] == decision.case_summaries[0].difference_summary
     assert policy_record["case_evidence"][0]["score_breakdown"] == decision.case_summaries[0].score_breakdown
     assert policy_record["case_evidence"][0]["failure_taxonomy"] == decision.case_summaries[0].failure_taxonomy
@@ -1527,11 +1537,28 @@ def test_run_supervised_evolution_session_promotes_candidate_into_bundle(tmp_pat
     assert proposal_path.exists()
     proposal = json.loads(proposal_path.read_text(encoding="utf-8"))
     assert proposal["status"] == "promoted"
+    assert proposal["supervised_decision"] == "PROMOTE"
+    assert proposal["policy_action"] == "PROMOTE"
+    assert proposal["proposal_status"] == "promoted"
+    assert proposal["runtime_effect"] == "not_applied"
+    assert proposal["agent_consumption"] == "advisory"
+    assert proposal["supervision_boundary"]["scope"] == "supervised_frozen_evaluator"
+    assert proposal["supervision_boundary"]["promote_updates_runtime"] is False
+    assert proposal["supervision_boundary"]["accepted_baseline_registry_scope"] == "supervised_policy_artifact"
     assert proposal["difference_summary"] == decision.case_summaries[0].difference_summary
     assert proposal["difference_metrics"] == decision.case_summaries[0].difference_metrics
     assert proposal["difference_reasons"] == decision.case_summaries[0].difference_reasons
+    accepted_baselines = json.loads(baseline_registry.read_text(encoding="utf-8"))
+    registry_entry = accepted_baselines["supervised_evolution_dry_run_v1:probe"]
+    assert registry_entry["scope"] == "supervised_frozen_evaluator"
+    assert registry_entry["runtime_effect"] == "not_applied"
+    assert registry_entry["agent_consumption"] == "advisory"
+    assert registry_entry["proposal_status"] == "promoted"
     policy_record = json.loads(Path(decision.policy_action["policy_record_path"]).read_text(encoding="utf-8"))
     assert policy_record["case_evidence"][0]["proposal_status"] == "promoted"
+    assert policy_record["case_evidence"][0]["runtime_effect"] == "not_applied"
+    assert policy_record["case_evidence"][0]["agent_consumption"] == "advisory"
+    assert policy_record["case_evidence"][0]["supervision_boundary"]["promote_updates_runtime"] is False
     assert policy_record["case_evidence"][0]["difference_summary"] == decision.case_summaries[0].difference_summary
     assert proposal["lineage"]["parent_baseline_id"] is None
 

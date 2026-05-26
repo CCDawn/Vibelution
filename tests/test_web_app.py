@@ -8717,6 +8717,16 @@ def test_evolution_routes_expose_supervised_policy_observing_proposal(tmp_path, 
                 "decision_signal": "stable_success",
                 "status": "observing",
                 "decision": "HOLD",
+                "supervised_decision": "HOLD",
+                "policy_action": "HOLD",
+                "proposal_status": "observing",
+                "runtime_effect": "not_applied",
+                "agent_consumption": "advisory",
+                "supervision_boundary": {
+                    "scope": "supervised_frozen_evaluator",
+                    "accepted_baseline_registry_scope": "supervised_policy_artifact",
+                    "promote_updates_runtime": False,
+                },
                 "decision_path": str(decision_path),
                 "observation_count": 1,
                 "observation_budget": 3,
@@ -8739,13 +8749,17 @@ def test_evolution_routes_expose_supervised_policy_observing_proposal(tmp_path, 
     detail_response = client.get("/api/evolution/proposals/observing_policy_run")
 
     assert runs_payload[0]["proposalStatus"] == "observing"
+    assert runs_payload[0]["runtimeEffect"] == "not_applied"
+    assert runs_payload[0]["agentConsumption"] == "advisory"
     assert runs_payload[0]["sourceProposalPath"] == str(proposal_path)
     assert any(item["sourceRun"] == "observing_policy_run" for item in library_payload["pending"])
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["proposalStatus"] == "observing"
+    assert detail["runtimeEffect"] == "not_applied"
     assert detail["paths"]["gymProposalPath"] == str(proposal_path)
     assert detail["rawProposal"]["proposal_id"] == "demo:case_1:observing"
+    assert detail["rawProposal"]["supervision_boundary"]["scope"] == "supervised_frozen_evaluator"
     assert detail["proposal"]["proposalId"] == "demo:case_1:observing"
 
 

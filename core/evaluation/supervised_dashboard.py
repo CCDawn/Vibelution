@@ -250,14 +250,19 @@ def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashb
     lifecycle = load_gym_promotion_lifecycle(payload, project_root=project_root)
     policy_proposal = _load_policy_proposal(payload, project_root=project_root)
     if lifecycle.status == "missing" and policy_proposal:
+        policy_payload = policy_proposal["payload"]
         gym_proposal_path = policy_proposal["path"]
         gym_decision_path = None
-        lifecycle_status = str(policy_proposal["payload"].get("status") or "unknown")
-        lifecycle_target_key = _policy_target_key(policy_proposal["payload"])
+        lifecycle_status = str(policy_payload.get("status") or "unknown")
+        lifecycle_target_key = _policy_target_key(policy_payload)
+        lifecycle_runtime_effect = str(policy_payload.get("runtime_effect") or "not_applied")
+        lifecycle_agent_consumption = str(policy_payload.get("agent_consumption") or "advisory")
         lifecycle_note = "该条目来自 supervised selection policy proposal。"
     else:
         lifecycle_status = lifecycle.status
         lifecycle_target_key = lifecycle.target_key
+        lifecycle_runtime_effect = lifecycle.runtime_effect
+        lifecycle_agent_consumption = lifecycle.agent_consumption
         lifecycle_note = lifecycle.note or lifecycle.error
     advisory_context = payload.get("advisory_context") if isinstance(payload.get("advisory_context"), dict) else {}
     return SupervisedDashboardRecord(
@@ -279,8 +284,8 @@ def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashb
         gym_decision_path=str(gym_decision_path) if gym_decision_path else None,
         gym_proposal_status=lifecycle_status,
         gym_target_key=lifecycle_target_key,
-        gym_runtime_effect=lifecycle.runtime_effect,
-        gym_agent_consumption=lifecycle.agent_consumption,
+        gym_runtime_effect=lifecycle_runtime_effect,
+        gym_agent_consumption=lifecycle_agent_consumption,
         gym_available_actions=lifecycle.available_actions,
         gym_active_registry_match=lifecycle.active_registry_match,
         gym_registry_path=lifecycle.registry_path,
