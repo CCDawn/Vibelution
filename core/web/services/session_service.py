@@ -1911,6 +1911,28 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "mentalModelEnabled": mental_model_enabled,
         },
     )
+    _record_session_execution_registry_event(
+        session_id,
+        turn_id,
+        "main_agent_loop",
+        "running",
+        details={"workspacePath": _session_workspace_relative_path(session_id)},
+    )
+    _record_session_execution_registry_event(
+        session_id,
+        turn_id,
+        "mental_model",
+        "enabled" if mental_model_enabled else "disabled",
+        details={"perTurnOption": mental_model_enabled},
+    )
+    _record_session_turn_trace_event(
+        session_id,
+        turn_id,
+        "state",
+        {"phase": "worker_started", "workspacePath": _session_workspace_relative_path(session_id)},
+        status="running",
+        summary="Chat turn worker started.",
+    )
     _set_session_turn_progress_live_output(session_id, "agent_prepare", turn_id=turn_id)
     try:
         with mental_model_enabled_override(mental_model_enabled), _session_tool_workspace_override(session_workspace):
@@ -2053,6 +2075,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 "wasCurrentTurn": _is_session_turn_current(session_id, turn_id),
             },
         )
+        _record_session_execution_registry_event(
+            session_id,
+            turn_id,
+            "main_agent_loop",
+            "finished",
+            details={"wasCurrentTurn": _is_session_turn_current(session_id, turn_id)},
+        )
         _set_session_running(session_id, False, turn_id=turn_id)
         _clear_session_turn_control(session_id, turn_id=turn_id)
         _publish_session_detail_snapshot(session_id)
@@ -2155,6 +2184,25 @@ def _run_session_continuation_loop(
                 "historyMessageCount": len(history_messages),
             },
         )
+        _record_session_execution_registry_event(
+            session_id,
+            getattr(turn_control, "turn_id", ""),
+            "llm_turn",
+            "running",
+            details={
+                "turnIndex": turn_index,
+                "maxTurns": max_turns,
+                "promptLength": len(prompt),
+            },
+        )
+        _record_session_turn_trace_event(
+            session_id,
+            getattr(turn_control, "turn_id", ""),
+            "state",
+            {"phase": "agent_turn_started", "turnIndex": turn_index, "maxTurns": max_turns},
+            status="running",
+            summary="Agent turn started.",
+        )
         _set_session_turn_progress_live_output(
             session_id,
             "model_request",
@@ -2189,6 +2237,17 @@ def _run_session_continuation_loop(
                 "toolCallCount": _coerce_nonnegative_int(result.get("tool_call_count") or 0) if isinstance(result, dict) else 0,
                 "hasVisibleReply": bool(_visible_reply_candidate(result)) if isinstance(result, dict) else False,
                 "isProviderFailed": _is_provider_failed_result(result),
+            },
+        )
+        _record_session_execution_registry_event(
+            session_id,
+            getattr(turn_control, "turn_id", ""),
+            "llm_turn",
+            result_status or "returned",
+            details={
+                "turnIndex": turn_index,
+                "resultStatus": result_status,
+                "toolCallCount": _coerce_nonnegative_int(result.get("tool_call_count") or 0) if isinstance(result, dict) else 0,
             },
         )
         last_visible_result = _remember_continuation_visible_result(result, last_visible_result)
@@ -2319,6 +2378,13 @@ def _persist_session_turn_result(
                 finished_at=timestamp,
                 updated_at=timestamp,
             )
+            _record_session_turn_result_log(
+                session_id,
+                turn_id,
+                status="failed_provider",
+                summary=str(turn_error.get("message") or ""),
+                recovery_pointer={"resumeAllowed": True, "source": "provider_failure"},
+            )
             _record_session_turn_lifecycle_event(
                 session_id,
                 "result_persisted",
@@ -2410,6 +2476,52 @@ def _persist_session_turn_result(
             finished_at=assistant_entry["timestamp"],
             updated_at=assistant_entry["timestamp"],
         )
+        tool_calls = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
+        _record_session_turn_visible_message(
+            session_id,
+            turn_id,
+            assistant_entry,
+            event="assistant_result",
+            status=final_status,
+        )
+        _record_session_turn_tool_calls(session_id, turn_id, tool_calls)
+        if assistant_entry.get("thought"):
+            _record_session_turn_trace_event(
+                session_id,
+                turn_id,
+                "thought",
+                {"chars": len(str(assistant_entry.get("thought") or ""))},
+                status=final_status,
+                summary="Assistant thought trace captured.",
+            )
+        if assistant_entry.get("mental_snapshot"):
+            _record_session_turn_trace_event(
+                session_id,
+                turn_id,
+                "mental",
+                assistant_entry.get("mental_snapshot") if isinstance(assistant_entry.get("mental_snapshot"), dict) else {},
+                status=final_status,
+                summary="Mental model trace captured.",
+            )
+        if tool_calls:
+            _record_session_execution_registry_event(
+                session_id,
+                turn_id,
+                "tool_calls",
+                final_status,
+                details={"toolCallCount": len(tool_calls)},
+            )
+        _record_session_turn_result_log(
+            session_id,
+            turn_id,
+            status="stopped_by_user" if stop_requested else ("completed" if result_status == "completed" else (result_status or "completed")),
+            summary=assistant_text,
+            recovery_pointer={
+                "resumeAllowed": final_status in {"stopped", "paused", "needs_continue"},
+                "toolCallCount": len(tool_calls),
+                "hasMentalSnapshot": bool(assistant_entry.get("mental_snapshot")),
+            },
+        )
         _record_session_turn_lifecycle_event(
             session_id,
             "result_persisted",
@@ -2472,6 +2584,13 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
                 finished_at=timestamp,
                 updated_at=timestamp,
             )
+            _record_session_turn_result_log(
+                session_id,
+                str(context.get("turn_id") or ""),
+                status="failed_provider",
+                summary=work_run_summary,
+                recovery_pointer={"resumeAllowed": True, "source": "provider_failure"},
+            )
             _record_session_turn_lifecycle_event(
                 session_id,
                 "failure_persisted",
@@ -2516,6 +2635,20 @@ def _persist_session_turn_failure(session_id: str, context: dict[str, Any], exc:
             error=raw_error,
             finished_at=assistant_entry["timestamp"],
             updated_at=assistant_entry["timestamp"],
+        )
+        _record_session_turn_visible_message(
+            session_id,
+            str(context.get("turn_id") or ""),
+            assistant_entry,
+            event="assistant_failure",
+            status="failed",
+        )
+        _record_session_turn_result_log(
+            session_id,
+            str(context.get("turn_id") or ""),
+            status="failed_runtime",
+            summary=work_run_summary,
+            recovery_pointer={"resumeAllowed": True, "source": "runtime_failure"},
         )
         _record_session_turn_lifecycle_event(
             session_id,
@@ -2750,6 +2883,186 @@ def _record_session_turn_lifecycle_event(
             f"runtime scene turn lifecycle log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
+
+
+def _conversation_turn_log_path(session_id: str, turn_id: str, file_name: str) -> str:
+    session_token = _safe_session_workspace_token(session_id)
+    turn_token = _safe_session_workspace_token(turn_id or "turn")
+    file_token = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(file_name or "trace_events.jsonl")).strip("._-")
+    return f"conversations/{session_token}/{turn_token}/{file_token or 'trace_events.jsonl'}"
+
+
+def _record_session_turn_subpackage_event(
+    session_id: str,
+    turn_id: str,
+    file_name: str,
+    payload: dict[str, Any],
+    *,
+    phase: str,
+    event_code: str,
+    level: str = "info",
+    outcome: str = "observed",
+    message: str = "",
+) -> str:
+    path = _conversation_turn_log_path(session_id, turn_id, file_name)
+    fields = {
+        "sessionId": str(session_id or "").strip(),
+        "turnId": str(turn_id or "").strip(),
+        "chatTurnLogPath": path,
+    }
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            phase,
+            event_code,
+            level=level,
+            outcome=outcome,
+            message=message or event_code,
+            fields=fields,
+            child_log_path=path,
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "turn_id": str(turn_id or "").strip(),
+                **(payload or {}),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene chat turn subpackage log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+    return path
+
+
+def _record_session_turn_trace_event(
+    session_id: str,
+    turn_id: str,
+    kind: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    status: str = "",
+    summary: str = "",
+) -> None:
+    _record_session_turn_subpackage_event(
+        session_id,
+        turn_id,
+        "trace_events.jsonl",
+        {
+            "kind": str(kind or "event").strip(),
+            "status": str(status or "").strip(),
+            "summary": trim_lines(summary or "", max_lines=3),
+            "payload": payload if isinstance(payload, dict) else {},
+        },
+        phase=f"turn_trace_{kind or 'event'}",
+        event_code=f"conversation.turn.trace.{re.sub(r'[^a-zA-Z0-9_.-]+', '_', str(kind or 'event')).strip('._-') or 'event'}",
+        outcome=status or "observed",
+        message=f"Conversation turn trace {kind or 'event'}.",
+    )
+
+
+def _record_session_execution_registry_event(
+    session_id: str,
+    turn_id: str,
+    entry_type: str,
+    status: str,
+    *,
+    owner: str = "main",
+    details: dict[str, Any] | None = None,
+) -> None:
+    _record_session_turn_subpackage_event(
+        session_id,
+        turn_id,
+        "execution_registry.jsonl",
+        {
+            "entry_type": str(entry_type or "runtime").strip(),
+            "owner": str(owner or "main").strip(),
+            "status": str(status or "").strip(),
+            "details": details if isinstance(details, dict) else {},
+        },
+        phase=f"turn_execution_{entry_type or 'runtime'}",
+        event_code="conversation.turn.execution_registry",
+        outcome=status or "observed",
+        message=f"Conversation turn execution registry: {entry_type or 'runtime'}.",
+    )
+
+
+def _record_session_turn_visible_message(
+    session_id: str,
+    turn_id: str,
+    message: dict[str, Any],
+    *,
+    event: str,
+    status: str,
+) -> None:
+    role = str(message.get("role") or "").strip()
+    _record_session_turn_subpackage_event(
+        session_id,
+        turn_id,
+        "visible_messages.jsonl",
+        {
+            "event": str(event or "message").strip(),
+            "status": str(status or "").strip(),
+            "role": role,
+            "content": _sanitize_message_content(role, message.get("content") or ""),
+            "message": message,
+        },
+        phase="turn_visible_message",
+        event_code="conversation.turn.visible_message",
+        outcome=status or "observed",
+        message="Conversation turn visible message persisted.",
+    )
+
+
+def _record_session_turn_tool_calls(
+    session_id: str,
+    turn_id: str,
+    tool_calls: list[dict[str, Any]],
+) -> None:
+    for index, tool_call in enumerate(tool_calls or []):
+        if not isinstance(tool_call, dict):
+            continue
+        _record_session_turn_subpackage_event(
+            session_id,
+            turn_id,
+            "tool_calls.jsonl",
+            {
+                "index": index,
+                "name": str(tool_call.get("name") or "").strip(),
+                "status": str(tool_call.get("status") or "").strip(),
+                "summary": trim_lines(tool_call.get("summary") or "", max_lines=3),
+                "owner": str(tool_call.get("owner") or tool_call.get("agent") or "main").strip(),
+                "trace_path": str(tool_call.get("tracePath") or tool_call.get("trace_path") or "").strip(),
+            },
+            phase="turn_tool_call",
+            event_code="conversation.turn.tool_call",
+            outcome=str(tool_call.get("status") or "observed").strip() or "observed",
+            message=f"Conversation turn tool call: {tool_call.get('name') or 'tool'}.",
+        )
+
+
+def _record_session_turn_result_log(
+    session_id: str,
+    turn_id: str,
+    *,
+    status: str,
+    summary: str,
+    recovery_pointer: dict[str, Any] | None = None,
+) -> None:
+    _record_session_turn_subpackage_event(
+        session_id,
+        turn_id,
+        "turn_result.jsonl",
+        {
+            "status": str(status or "").strip(),
+            "summary": trim_lines(summary or "", max_lines=6),
+            "recovery_pointer": recovery_pointer if isinstance(recovery_pointer, dict) else {},
+        },
+        phase="turn_result",
+        event_code="conversation.turn.result",
+        outcome=status or "observed",
+        message="Conversation turn result persisted.",
+    )
 
 
 def _record_session_turn_error(

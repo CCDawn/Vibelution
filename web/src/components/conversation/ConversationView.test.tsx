@@ -229,6 +229,51 @@ describe("ConversationView edit resend affordance", () => {
       ),
     ).toBe(true);
   });
+
+  it("separates mental model traces from tool call counts", () => {
+    const html = renderConversation([
+      {
+        id: "message-mental",
+        role: "assistant",
+        content: "已暂停，等待继续。",
+        timestamp: "2026-05-26T00:01:00Z",
+        mentalSnapshot: {
+          mood: "focused",
+          feeling: "tracking state",
+          whisper: "",
+          summary: "No tool call happened.",
+          cognitiveState: "productive",
+          confidence: 0.7,
+          sampleSize: 1,
+          interventionCount: 0,
+          updatedAt: "2026-05-26T00:01:05Z",
+          source: "runtime",
+        },
+      },
+    ]);
+
+    expect(html).toContain("心智模型");
+    expect(html).not.toContain("执行了 1 个操作");
+    expect(html).not.toContain("工具调用 1");
+  });
+
+  it("renders real tool calls in their own tool-call group", () => {
+    const html = renderConversation([
+      {
+        id: "message-tool",
+        role: "assistant",
+        content: "已读取文件。",
+        timestamp: "2026-05-26T00:01:00Z",
+        streaming: true,
+        toolCalls: [{ name: "read_file", status: "done", summary: "opened session_service.py" }],
+      },
+    ]);
+
+    expect(html).toContain("工具调用 1");
+    expect(html).toContain("read_file");
+    expect(html).toContain("opened session_service.py");
+    expect(html).not.toContain("执行了 1 个操作");
+  });
 });
 
 describe("ConversationView timeline scroll signal", () => {

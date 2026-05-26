@@ -77,7 +77,13 @@ class RoundStateController:
             "tool_count": self.total_tool_calls,
             "input_tokens": self.total_input_tokens,
             "output_tokens": self.total_output_tokens,
-            "tool_only_steps": self.consecutive_tool_only_steps,
+        }
+
+    def runtime_telemetry(self) -> Dict[str, int]:
+        return {
+            "consecutive_tool_only_steps": self.consecutive_tool_only_steps,
+            "no_new_evidence_steps": self.no_new_evidence_steps,
+            "delegation_failures": self.delegation_failures,
         }
 
     def current_status(self) -> Dict[str, int]:

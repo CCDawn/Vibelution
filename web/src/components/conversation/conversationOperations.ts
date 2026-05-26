@@ -17,6 +17,12 @@ export type ConversationOperationLabels = {
   mental: string;
 };
 
+export type ConversationOperationGroups = {
+  thoughts: ConversationOperation[];
+  mental: ConversationOperation[];
+  tools: ConversationOperation[];
+};
+
 export function buildConversationOperations(
   message: ConversationMessage,
   labels: ConversationOperationLabels,
@@ -64,6 +70,18 @@ export function buildConversationOperations(
   }
 
   return operations;
+}
+
+export function buildConversationOperationGroups(
+  message: ConversationMessage,
+  labels: ConversationOperationLabels,
+): ConversationOperationGroups {
+  const operations = buildConversationOperations(message, labels);
+  return {
+    thoughts: operations.filter((operation) => operation.kind === "thought"),
+    mental: operations.filter((operation) => operation.kind === "mental"),
+    tools: operations.filter((operation) => operation.kind === "tool"),
+  };
 }
 
 function coerceToolDurationSeconds(toolCall: ToolCall) {

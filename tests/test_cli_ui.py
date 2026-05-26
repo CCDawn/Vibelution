@@ -312,6 +312,17 @@ def test_runtime_metrics_include_turn_cycle_and_age():
     assert metrics["pet_age"] == 6
 
 
+def test_update_status_accepts_runtime_telemetry_without_crashing():
+    ui = UIManager()
+    ui.reset_workspace()
+
+    ui.update_status("THINKING", iterations=1, tool_only_steps=2, no_new_evidence_steps=3)
+
+    assert ui._status == "THINKING"
+    assert ui._last_status_telemetry["tool_only_steps"] == 2
+    assert ui._last_status_telemetry["no_new_evidence_steps"] == 3
+
+
 def test_pet_snapshot_age_uses_completed_evolutions_not_pet_level():
     ui = UIManager()
     ui.reset_workspace()
