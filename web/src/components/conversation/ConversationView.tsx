@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleDot,
   ExternalLink,
+  LoaderCircle,
   Pencil,
   Search,
   Sparkles,
@@ -32,6 +33,8 @@ import {
   hasUserContent,
 } from "./messageSections";
 import styles from "./ConversationView.module.css";
+
+const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 
 export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
   return messages
@@ -450,6 +453,9 @@ export function ConversationView({
     if (["done", "success", "completed", "succeeded"].includes(status)) {
       return <CheckCircle2 size={14} />;
     }
+    if (RUNNING_OPERATION_STATUSES.has(status)) {
+      return <LoaderCircle className={styles.statusSpinner} size={14} />;
+    }
     return <CircleDot size={14} />;
   }
 
@@ -523,6 +529,10 @@ export function ConversationView({
     const expanded = getExpansionState(messageId, section, defaultExpanded);
     const kind = operations[0]?.kind ?? "tool";
     const title = operationGroupTitle(kind, operations.length);
+    const isRunning = operations.some((operation) => {
+      const status = operation.status.trim().toLowerCase();
+      return RUNNING_OPERATION_STATUSES.has(status);
+    });
     const toggleTitle = expanded
       ? section === "thought"
         ? t("thoughtProcessVisible")
@@ -545,6 +555,7 @@ export function ConversationView({
         >
           {operationIcon(kind, title)}
           <span>{title}</span>
+          {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
         {expanded ? renderOperationTimeline(operations) : null}
@@ -687,6 +698,7 @@ export function ConversationView({
                       >
                         {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         <span>{t("responseLabel")}</span>
+                        {message.streaming ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
                       </button>
                       {responseExpanded ? (
                         <div className={styles.responseBody}>
