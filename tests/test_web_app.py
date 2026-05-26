@@ -2384,6 +2384,65 @@ def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, mo
     ]
 
 
+def test_history_seed_omits_state_only_assistant_messages():
+    history = session_service._history_messages_for_agent_seed(
+        [
+            {"role": "user", "content": "审查对话日志并汇报"},
+            {"role": "assistant", "content": "<state>{\"mood\":\"open\"}</state>"},
+            {"role": "assistant", "content": "<state"},
+            {"role": "assistant", "content": "已完成审查。"},
+        ]
+    )
+
+    assert [
+        {"role": item["role"], "content": item["content"]}
+        for item in history
+    ] == [
+        {"role": "user", "content": "审查对话日志并汇报"},
+        {"role": "assistant", "content": "已完成审查。"},
+    ]
+
+
+def test_build_followup_prompt_unwraps_nested_continue_goal():
+    prompt = session_service._build_followup_prompt(
+        original_prompt="审查对话日志并汇报",
+        effective_prompt=(
+            "继续完成同一个用户目标：继续完成同一个用户目标：审查对话日志并汇报\n"
+            "上一内部回合仍未完成用户目标（第 1 轮）。"
+        ),
+        latest_result={
+            "status": "completed",
+            "outcome": "progress",
+            "recommended_next_action": "基于已读证据输出结论。",
+        },
+        history_messages=[{"role": "user", "content": "审查对话日志并汇报"}],
+        turn_index=2,
+    )
+
+    assert prompt.count("继续完成同一个用户目标：") == 1
+    assert "继续完成同一个用户目标：审查对话日志并汇报" in prompt
+    assert "继续完成同一个用户目标：继续完成" not in prompt
+
+
+def test_normalize_persisted_tool_calls_preserves_timeout_as_failed():
+    tool_calls = session_service._normalize_persisted_tool_calls(
+        [
+            {
+                "name": "grep_search_tool",
+                "status": "done",
+                "summary": "[超时] grep_search_tool 执行超时 (30秒)",
+            },
+            {
+                "name": "read_file_tool",
+                "summary": "read ok",
+            },
+        ]
+    )
+
+    assert tool_calls[0]["status"] == "failed"
+    assert tool_calls[1]["status"] == "done"
+
+
 def test_session_detail_exposes_recent_next_state_signal_summaries(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     append_chat_next_state_signal(

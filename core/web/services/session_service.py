@@ -1306,9 +1306,27 @@ def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
     content = str(message.get("content") or "").strip()
     if role != "user":
         return role == "assistant" and (
-            not content or _looks_like_provider_error_text(content) or _looks_like_runtime_failure_notice(content)
+            not content
+            or _is_protocol_only_assistant_message(content)
+            or _looks_like_provider_error_text(content)
+            or _looks_like_runtime_failure_notice(content)
         )
     return not _is_meaningful_task_goal(content)
+
+
+def _is_protocol_only_assistant_message(content: Any) -> bool:
+    raw = str(content or "").strip()
+    if not raw:
+        return True
+    if _sanitize_message_content("assistant", raw):
+        return False
+    return bool(
+        re.search(
+            r"<\s*(?:/?state\b|/?invoke\b|/?parameter\b|/?active_components\b|[\w:.-]*tool_call\b|[^>\n]*dsml)",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _is_effective_user_message(message: Any) -> bool:
@@ -3367,6 +3385,18 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
     return default
 
 
+def _looks_like_tool_call_failure_summary(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(
+        re.search(
+            r"(?i)(^\s*\[(?:超时|timeout|failed|error)\]|执行超时|timed\s+out|timeout(?:\s+expired)?|tool\s+failed|工具执行失败|调用失败|traceback|exception\b)",
+            text,
+        )
+    )
+
+
 def _tool_call_name(raw: Any) -> str:
     if isinstance(raw, dict):
         function_block = raw.get("function") or {}
@@ -3406,6 +3436,8 @@ def _normalize_persisted_tool_calls(value: Any) -> list[dict[str, Any]]:
             )
             if summary:
                 entry["summary"] = summary
+            if _looks_like_tool_call_failure_summary(summary or item.get("error") or ""):
+                entry["status"] = "failed"
         tool_calls.append(entry)
     return tool_calls
 
@@ -4735,9 +4767,9 @@ def _build_followup_prompt(
             contract.get("next_action") or latest_result.get("recommended_next_action") or "",
             max_lines=2,
         )
-    goal = str(effective_prompt or original_prompt or "").strip()
+    goal = _unwrap_continuation_goal(effective_prompt or original_prompt)
     if _is_continue_request(goal):
-        goal = _latest_effective_user_message(history_messages) or str(original_prompt or "").strip()
+        goal = _unwrap_continuation_goal(_latest_effective_user_message(history_messages) or original_prompt)
     lines = [
         f"继续完成同一个用户目标：{goal}",
         f"上一内部回合仍未完成用户目标（第 {turn_index} 轮）。",
@@ -4746,6 +4778,17 @@ def _build_followup_prompt(
     if next_action:
         lines.append(f"优先执行上一轮下一步：{next_action}")
     return "\n".join(lines)
+
+
+def _unwrap_continuation_goal(value: Any) -> str:
+    text = str(value or "").strip()
+    marker = "继续完成同一个用户目标："
+    while text.startswith(marker):
+        text = text[len(marker) :].strip()
+        next_line = text.find("\n")
+        if next_line >= 0:
+            text = text[:next_line].strip()
+    return text
 
 
 def _build_session_active_task(
