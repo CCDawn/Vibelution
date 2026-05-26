@@ -20,6 +20,14 @@ class SupervisedPolicyProposalArtifact:
     payload: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class SupervisedJsonArtifact:
+    path: str | None
+    payload: dict[str, Any] | None
+    status: str
+    error: str = ""
+
+
 def resolve_project_artifact_path(raw_path: Any, *, project_root: Path) -> Path | None:
     text = str(raw_path or "").strip()
     if not text:
@@ -36,15 +44,83 @@ def resolve_project_artifact_path(raw_path: Any, *, project_root: Path) -> Path 
     return resolved
 
 
-def load_project_json_object(raw_path: Any, *, project_root: Path) -> dict[str, Any] | None:
-    path = resolve_project_artifact_path(raw_path, project_root=project_root)
-    if path is None or not path.exists():
-        return None
+def load_project_json_artifact(
+    raw_path: Any,
+    *,
+    project_root: Path,
+    label: str = "artifact",
+) -> SupervisedJsonArtifact:
+    text = str(raw_path or "").strip()
+    if not text:
+        return SupervisedJsonArtifact(
+            path=None,
+            payload=None,
+            status="missing",
+            error=f"Missing {label} path.",
+        )
+    resolved = resolve_project_artifact_path(text, project_root=project_root)
+    if resolved is None:
+        return SupervisedJsonArtifact(
+            path=None,
+            payload=None,
+            status="unsafe",
+            error=f"Unsafe {label} path outside project root: {text}",
+        )
+    if not resolved.exists():
+        return SupervisedJsonArtifact(
+            path=str(resolved),
+            payload=None,
+            status="missing",
+            error=f"Missing {label}: {resolved}",
+        )
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) else None
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return SupervisedJsonArtifact(
+            path=str(resolved),
+            payload=None,
+            status="invalid",
+            error=f"Invalid {label}: {resolved}",
+        )
+    if not isinstance(payload, dict):
+        return SupervisedJsonArtifact(
+            path=str(resolved),
+            payload=None,
+            status="invalid",
+            error=f"Invalid {label}: expected object at {resolved}",
+        )
+    return SupervisedJsonArtifact(path=str(resolved), payload=payload, status="loaded")
+
+
+def load_project_json_object(raw_path: Any, *, project_root: Path) -> dict[str, Any] | None:
+    artifact = load_project_json_artifact(raw_path, project_root=project_root)
+    return artifact.payload if artifact.status == "loaded" else None
+
+
+def load_required_project_json_object(raw_path: Any, *, project_root: Path, label: str) -> dict[str, Any]:
+    artifact = load_project_json_artifact(raw_path, project_root=project_root, label=label)
+    if artifact.status == "loaded" and artifact.payload is not None:
+        return artifact.payload
+    raise ValueError(artifact.error or f"Invalid {label}.")
+
+
+def load_policy_proposal_artifacts(
+    decision_payload: dict[str, Any],
+    *,
+    project_root: Path,
+) -> list[SupervisedPolicyProposalArtifact]:
+    policy_action = (
+        decision_payload.get("policy_action")
+        if isinstance(decision_payload.get("policy_action"), dict)
+        else {}
+    )
+    raw_paths = policy_action.get("proposal_paths") if isinstance(policy_action.get("proposal_paths"), list) else []
+    artifacts: list[SupervisedPolicyProposalArtifact] = []
+    for raw_path in raw_paths:
+        loaded = load_project_json_artifact(raw_path, project_root=project_root, label="policy proposal")
+        if loaded.status == "loaded" and loaded.path and loaded.payload is not None:
+            artifacts.append(SupervisedPolicyProposalArtifact(path=loaded.path, payload=loaded.payload))
+    return artifacts
 
 
 def policy_target_key(payload: dict[str, Any]) -> str | None:
@@ -62,26 +138,8 @@ def load_policy_proposal_artifact(
     *,
     project_root: Path,
 ) -> SupervisedPolicyProposalArtifact | None:
-    policy_action = (
-        decision_payload.get("policy_action")
-        if isinstance(decision_payload.get("policy_action"), dict)
-        else {}
-    )
-    raw_paths = policy_action.get("proposal_paths") if isinstance(policy_action.get("proposal_paths"), list) else []
-    for raw_path in raw_paths:
-        proposal_path = resolve_project_artifact_path(raw_path, project_root=project_root)
-        if proposal_path is None or not proposal_path.exists():
-            continue
-        try:
-            proposal_payload = json.loads(proposal_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if isinstance(proposal_payload, dict):
-            return SupervisedPolicyProposalArtifact(
-                path=str(proposal_path),
-                payload=proposal_payload,
-            )
-    return None
+    artifacts = load_policy_proposal_artifacts(decision_payload, project_root=project_root)
+    return artifacts[0] if artifacts else None
 
 
 def build_case_diagnostic(case: dict[str, Any]) -> dict[str, Any] | None:
@@ -153,10 +211,14 @@ def _case_dict_field(case: dict[str, Any], intake_provenance: dict[str, Any], ke
 
 
 __all__ = [
+    "SupervisedJsonArtifact",
     "SupervisedPolicyProposalArtifact",
     "build_case_diagnostic",
     "build_case_diagnostics",
+    "load_project_json_artifact",
     "load_project_json_object",
+    "load_required_project_json_object",
+    "load_policy_proposal_artifacts",
     "load_policy_proposal_artifact",
     "policy_target_key",
     "resolve_project_artifact_path",

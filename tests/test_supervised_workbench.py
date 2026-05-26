@@ -351,6 +351,29 @@ def test_load_gym_promotion_lifecycle_reads_proposed_proposal_from_supervised_de
     assert lifecycle.agent_consumption == "advisory"
 
 
+def test_load_gym_promotion_lifecycle_rejects_proposal_outside_project(tmp_path: Path):
+    outside_path = tmp_path.parent / "outside-promotion.json"
+    outside_path.write_text(
+        json.dumps(
+            {
+                "proposal_id": "outside",
+                "episode_id": "outside",
+                "status": "proposed",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    decision_path = _write_supervised_decision(tmp_path, str(outside_path), str(tmp_path / "gym-decision.json"))
+
+    lifecycle = load_gym_promotion_lifecycle(str(decision_path), project_root=tmp_path)
+
+    assert lifecycle.status == "invalid"
+    assert lifecycle.proposal_path == str(outside_path.resolve())
+    assert "outside project root" in lifecycle.error
+    assert lifecycle.available_actions == ()
+
+
 def test_load_gym_promotion_lifecycle_for_active_proposal_exposes_only_rollback(tmp_path: Path):
     result = run_gym_collection_episode(
         collection_id="foundation_local_stability",
