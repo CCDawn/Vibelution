@@ -51,7 +51,7 @@ export function buildConversationOperations(
       kind: "mental",
       label: labels.mental,
       status: resolvedStatus,
-      summary: "",
+      summary: mentalSnapshotSummary(message.mentalSnapshot),
       durationSeconds: null,
     });
   }
@@ -96,6 +96,21 @@ function coerceToolDurationSeconds(toolCall: ToolCall) {
   }
   const durationMs = numberOrNull(value.durationMs);
   return durationMs === null ? null : durationMs / 1000;
+}
+
+function mentalSnapshotSummary(snapshot: ConversationMessage["mentalSnapshot"]) {
+  if (!snapshot) {
+    return "";
+  }
+  return [
+    snapshot.feeling,
+    snapshot.summary,
+    snapshot.whisper,
+    snapshot.intervention,
+    snapshot.cognitiveState ? `state: ${snapshot.cognitiveState}` : "",
+  ]
+    .map((item) => String(item ?? "").trim())
+    .find(Boolean) ?? "";
 }
 
 function numberOrNull(value: unknown) {
