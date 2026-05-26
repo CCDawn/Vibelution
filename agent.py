@@ -496,7 +496,7 @@ class SelfEvolvingAgent:
             if "工具循环" in str(item.get("result_preview") or "")
             or "tool_loop_guard" in str(item.get("result_preview") or "")
         ]
-        if not guard_records:
+        if not guard_records and not self._recent_tool_records_suggest_tool_loop(records):
             return ""
         read_paths: List[str] = []
         tool_names: List[str] = []
@@ -519,6 +519,23 @@ class SelfEvolvingAgent:
             "我先停止继续顺着续读调用工具；下一步应基于已读证据总结结论、直接修改，"
             "或在新一轮中重新规划更窄的读取目标。"
         )
+
+    def _recent_tool_records_suggest_tool_loop(self, records: List[Dict[str, Any]]) -> bool:
+        """Infer a tool-only loop when convergence stopped before a guard result was captured."""
+        if len(records) < 3:
+            return False
+        signatures: Dict[str, int] = {}
+        for item in records:
+            name = str(item.get("name") or "").strip()
+            args = item.get("args") if isinstance(item.get("args"), dict) else {}
+            path = str(args.get("file_path") or args.get("path") or args.get("source_path") or "").strip()
+            signature = f"{name}:{path}" if path else name
+            if not signature:
+                continue
+            signatures[signature] = signatures.get(signature, 0) + 1
+        if any(count >= 3 for count in signatures.values()):
+            return True
+        return int(getattr(self, "_last_response_tool_calls", 0) or 0) >= 3
 
     def _build_delegation_request(
         self,
