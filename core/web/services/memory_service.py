@@ -1370,6 +1370,7 @@ def _normalize_sqlite_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _git_snapshot(root: Path) -> dict[str, Any]:
+    no_window_kwargs = _subprocess_no_window_kwargs()
     try:
         status = subprocess.run(
             ["git", "status", "--porcelain=1"],
@@ -1378,6 +1379,7 @@ def _git_snapshot(root: Path) -> dict[str, Any]:
             text=True,
             timeout=8,
             check=False,
+            **no_window_kwargs,
         )
         head = subprocess.run(
             ["git", "rev-parse", "--short=12", "HEAD"],
@@ -1386,6 +1388,7 @@ def _git_snapshot(root: Path) -> dict[str, Any]:
             text=True,
             timeout=8,
             check=False,
+            **no_window_kwargs,
         )
     except Exception as exc:
         return {"available": False, "summary": f"Git unavailable: {type(exc).__name__}: {exc}", "files": []}
@@ -1409,6 +1412,11 @@ def _git_snapshot(root: Path) -> dict[str, Any]:
         "truncated": len(files) > 50,
         "summary": "工作区干净" if not files else f"当前工作区有 {len(files)} 个变化文件",
     }
+
+
+def _subprocess_no_window_kwargs() -> dict[str, int]:
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": flags} if flags else {}
 
 
 def _session_memory_summary(root: Path, session_root: Path) -> dict[str, Any]:

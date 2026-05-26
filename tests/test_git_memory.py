@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core.infrastructure.agent_session import get_session_state, reset_session_state
 from core.infrastructure.event_bus import EventNames
+from core.infrastructure import git_memory
 from core.infrastructure.git_memory import GitMemoryService
 from tools.git_tools import (
     get_git_status_summary_tool,
@@ -35,6 +36,27 @@ def _run(cmd: str, cwd: Path) -> None:
     import subprocess
 
     subprocess.run(cmd, cwd=str(cwd), shell=True, check=True, capture_output=True, text=True)
+
+
+def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path):
+    import subprocess
+
+    calls = []
+    service = GitMemoryService.__new__(GitMemoryService)
+    service._project_root = tmp_path
+
+    monkeypatch.setattr(git_memory.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(git_memory.subprocess, "run", fake_run)
+
+    service._run_git(["status", "--porcelain=1"])
+
+    assert calls[0][0] == ["git", "status", "--porcelain=1"]
+    assert calls[0][1]["creationflags"] & 0x08000000
 
 
 def _init_git_repo(tmp_path: Path) -> Path:
