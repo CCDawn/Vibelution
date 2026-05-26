@@ -69,12 +69,13 @@ Vibelution/
 
 从桌面入口或 `scripts/vibelution_launcher.ps1 start` 首次打开时，launcher 会自动准备项目内运行环境：
 
+- 先检查系统级前置依赖：Python、Node.js/npm，以及打开窗口时需要的 Microsoft Edge。
 - 缺少 `.venv` 时用系统 `python` 创建项目虚拟环境。
 - 按 `requirements.txt` 安装或更新 Python 依赖。
 - 缺少 `web/node_modules` 或前端依赖变更时自动执行 `npm ci`/`npm install`。
 - 缺少 `web/dist` 或前端源码更新时自动执行 `npm run build`。
 
-过程日志会写入 `.runtime/launcher/launcher-control.log` 和当前 `logs/runtime_scenes/` 包；后续启动只做快速指纹检查，已就绪时会直接复用。
+如果系统级前置依赖缺失，启动器会先停止并给出缺失项；项目内安装和构建过程日志会写入 `.runtime/launcher/launcher-control.log` 和当前 `logs/runtime_scenes/` 包。后续启动只做快速指纹检查，已就绪时会直接复用。
 
 ### 2. 手动安装 Python 依赖
 
