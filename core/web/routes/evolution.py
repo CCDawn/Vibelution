@@ -132,6 +132,10 @@ class ProposalUpdatePayload(BaseModel):
 
 class SelfEvolutionRunStartPayload(BaseModel):
     goal: str = ""
+    writeIntent: bool | None = None
+    requiresWorktreeIsolation: bool | None = None
+    riskProfile: str | None = None
+    riskLevel: str | None = None
 
 
 class SelfEvolutionHistoryDeletePayload(BaseModel):
