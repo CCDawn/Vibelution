@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -73,6 +74,51 @@ _RUN_EXECUTING_STATUSES = {"queued", "running", "stopping"}
 _RUN_LOCKED_STATUSES = {"queued", "running", "stopping", "paused"}
 _RUN_FINAL_STATUSES = {"done", "failed", "cancelled"}
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
+_SELF_EVOLUTION_RISKY_WRITE_TEXT_MARKERS = (
+    "修改",
+    "修复",
+    "实现",
+    "新增",
+    "删除",
+    "重构",
+    "提交",
+    "继续修",
+    "继续做",
+    "动手",
+)
+_SELF_EVOLUTION_RISKY_WRITE_TOKEN_MARKERS = (
+    "apply",
+    "edit",
+    "modify",
+    "fix",
+    "implement",
+    "refactor",
+    "commit",
+    "delete",
+    "patch",
+    "merge",
+    "install",
+)
+_SELF_EVOLUTION_RISKY_WRITE_MODES = {
+    "coding",
+    "code",
+    "edit",
+    "write",
+    "worktree_write",
+    "risky_write",
+    "mutation",
+    "mutating",
+    "agent",
+}
+_SELF_EVOLUTION_RISKY_RISK_PROFILES = {
+    "medium",
+    "high",
+    "write",
+    "worktree_write",
+    "risky_write",
+    "mutation",
+    "mutating",
+}
 
 
 class SelfEvolutionRunBusyError(RuntimeError):
@@ -118,6 +164,98 @@ def _map_runtime_manager_error(message: str, error_type: str) -> Exception:
     if normalized == "SelfEvolutionRunNotFoundError":
         return SelfEvolutionRunNotFoundError(message)
     return SelfEvolutionRunValidationError(message)
+
+
+def _payload_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"", "0", "false", "no", "off", "none", "null"}:
+            return False
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+    return bool(value)
+
+
+def _payload_bool(payload: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        if _payload_truthy(payload.get(key)):
+            return True
+    return False
+
+
+def _payload_normalized_value(payload: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = str(payload.get(key) or "").strip().lower()
+        if value:
+            return value.replace("-", "_")
+    return ""
+
+
+def _text_has_risky_write_marker(text: str) -> bool:
+    lowered = str(text or "").lower()
+    compact = "".join(lowered.split())
+    if any(marker in compact for marker in _SELF_EVOLUTION_RISKY_WRITE_TEXT_MARKERS):
+        return True
+    for marker in _SELF_EVOLUTION_RISKY_WRITE_TOKEN_MARKERS:
+        if re.search(rf"(?<![a-z0-9_]){re.escape(marker)}(?![a-z0-9_])", lowered):
+            return True
+    return False
+
+
+def _self_evolution_worktree_isolation_reason(payload: dict[str, Any], goal: str) -> str:
+    data = payload if isinstance(payload, dict) else {}
+    if _payload_bool(data, "writeIntent", "requiresWorktreeIsolation"):
+        return "explicit_write_intent"
+
+    mode = _payload_normalized_value(data, "mode", "turnMode", "intent", "toolMode", "tool_calling_mode")
+    if mode in _SELF_EVOLUTION_RISKY_WRITE_MODES:
+        return f"mode:{mode}"
+
+    risk_profile = _payload_normalized_value(data, "riskProfile", "risk_level", "riskLevel")
+    if risk_profile in _SELF_EVOLUTION_RISKY_RISK_PROFILES:
+        return f"risk:{risk_profile}"
+
+    if _text_has_risky_write_marker(goal):
+        return "goal_write_marker"
+    return ""
+
+
+def _raise_if_self_evolution_requires_worktree_isolation(payload: dict[str, Any], goal: str, *, lang: str) -> None:
+    reason = _self_evolution_worktree_isolation_reason(payload, goal)
+    if not reason:
+        return
+    _record_self_scene_event(
+        "control",
+        "self_evolution_run.start.blocked_requires_worktree",
+        run_id="",
+        message="Self-evolution start blocked because risky writes require worktree isolation.",
+        level="warning",
+        outcome="blocked",
+        fields={
+            "reason": reason,
+            "goalPreview": str(goal or "")[:160],
+            "candidateOnlyEntryPoint": True,
+            "requiresWorktreeIsolation": True,
+        },
+        lifecycle=True,
+    )
+    raise SelfEvolutionRunValidationError(
+        text_for(
+            lang,
+            zh=(
+                "这条 self-evolution 目标看起来需要 risky write。主工作树里的 self-evolution "
+                "只允许只读观察、经验/反思记录和候选生成；请改用 worktree isolation / supervised worktree "
+                "进化路径，并在合并前回到监督线 review。"
+            ),
+            en=(
+                "This self-evolution goal appears to require risky writes. Main-worktree self evolution "
+                "is limited to read-only observation, experience/reflection records, and candidate generation; "
+                "use a worktree-isolated / supervised worktree path and review before merge."
+            ),
+        )
+    )
 
 
 def _record_self_scene_event(
@@ -320,6 +458,7 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
         )
 
     goal = str(payload.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
+    _raise_if_self_evolution_requires_worktree_isolation(payload, goal, lang=lang)
     if active_session_has_write_leases():
         raise SelfEvolutionRunBusyError(
             text_for(
@@ -3148,6 +3287,8 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
                     en="The current config does not enable self_evolution, so the web surface cannot launch this pass.",
                 )
             )
+        goal = str(payload.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
+        _raise_if_self_evolution_requires_worktree_isolation(payload, goal, lang=lang)
         if active_session_has_write_leases():
             raise SelfEvolutionRunBusyError(
                 text_for(

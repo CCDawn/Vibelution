@@ -575,6 +575,85 @@ def test_runtime_manager_start_self_evolution_allows_readonly_chat_session(monke
     ]
 
 
+def test_local_start_self_evolution_rejects_risky_write_goal_before_main_worktree(monkeypatch):
+    submitted: list[object] = []
+
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(
+        service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(service, "get_active_supervised_worktree_run", lambda: None)
+    monkeypatch.setattr(service, "_capture_preflight_state", lambda run_id: pytest.fail("preflight should not run"))
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda *args, **kwargs: submitted.append(args))
+
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="worktree"):
+        service.start_self_evolution_run({"goal": "修复 self evolution 的代码并提交"})
+
+    assert submitted == []
+    assert service.get_active_self_evolution_run() is None
+
+
+def test_runtime_manager_start_self_evolution_rejects_risky_write_goal_before_submit(monkeypatch):
+    calls: list[object] = []
+
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: True)
+    monkeypatch.setattr(
+        service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(service, "_ensure_runtime_manager_daemon", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
+    )
+
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="worktree"):
+        service.start_self_evolution_run({"goal": "implement a prompt patch and commit it"})
+
+    assert calls == []
+
+
+def test_start_self_evolution_run_route_rejects_explicit_write_intent(monkeypatch):
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(
+        service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True}},
+    )
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(service, "get_active_supervised_worktree_run", lambda: None)
+
+    response = client.post(
+        "/api/evolution/self/runs",
+        json={"goal": "分析候选池回流", "writeIntent": True},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "worktree" in detail.lower()
+    assert "候选" in detail or "candidate" in detail.lower()
+
+
+def test_self_evolution_worktree_isolation_ignores_false_string_flags():
+    reason = service._self_evolution_worktree_isolation_reason(
+        {"writeIntent": "false", "requiresWorktreeIsolation": "0"},
+        "分析候选池回流",
+    )
+
+    assert reason == ""
+
+
 @pytest.mark.parametrize(
     "manager_result",
     [
