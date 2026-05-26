@@ -20,7 +20,7 @@ def test_locate_defaults_to_search_then_symbol():
     assert "cli_tool" in decision.avoid_tools
 
 
-def test_pending_continuation_takes_priority():
+def test_pending_continuation_guides_target_selection_without_forcing_range_read():
     decision = decide_next_tools({
         "reading_task": "analyze",
         "reading_sufficiency": "",
@@ -38,9 +38,11 @@ def test_pending_continuation_takes_priority():
         ],
     })
 
-    assert decision.next_intent == "inspect_range"
-    assert decision.recommended_tools == ["read_file_tool"]
-    assert "grep_search_tool" in decision.avoid_tools
+    assert decision.next_intent == "choose_read_target"
+    assert "grep_search_tool" in decision.recommended_tools
+    assert "list_file_entities_tool" in decision.recommended_tools
+    assert "get_code_entity_tool" in decision.recommended_tools
+    assert "read_file_tool" in decision.recommended_tools
     assert "cli_tool" in decision.avoid_tools
     assert "core/demo.py" in decision.reason
 

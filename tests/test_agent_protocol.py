@@ -95,7 +95,7 @@ class TestToolMessageFlow:
             "[文件] demo.py\n"
             "[编码] utf-8 | [行数] 500 (已截断) | [大小] 12.0 KB\n"
             "[区间] 第 1-120 行 | 已显示 120 行 | 剩余 380 行\n"
-            '[续读] read_file_tool(file_path="demo.py", offset=120, max_lines=120)\n\n'
+            "[阅读导航] 下一步按目标选择；只有目标确实需要相邻下文时，才读取 offset=120, max_lines=120。\n\n"
             + ("X" * 5000)
         )
 
@@ -107,7 +107,7 @@ class TestToolMessageFlow:
         )
 
         assert len(messages) == 1
-        assert "建议续读" in messages[0].content
+        assert "阅读导航" in messages[0].content or "建议" in messages[0].content
         assert "offset=120" in messages[0].content
 
     def test_invoke_llm_preserves_tool_messages(self, monkeypatch):
@@ -2159,7 +2159,7 @@ class TestRuntimeStateMemoryFlow:
         assert "## 延续约束" in memory_text
         assert agent.prompt_manager.update_state_memory.call_args.kwargs["persist"] is False
 
-    def test_sync_runtime_state_memory_keeps_continuation_constraint_prominent(self, monkeypatch):
+    def test_sync_runtime_state_memory_keeps_read_navigation_prominent(self, monkeypatch):
         agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
         agent.prompt_manager = MagicMock()
         agent._last_runtime_state_memory = ""
@@ -2168,9 +2168,9 @@ class TestRuntimeStateMemoryFlow:
         fake_session = SimpleNamespace(
             render_runtime_constraints=lambda: (
                 "### 当前轮强约束\n"
-                "- 存在未完成续读：先补读 `core/demo.py`，暂不重新搜索、暂不直接归因。\n"
-                "### 续读提示\n"
-                "- 读局部片段（core/demo.py）：read_file_tool(file_path=\"core/demo.py\", offset=80, max_lines=80)"
+                "- 存在未显示完的内容 `core/demo.py`；先判断缺少哪类证据，不要默认顺序续读。\n"
+                "### 阅读导航\n"
+                "- 读局部片段（core/demo.py）：围绕目标行号、符号或关键词读取"
             )
         )
         monkeypatch.setattr(agent_module, "get_session_state", lambda: fake_session)
@@ -2179,7 +2179,7 @@ class TestRuntimeStateMemoryFlow:
 
         memory_text = agent.prompt_manager.update_state_memory.call_args[0][0]
         assert memory_text.splitlines()[0] == "### 当前轮强约束"
-        assert "先补读 `core/demo.py`" in memory_text
+        assert "不要默认顺序续读" in memory_text
         assert agent.prompt_manager.update_state_memory.call_args.kwargs["persist"] is False
 
     def test_refresh_retrospective_state_memory_updates_carryover(self, monkeypatch, tmp_path):

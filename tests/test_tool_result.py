@@ -78,12 +78,12 @@ class TestTruncateResult:
         assert isinstance(result, str)
         assert "1" in result
 
-    def test_package_tool_result_keeps_continuation_hint_for_file_reads(self):
+    def test_package_tool_result_keeps_reading_navigation_for_file_reads(self):
         raw = (
             "[文件] demo.py\n"
             "[编码] utf-8 | [行数] 400 (已截断) | [大小] 10.0 KB\n"
             "[区间] 第 1-120 行 | 已显示 120 行 | 剩余 280 行\n"
-            '[续读] read_file_tool(file_path="demo.py", offset=120, max_lines=120)\n\n'
+            "[阅读导航] 下一步按目标选择；只有目标确实需要相邻下文时，才读取 offset=120, max_lines=120。\n\n"
             "--- Content ---\n"
             + ("A" * 5000)
         )
@@ -100,7 +100,7 @@ class TestTruncateResult:
             "[文件] demo.py\n"
             "[编码] utf-8 | [行数] 400 (已截断) | [大小] 10.0 KB\n"
             "[区间] 第 1-120 行 | 已显示 120 行 | 剩余 280 行\n"
-            '[续读] read_file_tool(file_path="demo.py", offset=120, max_lines=80)\n\n'
+            "[阅读导航] 下一步按目标选择；只有目标确实需要相邻下文时，才读取 offset=120, max_lines=80。\n\n"
             "--- Content ---\n"
             + "\n".join(f"第 {i} 行" for i in range(1, 160))
         )

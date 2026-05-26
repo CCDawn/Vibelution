@@ -758,7 +758,7 @@ class AgentSessionState:
                 target = latest.get("path") or latest.get("hint") or "上一段未读完结果"
                 if "### 当前轮强约束" not in lines:
                     lines.append("### 当前轮强约束")
-                lines.append(f"- 存在未完成续读：先补读 `{target}`，暂不重新搜索、暂不直接归因。")
+                lines.append(f"- 存在未显示完的内容 `{target}`；先判断缺少哪类证据，不要默认顺序续读。")
             if self.diagnostic_phase != "idle":
                 lines.append("### 当前诊断纪律")
                 lines.append(f"- 当前阶段：{phase_label}")
@@ -795,7 +795,7 @@ class AgentSessionState:
                     lines.append(f"- 充分性：{self.reading_sufficiency}")
             if self.pending_continuations:
                 latest = self.pending_continuations[-1]
-                lines.append("### 续读提示")
+                lines.append("### 阅读导航")
                 target = f"（{latest.get('path')}）" if latest.get("path") else ""
                 lines.append(f"- {humanize_tool_name(latest.get('tool_name', ''))}{target}：{latest.get('hint', '')}")
             if self.active_delegation or self.delegation_findings or self.delegation_failures:

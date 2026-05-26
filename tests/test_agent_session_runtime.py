@@ -106,9 +106,9 @@ def test_pending_continuation_is_rendered_and_exposed():
     summary = session.render_runtime_constraints()
     snapshot = session.get_attention_snapshot()
 
-    assert "续读提示" in summary
+    assert "阅读导航" in summary
     assert "core/demo.py" in summary
-    assert "先补读" in summary
+    assert "不要默认顺序续读" in summary
     assert snapshot["pending_continuations"][-1]["path"] == "core/demo.py"
 
 

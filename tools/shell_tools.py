@@ -806,9 +806,14 @@ def read_file(
         ]
 
         if truncated and adaptive_max_lines is not None:
-            result_lines.append(
-                f'[续读] read_file_tool(file_path="{file_path}", offset={end_line}, max_lines={adaptive_max_lines})'
-            )
+            result_lines.extend([
+                f"[剩余] 还有 {remaining_lines} 行未显示；不要因为存在剩余内容就默认顺序翻页。",
+                (
+                    "[阅读导航] 下一步应按当前目标选择：若在找文本/调用点，用 grep_search_tool；"
+                    "若在理解结构，用 list_file_entities_tool / get_code_entity_tool；"
+                    f"只有目标确实需要相邻下文时，才读取 offset={end_line}, max_lines={adaptive_max_lines}。"
+                ),
+            ])
 
         result_lines.extend([
             "",

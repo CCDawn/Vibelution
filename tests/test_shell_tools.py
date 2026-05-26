@@ -129,7 +129,7 @@ class TestReadFile:
         result = read_file(file_path=file_path)
         assert isinstance(result, str)
 
-    def test_read_file_returns_continuation_hint_when_paginated(self, temp_test_dir):
+    def test_read_file_returns_navigation_hint_when_paginated(self, temp_test_dir):
         file_path = os.path.join(temp_test_dir, "paged.txt")
         with open(file_path, "w", encoding="utf-8") as f:
             for i in range(1, 11):
@@ -138,7 +138,8 @@ class TestReadFile:
         result = read_file(file_path=file_path, max_lines=3, offset=0)
 
         assert "[区间] 第 1-3 行" in result
-        assert "[续读]" in result
+        assert "[阅读导航]" in result
+        assert "read_file_tool(" not in result
         assert "offset=3" in result
 
     def test_read_file_adapts_page_size_for_large_file(self, temp_test_dir):
@@ -149,7 +150,8 @@ class TestReadFile:
 
         result = read_file(file_path=file_path, max_lines=120, offset=0)
 
-        assert "[续读]" in result
+        assert "[阅读导航]" in result
+        assert "read_file_tool(" not in result
         assert "max_lines=80" in result
 
 

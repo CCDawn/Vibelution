@@ -1085,7 +1085,7 @@ class PromptManager:
             "- 你只在给定 scope 内行动，不扩散任务。",
             "- 只读模式下不要尝试 `cli_tool`、shell、`git diff`、`pytest`、`head` 等命令链路。",
             "- 优先使用结构化只读工具：read/search/entity/log/context 类工具。",
-            "- 若 `read_file_tool` 返回续读提示，必须严格按提示的下一个 offset 顺序继续，禁止跳读。",
+            "- 若 `read_file_tool` 提示仍有剩余内容，不要默认按 offset 顺序续读；先判断当前目标缺少文本命中、结构信息还是实体上下文，再选择 grep/entity/range 工具。",
             "- 你负责的工作:",
             f"  - {role_spec.owned_work[0]}",
             f"  - {role_spec.owned_work[1]}",

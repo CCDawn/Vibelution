@@ -197,7 +197,8 @@ class TestGrepSearch:
         assert "helper_function" in result
         assert ".py" in result
         assert "[搜索摘要]" in result
-        assert "[续读]" in result
+        assert "[阅读导航]" in result
+        assert "read_file_tool(" not in result
 
     def test_search_with_context(self, sample_project):
         """测试带上下文的搜索"""
@@ -939,7 +940,8 @@ class TestParameterCombinations:
             max_output_chars=1500,
         )
 
-        assert "[续读]" in result
+        assert "[阅读导航]" in result
+        assert "read_file_tool(" not in result
         assert result.count("📁 ") <= 3
 
 
