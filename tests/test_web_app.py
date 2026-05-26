@@ -6184,12 +6184,20 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_sections["workbench"]["path"] == "workbench"
     assert payload["publicConfig"]["workbench"]["backend_port"] == 8000
     assert payload["publicConfig"]["workbench"]["frontend_port"] == 5173
+    assert payload["publicConfig"]["workbench"]["window_mode"] == "windowed"
     assert editor_meta["runtime.profile"]["kind"] == "select"
     assert editor_meta["runtime.profile"]["badge"] == "选项"
     assert editor_meta["workbench.backend_port"]["kind"] == "number"
     assert editor_meta["workbench.backend_port"]["label"] == "后端服务端口"
     assert editor_meta["workbench.frontend_port"]["kind"] == "number"
     assert editor_meta["workbench.frontend_port"]["label"] == "前端页面端口"
+    assert editor_meta["workbench.window_mode"]["kind"] == "select"
+    assert editor_meta["workbench.window_mode"]["label"] == "窗口模式"
+    assert editor_meta["workbench.window_mode"]["options"] == [
+        {"value": "windowed", "label": "窗口化"},
+        {"value": "fullscreen", "label": "沉浸全屏"},
+    ]
+    assert "重启工作台" in editor_meta["workbench.window_mode"]["hint"]
     assert editor_meta["network.proxy_enabled"]["kind"] == "boolean"
     assert editor_meta["network.proxy_enabled"]["label"] == "启用代理"
     assert editor_meta["network.proxy_url"]["kind"] == "url"

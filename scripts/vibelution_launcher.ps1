@@ -72,7 +72,48 @@ function Resolve-ConfiguredWorkbenchPort {
 
     return $resolvedPort
 }
+
+function Resolve-ConfiguredWorkbenchWindowMode {
+    $resolvedMode = "windowed"
+    if (Test-Path $configPath) {
+        try {
+            $inWorkbenchBlock = $false
+            foreach ($line in Get-Content -LiteralPath $configPath -Encoding utf8) {
+                $trimmed = ([string]$line).Trim()
+                if ($trimmed -match '^\[(.+)\]$') {
+                    $inWorkbenchBlock = ($matches[1] -eq "workbench")
+                    continue
+                }
+                if (-not $inWorkbenchBlock) {
+                    continue
+                }
+                if ($trimmed -match '^window_mode\s*=\s*"?([A-Za-z_-]+)"?\s*(?:#.*)?$') {
+                    $candidate = ([string]$matches[1]).Trim().ToLowerInvariant()
+                    if ($candidate -in @("windowed", "fullscreen")) {
+                        $resolvedMode = $candidate
+                    }
+                    break
+                }
+            }
+        } catch {
+        }
+    }
+
+    $envModeValue = $env:VIBELUTION_WORKBENCH_WINDOW_MODE
+    if (-not $envModeValue) {
+        $envModeValue = $env:AGENT_WORKBENCH_WINDOW_MODE
+    }
+    if ($envModeValue) {
+        $envMode = ([string]$envModeValue).Trim().ToLowerInvariant()
+        if ($envMode -in @("windowed", "fullscreen")) {
+            $resolvedMode = $envMode
+        }
+    }
+
+    return $resolvedMode
+}
 $port = Resolve-ConfiguredWorkbenchPort
+$workbenchWindowMode = Resolve-ConfiguredWorkbenchWindowMode
 $url = "http://$bindHost`:$port"
 $healthUrl = "$url/api/health"
 $mode = "single_service_bundled_edge_app"
@@ -3461,6 +3502,8 @@ function Start-ManagedBackend {
 function Start-ManagedBrowser {
     param([string]$BrowserExecutable)
 
+    $windowMode = if ($script:workbenchWindowMode) { [string]$script:workbenchWindowMode } else { "windowed" }
+    $fullscreenForced = ($windowMode -eq "fullscreen")
     $browserArgs = @(
         "--user-data-dir=$browserProfileDir",
         "--app=$url",
@@ -3469,11 +3512,14 @@ function Start-ManagedBrowser {
         "--no-default-browser-check",
         "--disable-session-crashed-bubble"
     )
+    if ($fullscreenForced) {
+        $browserArgs += "--start-fullscreen"
+    }
 
-    Write-Note "Starting managed Edge app window ..."
+    Write-Note "Starting managed Edge app window ($windowMode mode) ..."
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable } }
-        Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window."
+        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; fullscreen_forced = $fullscreenForced } }
+        Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window ($windowMode mode)."
         Write-RuntimeSceneEvent `
             -Component "browser" `
             -Phase "window" `
@@ -3485,7 +3531,8 @@ function Start-ManagedBrowser {
                 launch_api = "gui_process_without_console"
                 console_window_suppressed = $true
                 app_chrome_theme = "dark"
-                fullscreen_forced = $false
+                window_mode = $windowMode
+                fullscreen_forced = $fullscreenForced
             }
     }
     $proc = Start-GuiProcessWithoutConsole `
@@ -3497,7 +3544,7 @@ function Start-ManagedBrowser {
     if (-not $windowProcess) {
         Stop-ProcessesById (Get-ManagedBrowserPids)
         if ($script:currentRuntimeSceneId) {
-            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0 } }
+            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; window_mode = $windowMode; fullscreen_forced = $fullscreenForced } }
             Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window did not open successfully."
             Write-RuntimeSceneEvent `
                 -Component "browser" `
@@ -3511,13 +3558,15 @@ function Start-ManagedBrowser {
                     launch_pid = $proc.Id
                     launch_api = "gui_process_without_console"
                     console_window_suppressed = $true
+                    window_mode = $windowMode
+                    fullscreen_forced = $fullscreenForced
                 }
         }
         throw "Managed Edge app window did not open successfully."
     }
 
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; fullscreen_forced = $fullscreenForced } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window opened (launch PID=$($proc.Id), window PID=$($windowProcess.Id))."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -3531,6 +3580,8 @@ function Start-ManagedBrowser {
                 window_pid = $windowProcess.Id
                 launch_api = "gui_process_without_console"
                 console_window_suppressed = $true
+                window_mode = $windowMode
+                fullscreen_forced = $fullscreenForced
             }
     }
 
