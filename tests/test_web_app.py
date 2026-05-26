@@ -4384,6 +4384,75 @@ def test_submit_session_message_continues_after_bookkeeping_guard_progress(tmp_p
     assert payload["currentPhase"] == "ready"
 
 
+def test_submit_session_message_switches_to_no_tool_finalization_after_tool_guard(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=3),
+    )
+    calls = []
+
+    class ToolGuardAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None, disable_tools=False):
+            calls.append({"prompt": initial_prompt, "disable_tools": disable_tools})
+            if len(calls) == 1:
+                return {
+                    "status": "partial",
+                    "summary": (
+                        "本轮已触发工具循环保护：系统检测到连续工具调用没有形成可见回答，"
+                        "读取集中在 core/web/services/runtime_scene_service.py。"
+                    ),
+                    "raw_output": (
+                        "本轮已触发工具循环保护：系统检测到连续工具调用没有形成可见回答，"
+                        "读取集中在 core/web/services/runtime_scene_service.py。"
+                    ),
+                    "outcome": "progress",
+                    "recommended_next_action": "基于已读证据给出可见结论。",
+                    "tool_call_count": 3,
+                    "tool_trace": [
+                        {"name": "get_code_entity_tool"},
+                        {"name": "read_file_tool"},
+                        {"name": "grep_search_tool"},
+                    ],
+                }
+            assert disable_tools is True
+            return {
+                "status": "completed",
+                "summary": "已基于现有证据收束：runtime scene 摘要需要减少重复读取路径。",
+                "raw_output": "已基于现有证据收束：runtime scene 摘要需要减少重复读取路径。",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ToolGuardAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "好的开始修改"},
+    )
+
+    assert response.status_code == 202, response.json()
+    payload = response.json()
+    assert len(calls) == 2
+    assert calls[0]["disable_tools"] is False
+    assert calls[1]["disable_tools"] is True
+    assert "本回合已经禁用工具" in calls[1]["prompt"]
+    assert "基于已读证据给出可见结论" in calls[1]["prompt"]
+    assert payload["messages"][-1]["content"] == "已基于现有证据收束：runtime scene 摘要需要减少重复读取路径。"
+    assert payload["currentPhase"] == "ready"
+
+
 def test_submit_session_message_keeps_previous_continuation_reply_when_done_marker_follows(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

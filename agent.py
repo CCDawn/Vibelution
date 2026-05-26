@@ -1163,12 +1163,15 @@ class SelfEvolvingAgent:
                 except Exception:
                     pass
 
-                delegated = self._maybe_delegate(
-                    goal=user_prompt,
-                    iteration=iteration,
-                    total_tool_calls=round_state.total_tool_calls,
-                    messages=messages,
-                )
+                if bool(getattr(self, "_force_disable_tools_for_turn", False)):
+                    delegated = None
+                else:
+                    delegated = self._maybe_delegate(
+                        goal=user_prompt,
+                        iteration=iteration,
+                        total_tool_calls=round_state.total_tool_calls,
+                        messages=messages,
+                    )
                 self._raise_if_turn_stop_requested()
                 if delegated:
                     delegated_this_turn = True
@@ -1536,7 +1539,8 @@ class SelfEvolvingAgent:
                 try:
                     self._raise_if_turn_stop_requested()
                     llm_for_turn = self._get_llm_for_current_mode(
-                        disable_tools=disable_tools_for_retry,
+                        disable_tools=disable_tools_for_retry
+                        or bool(getattr(self, "_force_disable_tools_for_turn", False)),
                         profile_id=fallback_profile_id_for_retry,
                     )
                     if (
@@ -1881,6 +1885,7 @@ class SelfEvolvingAgent:
         initial_prompt: str = None,
         goal_override: str = None,
         case_id: str = None,
+        disable_tools: bool = False,
     ) -> Dict[str, Any]:
         """执行单轮思考并返回结构化摘要。"""
         policy = self._get_mode_policy()
@@ -1914,8 +1919,10 @@ class SelfEvolvingAgent:
         self._last_llm_failure_max_attempts = 0
         session = get_session_state()
         ok = False
+        previous_force_disable_tools = bool(getattr(self, "_force_disable_tools_for_turn", False))
         try:
             self._single_turn_mode_active = True
+            self._force_disable_tools_for_turn = bool(disable_tools)
             self._pending_supervised_case_id = case_id
             ok = self.think_and_act(user_prompt=initial_prompt, goal_override=goal_override)
             snapshot = session.get_attention_snapshot()
@@ -1996,6 +2003,7 @@ class SelfEvolvingAgent:
             return result
         finally:
             self._single_turn_mode_active = False
+            self._force_disable_tools_for_turn = previous_force_disable_tools
             self._pending_supervised_case_id = None
             self._turn_interrupt_checker = None
             set_cancel_checker = getattr(getattr(self, "tool_executor", None), "set_cancel_checker", None)
