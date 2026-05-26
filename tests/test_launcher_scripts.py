@@ -672,6 +672,12 @@ if ($managedBackendText -notmatch '--managed-by-launcher') {
 if ($managedBackendText -notmatch 'managed_marker') {
     throw "Start-ManagedBackend does not log the managed backend marker."
 }
+if ($managedBackendText -notmatch 'NoConsoleFilePath' -or $managedBackendText -notmatch 'python_no_console_command') {
+    throw "Start-ManagedBackend does not use and log the no-console Python runtime."
+}
+if ($managedBackendText -notmatch 'console_window_suppressed') {
+    throw "Start-ManagedBackend does not log whether console windows are suppressed."
+}
 
 $browserAst = $ast.Find({
     param($node)
@@ -912,7 +918,7 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
-def test_launcher_python_candidates_prefer_python_runtime(tmp_path):
+def test_launcher_python_candidates_prefer_python_runtime_with_no_console_sibling(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
         """
@@ -946,8 +952,11 @@ $projectDir = Join-Path $env:TEMP ("vibelution-python-candidates-" + [guid]::New
 $scriptsDir = Join-Path $projectDir ".venv\\Scripts"
 New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
 $pythonPath = Join-Path $scriptsDir "python.exe"
+$pythonwPath = Join-Path $scriptsDir "pythonw.exe"
 Set-Content -LiteralPath $pythonPath -Value "" -Encoding ascii
+Set-Content -LiteralPath $pythonwPath -Value "" -Encoding ascii
 Set-Variable -Name preferredPythonExe -Value $pythonPath -Scope Script
+Set-Variable -Name preferredPythonNoConsoleExe -Value $pythonwPath -Scope Script
 Set-Variable -Name launcherPythonOverride -Value $pythonPath -Scope Script
 
 $candidates = @(Get-ProjectPythonCandidates)
@@ -956,6 +965,9 @@ if ($candidates.Count -ne 1) {
 }
 if ($candidates[0].FilePath -ne (Resolve-Path -LiteralPath $pythonPath).Path) {
     throw "Launcher did not prefer python.exe."
+}
+if ($candidates[0].NoConsoleFilePath -ne (Resolve-Path -LiteralPath $pythonwPath).Path) {
+    throw "Launcher did not attach pythonw.exe as the no-console runtime."
 }
 Write-Output "ok"
 """,
@@ -1071,6 +1083,7 @@ $script:currentRuntimeSceneId = "test-scene"
 $projectDir = Join-Path $env:TEMP ("vibelution-bootstrap-" + [guid]::NewGuid().ToString("N"))
 $projectVenvDir = Join-Path $projectDir ".venv"
 $preferredPythonExe = Join-Path $projectVenvDir "Scripts\\python.exe"
+$preferredPythonNoConsoleExe = Join-Path $projectVenvDir "Scripts\\pythonw.exe"
 $launcherPythonOverride = ""
 New-Item -ItemType Directory -Path $projectDir -Force | Out-Null
 
@@ -1524,7 +1537,14 @@ function Resolve-PythonRuntime {
     if ($script:dependencyCalls -le 0) {
         throw "Resolve-PythonRuntime was called before dependency repair."
     }
-    return [pscustomobject]@{ FilePath = "python-test"; PrefixArgs = @() }
+    return [pscustomobject]@{ FilePath = "python-test"; NoConsoleFilePath = "pythonw-test"; PrefixArgs = @() }
+}
+function Get-ObjectPropertyValue {
+    param($Object, [string]$Name, $Default = $null)
+    if ($null -eq $Object) { return $Default }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $Default }
+    return $property.Value
 }
 function Invoke-HiddenNativeCommand {
     param([string]$CommandPath, [string[]]$ArgumentList = @())
@@ -1544,6 +1564,9 @@ $openArgs = @($script:calls[0].argumentList)
 $closeArgs = @($script:calls[1].argumentList)
 $statusArgs = @($script:calls[2].argumentList)
 
+if ($script:calls[0].commandPath -ne "pythonw-test") { throw "open_workbench did not use the no-console runtime." }
+if ($script:calls[1].commandPath -ne "pythonw-test") { throw "close_workbench did not use the no-console runtime." }
+if ($script:calls[2].commandPath -ne "pythonw-test") { throw "status did not use the no-console runtime." }
 if ($openArgs -notcontains "--no-browser") { throw "open_workbench did not forward --no-browser." }
 if ($openArgs -contains "--stop-manager") { throw "open_workbench forwarded --stop-manager unexpectedly." }
 if ($closeArgs -notcontains "--stop-manager") { throw "close_workbench did not forward --stop-manager." }

@@ -708,6 +708,7 @@ def _real_candidate_modifier(worktree_path: Path, prompt: str, context: dict[str
             errors="replace",
             timeout=timeout_seconds,
             check=False,
+            **_subprocess_no_window_kwargs(),
         )
         status = "success" if proc.returncode == 0 else "failed"
         return {
@@ -1157,6 +1158,7 @@ def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
             encoding="utf-8",
             errors="replace",
             check=False,
+            **_subprocess_no_window_kwargs(),
         )
     except OSError:
         return []
@@ -1173,6 +1175,11 @@ def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
         normalized = path.replace("\\", "/")
         items.append({"path": normalized, "status": status.strip() or "??"})
     return items
+
+
+def _subprocess_no_window_kwargs() -> dict[str, int]:
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": flags} if flags else {}
 
 
 def _change_type(status: str) -> str:

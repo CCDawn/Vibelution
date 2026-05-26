@@ -561,23 +561,48 @@ def _creation_flags() -> int:
     return flags
 
 
-def _prefer_python_executable(python_executable: str) -> str:
-    """Prefer python.exe for background Windows daemons when it is available."""
+def _select_daemon_python_runtime(python_executable: str) -> dict[str, Any]:
+    """Select the Python runtime used for the long-lived daemon process."""
 
     raw = str(python_executable or "").strip()
+    result = {
+        "pythonExecutable": raw,
+        "sourcePythonExecutable": raw,
+        "consoleWindowSuppressed": False,
+        "consoleFallbackReason": "empty_python_executable",
+    }
     if not raw:
-        return raw
+        return result
     candidate = Path(raw)
     if os.name != "nt":
-        return raw
+        result["consoleFallbackReason"] = "non_windows"
+        return result
+    if candidate.name.lower() == "pythonw.exe":
+        result["pythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
+        result["consoleWindowSuppressed"] = True
+        result["consoleFallbackReason"] = ""
+        return result
+    sibling = candidate.with_name("pythonw.exe")
+    if sibling.exists():
+        result["pythonExecutable"] = str(sibling.resolve())
+        result["consoleWindowSuppressed"] = True
+        result["consoleFallbackReason"] = ""
+        return result
     if candidate.name.lower() == "python.exe":
-        return str(candidate.resolve()) if candidate.exists() else raw
+        result["pythonExecutable"] = str(candidate.resolve()) if candidate.exists() else raw
+        result["consoleFallbackReason"] = "pythonw_sibling_missing"
+        return result
     sibling = candidate.with_name("python.exe")
     if sibling.exists():
-        return str(sibling.resolve())
+        result["pythonExecutable"] = str(sibling.resolve())
+        result["consoleFallbackReason"] = "pythonw_sibling_missing"
+        return result
     if candidate.exists():
-        return str(candidate.resolve())
-    return raw
+        result["pythonExecutable"] = str(candidate.resolve())
+        result["consoleFallbackReason"] = "pythonw_sibling_missing"
+        return result
+    result["consoleFallbackReason"] = "python_executable_missing"
+    return result
 
 
 def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
@@ -594,7 +619,8 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
         _terminate_daemon_process(current_pid)
 
     ensure_runtime_manager_dirs()
-    python_cmd = _prefer_python_executable(python_executable or sys.executable)
+    python_runtime = _select_daemon_python_runtime(python_executable or sys.executable)
+    python_cmd = str(python_runtime["pythonExecutable"])
     with DAEMON_STDOUT_PATH.open("a", encoding="utf-8") as stdout_handle, DAEMON_STDERR_PATH.open(
         "a", encoding="utf-8"
     ) as stderr_handle:
@@ -612,6 +638,9 @@ def ensure_daemon_running(*, python_executable: str | None = None) -> bool:
         {
             "launchPid": int(getattr(process, "pid", 0) or 0),
             "pythonExecutable": python_cmd,
+            "sourcePythonExecutable": str(python_runtime["sourcePythonExecutable"]),
+            "consoleWindowSuppressed": bool(python_runtime["consoleWindowSuppressed"]),
+            "consoleFallbackReason": str(python_runtime["consoleFallbackReason"]),
         },
     )
 

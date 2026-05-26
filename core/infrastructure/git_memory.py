@@ -20,6 +20,11 @@ _RISKY_EVOLUTION_PATH_PREFIXES = ("core/", "tools/", "config/", "workspace/promp
 _RISKY_EVOLUTION_PATHS = {"agent.py"}
 
 
+def _subprocess_no_window_kwargs() -> Dict[str, int]:
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": flags} if flags else {}
+
+
 def _is_risky_evolution_path(filepath: str) -> bool:
     normalized = filepath.replace("\\", "/").lstrip("./")
     return normalized in _RISKY_EVOLUTION_PATHS or normalized.startswith(_RISKY_EVOLUTION_PATH_PREFIXES)
@@ -217,6 +222,7 @@ class GitMemoryService:
             capture_output=True,
             text=True,
             timeout=20,
+            **_subprocess_no_window_kwargs(),
         )
 
     def is_git_available(self) -> tuple[bool, Optional[str]]:

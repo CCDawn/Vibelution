@@ -11,6 +11,7 @@ Set-StrictMode -Version Latest
 $projectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $projectVenvDir = Join-Path $projectDir ".venv"
 $preferredPythonExe = Join-Path $projectDir ".venv\Scripts\python.exe"
+$preferredPythonNoConsoleExe = Join-Path $projectDir ".venv\Scripts\pythonw.exe"
 $launcherPythonOverride = $env:VIBELUTION_PYTHON_EXE
 $requirementsPath = Join-Path $projectDir "requirements.txt"
 $webDir = Join-Path $projectDir "web"
@@ -233,6 +234,8 @@ function Invoke-RuntimeManagerClient {
 
     Ensure-ProjectPythonDependencies
     $pythonRuntime = Resolve-PythonRuntime
+    $runtimeNoConsolePath = Get-ObjectPropertyValue -Object $pythonRuntime -Name "NoConsoleFilePath" -Default ""
+    $runtimeCommandPath = if ($runtimeNoConsolePath) { [string]$runtimeNoConsolePath } else { [string]$pythonRuntime.FilePath }
     $pythonArgs = @()
     if ($pythonRuntime.PrefixArgs) {
         $pythonArgs += $pythonRuntime.PrefixArgs
@@ -240,7 +243,7 @@ function Invoke-RuntimeManagerClient {
 
     if ($Mode -eq "status") {
         $pythonArgs += @("-m", "core.runtime_manager.cli", "status")
-        $exitCode = Invoke-HiddenNativeCommand -CommandPath $pythonRuntime.FilePath -ArgumentList $pythonArgs
+        $exitCode = Invoke-HiddenNativeCommand -CommandPath $runtimeCommandPath -ArgumentList $pythonArgs
         Set-LauncherWindowTitle
         if ($exitCode -ne 0) {
             throw "Runtime manager status failed with exit code $exitCode."
@@ -270,7 +273,7 @@ function Invoke-RuntimeManagerClient {
         $pythonArgs += "--stop-manager"
     }
 
-    $exitCode = Invoke-HiddenNativeCommand -CommandPath $pythonRuntime.FilePath -ArgumentList $pythonArgs
+    $exitCode = Invoke-HiddenNativeCommand -CommandPath $runtimeCommandPath -ArgumentList $pythonArgs
     Set-LauncherWindowTitle
     if ($exitCode -ne 0) {
         throw "Runtime manager command '$CommandType' failed with exit code $exitCode."
@@ -2347,7 +2350,8 @@ function Get-ProjectPythonCandidates {
     function Add-PythonCandidate {
         param(
             [string]$Path,
-            [string]$Label
+            [string]$Label,
+            [string]$NoConsolePath = ""
         )
 
         if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
@@ -2355,20 +2359,33 @@ function Get-ProjectPythonCandidates {
         }
 
         $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
-        $fileName = [System.IO.Path]::GetFileName($resolvedPath)
         if (-not $seenPaths.Add($resolvedPath)) {
             return
         }
 
+        $resolvedNoConsolePath = ""
+        if ($NoConsolePath -and (Test-Path -LiteralPath $NoConsolePath)) {
+            $resolvedNoConsolePath = (Resolve-Path -LiteralPath $NoConsolePath).Path
+        }
+
         [void]$venvCandidates.Add([pscustomobject]@{
             FilePath = $resolvedPath
+            NoConsoleFilePath = $resolvedNoConsolePath
             PrefixArgs = @()
             Label = $Label
         })
     }
 
-    Add-PythonCandidate -Path $launcherPythonOverride -Label "launcher virtual environment"
-    Add-PythonCandidate -Path $preferredPythonExe -Label "project venv"
+    $overrideNoConsolePath = ""
+    if ($launcherPythonOverride) {
+        $overrideDirectory = Split-Path -Parent $launcherPythonOverride
+        if ($overrideDirectory) {
+            $overrideNoConsolePath = Join-Path $overrideDirectory "pythonw.exe"
+        }
+    }
+
+    Add-PythonCandidate -Path $launcherPythonOverride -NoConsolePath $overrideNoConsolePath -Label "launcher virtual environment"
+    Add-PythonCandidate -Path $preferredPythonExe -NoConsolePath $preferredPythonNoConsoleExe -Label "project venv"
 
     return $venvCandidates.ToArray()
 }
@@ -2529,6 +2546,7 @@ function Resolve-PythonRuntime {
         if (-not @($candidates | Where-Object { $_.FilePath -eq $resolvedPythonPath })) {
             [void]$candidates.Add([pscustomobject]@{
                 FilePath = $resolvedPythonPath
+                NoConsoleFilePath = ""
                 PrefixArgs = @()
                 Label = "python on PATH"
             })
@@ -2553,6 +2571,8 @@ function Write-PythonRuntimeSelectedLog {
     }
     $fields = @{
         path = [string]$PythonRuntime.FilePath
+        no_console_path = [string](Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default "")
+        no_console_available = [bool](Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default "")
         label = [string]$PythonRuntime.Label
     }
     Write-LauncherControlLog `
@@ -3358,6 +3378,8 @@ function Start-ManagedBackend {
 
     Write-Note "Starting bundled web service at $url ..."
     Write-Note "Python runtime: $($PythonRuntime.Label) -> $($PythonRuntime.FilePath)"
+    $backendNoConsolePath = Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default ""
+    $backendCommandPath = if ($backendNoConsolePath) { [string]$backendNoConsolePath } else { [string]$PythonRuntime.FilePath }
     if ($script:currentRuntimeSceneId) {
         Update-RuntimeSceneManifest @{
             backend = @{
@@ -3365,6 +3387,7 @@ function Start-ManagedBackend {
                 health_status = "starting"
                 python_label = $PythonRuntime.Label
                 python_command = $PythonRuntime.FilePath
+                python_no_console_command = $backendCommandPath
                 managed_marker = $managedBackendMarkerArg
             }
         }
@@ -3374,10 +3397,10 @@ function Start-ManagedBackend {
             -EventCode "backend.start.requested" `
             -Message "Starting bundled backend service." `
             -Outcome "started" `
-            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; managed_marker = $managedBackendMarkerArg }
+            -Fields @{ host = $bindHost; port = $port; python_label = $PythonRuntime.Label; python_command = $PythonRuntime.FilePath; python_no_console_command = $backendCommandPath; console_window_suppressed = [bool]$backendNoConsolePath; managed_marker = $managedBackendMarkerArg }
     }
     $proc = Start-RedirectedBackgroundProcess `
-        -CommandPath $PythonRuntime.FilePath `
+        -CommandPath $backendCommandPath `
         -ArgumentList @($PythonRuntime.PrefixArgs + @("scripts/web_workbench.py", "--host", $bindHost, "--port", "$port", "--no-browser", $managedBackendMarkerArg)) `
         -WorkingDirectory $projectDir `
         -StdoutPath $backendStdoutLog `
@@ -3611,6 +3634,7 @@ function Save-SessionState {
         backendStdout = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.BackendStdout } else { $null }
         backendStderr = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.BackendStderr } else { $null }
         pythonCommand = if ($PythonRuntime) { $PythonRuntime.FilePath } else { $null }
+        pythonNoConsoleCommand = if ($PythonRuntime) { Get-ObjectPropertyValue -Object $PythonRuntime -Name "NoConsoleFilePath" -Default $null } else { $null }
         pythonLabel = if ($PythonRuntime) { $PythonRuntime.Label } else { $null }
         browserManaged = $BrowserManaged
         browserExecutable = $BrowserExecutable

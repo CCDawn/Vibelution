@@ -1679,7 +1679,13 @@ def test_ensure_daemon_running_restarts_stale_source_signature(monkeypatch, tmp_
         ("daemon.restart_requested", {"pid": 12345, "reason": "runtime_manager_source_changed"}),
         (
             "daemon.start_requested",
-            {"launchPid": 24680, "pythonExecutable": "python-test"},
+            {
+                "launchPid": 24680,
+                "pythonExecutable": "python-test",
+                "sourcePythonExecutable": "python-test",
+                "consoleWindowSuppressed": False,
+                "consoleFallbackReason": "python_executable_missing",
+            },
         ),
     ]
     assert popen_calls == [["python-test", "-m", "core.runtime_manager.cli", "daemon"]]
@@ -1701,7 +1707,47 @@ def test_ensure_daemon_running_keeps_current_source_signature(monkeypatch):
     assert daemon.ensure_daemon_running() is False
 
 
-def test_ensure_daemon_running_prefers_python_for_background_daemon(tmp_path, monkeypatch):
+def test_ensure_daemon_running_prefers_pythonw_for_background_daemon(tmp_path, monkeypatch):
+    python_exe = tmp_path / "Scripts" / "python.exe"
+    pythonw_exe = tmp_path / "Scripts" / "pythonw.exe"
+    python_exe.parent.mkdir()
+    python_exe.write_text("", encoding="utf-8")
+    pythonw_exe.write_text("", encoding="utf-8")
+    running_checks = iter([False, True])
+    popen_calls = []
+    events: list[tuple[str, dict]] = []
+
+    monkeypatch.setattr(daemon, "load_pid", lambda: 0)
+    monkeypatch.setattr(daemon, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(daemon, "ensure_runtime_manager_dirs", lambda: None)
+    monkeypatch.setattr(daemon, "is_daemon_running", lambda: next(running_checks))
+    monkeypatch.setattr(daemon, "DAEMON_STDOUT_PATH", tmp_path / "daemon.out.log")
+    monkeypatch.setattr(daemon, "DAEMON_STDERR_PATH", tmp_path / "daemon.err.log")
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon.subprocess,
+        "Popen",
+        lambda args, **kwargs: popen_calls.append(args) or type("Proc", (), {"pid": 13579})(),
+    )
+
+    assert daemon.ensure_daemon_running(python_executable=str(python_exe)) is True
+
+    assert popen_calls == [[str(pythonw_exe.resolve()), "-m", "core.runtime_manager.cli", "daemon"]]
+    assert events == [
+        (
+            "daemon.start_requested",
+            {
+                "launchPid": 13579,
+                "pythonExecutable": str(pythonw_exe.resolve()),
+                "sourcePythonExecutable": str(python_exe),
+                "consoleWindowSuppressed": True,
+                "consoleFallbackReason": "",
+            },
+        )
+    ]
+
+
+def test_ensure_daemon_running_logs_console_fallback_when_pythonw_missing(tmp_path, monkeypatch):
     python_exe = tmp_path / "Scripts" / "python.exe"
     python_exe.parent.mkdir()
     python_exe.write_text("", encoding="utf-8")
@@ -1731,6 +1777,9 @@ def test_ensure_daemon_running_prefers_python_for_background_daemon(tmp_path, mo
             {
                 "launchPid": 13579,
                 "pythonExecutable": str(python_exe.resolve()),
+                "sourcePythonExecutable": str(python_exe),
+                "consoleWindowSuppressed": False,
+                "consoleFallbackReason": "pythonw_sibling_missing",
             },
         )
     ]
