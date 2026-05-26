@@ -1255,6 +1255,21 @@ export type SupervisedWorktreeRun = {
     initiator?: string;
     clientAction?: string;
   };
+  selfEvolutionOrigin?: {
+    sourceTrack?: string;
+    goal?: string;
+    riskReason?: string;
+    sourceSelfRunId?: string;
+    sourceCandidateId?: string;
+    requiresSupervisedReview?: boolean;
+  };
+  reviewGate?: {
+    required?: boolean;
+    status?: string;
+    reason?: string;
+    approvedAt?: string;
+    reviewerNote?: string;
+  };
   startedAt: string;
   updatedAt: string;
   finishedAt: string;
@@ -1285,6 +1300,13 @@ export type SupervisedWorktreeRun = {
     blockers?: string[];
     overlapFiles?: string[];
     highRiskFiles?: string[];
+    reviewGate?: {
+      required?: boolean;
+      status?: string;
+      reason?: string;
+      approvedAt?: string;
+      reviewerNote?: string;
+    };
     changedFiles?: Array<{
       path: string;
       status: string;

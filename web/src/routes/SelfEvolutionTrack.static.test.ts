@@ -16,6 +16,14 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("setSidebarCollapsed");
     expect(selfEvolutionSource).toContain("--self-sidebar-width");
   });
+
+  it("shows a supervised worktree escalation action for risky write start errors", () => {
+    expect(selfEvolutionSource).toContain("isWorktreeIsolationStartError");
+    expect(selfEvolutionSource).toContain("worktreeIsolationStartError");
+    expect(selfEvolutionSource).toContain("selfWorktreeEscalationHint");
+    expect(selfEvolutionSource).toContain("startSelfWorktreeRun");
+    expect(selfEvolutionSource).toContain("onStartWorktreeRun");
+  });
 });
 
 describe("self-evolution history selection pruning", () => {

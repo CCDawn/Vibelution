@@ -286,6 +286,21 @@
   background: var(--surface-card);
 }
 
+.worktreeEscalation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 9%, var(--surface-card));
+}
+
+.worktreeEscalation p {
+  flex: 1 1 220px;
+}
+
 .signalRow,
 .supportGrid {
   display: grid;
