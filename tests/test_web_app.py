@@ -4936,6 +4936,62 @@ def test_submit_session_message_continues_repeated_visible_progress_until_done(t
     assert latest_run["status"] == "completed"
 
 
+def test_submit_session_message_stops_on_inferred_progress_visible_conclusion(tmp_path, monkeypatch):
+    (tmp_path / "core" / "web" / "services").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "core" / "web" / "services" / "session_service.py").write_text("pass\n", encoding="utf-8")
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+    calls = []
+    conclusion = "根因已经确认：推断出来的 progress 不应该让已完成的可见结论再次进入 continuation。"
+
+    class InferredProgressConclusionAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            calls.append(initial_prompt)
+            return {
+                "status": "completed",
+                "summary": conclusion,
+                "raw_output": conclusion,
+                "outcome": "progress",
+                "metadata": {"chat_contract_outcome_source": "inferred"},
+                "read_files": ["core/web/services/session_service.py"],
+                "tool_call_count": 1,
+                "tool_trace": [
+                    {
+                        "name": "read_file_tool",
+                        "args": {"file_path": "core/web/services/session_service.py"},
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: InferredProgressConclusionAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "分析对话重复输出问题"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert len(calls) == 1
+    assert payload["messages"][-1]["content"] == conclusion
+    assert payload["currentPhase"] == "ready"
+    latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
+    assert latest_run["status"] == "completed"
+
+
 def test_submit_session_message_completed_turn_ignores_low_configured_limit(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

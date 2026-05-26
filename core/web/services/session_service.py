@@ -2360,6 +2360,8 @@ def _run_session_continuation_loop(
             return _build_stopped_turn_result(return_stop_reason)
 
         result_status = str(result.get("status") or "").strip().lower() if isinstance(result, dict) else type(result).__name__
+        result_visible_reply = _visible_reply_candidate(result) if isinstance(result, dict) else ""
+        result_contract = build_chat_coding_result_contract(result) if isinstance(result, dict) else {}
         _record_session_turn_lifecycle_event(
             session_id,
             "agent_turn_returned",
@@ -2369,7 +2371,12 @@ def _run_session_continuation_loop(
                 "turnIndex": turn_index,
                 "resultStatus": result_status,
                 "toolCallCount": _coerce_nonnegative_int(result.get("tool_call_count") or 0) if isinstance(result, dict) else 0,
-                "hasVisibleReply": bool(_visible_reply_candidate(result)) if isinstance(result, dict) else False,
+                "hasVisibleReply": bool(result_visible_reply),
+                "contractOutcome": str(result_contract.get("outcome") or "").strip().lower(),
+                "explicitOutcome": _explicit_chat_result_outcome(result) if isinstance(result, dict) else "",
+                "outcomeSource": _chat_result_outcome_source(result) if isinstance(result, dict) else "",
+                "visibleHasConclusion": has_conclusion_signal(result_visible_reply),
+                "visibleHasNextAction": has_next_action_signal(result_visible_reply),
                 "isProviderFailed": _is_provider_failed_result(result),
             },
         )
@@ -2395,6 +2402,8 @@ def _run_session_continuation_loop(
             return _annotate_continuation_result(result, turn_index, reached_limit=False)
         if _is_session_turn_terminal(result):
             result = _merge_continuation_visible_result(result, last_visible_result)
+            terminal_visible_reply = _visible_reply_candidate(result) if isinstance(result, dict) else ""
+            terminal_contract = build_chat_coding_result_contract(result) if isinstance(result, dict) else {}
             _record_session_turn_lifecycle_event(
                 session_id,
                 "terminal_result",
@@ -2403,6 +2412,11 @@ def _run_session_continuation_loop(
                 fields={
                     "turnIndex": turn_index,
                     "resultStatus": result_status,
+                    "contractOutcome": str(terminal_contract.get("outcome") or "").strip().lower(),
+                    "explicitOutcome": _explicit_chat_result_outcome(result) if isinstance(result, dict) else "",
+                    "outcomeSource": _chat_result_outcome_source(result) if isinstance(result, dict) else "",
+                    "visibleHasConclusion": has_conclusion_signal(terminal_visible_reply),
+                    "visibleHasNextAction": has_next_action_signal(terminal_visible_reply),
                 },
             )
             return _annotate_continuation_result(result, turn_index, reached_limit=False)
@@ -4772,7 +4786,7 @@ def _is_session_turn_terminal(result: Any) -> bool:
 
     if status in {"failed", "timeout", "stopped"}:
         return True
-    explicit_outcome = str(result.get("outcome") or result.get("task_outcome") or "").strip().lower()
+    explicit_outcome = _explicit_chat_result_outcome(result)
 
     if (
         status == "completed"
@@ -4790,6 +4804,22 @@ def _is_session_turn_terminal(result: Any) -> bool:
     if not visible:
         return False
     return True
+
+
+def _chat_result_outcome_source(result: dict[str, Any]) -> str:
+    metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), dict) else {}
+    source = str(metadata.get("chat_contract_outcome_source") or result.get("outcome_source") or "").strip().lower()
+    if source in {"explicit", "inferred"}:
+        return source
+    return "explicit" if (result.get("outcome") or result.get("task_outcome")) else ""
+
+
+def _explicit_chat_result_outcome(result: dict[str, Any]) -> str:
+    metadata = dict(result.get("metadata") or {}) if isinstance(result.get("metadata"), dict) else {}
+    source = _chat_result_outcome_source(result)
+    if source == "inferred":
+        return str(result.get("task_outcome") or metadata.get("chat_contract_explicit_outcome") or "").strip().lower()
+    return str(result.get("outcome") or result.get("task_outcome") or "").strip().lower()
 
 
 def _visible_reply_candidate(result: dict[str, Any]) -> str:
@@ -4877,7 +4907,7 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
     if isinstance(result, dict):
         contract = build_chat_coding_result_contract(result)
         outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()
-        explicit_outcome = str(result.get("outcome") or result.get("task_outcome") or "").strip().lower()
+        explicit_outcome = _explicit_chat_result_outcome(result)
         visible = _visible_reply_candidate(result)
         if (
             normalized == "completed"
