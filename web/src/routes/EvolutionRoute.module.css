@@ -762,6 +762,24 @@
   font-size: 0.84rem;
 }
 
+.worktreeReviewGate {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-hairline));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-subtle));
+}
+
+.worktreeReviewHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .monitorSummary {
   display: grid;
   gap: 10px;

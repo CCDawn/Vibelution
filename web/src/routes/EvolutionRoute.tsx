@@ -100,6 +100,7 @@ const LIBRARY_STATUS_FILTERS: LibraryStatusFilter[] = [
 ];
 const EMPTY_RUNS: EvolutionRun[] = [];
 const EMPTY_LIBRARY_ENTRIES: EvolutionLibraryEntry[] = [];
+const EMPTY_WORKTREE_RUNS: SupervisedWorktreeRun[] = [];
 const EVOLUTION_RUNS_QUEUE_WIDTH_KEY = "vibelution.evolution.runs-queue-width";
 const EVOLUTION_RUNS_QUEUE_BOUNDS = { min: 300, max: 520 };
 const EVOLUTION_RUNS_QUEUE_DEFAULT_WIDTH = 380;
@@ -223,6 +224,24 @@ function proposalEditDraftFromDetail(detail: EvolutionProposalDetail): ProposalE
 
 function isSelfEvolutionCandidateItem(item: EvolutionLibraryEntry | null | undefined) {
   return item?.ingestMode === "self_evolution_candidate";
+}
+
+function isSelfEvolutionWorktreeRun(run: SupervisedWorktreeRun | null | undefined) {
+  if (!run) {
+    return false;
+  }
+  const sourceTrack = String(run.selfEvolutionOrigin?.sourceTrack || "").trim().toLowerCase();
+  return Boolean(run.selfEvolutionOrigin)
+    || sourceTrack === "self_evolution"
+    || Boolean(run.reviewGate?.required)
+    || Boolean(run.mergeAnalysis?.reviewGate?.required);
+}
+
+function worktreeReviewGate(run: SupervisedWorktreeRun | null | undefined) {
+  if (!run) {
+    return undefined;
+  }
+  return run.reviewGate ?? run.mergeAnalysis?.reviewGate;
 }
 
 function proposalDisplaySourceRun(item: EvolutionLibraryEntry | null | undefined) {
@@ -392,6 +411,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     queryKey: queryKeys.evolutionWorktreeActiveRun(),
     queryFn: () => fetchJson<SupervisedWorktreeRun | null>("/api/evolution/worktree-runs/active"),
     refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    refetchIntervalInBackground: false,
+    enabled: supervisedTrackQueriesEnabled
+      || (selfTrackQueriesEnabled && (configQuery.data?.modeAvailability.supervised_evolution ?? false)),
+  });
+  const worktreeRunsQuery = useQuery({
+    queryKey: queryKeys.evolutionWorktreeRuns(),
+    queryFn: () => fetchJson<SupervisedWorktreeRun[]>("/api/evolution/worktree-runs"),
+    refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
     enabled: supervisedTrackQueriesEnabled
       || (selfTrackQueriesEnabled && (configQuery.data?.modeAvailability.supervised_evolution ?? false)),
@@ -712,6 +739,30 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       await invalidateSelfEvolution();
     },
   });
+  const worktreeActionMutation = useMutation({
+    onMutate: () => {
+      setWorktreeRunFeedback("");
+    },
+    mutationFn: (variables: { runId: string; action: string; reviewerNote?: string }) =>
+      fetchJson<SupervisedWorktreeRun>(`/api/evolution/worktree-runs/${variables.runId}/actions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: variables.action,
+          reviewerNote: variables.reviewerNote ?? "",
+        }),
+      }),
+    onSuccess: async (snapshot) => {
+      setWorktreeRunFeedback(snapshot.latestMessage || t("selfWorktreeReviewApproved"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeActiveRun() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeRuns() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
+      ]);
+    },
+  });
   const actionMutation = useMutation({
     mutationFn: (variables: { sessionId: string; action: string }) =>
       fetchJson<EvolutionRunActionResponse>(`/api/evolution/runs/${variables.sessionId}/actions`, {
@@ -740,6 +791,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const workbenchState = overview?.workbench ?? workbenchControl?.savedState;
   const activeRunSnapshot = selectRunSnapshotWithRunId(activeRunQuery.data);
   const activeWorktreeRun = worktreeActiveRunQuery.data ?? null;
+  const worktreeRuns = worktreeRunsQuery.data ?? EMPTY_WORKTREE_RUNS;
+  const highlightedWorktreeRun = activeWorktreeRun ?? worktreeRuns[0] ?? null;
+  const highlightedReviewGate = worktreeReviewGate(highlightedWorktreeRun);
+  const highlightedSelfOrigin = highlightedWorktreeRun?.selfEvolutionOrigin;
+  const highlightedIsSelfOrigin = isSelfEvolutionWorktreeRun(highlightedWorktreeRun);
+  const highlightedReviewStatus = String(highlightedReviewGate?.status || "").trim().toLowerCase();
+  const highlightedReviewPending = highlightedIsSelfOrigin
+    && Boolean(highlightedReviewGate?.required)
+    && highlightedReviewStatus !== "approved";
+  const highlightedApproveReviewAction = highlightedWorktreeRun?.actionStates?.approveReview;
+  const highlightedMergeBlockers = highlightedWorktreeRun?.mergeAnalysis?.blockers ?? [];
   const latestSelfRunSnapshot = selectRunSnapshotWithRunId(selfLatestRunQuery.data);
   const latestRun = runs[0] ?? null;
   const selfTrackEnabled = configQuery.data?.modeAvailability.self_evolution ?? false;
@@ -812,6 +874,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ?? resumeRunMutation.error?.message
     ?? terminateRunMutation.error?.message
     ?? deleteRunMutation.error?.message
+    ?? worktreeActionMutation.error?.message
     ?? startRunMutation.error?.message
     ?? startWorktreeRunMutation.error?.message
     ?? "";
@@ -1577,6 +1640,17 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     actionMutation.mutate({ sessionId, action });
   }
 
+  function triggerWorktreeReviewApproval(run: SupervisedWorktreeRun | null) {
+    if (!run?.runId) {
+      return;
+    }
+    worktreeActionMutation.mutate({
+      runId: run.runId,
+      action: "approve_review",
+      reviewerNote: t("selfWorktreeReviewNote"),
+    });
+  }
+
   function toggleRunSelection(run: EvolutionRun) {
     if (!run.canDelete) {
       return;
@@ -2263,11 +2337,52 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     {t("startClosedLoopRun")}
                   </button>
                 </div>
-                {activeWorktreeRun ? (
+                {highlightedWorktreeRun ? (
                   <div className={styles.closedLoopStatus}>
-                    <span className={styles.secondaryPill}>{t("closedLoopActive")}</span>
-                    <strong>{activeWorktreeRun.status || "--"}</strong>
-                    <span>{activeWorktreeRun.latestMessage || activeWorktreeRun.phase || "--"}</span>
+                    <span className={styles.secondaryPill}>
+                      {highlightedIsSelfOrigin ? t("selfWorktreeReviewSource") : t("closedLoopActive")}
+                    </span>
+                    <strong>{highlightedWorktreeRun.status || "--"}</strong>
+                    <span>{highlightedWorktreeRun.latestMessage || highlightedWorktreeRun.phase || "--"}</span>
+                  </div>
+                ) : null}
+                {highlightedIsSelfOrigin && highlightedWorktreeRun ? (
+                  <div className={styles.worktreeReviewGate}>
+                    <div className={styles.worktreeReviewHeader}>
+                      <span className={highlightedReviewPending ? styles.statusPill : styles.secondaryPill}>
+                        {highlightedReviewPending ? t("selfWorktreeReviewPending") : t("selfWorktreeReviewApprovedStatus")}
+                      </span>
+                      <strong className={styles.truncateText} title={highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}>
+                        {highlightedSelfOrigin?.goal || highlightedWorktreeRun.runId}
+                      </strong>
+                    </div>
+                    <p className={styles.noticeText}>
+                      {highlightedReviewGate?.reason || highlightedSelfOrigin?.riskReason || t("selfWorktreeReviewHint")}
+                    </p>
+                    {highlightedMergeBlockers.length > 0 ? (
+                      <div className={styles.metaRow}>
+                        <span>{t("selfWorktreeMergeBlockers")}</span>
+                        <span>{highlightedMergeBlockers.join(", ")}</span>
+                      </div>
+                    ) : null}
+                    <div className={styles.controlActions}>
+                      <button
+                        type="button"
+                        className={styles.inlineAction}
+                        disabled={
+                          !highlightedApproveReviewAction?.enabled
+                          || worktreeActionMutation.isPending
+                        }
+                        onClick={() => triggerWorktreeReviewApproval(highlightedWorktreeRun)}
+                        title={disabledReason(highlightedApproveReviewAction) || t("approveSelfWorktreeReview")}
+                      >
+                        {worktreeActionMutation.isPending ? <LoaderCircle size={15} /> : <CheckCircle2 size={15} />}
+                        {t("approveSelfWorktreeReview")}
+                      </button>
+                      {!highlightedApproveReviewAction?.enabled && disabledReason(highlightedApproveReviewAction) ? (
+                        <p className={styles.noticeText}>{disabledReason(highlightedApproveReviewAction)}</p>
+                      ) : null}
+                    </div>
                   </div>
                 ) : null}
                 {worktreeRunFeedback ? <p className={styles.noticeText}>{worktreeRunFeedback}</p> : null}
