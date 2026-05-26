@@ -762,6 +762,68 @@
   font-size: 0.84rem;
 }
 
+.worktreeRunPicker {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.worktreeRunPickerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+}
+
+.worktreeRunList {
+  display: grid;
+  gap: 6px;
+  max-height: 210px;
+  overflow: auto;
+}
+
+.worktreeRunItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+  color: var(--fg-primary);
+  text-align: left;
+}
+
+.worktreeRunItem:hover,
+.worktreeRunItemActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-hairline));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card-muted));
+}
+
+.worktreeRunItemTop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.worktreeRunItemTop strong,
+.worktreeRunItemTop span,
+.worktreeRunItemMeta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktreeRunItemTop span,
+.worktreeRunItemMeta {
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+}
+
 .worktreeReviewGate {
   display: grid;
   gap: 8px;

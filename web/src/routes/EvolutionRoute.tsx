@@ -326,6 +326,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [selectedPendingItemId, setSelectedPendingItemId] = useState<string | null>(null);
   const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
   const [selectedProposalRunIds, setSelectedProposalRunIds] = useState<string[]>([]);
+  const [selectedWorktreeRunId, setSelectedWorktreeRunId] = useState<string | null>(null);
   const [librarySearchInput, setLibrarySearchInput] = useState("");
   const [libraryStatusFilter, setLibraryStatusFilter] = useState<LibraryStatusFilter>("all");
   const [libraryDeleteFilter, setLibraryDeleteFilter] = useState<LibraryDeleteFilter>("all");
@@ -821,7 +822,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const activeRunSnapshot = selectRunSnapshotWithRunId(activeRunQuery.data);
   const activeWorktreeRun = worktreeActiveRunQuery.data ?? null;
   const worktreeRuns = worktreeRunsQuery.data ?? EMPTY_WORKTREE_RUNS;
-  const highlightedWorktreeRun = activeWorktreeRun ?? worktreeRuns[0] ?? null;
+  const selectedWorktreeRun = selectedWorktreeRunId
+    ? worktreeRuns.find((item) => item.runId === selectedWorktreeRunId) ?? null
+    : null;
+  const highlightedWorktreeRun = activeWorktreeRun ?? selectedWorktreeRun ?? worktreeRuns[0] ?? null;
   const highlightedReviewGate = worktreeReviewGate(highlightedWorktreeRun);
   const highlightedSelfOrigin = highlightedWorktreeRun?.selfEvolutionOrigin;
   const highlightedIsSelfOrigin = isSelfEvolutionWorktreeRun(highlightedWorktreeRun);
@@ -1437,6 +1441,18 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return next;
     });
   }, [visibleDeletableRunIds]);
+
+  useEffect(() => {
+    const activeRunId = activeWorktreeRun?.runId;
+    if (activeRunId && activeRunId !== selectedWorktreeRunId) {
+      setSelectedWorktreeRunId(activeRunId);
+      return;
+    }
+    if (selectedWorktreeRunId && worktreeRuns.some((item) => item.runId === selectedWorktreeRunId)) {
+      return;
+    }
+    setSelectedWorktreeRunId(worktreeRuns[0]?.runId ?? null);
+  }, [activeWorktreeRun?.runId, selectedWorktreeRunId, worktreeRuns]);
 
   const relatedLibraryItems = selectedRun
     ? libraryItems.filter((item) => item.sourceRun === selectedRun.id)
@@ -2387,6 +2403,42 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </span>
                     <strong>{highlightedWorktreeRun.status || "--"}</strong>
                     <span>{highlightedWorktreeRun.latestMessage || highlightedWorktreeRun.phase || "--"}</span>
+                  </div>
+                ) : null}
+                {worktreeRuns.length > 0 ? (
+                  <div className={styles.worktreeRunPicker}>
+                    <div className={styles.worktreeRunPickerHeader}>
+                      <span>{t("worktreeRunHistory")}</span>
+                      <span>{worktreeRuns.length}</span>
+                    </div>
+                    <div className={styles.worktreeRunList}>
+                      {worktreeRuns.slice(0, 6).map((run) => {
+                        const selected = highlightedWorktreeRun?.runId === run.runId;
+                        const runReviewGate = worktreeReviewGate(run);
+                        const runReviewPending = isSelfEvolutionWorktreeRun(run)
+                          && Boolean(runReviewGate?.required)
+                          && String(runReviewGate?.status || "").trim().toLowerCase() !== "approved";
+                        return (
+                          <button
+                            key={run.runId}
+                            type="button"
+                            className={selected ? `${styles.worktreeRunItem} ${styles.worktreeRunItemActive}` : styles.worktreeRunItem}
+                            aria-pressed={selected}
+                            onClick={() => setSelectedWorktreeRunId(run.runId)}
+                          >
+                            <span className={styles.worktreeRunItemTop}>
+                              <strong>{run.runId || "--"}</strong>
+                              <span>{statusLabel(run.status)}</span>
+                            </span>
+                            <span className={styles.worktreeRunItemMeta}>
+                              {isSelfEvolutionWorktreeRun(run) ? t("selfWorktreeReviewSource") : t("closedLoopActive")}
+                              {" · "}
+                              {runReviewPending ? t("selfWorktreeReviewPending") : (run.phase || compactTimestamp(run.updatedAt))}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : null}
                 {highlightedIsSelfOrigin && highlightedWorktreeRun ? (

@@ -69,4 +69,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("triggerWorktreeAction(highlightedWorktreeRun, item.action)");
     expect(routeSource).toContain("selfWorktreeMergeRequiresReview");
   });
+
+  it("lets users select a recent worktree run for review actions", () => {
+    expect(routeSource).toContain("selectedWorktreeRunId");
+    expect(routeSource).toContain("setSelectedWorktreeRunId(activeRunId)");
+    expect(routeSource).toContain("setSelectedWorktreeRunId(worktreeRuns[0]?.runId ?? null)");
+    expect(routeSource).toContain("selectedWorktreeRun");
+    expect(routeSource).toContain("worktreeRunPicker");
+    expect(routeSource).toContain("worktreeRuns.slice(0, 6).map");
+    expect(routeSource).toContain("aria-pressed={selected}");
+    expect(routeSource).toContain("onClick={() => setSelectedWorktreeRunId(run.runId)}");
+  });
 });
