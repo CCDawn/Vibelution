@@ -4858,6 +4858,13 @@ def _is_session_turn_terminal(result: Any) -> bool:
         return True
     explicit_outcome = str(result.get("outcome") or result.get("task_outcome") or "").strip().lower()
 
+    if (
+        status == "completed"
+        and explicit_outcome != "progress"
+        and visible
+        and (has_conclusion_signal(visible) or has_next_action_signal(visible))
+    ):
+        return True
     if outcome in {"done", "blocked", "needs_input"}:
         return True
     if explicit_outcome == "progress":
@@ -4962,6 +4969,15 @@ def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested:
     if isinstance(result, dict):
         contract = build_chat_coding_result_contract(result)
         outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()
+        explicit_outcome = str(result.get("outcome") or result.get("task_outcome") or "").strip().lower()
+        visible = _visible_reply_candidate(result)
+        if (
+            normalized == "completed"
+            and explicit_outcome != "progress"
+            and visible
+            and (has_conclusion_signal(visible) or has_next_action_signal(visible))
+        ):
+            return "completed"
         if outcome == "progress":
             return "needs_continue"
     if normalized == "completed":
