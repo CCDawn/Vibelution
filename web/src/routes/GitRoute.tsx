@@ -10,7 +10,6 @@ import {
   GitCommitResponse,
   GitCommitsResponse,
   GitFileDiff,
-  GitStatusFile,
   GitStatusSummary,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
@@ -23,62 +22,22 @@ import {
   getSelectedGitFiles,
   getStagedFilesOutsideSelection,
 } from "./gitCommitUx";
+import {
+  configuredGitProfileId,
+  displayGitPath,
+  formatGitDateTime,
+  gitFileName,
+  gitFilterMatches,
+  GIT_FILTER_LABEL_KEYS,
+  GIT_FILTERS,
+  type GitFilter,
+} from "./gitRouteLogic";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./GitRoute.module.css";
 
-type GitFilter = "all" | "staged" | "unstaged" | "untracked" | "deleted";
-
-const FILTERS: GitFilter[] = ["all", "staged", "unstaged", "untracked", "deleted"];
 const GIT_CHANGE_PANEL_WIDTH_KEY = "vibelution.git.change-panel-width";
 const GIT_CHANGE_PANEL_BOUNDS = { min: 260, max: 520 };
 const GIT_CHANGE_PANEL_DEFAULT_WIDTH = 340;
-const FILTER_LABEL_KEYS = {
-  all: "gitFilterAll",
-  staged: "gitFilterStaged",
-  unstaged: "gitFilterUnstaged",
-  untracked: "gitFilterUntracked",
-  deleted: "gitFilterDeleted",
-} as const;
-
-function filterMatches(file: GitStatusFile, filter: GitFilter) {
-  if (filter === "all") {
-    return true;
-  }
-  return Boolean(file[filter]);
-}
-
-function displayPath(path: string) {
-  return path.replaceAll("\\", "/");
-}
-
-function fileName(path: string) {
-  return displayPath(path).split("/").at(-1) || path;
-}
-
-function formatDateTime(value: string, locale: string) {
-  if (!value) {
-    return "-";
-  }
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(locale, {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
-}
-
-function configuredGitProfileId(workspace?: ConfigWorkspace) {
-  const gitConfig = workspace?.publicConfig?.git;
-  if (!gitConfig || typeof gitConfig !== "object" || Array.isArray(gitConfig)) {
-    return "";
-  }
-  return String((gitConfig as Record<string, unknown>).commit_message_profile ?? "").trim();
-}
 
 export function GitRoute() {
   const { lang, t } = useAppI18n();
@@ -119,7 +78,7 @@ export function GitRoute() {
 
   const files = statusQuery.data?.files ?? [];
   const filteredFiles = useMemo(
-    () => files.filter((file) => filterMatches(file, activeFilter)),
+    () => files.filter((file) => gitFilterMatches(file, activeFilter)),
     [activeFilter, files],
   );
   const activeFile = files.find((file) => file.path === activePath) ?? null;
@@ -365,14 +324,14 @@ export function GitRoute() {
             <span className={styles.countPill}>{filteredFiles.length}</span>
           </div>
           <div className={styles.filterRow}>
-            {FILTERS.map((filter) => (
+            {GIT_FILTERS.map((filter) => (
               <button
                 key={filter}
                 type="button"
                 className={filter === activeFilter ? styles.filterButtonActive : styles.filterButton}
                 onClick={() => setActiveFilter(filter)}
               >
-                {t(FILTER_LABEL_KEYS[filter])}
+                {t(GIT_FILTER_LABEL_KEYS[filter])}
               </button>
             ))}
           </div>
@@ -410,8 +369,8 @@ export function GitRoute() {
                 </button>
                 <span className={styles.fileStatus}>{file.status}</span>
                 <button type="button" className={styles.fileCopyButton} onClick={() => setActivePath(file.path)}>
-                  <strong>{fileName(file.path)}</strong>
-                  <span className={styles.filePathText}>{displayPath(file.path)}</span>
+                  <strong>{gitFileName(file.path)}</strong>
+                  <span className={styles.filePathText}>{displayGitPath(file.path)}</span>
                   <span className={styles.fileBadgeRow}>
                     {isActive ? <span className={styles.fileBadgeActive}>{t("gitPreviewing")}</span> : null}
                     {isSelected ? <span className={styles.fileBadgeSelected}>{t("gitSelectedForCommit")}</span> : null}
@@ -482,7 +441,7 @@ export function GitRoute() {
                   {selectedFilePreview.map((file) => (
                     <article key={file.path} className={styles.scopeItem}>
                       <span>{file.status}</span>
-                      <strong>{displayPath(file.path)}</strong>
+                      <strong>{displayGitPath(file.path)}</strong>
                     </article>
                   ))}
                   {selectedOverflowCount ? <p className={styles.scopeMore}>{selectedOverflowText}</p> : null}
@@ -494,7 +453,7 @@ export function GitRoute() {
                 <div className={styles.scopeWarning}>
                   <strong>{t("gitStagedOutsideSelectionTitle")}</strong>
                   <p>{t("gitStagedOutsideSelectionHint")}</p>
-                  <span>{stagedOutsideSelection.slice(0, 3).map((file) => displayPath(file.path)).join(", ")}</span>
+                  <span>{stagedOutsideSelection.slice(0, 3).map((file) => displayGitPath(file.path)).join(", ")}</span>
                 </div>
               ) : null}
             </section>
@@ -574,7 +533,7 @@ export function GitRoute() {
                   <code>{commit.shortSha}</code>
                   <span>
                     <Clock3 size={13} />
-                    {formatDateTime(commit.authoredAt, locale)}
+                    {formatGitDateTime(commit.authoredAt, locale)}
                   </span>
                 </div>
                 <strong>{commit.subject}</strong>
