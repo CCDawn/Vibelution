@@ -3464,6 +3464,7 @@ function Start-ManagedBrowser {
     $browserArgs = @(
         "--user-data-dir=$browserProfileDir",
         "--app=$url",
+        "--force-dark-mode",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-session-crashed-bubble"
@@ -3483,6 +3484,8 @@ function Start-ManagedBrowser {
                 executable = $BrowserExecutable
                 launch_api = "gui_process_without_console"
                 console_window_suppressed = $true
+                app_chrome_theme = "dark"
+                fullscreen_forced = $false
             }
     }
     $proc = Start-GuiProcessWithoutConsole `

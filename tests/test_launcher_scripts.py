@@ -740,6 +740,18 @@ if ($browserText -notmatch "Start-GuiProcessWithoutConsole") {
 if ($browserText -notmatch "gui_process_without_console" -or $browserText -notmatch "console_window_suppressed") {
     throw "Start-ManagedBrowser does not log the no-console launch strategy."
 }
+if ($browserText -notmatch "--app=`$url") {
+    throw "Start-ManagedBrowser should keep using an app window so the web manifest can theme the chrome."
+}
+if ($browserText -notmatch '--force-dark-mode') {
+    throw "Start-ManagedBrowser should request dark app chrome for the managed browser window."
+}
+if ($browserText -match '--kiosk' -or $browserText -match '--start-fullscreen') {
+    throw "Start-ManagedBrowser should not hide the title bar by forcing kiosk or fullscreen mode."
+}
+if ($browserText -notmatch 'app_chrome_theme' -or $browserText -notmatch 'fullscreen_forced') {
+    throw "Start-ManagedBrowser should log the managed app chrome strategy."
+}
 
 $saveStateAst = $ast.Find({
     param($node)
