@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from core.evaluation.supervised_artifacts import (
+    build_decision_record_artifacts,
     build_case_diagnostic,
     build_case_diagnostics,
     load_project_json_artifact,
@@ -103,6 +104,36 @@ def test_load_project_json_artifact_reports_status_for_boundaries(tmp_path: Path
     unsafe = load_project_json_artifact(str(outside_path), project_root=tmp_path, label="demo")
     assert unsafe.status == "unsafe"
     assert unsafe.path is None
+
+
+def test_build_decision_record_artifacts_normalizes_record_fields(tmp_path: Path):
+    fallback_path = tmp_path / "workspace" / "supervised_evolution" / "decisions" / "run.json"
+    artifacts = build_decision_record_artifacts(
+        {
+            "policy_action": {"lineage_index_path": "workspace/lineage.json"},
+            "gates": [
+                "ignored",
+                {"name": "dry", "metrics": {}},
+                {
+                    "name": "gym_promotion",
+                    "metrics": {
+                        "promotion_proposal_path": "workspace/gym/proposals/proposal.json",
+                        "decision_path": "workspace/gym/decisions/decision.json",
+                    },
+                },
+            ],
+            "case_summaries": ["ignored", {"case_id": "case_1"}],
+        },
+        fallback_decision_path=fallback_path,
+    )
+
+    assert artifacts.policy_action == {"lineage_index_path": "workspace/lineage.json"}
+    assert [gate["name"] for gate in artifacts.gates] == ["dry", "gym_promotion"]
+    assert artifacts.case_summaries == [{"case_id": "case_1"}]
+    assert artifacts.decision_path == str(fallback_path)
+    assert artifacts.lineage_index_path == "workspace/lineage.json"
+    assert artifacts.gym_proposal_path == "workspace/gym/proposals/proposal.json"
+    assert artifacts.gym_decision_path == "workspace/gym/decisions/decision.json"
 
 
 def test_build_case_diagnostic_filters_empty_static_case():
