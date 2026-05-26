@@ -1197,6 +1197,162 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_first_run_prerequisites_are_logged_before_bootstrap(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+function Get-FunctionText {
+    param([string]$Name)
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $Name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$Name was not found."
+    }
+    return $functionAst.Extent.Text
+}
+
+$prereqText = Get-FunctionText -Name "Assert-LauncherSystemPrerequisites"
+$prereqEventText = Get-FunctionText -Name "Write-BootstrapPrerequisiteEvent"
+$startText = Get-FunctionText -Name "Start-ManagedSession"
+
+foreach ($required in @(
+    "Get-Command\\s+python",
+    "Resolve-NpmCommand",
+    "Resolve-EdgeExecutable",
+    "bootstrap.prerequisite",
+    "system_prerequisites",
+    "Missing system prerequisites for first startup"
+)) {
+    if ($prereqText -notmatch $required -and $prereqEventText -notmatch $required) {
+        throw "First-run prerequisite flow is missing '$required'."
+    }
+}
+
+$prereqIndex = $startText.IndexOf("Assert-LauncherSystemPrerequisites")
+$pythonIndex = $startText.IndexOf("Ensure-ProjectPythonDependencies")
+$frontendIndex = $startText.IndexOf("Ensure-WebBuild")
+$runtimeIndex = $startText.IndexOf("Resolve-PythonRuntime")
+if ($prereqIndex -lt 0 -or $pythonIndex -lt 0 -or $frontendIndex -lt 0 -or $runtimeIndex -lt 0) {
+    throw "Start-ManagedSession is missing one of the bootstrap phases."
+}
+if (-not ($prereqIndex -lt $pythonIndex -and $pythonIndex -lt $frontendIndex -and $frontendIndex -lt $runtimeIndex)) {
+    throw "Start-ManagedSession should run prerequisites, Python bootstrap, frontend build, then backend runtime selection."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_first_run_prerequisite_failures_are_actionable(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @("Resolve-NpmCommand", "Write-BootstrapPrerequisiteEvent", "Assert-LauncherSystemPrerequisites")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:controlEvents = @()
+$script:runtimeEvents = @()
+$script:currentRuntimeSceneId = "test-scene"
+$projectDir = Join-Path $env:TEMP ("vibelution-prereq-" + [guid]::NewGuid().ToString("N"))
+$projectVenvDir = Join-Path $projectDir ".venv"
+$preferredPythonExe = Join-Path $projectVenvDir "Scripts\\python.exe"
+New-Item -ItemType Directory -Path $projectDir -Force | Out-Null
+
+function Get-Command {
+    param([string]$Name)
+    return $null
+}
+function Write-LauncherControlLog {
+    param([string]$Event, [string]$Message, [string]$Level = "info", [hashtable]$Fields = @{})
+    $script:controlEvents += ,@{ event = $Event; level = $Level; message = $Message; fields = $Fields }
+}
+function Write-RuntimeSceneEvent {
+    param(
+        [string]$Component,
+        [string]$Phase,
+        [string]$EventCode,
+        [string]$Message,
+        [string]$Level = "info",
+        [string]$Outcome = "observed",
+        [hashtable]$Fields = @{}
+    )
+    $script:runtimeEvents += ,@{ component = $Component; phase = $Phase; eventCode = $EventCode; outcome = $Outcome; level = $Level; fields = $Fields }
+}
+
+$message = ""
+try {
+    Assert-LauncherSystemPrerequisites -BrowserRequired $false
+} catch {
+    $message = $_.Exception.Message
+}
+
+if ($message -notmatch "Missing system prerequisites for first startup") {
+    throw "Missing prerequisite failure was not actionable: $message"
+}
+if ($message -notmatch "Python" -or $message -notmatch "Node.js/npm") {
+    throw "Missing prerequisite failure did not name Python and Node/npm: $message"
+}
+if (@($script:controlEvents | Where-Object { $_.event -eq "bootstrap.prerequisite.missing" }).Count -lt 2) {
+    throw "Missing prerequisites were not written to launcher control log."
+}
+if (@($script:runtimeEvents | Where-Object { $_.eventCode -eq "bootstrap.prerequisite.missing" -and $_.phase -eq "system_prerequisites" }).Count -lt 2) {
+    throw "Missing prerequisites were not written to runtime scene lifecycle."
+}
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_virtualenv_bootstrap_is_idempotent(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,

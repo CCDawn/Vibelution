@@ -1845,6 +1845,115 @@ function Resolve-NpmCommand {
     return $npm.Source
 }
 
+function Write-BootstrapPrerequisiteEvent {
+    param(
+        [string]$Name,
+        [string]$Status,
+        [string]$Message,
+        [string]$Level = "info",
+        [hashtable]$Fields = @{}
+    )
+
+    $eventCode = "bootstrap.prerequisite.$Status"
+    $payloadFields = if ($Fields) { $Fields.Clone() } else { @{} }
+    $payloadFields["name"] = $Name
+
+    Write-LauncherControlLog `
+        -Event $eventCode `
+        -Message $Message `
+        -Level $Level `
+        -Fields $payloadFields
+
+    if ($script:currentRuntimeSceneId) {
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "system_prerequisites" `
+            -EventCode $eventCode `
+            -Message $Message `
+            -Level $Level `
+            -Outcome $(if ($Status -eq "missing") { "failed" } else { "succeeded" }) `
+            -Fields $payloadFields
+    }
+}
+
+function Assert-LauncherSystemPrerequisites {
+    param([bool]$BrowserRequired = $true)
+
+    $missing = New-Object System.Collections.Generic.List[string]
+
+    if (-not (Test-Path -LiteralPath $preferredPythonExe)) {
+        $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+        if ($pythonCommand) {
+            Write-BootstrapPrerequisiteEvent `
+                -Name "python" `
+                -Status "available" `
+                -Message "System Python is available for first-run virtualenv bootstrap." `
+                -Fields @{ path = $pythonCommand.Source; required_for = "create .venv" }
+        } else {
+            [void]$missing.Add("Python 3.11 or 3.12 on PATH")
+            Write-BootstrapPrerequisiteEvent `
+                -Name "python" `
+                -Status "missing" `
+                -Message "System Python is required to create the project virtual environment." `
+                -Level "error" `
+                -Fields @{ required_for = "create .venv" }
+        }
+    } else {
+        Write-BootstrapPrerequisiteEvent `
+            -Name "project_python" `
+            -Status "available" `
+            -Message "Project virtual environment already exists." `
+            -Fields @{ path = $preferredPythonExe }
+    }
+
+    try {
+        $npmCommand = Resolve-NpmCommand
+        Write-BootstrapPrerequisiteEvent `
+            -Name "npm" `
+            -Status "available" `
+            -Message "npm is available for frontend dependency install and build." `
+            -Fields @{ path = $npmCommand; required_for = "web dependencies and build" }
+    } catch {
+        [void]$missing.Add("Node.js/npm on PATH")
+        Write-BootstrapPrerequisiteEvent `
+            -Name "npm" `
+            -Status "missing" `
+            -Message "npm is required to install frontend dependencies and build web/dist." `
+            -Level "error" `
+            -Fields @{ required_for = "web dependencies and build"; error = $_.Exception.Message }
+    }
+
+    if ($BrowserRequired) {
+        try {
+            $edgeExecutable = Resolve-EdgeExecutable
+            Write-BootstrapPrerequisiteEvent `
+                -Name "edge" `
+                -Status "available" `
+                -Message "Microsoft Edge is available for the managed app window." `
+                -Fields @{ path = $edgeExecutable; required_for = "managed browser window" }
+        } catch {
+            [void]$missing.Add("Microsoft Edge")
+            Write-BootstrapPrerequisiteEvent `
+                -Name "edge" `
+                -Status "missing" `
+                -Message "Microsoft Edge is required to open the managed app window." `
+                -Level "error" `
+                -Fields @{ required_for = "managed browser window"; error = $_.Exception.Message }
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        $summary = ($missing | Sort-Object -Unique) -join ", "
+        throw "Missing system prerequisites for first startup: $summary. Install them and start Vibelution again."
+    }
+
+    Write-BootstrapPrerequisiteEvent `
+        -Name "first_run_environment" `
+        -Status "ready" `
+        -Message "System prerequisites are ready for first-run bootstrap." `
+        -Fields @{ browser_required = [bool]$BrowserRequired }
+}
+
 function ConvertTo-ProcessArgument {
     param([AllowNull()][string]$Value)
 
@@ -4394,8 +4503,9 @@ function Start-ManagedSession {
     Initialize-RuntimeScene -Trigger $Action -BrowserManaged (-not $NoBrowser)
 
     try {
-        Ensure-WebBuild
+        Assert-LauncherSystemPrerequisites -BrowserRequired (-not $NoBrowser)
         Ensure-ProjectPythonDependencies
+        Ensure-WebBuild
 
         $pythonRuntime = Resolve-PythonRuntime
         $managedSessionId = [guid]::NewGuid().ToString()
