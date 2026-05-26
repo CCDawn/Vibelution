@@ -136,7 +136,7 @@ $env:MINIMAX_API_KEY="your-api-key"
 python scripts/web_workbench.py --reload
 ```
 
-默认监听 `http://127.0.0.1:8000`。如果只跑前端开发服务器：
+默认监听 `http://127.0.0.1:8000`，并保持无浏览器窗口；桌面入口和 launcher 负责打开托管窗口。调试时如果确实要打开系统默认浏览器，可显式追加 `--open-browser`。如果只跑前端开发服务器：
 
 ```bash
 cd web

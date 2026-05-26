@@ -23,6 +23,7 @@ from .constants import (
     DAEMON_STDOUT_PATH,
     EVENTS_PATH,
     PROJECT_ROOT,
+    RESULTS_DIR,
     STATE_PATH,
     ensure_runtime_manager_dirs,
 )
@@ -103,6 +104,18 @@ def _active_command_is_recent(state: dict[str, Any]) -> bool:
         parsed = parsed.replace(tzinfo=UTC)
     age_seconds = (datetime.now(UTC) - parsed.astimezone(UTC)).total_seconds()
     return age_seconds < _ACTIVE_COMMAND_RESTART_GRACE_SECONDS
+
+
+def _command_result_is_completed(command_id: str) -> bool:
+    normalized = str(command_id or "").strip()
+    if not normalized:
+        return False
+    result_path = RESULTS_DIR / f"{normalized}.json"
+    try:
+        payload = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(isinstance(payload, dict) and payload.get("completed"))
 
 
 def _terminate_daemon_process(pid: int) -> None:
@@ -1152,7 +1165,28 @@ class RuntimeManagerDaemon:
         desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"
         observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
         phase = str(workbench.get("phase") or "steady").strip() or "steady"
-        active_command = str(state.setdefault("command", {}).get("activeCommandId") or "").strip()
+        command_state = state.setdefault("command", {})
+        active_command = str(command_state.get("activeCommandId") or "").strip()
+        if active_command and _command_result_is_completed(active_command):
+            _append_event(
+                "command.active_completed_cleared",
+                {
+                    "commandId": active_command,
+                    "activeType": str(command_state.get("activeType") or ""),
+                    "requestedBy": str(command_state.get("requestedBy") or ""),
+                },
+            )
+            command_state.update(
+                {
+                    "activeCommandId": "",
+                    "activeType": "",
+                    "requestedBy": "",
+                    "startedAt": "",
+                    "stopManager": False,
+                    "noBrowser": False,
+                }
+            )
+            active_command = ""
         previous_frontend_orphaned = bool(workbench.get("frontendOrphaned"))
         consistency_fields = _workbench_consistency_fields(observation)
         orphaned_browser = bool(consistency_fields["frontendOrphaned"])
@@ -1193,6 +1227,33 @@ class RuntimeManagerDaemon:
             else:
                 phase = "failed"
                 _append_event("workbench.consistency.orphaned_browser_cleanup_failed", cleanup_payload)
+
+        if (
+            not active_command
+            and desired_state == "closed"
+            and phase not in {"opening", "closing", "failed"}
+            and int(residual_processes.get("count") or 0) > 0
+        ):
+            cleanup_payload = {
+                "desiredState": desired_state,
+                "observedState": observed_state,
+                "lifecycleConsistency": str(consistency_fields["lifecycleConsistency"]),
+                "residualProcesses": residual_processes,
+            }
+            _append_event("workbench.consistency.closed_residual_cleanup_requested", cleanup_payload)
+            cleanup_result = self._cleanup_residual_workbench_processes()
+            cleanup_payload = cleanup_payload | {"cleanup": cleanup_result}
+            if isinstance(cleanup_result, dict) and not cleanup_result.get("remaining"):
+                _append_event("workbench.consistency.closed_residual_cleanup_succeeded", cleanup_payload)
+            else:
+                _append_event("workbench.consistency.closed_residual_cleanup_incomplete", cleanup_payload)
+            observation = observe_workbench()
+            observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
+            consistency_fields = _workbench_consistency_fields(observation)
+            residual_processes = residual_process_payload(
+                project_root=PROJECT_ROOT,
+                exclude_pids=_snapshot_residual_excluded_pids(observation, self._pid),
+            )
 
         if not active_command and phase != "failed":
             if observed_state == "open" and desired_state != "open":

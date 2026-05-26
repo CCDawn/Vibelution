@@ -73,13 +73,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--host", default=DEFAULT_WORKBENCH_HOST)
     parser.add_argument("--port", type=int, default=default_port())
     parser.add_argument("--reload", action="store_true")
-    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the workbench URL in the default browser. The desktop launcher owns browser windows by default.",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Keep the server headless. Accepted for compatibility and takes precedence over --open-browser.",
+    )
     parser.add_argument(
         "--managed-by-launcher",
         action="store_true",
         help="Mark this process as owned by the Vibelution launcher/runtime manager.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    args.open_browser = bool(args.open_browser and not args.no_browser)
+    return args
 
 
 def install_access_log_filters() -> None:
@@ -92,7 +103,7 @@ def install_access_log_filters() -> None:
 def main() -> None:
     args = parse_args()
     url = f"http://{args.host}:{args.port}"
-    if not args.no_browser:
+    if args.open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     install_access_log_filters()
     uvicorn.run("core.web.app:app", host=args.host, port=args.port, reload=args.reload)
