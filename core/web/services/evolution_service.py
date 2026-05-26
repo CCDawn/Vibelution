@@ -14,7 +14,7 @@ from core.evaluation import (
     load_gym_promotion_lifecycle,
     load_workbench_state,
 )
-from core.evaluation.supervised_artifacts import build_case_diagnostics
+from core.evaluation.supervised_artifacts import build_case_diagnostics, load_project_json_object
 from core.evaluation.supervised_intake import self_evolution_candidate_risk_level
 from core.evaluation.self_evolution_candidate_pool import (
     ALLOWED_CANDIDATE_TYPES,
@@ -1917,16 +1917,7 @@ def _improvement_type_label(value: str, *, lang: str) -> str:
 
 
 def _load_json_object(path_value: str | Path | None, *, root: Path) -> dict[str, Any] | None:
-    if not path_value:
-        return None
-    path = _resolve_path(path_value, root=root)
-    if not path.exists():
-        return None
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) else None
+    return load_project_json_object(path_value, project_root=root)
 
 
 def _load_required_json_object(path_value: str | Path, *, root: Path, label: str) -> dict[str, Any]:
