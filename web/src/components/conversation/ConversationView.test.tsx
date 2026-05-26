@@ -237,6 +237,7 @@ describe("ConversationView edit resend affordance", () => {
         role: "assistant",
         content: "已暂停，等待继续。",
         timestamp: "2026-05-26T00:01:00Z",
+        streaming: true,
         mentalSnapshot: {
           mood: "focused",
           feeling: "tracking state",
@@ -253,6 +254,7 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("心智模型");
+    expect(html).toContain("tracking state");
     expect(html).not.toContain("执行了 1 个操作");
     expect(html).not.toContain("工具调用 1");
   });

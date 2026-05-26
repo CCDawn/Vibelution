@@ -48,7 +48,7 @@ describe("conversationOperations", () => {
         kind: "mental",
         label: "Mental model",
         status: "done",
-        summary: "",
+        summary: "Need a narrow pass",
         durationSeconds: null,
       },
       {
@@ -122,7 +122,7 @@ describe("conversationOperations", () => {
         kind: "mental",
         label: "Mental model",
         status: "running",
-        summary: "",
+        summary: "Still working",
         durationSeconds: null,
       },
       {
@@ -171,5 +171,30 @@ describe("conversationOperations", () => {
     expect(grouped.thoughts.map((item) => item.kind)).toEqual(["thought"]);
     expect(grouped.mental.map((item) => item.kind)).toEqual(["mental"]);
     expect(grouped.tools.map((item) => item.kind)).toEqual(["tool"]);
+  });
+
+  it("uses diagnosis summary when mental state details are otherwise empty", () => {
+    const message: ConversationMessage = {
+      id: "message-diagnosis",
+      role: "assistant",
+      content: "你好！我在。",
+      timestamp: "2026-05-26T14:33:52",
+      mentalSnapshot: {
+        mood: "",
+        feeling: "",
+        whisper: "",
+        summary: "当前以规则诊断为主，认知态：稳定。",
+        cognitiveState: "normal",
+        confidence: 0,
+        sampleSize: 0,
+        interventionCount: 0,
+        updatedAt: "2026-05-26T14:33:52.789770",
+        source: "diagnosis",
+      },
+    };
+
+    expect(buildConversationOperationGroups(message, labels).mental[0]?.summary).toBe(
+      "当前以规则诊断为主，认知态：稳定。",
+    );
   });
 });
