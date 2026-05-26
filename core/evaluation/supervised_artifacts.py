@@ -28,6 +28,17 @@ class SupervisedJsonArtifact:
     error: str = ""
 
 
+@dataclass(frozen=True)
+class SupervisedDecisionRecordArtifacts:
+    policy_action: dict[str, Any]
+    gates: list[dict[str, Any]]
+    case_summaries: list[dict[str, Any]]
+    decision_path: str
+    lineage_index_path: Any
+    gym_proposal_path: Any
+    gym_decision_path: Any
+
+
 def resolve_project_artifact_path(raw_path: Any, *, project_root: Path) -> Path | None:
     text = str(raw_path or "").strip()
     if not text:
@@ -142,6 +153,35 @@ def load_policy_proposal_artifact(
     return artifacts[0] if artifacts else None
 
 
+def build_decision_record_artifacts(
+    decision_payload: dict[str, Any],
+    *,
+    fallback_decision_path: Any = "",
+) -> SupervisedDecisionRecordArtifacts:
+    policy_action = (
+        decision_payload.get("policy_action")
+        if isinstance(decision_payload.get("policy_action"), dict)
+        else {}
+    )
+    gates = [gate for gate in _list_of_dicts(decision_payload.get("gates"))]
+    case_summaries = [case for case in _list_of_dicts(decision_payload.get("case_summaries"))]
+    gym_proposal_path = None
+    gym_decision_path = None
+    for gate in gates:
+        metrics = gate.get("metrics") if isinstance(gate.get("metrics"), dict) else {}
+        gym_proposal_path = gym_proposal_path or metrics.get("promotion_proposal_path")
+        gym_decision_path = gym_decision_path or metrics.get("decision_path")
+    return SupervisedDecisionRecordArtifacts(
+        policy_action=policy_action,
+        gates=gates,
+        case_summaries=case_summaries,
+        decision_path=str(decision_payload.get("decision_path") or fallback_decision_path),
+        lineage_index_path=policy_action.get("lineage_index_path"),
+        gym_proposal_path=gym_proposal_path,
+        gym_decision_path=gym_decision_path,
+    )
+
+
 def build_case_diagnostic(case: dict[str, Any]) -> dict[str, Any] | None:
     metrics = case.get("difference_metrics") if isinstance(case.get("difference_metrics"), dict) else {}
     reasons = case.get("difference_reasons") if isinstance(case.get("difference_reasons"), list) else []
@@ -210,9 +250,17 @@ def _case_dict_field(case: dict[str, Any], intake_provenance: dict[str, Any], ke
     return value if isinstance(value, dict) else {}
 
 
+def _list_of_dicts(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
 __all__ = [
+    "SupervisedDecisionRecordArtifacts",
     "SupervisedJsonArtifact",
     "SupervisedPolicyProposalArtifact",
+    "build_decision_record_artifacts",
     "build_case_diagnostic",
     "build_case_diagnostics",
     "load_project_json_artifact",

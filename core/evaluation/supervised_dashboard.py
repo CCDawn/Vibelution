@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .supervised_artifacts import load_policy_proposal_artifact, policy_target_key
+from .supervised_artifacts import build_decision_record_artifacts, load_policy_proposal_artifact, policy_target_key
 from .supervised_workbench import load_gym_promotion_lifecycle
 
 
@@ -238,16 +238,10 @@ def build_supervised_dashboard(
 
 def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashboardRecord:
     project_root = path.parents[3]
-    policy_action = payload.get("policy_action") if isinstance(payload.get("policy_action"), dict) else {}
-    gates = payload.get("gates") if isinstance(payload.get("gates"), list) else []
-    case_summaries = payload.get("case_summaries") if isinstance(payload.get("case_summaries"), list) else []
-    risk_level, risk_reasons = _assess_risk(payload, gates)
-    gym_proposal_path = None
-    gym_decision_path = None
-    for gate in gates:
-        metrics = gate.get("metrics") if isinstance(gate, dict) and isinstance(gate.get("metrics"), dict) else {}
-        gym_proposal_path = gym_proposal_path or metrics.get("promotion_proposal_path")
-        gym_decision_path = gym_decision_path or metrics.get("decision_path")
+    artifacts = build_decision_record_artifacts(payload, fallback_decision_path=path)
+    risk_level, risk_reasons = _assess_risk(payload, artifacts.gates)
+    gym_proposal_path = artifacts.gym_proposal_path
+    gym_decision_path = artifacts.gym_decision_path
     lifecycle = load_gym_promotion_lifecycle(payload, project_root=project_root)
     policy_proposal = load_policy_proposal_artifact(payload, project_root=project_root)
     if lifecycle.status == "missing" and policy_proposal:
@@ -277,10 +271,10 @@ def _record_from_payload(payload: dict[str, Any], path: Path) -> SupervisedDashb
         score_delta=_as_float(payload.get("score_delta")),
         risk_level=risk_level,
         risk_reasons=risk_reasons,
-        gates=[gate for gate in gates if isinstance(gate, dict)],
-        case_summaries=[case for case in case_summaries if isinstance(case, dict)],
-        decision_path=str(payload.get("decision_path") or path),
-        lineage_index_path=policy_action.get("lineage_index_path"),
+        gates=artifacts.gates,
+        case_summaries=artifacts.case_summaries,
+        decision_path=artifacts.decision_path,
+        lineage_index_path=artifacts.lineage_index_path,
         gym_proposal_path=str(gym_proposal_path) if gym_proposal_path else None,
         gym_decision_path=str(gym_decision_path) if gym_decision_path else None,
         gym_proposal_status=lifecycle_status,

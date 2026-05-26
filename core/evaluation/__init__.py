@@ -23,8 +23,10 @@ from .supervised_dashboard import (
 )
 from .selection_policy import PolicyExecutionRecord, execute_supervised_policy
 from .supervised_artifacts import (
+    SupervisedDecisionRecordArtifacts,
     SupervisedJsonArtifact,
     SupervisedPolicyProposalArtifact,
+    build_decision_record_artifacts,
     build_case_diagnostic,
     build_case_diagnostics,
     load_project_json_artifact,
@@ -149,8 +151,10 @@ __all__ = [
     "load_supervised_bundle",
     "PolicyExecutionRecord",
     "execute_supervised_policy",
+    "SupervisedDecisionRecordArtifacts",
     "SupervisedJsonArtifact",
     "SupervisedPolicyProposalArtifact",
+    "build_decision_record_artifacts",
     "build_case_diagnostic",
     "build_case_diagnostics",
     "load_project_json_artifact",
