@@ -14,6 +14,10 @@ from typing import Any, Dict, List
 from config import get_config
 
 DEFAULT_OBSERVATION_BUDGET = 3
+SUPERVISED_BASELINE_SCOPE = "supervised_frozen_evaluator"
+SUPERVISED_POLICY_ARTIFACT_SCOPE = "supervised_policy_artifact"
+SUPERVISED_POLICY_RUNTIME_EFFECT = "not_applied"
+SUPERVISED_POLICY_AGENT_CONSUMPTION = "advisory"
 _SAFE_PROPOSAL_FILE_STEM_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 _WINDOWS_RESERVED_FILE_STEMS = {
     "CON",
@@ -148,6 +152,20 @@ def _target_for_case(bundle_name: str, case_id: str) -> Dict[str, Any]:
     }
 
 
+def _supervision_boundary_payload(*, policy_action: str, proposal_status: str) -> Dict[str, Any]:
+    return {
+        "scope": SUPERVISED_BASELINE_SCOPE,
+        "accepted_baseline_registry_scope": SUPERVISED_POLICY_ARTIFACT_SCOPE,
+        "policy_action": str(policy_action or "").strip(),
+        "proposal_status": str(proposal_status or "").strip(),
+        "runtime_effect": SUPERVISED_POLICY_RUNTIME_EFFECT,
+        "agent_consumption": SUPERVISED_POLICY_AGENT_CONSUMPTION,
+        "promote_updates_runtime": False,
+        "runtime_prompt_override_allowed": False,
+        "runtime_config_update_allowed": False,
+    }
+
+
 def _run_has_boundary_issue(run: Any) -> bool:
     summary = getattr(run, "evolution_summary", None)
     if not isinstance(summary, dict):
@@ -208,6 +226,9 @@ def _case_evidence_payload(
     if proposal_payload is not None:
         evidence["proposal_id"] = str(proposal_payload.get("proposal_id") or "")
         evidence["proposal_status"] = str(proposal_payload.get("status") or "")
+        evidence["runtime_effect"] = str(proposal_payload.get("runtime_effect") or "")
+        evidence["agent_consumption"] = str(proposal_payload.get("agent_consumption") or "")
+        evidence["supervision_boundary"] = dict(proposal_payload.get("supervision_boundary") or {})
     if proposal_path is not None:
         evidence["proposal_path"] = str(proposal_path)
     return evidence
@@ -236,6 +257,10 @@ def _write_proposal(
             expiration_reason = "observation_budget_exhausted"
     elif observation_count <= 0:
         observation_count = 1
+    supervision_boundary = _supervision_boundary_payload(
+        policy_action=decision.decision,
+        proposal_status=status,
+    )
     proposal_payload = {
         "proposal_id": proposal_id,
         "session_id": decision.session_id,
@@ -260,6 +285,12 @@ def _write_proposal(
         "evidence_paths": dict(getattr(case_summary, "evidence_paths", {}) or {}),
         "intake_provenance": dict(getattr(case_summary, "intake_provenance", {}) or {}),
         "status": status,
+        "supervised_decision": decision.decision,
+        "policy_action": decision.decision,
+        "proposal_status": status,
+        "runtime_effect": SUPERVISED_POLICY_RUNTIME_EFFECT,
+        "agent_consumption": SUPERVISED_POLICY_AGENT_CONSUMPTION,
+        "supervision_boundary": supervision_boundary,
         "decision": decision.decision,
         "decision_path": decision.decision_path,
         "observation_count": observation_count,
@@ -428,6 +459,15 @@ def execute_supervised_policy(
                 "promoted_at": decision.ended_at,
                 "decision": decision.decision,
                 "score_delta": decision.score_delta,
+                "scope": SUPERVISED_BASELINE_SCOPE,
+                "policy_action": decision.decision,
+                "proposal_status": "promoted",
+                "runtime_effect": SUPERVISED_POLICY_RUNTIME_EFFECT,
+                "agent_consumption": SUPERVISED_POLICY_AGENT_CONSUMPTION,
+                "supervision_boundary": _supervision_boundary_payload(
+                    policy_action=decision.decision,
+                    proposal_status="promoted",
+                ),
             }
         bundle_path.write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
         baseline_registry_path.write_text(json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8")
