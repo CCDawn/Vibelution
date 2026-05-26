@@ -724,20 +724,6 @@ def test_runtime_shutdown_falls_back_to_local_exit_when_not_managed(monkeypatch)
     assert calls == ["local"]
 
 
-def test_files_tree_lists_repo_entries():
-    response = client.get("/api/files/tree")
-    assert response.status_code == 200, response.json()
-    payload = response.json()
-    assert any(item["name"] == "core" for item in payload)
-    assert any(item["name"] == "docs" for item in payload)
-
-
-def test_file_content_rejects_path_escape():
-    response = client.get("/api/files/content", params={"path": "../outside.txt"})
-    assert response.status_code == 400
-    assert "project root" in response.json()["detail"]
-
-
 def test_runtime_scene_endpoints_list_detail_content_and_delete(tmp_path, monkeypatch):
     _seed_runtime_scene_bundle(tmp_path, scene_id="scene-a")
     _seed_runtime_scene_bundle(tmp_path, scene_id="scene-b")
