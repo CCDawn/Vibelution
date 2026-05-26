@@ -307,6 +307,35 @@ def load_gym_promotion_lifecycle(
     )
 
 
+def _record_proposal_action_scene_event(
+    event_code: str,
+    *,
+    action: str,
+    outcome: str,
+    fields: dict[str, Any] | None = None,
+    level: str = "info",
+    message: str = "",
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "supervised_proposal_action",
+            "execute",
+            event_code,
+            message=message or event_code,
+            level=level,
+            outcome=outcome,
+            fields={
+                "action": str(action or "").strip().lower(),
+                **(fields or {}),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
 def execute_gym_promotion_action(
     decision_source: Any,
     action: str,
@@ -316,6 +345,20 @@ def execute_gym_promotion_action(
     root = _resolve_project_root(project_root)
     lifecycle = load_gym_promotion_lifecycle(decision_source, project_root=root)
     if action not in lifecycle.available_actions:
+        _record_proposal_action_scene_event(
+            "supervised_proposal_action.blocked",
+            action=action,
+            outcome="blocked",
+            level="warning",
+            message="Supervised proposal action blocked by current lifecycle status.",
+            fields={
+                "statusBefore": lifecycle.status,
+                "proposalId": lifecycle.proposal_id or "",
+                "proposalPath": lifecycle.proposal_path or "",
+                "supervisedDecisionPath": lifecycle.supervised_decision_path or "",
+                "availableActions": list(lifecycle.available_actions),
+            },
+        )
         raise ValueError(f"Gym promotion proposal 当前状态={lifecycle.status}，不能执行 {action}")
     if not lifecycle.proposal_path:
         raise ValueError("当前监督结果没有可操作的 Gym promotion proposal")
@@ -365,6 +408,23 @@ def execute_gym_promotion_action(
         raise ValueError(f"未知 Gym proposal 动作: {action}")
 
     refreshed = load_gym_promotion_lifecycle(decision_source, project_root=root)
+    _record_proposal_action_scene_event(
+        "supervised_proposal_action.executed",
+        action=action,
+        outcome="succeeded",
+        message="Supervised proposal action executed.",
+        fields={
+            "proposalId": lifecycle.proposal_id or "",
+            "statusBefore": lifecycle.status,
+            "statusAfter": refreshed.status,
+            "runtimeEffect": refreshed.runtime_effect,
+            "agentConsumption": refreshed.agent_consumption,
+            "proposalPath": lifecycle.proposal_path or refreshed.proposal_path or "",
+            "supervisedDecisionPath": lifecycle.supervised_decision_path or refreshed.supervised_decision_path or "",
+            "gymDecisionPath": refreshed.gym_decision_path or "",
+            "traceIndexPath": refreshed.trace_index_path or "",
+        },
+    )
     return SupervisedGymProposalActionResult(
         action=action,
         proposal_id=lifecycle.proposal_id,

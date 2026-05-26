@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from core.gym import run_gym_collection_episode
 from core.gym.promotion import activate_gym_promotion_proposal, apply_gym_promotion_proposal
 from core.evaluation.supervised_workbench import (
@@ -382,6 +384,90 @@ def test_execute_gym_promotion_action_refreshes_lifecycle(tmp_path: Path):
     assert action.action == "apply"
     assert action.lifecycle.status == "applied"
     assert "status: applied" in action.summary
+
+
+def test_execute_gym_promotion_action_records_lifecycle_event(tmp_path: Path, monkeypatch):
+    events = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "event_code": event_code,
+                **kwargs,
+            }
+        )
+
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event",
+        fake_record_runtime_scene_event,
+    )
+    result = run_gym_collection_episode(
+        collection_id="foundation_local_stability",
+        project_root=tmp_path,
+        adapter=RunnerFakeAdapter(),
+        episode_id="supervised_lifecycle_event",
+    )
+    decision_path = _write_supervised_decision(tmp_path, result.promotion_proposal_path, result.decision_path)
+
+    action = execute_gym_promotion_action(str(decision_path), "apply", project_root=tmp_path)
+
+    assert action.lifecycle.status == "applied"
+    event = next(item for item in events if item["event_code"] == "supervised_proposal_action.executed")
+    assert event["component"] == "supervised_proposal_action"
+    assert event["phase"] == "execute"
+    assert event["outcome"] == "succeeded"
+    assert event["lifecycle"] is True
+    assert event["fields"]["action"] == "apply"
+    assert event["fields"]["proposalId"] == action.proposal_id
+    assert event["fields"]["statusBefore"] == "proposed"
+    assert event["fields"]["statusAfter"] == "applied"
+    assert event["fields"]["runtimeEffect"] == "not_applied"
+    assert event["fields"]["agentConsumption"] == "advisory"
+    assert event["fields"]["supervisedDecisionPath"] == str(decision_path)
+    assert event["fields"]["proposalPath"] == str(Path(result.promotion_proposal_path).resolve())
+
+
+def test_execute_gym_promotion_action_records_blocked_lifecycle_event(tmp_path: Path, monkeypatch):
+    events = []
+
+    def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+        events.append(
+            {
+                "component": component,
+                "phase": phase,
+                "event_code": event_code,
+                **kwargs,
+            }
+        )
+
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event",
+        fake_record_runtime_scene_event,
+    )
+    result = run_gym_collection_episode(
+        collection_id="foundation_local_stability",
+        project_root=tmp_path,
+        adapter=RunnerFakeAdapter(),
+        episode_id="supervised_lifecycle_blocked_event",
+    )
+    decision_path = _write_supervised_decision(tmp_path, result.promotion_proposal_path, result.decision_path)
+
+    with pytest.raises(ValueError, match="不能执行 activate"):
+        execute_gym_promotion_action(str(decision_path), "activate", project_root=tmp_path)
+
+    event = next(item for item in events if item["event_code"] == "supervised_proposal_action.blocked")
+    assert event["component"] == "supervised_proposal_action"
+    assert event["phase"] == "execute"
+    assert event["outcome"] == "blocked"
+    assert event["level"] == "warning"
+    assert event["lifecycle"] is True
+    assert event["fields"]["action"] == "activate"
+    assert event["fields"]["proposalId"]
+    assert event["fields"]["statusBefore"] == "proposed"
+    assert event["fields"]["availableActions"] == ["apply"]
+    assert event["fields"]["supervisedDecisionPath"] == str(decision_path)
 
 
 def _write_supervised_decision(tmp_path: Path, proposal_path: str, gym_decision_path: str) -> Path:
