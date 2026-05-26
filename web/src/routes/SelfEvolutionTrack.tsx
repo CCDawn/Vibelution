@@ -40,6 +40,7 @@ type SelfEvolutionTrackProps = {
   goalInput: string;
   onGoalInputChange: (value: string) => void;
   onStartRun: () => void;
+  onStartWorktreeRun: () => void;
   onPauseRun: () => void;
   onResumeRun: () => void;
   onTerminateRun: () => void;
@@ -47,6 +48,7 @@ type SelfEvolutionTrackProps = {
   onHandoffRun: () => void;
   onDeleteHistoryGroups: (txnIds: string[]) => void;
   startPending: boolean;
+  startWorktreePending: boolean;
   pausePending: boolean;
   resumePending: boolean;
   terminatePending: boolean;
@@ -54,6 +56,7 @@ type SelfEvolutionTrackProps = {
   handoffPending: boolean;
   deleteHistoryPending: boolean;
   startError: string;
+  startWorktreeError: string;
   pauseError: string;
   resumeError: string;
   terminateError: string;
@@ -62,6 +65,7 @@ type SelfEvolutionTrackProps = {
   deleteHistoryError: string;
   actionFeedback: string;
   runLocked: boolean;
+  worktreeRunLocked: boolean;
   transactions: SelfEvolutionTransaction[];
   loading: boolean;
 };
@@ -141,6 +145,16 @@ function isPausedRunStatus(status: string) {
   return String(status || "").trim().toLowerCase() === "paused";
 }
 
+function isWorktreeIsolationStartError(message: string) {
+  const text = String(message || "").toLowerCase();
+  return Boolean(text) && (
+    text.includes("worktree")
+    || text.includes("risky write")
+    || text.includes("监督工作树")
+    || text.includes("隔离工作树")
+  );
+}
+
 function readinessIcon(state: string) {
   const normalized = String(state).trim().toLowerCase();
   if (normalized === "ready" || normalized === "done" || normalized === "success") {
@@ -203,6 +217,7 @@ export function SelfEvolutionTrack({
   goalInput,
   onGoalInputChange,
   onStartRun,
+  onStartWorktreeRun,
   onPauseRun,
   onResumeRun,
   onTerminateRun,
@@ -210,6 +225,7 @@ export function SelfEvolutionTrack({
   onHandoffRun,
   onDeleteHistoryGroups,
   startPending,
+  startWorktreePending,
   pausePending,
   resumePending,
   terminatePending,
@@ -217,6 +233,7 @@ export function SelfEvolutionTrack({
   handoffPending,
   deleteHistoryPending,
   startError,
+  startWorktreeError,
   pauseError,
   resumeError,
   terminateError,
@@ -225,6 +242,7 @@ export function SelfEvolutionTrack({
   deleteHistoryError,
   actionFeedback,
   runLocked,
+  worktreeRunLocked,
   transactions,
   loading,
 }: SelfEvolutionTrackProps) {
@@ -340,8 +358,17 @@ export function SelfEvolutionTrack({
   const controlAction = String(latestRun?.controlAction || "").trim().toLowerCase();
   const terminateRequested = controlAction === "terminate" || String(latestRun?.status || "").toLowerCase() === "stopping";
   const pauseRequested = controlAction === "pause" || String(latestRun?.runtimeStatus || "").toLowerCase() === "pausing";
-  const errorMessage =
-    startError || pauseError || resumeError || terminateError || rollbackError || handoffError || deleteHistoryError;
+  const worktreeIsolationStartError = isWorktreeIsolationStartError(startError);
+  const errorMessage = collectUniqueLines([
+    startError,
+    startWorktreeError,
+    pauseError,
+    resumeError,
+    terminateError,
+    rollbackError,
+    handoffError,
+    deleteHistoryError,
+  ]).join("\n");
   const visibleTransactions = useMemo(() => transactionItems.slice(0, 8), [transactionItems]);
   const visibleAuditTrail = useMemo(() => (overview?.auditTail ?? []).slice(-8).reverse(), [overview?.auditTail]);
   const visibleTransactionIds = useMemo(
@@ -624,8 +651,23 @@ export function SelfEvolutionTrack({
                   <p className={styles.noticeText}>{disabledReason(startSelfAction)}</p>
                 ) : null}
                 {runLocked ? <p className={styles.noticeText}>{t("selfRunningLockHint")}</p> : null}
+                {worktreeRunLocked ? <p className={styles.noticeText}>{t("selfWorktreeRunningLockHint")}</p> : null}
                 {actionFeedback ? <p className={styles.feedbackText}>{actionFeedback}</p> : null}
                 {errorMessage ? <p className={styles.errorText}>{errorMessage}</p> : null}
+                {worktreeIsolationStartError ? (
+                  <div className={styles.worktreeEscalation}>
+                    <p className={styles.noticeText}>{t("selfWorktreeEscalationHint")}</p>
+                    <button
+                      type="button"
+                      className={styles.secondaryAction}
+                      disabled={runLocked || worktreeRunLocked || startWorktreePending}
+                      onClick={onStartWorktreeRun}
+                    >
+                      {startWorktreePending ? <LoaderCircle size={15} className={styles.spinning} /> : <ArrowUpRight size={15} />}
+                      {t("startSelfWorktreeRun")}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -808,7 +850,7 @@ export function SelfEvolutionTrack({
                 autoScrollToLatest={runIsActive}
                 composerValue={goalInput}
                 composerPlaceholder={t("selfGoalPlaceholder")}
-                composerDisabled={!startSelfAction?.enabled || runLocked || startPending}
+                composerDisabled={!startSelfAction?.enabled || runLocked || worktreeRunLocked || startPending}
                 composerPending={startPending}
                 submitLabel={t("startSelfRun")}
                 submitPendingLabel={t("loading")}

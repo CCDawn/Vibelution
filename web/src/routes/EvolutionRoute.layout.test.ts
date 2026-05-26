@@ -37,4 +37,12 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("runsQueueCollapsed");
     expect(routeSource).toContain("libraryListCollapsed");
   });
+
+  it("routes risky self-evolution writes into the supervised worktree endpoint", () => {
+    expect(routeSource).toContain("startSelfWorktreeRunMutation");
+    expect(routeSource).toContain('"/api/evolution/self/worktree-runs"');
+    expect(routeSource).toContain('mode: "manual"');
+    expect(routeSource).toContain("onStartWorktreeRun={() => startSelfWorktreeRunMutation.mutate()}");
+    expect(routeSource).toContain("startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? \"\"}");
+  });
 });

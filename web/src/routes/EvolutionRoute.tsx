@@ -371,7 +371,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     queryFn: () => fetchJson<EvolutionWorkbench>("/api/evolution/workbench"),
     refetchInterval: resolvePollingInterval(pageVisible, 8_000),
     refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled,
+    enabled: supervisedTrackQueriesEnabled
+      || (selfTrackQueriesEnabled && (configQuery.data?.modeAvailability.supervised_evolution ?? false)),
   });
   const overviewQuery = useQuery({
     queryKey: queryKeys.evolutionOverview(),
@@ -392,7 +393,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     queryFn: () => fetchJson<SupervisedWorktreeRun | null>("/api/evolution/worktree-runs/active"),
     refetchInterval: resolvePollingInterval(pageVisible, 4_000),
     refetchIntervalInBackground: false,
-    enabled: supervisedTrackQueriesEnabled,
+    enabled: supervisedTrackQueriesEnabled
+      || (selfTrackQueriesEnabled && (configQuery.data?.modeAvailability.supervised_evolution ?? false)),
   });
   const selfOverviewQuery = useQuery({
     queryKey: queryKeys.evolutionSelfOverview(),
@@ -573,6 +575,42 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       setSelfActionFeedback("");
       setLiveSelfRun(snapshot);
       await invalidateSelfEvolution();
+    },
+  });
+  const startSelfWorktreeRunMutation = useMutation({
+    onMutate: () => {
+      startSelfRunMutation.reset();
+      setSelfActionFeedback("");
+    },
+    mutationFn: () => {
+      const fallbackBundleName =
+        bundleNameInput.trim()
+        || workbenchQuery.data?.defaultBundleName
+        || workbenchQuery.data?.bundles?.[0]?.name
+        || "";
+      return fetchJson<SupervisedWorktreeRun>("/api/evolution/self/worktree-runs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          goal: selfGoalInput.trim(),
+          sourceKind: "bundle",
+          bundleName: fallbackBundleName,
+          mode: "manual",
+          executionMode: "simulation",
+          confirmRealLlmCost: false,
+          uiRoute: `${location.pathname}${location.search}`,
+        }),
+      });
+    },
+    onSuccess: async (snapshot) => {
+      setSelfActionFeedback(snapshot.latestMessage || t("startSelfWorktreeQueued"));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeActiveRun() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeRuns() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
+      ]);
     },
   });
   const stopSelfRunMutation = useMutation({
@@ -1995,6 +2033,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           goalInput={selfGoalInput}
           onGoalInputChange={setSelfGoalInput}
           onStartRun={() => startSelfRunMutation.mutate()}
+          onStartWorktreeRun={() => startSelfWorktreeRunMutation.mutate()}
           onPauseRun={() => monitoredSelfRun && pauseSelfRunMutation.mutate(monitoredSelfRun.runId)}
           onResumeRun={() => monitoredSelfRun && resumeSelfRunMutation.mutate(monitoredSelfRun.runId)}
           onTerminateRun={() => monitoredSelfRun && stopSelfRunMutation.mutate(monitoredSelfRun.runId)}
@@ -2002,6 +2041,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           onHandoffRun={() => monitoredSelfRun && handoffSelfRunMutation.mutate(monitoredSelfRun.runId)}
           onDeleteHistoryGroups={(txnIds) => deleteSelfHistoryMutation.mutate(txnIds)}
           startPending={startSelfRunMutation.isPending}
+          startWorktreePending={startSelfWorktreeRunMutation.isPending}
           pausePending={pauseSelfRunMutation.isPending}
           resumePending={resumeSelfRunMutation.isPending}
           terminatePending={stopSelfRunMutation.isPending}
@@ -2009,6 +2049,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           handoffPending={handoffSelfRunMutation.isPending}
           deleteHistoryPending={deleteSelfHistoryMutation.isPending}
           startError={startSelfRunMutation.error?.message ?? ""}
+          startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? ""}
           pauseError={pauseSelfRunMutation.error?.message ?? ""}
           resumeError={resumeSelfRunMutation.error?.message ?? ""}
           terminateError={stopSelfRunMutation.error?.message ?? ""}
@@ -2017,6 +2058,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           deleteHistoryError={deleteSelfHistoryMutation.error?.message ?? ""}
           actionFeedback={selfActionFeedback}
           runLocked={selfRunLocked}
+          worktreeRunLocked={worktreeRunLocked}
           transactions={selfTransactionsQuery.data ?? []}
           loading={selfOverviewQuery.isLoading || selfLatestRunQuery.isLoading || selfTransactionsQuery.isLoading}
         />
