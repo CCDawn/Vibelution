@@ -275,9 +275,17 @@ class WorkRunStore:
             "stopping",
             "done",
             "completed",
+            "needs_continue",
+            "paused_limit",
             "stopped",
+            "stopped_by_user",
+            "force_stopping",
+            "stop_failed",
             "failed",
+            "failed_provider",
+            "failed_runtime",
             "cancelled",
+            "superseded",
         }
         lifecycle_changed = previous_signature != current_signature
         _record_work_run_event(

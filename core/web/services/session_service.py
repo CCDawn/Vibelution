@@ -1723,7 +1723,17 @@ def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> s
     if _is_session_running(conversation_id):
         return "running"
     normalized = str(conversation.get("lastTurnStatus") or "").strip().lower()
-    if normalized in {"failed", "ready"}:
+    if normalized in {
+        "failed",
+        "ready",
+        "completed",
+        "needs_continue",
+        "paused_limit",
+        "stopped_by_user",
+        "failed_provider",
+        "failed_runtime",
+        "superseded",
+    }:
         return normalized
     if conversation.get("messages"):
         return "ready"
@@ -1822,7 +1832,7 @@ def _persist_chat_turn_work_run(
     started = str(started_at or previous.get("startedAt") or now).strip()
     finished = str(finished_at or previous.get("finishedAt") or "").strip()
     normalized_status = str(status or previous.get("status") or "running").strip().lower() or "running"
-    active_run_id = normalized_turn_id if normalized_status in {"queued", "running", "stopping", "paused"} else ""
+    active_run_id = normalized_turn_id if normalized_status in {"queued", "running", "stopping"} else ""
     payload = {
         **previous,
         "runId": normalized_turn_id,
@@ -1838,7 +1848,10 @@ def _persist_chat_turn_work_run(
         "error": str(error or previous.get("error") or "").strip(),
         "startedAt": started,
         "updatedAt": str(updated_at or now).strip(),
-        "finishedAt": finished if normalized_status in {"completed", "failed", "stopped", "cancelled"} else "",
+        "finishedAt": finished
+        if normalized_status
+        in {"completed", "failed", "stopped", "cancelled", "paused_limit", "needs_continue", "stopped_by_user"}
+        else "",
     }
     _WORK_RUN_STORE.persist_snapshot("chat_turn", payload, active_run_id=active_run_id)
 
@@ -2137,7 +2150,7 @@ def _run_session_continuation_loop(
     if _is_continue_request(prompt):
         resume_goal = _latest_unfinished_task_goal(session_id)
         if resume_goal:
-            prompt = f"继续完成上一任务：{resume_goal}"
+            prompt = resume_goal
             _set_session_turn_progress_live_output(
                 session_id,
                 "history_restore",
@@ -2151,7 +2164,21 @@ def _run_session_continuation_loop(
                 fields={
                     "resumeGoalLength": len(resume_goal),
                     "historyMessageCount": len(history_messages),
+                    "promptSource": "resume_goal",
+                    "preservesOriginalGoal": True,
                 },
+            )
+            _record_session_turn_trace_event(
+                session_id,
+                getattr(turn_control, "turn_id", ""),
+                "continue",
+                {
+                    "resumeGoalLength": len(resume_goal),
+                    "historyMessageCount": len(history_messages),
+                    "promptSource": "resume_goal",
+                },
+                status="running",
+                summary="Continue command resolved to the existing user goal.",
             )
 
     result: Any = None
@@ -2459,15 +2486,19 @@ def _persist_session_turn_result(
             conversation["active_task"] = next_active_task
         conversation.pop("last_turn_error", None)
         conversation.pop("lastTurnError", None)
-        conversation["last_turn_status"] = "failed" if result_status == "failed" else "ready"
+        final_status = _chat_turn_result_status(result_status, result, stop_requested=stop_requested)
+        conversation["last_turn_status"] = (
+            "failed"
+            if final_status in {"failed_provider", "failed_runtime", "failed"}
+            else ("paused_limit" if final_status == "paused_limit" else "ready")
+        )
         conversation["updated_at"] = assistant_entry["timestamp"]
         payload["updated_at"] = assistant_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, payload)
         _clear_session_live_output(session_id)
-        if result_status == "completed" and not stop_requested:
+        if final_status == "completed":
             capture_messages = list(conversation["messages"])
         cycle_active_task = next_active_task
-        final_status = "stopped" if stop_requested else ("completed" if result_status == "completed" else (result_status or "completed"))
         _persist_chat_turn_work_run(
             session_id=session_id,
             turn_id=turn_id,
@@ -2514,10 +2545,10 @@ def _persist_session_turn_result(
         _record_session_turn_result_log(
             session_id,
             turn_id,
-            status="stopped_by_user" if stop_requested else ("completed" if result_status == "completed" else (result_status or "completed")),
+            status=final_status,
             summary=assistant_text,
             recovery_pointer={
-                "resumeAllowed": final_status in {"stopped", "paused", "needs_continue"},
+                "resumeAllowed": final_status in {"stopped_by_user", "paused_limit", "needs_continue"},
                 "toolCallCount": len(tool_calls),
                 "hasMentalSnapshot": bool(assistant_entry.get("mental_snapshot")),
             },
@@ -2541,7 +2572,7 @@ def _persist_session_turn_result(
         session_id,
         assistant_entry,
         event="assistant_result",
-        status="stopped" if stop_requested else (result_status or "ready"),
+        status=final_status,
         active_task=cycle_active_task,
     )
     if capture_messages:
@@ -4630,6 +4661,36 @@ def _annotate_continuation_result(
     return result
 
 
+def _chat_turn_result_status(result_status: str, result: Any, *, stop_requested: bool) -> str:
+    if stop_requested:
+        return "stopped_by_user"
+    normalized = str(result_status or "").strip().lower()
+    metadata = dict(result.get("metadata") or {}) if isinstance(result, dict) and isinstance(result.get("metadata"), dict) else {}
+    if bool(metadata.get("continuation_limit_reached")):
+        return "paused_limit"
+    if isinstance(result, dict):
+        contract = build_chat_coding_result_contract(result)
+        outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()
+        if outcome == "progress":
+            return "needs_continue"
+    if normalized == "completed":
+        return "completed"
+    if normalized in {
+        "needs_continue",
+        "paused_limit",
+        "stopped_by_user",
+        "force_stopping",
+        "stop_failed",
+        "failed_provider",
+        "failed_runtime",
+        "superseded",
+    }:
+        return normalized
+    if normalized in {"failed", "timeout", "error"}:
+        return "failed_runtime"
+    return normalized or "completed"
+
+
 def _build_continuation_limit_result(result: Any, turn_count: int, max_turns: int) -> dict[str, Any]:
     base = dict(result or {}) if isinstance(result, dict) else {}
     contract = build_chat_coding_result_contract(base)
@@ -4649,7 +4710,7 @@ def _build_continuation_limit_result(result: Any, turn_count: int, max_turns: in
 
     base.update(
         {
-            "status": "completed",
+            "status": "paused_limit",
             "summary": "\n".join(summary_lines),
             "raw_output": "\n".join(summary_lines),
             "outcome": "progress",
