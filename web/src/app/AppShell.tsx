@@ -1,11 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigationType } from "react-router-dom";
-import { GitBranch, LoaderCircle, Moon, Power, Settings, Sun } from "lucide-react";
+import { GitBranch, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
-import { BackendHealth, ConfigSummary, GitStatusSummary, RuntimeSummary, ShutdownResponse } from "../api/types";
+import {
+  BackendHealth,
+  ConfigSummary,
+  GitStatusSummary,
+  RuntimeRestartResponse,
+  RuntimeSummary,
+  ShutdownResponse,
+} from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import {
   collectBrowserPageSnapshot,
@@ -44,12 +51,13 @@ export function shouldSuppressApiFailureTelemetry(
   failure: FetchJsonFailureReport,
   options: {
     shutdownRequested: boolean;
+    restartRequested?: boolean;
     runtimeControllerState: string;
     visibilityState?: DocumentVisibilityState | string;
   },
 ): boolean {
-  const { shutdownRequested, runtimeControllerState, visibilityState } = options;
-  if (shutdownRequested || runtimeControllerState === "closing") {
+  const { shutdownRequested, restartRequested, runtimeControllerState, visibilityState } = options;
+  if (shutdownRequested || restartRequested || runtimeControllerState === "closing") {
     return true;
   }
   if (
@@ -101,6 +109,19 @@ export function buildShutdownRequestedTelemetry(): BrowserTelemetryEventInput {
   };
 }
 
+export function buildRestartRequestedTelemetry(): BrowserTelemetryEventInput {
+  return {
+    phase: "restart",
+    eventCode: "browser.user_action.restart_requested",
+    message: "User requested workbench restart.",
+    level: "info",
+    fields: {
+      action: "restart",
+      source: "app_shell",
+    },
+  };
+}
+
 export function buildShutdownRequestUnconfirmedTelemetry(errorMessage: string): BrowserTelemetryEventInput {
   return {
     phase: "shutdown",
@@ -115,10 +136,30 @@ export function buildShutdownRequestUnconfirmedTelemetry(errorMessage: string): 
   };
 }
 
+export function buildRestartRequestUnconfirmedTelemetry(errorMessage: string): BrowserTelemetryEventInput {
+  return {
+    phase: "restart",
+    eventCode: "browser.user_action.restart_request_unconfirmed",
+    message: "Restart confirmation was not received; keeping pending restart feedback.",
+    level: "warning",
+    fields: {
+      action: "restart",
+      source: "app_shell",
+      errorMessage,
+    },
+  };
+}
+
 export function shutdownRequestUnconfirmedBody(lang: string): string {
   return lang === "en"
     ? "The close flow has started, but this window did not receive a final confirmation yet. The workbench is still checking the runtime state."
     : "关闭流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
+}
+
+export function restartRequestUnconfirmedBody(lang: string): string {
+  return lang === "en"
+    ? "The restart flow has started, but this window did not receive a final confirmation yet. The workbench is still checking the runtime state."
+    : "重启流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
 }
 
 export function shutdownLocallyCompleteBody(lang: string): string {
@@ -192,6 +233,7 @@ export function AppShell() {
   const [shutdownDetail, setShutdownDetail] = useState("");
   const [shutdownSettled, setShutdownSettled] = useState(false);
   const [shutdownRequested, setShutdownRequested] = useState(false);
+  const [restartRequested, setRestartRequested] = useState(false);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -201,6 +243,7 @@ export function AppShell() {
     () => (typeof navigator === "undefined" ? true : navigator.onLine),
   );
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
+  const restartPromiseRef = useRef<Promise<void> | null>(null);
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(`page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
@@ -209,12 +252,13 @@ export function AppShell() {
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
   });
+  const lifecycleControlActive = shutdownOpen || shutdownRequested || restartRequested;
   const runtimeRefetchInterval = resolvePollingInterval(
     frontendVisible,
-    shutdownOpen || shutdownRequested ? 1_000 : 5_000,
+    lifecycleControlActive ? 1_000 : 5_000,
     {
-      backgroundMs: shutdownOpen || shutdownRequested ? 1_000 : 30_000,
-      force: shutdownOpen || shutdownRequested,
+      backgroundMs: lifecycleControlActive ? 1_000 : 30_000,
+      force: lifecycleControlActive,
     },
   );
   const gitRefetchInterval = resolvePollingInterval(frontendVisible, 6_000, { backgroundMs: 60_000 });
@@ -249,6 +293,7 @@ export function AppShell() {
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");
   const selfEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "self_evolution");
   const closeWorkbenchLabel = lang === "en" ? "Close workbench" : "关闭工作台";
+  const restartWorkbenchLabel = lang === "en" ? "Restart workbench" : "重启工作台";
   const themeToggleLabel = theme === "dark" ? t("switchToLightTheme") : t("switchToDarkTheme");
   const shutdownHeading = lang === "en" ? "Closing workbench" : "正在关闭工作台";
   const shutdownBody = lang === "en"
@@ -260,6 +305,18 @@ export function AppShell() {
   const shutdownUnconfirmedBody = shutdownRequestUnconfirmedBody(lang);
   const shutdownLocallyCompleteTitle = lang === "en" ? "Workbench backend stopped" : "工作台后端已停止";
   const shutdownLocallyCompleteDetail = shutdownLocallyCompleteBody(lang);
+  const restartHeading = lang === "en" ? "Restarting workbench" : "正在重启工作台";
+  const restartBody = lang === "en"
+    ? "Please keep this window open. The runtime manager is stopping the old backend and starting a fresh workbench."
+    : "请先保持这个窗口打开。运行时管理器正在停稳旧后端并重新拉起工作台。";
+  const restartCompleteTitle = lang === "en" ? "Workbench restarted" : "工作台已重启";
+  const restartCompleteBody = lang === "en"
+    ? "The backend and app window are reachable again."
+    : "后端和应用窗口已经重新可达。";
+  const restartErrorBody = lang === "en"
+    ? "The runtime manager could not restart the workbench. Check the launcher and runtime-manager logs."
+    : "运行时管理器没有成功重启工作台。请检查 launcher 和 runtime-manager 日志。";
+  const restartUnconfirmedBody = restartRequestUnconfirmedBody(lang);
   const locale = lang === "zh" ? "zh-CN" : "en-US";
   const timezone = useMemo(
     () => Intl.DateTimeFormat().resolvedOptions().timeZone || (lang === "en" ? "Local time" : "本地时间"),
@@ -367,6 +424,9 @@ export function AppShell() {
   }, []);
 
   const beginShutdown = useCallback(() => {
+    if (restartPromiseRef.current || restartRequested) {
+      return restartPromiseRef.current ?? Promise.resolve();
+    }
     if (shutdownPromiseRef.current) {
       return shutdownPromiseRef.current;
     }
@@ -400,7 +460,46 @@ export function AppShell() {
 
     shutdownPromiseRef.current = task;
     return task;
-  }, [emitBrowserTelemetry, shutdownBody, shutdownHeading, shutdownUnconfirmedBody]);
+  }, [emitBrowserTelemetry, restartRequested, shutdownBody, shutdownHeading, shutdownUnconfirmedBody]);
+
+  const beginRestart = useCallback(() => {
+    if (shutdownPromiseRef.current || shutdownRequested) {
+      return shutdownPromiseRef.current ?? Promise.resolve();
+    }
+    if (restartPromiseRef.current) {
+      return restartPromiseRef.current;
+    }
+
+    const task = (async () => {
+      setRestartRequested(true);
+      setShutdownRequested(false);
+      setShutdownSettled(false);
+      setShutdownOpen(true);
+      setShutdownTitle(restartHeading);
+      setShutdownDetail(restartBody);
+      emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
+
+      const payload = await fetchJson<RuntimeRestartResponse>("/api/runtime/restart", {
+        method: "POST",
+      });
+      if (payload.message) {
+        setShutdownDetail(payload.message);
+      }
+    })().catch((error) => {
+      const errorMessage = error instanceof Error ? error.message : String(error || "");
+      setRestartRequested(true);
+      setShutdownOpen(true);
+      setShutdownSettled(false);
+      setShutdownTitle(restartHeading);
+      setShutdownDetail(restartUnconfirmedBody);
+      emitBrowserTelemetry(buildRestartRequestUnconfirmedTelemetry(errorMessage), { preferBeacon: true });
+    }).finally(() => {
+      restartPromiseRef.current = null;
+    });
+
+    restartPromiseRef.current = task;
+    return task;
+  }, [emitBrowserTelemetry, restartBody, restartHeading, restartUnconfirmedBody, shutdownRequested]);
 
   const toggleTheme = useCallback(() => {
     setTheme((current) => {
@@ -419,6 +518,7 @@ export function AppShell() {
     setFetchJsonFailureReporter((failure) => {
       if (shouldSuppressApiFailureTelemetry(failure, {
         shutdownRequested,
+        restartRequested,
         runtimeControllerState,
         visibilityState: typeof document === "undefined" ? "visible" : document.visibilityState,
       })) {
@@ -442,7 +542,7 @@ export function AppShell() {
       });
     });
     return () => setFetchJsonFailureReporter(null);
-  }, [emitBrowserTelemetry, runtimeControllerState, shutdownRequested]);
+  }, [emitBrowserTelemetry, restartRequested, runtimeControllerState, shutdownRequested]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -722,6 +822,52 @@ export function AppShell() {
     shutdownLocallyCompleteDetail,
     shutdownLocallyCompleteTitle,
     shutdownRequested,
+    workbench,
+  ]);
+
+  useEffect(() => {
+    if (!restartRequested || !workbench) {
+      return;
+    }
+
+    const failed = workbench.phase === "failed";
+    const ready = workbench.desiredState === "open"
+      && workbench.observedState === "open"
+      && workbench.backendHealthy
+      && workbench.browserWindowAlive;
+
+    if (failed) {
+      setRestartRequested(false);
+      setShutdownOpen(true);
+      setShutdownSettled(true);
+      setShutdownTitle(restartHeading);
+      setShutdownDetail(workbench.failureMessage || restartErrorBody);
+      return;
+    }
+
+    if (ready) {
+      setRestartRequested(false);
+      setShutdownOpen(true);
+      setShutdownSettled(true);
+      setShutdownTitle(restartCompleteTitle);
+      setShutdownDetail(workbench.statusLine || restartCompleteBody);
+      const timer = window.setTimeout(() => {
+        setShutdownOpen(false);
+      }, 1_600);
+      return () => window.clearTimeout(timer);
+    }
+
+    setShutdownOpen(true);
+    setShutdownSettled(false);
+    setShutdownTitle(restartHeading);
+    setShutdownDetail(workbench.statusLine || restartBody);
+  }, [
+    restartBody,
+    restartCompleteBody,
+    restartCompleteTitle,
+    restartErrorBody,
+    restartHeading,
+    restartRequested,
     workbench,
   ]);
 
@@ -1119,12 +1265,24 @@ export function AppShell() {
           <button
             type="button"
             className={styles.actionIconButton}
+            aria-label={restartWorkbenchLabel}
+            title={restartWorkbenchLabel}
+            onClick={() => {
+              void beginRestart();
+            }}
+            disabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
+          >
+            <RefreshCw size={16} />
+          </button>
+          <button
+            type="button"
+            className={styles.actionIconButton}
             aria-label={closeWorkbenchLabel}
             title={closeWorkbenchLabel}
             onClick={() => {
               void beginShutdown();
             }}
-            disabled={shutdownInFlight && !shutdownSettled}
+            disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
           >
             <Power size={16} />
           </button>

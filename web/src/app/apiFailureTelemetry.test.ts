@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildRestartRequestUnconfirmedTelemetry,
+  buildRestartRequestedTelemetry,
   buildShutdownLocallyCompleteTelemetry,
   buildShutdownRequestUnconfirmedTelemetry,
   buildShutdownRequestedTelemetry,
+  restartRequestUnconfirmedBody,
   shouldSuppressApiFailureTelemetry,
   shouldTreatShutdownAsLocallyComplete,
   shouldThrottleApiFailureTelemetry,
@@ -23,6 +26,26 @@ describe("api failure telemetry", () => {
           failureKind: "network",
         },
         { shutdownRequested: true, runtimeControllerState: "managed", visibilityState: "visible" },
+      ),
+    ).toBe(true);
+  });
+
+  it("suppresses expected failures while restart is in progress", () => {
+    expect(
+      shouldSuppressApiFailureTelemetry(
+        {
+          endpoint: "/api/runtime/summary",
+          method: "GET",
+          status: null,
+          message: "Failed to fetch",
+          failureKind: "network",
+        },
+        {
+          shutdownRequested: false,
+          restartRequested: true,
+          runtimeControllerState: "managed",
+          visibilityState: "visible",
+        },
       ),
     ).toBe(true);
   });
@@ -95,6 +118,29 @@ describe("api failure telemetry", () => {
       fields: {
         action: "shutdown",
         source: "app_shell",
+      },
+    });
+  });
+
+  it("builds explicit user-action telemetry for restart requests", () => {
+    expect(buildRestartRequestedTelemetry()).toMatchObject({
+      phase: "restart",
+      eventCode: "browser.user_action.restart_requested",
+      level: "info",
+      fields: {
+        action: "restart",
+        source: "app_shell",
+      },
+    });
+    expect(restartRequestUnconfirmedBody("zh")).toContain("重启流程已经开始");
+    expect(buildRestartRequestUnconfirmedTelemetry("Failed to fetch")).toMatchObject({
+      phase: "restart",
+      eventCode: "browser.user_action.restart_request_unconfirmed",
+      level: "warning",
+      fields: {
+        action: "restart",
+        source: "app_shell",
+        errorMessage: "Failed to fetch",
       },
     });
   });

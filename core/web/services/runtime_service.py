@@ -227,6 +227,66 @@ def request_runtime_shutdown() -> dict[str, object]:
     }
 
 
+def request_runtime_restart() -> dict[str, object]:
+    """Request a managed workbench restart through the runtime manager."""
+
+    lang = get_web_language()
+    _record_restart_event(
+        "runtime.restart.requested",
+        message="Runtime restart requested from web UI.",
+        fields={"source": "web_ui"},
+    )
+    stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
+    stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
+
+    try:
+        ensure_daemon_running()
+        command = submit_command(
+            "restart_workbench",
+            args={"reason": "web_restart_button", "source": "web_ui", "noBrowser": False},
+            requested_by="web_ui",
+        )
+    except Exception as exc:
+        _record_restart_event(
+            "runtime.restart.failed",
+            message="Runtime restart could not be queued through runtime manager.",
+            outcome="failed",
+            level="error",
+            fields=_restart_event_fields(
+                mode="runtime_manager",
+                stopped_chat_turns=stopped_chat_turns,
+                stopped_evolution_runs=stopped_evolution_runs,
+            )
+            | {"errorType": type(exc).__name__, "errorMessage": str(exc)},
+        )
+        raise
+
+    command_id = str(command.get("commandId") or "")
+    _record_restart_event(
+        "runtime.restart.accepted",
+        message="Runtime restart queued through runtime manager.",
+        outcome="accepted",
+        fields=_restart_event_fields(
+            mode="runtime_manager",
+            stopped_chat_turns=stopped_chat_turns,
+            stopped_evolution_runs=stopped_evolution_runs,
+        )
+        | {"commandId": command_id},
+    )
+    return {
+        "accepted": True,
+        "mode": "runtime_manager",
+        "commandId": command_id,
+        "message": text_for(
+            lang,
+            zh="正在安全重启工作台。运行时管理器会先停稳旧后端，再重新拉起前后端。",
+            en="Restarting the workbench safely. The runtime manager will stop the old backend before starting it again.",
+        ),
+        "chatTurns": stopped_chat_turns,
+        "evolutionRuns": stopped_evolution_runs,
+    }
+
+
 def _record_shutdown_event(
     event_code: str,
     *,
@@ -250,7 +310,53 @@ def _record_shutdown_event(
         return
 
 
+def _record_restart_event(
+    event_code: str,
+    *,
+    message: str,
+    outcome: str = "observed",
+    level: str = "info",
+    fields: dict[str, object] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "runtime",
+            "restart",
+            event_code,
+            message=message,
+            level=level,
+            outcome=outcome,
+            fields=fields or {},
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
 def _shutdown_event_fields(
+    *,
+    mode: str,
+    stopped_chat_turns: list[dict[str, object]],
+    stopped_evolution_runs: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "source": "web_ui",
+        "mode": mode,
+        "chatTurnCount": len(stopped_chat_turns),
+        "evolutionRunCount": len(stopped_evolution_runs),
+        "chatTurnStatuses": _status_counts(stopped_chat_turns),
+        "evolutionRunStatuses": _status_counts(stopped_evolution_runs),
+        "evolutionRunKinds": sorted(
+            {
+                str(item.get("kind") or "").strip()
+                for item in stopped_evolution_runs
+                if str(item.get("kind") or "").strip()
+            }
+        ),
+    }
+
+
+def _restart_event_fields(
     *,
     mode: str,
     stopped_chat_turns: list[dict[str, object]],

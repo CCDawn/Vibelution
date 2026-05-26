@@ -36,6 +36,13 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("shutdownFailed");
   });
 
+  it("exposes a managed restart control beside the close control", () => {
+    expect(shellSource).toContain("RefreshCw");
+    expect(shellSource).toContain('"/api/runtime/restart"');
+    expect(shellSource).toContain("restartWorkbenchLabel");
+    expect(shellSource).toContain("beginRestart");
+  });
+
   it("renders a startup progress overlay from loading and lifecycle state", () => {
     expect(shellSource).toContain("deriveStartupLoadingState");
     expect(shellSource).toContain("deriveStartupProgressState");
