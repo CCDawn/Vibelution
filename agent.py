@@ -489,7 +489,8 @@ class SelfEvolvingAgent:
     def _build_tool_loop_guard_summary(self) -> str:
         """Build a visible fallback when the turn stops in a tool-only loop."""
         records = list(getattr(self, "_recent_tool_records", []) or [])
-        if not records:
+        guard_reason = str(getattr(self, "_last_tool_loop_guard_reason", "") or "").strip()
+        if not records and not guard_reason:
             return ""
         guard_records = [
             item
@@ -497,7 +498,6 @@ class SelfEvolvingAgent:
             if "工具循环" in str(item.get("result_preview") or "")
             or "tool_loop_guard" in str(item.get("result_preview") or "")
         ]
-        guard_reason = str(getattr(self, "_last_tool_loop_guard_reason", "") or "").strip()
         if not guard_records and not guard_reason and not self._recent_tool_records_suggest_tool_loop(records):
             return ""
         read_paths: List[str] = []
@@ -512,14 +512,21 @@ class SelfEvolvingAgent:
                 read_paths.append(path)
         unique_tools = list(dict.fromkeys(tool_names))[-6:]
         unique_paths = list(dict.fromkeys(read_paths))[-3:]
-        path_text = "、".join(unique_paths) if unique_paths else "当前目标文件"
         tool_text = " -> ".join(unique_tools) if unique_tools else "工具调用"
+        bookkeeping_names = getattr(RoundStateController, "BOOKKEEPING_TOOL_NAMES", set())
+        bookkeeping_only = bool(unique_tools) and all(name in bookkeeping_names for name in unique_tools)
+        if bookkeeping_only:
+            focus_text = "这些调用主要是任务管理或状态查询，尚未产生新的证据读取、实际动作或用户可见结论。"
+            next_text = "下一步必须停止继续整理任务清单，转向读取证据、执行用户目标，或直接给出可见结论。"
+        else:
+            path_text = "、".join(unique_paths) if unique_paths else "当前目标文件"
+            focus_text = f"读取集中在 {path_text}。"
+            next_text = "下一步应基于已读证据总结结论、直接修改，或重新规划更窄的读取目标。"
         return (
             "本轮已触发工具循环保护：系统检测到连续工具调用没有形成可见回答，"
-            f"且读取集中在 {path_text}。"
+            f"{focus_text}"
             f"已执行的主要工具链为 {tool_text}。"
-            "我先停止继续顺着续读调用工具；下一步应基于已读证据总结结论、直接修改，"
-            "或在新一轮中重新规划更窄的读取目标。"
+            f"我先停止继续顺着当前路径调用工具；{next_text}"
         )
 
     def _recent_tool_records_suggest_tool_loop(self, records: List[Dict[str, Any]]) -> bool:
@@ -1173,8 +1180,10 @@ class SelfEvolvingAgent:
                         iteration=iteration,
                         no_new_evidence_steps=round_state.no_new_evidence_steps,
                         consecutive_tool_only_steps=round_state.consecutive_tool_only_steps,
+                        consecutive_bookkeeping_tool_only_steps=round_state.consecutive_bookkeeping_tool_only_steps,
                         delegation_failures=round_state.delegation_failures,
                         total_tool_calls=round_state.total_tool_calls,
+                        substantive_tool_calls=round_state.substantive_tool_calls,
                     )
                     if stop_reason:
                         ui.add_log(stop_reason, "WARN")
@@ -1335,14 +1344,17 @@ class SelfEvolvingAgent:
                     }
 
                 tool_calls = processed.tool_calls
+                response_tool_names = [
+                    str(tool_call.get("name") or "").strip()
+                    for tool_call in tool_calls
+                    if str(tool_call.get("name") or "").strip()
+                ]
                 round_state.note_response_tools(
                     tool_call_count,
                     self._last_visible_response_text,
+                    tool_names=response_tool_names,
                 )
-                for tool_call in tool_calls:
-                    tool_name = str(tool_call.get("name") or "").strip()
-                    if tool_name:
-                        turn_tool_names.append(tool_name)
+                turn_tool_names.extend(response_tool_names)
                 if tool_calls:
                     ui.update_status(
                         "ACTING",
@@ -1403,8 +1415,10 @@ class SelfEvolvingAgent:
                     iteration=iteration,
                     no_new_evidence_steps=round_state.no_new_evidence_steps,
                     consecutive_tool_only_steps=round_state.consecutive_tool_only_steps,
+                    consecutive_bookkeeping_tool_only_steps=round_state.consecutive_bookkeeping_tool_only_steps,
                     delegation_failures=round_state.delegation_failures,
                     total_tool_calls=round_state.total_tool_calls,
+                    substantive_tool_calls=round_state.substantive_tool_calls,
                 )
                 if stop_reason:
                     if TurnOutcomeController.should_skip_convergence_stop_for_pending_restart(
@@ -1417,7 +1431,10 @@ class SelfEvolvingAgent:
                         )
                     else:
                         ui.add_log(stop_reason, "WARN")
-                        if round_state.consecutive_tool_only_steps >= 3:
+                        if (
+                            round_state.consecutive_tool_only_steps >= 3
+                            or round_state.consecutive_bookkeeping_tool_only_steps >= 2
+                        ):
                             self._last_tool_loop_guard_reason = stop_reason
                             _record_agent_scene_event(
                                 "tool_loop_guard",
@@ -1427,6 +1444,8 @@ class SelfEvolvingAgent:
                                     "iteration": iteration,
                                     "totalToolCalls": round_state.total_tool_calls,
                                     "consecutiveToolOnlySteps": round_state.consecutive_tool_only_steps,
+                                    "consecutiveBookkeepingToolOnlySteps": round_state.consecutive_bookkeeping_tool_only_steps,
+                                    "substantiveToolCalls": round_state.substantive_tool_calls,
                                     "inputTokens": round_state.total_input_tokens,
                                     "outputTokens": round_state.total_output_tokens,
                                 },
@@ -1921,15 +1940,20 @@ class SelfEvolvingAgent:
                 status = "failed"
             elif not ok:
                 status = "stopped"
+            guard_recovery = False
             if not summary:
                 if error_message:
                     summary = error_message
                 elif self._build_tool_loop_guard_summary():
                     summary = self._build_tool_loop_guard_summary()
+                    guard_recovery = True
+                    if status == "completed":
+                        status = "partial"
                 elif status == "failed":
                     summary = "当前轮执行失败，请检查 LLM 配置或日志。"
                 elif status == "stopped":
                     summary = "当前轮已停止，未产生可见回复。"
+            tool_trace = list(getattr(self, "_recent_tool_records", []) or [])
             result = {
                 "status": status,
                 "summary": summary,
@@ -1942,9 +1966,15 @@ class SelfEvolvingAgent:
                 ),
                 "confidence": "medium" if summary else "low",
                 "raw_output": summary,
-                "tool_call_count": self._last_response_tool_calls,
-                "tool_trace": list(getattr(self, "_recent_tool_records", []) or []),
+                "tool_call_count": max(self._last_response_tool_calls, len(tool_trace)),
+                "tool_trace": tool_trace,
             }
+            if guard_recovery:
+                result["outcome"] = "progress"
+                result["recommended_next_action"] = (
+                    "不要继续调用任务管理或重复读取工具；基于已有证据给出可见结论，"
+                    "或选择一个能直接推进用户目标的证据/动作工具。"
+                )
             if error_message:
                 result["error"] = error_message
             llm_failure = getattr(self, "_last_turn_metadata", {}).get("llm_failure")
