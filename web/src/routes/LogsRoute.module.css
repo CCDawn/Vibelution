@@ -1277,6 +1277,69 @@
   overflow-wrap: anywhere;
 }
 
+.packageEvidencePaths {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-card-subtle));
+}
+
+.packageEvidencePaths > span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+}
+
+.packageEvidencePaths > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.packageEvidencePaths button {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: min(180px, 100%);
+  max-width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+  cursor: pointer;
+}
+
+.packageEvidencePaths button:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+}
+
+.packageEvidencePaths strong {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.68rem;
+}
+
+.packageEvidencePaths code {
+  min-width: 0;
+  color: var(--accent-cool);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .packageDiagnosisDetails {
   display: grid;
   gap: 10px;

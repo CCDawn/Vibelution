@@ -136,6 +136,7 @@ describe("chatSessionState", () => {
     expect(deriveSessionDetailQueryErrorState(makeDetail(), true)).toEqual({
       blockingError: false,
       transientError: true,
+      backgroundError: false,
     });
   });
 
@@ -143,6 +144,35 @@ describe("chatSessionState", () => {
     expect(deriveSessionDetailQueryErrorState(undefined, true)).toEqual({
       blockingError: true,
       transientError: false,
+      backgroundError: false,
+    });
+  });
+
+  it("keeps live stream detail authoritative when a background refetch fails", () => {
+    expect(
+      deriveSessionDetailQueryErrorState(makeDetail(), true, {
+        dataUpdatedAt: 2_000,
+        errorUpdatedAt: 3_000,
+        streamConnected: true,
+      }),
+    ).toEqual({
+      blockingError: false,
+      transientError: false,
+      backgroundError: true,
+    });
+  });
+
+  it("clears a query error once a newer session detail snapshot arrives", () => {
+    expect(
+      deriveSessionDetailQueryErrorState(makeDetail(), true, {
+        dataUpdatedAt: 4_000,
+        errorUpdatedAt: 3_000,
+        streamConnected: true,
+      }),
+    ).toEqual({
+      blockingError: false,
+      transientError: false,
+      backgroundError: false,
     });
   });
 

@@ -227,6 +227,7 @@ export type RuntimeSceneListItem = {
   agentLogCount: number;
   artifactCount: number;
   eventLogCount: number;
+  researchLogCount: number;
   errorCount: number;
   warningCount: number;
 };
@@ -265,6 +266,7 @@ export type RuntimeScenePackageSummary = {
   agentLogCount: number;
   artifactCount: number;
   eventLogCount: number;
+  researchLogCount: number;
   errorCount: number;
   warningCount: number;
 };
@@ -340,6 +342,7 @@ export type RuntimeScenePackageDiagnosis = {
     }>;
   };
   recommendedOrder: string[];
+  evidencePaths?: string[];
   keyEntries: Array<{
     path: string;
     label: string;
@@ -361,6 +364,7 @@ export type RuntimeScenePackageIndex = {
   durationSeconds: number | null;
   searchText: string;
   tags: string[];
+  summaryRef: string;
 };
 
 export type RuntimeSceneDetail = {
@@ -391,6 +395,7 @@ export type RuntimeSceneDetail = {
   agentLogs: RuntimeSceneRawFile[];
   artifacts: RuntimeSceneRawFile[];
   eventLogs: RuntimeSceneRawFile[];
+  researchLogs: RuntimeSceneRawFile[];
   packageSummary: RuntimeScenePackageSummary;
   packageDiagnosis: RuntimeScenePackageDiagnosis;
 };
@@ -930,6 +935,16 @@ export type SessionDetail = SessionSummary & {
   changedFiles: string[];
   readFiles: string[];
   messages: ConversationMessage[];
+  contextUsage?: {
+    used: number;
+    limit: number;
+    estimatedTokens: number;
+    messageCount: number;
+    userMessageCount: number;
+    assistantMessageCount: number;
+    toolCallCount: number;
+    source: string;
+  };
   lastTurnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   stopRequested: boolean;
@@ -2113,11 +2128,87 @@ export type ResearchPromptItem = {
   filename: string;
   path: string;
   content: string;
+  defaultContent: string;
+};
+
+export type ResearchAgentTemplate = {
+  templateId: string;
+  label: string;
+  description: string;
+};
+
+export type ResearchAgentConfig = {
+  key: "broad" | "deep" | "review" | "themes" | "card" | string;
+  label: string;
+  promptFilename: string;
+  templateId: string;
+  llmConfigId: string;
+  enabled: boolean;
+};
+
+export type ResearchLlmConfigOption = {
+  configId: string;
+  label: string;
+  model: string;
+  providerKind: string;
 };
 
 export type ResearchPromptWorkspace = {
   root: string;
+  agentConfigPath: string;
   prompts: ResearchPromptItem[];
+  agentTemplates: ResearchAgentTemplate[];
+  llmConfigs: ResearchLlmConfigOption[];
+  agents: ResearchAgentConfig[];
+};
+
+export type ResearchFlowNodeStatus =
+  | "idle"
+  | "ready"
+  | "running"
+  | "done"
+  | "failed"
+  | "stale"
+  | "needs_review"
+  | "needs_input"
+  | "needs_evidence"
+  | "blocked"
+  | "skipped"
+  | string;
+
+export type ResearchFlowNode = {
+  id: string;
+  label: string;
+  type: "agent" | "decision" | "artifact" | "human" | "tool" | "evaluation" | string;
+  status: ResearchFlowNodeStatus;
+  x: number;
+  y: number;
+  agentKey: string;
+  promptKey: string;
+  llmConfigId: string;
+  description: string;
+  routeCondition: string;
+};
+
+export type ResearchFlowEdge = {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  condition: string;
+};
+
+export type ResearchFlowCanvas = {
+  schemaVersion: number;
+  updatedAt: string;
+  path: string;
+  viewport: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+  nodes: ResearchFlowNode[];
+  edges: ResearchFlowEdge[];
 };
 
 export type ResearchDiscoverySession = {

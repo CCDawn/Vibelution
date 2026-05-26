@@ -1,5 +1,11 @@
 import { SessionDetail, SessionStreamEvent, SessionSummary } from "../api/types";
 
+export type SessionDetailLoadState = {
+  blockingError: boolean;
+  transientError: boolean;
+  backgroundError: boolean;
+};
+
 export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary {
   return {
     id: detail.id,
@@ -71,10 +77,27 @@ export function markSessionDetailRunning(detail: SessionDetail | undefined): Ses
 export function deriveSessionDetailQueryErrorState(
   detail: SessionDetail | undefined,
   isError: boolean,
-): { blockingError: boolean; transientError: boolean } {
+  options: {
+    dataUpdatedAt?: number;
+    errorUpdatedAt?: number;
+    streamConnected?: boolean;
+  } = {},
+): SessionDetailLoadState {
+  const hasDetail = Boolean(detail);
+  const dataUpdatedAt = Number(options.dataUpdatedAt ?? 0);
+  const errorUpdatedAt = Number(options.errorUpdatedAt ?? 0);
+  const streamConnected = Boolean(options.streamConnected);
+  const dataIsNewerThanError =
+    hasDetail
+    && dataUpdatedAt > 0
+    && errorUpdatedAt > 0
+    && dataUpdatedAt >= errorUpdatedAt;
+  const activeQueryError = isError && !dataIsNewerThanError;
+
   return {
-    blockingError: isError && !detail,
-    transientError: isError && Boolean(detail),
+    blockingError: activeQueryError && !hasDetail,
+    transientError: activeQueryError && hasDetail && !streamConnected,
+    backgroundError: activeQueryError && hasDetail && streamConnected,
   };
 }
 

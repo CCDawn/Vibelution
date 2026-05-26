@@ -3,6 +3,7 @@ import type { RuntimeSceneDetail, RuntimeSceneRawFile } from "../api/types";
 export type RuntimeScenePackageSectionId =
   | "startup"
   | "conversations"
+  | "research"
   | "supervised"
   | "selfEvolution"
   | "agent"
@@ -63,6 +64,7 @@ function isStartupFile(file: RuntimeSceneRawFile) {
 
 export function runtimeScenePackageSections(scene: RuntimeSceneDetail): RuntimeScenePackageSection[] {
   const eventLogs = [...(scene.eventLogs ?? [])];
+  const researchLogs = [...(scene.researchLogs ?? [])].sort(byPath);
   const conversationLogs = [...scene.conversationLogs, ...eventLogs.filter(isConversationEventFile)].sort(byPath);
   const rawFiles = [...scene.rawFiles].sort(byPath);
   const startupLogs = [...rawFiles.filter(isStartupFile), ...eventLogs.filter(isStartupFile)].sort(byPath);
@@ -111,6 +113,14 @@ export function runtimeScenePackageSections(scene: RuntimeSceneDetail): RuntimeS
       emptyZh: "本周期没有对话消息。",
       emptyEn: "No conversation messages were recorded in this cycle.",
       files: conversationLogs,
+    },
+    {
+      id: "research",
+      titleZh: "科研流程",
+      titleEn: "Research Workflow",
+      emptyZh: "本周期没有科研流程记录。",
+      emptyEn: "No research workflow activity was recorded in this cycle.",
+      files: researchLogs,
     },
     {
       id: "supervised",

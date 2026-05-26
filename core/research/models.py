@@ -36,13 +36,24 @@ ALLOWED_NOVELTY_PATHS = {
 ALLOWED_THEME_STATUSES = {"draft", "shortlisted", "selected", "rejected", "stale"}
 ALLOWED_THEME_CARD_STATUSES = {"draft", "approved", "stale"}
 
-DEFAULT_DISCOVERY_GOAL = "Find a novel interdisciplinary AI Scientist research theme related to computer science."
+DEFAULT_DISCOVERY_GOAL = (
+    "For XH-202619, develop a novel computer-science-plus-domain research theme where Vibelution acts as an "
+    "AI Scientist platform and closes the loop from source input to verifiable scientific hypothesis and research "
+    "plan output."
+)
 DEFAULT_DISCOVERY_CONSTRAINTS = (
-    "Suitable for a student team, grounded in public sources, and aligned with the XH-202619 AI Scientist topic."
+    "Use a domestic open-source foundation model, especially Qwen; model calls should be explainable through "
+    "Alibaba Cloud Bailian evidence or screenshots; the system should be a super-agent or multi-agent architecture "
+    "with problem understanding, knowledge integration, association discovery, and verifiable hypothesis generation. "
+    "The research-plan output should cover Problem Statement, Rationale, Technical Details, Datasets with Source "
+    "and Target, Paper Title, Paper Abstract, Methods, Experiments, Baselines, Metrics, Results, and real References. "
+    "A student team should be able to build an MVP before September 5, 2026."
 )
 DEFAULT_DISCOVERY_PREFERENCES = (
-    "Novel, evidence-grounded, interdisciplinary, verifiable enough for a first-stage plan, "
-    "and not a generic RAG or literature-review tool."
+    "Prioritize upstream scientific research themes where the AI Scientist identifies knowledge gaps, proposes "
+    "falsifiable hypotheses, designs experiments, evaluates results, and iterates. Align with scientific value, "
+    "technical depth, and application potential; reject generic RAG, literature-review tools, hallucinated "
+    "references, unreproducible datasets, and concepts without experimental metrics."
 )
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")

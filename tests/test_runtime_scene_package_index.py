@@ -86,20 +86,27 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     summary = json.loads((scene_dir / "summary.json").read_text(encoding="utf-8"))
     assert manifest["package"]["package_index_path"] == "package_index.json"
     assert manifest["package"]["summary_path"] == "summary.json"
-    assert package_index["schema_version"] == 1
+    assert package_index["schema_version"] == 2
     assert package_index["package_id"] == scene_id
     assert package_index["index_key"] == manifest["package"]["index_key"]
     assert package_index["search_text"] == manifest["package"]["search_text"]
+    assert package_index["summary_ref"] == "summary.json"
+    assert "diagnosis" not in package_index
     assert package_index["timeline_path"] == "timeline.jsonl"
     assert package_index["lifecycle_path"] == "lifecycle.jsonl"
-    assert summary["schema_version"] == 1
+    assert package_index["research_dir"] == "research"
+    assert summary["schema_version"] == 2
     assert summary["package_id"] == scene_id
     assert summary["display_name"] == package_index["display_name"]
     assert summary["primary_files"]["package_index"] == "package_index.json"
     assert summary["primary_files"]["manifest"] == "manifest.json"
     assert summary["primary_files"]["timeline"] == "timeline.jsonl"
     assert summary["primary_files"]["lifecycle"] == "lifecycle.jsonl"
+    assert summary["primary_files"]["research"] == "research/summary.json"
     assert summary["sections"]["conversations"]["path"] == "conversations"
+    assert summary["sections"]["research"]["path"] == "research"
+    assert summary["sections"]["research"]["events_path"] == "research/events.jsonl"
+    assert summary["sections"]["research"]["summary_path"] == "research/summary.json"
     assert summary["sections"]["supervised_evolution"]["path"] == "agent/supervised_runs"
     assert summary["sections"]["supervised_evolution"]["worktree_path"] == "agent/supervised_worktree_runs"
     assert summary["sections"]["self_evolution"]["path"] == "agent/self_evolution_runs"
@@ -107,7 +114,21 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     assert summary["event_counts"]["lifecycle_events"] == 2
     assert summary["event_counts"]["errors"] == 1
     assert summary["event_counts"]["warnings"] == 1
+    assert summary["event_counts"]["research_logs"] == 0
+    assert summary["diagnosis"]["severity"] == "error"
+    assert summary["diagnosis"]["issueState"]["activeClusterCount"] == 2
+    assert summary["diagnosis"]["evidencePaths"][0] == "events/llm.jsonl"
+    assert "rawRefs" not in summary["diagnosis"]["agentNextStep"]
+    assert "evidence_paths" in summary["diagnosis"]["agentNextStep"]
+    assert "llm-llm-invoke-failed" in package_index["search_text"]
+    assert "diagnosis-active-issue" in package_index["tags"]
+    assert summary["diagnosis"]["agentNextStep"]
     assert summary["diagnostic_entrypoint"]["first_read"] == "summary.json"
+    assert summary["diagnostic_entrypoint"]["package_root"] == f"logs/runtime_scenes/{scene_dir.name}"
+    assert summary["diagnostic_entrypoint"]["path_mode"] == "package_relative"
+    assert summary["diagnostic_entrypoint"]["evidence_paths"] == summary["diagnosis"]["evidencePaths"]
+    assert "research/summary.json" in summary["diagnostic_entrypoint"]["recommended_order"]
+    assert "research/events.jsonl" in summary["diagnostic_entrypoint"]["recommended_order"]
     assert summary["diagnostic_entrypoint"]["recommended_order"][:6] == [
         "summary.json",
         "package_index.json",
@@ -116,6 +137,55 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
         "raw/launcher-control.log",
         "timeline.jsonl",
     ]
+
+
+def test_research_scene_event_writes_dedicated_research_package_section(tmp_path, monkeypatch):
+    scene_id = "scene-research-package"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}"
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-18T12:00:00Z",
+                "status": "running",
+                "trigger": "start",
+                "project_root": str(tmp_path),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps({"runtimeSceneId": scene_id, "runtimeSceneDir": str(scene_dir)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = runtime_scene_service.record_research_scene_event(
+        "research.prompt.updated",
+        phase="prompt_config",
+        message="Research prompt updated",
+        fields={"agentKey": "broad", "filename": "broad.md"},
+        agent_key="broad",
+    )
+
+    assert response["accepted"] is True
+    assert response["path"] == "research/events.jsonl"
+    research_events = [json.loads(line) for line in scene_dir.joinpath("research/events.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert research_events[0]["event_code"] == "research.prompt.updated"
+    assert research_events[0]["agent_key"] == "broad"
+    research_summary = json.loads(scene_dir.joinpath("research/summary.json").read_text(encoding="utf-8"))
+    assert research_summary["event_count"] == 1
+    assert research_summary["event_codes"]["research.prompt.updated"] == 1
+    assert research_summary["agents"]["broad"] == 1
+    summary = json.loads(scene_dir.joinpath("summary.json").read_text(encoding="utf-8"))
+    assert summary["event_counts"]["research_logs"] == 2
+    assert summary["sections"]["research"]["path"] == "research"
 
 
 def test_runtime_scene_event_can_target_recent_completed_package_when_allowed(tmp_path, monkeypatch):
@@ -176,6 +246,8 @@ def test_runtime_scene_event_can_target_recent_completed_package_when_allowed(tm
     assert "command.failed" in timeline
     summary = json.loads((scene_dir / "summary.json").read_text(encoding="utf-8"))
     assert summary["event_counts"]["errors"] == 1
+    assert summary["diagnosis"]["issueState"]["activeClusterCount"] == 1
+    assert summary["diagnosis"]["evidencePaths"][0] == "events/runtime_manager.jsonl"
 
 
 def test_runtime_scene_list_sorts_by_package_timestamp_when_started_at_missing(tmp_path, monkeypatch):
@@ -277,6 +349,92 @@ def test_runtime_scene_detail_refreshes_stale_package_sidecars(tmp_path, monkeyp
     assert detail["status"] == "running"
     assert package_index["package_id"] == scene_id
     assert package_index["index_key"] == detail["packageIndex"]["indexKey"]
+    assert package_index["summary_ref"] == "summary.json"
+    assert "diagnosis" not in package_index
     assert summary["package_id"] == scene_id
     assert summary["display_name"] == detail["packageIndex"]["displayName"]
+    assert summary["diagnosis"]["issueState"]["activeClusterCount"] == 0
     assert manifest["package"]["index_key"] == detail["packageIndex"]["indexKey"]
+
+
+def test_runtime_scene_static_summary_distinguishes_recovered_issue_from_active_failure(tmp_path, monkeypatch):
+    scene_id = "static-recovered-scene"
+    scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
+    scene_dir.mkdir(parents=True)
+    scene_dir.joinpath("manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_scene_id": scene_id,
+                "started_at": "2026-05-24T12:00:01Z",
+                "ended_at": "",
+                "status": "running",
+                "trigger": "internal-start",
+                "project_root": str(tmp_path),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (scene_dir / "timeline.jsonl").write_text(
+        "\n".join(
+            json.dumps(row, ensure_ascii=False)
+            for row in [
+                {
+                    "runtime_scene_id": scene_id,
+                    "ts": "2026-05-24T12:00:02Z",
+                    "seq": 1,
+                    "component": "llm",
+                    "phase": "invoke",
+                    "event_code": "llm.invoke.failed.retrying",
+                    "level": "warning",
+                    "outcome": "retrying",
+                    "message": "LLM invoke retrying after timeout.",
+                    "fields": {"errorType": "timeout", "retryable": True},
+                },
+                {
+                    "runtime_scene_id": scene_id,
+                    "ts": "2026-05-24T12:00:03Z",
+                    "seq": 2,
+                    "component": "llm",
+                    "phase": "invoke",
+                    "event_code": "llm.invoke.succeeded",
+                    "level": "info",
+                    "outcome": "succeeded",
+                    "message": "LLM invoke succeeded.",
+                    "fields": {},
+                },
+                {
+                    "runtime_scene_id": scene_id,
+                    "ts": "2026-05-24T12:00:04Z",
+                    "seq": 3,
+                    "component": "conversation",
+                    "phase": "next_state_signal",
+                    "event_code": "conversation.next_state_signal.recorded",
+                    "level": "warning",
+                    "outcome": "user_stops",
+                    "message": "用户请求停止当前对话轮次。",
+                    "fields": {"kind": "user_stops"},
+                },
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    package_index = json.loads(scene_dir.joinpath("package_index.json").read_text(encoding="utf-8"))
+    summary = json.loads(scene_dir.joinpath("summary.json").read_text(encoding="utf-8"))
+    assert detail["packageDiagnosis"]["severity"] == "info"
+    assert package_index["summary_ref"] == "summary.json"
+    assert "diagnosis" not in package_index
+    assert summary["diagnosis"]["severity"] == "info"
+    assert summary["diagnosis"]["issueState"]["activeClusterCount"] == 0
+    assert summary["diagnosis"]["issueState"]["historicalClusterCount"] == 1
+    assert summary["diagnosis"]["issueState"]["controlSignalCount"] == 1
+    assert summary["diagnosis"]["firstSignal"]["eventCode"] == "llm.invoke.failed.retrying"
+    assert summary["diagnosis"]["evidencePaths"][0] == "events/llm.jsonl"
+    assert "避免把已恢复错误当成当前阻塞" in summary["diagnosis"]["agentNextStep"]
+    assert "diagnosis-recovered-issue" in package_index["tags"]
+    assert "recovered_issue" in package_index["search_text"]

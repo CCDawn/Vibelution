@@ -1,14 +1,21 @@
+import { markdown } from "@codemirror/lang-markdown";
+import { EditorView } from "@codemirror/view";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import CodeMirror from "@uiw/react-codemirror";
 import {
   BadgeCheck,
   BookOpenCheck,
   BrainCircuit,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Database,
   FileSearch,
   FlaskConical,
   GitBranch,
   Layers3,
+  ArrowDown,
+  LoaderCircle,
   RadioTower,
   RefreshCw,
   RotateCcw,
@@ -16,9 +23,14 @@ import {
   Sparkles,
   Target,
   Save,
+  Pause,
+  Play,
+  Trash2,
   TriangleAlert,
+  Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -30,6 +42,7 @@ import {
   ResearchSource,
   ResearchThemeCard,
 } from "../api/types";
+import { workbenchCodeMirrorTheme } from "../design/codeMirrorTheme";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./ResearchRoute.module.css";
 
@@ -40,25 +53,63 @@ type DraftInput = {
 };
 
 type ResearchViewKey = "discovery" | "prompts";
+type ResearchStageKey = "broad" | "deep" | "evidence" | "themes" | "card";
+type ResearchWorkflowMode = "manual" | "auto";
 
 type ResearchPromptDraft = {
   key: string;
   filename: string;
   content: string;
+  defaultContent: string;
 };
+
+const LEGACY_DEFAULT_INPUT = {
+  zh: {
+    openGoal: "找一个计算机相关、适合 AI Scientist 赛题的新颖交叉学科研究主题。",
+    constraints: "学生团队可做；能基于公开论文、GitHub、数据集或网页资料进行初步验证；适合比赛 MVP 展示。",
+    preferences: "更偏新颖；优先问题视角创新，其次方法迁移、学科组合、应用场景；避免普通 RAG 或文献综述工具。",
+  },
+  en: {
+    openGoal: "Find a novel interdisciplinary research theme related to computer science for the AI Scientist topic.",
+    constraints:
+      "Suitable for a student team; grounded in public papers, GitHub, datasets, or web sources; suitable for a competition MVP.",
+    preferences:
+      "Novelty first; prioritize problem-perspective novelty, then method transfer, discipline combination, and application scenario; avoid generic RAG or literature-review tools.",
+  },
+} as const;
 
 const COPY = {
   zh: {
     eyebrow: "AI Scientist Theme Discovery",
     subtitle: "从开放目标出发，联网调研并发现新颖性优先的候选科研主题。",
     create: "创建会话",
+    deleteSession: "删除会话",
+    deleteSessionConfirm: "确定删除这个科研会话吗？这会移除该会话下的检索、证据、候选主题和主题卡记录。",
     runDraft: "一键草稿",
+    pause: "暂停",
+    pausing: "暂停中",
+    start: "开始",
+    running: "运行中",
+    complete: "完成",
+    ready: "等待",
+    failed: "失败",
+    workflowMode: "流程模式",
+    manualMode: "手动",
+    autoMode: "自动",
+    continueWorkflow: "继续下一步",
+    evidenceRequests: "缺失证据请求",
+    confirmEvidenceSearch: "确认补搜",
     broad: "广撒网",
     deep: "定向深搜",
     evidence: "抽取证据",
     themes: "生成主题",
     select: "选择",
     themeCard: "主题卡",
+    candidateCardPreview: "候选卡预览",
+    formalCard: "正式主题卡",
+    previewBeforeCard: "先从候选主题中选择一个方向，确认后再生成正式主题卡。",
+    collapseTrace: "收起过程",
+    expandTrace: "展开过程",
     approve: "批准",
     rerun: "重跑",
     history: "研究会话",
@@ -73,8 +124,21 @@ const COPY = {
     researchView: "科研",
     promptWorkspace: "工作区提示词",
     promptBody: "工作区是真值来源。这里编辑的内容会直接写入 `workspace/prompts/research/`。",
+    promptEditor: "提示词编辑器",
+    promptAgentList: "科研 Agent",
+    promptCurrentAgent: "当前 Agent",
+    promptDefaultPreview: "默认提示词预览",
+    promptDirty: "有未保存修改",
+    promptClean: "已与工作区同步",
+    promptStats: "字符",
+    promptFile: "文件",
+    agentTemplate: "Agent 模板",
+    llmConfig: "LLM 配置",
+    agentTemplateConfig: "Agent 绑定配置",
+    agentTemplateSaved: "Agent 绑定已保存",
+    llmConfigMissing: "未找到对应 LLM 配置",
     promptSave: "保存提示词",
-    promptReset: "恢复当前内容",
+    promptReset: "恢复默认提示词",
     promptSaved: "已保存到工作区",
     promptLoading: "正在读取科研提示词...",
     promptEmpty: "尚未找到提示词文件，保存后会自动创建。",
@@ -119,22 +183,45 @@ const COPY = {
     boundary: "边界",
     boundaryBody: "第一版只做主题发现与概念主题卡，不执行实验、不交接监督进化、不修改 baseline。",
     defaultInput: {
-      openGoal: "找一个计算机相关、适合 AI Scientist 赛题的新颖交叉学科研究主题。",
-      constraints: "学生团队可做；能基于公开论文、GitHub、数据集或网页资料进行初步验证；适合比赛 MVP 展示。",
-      preferences: "更偏新颖；优先问题视角创新，其次方法迁移、学科组合、应用场景；避免普通 RAG 或文献综述工具。",
+      openGoal:
+        "围绕 XH-202619「基于国产开源大模型的 AI Scientist 的研发与应用」，发现一个计算机与具体学科交叉的高质量研究主题，并让 Vibelution 作为 AI Scientist 平台完成从资料输入到可验证科学假设与研究计划输出的闭环。",
+      constraints:
+        "赛题硬约束：必须基于国产开源大模型，重点使用 Qwen/千问系列；模型调用需可通过阿里云百炼平台说明或截图证明；系统形态应是超级智能体或多智能体架构，具备问题理解、知识整合、关联发现、可验证假设生成能力。\n\n科研闭环要求：输入可以是公开论文、GitHub 项目、开放数据集、网页资料或学科问题集；输出必须能形成《科学假设与研究计划》，至少覆盖待研究问题 Problem Statement、解决思路 Rationale、技术手段 Technical Details、数据集 Datasets（Source/Target）、论文标题、摘要、方法论 Methods、实验设计 Experiments、基线 Baselines、评估指标 Metrics、初步结果 Results、真实参考文献 References。\n\n参赛可行性：学生团队可在 2026 年 9 月 5 日前形成 MVP；技术方案文档不超过 20 页；需要核心代码、上下文工程/agent 工作流、真实案例；鼓励交互式前端和 10 分钟内演示视频。",
+      preferences:
+        "优先新颖、可验证、扣题的上游科研主题：让 AI Scientist 发现知识缺口、提出可证伪假设、设计实验、评估结果并反思迭代，而不是普通 RAG、文献综述或展示型应用。\n\n主题选择优先级：1. 核心假设创新且自洽；2. 有真实数据和可落地验证路径；3. 能体现多智能体协作或超级智能体 Skills；4. 能处理科学模态数据或跨学科证据；5. 对 Vibelution agent 能力有明确提升，例如检索、证据审查、假设生成、实验设计、代码改进、评估闭环。\n\n评分对齐：科学价值 40 分、技术深度 30 分、应用潜力 30 分；避免虚构引用、不可复现数据、泛泛 AI+X、没有实验指标的概念包装。",
     },
   },
   en: {
     eyebrow: "AI Scientist Theme Discovery",
     subtitle: "Start from an open goal, search public sources, and find novelty-first research themes.",
     create: "Create session",
+    deleteSession: "Delete session",
+    deleteSessionConfirm: "Delete this research session? This removes its search runs, evidence, candidate themes, and theme cards.",
     runDraft: "Run draft",
+    pause: "Pause",
+    pausing: "Pausing",
+    start: "Start",
+    running: "Running",
+    complete: "Complete",
+    ready: "Ready",
+    failed: "Failed",
+    workflowMode: "Workflow mode",
+    manualMode: "Manual",
+    autoMode: "Auto",
+    continueWorkflow: "Continue",
+    evidenceRequests: "Missing evidence",
+    confirmEvidenceSearch: "Confirm search",
     broad: "Broad search",
     deep: "Deep search",
     evidence: "Extract evidence",
     themes: "Generate themes",
     select: "Select",
     themeCard: "Theme card",
+    candidateCardPreview: "Candidate card preview",
+    formalCard: "Formal theme card",
+    previewBeforeCard: "Choose a candidate theme first, then generate its formal theme card.",
+    collapseTrace: "Collapse trace",
+    expandTrace: "Expand trace",
     approve: "Approve",
     rerun: "Rerun",
     history: "Research sessions",
@@ -149,8 +236,21 @@ const COPY = {
     researchView: "Research",
     promptWorkspace: "Workspace prompts",
     promptBody: "The workspace is the source of truth. Changes here are written directly into `workspace/prompts/research/`.",
+    promptEditor: "Prompt editor",
+    promptAgentList: "Research agents",
+    promptCurrentAgent: "Current agent",
+    promptDefaultPreview: "Default prompt preview",
+    promptDirty: "Unsaved changes",
+    promptClean: "Synced with workspace",
+    promptStats: "chars",
+    promptFile: "File",
+    agentTemplate: "Agent template",
+    llmConfig: "LLM config",
+    agentTemplateConfig: "Agent binding config",
+    agentTemplateSaved: "Agent binding saved",
+    llmConfigMissing: "LLM config not found",
     promptSave: "Save prompts",
-    promptReset: "Reset current content",
+    promptReset: "Restore default prompt",
     promptSaved: "Saved to workspace",
     promptLoading: "Loading research prompts...",
     promptEmpty: "No prompt files found yet. Saving will create them.",
@@ -196,11 +296,12 @@ const COPY = {
     boundaryBody:
       "The first release only discovers themes and concept cards. It does not run experiments, hand off to Supervised Evolution, or mutate baseline behavior.",
     defaultInput: {
-      openGoal: "Find a novel interdisciplinary research theme related to computer science for the AI Scientist topic.",
+      openGoal:
+        "For XH-202619, develop a novel computer-science-plus-domain research theme where Vibelution acts as an AI Scientist platform and closes the loop from source input to verifiable scientific hypothesis and research plan output.",
       constraints:
-        "Suitable for a student team; grounded in public papers, GitHub, datasets, or web sources; suitable for a competition MVP.",
+        "Competition constraints: use a domestic open-source foundation model, especially Qwen; model calls should be explainable through Alibaba Cloud Bailian evidence or screenshots; the system should be a super-agent or multi-agent architecture with problem understanding, knowledge integration, association discovery, and verifiable hypothesis generation.\n\nResearch-plan output must cover Problem Statement, Rationale, Technical Details, Datasets with Source and Target, Paper Title, Paper Abstract, Methods, Experiments, Baselines, Metrics, Results, and real References. Inputs may include public papers, GitHub projects, open datasets, web sources, or published scientific question sets.\n\nFeasibility constraints: a student team should be able to build an MVP before September 5, 2026; the final package should support a PDF technical plan within 20 pages, core code, context-engineering or agent-workflow code, a real case study, and optionally an interactive frontend plus a demo video under 10 minutes.",
       preferences:
-        "Novelty first; prioritize problem-perspective novelty, then method transfer, discipline combination, and application scenario; avoid generic RAG or literature-review tools.",
+        "Prioritize upstream scientific research themes where the AI Scientist identifies knowledge gaps, proposes falsifiable hypotheses, designs experiments, evaluates results, and iterates. Avoid generic RAG, literature-review tools, or display-only applications.\n\nSelection priority: innovative and self-consistent core hypothesis; real data and feasible validation path; visible multi-agent or super-agent design; scientific-modal or interdisciplinary evidence handling; explicit improvement to Vibelution agent capabilities such as retrieval, evidence review, hypothesis generation, experiment design, code improvement, and evaluation loops.\n\nAlign with judging: scientific value 40, technical depth 30, application potential 30. Reject hallucinated references, unreproducible datasets, generic AI+X framing, and concepts without experimental metrics.",
     },
   },
 };
@@ -211,9 +312,15 @@ const STAGES = [
   { id: "evidence", icon: BookOpenCheck },
   { id: "themes", icon: BrainCircuit },
   { id: "card", icon: BadgeCheck },
-];
+] as const;
 
 const RESEARCH_PROMPT_KEYS = ["broad", "deep", "review", "themes", "card"] as const;
+const AUTO_DRAFT_STEPS = [
+  { stage: "broad", suffix: "run-broad-search" },
+  { stage: "deep", suffix: "run-deep-search" },
+  { stage: "evidence", suffix: "extract-evidence" },
+  { stage: "themes", suffix: "generate-themes" },
+] as const;
 
 export function ResearchRoute() {
   const { lang, t } = useAppI18n();
@@ -221,16 +328,28 @@ export function ResearchRoute() {
   const queryClient = useQueryClient();
   const [activeSessionId, setActiveSessionId] = useState("");
   const [activeView, setActiveView] = useState<ResearchViewKey>("discovery");
+  const [activePromptKey, setActivePromptKey] = useState<(typeof RESEARCH_PROMPT_KEYS)[number]>("broad");
+  const [activeStage, setActiveStage] = useState<ResearchStageKey>("broad");
+  const [runningStage, setRunningStage] = useState<ResearchStageKey | "draft" | "">("");
+  const [workflowMode, setWorkflowMode] = useState<ResearchWorkflowMode>("manual");
+  const [autoDraftPauseRequested, setAutoDraftPauseRequested] = useState(false);
   const [draft, setDraft] = useState<DraftInput>(copy.defaultInput);
   const [promptDrafts, setPromptDrafts] = useState<Record<string, ResearchPromptDraft>>({});
+  const autoDraftPauseRequestedRef = useRef(false);
 
   useEffect(() => {
     setDraft((current) => ({
-      openGoal: current.openGoal || copy.defaultInput.openGoal,
-      constraints: current.constraints || copy.defaultInput.constraints,
-      preferences: current.preferences || copy.defaultInput.preferences,
+      openGoal: shouldRefreshDefaultDraft(current.openGoal, "openGoal", lang)
+        ? copy.defaultInput.openGoal
+        : current.openGoal,
+      constraints: shouldRefreshDefaultDraft(current.constraints, "constraints", lang)
+        ? copy.defaultInput.constraints
+        : current.constraints,
+      preferences: shouldRefreshDefaultDraft(current.preferences, "preferences", lang)
+        ? copy.defaultInput.preferences
+        : current.preferences,
     }));
-  }, [copy.defaultInput.constraints, copy.defaultInput.openGoal, copy.defaultInput.preferences]);
+  }, [copy.defaultInput.constraints, copy.defaultInput.openGoal, copy.defaultInput.preferences, lang]);
 
   const sessionsQuery = useQuery({
     queryKey: queryKeys.researchThemeDiscoverySessions(),
@@ -252,6 +371,7 @@ export function ResearchRoute() {
         `/api/research/theme-discovery/sessions/${encodeURIComponent(activeSessionId)}`,
       ),
     enabled: Boolean(activeSessionId),
+    refetchInterval: runningStage ? 1200 : false,
   });
 
   const active = sessionQuery.data;
@@ -272,6 +392,7 @@ export function ResearchRoute() {
           key: item.key,
           filename: item.filename,
           content: current[item.key]?.content ?? item.content ?? "",
+          defaultContent: item.defaultContent ?? "",
         };
       }
       return next;
@@ -294,6 +415,7 @@ export function ResearchRoute() {
     active?.themeCards,
     selectedTheme?.themeId,
   ]);
+  const missingEvidenceRequests = useMemo(() => latestMissingEvidenceRequests(active), [active]);
 
   const invalidateResearch = async (sessionId?: string) => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySessions() });
@@ -310,54 +432,233 @@ export function ResearchRoute() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...draft, candidateCount: 5 }),
-      }),
+    }),
     onSuccess: async (payload) => {
       setActiveSessionId(payload.session.sessionId);
+      setActiveStage("broad");
       await invalidateResearch(payload.session.sessionId);
+    },
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: (sessionId: string) =>
+      fetchJson<ResearchDiscoverySessionList & { deleted: boolean; sessionId: string }>(
+        `/api/research/theme-discovery/sessions/${encodeURIComponent(sessionId)}`,
+        {
+          method: "DELETE",
+        },
+      ),
+    onSuccess: async (payload) => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySessions() });
+      queryClient.removeQueries({ queryKey: queryKeys.researchThemeDiscoverySession(payload.sessionId) });
+      const nextSessionId = payload.sessions[0]?.sessionId ?? "";
+      setActiveSessionId((current) => (current === payload.sessionId ? nextSessionId : current));
     },
   });
 
   const actionMutation = useMutation({
-    mutationFn: (endpoint: string) =>
+    mutationFn: ({ endpoint, body }: { endpoint: string; body?: unknown }) =>
       fetchJson<ResearchDiscoverySessionPayload>(endpoint, {
         method: "POST",
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
       }),
     onSuccess: async (payload) => {
       setActiveSessionId(payload.session.sessionId);
       await invalidateResearch(payload.session.sessionId);
     },
+    onSettled: () => {
+      setRunningStage("");
+    },
   });
 
-  const runAction = (suffix: string) => {
+  const autoDraftMutation = useMutation({
+    mutationFn: async ({
+      initialPayload,
+      sessionId,
+      startIndex,
+    }: {
+      initialPayload?: ResearchDiscoverySessionPayload;
+      sessionId: string;
+      startIndex: number;
+    }) => {
+      autoDraftPauseRequestedRef.current = false;
+      setAutoDraftPauseRequested(false);
+      let latestPayload: ResearchDiscoverySessionPayload | null = initialPayload ?? null;
+      let completedEvidenceSupplement = Boolean(
+        latestPayload &&
+          latestMissingEvidenceRequests(latestPayload).length &&
+          latestEvidenceIsOlderThanDeepSearch(latestPayload),
+      );
+      const runAutoStep = async (stage: ResearchStageKey, suffix: string, body?: unknown) => {
+        setActiveStage(stage);
+        setRunningStage(stage);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySession(sessionId) });
+        const payload = await fetchJson<ResearchDiscoverySessionPayload>(
+          `/api/research/theme-discovery/sessions/${encodeURIComponent(sessionId)}/${suffix}`,
+          {
+            method: "POST",
+            headers: body ? { "Content-Type": "application/json" } : undefined,
+            body: body ? JSON.stringify(body) : undefined,
+          },
+        );
+        setActiveSessionId(payload.session.sessionId);
+        await invalidateResearch(payload.session.sessionId);
+        return payload;
+      };
+      if (latestPayload && startIndex >= autoDraftStepIndex("themes")) {
+        const requests = latestMissingEvidenceRequests(latestPayload);
+        if (requests.length && !hasDeepSearchAfterLatestEvidence(latestPayload)) {
+          completedEvidenceSupplement = true;
+          latestPayload = await runAutoStep("deep", "run-deep-search", { evidenceRequests: requests });
+          if (!autoDraftPauseRequestedRef.current) {
+            latestPayload = await runAutoStep("evidence", "extract-evidence");
+          }
+        } else if (requests.length && latestEvidenceIsOlderThanDeepSearch(latestPayload)) {
+          completedEvidenceSupplement = true;
+          latestPayload = await runAutoStep("evidence", "extract-evidence");
+        }
+      }
+      for (const step of AUTO_DRAFT_STEPS.slice(startIndex)) {
+        if (autoDraftPauseRequestedRef.current) {
+          break;
+        }
+        latestPayload = await runAutoStep(step.stage, step.suffix);
+        if (autoDraftPauseRequestedRef.current) {
+          break;
+        }
+        const requests = latestMissingEvidenceRequests(latestPayload);
+        if (step.stage === "evidence" && requests.length && !completedEvidenceSupplement) {
+          completedEvidenceSupplement = true;
+          latestPayload = await runAutoStep("deep", "run-deep-search", { evidenceRequests: requests });
+          if (autoDraftPauseRequestedRef.current) {
+            break;
+          }
+          latestPayload = await runAutoStep("evidence", "extract-evidence");
+        }
+      }
+      return latestPayload;
+    },
+    onSettled: () => {
+      setRunningStage("");
+    },
+  });
+
+  const runWorkflow = () => {
     if (!activeSessionId) {
       return;
     }
-    actionMutation.mutate(`/api/research/theme-discovery/sessions/${encodeURIComponent(activeSessionId)}/${suffix}`);
+    if (workflowMode === "manual") {
+      const next = nextManualWorkflowStep(active);
+      if (!next) {
+        return;
+      }
+      runAction(next.suffix, next.stage, next.body);
+      return;
+    }
+    autoDraftMutation.mutate({
+      initialPayload: active,
+      sessionId: activeSessionId,
+      startIndex: autoDraftStartIndex(active),
+    });
   };
 
-  const runThemeAction = (theme: ResearchCandidateTheme, suffix: string) => {
-    actionMutation.mutate(
-      `/api/research/theme-discovery/sessions/${encodeURIComponent(theme.sessionId)}/themes/${encodeURIComponent(
+  const runAction = (suffix: string, stage?: ResearchStageKey, body?: unknown) => {
+    if (!activeSessionId) {
+      return;
+    }
+    if (stage) {
+      setActiveStage(stage);
+    }
+    setRunningStage(stage ?? "draft");
+    void queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySession(activeSessionId) });
+    actionMutation.mutate({
+      endpoint: `/api/research/theme-discovery/sessions/${encodeURIComponent(activeSessionId)}/${suffix}`,
+      body,
+    });
+  };
+
+  const runEvidenceSupplementSearch = () => {
+    const requests = latestMissingEvidenceRequests(active);
+    if (!requests.length) {
+      return;
+    }
+    runAction("run-deep-search", "deep", { evidenceRequests: requests });
+  };
+
+  const pauseAutoDraft = () => {
+    autoDraftPauseRequestedRef.current = true;
+    setAutoDraftPauseRequested(true);
+  };
+
+  const runThemeAction = (theme: ResearchCandidateTheme, suffix: string, stage?: ResearchStageKey) => {
+    if (stage) {
+      setActiveStage(stage);
+    }
+    setRunningStage(stage ?? activeStage);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySession(theme.sessionId) });
+    actionMutation.mutate({
+      endpoint: `/api/research/theme-discovery/sessions/${encodeURIComponent(theme.sessionId)}/themes/${encodeURIComponent(
         theme.themeId,
       )}/${suffix}`,
-    );
+    });
   };
 
   const approveCard = (card: ResearchThemeCard) => {
-    actionMutation.mutate(
-      `/api/research/theme-discovery/sessions/${encodeURIComponent(card.sessionId)}/theme-cards/${encodeURIComponent(
+    actionMutation.mutate({
+      endpoint: `/api/research/theme-discovery/sessions/${encodeURIComponent(card.sessionId)}/theme-cards/${encodeURIComponent(
         card.cardId,
       )}/approve`,
-    );
+    });
   };
 
-  const busy = createMutation.isPending || actionMutation.isPending;
-  const actionError = createMutation.error || actionMutation.error || sessionQuery.error || sessionsQuery.error;
+  const deleteSession = (sessionId: string) => {
+    if (deleteSessionMutation.isPending || !window.confirm(copy.deleteSessionConfirm)) {
+      return;
+    }
+    deleteSessionMutation.mutate(sessionId);
+  };
+
+  const busy = createMutation.isPending || deleteSessionMutation.isPending || actionMutation.isPending || autoDraftMutation.isPending;
+  const actionError =
+    createMutation.error ||
+    deleteSessionMutation.error ||
+    actionMutation.error ||
+    autoDraftMutation.error ||
+    sessionQuery.error ||
+    sessionsQuery.error;
   const promptWorkspace = promptsQuery.data;
   const promptItems = useMemo(
     () => RESEARCH_PROMPT_KEYS.map((key) => promptDrafts[key]).filter(Boolean),
     [promptDrafts],
   );
+  useEffect(() => {
+    if (!promptItems.length) {
+      return;
+    }
+    if (!promptItems.some((item) => item.key === activePromptKey)) {
+      setActivePromptKey(promptItems[0].key as (typeof RESEARCH_PROMPT_KEYS)[number]);
+    }
+  }, [activePromptKey, promptItems]);
+  const agentByKey = useMemo(
+    () => new Map((promptWorkspace?.agents ?? []).map((agent) => [agent.key, agent])),
+    [promptWorkspace?.agents],
+  );
+  const agentTemplates = promptWorkspace?.agentTemplates ?? [];
+  const llmConfigs = promptWorkspace?.llmConfigs ?? [];
+  const activePromptItem = promptItems.find((item) => item.key === activePromptKey) ?? promptItems[0];
+  const activePromptAgent = activePromptItem ? agentByKey.get(activePromptItem.key) : undefined;
+  const activePromptTemplate =
+    agentTemplates.find((template) => template.templateId === activePromptAgent?.templateId) ?? agentTemplates[0];
+  const activePromptLlmConfig = llmConfigs.find((config) => config.configId === activePromptAgent?.llmConfigId);
+  const activePromptIsDirty = Boolean(
+    activePromptItem &&
+      promptsQuery.data &&
+      promptsQuery.data?.prompts.find((prompt) => prompt.key === activePromptItem.key)?.content !== activePromptItem.content,
+  );
+  const activeStageMeta = STAGES.find((stage) => stage.id === activeStage) ?? STAGES[0];
+  const activeStageLabel = stageLabel(activeStageMeta.id, copy);
+  const activeStageStatus = displayedStageStatus(activeStage, active, runningStage);
 
   const savePromptMutation = useMutation({
     mutationFn: (payload: { key: string; content: string }) =>
@@ -376,10 +677,22 @@ export function ResearchRoute() {
               key: item.key,
               filename: item.filename,
               content: item.content,
+              defaultContent: item.defaultContent,
             },
           ]),
         ) as Record<string, ResearchPromptDraft>,
       );
+    },
+  });
+  const saveAgentTemplateMutation = useMutation({
+    mutationFn: (payload: { key: string; templateId: string; llmConfigId: string }) =>
+      fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/agent-templates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoveryPrompts() });
     },
   });
 
@@ -407,11 +720,44 @@ export function ResearchRoute() {
             >
               {copy.prompts}
             </button>
+            <Link className={styles.subnavLink} to="/research/flow-canvas">
+              流程画布
+            </Link>
           </nav>
-          <button className={styles.primaryButton} disabled={busy || !activeSessionId} onClick={() => runAction("run-draft")}>
-            <Sparkles size={16} />
-            {copy.runDraft}
-          </button>
+          {activeView === "discovery" ? (
+            <>
+              <div className={styles.workflowModeControl} aria-label={copy.workflowMode}>
+                <span>{copy.workflowMode}</span>
+                <button
+                  type="button"
+                  className={workflowMode === "manual" ? styles.workflowModeButton_active : styles.workflowModeButton}
+                  onClick={() => setWorkflowMode("manual")}
+                  aria-pressed={workflowMode === "manual"}
+                >
+                  {copy.manualMode}
+                </button>
+                <button
+                  type="button"
+                  className={workflowMode === "auto" ? styles.workflowModeButton_active : styles.workflowModeButton}
+                  onClick={() => setWorkflowMode("auto")}
+                  aria-pressed={workflowMode === "auto"}
+                >
+                  {copy.autoMode}
+                </button>
+              </div>
+              {autoDraftMutation.isPending ? (
+                <button className={styles.secondaryButton} disabled={autoDraftPauseRequested} onClick={pauseAutoDraft}>
+                  <Pause size={16} />
+                  {autoDraftPauseRequested ? copy.pausing : copy.pause}
+                </button>
+              ) : (
+                <button className={styles.primaryButton} disabled={busy || !activeSessionId} onClick={runWorkflow}>
+                  <Sparkles size={16} />
+                  {workflowMode === "manual" ? copy.continueWorkflow : copy.runDraft}
+                </button>
+              )}
+            </>
+          ) : null}
         </div>
       </header>
 
@@ -453,39 +799,151 @@ export function ResearchRoute() {
               <RadioTower size={18} />
             </div>
             <p className={styles.panelLead}>{copy.promptBody}</p>
+            {promptWorkspace?.agentConfigPath ? (
+              <p className={styles.promptConfigLine}>
+                {copy.agentTemplateConfig}: <code>{promptWorkspace.agentConfigPath}</code>
+              </p>
+            ) : null}
             {promptsQuery.isPending ? <p className={styles.emptyText}>{copy.promptLoading}</p> : null}
             {!promptItems.length && !promptsQuery.isPending ? <p className={styles.emptyText}>{copy.promptEmpty}</p> : null}
-            <div className={styles.promptGrid}>
-              {promptItems.map((item) => (
-                <article key={item.key} className={styles.promptCard}>
-                  <div className={styles.promptCardHeader}>
-                    <div>
-                      <p className={styles.panelEyebrow}>{copy.promptKeys[item.key as keyof typeof copy.promptKeys] ?? item.key}</p>
-                      <h3>{item.filename}</h3>
-                    </div>
-                    <span className={styles.promptPath}>{item.key}</span>
+            {activePromptItem ? (
+              <div className={styles.promptWorkbench}>
+                <aside className={styles.promptAgentRail} aria-label={copy.promptAgentList}>
+                  <div className={styles.promptRailHeader}>
+                    <strong>{copy.promptAgentList}</strong>
+                    <span>{promptItems.length}</span>
                   </div>
-                  <textarea
-                    className={styles.promptTextarea}
-                    value={item.content}
-                    onChange={(event) =>
-                      setPromptDrafts((current) => ({
-                        ...current,
-                        [item.key]: {
-                          ...item,
-                          content: event.target.value,
-                        },
-                      }))
-                    }
-                  />
+                  <div className={styles.promptAgentList}>
+                    {promptItems.map((item) => {
+                      const agent = agentByKey.get(item.key);
+                      const llmConfig = llmConfigs.find((config) => config.configId === agent?.llmConfigId);
+                      const originalContent = promptsQuery.data?.prompts.find((prompt) => prompt.key === item.key)?.content;
+                      const isDirty = Boolean(originalContent !== undefined && originalContent !== item.content);
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          className={`${styles.promptAgentButton} ${activePromptItem.key === item.key ? styles.promptAgentButton_active : ""}`}
+                          aria-pressed={activePromptItem.key === item.key}
+                          onClick={() => setActivePromptKey(item.key as (typeof RESEARCH_PROMPT_KEYS)[number])}
+                        >
+                          <span>
+                            {copy.promptKeys[item.key as keyof typeof copy.promptKeys] ?? item.key}
+                            {isDirty ? <em>{copy.promptDirty}</em> : null}
+                          </span>
+                          <small>{llmConfig ? `${llmConfig.label} · ${llmConfig.model}` : copy.llmConfigMissing}</small>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </aside>
+
+                <section className={styles.promptEditorPanel}>
+                  <div className={styles.promptEditorHeader}>
+                    <div>
+                      <p className={styles.panelEyebrow}>{copy.promptEditor}</p>
+                      <h3>{copy.promptKeys[activePromptItem.key as keyof typeof copy.promptKeys] ?? activePromptItem.key}</h3>
+                    </div>
+                    <span className={activePromptIsDirty ? styles.statePill : styles.countPill}>
+                      {activePromptIsDirty ? copy.promptDirty : copy.promptClean}
+                    </span>
+                  </div>
+                  <div className={styles.promptEditorMeta}>
+                    <span>
+                      {copy.promptFile}: <code>{activePromptItem.filename}</code>
+                    </span>
+                    <span>
+                      {activePromptItem.content.length} {copy.promptStats}
+                    </span>
+                  </div>
+                  <div className={styles.promptCodeEditor}>
+                    <CodeMirror
+                      value={activePromptItem.content}
+                      theme={workbenchCodeMirrorTheme}
+                      height="100%"
+                      extensions={[markdown(), EditorView.lineWrapping]}
+                      onChange={(value) =>
+                        setPromptDrafts((current) => ({
+                          ...current,
+                          [activePromptItem.key]: {
+                            ...activePromptItem,
+                            content: value,
+                          },
+                        }))
+                      }
+                      basicSetup={{
+                        foldGutter: false,
+                        allowMultipleSelections: false,
+                      }}
+                    />
+                  </div>
+                </section>
+
+                <aside className={styles.promptInspectorPanel}>
+                  <div className={styles.promptInspectorHeader}>
+                    <p className={styles.panelEyebrow}>{copy.promptCurrentAgent}</p>
+                    <h3>{activePromptItem.key}</h3>
+                  </div>
+                  <label className={styles.agentTemplateField}>
+                    <span>{copy.agentTemplate}</span>
+                    <select
+                      value={activePromptAgent?.templateId ?? ""}
+                      disabled={!agentTemplates.length || saveAgentTemplateMutation.isPending}
+                      onChange={(event) =>
+                        saveAgentTemplateMutation.mutate({
+                          key: activePromptItem.key,
+                          templateId: event.target.value,
+                          llmConfigId: activePromptAgent?.llmConfigId ?? llmConfigs[0]?.configId ?? "",
+                        })
+                      }
+                    >
+                      {agentTemplates.map((template) => (
+                        <option key={template.templateId} value={template.templateId}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </select>
+                    {activePromptTemplate?.description ? <em>{activePromptTemplate.description}</em> : null}
+                  </label>
+                  <label className={styles.agentTemplateField}>
+                    <span>{copy.llmConfig}</span>
+                    <select
+                      value={activePromptAgent?.llmConfigId ?? ""}
+                      disabled={!llmConfigs.length || saveAgentTemplateMutation.isPending}
+                      onChange={(event) =>
+                        saveAgentTemplateMutation.mutate({
+                          key: activePromptItem.key,
+                          templateId: activePromptAgent?.templateId ?? activePromptTemplate?.templateId ?? "",
+                          llmConfigId: event.target.value,
+                        })
+                      }
+                    >
+                      {llmConfigs.map((config) => (
+                        <option key={config.configId} value={config.configId}>
+                          {config.label}
+                        </option>
+                      ))}
+                    </select>
+                    {activePromptLlmConfig ? (
+                      <em>
+                        {activePromptLlmConfig.providerKind} / {activePromptLlmConfig.model}
+                      </em>
+                    ) : (
+                      <em>{copy.llmConfigMissing}</em>
+                    )}
+                  </label>
+                  <section className={styles.promptDefaultPanel}>
+                    <strong>{copy.promptDefaultPreview}</strong>
+                    <p>{clip(activePromptItem.defaultContent || "", 360)}</p>
+                  </section>
                   <div className={styles.cardActions}>
                     <button
                       className={styles.primaryButton}
                       disabled={savePromptMutation.isPending}
                       onClick={() =>
                         savePromptMutation.mutate({
-                          key: item.key,
-                          content: promptDrafts[item.key]?.content ?? "",
+                          key: activePromptItem.key,
+                          content: promptDrafts[activePromptItem.key]?.content ?? "",
                         })
                       }
                     >
@@ -498,9 +956,12 @@ export function ResearchRoute() {
                       onClick={() =>
                         setPromptDrafts((current) => ({
                           ...current,
-                          [item.key]: {
-                            ...item,
-                            content: promptsQuery.data?.prompts.find((prompt) => prompt.key === item.key)?.content ?? "",
+                          [activePromptItem.key]: {
+                            ...activePromptItem,
+                            content:
+                              promptsQuery.data?.prompts.find((prompt) => prompt.key === activePromptItem.key)?.defaultContent ??
+                              activePromptItem.defaultContent ??
+                              "",
                           },
                         }))
                       }
@@ -509,11 +970,15 @@ export function ResearchRoute() {
                       {copy.promptReset}
                     </button>
                   </div>
-                </article>
-              ))}
-            </div>
+                </aside>
+              </div>
+            ) : null}
             {savePromptMutation.isSuccess ? <p className={styles.okText}>{copy.promptSaved}</p> : null}
+            {saveAgentTemplateMutation.isSuccess ? <p className={styles.okText}>{copy.agentTemplateSaved}</p> : null}
             {savePromptMutation.error ? <p className={styles.errorText}>{errorMessage(savePromptMutation.error)}</p> : null}
+            {saveAgentTemplateMutation.error ? (
+              <p className={styles.errorText}>{errorMessage(saveAgentTemplateMutation.error)}</p>
+            ) : null}
           </section>
         ) : null}
 
@@ -528,24 +993,26 @@ export function ResearchRoute() {
               </div>
               <FileSearch size={18} />
             </div>
-            <label>
-              <span>{copy.openGoal}</span>
-              <textarea value={draft.openGoal} onChange={(event) => setDraft({ ...draft, openGoal: event.target.value })} />
-            </label>
-            <label>
-              <span>{copy.constraints}</span>
-              <textarea
-                value={draft.constraints}
-                onChange={(event) => setDraft({ ...draft, constraints: event.target.value })}
-              />
-            </label>
-            <label>
-              <span>{copy.preferences}</span>
-              <textarea
-                value={draft.preferences}
-                onChange={(event) => setDraft({ ...draft, preferences: event.target.value })}
-              />
-            </label>
+            <div className={styles.intakeFields}>
+              <label className={`${styles.intakeField} ${styles.intakeField_primary}`}>
+                <span>{copy.openGoal}</span>
+                <textarea value={draft.openGoal} onChange={(event) => setDraft({ ...draft, openGoal: event.target.value })} />
+              </label>
+              <label className={styles.intakeField}>
+                <span>{copy.constraints}</span>
+                <textarea
+                  value={draft.constraints}
+                  onChange={(event) => setDraft({ ...draft, constraints: event.target.value })}
+                />
+              </label>
+              <label className={styles.intakeField}>
+                <span>{copy.preferences}</span>
+                <textarea
+                  value={draft.preferences}
+                  onChange={(event) => setDraft({ ...draft, preferences: event.target.value })}
+                />
+              </label>
+            </div>
             <button className={styles.primaryButton} disabled={busy} onClick={() => createMutation.mutate()}>
               <Layers3 size={16} />
               {copy.create}
@@ -564,19 +1031,28 @@ export function ResearchRoute() {
             <div className={styles.sessionList}>
               {sessions.length === 0 ? <p className={styles.emptyText}>{copy.noSession}</p> : null}
               {sessions.map((session) => (
-                <button
+                <div
                   key={session.sessionId}
-                  className={`${styles.sessionButton} ${
-                    session.sessionId === activeSessionId ? styles.sessionButton_active : ""
-                  }`}
-                  onClick={() => setActiveSessionId(session.sessionId)}
+                  className={`${styles.sessionRow} ${session.sessionId === activeSessionId ? styles.sessionRow_active : ""}`}
                 >
-                  <strong>{clip(session.openGoal, 72)}</strong>
-                  <span>{formatDate(session.updatedAt)}</span>
-                  <code>
-                    {session.summary.candidateThemeCount} {copy.themeCount} / {session.status}
-                  </code>
-                </button>
+                  <button className={styles.sessionButton} onClick={() => setActiveSessionId(session.sessionId)}>
+                    <strong>{clip(session.openGoal, 72)}</strong>
+                    <span>{formatDate(session.updatedAt)}</span>
+                    <code>
+                      {session.summary.candidateThemeCount} {copy.themeCount} / {session.status}
+                    </code>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.sessionDeleteButton}
+                    disabled={deleteSessionMutation.isPending}
+                    title={copy.deleteSession}
+                    aria-label={`${copy.deleteSession}: ${clip(session.openGoal, 36)}`}
+                    onClick={() => deleteSession(session.sessionId)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               ))}
             </div>
           </section>
@@ -586,71 +1062,26 @@ export function ResearchRoute() {
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>Theme Discovery MVP</p>
-              <h2>{copy.candidates}</h2>
+              <h2>{activeStageLabel}</h2>
             </div>
-            <span className={styles.countPill}>5</span>
+            <span className={styles.countPill}>{stageStatusLabel(activeStageStatus, copy)}</span>
           </div>
 
-          <div className={styles.themeGrid}>
-            {currentThemes.length === 0 ? <p className={styles.emptyText}>{copy.emptyCandidates}</p> : null}
-            {currentThemes.map((theme, index) => (
-              <article key={theme.themeId} className={styles.themeCard}>
-                <div className={styles.themeRank}>
-                  <span>{String(index + 1).padStart(2, "0")}</span>
-                  <strong>{Math.round(theme.recommendationScore)}</strong>
-                </div>
-                <div className={styles.themeBody}>
-                  <div className={styles.themeHeader}>
-                    <div>
-                      <h3>{theme.title}</h3>
-                      <p>{theme.oneLine}</p>
-                    </div>
-                    <span className={`${styles.statePill} ${styles[`state_${themeTone(theme.status)}`]}`}>
-                      {statusLabel(theme.status, copy)}
-                    </span>
-                  </div>
-                  <p className={styles.questionText}>{theme.coreQuestion}</p>
-                  <div className={styles.scoreStrip}>
-                    <Metric label={copy.score} value={theme.recommendationScore} />
-                    <Metric label={copy.novelty} value={score(theme, "noveltyGap")} />
-                    <Metric label={copy.competition} value={score(theme, "competitionFit")} />
-                    <Metric label={copy.data} value={score(theme, "verifiability")} />
-                  </div>
-                  <div className={styles.tagRow}>
-                    <code>{noveltyLabel(theme.noveltyPath)}</code>
-                    {theme.interdisciplinaryCombination.slice(0, 4).map((item) => (
-                      <code key={item}>{item}</code>
-                    ))}
-                  </div>
-                  <div className={styles.agentReview}>
-                    <BrainCircuit size={15} />
-                    <p>{theme.agentReview}</p>
-                  </div>
-                  <p className={styles.riskText}>
-                    {copy.risk}: {theme.uncertainty}
-                  </p>
-                  <div className={styles.cardActions}>
-                    <button
-                      className={styles.primaryButton}
-                      disabled={busy || theme.status === "stale"}
-                      onClick={() => runThemeAction(theme, "select")}
-                    >
-                      <GitBranch size={15} />
-                      {copy.select}
-                    </button>
-                    <button
-                      className={styles.secondaryButton}
-                      disabled={busy || theme.status === "stale"}
-                      onClick={() => runThemeAction(theme, "theme-card")}
-                    >
-                      <FlaskConical size={15} />
-                      {copy.themeCard}
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
+          <ResearchStageOutput
+            active={active}
+            busy={busy}
+            copy={copy}
+            currentThemes={currentThemes}
+            lang={lang}
+            onGenerateCard={(theme) => runThemeAction(theme, "theme-card", "card")}
+            onSupplementEvidence={runEvidenceSupplementSearch}
+            onSelectTheme={(theme) => runThemeAction(theme, "select", "themes")}
+            missingEvidenceRequests={missingEvidenceRequests}
+            selectedCard={selectedCard}
+            selectedTheme={selectedTheme}
+            stage={activeStage}
+            runningStage={runningStage}
+          />
         </section>
 
             <aside className={styles.sideColumn}>
@@ -658,46 +1089,53 @@ export function ResearchRoute() {
             <div className={styles.stageRail}>
               {STAGES.map((stage, index) => {
                 const StageIcon = stage.icon;
-                const label =
-                  stage.id === "broad"
-                    ? copy.broad
-                    : stage.id === "deep"
-                      ? copy.deep
-                      : stage.id === "evidence"
-                        ? copy.evidence
-                        : stage.id === "themes"
-                          ? copy.themes
-                          : copy.themeCard;
+                const label = stageLabel(stage.id, copy);
+                const status = displayedStageStatus(stage.id, active, runningStage);
+                const actionLabel = stageActionLabel(status, stage.id, copy);
+                const ActionIcon = status === "done" || status === "failed" ? RefreshCw : Play;
                 const action =
                   stage.id === "broad"
-                    ? () => runAction("run-broad-search")
+                    ? () => runAction("run-broad-search", stage.id)
                     : stage.id === "deep"
-                      ? () => runAction("run-deep-search")
+                      ? () => runAction("run-deep-search", stage.id)
                       : stage.id === "evidence"
-                        ? () => runAction("extract-evidence")
+                        ? () => runAction("extract-evidence", stage.id)
                         : stage.id === "themes"
-                          ? () => runAction("generate-themes")
+                          ? () => runAction("generate-themes", stage.id)
                           : selectedTheme
-                            ? () => runThemeAction(selectedTheme, "theme-card")
+                            ? () => runThemeAction(selectedTheme, "theme-card", stage.id)
                             : undefined;
                 return (
-                  <article key={stage.id} className={styles.stageCard}>
-                    <div className={styles.stageIndex}>
-                      <StageIcon size={16} />
-                      <span>{String(index + 1).padStart(2, "0")}</span>
-                    </div>
-                    <div className={styles.stageBody}>
-                      <div className={styles.stageHeader}>
-                        <strong>{label}</strong>
-                        <span>{stageStatus(stage.id, active)}</span>
+                  <article
+                    key={stage.id}
+                    className={`${styles.stageCard} ${activeStage === stage.id ? styles.stageCard_active : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className={styles.stageSelectButton}
+                      aria-pressed={activeStage === stage.id}
+                      onClick={() => setActiveStage(stage.id)}
+                    >
+                      <div className={styles.stageIndex}>
+                        <StageIcon size={16} />
+                        <span>{String(index + 1).padStart(2, "0")}</span>
                       </div>
+                      <div className={styles.stageHeader}>
+                        <div>
+                          <strong>{label}</strong>
+                          <small>{stageDescription(stage.id, lang)}</small>
+                        </div>
+                        <span>{stageStatusLabel(status, copy)}</span>
+                      </div>
+                    </button>
+                    <div className={styles.stageBody}>
                       <button
                         className={styles.secondaryButton}
                         disabled={busy || !activeSessionId || !action}
                         onClick={action}
                       >
-                        <RefreshCw size={14} />
-                        {stage.id === "card" ? copy.themeCard : copy.rerun}
+                        <ActionIcon size={14} />
+                        <span>{actionLabel}</span>
                       </button>
                     </div>
                   </article>
@@ -723,6 +1161,778 @@ function latestSearchRun(runs: ResearchDiscoverySessionPayload["searchRuns"], ph
   return [...runs].reverse().find((run) => run.phase === phase);
 }
 
+function autoDraftStartIndex(active: ResearchDiscoverySessionPayload | undefined) {
+  if (!active) {
+    return 0;
+  }
+  const firstIncomplete = AUTO_DRAFT_STEPS.findIndex((step) => stageStatus(step.stage, active) !== "done");
+  return firstIncomplete >= 0 ? firstIncomplete : 0;
+}
+
+function autoDraftStepIndex(stage: ResearchStageKey) {
+  const index = AUTO_DRAFT_STEPS.findIndex((step) => step.stage === stage);
+  return index >= 0 ? index : AUTO_DRAFT_STEPS.length;
+}
+
+function nextManualWorkflowStep(active: ResearchDiscoverySessionPayload | undefined): {
+  stage: ResearchStageKey;
+  suffix: string;
+  body?: unknown;
+} | null {
+  if (!active || stageStatus("broad", active) !== "done") {
+    return { stage: "broad", suffix: "run-broad-search" };
+  }
+  if (stageStatus("deep", active) !== "done") {
+    return { stage: "deep", suffix: "run-deep-search" };
+  }
+  if (stageStatus("evidence", active) !== "done") {
+    return { stage: "evidence", suffix: "extract-evidence" };
+  }
+  const requests = latestMissingEvidenceRequests(active);
+  if (requests.length && !hasDeepSearchAfterLatestEvidence(active)) {
+    return { stage: "deep", suffix: "run-deep-search", body: { evidenceRequests: requests } };
+  }
+  if (requests.length && hasDeepSearchAfterLatestEvidence(active) && latestEvidenceIsOlderThanDeepSearch(active)) {
+    return { stage: "evidence", suffix: "extract-evidence" };
+  }
+  if (stageStatus("themes", active) !== "done") {
+    return { stage: "themes", suffix: "generate-themes" };
+  }
+  return null;
+}
+
+function latestMissingEvidenceRequests(active: ResearchDiscoverySessionPayload | undefined) {
+  if (!active) {
+    return [];
+  }
+  const event = latestResearchEvent(active, "evidence.");
+  const fields = asRecord(event?.fields);
+  const profile = asRecord(fields.agentExecution);
+  return stringList(fields.missingEvidenceRequests).concat(stringList(profile.missingEvidenceRequests)).filter(uniqueString);
+}
+
+function latestResearchEvent(active: ResearchDiscoverySessionPayload, prefix: string) {
+  return [...active.events].reverse().find((event) => event.eventCode.startsWith(prefix));
+}
+
+function hasDeepSearchAfterLatestEvidence(active: ResearchDiscoverySessionPayload) {
+  const evidenceTime = timestampMs(latestResearchEvent(active, "evidence.")?.timestamp);
+  return active.searchRuns.some((run) => run.phase === "deep" && timestampMs(run.completedAt || run.startedAt) > evidenceTime);
+}
+
+function latestEvidenceIsOlderThanDeepSearch(active: ResearchDiscoverySessionPayload) {
+  const evidenceTime = timestampMs(latestResearchEvent(active, "evidence.")?.timestamp);
+  const latestDeepTime = Math.max(
+    0,
+    ...active.searchRuns
+      .filter((run) => run.phase === "deep")
+      .map((run) => timestampMs(run.completedAt || run.startedAt)),
+  );
+  return latestDeepTime > evidenceTime;
+}
+
+function stageLabel(stage: ResearchStageKey, copy: (typeof COPY)["zh"]) {
+  if (stage === "broad") return copy.broad;
+  if (stage === "deep") return copy.deep;
+  if (stage === "evidence") return copy.evidence;
+  if (stage === "themes") return copy.themes;
+  return copy.themeCard;
+}
+
+function ResearchStageOutput({
+  active,
+  busy,
+  copy,
+  currentThemes,
+  lang,
+  missingEvidenceRequests,
+  onGenerateCard,
+  onSupplementEvidence,
+  onSelectTheme,
+  selectedCard,
+  selectedTheme,
+  stage,
+  runningStage,
+}: {
+  active: ResearchDiscoverySessionPayload | undefined;
+  busy: boolean;
+  copy: (typeof COPY)["zh"];
+  currentThemes: ResearchCandidateTheme[];
+  lang: "zh" | "en";
+  missingEvidenceRequests: string[];
+  onGenerateCard: (theme: ResearchCandidateTheme) => void;
+  onSupplementEvidence: () => void;
+  onSelectTheme: (theme: ResearchCandidateTheme) => void;
+  selectedCard: ResearchThemeCard | undefined;
+  selectedTheme: ResearchCandidateTheme | undefined;
+  stage: ResearchStageKey;
+  runningStage: ResearchStageKey | "draft" | "";
+}) {
+  const result = stageResultView(stage, active, currentThemes, selectedTheme, selectedCard, lang);
+  const StageIcon = (STAGES.find((item) => item.id === stage) ?? STAGES[0]).icon;
+
+  if (!active) {
+    return <p className={styles.emptyText}>{copy.noSession}</p>;
+  }
+
+  return (
+    <div className={styles.stageOutput}>
+      {result ? (
+        <section className={styles.stageResult}>
+          <div className={styles.stageOutputHeader}>
+            <span>
+              <StageIcon size={17} />
+            </span>
+            <p className={styles.stageResultSummary}>{result.summary}</p>
+          </div>
+          {result.items.length ? (
+            <div className={styles.stageResultItems}>
+              {result.items.map((item) => (
+                <div key={item.label} className={styles.stageResultItem}>
+                  <strong>{item.label}</strong>
+                  <em>{item.value}</em>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {stage === "broad" || stage === "deep" ? (
+        <StageSources active={active} lang={lang} phase={stage} />
+      ) : stage === "evidence" ? (
+        <StageEvidence
+          active={active}
+          busy={busy}
+          copy={copy}
+          missingEvidenceRequests={missingEvidenceRequests}
+          onSupplementEvidence={onSupplementEvidence}
+        />
+      ) : stage === "themes" ? (
+        <StageThemes
+          busy={busy}
+          copy={copy}
+          currentThemes={currentThemes}
+          onGenerateCard={onGenerateCard}
+          onSelectTheme={onSelectTheme}
+        />
+      ) : (
+        <StageCard
+          busy={busy}
+          copy={copy}
+          currentThemes={currentThemes}
+          onGenerateCard={onGenerateCard}
+          onSelectTheme={onSelectTheme}
+          selectedCard={selectedCard}
+          selectedTheme={selectedTheme}
+        />
+      )}
+
+      <AgentTracePanel
+        active={active}
+        copy={copy}
+        defaultCollapsed={stage === "themes" || stage === "card"}
+        isRunning={runningStage === stage || runningStage === "draft"}
+        stage={stage}
+      />
+    </div>
+  );
+}
+
+function StageSources({
+  active,
+  lang,
+  phase,
+}: {
+  active: ResearchDiscoverySessionPayload;
+  lang: "zh" | "en";
+  phase: "broad" | "deep";
+}) {
+  const run = latestSearchRun(active.searchRuns, phase);
+  const sources =
+    phase === "broad"
+      ? active.sources
+      : active.sources.filter((source) => !run?.runId || source.searchRunId === run.runId);
+  const visibleSources = sources.slice(0, 12);
+  return (
+    <div className={styles.evidenceList}>
+      {!visibleSources.length ? <p className={styles.emptyText}>{phase === "broad" ? "还没有广撒网来源。" : "还没有定向深搜来源。"}</p> : null}
+      {visibleSources.map((source) => (
+        <article key={source.sourceId} className={styles.evidenceCard}>
+          <a href={source.url} target="_blank" rel="noreferrer">
+            <strong>{source.title}</strong>
+            <span>{clip(source.snippet, 180)}</span>
+          </a>
+          <small>
+            {sourceKindLabel(source.kind, lang)} · {source.reliability}
+          </small>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function AgentTracePanel({
+  active,
+  copy,
+  defaultCollapsed,
+  isRunning,
+  stage,
+}: {
+  active: ResearchDiscoverySessionPayload;
+  copy: (typeof COPY)["zh"];
+  defaultCollapsed: boolean;
+  isRunning: boolean;
+  stage: ResearchStageKey;
+}) {
+  const trace = stageTrace(active, stage);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
+  const initializedTraceRef = useRef("");
+  const atBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(defaultCollapsed && !isRunning);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const traceSessionKey = `${active.session.sessionId}:${stage}`;
+  const traceScrollSignal = useMemo(() => buildResearchTraceScrollSignal(trace, isRunning), [trace, isRunning]);
+  const mainEntries = useMemo(() => trace.filter((item) => isMainTraceEntry(String(item.kind || "agent"))), [trace]);
+  const detailEntries = useMemo(() => trace.filter((item) => !isMainTraceEntry(String(item.kind || "agent"))), [trace]);
+  const latestTimestamp = useMemo(() => latestTraceTimestamp(trace), [trace]);
+
+  useLayoutEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return;
+    }
+    if (initializedTraceRef.current !== traceSessionKey) {
+      initializedTraceRef.current = traceSessionKey;
+      timeline.scrollTop = timeline.scrollHeight;
+      atBottomRef.current = true;
+      setIsAtBottom(true);
+      return;
+    }
+    if (atBottomRef.current) {
+      timeline.scrollTop = timeline.scrollHeight;
+      setIsAtBottom(true);
+    }
+  }, [traceSessionKey, traceScrollSignal]);
+
+  useEffect(() => {
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return;
+    }
+    const handleScroll = () => {
+      const distance = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight;
+      const nextAtBottom = distance < 18;
+      atBottomRef.current = nextAtBottom;
+      setIsAtBottom(nextAtBottom);
+    };
+    handleScroll();
+    timeline.addEventListener("scroll", handleScroll);
+    return () => timeline.removeEventListener("scroll", handleScroll);
+  }, [traceSessionKey]);
+
+  useEffect(() => {
+    setIsCollapsed(defaultCollapsed && !isRunning);
+    setDetailsExpanded(false);
+  }, [defaultCollapsed, isRunning, traceSessionKey]);
+
+  const scrollToLatest = () => {
+    const timeline = timelineRef.current;
+    if (!timeline) {
+      return;
+    }
+    timeline.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
+    atBottomRef.current = true;
+    setIsAtBottom(true);
+  };
+
+  if (!trace.length) {
+    return (
+      <section className={`${styles.agentTracePanel} ${isCollapsed ? styles.agentTracePanel_collapsed : ""}`}>
+        <div className={styles.agentTraceHeader}>
+          <div>
+            <strong>Agent 执行时间线</strong>
+            <span>{isRunning ? "等待第一条过程记录" : "还没有执行过程记录"}</span>
+          </div>
+          <div className={styles.agentTraceControls}>
+            <button
+              type="button"
+              className={styles.traceGhostButton}
+              onClick={() => setIsCollapsed((current) => !current)}
+              aria-expanded={!isCollapsed}
+            >
+              {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+              <span>{isCollapsed ? copy.expandTrace : copy.collapseTrace}</span>
+            </button>
+            {isRunning ? <LoaderCircle className={styles.statusSpinner} size={15} /> : null}
+          </div>
+        </div>
+        {!isCollapsed ? (
+          <div className={styles.agentTraceTimeline}>
+            <article className={`${styles.agentTraceTurn} ${styles.agentTrace_context}`}>
+              <div className={styles.agentTraceAvatar}>{isRunning ? <LoaderCircle size={15} /> : <BrainCircuit size={15} />}</div>
+              <div className={styles.agentTraceContent}>
+                <div className={styles.agentTraceMeta}>
+                  <strong>{isRunning ? "正在等待 agent 写入第一条过程记录" : "运行后这里会显示 agent 过程"}</strong>
+                </div>
+                <p>{isRunning ? "后端开始调用后，这里会实时显示主回答和可折叠工具过程。" : "运行或重跑当前步骤后，这里会保留可追溯过程。"}</p>
+              </div>
+            </article>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+  return (
+    <section className={`${styles.agentTracePanel} ${isCollapsed ? styles.agentTracePanel_collapsed : ""}`}>
+      <div className={styles.agentTraceHeader}>
+        <div>
+          <strong>Agent 执行时间线</strong>
+          <span>
+            {isRunning ? "实时跟随最新状态" : "阶段过程已记录"}
+            {latestTimestamp ? ` · ${formatTraceTimestamp(latestTimestamp)}` : ""}
+          </span>
+        </div>
+        <div className={styles.agentTraceControls}>
+          <button
+            type="button"
+            className={styles.traceGhostButton}
+            onClick={() => setIsCollapsed((current) => !current)}
+            aria-expanded={!isCollapsed}
+          >
+            {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+            <span>{isCollapsed ? copy.expandTrace : copy.collapseTrace}</span>
+          </button>
+          <button
+            type="button"
+            className={styles.traceGhostButton}
+            disabled={!detailEntries.length}
+            onClick={() => setDetailsExpanded((current) => !current)}
+            aria-expanded={detailsExpanded}
+          >
+            {detailsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span>{detailsExpanded ? "收起细节" : `展开细节 ${detailEntries.length}`}</span>
+          </button>
+          {isRunning ? (
+            <span className={styles.agentTraceLivePill}>
+              <LoaderCircle className={styles.statusSpinner} size={13} />
+              运行中
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      {!isCollapsed ? <div ref={timelineRef} className={styles.agentTraceTimeline}>
+        {isRunning ? (
+          <article className={`${styles.agentTraceTurn} ${styles.agentTrace_agent}`}>
+            <div className={styles.agentTraceAvatar}>
+              <LoaderCircle size={15} />
+            </div>
+            <div className={styles.agentTraceContent}>
+              <div className={styles.agentTraceMeta}>
+                <strong>Agent 正在执行当前步骤</strong>
+                <time>最新状态</time>
+              </div>
+              <p>页面会持续刷新这个过程，新的主回答、工具调用和观察结果会继续追加。</p>
+            </div>
+          </article>
+        ) : null}
+
+        {mainEntries.map((item, index) => (
+          <ResearchTraceTurn key={traceEntryKey(item, index)} item={item} index={index} />
+        ))}
+
+        {detailEntries.length ? (
+          <section className={styles.agentTraceDetailGroup}>
+            <button
+              type="button"
+              className={styles.agentTraceDetailSummary}
+              aria-expanded={detailsExpanded}
+              onClick={() => setDetailsExpanded((current) => !current)}
+            >
+              <Wrench size={15} />
+              <span>工具调用与上下文过程</span>
+              <em>{detailEntries.length}</em>
+              {detailsExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+            </button>
+            {detailsExpanded ? (
+              <div className={styles.agentTraceDetailList}>
+                {detailEntries.map((item, index) => (
+                  <ResearchTraceDetail key={traceEntryKey(item, index)} item={item} />
+                ))}
+              </div>
+            ) : null}
+          </section>
+        ) : null}
+
+        {!mainEntries.length && !detailsExpanded ? (
+          <article className={`${styles.agentTraceTurn} ${styles.agentTrace_context}`}>
+            <div className={styles.agentTraceAvatar}>
+              <BrainCircuit size={15} />
+            </div>
+            <div className={styles.agentTraceContent}>
+              <div className={styles.agentTraceMeta}>
+                <strong>当前只有工具与上下文过程</strong>
+              </div>
+              <p>展开细节可以查看提示词、输入、工具调用和观察结果。</p>
+            </div>
+          </article>
+        ) : null}
+      </div> : null}
+
+      {!isCollapsed && !isAtBottom ? (
+        <button type="button" className={styles.traceBackToBottomButton} onClick={scrollToLatest}>
+          <ArrowDown size={14} />
+          <span>回到最新</span>
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
+function ResearchTraceTurn({ item, index }: { item: Record<string, unknown>; index: number }) {
+  const kind = String(item.kind || "agent");
+  return (
+    <article className={`${styles.agentTraceTurn} ${styles[`agentTrace_${traceTone(kind)}`]}`}>
+      <div className={styles.agentTraceAvatar}>{traceIcon(kind)}</div>
+      <div className={styles.agentTraceContent}>
+        <div className={styles.agentTraceMeta}>
+          <strong>{String(item.title || `Agent step ${index + 1}`)}</strong>
+          {item.timestamp ? <time>{formatTraceTimestamp(String(item.timestamp))}</time> : null}
+        </div>
+        {item.detail ? <p>{String(item.detail)}</p> : null}
+      </div>
+    </article>
+  );
+}
+
+function ResearchTraceDetail({ item }: { item: Record<string, unknown> }) {
+  const kind = String(item.kind || "agent");
+  return (
+    <article className={`${styles.agentTraceDetailItem} ${styles[`agentTrace_${traceTone(kind)}`]}`}>
+      <span className={styles.agentTraceDetailIcon}>{traceIcon(kind)}</span>
+      <div>
+        <div className={styles.agentTraceMeta}>
+          <strong>{String(item.title || traceLabel(kind))}</strong>
+          {item.timestamp ? <time>{formatTraceTimestamp(String(item.timestamp))}</time> : null}
+        </div>
+        {item.detail ? <p>{String(item.detail)}</p> : null}
+      </div>
+    </article>
+  );
+}
+
+function traceIcon(kind: string) {
+  if (kind === "error") return <TriangleAlert size={15} />;
+  if (kind === "tool") return <Wrench size={15} />;
+  if (kind === "observation") return <SearchCheck size={15} />;
+  if (kind === "prompt" || kind === "input") return <FileSearch size={15} />;
+  if (kind === "plan") return <GitBranch size={15} />;
+  return <Sparkles size={15} />;
+}
+
+function isMainTraceEntry(kind: string) {
+  return kind === "agent" || kind === "error";
+}
+
+function buildResearchTraceScrollSignal(trace: Array<Record<string, unknown>>, isRunning: boolean) {
+  return trace
+    .map((item, index) =>
+      [
+        index,
+        item.kind ?? "",
+        item.title ?? "",
+        String(item.detail ?? "").length,
+        item.timestamp ?? "",
+      ].join(":"),
+    )
+    .concat(isRunning ? ["running"] : ["idle"])
+    .join("|");
+}
+
+function latestTraceTimestamp(trace: Array<Record<string, unknown>>) {
+  return [...trace].reverse().find((item) => item.timestamp)?.timestamp?.toString() ?? "";
+}
+
+function traceEntryKey(item: Record<string, unknown>, index: number) {
+  return `${String(item.timestamp || "")}-${String(item.kind || "agent")}-${String(item.title || "")}-${index}`;
+}
+
+function formatTraceTimestamp(timestamp: string) {
+  if (!timestamp) {
+    return "";
+  }
+  const value = new Date(timestamp);
+  if (Number.isNaN(value.getTime())) {
+    return timestamp;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(value);
+}
+
+function StageEvidence({
+  active,
+  busy,
+  copy,
+  missingEvidenceRequests,
+  onSupplementEvidence,
+}: {
+  active: ResearchDiscoverySessionPayload;
+  busy: boolean;
+  copy: (typeof COPY)["zh"];
+  missingEvidenceRequests: string[];
+  onSupplementEvidence: () => void;
+}) {
+  const visibleEvidence = active.evidence.slice(0, 12);
+  return (
+    <div className={styles.evidenceList}>
+      {missingEvidenceRequests.length ? (
+        <section className={styles.evidenceRequestPanel}>
+          <div>
+            <strong>{copy.evidenceRequests}</strong>
+            <span>{missingEvidenceRequests.length}</span>
+          </div>
+          <ul>
+            {missingEvidenceRequests.slice(0, 5).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <button className={styles.secondaryButton} disabled={busy} onClick={onSupplementEvidence}>
+            <SearchCheck size={14} />
+            {copy.confirmEvidenceSearch}
+          </button>
+        </section>
+      ) : null}
+      {!visibleEvidence.length ? <p className={styles.emptyText}>还没有证据记录。</p> : null}
+      {visibleEvidence.map((item) => (
+        <article key={item.evidenceId} className={styles.evidenceCard}>
+          <strong>{item.claim}</strong>
+          <span>
+            {item.evidenceType} · {item.confidence}
+          </span>
+          <small>{item.note}</small>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function StageThemes({
+  busy,
+  copy,
+  currentThemes,
+  onGenerateCard,
+  onSelectTheme,
+}: {
+  busy: boolean;
+  copy: (typeof COPY)["zh"];
+  currentThemes: ResearchCandidateTheme[];
+  onGenerateCard: (theme: ResearchCandidateTheme) => void;
+  onSelectTheme: (theme: ResearchCandidateTheme) => void;
+}) {
+  return (
+    <div className={styles.themeGrid}>
+      {currentThemes.length === 0 ? <p className={styles.emptyText}>{copy.emptyCandidates}</p> : null}
+      {currentThemes.map((theme, index) => (
+        <ThemeCompareRow
+          key={theme.themeId}
+          busy={busy}
+          copy={copy}
+          index={index}
+          onGenerateCard={onGenerateCard}
+          onSelectTheme={onSelectTheme}
+          theme={theme}
+        />
+      ))}
+    </div>
+  );
+}
+
+function ThemeCompareRow({
+  busy,
+  cardPrimary = false,
+  copy,
+  index,
+  isSelected = false,
+  onGenerateCard,
+  onSelectTheme,
+  theme,
+}: {
+  busy: boolean;
+  cardPrimary?: boolean;
+  copy: (typeof COPY)["zh"];
+  index: number;
+  isSelected?: boolean;
+  onGenerateCard: (theme: ResearchCandidateTheme) => void;
+  onSelectTheme: (theme: ResearchCandidateTheme) => void;
+  theme: ResearchCandidateTheme;
+}) {
+  const disabled = busy || theme.status === "stale";
+  return (
+    <article className={`${styles.themeCompareRow} ${isSelected ? styles.themeCompareRow_selected : ""}`}>
+      <div className={styles.themeCompareRank}>
+        <span>{String(index + 1).padStart(2, "0")}</span>
+        <strong>{Math.round(theme.recommendationScore)}</strong>
+      </div>
+      <div className={styles.themeCompareMain}>
+        <div className={styles.themeCompareHeader}>
+          <div>
+            <h3>{theme.title}</h3>
+            <p>{theme.oneLine}</p>
+          </div>
+          <span className={`${styles.statePill} ${styles[`state_${themeTone(theme.status)}`]}`}>
+            {isSelected ? copy.selected : statusLabel(theme.status, copy)}
+          </span>
+        </div>
+        <p className={styles.themeCompareQuestion}>{theme.coreQuestion}</p>
+        <div className={styles.themeCompareTags}>
+          <code>{noveltyLabel(theme.noveltyPath)}</code>
+          {theme.interdisciplinaryCombination.slice(0, 3).map((item) => (
+            <code key={item}>{item}</code>
+          ))}
+        </div>
+      </div>
+      <div className={styles.themeCompareMetrics}>
+        <Metric label={copy.novelty} value={score(theme, "noveltyGap")} />
+        <Metric label={copy.competition} value={score(theme, "competitionFit")} />
+        <Metric label={copy.data} value={score(theme, "verifiability")} />
+      </div>
+      <div className={styles.themeCompareReview}>
+        <BrainCircuit size={14} />
+        <span>{clip(theme.agentReview || theme.uncertainty, 92)}</span>
+      </div>
+      <div className={styles.themeCompareActions}>
+        <button
+          className={cardPrimary ? styles.secondaryButton : styles.primaryButton}
+          disabled={disabled || isSelected}
+          onClick={() => onSelectTheme(theme)}
+        >
+          <GitBranch size={14} />
+          <span>{isSelected ? copy.selected : copy.select}</span>
+        </button>
+        <button
+          className={cardPrimary ? styles.primaryButton : styles.secondaryButton}
+          disabled={disabled}
+          onClick={() => onGenerateCard(theme)}
+        >
+          <FlaskConical size={14} />
+          <span>{cardPrimary ? copy.formalCard : copy.themeCard}</span>
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function StageCard({
+  busy,
+  copy,
+  currentThemes,
+  onGenerateCard,
+  onSelectTheme,
+  selectedCard,
+  selectedTheme,
+}: {
+  busy: boolean;
+  copy: (typeof COPY)["zh"];
+  currentThemes: ResearchCandidateTheme[];
+  onGenerateCard: (theme: ResearchCandidateTheme) => void;
+  onSelectTheme: (theme: ResearchCandidateTheme) => void;
+  selectedCard: ResearchThemeCard | undefined;
+  selectedTheme: ResearchCandidateTheme | undefined;
+}) {
+  const previewThemes = currentThemes.filter((theme) => theme.status !== "stale");
+  const visibleThemes = previewThemes.length ? previewThemes : currentThemes;
+  if (!selectedCard) {
+    return (
+      <div className={styles.themeGrid}>
+        <section className={styles.cardPreviewIntro}>
+          <div>
+            <strong>{copy.candidateCardPreview}</strong>
+            <span>{visibleThemes.length ? `${visibleThemes.length} ${copy.candidates}` : copy.emptyCard}</span>
+          </div>
+          <p>{copy.previewBeforeCard}</p>
+        </section>
+        {visibleThemes.length === 0 ? <p className={styles.emptyText}>{copy.emptyCandidates}</p> : null}
+        {visibleThemes.map((theme, index) => {
+          const isSelected = selectedTheme?.themeId === theme.themeId;
+          return (
+            <ThemeCompareRow
+              key={theme.themeId}
+              busy={busy}
+              cardPrimary
+              copy={copy}
+              index={index}
+              isSelected={isSelected}
+              onGenerateCard={onGenerateCard}
+              onSelectTheme={onSelectTheme}
+              theme={theme}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+  return (
+    <article className={styles.themeCard}>
+      <div className={styles.themeRank}>
+        <span>v{selectedCard.version}</span>
+        <strong>{selectedCard.status === "approved" ? "OK" : "D"}</strong>
+      </div>
+      <div className={styles.themePlan}>
+        <div className={styles.themeHeader}>
+          <div>
+            <h3>{selectedCard.title}</h3>
+            <p>{selectedCard.oneLine}</p>
+          </div>
+          <span className={`${styles.statePill} ${styles[`state_${themeTone(selectedCard.status)}`]}`}>
+            {statusLabel(selectedCard.status, copy)}
+          </span>
+        </div>
+        <p className={styles.questionText}>{selectedCard.coreScientificQuestion}</p>
+        <section>
+          <strong>{copy.novelty}</strong>
+          <p>{selectedCard.whyNovel}</p>
+        </section>
+        <section>
+          <strong>{copy.competition}</strong>
+          <p>{selectedCard.whyCompetitionFit}</p>
+        </section>
+        <section>
+          <strong>{copy.data}</strong>
+          <ul>
+            {selectedCard.possibleDatasets.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+        <section>
+          <strong>{copy.themes}</strong>
+          <ul>
+            {selectedCard.possibleMethods.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+        <section>
+          <strong>{copy.risk}</strong>
+          <ul>
+            {selectedCard.risks.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </section>
+      </div>
+    </article>
+  );
+}
+
 function stageResultView(
   stage: string,
   active: ResearchDiscoverySessionPayload | undefined,
@@ -738,6 +1948,8 @@ function stageResultView(
           queries: "查询",
           sources: "来源",
           failed: "失败",
+          status: "状态",
+          reason: "原因",
           sample: "样例",
           evidence: "证据",
           gap: "缺口",
@@ -757,6 +1969,8 @@ function stageResultView(
           queries: "Queries",
           sources: "Sources",
           failed: "Fails",
+          status: "Status",
+          reason: "Reason",
           sample: "Sample",
           evidence: "Evidence",
           gap: "Gap",
@@ -778,6 +1992,32 @@ function stageResultView(
 
   if (stage === "broad" || stage === "deep") {
     const run = latestSearchRun(active.searchRuns, stage);
+    if (!run) {
+      return {
+        summary: stage === "broad" ? "等待开始广撒网调研。" : "等待开始定向深搜。",
+        items: [
+          { label: copy.status, value: "ready" },
+          { label: copy.queries, value: "0" },
+          { label: copy.sources, value: "0" },
+          { label: copy.sample, value: copy.pending },
+        ],
+      };
+    }
+    const failure = runFailure(run);
+    if (failure) {
+      return {
+        summary:
+          stage === "broad"
+            ? `广撒网失败：${failure.message}`
+            : `定向深搜失败：${failure.message}`,
+        items: [
+          { label: copy.status, value: "failed" },
+          { label: copy.queries, value: `${run?.queries.length ?? 0}` },
+          { label: copy.reason, value: failure.type || "error" },
+          { label: copy.sample, value: clip(failure.message, 54) },
+        ],
+      };
+    }
     const execution = asRecord(asRecord(run?.modelProfile).searchExecution);
     const sourceCounts = asRecord(execution.sourceCounts);
     const totalSources = sumRecordNumbers(sourceCounts);
@@ -785,26 +2025,48 @@ function stageResultView(
     const failedCount = numberFrom(execution.failedAttemptCount);
     const sources = active.sources.filter((item) => stage === "broad" || item.searchRunId === run?.runId);
     const sampleSource = sources[0];
+    const isCompleted = run.status === "completed";
     return {
-      summary:
-        stage === "broad"
+      summary: isCompleted
+        ? stage === "broad"
           ? `已完成广撒网：${queryCount} 组查询，收集 ${totalSources} 条来源，${failedCount} 次失败。`
-          : `已完成定向深搜：${queryCount} 组查询，收集 ${totalSources} 条来源，${failedCount} 次失败。`,
-      items: [
-        { label: copy.queries, value: `${queryCount}` },
-        { label: copy.sources, value: `${totalSources}` },
-        { label: copy.failed, value: `${failedCount}` },
-        {
-          label: copy.sample,
-          value: sampleSource
-            ? `${clip(sampleSource.title, 42)} · ${sourceKindLabel(sampleSource.kind, lang)}`
-            : clip(run?.queries[0] || copy.pending, 54),
-        },
-      ],
+          : `已完成定向深搜：${queryCount} 组查询，收集 ${totalSources} 条来源，${failedCount} 次失败。`
+        : stage === "broad"
+          ? `广撒网进行中：已记录 ${queryCount} 组查询，当前 ${totalSources} 条来源。`
+          : `定向深搜进行中：已记录 ${queryCount} 组查询，当前 ${totalSources} 条来源。`,
+      items: isCompleted
+        ? [
+            { label: copy.queries, value: `${queryCount}` },
+            { label: copy.sources, value: `${totalSources}` },
+            { label: copy.failed, value: `${failedCount}` },
+            {
+              label: copy.sample,
+              value: sampleSource
+                ? `${clip(sampleSource.title, 42)} · ${sourceKindLabel(sampleSource.kind, lang)}`
+                : clip(run.queries[0] || copy.pending, 54),
+            },
+          ]
+        : [
+            { label: copy.status, value: run.status },
+            { label: copy.queries, value: `${queryCount}` },
+            { label: copy.sources, value: `${totalSources}` },
+            { label: copy.failed, value: `${failedCount}` },
+          ],
     };
   }
 
   if (stage === "evidence") {
+    if (!active.evidence.length) {
+      return {
+        summary: "等待抽取证据。完成广撒网和定向深搜后，这里会显示可复核证据。",
+        items: [
+          { label: copy.status, value: "ready" },
+          { label: copy.gap, value: "0" },
+          { label: copy.dataset, value: "0" },
+          { label: copy.sample, value: copy.pending },
+        ],
+      };
+    }
     const evidenceCounts = active.evidence.reduce<Record<string, number>>((acc, item) => {
       acc[item.evidenceType] = (acc[item.evidenceType] || 0) + 1;
       return acc;
@@ -829,6 +2091,17 @@ function stageResultView(
   if (stage === "themes") {
     const shortlisted = currentThemes.filter((theme) => theme.status === "shortlisted" || theme.status === "selected");
     const best = shortlisted[0];
+    if (!best) {
+      return {
+        summary: "等待生成候选主题。证据抽取完成后，这里会进入 5 个候选主题比较。",
+        items: [
+          { label: copy.status, value: "ready" },
+          { label: copy.themes, value: "0" },
+          { label: copy.top, value: copy.pending },
+          { label: copy.path, value: copy.pending },
+        ],
+      };
+    }
     return {
       summary: `已生成 ${shortlisted.length} 个候选主题，并完成去重与打分。`,
       items: [
@@ -882,8 +2155,80 @@ function sourceKindLabel(kind: string, lang: "zh" | "en") {
   return (lang === "zh" ? zh : en)[kind] || kind;
 }
 
+function stageTrace(active: ResearchDiscoverySessionPayload, stage: ResearchStageKey): Array<Record<string, unknown>> {
+  if (stage === "broad" || stage === "deep") {
+    const run = latestSearchRun(active.searchRuns, stage);
+    const trace = traceFromUnknown(asRecord(asRecord(run?.modelProfile).agentExecution).trace);
+    const failure = runFailure(run);
+    if (!failure) {
+      return trace;
+    }
+    return [
+      ...trace,
+      {
+        kind: "error",
+        title: `${failure.type || "Agent"} 失败`,
+        detail: failure.message,
+        timestamp: run?.completedAt || "",
+      },
+    ];
+  }
+  const eventPrefix =
+    stage === "evidence"
+      ? "evidence."
+      : stage === "themes"
+        ? "themes."
+        : "theme_card.";
+  const event = [...active.events].reverse().find((item) => item.eventCode.startsWith(eventPrefix));
+  return traceFromUnknown(event?.fields?.trace);
+}
+
+function traceFromUnknown(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+}
+
+function traceTone(kind: string) {
+  if (kind === "error") return "error";
+  if (kind === "tool") return "tool";
+  if (kind === "observation") return "observation";
+  if (kind === "prompt" || kind === "input" || kind === "plan") return "context";
+  return "agent";
+}
+
+function traceLabel(kind: string) {
+  if (kind === "error") return "失败";
+  if (kind === "tool") return "工具";
+  if (kind === "observation") return "观察";
+  if (kind === "prompt") return "提示";
+  if (kind === "input") return "输入";
+  if (kind === "plan") return "计划";
+  return "Agent";
+}
+
+function shouldRefreshDefaultDraft(value: string, field: keyof DraftInput, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  return !normalized || normalized === LEGACY_DEFAULT_INPUT[lang][field];
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item || "").trim()).filter(Boolean) : [];
+}
+
+function uniqueString(value: string, index: number, values: string[]) {
+  return values.indexOf(value) === index;
+}
+
+function timestampMs(value: unknown) {
+  const date = new Date(String(value || ""));
+  const time = date.getTime();
+  return Number.isNaN(time) ? 0 : time;
 }
 
 function sumRecordNumbers(record: Record<string, unknown>): number {
@@ -935,10 +2280,10 @@ function stageStatus(stage: string, active?: ResearchDiscoverySessionPayload) {
     return "idle";
   }
   if (stage === "broad") {
-    return active.searchRuns.some((run) => run.phase === "broad" && run.status === "completed") ? "done" : "ready";
+    return searchRunStageStatus(active, "broad");
   }
   if (stage === "deep") {
-    return active.searchRuns.some((run) => run.phase === "deep" && run.status === "completed") ? "done" : "ready";
+    return searchRunStageStatus(active, "deep");
   }
   if (stage === "evidence") {
     return active.evidence.length ? "done" : "ready";
@@ -947,6 +2292,48 @@ function stageStatus(stage: string, active?: ResearchDiscoverySessionPayload) {
     return active.summary.candidateThemeCount ? "done" : "ready";
   }
   return active.themeCards.length ? "done" : "ready";
+}
+
+function displayedStageStatus(
+  stage: ResearchStageKey,
+  active: ResearchDiscoverySessionPayload | undefined,
+  runningStage: ResearchStageKey | "draft" | "",
+) {
+  if (runningStage === stage) {
+    return "running";
+  }
+  return stageStatus(stage, active);
+}
+
+function stageStatusLabel(status: string, copy: (typeof COPY)["zh"]) {
+  if (status === "done") return copy.complete;
+  if (status === "running") return copy.running;
+  if (status === "failed") return copy.failed;
+  return copy.ready;
+}
+
+function stageActionLabel(status: string, stage: ResearchStageKey, copy: (typeof COPY)["zh"]) {
+  if (status === "running") return copy.running;
+  if (status === "done" || status === "failed") return copy.rerun;
+  if (stage === "card" && status === "ready") return copy.start;
+  return copy.start;
+}
+
+function searchRunStageStatus(active: ResearchDiscoverySessionPayload, phase: "broad" | "deep") {
+  const latest = latestSearchRun(active.searchRuns, phase);
+  if (!latest) {
+    return "ready";
+  }
+  if (latest.status === "running") {
+    return "running";
+  }
+  if (latest.status === "failed") {
+    return "failed";
+  }
+  if (latest.status === "completed") {
+    return "done";
+  }
+  return "ready";
 }
 
 function stageDescription(stage: string, lang: "zh" | "en") {
@@ -969,6 +2356,19 @@ function stageDescription(stage: string, lang: "zh" | "en") {
 
 function clip(value: string, length: number) {
   return value.length > length ? `${value.slice(0, length - 1)}...` : value;
+}
+
+function runFailure(run: ResearchDiscoverySessionPayload["searchRuns"][number] | undefined) {
+  const failure = asRecord(asRecord(run?.modelProfile).failure);
+  const message = String(failure.message || "").trim();
+  const type = String(failure.type || "").trim();
+  if (run?.status !== "failed" && !message && !type) {
+    return null;
+  }
+  return {
+    type,
+    message: message || "Research agent failed before returning a result.",
+  };
 }
 
 function formatDate(value: string) {

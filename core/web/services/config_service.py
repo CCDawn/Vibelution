@@ -56,6 +56,11 @@ PROFILE_LABELS = {
     "subagent_explorer": {"zh": "子代理 Explorer", "en": "Subagent Explorer"},
     "supervised_baseline": {"zh": "监督基线", "en": "Supervised Baseline"},
     "supervised_candidate": {"zh": "监督候选", "en": "Supervised Candidate"},
+    "research_broad": {"zh": "科研广搜", "en": "Research Broad Search"},
+    "research_deep": {"zh": "科研深搜", "en": "Research Deep Search"},
+    "research_review": {"zh": "科研审查", "en": "Research Review"},
+    "research_themes": {"zh": "科研主题生成", "en": "Research Theme Generation"},
+    "research_card": {"zh": "科研主题卡", "en": "Research Theme Card"},
     "compression": {"zh": "压缩配置", "en": "Compression"},
 }
 _PENDING_SECRET_PREFIX = "pending-secret:"
@@ -124,11 +129,11 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
         },
         {
             "id": "profiles",
-            "title": text_for(lang, zh="任务模型", en="Task Models"),
+            "title": text_for(lang, zh="LLM 配置", en="LLM Configs"),
             "summary": text_for(
                 lang,
-                zh="查看每个任务当前使用的模型、密钥状态，并直接做连接测试。",
-                en="Inspect the model and key state used by each task, then run direct connection checks.",
+                zh="查看每个调用点当前使用的模型、密钥状态，并直接做连接测试。",
+                en="Inspect the model and key state used by each LLM call site, then run direct connection checks.",
             ),
         },
         {
@@ -429,8 +434,8 @@ def _validate_required_llm_profiles(public_config: dict[str, Any], lang: str) ->
     raise ValueError(
         text_for(
             lang,
-            zh=f"以下任务模型还没有绑定可用模型：{display_names}",
-            en=f"These task models do not have a usable model bound yet: {display_names}",
+            zh=f"以下 LLM 配置还没有绑定可用模型：{display_names}",
+            en=f"These LLM configs do not have a usable model bound yet: {display_names}",
         )
     )
 
@@ -946,8 +951,8 @@ def draft_add_profile(
         base_hash=str(base_hash or public_config_hash(old_public)).strip(),
         message=text_for(
             _resolve_workspace_language(updated),
-            zh="任务模型修改已更新，尚未保存到 config.toml。",
-            en="Task model changes updated and not yet saved to config.toml.",
+            zh="LLM 配置修改已更新，尚未保存到 config.toml。",
+            en="LLM config changes updated and not yet saved to config.toml.",
         ),
     )
 

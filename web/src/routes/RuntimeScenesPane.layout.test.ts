@@ -16,6 +16,10 @@ describe("RuntimeScenesPane layout contract", () => {
   it("keeps package diagnosis compact by folding low-frequency details", () => {
     expect(paneSource).toContain("<details className={styles.packageDiagnosisDetails}>");
     expect(paneSource).toContain("{lang === \"zh\" ? \"阅读顺序与关键入口\" : \"Reading order and key entries\"}");
+    expect(paneSource).toContain("const evidencePaths = diagnosis.evidencePaths?.length");
+    expect(paneSource).toContain("styles.packageEvidencePaths");
+    expect(paneSource).toContain("\"优先排查路径\"");
+    expect(paneSource).toContain("Package-relative path");
     expect(paneSource).toContain("packageDiagnosisFoldout");
     expect(paneSource).toContain("packageDiagnosisInlineMetrics");
     expect(paneSource).toContain("handleOpenRawLog(scene.runtimeSceneId, entry.path)");
@@ -52,5 +56,18 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("sidebarCollapsed");
     expect(paneSource).toContain("setSidebarCollapsed");
     expect(paneSource).toContain("--logs-sidebar-width");
+  });
+
+  it("keeps the scene list on the lightweight package index", () => {
+    expect(paneSource).not.toContain("packageIndex?.diagnosis");
+    expect(paneSource).toContain("function runtimeSceneListSummary");
+    expect(paneSource).toContain("scene.stopReason || scene.result || scene.displayName");
+    expect(paneSource).toContain("item.packageIndex?.searchText");
+  });
+
+  it("counts research workflow logs as a separate package child section", () => {
+    expect(paneSource).toContain("scene.packageSummary?.researchLogCount");
+    expect(paneSource).toContain("scene.researchLogs?.length");
+    expect(paneSource).toContain("research: \"科研\"");
   });
 });

@@ -532,12 +532,14 @@ def test_get_config_language_falls_back_safely():
 def test_label_localization_prefers_exact_and_fallback_rules():
     assert localize_label("llm.providers.remote_main.api_key", "api_key", "zh") == "API 密钥"
     assert localize_label("tools.shell.default_timeout", "default_timeout", "en") == "Default Timeout"
-    assert localize_label("git.commit_message_profile", "commit_message_profile", "zh") == "AI 提交说明模型"
-    assert localize_label("git.commit_message_profile", "commit_message_profile", "en") == "AI Commit Message Model"
+    assert localize_label("git.commit_message_profile", "commit_message_profile", "zh") == "Git 提交使用的模型配置"
+    assert localize_label("git.commit_message_profile", "commit_message_profile", "en") == "Git Commit Model Config"
     assert localize_label("network.proxy_enabled", "proxy_enabled", "zh") == "启用代理"
     assert localize_label("network.proxy_url", "proxy_url", "en") == "Proxy URL"
-    assert localize_section_label("llm.profiles", "profiles", "zh") == "模型"
-    assert localize_section_label("llm.profiles", "profiles", "en") == "Models"
+    assert localize_section_label("llm.profiles", "profiles", "zh") == "模型配置"
+    assert localize_section_label("llm.profiles", "profiles", "en") == "Model Configs"
+    assert localize_section_label("prompt", "prompt", "zh") == "系统提示词"
+    assert localize_section_label("git.commit_message_prompt", "commit_message_prompt", "zh") == "Git 提交提示词"
     assert localize_section_label("llm.discovery", "discovery", "zh") == "模型发现"
     assert localize_section_label("network", "network", "en") == "Network"
 

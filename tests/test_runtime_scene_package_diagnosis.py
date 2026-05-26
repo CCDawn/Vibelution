@@ -86,6 +86,7 @@ def test_runtime_scene_detail_exposes_package_diagnosis_first_signal(tmp_path, m
     assert "错误信号" in diagnosis["userSummary"]
     assert diagnosis["firstSignal"]["eventCode"] == "backend.start.failed"
     assert diagnosis["firstSignal"]["rawRefs"] == [{"path": "raw/backend.stderr.log", "tail_lines": 80}]
+    assert diagnosis["evidencePaths"][0] == "raw/backend.stderr.log"
     assert diagnosis["recommendedOrder"][:5] == [
         "summary.json",
         "package_index.json",
@@ -109,7 +110,8 @@ def test_runtime_scene_detail_exposes_package_diagnosis_first_signal(tmp_path, m
     assert any(item["path"] == "raw/backend.stderr.log" for item in diagnosis["keyEntries"])
     assert "logs/runtime_scenes/20260518T120000Z__scene-diagnosis-error/summary.json" in diagnosis["agentNextStep"]
     assert "issueState.activeClusterCount" in diagnosis["agentNextStep"]
-    assert "rawRefs" in diagnosis["agentNextStep"]
+    assert "evidence_paths" in diagnosis["agentNextStep"]
+    assert "rawRefs" not in diagnosis["agentNextStep"]
 
 
 def test_runtime_scene_first_signal_prefers_errors_over_earlier_user_stop_warning(tmp_path, monkeypatch):

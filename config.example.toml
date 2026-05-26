@@ -157,6 +157,21 @@ compat_mode = "openai"
 requires_api_key = true
 context_window = 204800
 
+[llm.profiles.research_broad]
+model_ref = "relay_openai_gpt_5_5"
+
+[llm.profiles.research_deep]
+model_ref = "relay_openai_gpt_5_5"
+
+[llm.profiles.research_review]
+model_ref = "relay_openai_gpt_5_5"
+
+[llm.profiles.research_themes]
+model_ref = "relay_openai_gpt_5_5"
+
+[llm.profiles.research_card]
+model_ref = "relay_openai_gpt_5_5"
+
 [llm.profiles.compression]
 model = ""
 transport = "chat_completions"
