@@ -2775,6 +2775,129 @@ def test_submit_session_message_continue_uses_previous_meaningful_goal_not_punct
     assert all(item["content"] != "?" for item in captured["seeded"])
 
 
+def test_submit_session_message_does_not_promote_contextual_confirmation_to_task_goal(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "session-live-coding-task",
+            "kind": "coding",
+            "status": "reading",
+            "title": "优化日志摘要入口",
+            "goal": "优化日志摘要入口",
+            "latest_summary": "已经形成日志摘要优化计划。",
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "已开始按计划修改日志摘要入口。",
+                "raw_output": "已开始按计划修改日志摘要入口。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "好的开始修改"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["activeTask"]["goal"] == "优化日志摘要入口"
+    assert payload["activeTask"]["title"] != "好的开始修改"
+    state = load_chat_state(tmp_path)
+    assert state["conversations"][0]["active_task"]["goal"] == "优化日志摘要入口"
+
+
+def test_submit_session_continue_recovers_context_when_active_task_goal_is_confirmation(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "session-live-coding-task",
+            "kind": "coding",
+            "status": "reading",
+            "title": "好的开始修改",
+            "goal": "好的开始修改",
+            "read_files": ["core/web/services/runtime_scene_service.py"],
+        },
+    )
+    state = load_chat_state(tmp_path)
+    messages = state["conversations"][0]["messages"]
+    messages.append(
+        {
+            "role": "user",
+            "content": "检查日志系统摘要一致性并给出优化方案",
+            "timestamp": "2026-05-18T11:57:00",
+        }
+    )
+    messages.append(
+        {
+            "role": "assistant",
+            "content": "建议先定位 summary 与 package_index 的生成链路，再补测试。",
+            "timestamp": "2026-05-18T11:58:00",
+        }
+    )
+    messages.append(
+        {"role": "user", "content": "好的开始修改", "timestamp": "2026-05-18T11:59:00"}
+    )
+    messages.append(
+        {
+            "role": "assistant",
+            "content": "已达到 Web Chat 任务级持续上限（4 轮），本次先暂停，避免后台无限运行。",
+            "timestamp": "2026-05-18T12:00:00",
+        }
+    )
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    captured: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            captured["seeded"] = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            captured["prompt"] = initial_prompt
+            return {
+                "status": "completed",
+                "summary": "已恢复到日志摘要一致性任务并完成收束。",
+                "raw_output": "已恢复到日志摘要一致性任务并完成收束。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续"},
+    )
+
+    assert response.status_code == 202
+    prompt = str(captured["prompt"])
+    assert "继续完成当前会话中尚未完成的真实用户目标" in prompt
+    assert "检查日志系统摘要一致性并给出优化方案" in prompt
+    assert "好的开始修改" in prompt
+    assert prompt != "好的开始修改"
+
+
 def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallback(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

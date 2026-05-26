@@ -845,6 +845,7 @@ def submit_session_message(
         "user_message_source": user_message_source,
         "history_messages": previous_messages,
         "mental_model_enabled": mental_model_enabled,
+        "active_task": active_task,
     }
     _record_session_turn_scheduled_event(context)
     try:
@@ -1330,7 +1331,7 @@ def _is_protocol_only_assistant_message(content: Any) -> bool:
 
 
 def _is_effective_user_message(message: Any) -> bool:
-    return _is_meaningful_task_goal(message)
+    return _is_meaningful_task_goal(message) and not _is_contextual_confirmation_message(message)
 
 
 def _latest_effective_user_message(messages: list[dict[str, Any]]) -> str:
@@ -1341,6 +1342,25 @@ def _latest_effective_user_message(messages: list[dict[str, Any]]) -> str:
         if _is_effective_user_message(content):
             return content
     return ""
+
+
+def _latest_effective_user_messages(messages: list[dict[str, Any]], *, limit: int = 3) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for item in reversed(messages):
+        if str(item.get("role") or "").strip().lower() != "user":
+            continue
+        content = trim_lines(item.get("content") or "", max_lines=4)
+        if not _is_effective_user_message(content):
+            continue
+        dedupe_key = re.sub(r"\s+", "", content)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        values.append(content)
+        if len(values) >= max(1, limit):
+            break
+    return list(reversed(values))
 
 
 def _resolve_session_user_prompt(
@@ -2051,6 +2071,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     session_id,
                     _build_stopped_turn_result(initial_stop_reason),
                     mental_model_enabled=mental_model_enabled,
+                    active_task_hint=context.get("active_task"),
                     turn_id=turn_id,
                 )
                 return
@@ -2114,6 +2135,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         session_id,
                         _build_stopped_turn_result(preflight_stop_reason),
                         mental_model_enabled=mental_model_enabled,
+                        active_task_hint=context.get("active_task"),
                         turn_id=turn_id,
                     )
                     return
@@ -2148,6 +2170,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 result,
                 mental_model_enabled=mental_model_enabled,
                 session_workspace=session_workspace,
+                active_task_hint=context.get("active_task"),
                 turn_id=turn_id,
             )
     except Exception as exc:
@@ -2234,7 +2257,7 @@ def _run_session_continuation_loop(
             )
             prompt = history_goal
     if _is_continue_request(prompt):
-        resume_goal = _latest_unfinished_task_goal(session_id)
+        resume_goal, resume_source = _latest_unfinished_task_goal_with_source(session_id)
         if resume_goal:
             prompt = resume_goal
             _set_session_turn_progress_live_output(
@@ -2250,7 +2273,7 @@ def _run_session_continuation_loop(
                 fields={
                     "resumeGoalLength": len(resume_goal),
                     "historyMessageCount": len(history_messages),
-                    "promptSource": "resume_goal",
+                    "promptSource": resume_source or "resume_goal",
                     "preservesOriginalGoal": True,
                 },
             )
@@ -2261,7 +2284,7 @@ def _run_session_continuation_loop(
                 {
                     "resumeGoalLength": len(resume_goal),
                     "historyMessageCount": len(history_messages),
-                    "promptSource": "resume_goal",
+                    "promptSource": resume_source or "resume_goal",
                 },
                 status="running",
                 summary="Continue command resolved to the existing user goal.",
@@ -2498,6 +2521,7 @@ def _persist_session_turn_result(
     *,
     mental_model_enabled: bool | None = None,
     session_workspace: str | Path | None = None,
+    active_task_hint: Any = None,
     turn_id: str = "",
 ) -> None:
     lang = get_web_language()
@@ -2528,8 +2552,14 @@ def _persist_session_turn_result(
             error_type = _failure_error_type(raw_error)
             turn_error = _make_session_turn_error(raw_error, lang=lang, error_type=error_type, turn_id=turn_id)
             timestamp = str(turn_error.get("timestamp") or _now_timestamp()).strip()
-            existing_active_task = _normalize_session_active_task(
+            stored_active_task = _normalize_session_active_task(
                 conversation.get("active_task") or conversation.get("activeTask")
+            )
+            hint_active_task = _normalize_session_active_task(active_task_hint)
+            existing_active_task = _select_existing_active_task_for_update(
+                stored_active_task,
+                hint_active_task,
+                messages,
             )
             next_active_task = _build_session_active_task(
                 session_id,
@@ -2615,8 +2645,14 @@ def _persist_session_turn_result(
         if isinstance(result, dict):
             assistant_entry["toolCalls"] = _normalize_message_tool_calls(_extract_chat_tool_calls(result))
         conversation["messages"] = messages + [assistant_entry]
-        existing_active_task = _normalize_session_active_task(
+        stored_active_task = _normalize_session_active_task(
             conversation.get("active_task") or conversation.get("activeTask")
+        )
+        hint_active_task = _normalize_session_active_task(active_task_hint)
+        existing_active_task = _select_existing_active_task_for_update(
+            stored_active_task,
+            hint_active_task,
+            messages,
         )
         task_result = result
         if not isinstance(task_result, dict):
@@ -4672,24 +4708,39 @@ def _is_continue_request(text: Any) -> bool:
 
 
 def _latest_unfinished_task_goal(session_id: str) -> str:
+    goal, _source = _latest_unfinished_task_goal_with_source(session_id)
+    return goal
+
+
+def _latest_unfinished_task_goal_with_source(session_id: str) -> tuple[str, str]:
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
         conversation = _find_conversation_entry(payload, session_id)
         if conversation is None:
-            return ""
+            return "", ""
         active_task = _normalize_session_active_task(
             conversation.get("active_task") or conversation.get("activeTask")
         )
         messages = normalize_chat_messages(conversation.get("messages") or [])
     if not isinstance(active_task, dict):
-        return ""
+        return _build_resume_goal_from_conversation_context(messages, active_task={}), "conversation_context"
     status = str(active_task.get("status") or "").strip().lower()
     if status in {"done", "idle"}:
-        return ""
+        return "", ""
     goal = trim_lines(active_task.get("goal") or active_task.get("title") or "", max_lines=2)
+    if _is_effective_user_message(goal):
+        return goal, "active_task"
     if _is_continue_request(goal) or not _is_meaningful_task_goal(goal):
-        return _latest_meaningful_user_message(messages)
-    return goal
+        history_goal = _latest_meaningful_user_message(messages)
+        if history_goal:
+            return history_goal, "history"
+    context_goal = _build_resume_goal_from_conversation_context(messages, active_task=active_task)
+    if context_goal:
+        return context_goal, "conversation_context"
+    history_goal = _latest_meaningful_user_message(messages)
+    if history_goal:
+        return history_goal, "history"
+    return "", ""
 
 
 def _latest_meaningful_user_message(messages: list[dict[str, Any]]) -> str:
@@ -4697,7 +4748,7 @@ def _latest_meaningful_user_message(messages: list[dict[str, Any]]) -> str:
         if str(item.get("role") or "").strip().lower() != "user":
             continue
         content = trim_lines(item.get("content") or "", max_lines=4)
-        if _is_meaningful_task_goal(content):
+        if _is_effective_user_message(content):
             return content
     return ""
 
@@ -4712,6 +4763,82 @@ def _is_meaningful_task_goal(text: Any) -> bool:
     if compact in {"1", "2", "3", "ok", "好的", "确认", "是", "否", "停止", "stop"}:
         return False
     return len(compact) >= 6
+
+
+def _is_contextual_confirmation_message(text: Any) -> bool:
+    compact = re.sub(r"\s+", "", str(text or "")).strip().lower()
+    if not compact:
+        return False
+    exact_values = {
+        "好的开始修改",
+        "好开始修改",
+        "开始修改",
+        "好的开始修复",
+        "开始修复",
+        "好的开始实现",
+        "开始实现",
+        "好的开始执行",
+        "开始执行",
+        "确认开始",
+        "同意开始",
+        "可以开始",
+        "好的继续",
+        "好继续",
+    }
+    if compact in exact_values:
+        return True
+    return bool(
+        re.fullmatch(
+            r"(好的|好|确认|同意|可以|是的|对的)?(按这个|按计划|就这样)?(开始|继续)(修改|修复|实现|执行|处理|推进)",
+            compact,
+        )
+    )
+
+
+def _build_resume_goal_from_conversation_context(
+    messages: list[dict[str, Any]],
+    *,
+    active_task: dict[str, Any],
+) -> str:
+    effective_goals = _latest_effective_user_messages(messages, limit=3)
+    context_lines: list[str] = []
+    for item in list(messages or [])[-8:]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        if role not in {"user", "assistant"}:
+            continue
+        content = trim_lines(_sanitize_message_content(role, item.get("content") or ""), max_lines=4)
+        if not content:
+            continue
+        if role == "user" and not (_is_effective_user_message(content) or _is_contextual_confirmation_message(content)):
+            continue
+        if role == "assistant" and _looks_like_runtime_failure_notice(content):
+            content = "上一轮被运行保护暂停，未完成真实用户目标。"
+        context_lines.append(f"{'用户' if role == 'user' else 'Agent'}：{content}")
+    read_files = []
+    if isinstance(active_task, dict):
+        read_files = [
+            str(item).strip()
+            for item in list(active_task.get("read_files") or active_task.get("readFiles") or [])[:5]
+            if str(item).strip()
+        ]
+    if not effective_goals and not context_lines and not read_files:
+        return ""
+    lines = [
+        "继续完成当前会话中尚未完成的真实用户目标。",
+        "不要把“继续”“确认”“好的开始修改”这类控制/确认短句当作任务目标。",
+    ]
+    if effective_goals:
+        lines.append("最近有效用户请求：")
+        lines.extend(f"- {goal}" for goal in effective_goals)
+    if context_lines:
+        lines.append("最近对话上下文：")
+        lines.extend(context_lines[-6:])
+    if read_files:
+        lines.append("当前已读文件：" + "、".join(read_files))
+    lines.append("请先恢复真实任务语境，再基于已有证据继续推进并输出可见结果。")
+    return "\n".join(lines)
 
 
 def _is_session_turn_terminal(result: Any) -> bool:
@@ -5058,7 +5185,8 @@ def _build_session_active_task(
         else ""
     )
     history_goal = _latest_effective_user_message(messages)
-    if _is_continue_request(last_user_message):
+    last_is_contextual_confirmation = _is_contextual_confirmation_message(last_user_message)
+    if _is_continue_request(last_user_message) or last_is_contextual_confirmation:
         effective_goal = existing_goal if existing_goal and _is_effective_user_message(existing_goal) else history_goal
     else:
         effective_goal = last_user_message if _is_effective_user_message(last_user_message) else history_goal
@@ -5066,7 +5194,7 @@ def _build_session_active_task(
         effective_goal = existing_goal if existing_goal and _is_effective_user_message(existing_goal) else history_goal
     effective_title = (
         effective_goal
-        if _is_continue_request(last_user_message) and effective_goal
+        if (_is_continue_request(last_user_message) or last_is_contextual_confirmation) and effective_goal
         else (last_user_message if _is_effective_user_message(last_user_message) else (effective_goal or latest_summary))
     )
     metadata = dict(existing_metadata)
@@ -5114,6 +5242,19 @@ def _build_session_active_task(
         "active_preview_path": active_preview_path,
         "metadata": metadata,
     }
+
+
+def _select_existing_active_task_for_update(
+    stored_active_task: dict[str, Any] | None,
+    hint_active_task: dict[str, Any] | None,
+    messages: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    last_user_message = _latest_user_message(messages)
+    if _is_contextual_confirmation_message(last_user_message) and isinstance(hint_active_task, dict):
+        hint_goal = trim_lines(hint_active_task.get("goal") or hint_active_task.get("title") or "", max_lines=2)
+        if _is_effective_user_message(hint_goal):
+            return hint_active_task
+    return stored_active_task or hint_active_task
 
 
 def _task_status_from_result_contract(
