@@ -24,6 +24,8 @@ from .supervised_dashboard import (
 from .selection_policy import PolicyExecutionRecord, execute_supervised_policy
 from .supervised_artifacts import (
     SupervisedPolicyProposalArtifact,
+    build_case_diagnostic,
+    build_case_diagnostics,
     load_policy_proposal_artifact,
     policy_target_key,
     resolve_project_artifact_path,
@@ -143,6 +145,8 @@ __all__ = [
     "PolicyExecutionRecord",
     "execute_supervised_policy",
     "SupervisedPolicyProposalArtifact",
+    "build_case_diagnostic",
+    "build_case_diagnostics",
     "load_policy_proposal_artifact",
     "policy_target_key",
     "resolve_project_artifact_path",
