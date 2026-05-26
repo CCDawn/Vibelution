@@ -14,7 +14,7 @@ tests/
 ├── prompt_debugger.py             # 提示词打靶测试（工具变更时必用）
 ├── simulate_lifecycle.py          # 沙盘生命周期独立验证脚本
 │
-├── [pytest 测试文件]              # 23 个，对应实际模块
+├── [pytest 测试文件]              # 以 test_*.py 为准，按功能面持续增长
 │   ├── test_code_analysis_tools.py # 代码分析工具
 │   ├── test_event_bus.py          # 事件总线
 │   ├── test_key_info_extractor.py # 关键信息提取
@@ -53,7 +53,8 @@ tests/
 | `test_rebirth_tools.py` | `tools/rebirth_tools.py` | tools/ |
 | `test_token_manager.py` | `tools/token_manager.py` | tools/ |
 | `test_key_info_extractor.py` | `tools/key_info_extractor.py` | tools/ |
-| `test_task_planner.py` | `core/task_planner.py` | core/ || `test_prompt_manager.py` | `core/prompt_manager/prompt_manager.py` | core/prompt_manager/ |
+| `test_task_planner.py` | `core/task_planner.py` | core/ |
+| `test_prompt_manager.py` | `core/prompt_manager/prompt_manager.py` | core/prompt_manager/ |
 | `test_tool_executor.py` | `core/infrastructure/tool_executor.py` | core/infrastructure/ |
 | `test_tool_registry.py` | `core/infrastructure/tool_registry.py` | core/infrastructure/ |
 | `test_security.py` | `core/infrastructure/security.py` | core/infrastructure/ |
@@ -65,6 +66,8 @@ tests/
 | `test_event_bus.py` | `core/infrastructure/event_bus.py` | core/infrastructure/ |
 | `test_tool_result.py` | `core/infrastructure/tool_result.py` | core/infrastructure/ |
 | `test_memory.py` | 跨模块（记忆系统集成） | 集成测试 |
+| `test_web_app.py` | Web API 与工作台聚合路由 | web/ |
+| `test_web_git_routes.py` | Git 页面相关 API 路由 | web/git |
 
 ---
 
@@ -81,6 +84,9 @@ pytest tests/test_memory.py -v
 
 # 按关键字筛选
 pytest tests/test_code_analysis_tools.py -v -k "diff"
+
+# 查看当前 pytest 文件数量
+python -c "from pathlib import Path; print(len(list(Path('tests').glob('test_*.py'))))"
 
 # 遇错即停
 pytest tests/ -v -x
@@ -186,7 +192,7 @@ def test_config():
 | `test_runner.py` | 单元/集成测试运行器：验证代码正确性 | 日常开发、提交前 |
 | `simulate_lifecycle.py` | 生命周期验证：不调用大模型，验证防断裂机制 | 重启前必检 |
 | `conftest.py` | pytest 配置：单例重置、隔离工作空间、共享 fixtures | pytest 自动加载 |
-| `test_*.py` | 23 个 pytest 测试文件：覆盖各模块 | 日常开发、CI |
+| `test_*.py` | pytest 测试文件集合：覆盖核心、工具、Web、进化、运行时和配置等模块 | 日常开发、CI |
 
 ---
 
