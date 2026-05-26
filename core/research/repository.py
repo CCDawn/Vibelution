@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -56,6 +57,16 @@ class ResearchRepository:
             raise FileNotFoundError("Research discovery session not found.")
         return ResearchDiscoverySession.from_dict(payload)
 
+    def delete_session(self, session_id: str) -> None:
+        session_id = validate_safe_id(session_id, label="session id")
+        session_dir = self._session_dir(session_id).resolve()
+        sessions_root = self.sessions_root.resolve()
+        if session_dir.parent != sessions_root:
+            raise ValueError("Invalid session path.")
+        if not (session_dir / "session.json").exists():
+            raise FileNotFoundError("Research discovery session not found.")
+        shutil.rmtree(session_dir)
+
     def save_search_runs(self, session_id: str, items: list[SearchRun]) -> None:
         _atomic_write_json_list(self._session_dir(session_id) / "search_runs.json", [item.to_dict() for item in items])
 
@@ -93,6 +104,19 @@ class ResearchRepository:
         events = _load_json(self._session_dir(session_id) / "events.json", fallback=[])
         if not isinstance(events, list):
             events = []
+        events.append(event)
+        _atomic_write_json_list(self._session_dir(session_id) / "events.json", events)
+
+    def replace_event(self, session_id: str, event_code: str, event: dict[str, Any]) -> None:
+        events = _load_json(self._session_dir(session_id) / "events.json", fallback=[])
+        if not isinstance(events, list):
+            events = []
+        for index in range(len(events) - 1, -1, -1):
+            item = events[index]
+            if isinstance(item, dict) and item.get("eventCode") == event_code:
+                events[index] = event
+                _atomic_write_json_list(self._session_dir(session_id) / "events.json", events)
+                return
         events.append(event)
         _atomic_write_json_list(self._session_dir(session_id) / "events.json", events)
 

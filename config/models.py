@@ -249,6 +249,11 @@ DEFAULT_ROLE_PROFILE_IDS = (
     "subagent_explorer",
     "supervised_baseline",
     "supervised_candidate",
+    "research_broad",
+    "research_deep",
+    "research_review",
+    "research_themes",
+    "research_card",
     "compression",
 )
 

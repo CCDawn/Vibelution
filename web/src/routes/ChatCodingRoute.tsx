@@ -42,6 +42,7 @@ import {
   ConversationMessage,
 } from "../api/types";
 import { ConversationView } from "../components/conversation/ConversationView";
+import { postBrowserTelemetry } from "../app/browserTelemetry";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import type { TranslationKey } from "../i18n/dictionary";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
@@ -341,6 +342,8 @@ export function ChatCodingRoute() {
     DEFAULT_CHAT_FEATURE_PRESETS,
   );
   const layoutRef = useRef<HTMLDivElement | null>(null);
+  const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
+  const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
   const requestedSessionId = useMemo(() => {
     return new URLSearchParams(location.search).get("session") ?? "";
   }, [location.search]);
@@ -705,17 +708,41 @@ export function ChatCodingRoute() {
     }
 
     let disposed = false;
-    const stream = new EventSource(`/api/sessions/${activeSessionId}/events`);
+    const streamSessionId = activeSessionId;
+    const stream = new EventSource(`/api/sessions/${streamSessionId}/events`);
 
     stream.onopen = () => {
       if (!disposed) {
         setSessionStreamConnected(true);
+        sessionStreamErrorLoggedRef.current[streamSessionId] = false;
+        postBrowserTelemetry({
+          phase: "session_stream",
+          eventCode: "browser.session_stream.opened",
+          message: "Session detail stream opened.",
+          level: "info",
+          fields: {
+            sessionId: streamSessionId,
+          },
+        });
       }
     };
 
     stream.onerror = () => {
       if (!disposed) {
         setSessionStreamConnected(false);
+        if (!sessionStreamErrorLoggedRef.current[streamSessionId]) {
+          sessionStreamErrorLoggedRef.current[streamSessionId] = true;
+          postBrowserTelemetry({
+            phase: "session_stream",
+            eventCode: "browser.session_stream.error",
+            message: "Session detail stream reported an error.",
+            level: "warning",
+            fields: {
+              sessionId: streamSessionId,
+              readyState: stream.readyState,
+            },
+          });
+        }
       }
     };
 
@@ -724,14 +751,26 @@ export function ChatCodingRoute() {
       try {
         payload = JSON.parse(event.data) as SessionStreamEvent;
       } catch {
+        if (!sessionStreamPayloadErrorLoggedRef.current[streamSessionId]) {
+          sessionStreamPayloadErrorLoggedRef.current[streamSessionId] = true;
+          postBrowserTelemetry({
+            phase: "session_stream",
+            eventCode: "browser.session_stream.bad_payload",
+            message: "Session detail stream payload could not be parsed.",
+            level: "warning",
+            fields: {
+              sessionId: streamSessionId,
+              payloadLength: event.data.length,
+            },
+          });
+        }
         return;
       }
-      if (!shouldAcceptSessionStreamEvent(payload, activeSessionId)) {
+      if (!shouldAcceptSessionStreamEvent(payload, streamSessionId)) {
         return;
       }
+      setSessionStreamConnected(true);
       syncSessionDetail(payload.detail);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     }
 
     stream.addEventListener("session_detail", handleSessionDetail as EventListener);
@@ -742,7 +781,7 @@ export function ChatCodingRoute() {
       stream.removeEventListener("session_detail", handleSessionDetail as EventListener);
       stream.close();
     };
-  }, [activeSessionId, pageVisible, queryClient, syncSessionDetail]);
+  }, [activeSessionId, pageVisible, syncSessionDetail]);
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {
@@ -865,7 +904,11 @@ export function ChatCodingRoute() {
   const runtime = runtimeQuery.data;
   const pet = petQuery.data;
   const detail = sessionDetailQuery.data;
-  const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError);
+  const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
+    dataUpdatedAt: sessionDetailQuery.dataUpdatedAt,
+    errorUpdatedAt: sessionDetailQuery.errorUpdatedAt,
+    streamConnected: sessionStreamConnected,
+  });
   const sessionsErrorState = deriveSessionListQueryErrorState(sessionsQuery.data, sessionsQuery.isError);
   const sessionDetailErrorMessage = sessionDetailQuery.isError
     ? describeError(sessionDetailQuery.error, t("loadFailed"))
@@ -908,15 +951,11 @@ export function ChatCodingRoute() {
           : resolvedEditTarget
             ? t("editMessagePlaceholder")
           : t("messageInputPlaceholder");
-  const contextPercent = contextUsagePercent(
-    runtime?.contextUsage.used ?? 0,
-    runtime?.contextUsage.limit ?? 0,
-  );
-  const contextUsageLabel = formatContextUsage(
-    runtime?.contextUsage.used ?? 0,
-    runtime?.contextUsage.limit ?? 0,
-    locale,
-  );
+  const sessionContextUsage = detail?.contextUsage;
+  const panelContextUsed = sessionContextUsage?.used ?? runtime?.contextUsage.used ?? 0;
+  const panelContextLimit = sessionContextUsage?.limit ?? runtime?.contextUsage.limit ?? 0;
+  const contextPercent = contextUsagePercent(panelContextUsed, panelContextLimit);
+  const contextUsageLabel = formatContextUsage(panelContextUsed, panelContextLimit, locale);
   const petVitals = useMemo(
     () => [
       { key: "hunger", label: t("hunger"), value: clampPercent(pet?.hunger ?? 0) },
@@ -955,8 +994,15 @@ export function ChatCodingRoute() {
   };
   const contextStatusLine = runtimeQuery.isError
     ? describeError(runtimeQuery.error, t("loadFailed"))
-    : runtime
+    : sessionContextUsage
       ? contextUsageLabel
+      : runtime
+      ? contextUsageLabel
+      : t("loadingContext");
+  const contextUsageMetaLine = sessionContextUsage
+    ? `${numberFormatter.format(sessionContextUsage.messageCount)} ${lang === "zh" ? "条消息" : "messages"} · ${numberFormatter.format(sessionContextUsage.userMessageCount)} ${lang === "zh" ? "用户" : "user"} / ${numberFormatter.format(sessionContextUsage.assistantMessageCount)} Agent`
+    : runtime
+      ? `${numberFormatter.format(runtime.contextUsage.used)} / ${numberFormatter.format(runtime.contextUsage.limit)}`
       : t("loadingContext");
   const compression = runtime?.contextCompression;
   const compressionCurrentPercent = compression
@@ -1548,9 +1594,7 @@ export function ChatCodingRoute() {
             <div className={styles.progressFillWarm} style={{ width: `${contextPercent}%` }} />
           </div>
           <p className={styles.backendNote}>
-            {runtime
-              ? `${numberFormatter.format(runtime.contextUsage.used)} / ${numberFormatter.format(runtime.contextUsage.limit)}`
-              : t("loadingContext")}
+            {contextUsageMetaLine}
           </p>
         </section>
 

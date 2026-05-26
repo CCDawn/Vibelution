@@ -21,7 +21,7 @@ from .llm_security import (
     validate_llm_provider_target,
     validate_llm_public_config,
 )
-from .models import AppConfig, RetryPolicyConfig
+from .models import AppConfig, DEFAULT_ROLE_PROFILE_IDS, RetryPolicyConfig
 from .profiles import apply_runtime_profile
 from .settings import (
     PROFILE_REFERENCE_OVERRIDE_FIELDS,
@@ -473,6 +473,58 @@ def _profile_model_ref(profile: Any) -> str:
     return str(profile.get("model_ref", "") or "").strip()
 
 
+def _profile_has_model_binding(profile: Any) -> bool:
+    if not isinstance(profile, dict):
+        return False
+    if _profile_model_ref(profile):
+        return True
+    if str(profile.get("model", "") or "").strip() and _owner_provider(profile):
+        return True
+    return False
+
+
+def _profile_reference_payload(source: dict[str, Any]) -> dict[str, Any]:
+    model_ref = _profile_model_ref(source)
+    if model_ref:
+        payload: dict[str, Any] = {"model_ref": model_ref}
+        overrides = source.get("overrides")
+        if isinstance(overrides, dict) and overrides:
+            payload["overrides"] = copy.deepcopy(overrides)
+        return payload
+    payload = copy.deepcopy(source)
+    payload.pop("profile_id", None)
+    return payload
+
+
+def _fill_missing_role_profiles(public_config: dict) -> dict:
+    updated = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
+    llm = updated.setdefault("llm", {})
+    if not isinstance(llm, dict):
+        updated["llm"] = llm = {}
+    profiles = llm.setdefault("profiles", {})
+    if not isinstance(profiles, dict):
+        llm["profiles"] = profiles = {}
+
+    primary = profiles.get("primary", {}) if isinstance(profiles.get("primary", {}), dict) else {}
+    worker = profiles.get("subagent_worker", {}) if isinstance(profiles.get("subagent_worker", {}), dict) else {}
+    explorer = profiles.get("subagent_explorer", {}) if isinstance(profiles.get("subagent_explorer", {}), dict) else {}
+    research_sources = {
+        "research_broad": explorer if _profile_has_model_binding(explorer) else primary,
+        "research_deep": explorer if _profile_has_model_binding(explorer) else primary,
+        "research_review": worker if _profile_has_model_binding(worker) else primary,
+        "research_themes": worker if _profile_has_model_binding(worker) else primary,
+        "research_card": primary,
+    }
+    for profile_id in DEFAULT_ROLE_PROFILE_IDS:
+        if isinstance(profiles.get(profile_id), dict) and _profile_has_model_binding(profiles.get(profile_id)):
+            continue
+        source = research_sources.get(profile_id, primary)
+        if not _profile_has_model_binding(source):
+            continue
+        profiles[profile_id] = _profile_reference_payload(source)
+    return updated
+
+
 def _provider_fingerprint(provider: dict[str, Any]) -> str:
     payload = json.dumps(_public_provider_entry(provider), ensure_ascii=False, sort_keys=True)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
@@ -522,7 +574,8 @@ def _repair_legacy_model_library_shape(public_config: dict) -> dict:
 def _canonicalize_public_config(public_config: dict) -> dict:
     normalized = normalize_public_config_dict(public_config)
     denormalized = denormalize_config_dict(normalized)
-    return _repair_legacy_model_library_shape(denormalized)
+    repaired = _repair_legacy_model_library_shape(denormalized)
+    return _fill_missing_role_profiles(repaired)
 
 
 def public_config_hash(public_config: dict) -> str:

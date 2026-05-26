@@ -505,6 +505,7 @@ def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, mon
     assert accepted_event[3]["fields"]["mode"] == "runtime_manager"
     assert accepted_event[3]["fields"]["chatTurnCount"] == 0
 
+
 def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatch):
     calls: list[object] = []
     scene_events: list[tuple[str, str, str, dict]] = []
@@ -2032,6 +2033,46 @@ def test_session_detail_exists(tmp_path, monkeypatch):
     assert payload["taskSummary"] == "已经接到真实状态了。"
     assert payload["previewTabs"] == []
     assert payload["currentPhase"] == "ready"
+    assert payload["contextUsage"]["source"] == "session_messages"
+    assert payload["contextUsage"]["messageCount"] == 2
+    assert payload["contextUsage"]["userMessageCount"] == 1
+    assert payload["contextUsage"]["assistantMessageCount"] == 1
+    assert payload["contextUsage"]["toolCallCount"] == 2
+    assert payload["contextUsage"]["used"] > 0
+    assert payload["contextUsage"]["limit"] > 0
+
+
+def test_session_detail_context_usage_comes_from_persisted_messages_after_restart(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"].extend(
+        [
+            {
+                "role": "user",
+                "content": "重启后仍然应该统计这一条历史用户消息。",
+                "timestamp": "2026-05-18T11:57:00",
+            },
+            {
+                "role": "assistant",
+                "content": "收到，当前对话上下文应来自持久化消息，而不是运行时临时计数。",
+                "timestamp": "2026-05-18T11:58:00",
+            },
+        ]
+    )
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["messages"]) == 4
+    assert payload["contextUsage"]["messageCount"] == 4
+    assert payload["contextUsage"]["userMessageCount"] == 2
+    assert payload["contextUsage"]["assistantMessageCount"] == 2
+    assert payload["contextUsage"]["source"] == "session_messages"
+    assert payload["contextUsage"]["used"] == payload["contextUsage"]["estimatedTokens"]
+    assert payload["contextUsage"]["used"] > 0
 
 
 def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, monkeypatch):
@@ -5907,6 +5948,12 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert preset_options["custom_relay_responses"]["model"]["transport"] == "responses"
     assert "modelOptions" in payload
     assert "profileCards" in payload
+    profile_cards = {item["profileId"]: item for item in payload["profileCards"]}
+    assert profile_cards["research_broad"]["label"] == "Research Broad Search"
+    assert profile_cards["research_deep"]["label"] == "Research Deep Search"
+    assert profile_cards["research_review"]["label"] == "Research Review"
+    assert profile_cards["research_themes"]["label"] == "Research Theme Generation"
+    assert profile_cards["research_card"]["label"] == "Research Theme Card"
 
 
 def test_config_workspace_exposes_full_editor_schema(monkeypatch):
@@ -5925,13 +5972,21 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert "prompt" in editor_sections
     assert "llm-profiles" in editor_sections
     sections_by_id = {section["id"]: section for section in payload["sections"]}
-    assert sections_by_id["profiles"]["title"] == "任务模型"
+    assert sections_by_id["profiles"]["title"] == "LLM 配置"
     assert "配置档" not in sections_by_id["profiles"]["summary"]
     assert sections_by_id["draft"]["title"] == "高级配置检查"
     assert "JSON" not in sections_by_id["draft"]["title"]
     assert "JSON" not in sections_by_id["draft"]["summary"]
     assert "草稿" not in sections_by_id["draft"]["summary"]
-    assert editor_sections["llm-profiles"]["title"] == "模型"
+    assert editor_sections["llm-profiles"]["title"] == "模型配置"
+    assert editor_sections["prompt"]["title"] == "系统提示词"
+    assert "git" not in editor_sections
+    assert editor_sections["git-commit-profile"]["path"] == "git.commit_message_profile"
+    assert editor_sections["git-commit-profile"]["title"] == "Git 提交模型"
+    assert editor_sections["git-commit-profile"]["fieldCount"] == 1
+    assert editor_sections["git-commit-prompt"]["path"] == "git.commit_message_prompt"
+    assert editor_sections["git-commit-prompt"]["title"] == "Git 提交提示词"
+    assert editor_sections["git-commit-prompt"]["fieldCount"] == 1
     assert editor_sections["runtime"]["path"] == "runtime"
     assert "workbench" in editor_sections
     assert editor_sections["workbench"]["path"] == "workbench"
@@ -5953,13 +6008,13 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_meta["prompt.sections"]["badge"] == "列表"
     assert editor_meta["llm.profiles.primary.provider.kind"]["label"] == "服务商类型"
     assert editor_meta["llm.profiles.primary.provider.base_url"]["label"] == "服务商基础地址"
-    assert "git" in editor_sections
     assert payload["publicConfig"]["git"]["commit_message_profile"]
     assert "{diff}" in payload["publicConfig"]["git"]["commit_message_prompt"]
     assert editor_meta["git.commit_message_profile"]["kind"] == "select"
-    assert editor_meta["git.commit_message_profile"]["label"] == "提交说明使用的模型"
+    assert editor_meta["git.commit_message_profile"]["label"] == "Git 提交使用的模型配置"
     assert "profile" not in editor_meta["git.commit_message_profile"]["hint"].lower()
     assert editor_meta["git.commit_message_prompt"]["kind"] == "multiline"
+    assert "系统提示词模板" in editor_meta["git.commit_message_prompt"]["hint"]
     assert sections_by_id["health-diagnostics"]["title"] == "健康诊断"
     assert any(section["id"] == "overview" for section in payload["sections"])
     assert any(section["id"] == "shell" for section in payload["sections"])

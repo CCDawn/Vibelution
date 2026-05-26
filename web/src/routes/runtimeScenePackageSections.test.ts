@@ -18,6 +18,7 @@ function scene(files: {
   agentLogs?: RuntimeSceneRawFile[];
   artifacts?: RuntimeSceneRawFile[];
   eventLogs?: RuntimeSceneRawFile[];
+  researchLogs?: RuntimeSceneRawFile[];
 }): RuntimeSceneDetail {
   return {
     runtimeSceneId: "scene-test",
@@ -37,6 +38,7 @@ function scene(files: {
       durationSeconds: null,
       searchText: "",
       tags: [],
+      summaryRef: "summary.json",
     },
     manifestPath: "logs/runtime_scenes/scene-test/manifest.json",
     manifest: {},
@@ -61,6 +63,7 @@ function scene(files: {
     agentLogs: files.agentLogs ?? [],
     artifacts: files.artifacts ?? [],
     eventLogs: files.eventLogs ?? [],
+    researchLogs: files.researchLogs ?? [],
     packageSummary: {
       schemaVersion: 2,
       eventCount: 0,
@@ -70,6 +73,7 @@ function scene(files: {
       agentLogCount: files.agentLogs?.length ?? 0,
       artifactCount: files.artifacts?.length ?? 0,
       eventLogCount: files.eventLogs?.length ?? 0,
+      researchLogCount: files.researchLogs?.length ?? 0,
       errorCount: 0,
       warningCount: 0,
     },
@@ -115,6 +119,7 @@ describe("runtimeScenePackageSections", () => {
         file("events/supervised_run.jsonl"),
         file("events/self_evolution_run.jsonl"),
       ],
+      researchLogs: [file("research/events.jsonl"), file("research/summary.json")],
     });
 
     const sections = runtimeScenePackageSections(detail);
@@ -122,6 +127,7 @@ describe("runtimeScenePackageSections", () => {
     expect(Object.fromEntries(sections.map((section) => [section.id, section.files.map((item) => item.path)]))).toEqual({
       startup: ["events/backend.jsonl", "events/launcher.jsonl", "events/runtime_manager.jsonl"],
       conversations: ["conversations/session-demo.jsonl", "events/conversation.jsonl"],
+      research: ["research/events.jsonl", "research/summary.json"],
       supervised: [
         "agent/supervised_runs/web-supervised-demo.jsonl",
         "artifacts/supervised/evidence.json",
@@ -145,6 +151,7 @@ describe("runtimeScenePackageSections", () => {
     expect(sections.map((section) => section.id)).toEqual([
       "startup",
       "conversations",
+      "research",
       "supervised",
       "selfEvolution",
       "agent",
@@ -159,6 +166,7 @@ describe("runtimeScenePackageSections", () => {
   it("flattens files in the same order used by the package viewer", () => {
     const detail = scene({
       conversationLogs: [file("conversations/session-demo.jsonl")],
+      researchLogs: [file("research/events.jsonl")],
       agentLogs: [file("agent/self_evolution_runs/web-self-demo.jsonl")],
       eventLogs: [file("events/supervised_run.jsonl")],
       rawFiles: [file("raw/desktop-entry.log"), file("raw/backend.stdout.log")],
@@ -167,6 +175,7 @@ describe("runtimeScenePackageSections", () => {
     expect(runtimeScenePackageFiles(detail).map((item) => item.path)).toEqual([
       "raw/desktop-entry.log",
       "conversations/session-demo.jsonl",
+      "research/events.jsonl",
       "events/supervised_run.jsonl",
       "agent/self_evolution_runs/web-self-demo.jsonl",
       "raw/backend.stdout.log",

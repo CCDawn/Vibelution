@@ -11,6 +11,7 @@ import { LogsRoute } from "../routes/LogsRoute";
 import { MemoryRoute } from "../routes/MemoryRoute";
 import { PetRoute } from "../routes/PetRoute";
 import { ResetRoute } from "../routes/ResetRoute";
+import { ResearchFlowCanvasRoute } from "../routes/ResearchFlowCanvasRoute";
 import { ResearchRoute } from "../routes/ResearchRoute";
 import { SupervisedReviewRoute } from "../routes/SupervisedReviewRoute";
 import { ToolsRoute } from "../routes/ToolsRoute";
@@ -80,6 +81,7 @@ export const router = createBrowserRouter([
       { path: "memory/sources", element: <MemoryRoute forcedView="sources" /> },
       { path: "logs", element: <LogsRoute /> },
       { path: "research", element: <ResearchRoute /> },
+      { path: "research/flow-canvas", element: <ResearchFlowCanvasRoute /> },
       { path: "pet", element: <PetRoute /> },
       { path: "reset", element: <ResetRoute /> },
       { path: "config", element: <ConfigRoute /> },

@@ -1476,6 +1476,7 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
         str(active_task.get("active_preview_path") or "").strip() if active_task else ""
     ) or "agent"
     detail_messages = _messages_with_live_output(conversation["id"], conversation.get("messages") or [])
+    context_usage = _build_session_context_usage(conversation["id"], detail_messages)
     detail = {
         **summary,
         "activeTask": _active_task_to_api(active_task),
@@ -1485,6 +1486,7 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
         "changedFiles": changed_files,
         "readFiles": read_files,
         "messages": detail_messages,
+        "contextUsage": context_usage,
         "lastTurnError": _session_turn_error_to_api(conversation.get("lastTurnError")),
         "nextStateSignals": _recent_chat_next_state_signal_summaries(conversation["id"], limit=5),
         "stopRequested": bool(turn_snapshot["stopRequested"]),
@@ -1492,6 +1494,72 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
         "stopReason": str(turn_snapshot["stopReason"] or "").strip(),
     }
     return detail
+
+
+def _build_session_context_usage(session_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    user_count = 0
+    assistant_count = 0
+    character_count = 0
+    tool_call_count = 0
+    for message in list(messages or []):
+        role = str((message or {}).get("role") or "").strip().lower()
+        if role == "user":
+            user_count += 1
+        elif role == "assistant":
+            assistant_count += 1
+        content = str((message or {}).get("content") or "")
+        thought = str((message or {}).get("thought") or "")
+        character_count += len(content) + len(thought)
+        tool_calls = (message or {}).get("toolCalls") or (message or {}).get("tool_calls") or []
+        if isinstance(tool_calls, list):
+            tool_call_count += len(tool_calls)
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                character_count += len(str(tool_call.get("name") or ""))
+                character_count += len(str(tool_call.get("summary") or ""))
+    estimated_tokens = _estimate_session_context_tokens(character_count, tool_call_count)
+    limit = _session_context_limit()
+    used = min(estimated_tokens, limit) if limit > 0 else estimated_tokens
+    payload = {
+        "used": used,
+        "limit": limit,
+        "estimatedTokens": estimated_tokens,
+        "messageCount": len(list(messages or [])),
+        "userMessageCount": user_count,
+        "assistantMessageCount": assistant_count,
+        "toolCallCount": tool_call_count,
+        "source": "session_messages",
+    }
+    return payload
+
+
+def _estimate_session_context_tokens(character_count: int, tool_call_count: int) -> int:
+    # Conservative mixed Chinese/English approximation plus a small per-message/tool overhead.
+    return max(0, int((max(0, character_count) + 2) // 3) + max(0, tool_call_count) * 12)
+
+
+def _session_context_limit() -> int:
+    try:
+        cfg = get_config()
+        compression_limit = int(getattr(cfg.context_compression, "max_token_limit", 0) or 0)
+        profile = cfg.llm.get_profile(role="primary")
+        provider = cfg.llm.get_provider(profile.provider_id)
+        provider_limit = int(getattr(provider, "context_window", 0) or 0)
+        return _first_positive_int(compression_limit, provider_limit, 128000)
+    except Exception:
+        return 128000
+
+
+def _first_positive_int(*values: Any) -> int:
+    for value in values:
+        try:
+            parsed = int(value or 0)
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            return parsed
+    return 0
 
 
 def _normalize_project_paths(items: Any, *, existing_only: bool) -> list[str]:

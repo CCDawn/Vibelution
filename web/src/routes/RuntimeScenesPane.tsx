@@ -233,6 +233,13 @@ function renderPackageDiagnosisPanel(
     issueState?.activeClusters?.[0] ??
     issueState?.policyClusters?.[0] ??
     issueState?.historicalClusters?.[0];
+  const evidencePaths = diagnosis.evidencePaths?.length
+    ? diagnosis.evidencePaths
+    : [
+        ...(primaryCluster?.rawRefs ?? []).map((ref) => ref.path),
+        ...(firstSignal?.rawRefs ?? []).map((ref) => ref.path),
+        ...recommendedOrder,
+      ].filter((path, index, paths) => path && paths.indexOf(path) === index);
   const visibleClusters = [
     ...(issueState?.activeClusters ?? []).slice(0, 3),
     ...(issueState?.policyClusters ?? []).slice(0, 2),
@@ -297,6 +304,28 @@ function renderPackageDiagnosisPanel(
             <strong>{issueState.controlSignalCount}</strong>
             {lang === "zh" ? " 控制信号" : " control"}
           </span>
+        </div>
+      ) : null}
+      {evidencePaths.length > 0 ? (
+        <div className={styles.packageEvidencePaths}>
+          <span>{lang === "zh" ? "优先排查路径" : "Priority evidence paths"}</span>
+          <div>
+            {evidencePaths.slice(0, 6).map((path, index) => (
+              <button
+                key={`${path}-${index}`}
+                type="button"
+                onClick={() => handleOpenRawLog(scene.runtimeSceneId, path)}
+                title={
+                  lang === "zh"
+                    ? `包内相对路径：${path}`
+                    : `Package-relative path: ${path}`
+                }
+              >
+                <strong>{index + 1}</strong>
+                <code>{path}</code>
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
       {primaryCluster ? (
@@ -547,13 +576,21 @@ function runtimeSceneListSignal(scene: RuntimeSceneListItem, lang: "zh" | "en") 
   };
 }
 
+function runtimeSceneListSummary(scene: RuntimeSceneListItem, lang: "zh" | "en") {
+  return localizeRuntimeSceneText(
+    scene.stopReason || scene.result || scene.displayName || scene.title || scene.directoryName,
+    lang,
+  );
+}
+
 function runtimeSceneChildLogCount(scene: RuntimeSceneDetail) {
   return (
     (scene.packageSummary?.rawLogCount ?? scene.rawFiles.length) +
     (scene.packageSummary?.conversationLogCount ?? scene.conversationLogs.length) +
     (scene.packageSummary?.agentLogCount ?? scene.agentLogs.length) +
     (scene.packageSummary?.artifactCount ?? scene.artifacts.length) +
-    (scene.packageSummary?.eventLogCount ?? scene.eventLogs?.length ?? 0)
+    (scene.packageSummary?.eventLogCount ?? scene.eventLogs?.length ?? 0) +
+    (scene.packageSummary?.researchLogCount ?? scene.researchLogs?.length ?? 0)
   );
 }
 
@@ -577,6 +614,7 @@ const runtimeSceneTokenZhMap: Record<string, string> = {
   frontend: "前端",
   backend: "后端",
   browser: "浏览器",
+  research: "科研",
   supervisor: "监督器",
   session: "会话",
   startup: "启动",
@@ -1398,10 +1436,7 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
                         </span>
                       </div>
                       <p className={styles.sceneCardSummary}>
-                        {localizeRuntimeSceneText(
-                          scene.stopReason || scene.result || scene.displayName || scene.title || scene.directoryName,
-                          lang,
-                        )}
+                        {runtimeSceneListSummary(scene, lang)}
                       </p>
                     </button>
                   </div>

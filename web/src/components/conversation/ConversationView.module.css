@@ -289,7 +289,17 @@
 }
 
 .userTurn .turnMeta {
+  flex-direction: row-reverse;
+  justify-content: flex-start;
   text-align: right;
+}
+
+.userTurn .turnMetaIdentity {
+  justify-content: flex-end;
+}
+
+.userTurn .turnMetaActions {
+  justify-content: flex-start;
 }
 
 .turnSpeaker {

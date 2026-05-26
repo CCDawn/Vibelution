@@ -13,6 +13,7 @@ export const queryKeys = {
   researchThemeDiscoverySessions: () => ["research", "theme-discovery", "sessions"] as const,
   researchThemeDiscoverySession: (sessionId: string) => ["research", "theme-discovery", "sessions", sessionId] as const,
   researchThemeDiscoveryPrompts: () => ["research", "theme-discovery", "prompts"] as const,
+  researchFlowCanvas: () => ["research", "flow-canvas"] as const,
   logRoots: () => ["logs", "roots"] as const,
   logTree: (root: string) => ["logs", "tree", root] as const,
   logContent: (root: string, path: string) => ["logs", "content", root, path] as const,

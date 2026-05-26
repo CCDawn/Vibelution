@@ -27,6 +27,9 @@ CONVERSATIONS_DIR = "conversations"
 AGENT_DIR = "agent"
 ARTIFACTS_DIR = "artifacts"
 EVENTS_DIR = "events"
+RESEARCH_DIR = "research"
+RESEARCH_EVENTS_PATH = f"{RESEARCH_DIR}/events.jsonl"
+RESEARCH_SUMMARY_PATH = f"{RESEARCH_DIR}/summary.json"
 MAX_TELEMETRY_TEXT_CHARS = 4_000
 MAX_TELEMETRY_FIELD_TEXT_CHARS = 1_200
 MAX_TELEMETRY_FIELD_ITEMS = 24
@@ -201,6 +204,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
         agent_logs = _list_agent_logs(scene_dir)
         artifacts = _list_artifacts(scene_dir)
         event_logs = _list_event_logs(scene_dir)
+        research_logs = _list_research_logs(scene_dir)
         package_index = _runtime_scene_package_index(scene_dir, manifest, scene_id)
         _sync_runtime_scene_package_sidecars_if_stale(scene_dir, manifest, package_index)
         severity_summary = _runtime_scene_severity_summary(timeline)
@@ -227,6 +231,7 @@ def list_runtime_scenes(limit: int = 80) -> list[dict]:
                 "agentLogCount": len(agent_logs),
                 "artifactCount": len(artifacts),
                 "eventLogCount": len(event_logs),
+                "researchLogCount": len(research_logs),
                 "errorCount": severity_summary["errorCount"],
                 "warningCount": severity_summary["warningCount"],
             }
@@ -255,8 +260,11 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
     agent_logs = _list_agent_logs(scene_dir)
     artifacts = _list_artifacts(scene_dir)
     event_logs = _list_event_logs(scene_dir)
+    research_logs = _list_research_logs(scene_dir)
     package_index = _runtime_scene_package_index(scene_dir, manifest, detail_scene_id)
     _sync_runtime_scene_package_sidecars_if_stale(scene_dir, manifest, package_index)
+    summary_payload = _load_scene_json(scene_dir / SUMMARY_PATH)
+    package_diagnosis = summary_payload.get("diagnosis") if isinstance(summary_payload.get("diagnosis"), dict) else {}
     return {
         "runtimeSceneId": detail_scene_id,
         "directoryName": scene_dir.name,
@@ -285,6 +293,7 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
         "agentLogs": agent_logs,
         "artifacts": artifacts,
         "eventLogs": event_logs,
+        "researchLogs": research_logs,
         "packageSummary": _runtime_scene_package_summary(
             timeline=timeline,
             lifecycle=lifecycle_events,
@@ -293,19 +302,9 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
             agent_logs=agent_logs,
             artifacts=artifacts,
             event_logs=event_logs,
+            research_logs=research_logs,
         ),
-        "packageDiagnosis": _runtime_scene_package_diagnosis(
-            scene_dir=scene_dir,
-            scene_id=detail_scene_id,
-            manifest=manifest,
-            timeline=timeline,
-            lifecycle=lifecycle_events,
-            raw_files=raw_files,
-            conversation_logs=conversation_logs,
-            agent_logs=agent_logs,
-            artifacts=artifacts,
-            event_logs=event_logs,
-        ),
+        "packageDiagnosis": package_diagnosis,
     }
 
 
@@ -630,6 +629,98 @@ def record_runtime_scene_event(
     }
 
 
+def record_research_scene_event(
+    event_code: str,
+    *,
+    message: str = "",
+    level: str = "info",
+    outcome: str = "observed",
+    phase: str = "theme_discovery",
+    fields: dict[str, Any] | None = None,
+    session_id: str = "",
+    agent_key: str = "",
+    occurred_at: str = "",
+    allow_recent_completed: bool = True,
+) -> dict[str, Any]:
+    """Record research workflow activity in a dedicated runtime-scene subpackage."""
+
+    scene_dir = _resolve_current_runtime_scene_dir()
+    if scene_dir is None and allow_recent_completed:
+        scene_dir = _resolve_recent_completed_runtime_scene_dir()
+    if scene_dir is None:
+        return {
+            "accepted": False,
+            "reason": "no_runtime_scene",
+        }
+
+    timestamp = _normalize_event_timestamp(occurred_at) or _now_utc()
+    event_name = _sanitize_token(event_code, default="research.event")
+    phase_name = _sanitize_token(phase, default="theme_discovery")
+    level_name = _sanitize_token(level, default="info")
+    outcome_name = _sanitize_token(outcome, default="observed")
+    normalized_fields = _normalize_telemetry_fields(fields)
+    normalized_session_id = str(session_id or normalized_fields.get("sessionId") or "").strip()
+    normalized_agent_key = str(agent_key or normalized_fields.get("agentKey") or "").strip()
+    if normalized_session_id:
+        normalized_fields["sessionId"] = normalized_session_id
+    if normalized_agent_key:
+        normalized_fields["agentKey"] = normalized_agent_key
+    message_text = _truncate_text(str(message or event_name), 320)
+
+    with RUNTIME_SCENE_PACKAGE_WRITE_LOCK:
+        manifest = _load_scene_manifest(scene_dir)
+        scene_id = _scene_id(scene_dir, manifest)
+        research_payload = {
+            "schema_version": 1,
+            "runtime_scene_id": scene_id,
+            "ts": timestamp,
+            "seq": _next_research_event_seq(scene_dir),
+            "component": "research",
+            "phase": phase_name,
+            "event_code": event_name,
+            "level": level_name,
+            "outcome": outcome_name,
+            "message": message_text,
+            "session_id": normalized_session_id,
+            "agent_key": normalized_agent_key,
+            "fields": normalized_fields,
+        }
+        _append_scene_jsonl(scene_dir, RESEARCH_EVENTS_PATH, research_payload)
+        _append_scene_event(
+            scene_dir,
+            "research",
+            {
+                "schema_version": 1,
+                "runtime_scene_id": scene_id,
+                "ts": timestamp,
+                "seq": _next_scene_event_seq(scene_dir, "research"),
+                "component": "research",
+                "phase": phase_name,
+                "event_code": event_name,
+                "level": level_name,
+                "outcome": outcome_name,
+                "message": message_text,
+                "fields": normalized_fields,
+                "raw_refs": [
+                    {
+                        "path": RESEARCH_EVENTS_PATH,
+                        "tail_lines": 80,
+                    },
+                ],
+            },
+        )
+        _save_runtime_scene_research_summary(scene_dir)
+        _update_runtime_scene_package_manifest(scene_dir, manifest)
+
+    return {
+        "accepted": True,
+        "runtimeSceneId": scene_id,
+        "recordedAt": timestamp,
+        "path": RESEARCH_EVENTS_PATH,
+        "summaryPath": RESEARCH_SUMMARY_PATH,
+    }
+
+
 def _maybe_close_runtime_scene_from_reconciliation(
     scene_dir: Path,
     manifest: dict[str, Any],
@@ -917,7 +1008,7 @@ def _analyze_runtime_scene_content(scene_id: str, relative_path: str, content: s
         empty_summary="这份原始日志为空，暂时不能作为诊断证据。",
         error_summary_prefix="这份原始日志发现 ",
         warning_summary_prefix="这份原始日志发现 ",
-        error_next_step="打开错误筛选，围绕第 {line} 行对照左侧统一时间线和 rawRefs。",
+        error_next_step="打开错误筛选，围绕第 {line} 行对照左侧统一时间线和证据路径。",
         warning_next_step="打开警告筛选，把第 {line} 行附近的重试/超时与 timeline 事件对齐。",
         structured_next_step="按结构化事件类型回到统一时间线，确认这份原始日志对应的组件阶段。",
         fallback_next_step="如当前问题仍未解释，继续查看同一运行现场的其它 raw 日志。",
@@ -946,7 +1037,7 @@ def _save_runtime_scene_package_index(scene_dir: Path, package_index: dict[str, 
 
 def _runtime_scene_package_index_payload(package_index: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": package_index["schemaVersion"],
+        "schema_version": 2,
         "package_id": package_index["packageId"],
         "display_name": package_index["displayName"],
         "index_key": package_index["indexKey"],
@@ -959,12 +1050,14 @@ def _runtime_scene_package_index_payload(package_index: dict[str, Any]) -> dict[
         "duration_seconds": package_index["durationSeconds"],
         "search_text": package_index["searchText"],
         "tags": package_index["tags"],
+        "summary_ref": SUMMARY_PATH,
         "timeline_path": TIMELINE_PATH,
         "lifecycle_path": LIFECYCLE_PATH,
         "raw_dir": "raw",
         "conversations_dir": CONVERSATIONS_DIR,
         "agent_dir": AGENT_DIR,
         "artifacts_dir": ARTIFACTS_DIR,
+        "research_dir": RESEARCH_DIR,
     }
 
 
@@ -979,8 +1072,9 @@ def _runtime_scene_summary_payload(
     manifest: dict[str, Any],
     package_index: dict[str, Any],
 ) -> dict[str, Any]:
+    diagnosis = _runtime_scene_package_diagnosis_for_scene(scene_dir, manifest, package_index["packageId"])
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "package_id": package_index["packageId"],
         "display_name": package_index["displayName"],
         "index_key": package_index["indexKey"],
@@ -995,6 +1089,7 @@ def _runtime_scene_summary_payload(
         "ended_at": package_index["endedAt"],
         "duration_seconds": package_index["durationSeconds"],
         "event_counts": _runtime_scene_summary_counts(scene_dir),
+        "diagnosis": diagnosis,
         "primary_files": {
             "summary": SUMMARY_PATH,
             "package_index": PACKAGE_INDEX_PATH,
@@ -1002,11 +1097,15 @@ def _runtime_scene_summary_payload(
             "timeline": TIMELINE_PATH,
             "lifecycle": LIFECYCLE_PATH,
             "startup": "raw/desktop-entry.log",
+            "research": RESEARCH_SUMMARY_PATH,
         },
         "sections": _runtime_scene_summary_sections(),
         "diagnostic_entrypoint": {
             "first_read": SUMMARY_PATH,
             "purpose": "Agent first-read summary for reconstructing this lifecycle package before opening child logs.",
+            "package_root": f"logs/runtime_scenes/{scene_dir.name}",
+            "path_mode": "package_relative",
+            "evidence_paths": diagnosis.get("evidencePaths", []),
             "recommended_order": [
                 SUMMARY_PATH,
                 PACKAGE_INDEX_PATH,
@@ -1021,6 +1120,8 @@ def _runtime_scene_summary_payload(
                 "agent/supervised_runs/",
                 "agent/supervised_worktree_runs/",
                 "agent/self_evolution_runs/",
+                RESEARCH_SUMMARY_PATH,
+                RESEARCH_EVENTS_PATH,
                 "raw/",
                 "artifacts/",
             ],
@@ -1049,12 +1150,16 @@ def _runtime_scene_package_sidecars_are_stale(
 ) -> bool:
     expected_index = _runtime_scene_package_index_payload(package_index)
     actual_index = _load_scene_json(scene_dir / PACKAGE_INDEX_PATH)
+    if set(actual_index) != set(expected_index):
+        return True
     for key, expected_value in expected_index.items():
         if actual_index.get(key) != expected_value:
             return True
 
     expected_summary = _runtime_scene_summary_payload(scene_dir, manifest, package_index)
     actual_summary = _load_scene_json(scene_dir / SUMMARY_PATH)
+    if set(actual_summary) - {"generated_at"} != set(expected_summary) - {"generated_at"}:
+        return True
     for key, expected_value in expected_summary.items():
         if key == "generated_at":
             continue
@@ -1069,6 +1174,7 @@ def _runtime_scene_package_sidecars_are_stale(
         "index_key": package_index["indexKey"],
         "summary_path": SUMMARY_PATH,
         "package_index_path": PACKAGE_INDEX_PATH,
+        "research_dir": RESEARCH_DIR,
     }
     return any(package.get(key) != expected_value for key, expected_value in expected_package_values.items())
 
@@ -1089,6 +1195,7 @@ def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:
     agent_logs = _list_agent_logs(scene_dir)
     artifacts = _list_artifacts(scene_dir)
     event_logs = _list_event_logs(scene_dir)
+    research_logs = _list_research_logs(scene_dir)
     severity = _runtime_scene_severity_summary(timeline)
     return {
         "timeline_events": len(timeline),
@@ -1098,6 +1205,7 @@ def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:
         "agent_logs": len(agent_logs),
         "artifacts": len(artifacts),
         "event_logs": len(event_logs),
+        "research_logs": len(research_logs),
         "supervised_evolution_logs": _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_runs")
         + _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_worktree_runs"),
         "self_evolution_logs": _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/self_evolution_runs"),
@@ -1151,6 +1259,12 @@ def _runtime_scene_summary_sections() -> dict[str, dict[str, str]]:
         "self_evolution": {
             "path": f"{AGENT_DIR}/self_evolution_runs",
             "purpose": "Unsupervised self-evolution run, checkpoint, reflection, guard, and validation breadcrumbs when present.",
+        },
+        "research": {
+            "path": RESEARCH_DIR,
+            "events_path": RESEARCH_EVENTS_PATH,
+            "summary_path": RESEARCH_SUMMARY_PATH,
+            "purpose": "Research theme discovery sessions, prompt and agent-template edits, searches, evidence extraction, theme selection, and theme-card operations.",
         },
         "artifacts": {
             "path": ARTIFACTS_DIR,
@@ -1208,6 +1322,9 @@ def _runtime_scene_package_index(scene_dir: Path, manifest: dict, scene_id: str)
     index_key = _join_index_key_parts([started_date, started_time.replace(":", "-"), trigger_token, status_token])
     duration_seconds = _scene_duration_seconds(started, ended)
     tags = _runtime_scene_index_tags(manifest, trigger_token, status_token)
+    diagnosis = _runtime_scene_package_diagnosis_for_scene(scene_dir, manifest, scene_id)
+    diagnosis_tags = _runtime_scene_diagnosis_tags(diagnosis)
+    tags = [*tags, *[tag for tag in diagnosis_tags if tag not in tags]]
     search_text = _join_search_text(
         [
             display_name,
@@ -1223,11 +1340,24 @@ def _runtime_scene_package_index(scene_dir: Path, manifest: dict, scene_id: str)
             str(manifest.get("status") or ""),
             str(manifest.get("result") or ""),
             str(manifest.get("stop_reason") or ""),
+            _runtime_scene_diagnosis_status(diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}),
+            _runtime_scene_primary_cause_token(
+                diagnosis,
+                _runtime_scene_primary_issue_cluster(diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}),
+                diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else None,
+            ),
+            _runtime_scene_primary_cause_label(
+                _runtime_scene_primary_issue_cluster(diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}),
+                diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else None,
+            ),
+            diagnosis.get("severity"),
+            diagnosis.get("userSummary"),
+            diagnosis.get("agentNextStep"),
             *tags,
         ]
     )
     return {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "packageId": scene_id,
         "displayName": display_name,
         "indexKey": index_key,
@@ -1240,6 +1370,7 @@ def _runtime_scene_package_index(scene_dir: Path, manifest: dict, scene_id: str)
         "durationSeconds": duration_seconds,
         "searchText": search_text,
         "tags": tags,
+        "summaryRef": SUMMARY_PATH,
     }
 
 
@@ -1590,6 +1721,94 @@ def _list_event_logs(scene_dir: Path) -> list[dict[str, Any]]:
     return _list_package_files(scene_dir, EVENTS_DIR, label_prefix="Event stream")
 
 
+def _list_research_logs(scene_dir: Path) -> list[dict[str, Any]]:
+    return _list_package_files(scene_dir, RESEARCH_DIR, label_prefix="Research")
+
+
+def _next_research_event_seq(scene_dir: Path) -> int:
+    last_seq = 0
+    for row in _read_jsonl_file(scene_dir / RESEARCH_EVENTS_PATH):
+        try:
+            last_seq = max(last_seq, int(row.get("seq") or 0))
+        except (TypeError, ValueError):
+            continue
+    return last_seq + 1
+
+
+def _save_runtime_scene_research_summary(scene_dir: Path) -> None:
+    events = _read_jsonl_file(scene_dir / RESEARCH_EVENTS_PATH)
+    if not events:
+        return
+    summary_path = _resolve_scene_child(scene_dir, RESEARCH_SUMMARY_PATH)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(
+        json.dumps(_runtime_scene_research_summary_payload(events), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _runtime_scene_research_summary_payload(events: list[dict[str, Any]]) -> dict[str, Any]:
+    event_codes: dict[str, int] = {}
+    phases: dict[str, int] = {}
+    agents: dict[str, int] = {}
+    sessions: dict[str, dict[str, Any]] = {}
+    latest_event: dict[str, Any] | None = None
+    for event in events:
+        event_code = str(event.get("event_code") or "research.event").strip()
+        phase = str(event.get("phase") or "theme_discovery").strip()
+        agent_key = str(event.get("agent_key") or "").strip()
+        session_id = str(event.get("session_id") or "").strip()
+        timestamp = str(event.get("ts") or "").strip()
+        event_codes[event_code] = event_codes.get(event_code, 0) + 1
+        phases[phase] = phases.get(phase, 0) + 1
+        if agent_key:
+            agents[agent_key] = agents.get(agent_key, 0) + 1
+        if session_id:
+            session = sessions.setdefault(
+                session_id,
+                {
+                    "sessionId": session_id,
+                    "eventCount": 0,
+                    "latestEventAt": "",
+                    "latestEventCode": "",
+                },
+            )
+            session["eventCount"] = int(session.get("eventCount") or 0) + 1
+            if timestamp >= str(session.get("latestEventAt") or ""):
+                session["latestEventAt"] = timestamp
+                session["latestEventCode"] = event_code
+        if latest_event is None or timestamp >= str(latest_event.get("ts") or ""):
+            latest_event = event
+    return {
+        "schema_version": 1,
+        "event_count": len(events),
+        "session_count": len(sessions),
+        "agent_count": len(agents),
+        "event_codes": event_codes,
+        "phases": phases,
+        "agents": agents,
+        "sessions": sorted(sessions.values(), key=lambda item: str(item.get("latestEventAt") or ""), reverse=True),
+        "latest_event": _runtime_scene_research_summary_event(latest_event),
+        "events_path": RESEARCH_EVENTS_PATH,
+        "generated_at": _now_utc(),
+    }
+
+
+def _runtime_scene_research_summary_event(event: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(event, dict):
+        return None
+    return {
+        "timestamp": str(event.get("ts") or ""),
+        "eventCode": str(event.get("event_code") or ""),
+        "phase": str(event.get("phase") or ""),
+        "level": str(event.get("level") or ""),
+        "outcome": str(event.get("outcome") or ""),
+        "message": str(event.get("message") or ""),
+        "sessionId": str(event.get("session_id") or ""),
+        "agentKey": str(event.get("agent_key") or ""),
+    }
+
+
 def _list_package_files(scene_dir: Path, relative_dir: str, *, label_prefix: str) -> list[dict[str, Any]]:
     root = scene_dir / relative_dir
     items: list[dict[str, Any]] = []
@@ -1620,7 +1839,9 @@ def _runtime_scene_package_summary(
     agent_logs: list[dict],
     artifacts: list[dict],
     event_logs: list[dict],
+    research_logs: list[dict] | None = None,
 ) -> dict[str, Any]:
+    research_logs = research_logs if isinstance(research_logs, list) else []
     severity_summary = _runtime_scene_severity_summary(timeline)
     return {
         "schemaVersion": 2,
@@ -1631,9 +1852,122 @@ def _runtime_scene_package_summary(
         "agentLogCount": len(agent_logs),
         "artifactCount": len(artifacts),
         "eventLogCount": len(event_logs),
+        "researchLogCount": len(research_logs),
         "errorCount": severity_summary["errorCount"],
         "warningCount": severity_summary["warningCount"],
     }
+
+
+def _runtime_scene_package_diagnosis_for_scene(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    scene_id: str,
+) -> dict[str, Any]:
+    timeline = _read_scene_timeline(scene_dir)
+    lifecycle = _read_scene_lifecycle(scene_dir, timeline)
+    diagnosis = _runtime_scene_package_diagnosis(
+        scene_dir=scene_dir,
+        scene_id=scene_id,
+        manifest=manifest,
+        timeline=timeline,
+        lifecycle=lifecycle,
+        raw_files=_list_raw_files(scene_dir),
+        conversation_logs=_list_conversation_logs(scene_dir),
+        agent_logs=_list_agent_logs(scene_dir),
+        artifacts=_list_artifacts(scene_dir),
+        event_logs=_list_event_logs(scene_dir),
+    )
+    return diagnosis
+
+
+def _runtime_scene_primary_issue_cluster(issue_state: dict[str, Any]) -> dict[str, Any] | None:
+    for key in ("firstActiveCluster", "firstPolicyCluster", "firstHistoricalCluster"):
+        value = issue_state.get(key)
+        if isinstance(value, dict):
+            return value
+    for key in ("activeClusters", "policyClusters", "historicalClusters"):
+        value = issue_state.get(key)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    return item
+    return None
+
+
+def _runtime_scene_diagnosis_status(issue_state: dict[str, Any]) -> str:
+    if int(issue_state.get("activeClusterCount") or 0):
+        return "active_issue"
+    if int(issue_state.get("policyClusterCount") or 0) or int(issue_state.get("policySignalCount") or 0):
+        return "policy_signal"
+    if int(issue_state.get("historicalClusterCount") or 0):
+        return "recovered_issue"
+    if int(issue_state.get("controlSignalCount") or 0):
+        return "control_only"
+    return "clear"
+
+
+def _runtime_scene_primary_cause_token(
+    diagnosis: dict[str, Any],
+    primary_cluster: dict[str, Any] | None,
+    first_signal: dict[str, Any] | None,
+) -> str:
+    source = primary_cluster if isinstance(primary_cluster, dict) else first_signal if isinstance(first_signal, dict) else {}
+    component = str(source.get("component") or "").strip()
+    event_code = str(source.get("eventCode") or "").strip()
+    if component or event_code:
+        return _slugify_index_token("_".join(part for part in (component, event_code) if part), default="runtime-signal")
+    severity = str(diagnosis.get("severity") or "info").strip()
+    return _slugify_index_token(f"runtime-{severity}", default="runtime-clear")
+
+
+def _runtime_scene_primary_cause_label(
+    primary_cluster: dict[str, Any] | None,
+    first_signal: dict[str, Any] | None,
+) -> str:
+    if isinstance(primary_cluster, dict):
+        return _runtime_scene_issue_cluster_display(primary_cluster)
+    if isinstance(first_signal, dict):
+        return " / ".join(
+            part
+            for part in (
+                str(first_signal.get("component") or "").strip(),
+                str(first_signal.get("eventCode") or "").strip(),
+            )
+            if part
+        )
+    return ""
+
+
+def _runtime_scene_diagnosis_evidence_paths(
+    diagnosis: dict[str, Any],
+    primary_cluster: dict[str, Any] | None,
+    first_signal: dict[str, Any] | None,
+) -> list[str]:
+    paths: list[str] = []
+    for source in (primary_cluster, first_signal):
+        if not isinstance(source, dict):
+            continue
+        for item in source.get("rawRefs") if isinstance(source.get("rawRefs"), list) else []:
+            if isinstance(item, dict):
+                _append_unique_path(paths, str(item.get("path") or ""))
+    for item in diagnosis.get("keyEntries") if isinstance(diagnosis.get("keyEntries"), list) else []:
+        if isinstance(item, dict):
+            _append_unique_path(paths, str(item.get("path") or ""))
+    for path in diagnosis.get("recommendedOrder") if isinstance(diagnosis.get("recommendedOrder"), list) else []:
+        _append_unique_path(paths, str(path or ""))
+    return paths[:6]
+
+
+def _runtime_scene_diagnosis_tags(diagnosis: dict[str, Any]) -> list[str]:
+    issue_state = diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}
+    primary_cluster = _runtime_scene_primary_issue_cluster(issue_state)
+    first_signal = diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else None
+    tags = [
+        f"diagnosis-{_runtime_scene_diagnosis_status(issue_state)}",
+        f"severity-{diagnosis.get('severity') or 'info'}",
+        _runtime_scene_primary_cause_token(diagnosis, primary_cluster, first_signal),
+    ]
+    return [_slugify_index_token(tag, default="") for tag in tags if _slugify_index_token(tag, default="")]
 
 
 def _runtime_scene_package_diagnosis(
@@ -1676,6 +2010,11 @@ def _runtime_scene_package_diagnosis(
         event_logs=event_logs,
         first_signal=first_signal,
     )
+    evidence_paths = _runtime_scene_diagnosis_evidence_paths(
+        {"keyEntries": key_entries, "recommendedOrder": recommended_order},
+        _runtime_scene_primary_issue_cluster(issue_state),
+        _runtime_scene_diagnosis_signal_payload(first_signal),
+    )
     return {
         "schemaVersion": 1,
         "severity": severity,
@@ -1705,6 +2044,7 @@ def _runtime_scene_package_diagnosis(
         "startupTrace": startup_trace,
         "recommendedOrder": recommended_order,
         "keyEntries": key_entries,
+        "evidencePaths": evidence_paths,
     }
 
 
@@ -1817,6 +2157,7 @@ def _runtime_scene_issue_clusters(signals: list[dict[str, Any]]) -> list[dict[st
         timestamp = str(event.get("timestamp") or "")
         representative = {**event, "diagnosisSeverity": str(signal.get("severity") or _runtime_scene_event_severity(event))}
         if cluster is None:
+            raw_refs = _runtime_scene_signal_raw_refs(representative)
             cluster = {
                 "schemaVersion": 1,
                 "severity": str(signal.get("severity") or "info"),
@@ -1828,9 +2169,10 @@ def _runtime_scene_issue_clusters(signals: list[dict[str, Any]]) -> list[dict[st
                 "firstTimestamp": timestamp,
                 "lastTimestamp": timestamp,
                 "representativeSignal": representative,
-                "rawRefs": representative.get("rawRefs") if isinstance(representative.get("rawRefs"), list) else [],
+                "rawRefs": raw_refs,
                 "identity": _runtime_scene_event_identity(event),
             }
+            representative["rawRefs"] = raw_refs
             clusters_by_key[key] = cluster
             cluster_order.append(key)
             continue
@@ -1915,6 +2257,56 @@ def _runtime_scene_signal_kind(event: dict[str, Any]) -> str:
         if str(fields.get("source") or "").strip().lower() == "built_in":
             return "policy"
     return "problem"
+
+
+def _runtime_scene_signal_raw_refs(event: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_refs = event.get("rawRefs") if isinstance(event.get("rawRefs"), list) else []
+    normalized: list[dict[str, Any]] = []
+    for item in raw_refs:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip().replace("\\", "/")
+        if not path:
+            continue
+        ref: dict[str, Any] = {"path": path}
+        if item.get("tail_lines") is not None:
+            ref["tail_lines"] = item.get("tail_lines")
+        elif item.get("tailLines") is not None:
+            ref["tail_lines"] = item.get("tailLines")
+        else:
+            ref["tail_lines"] = 80
+        normalized.append(ref)
+    if normalized:
+        return normalized
+
+    component = str(event.get("component") or "").strip()
+    fallback_path = _runtime_scene_component_evidence_path(component)
+    if fallback_path:
+        return [{"path": fallback_path, "tail_lines": 80}]
+    return []
+
+
+def _runtime_scene_component_evidence_path(component: str) -> str:
+    normalized = str(component or "").strip().lower()
+    if normalized == "backend":
+        return BACKEND_API_RAW_PATH
+    if normalized == "browser":
+        return "raw/browser.log"
+    if normalized == "browser_page":
+        return BROWSER_TELEMETRY_RAW_PATH
+    if normalized == "frontend":
+        return "raw/frontend.build.log"
+    if normalized == "launcher":
+        return "raw/launcher-control.log"
+    if normalized == "supervisor":
+        return "raw/supervisor.log"
+    if normalized == "conversation":
+        return f"{EVENTS_DIR}/conversation.jsonl"
+    if normalized in {"agent", "llm", "runtime_manager", "tool_executor", "work_run"}:
+        return f"{EVENTS_DIR}/{normalized}.jsonl"
+    if normalized:
+        return f"{EVENTS_DIR}/{_slugify_index_token(normalized, default='component')}.jsonl"
+    return TIMELINE_PATH
 
 
 def _runtime_scene_signal_has_later_resolution(events: list[dict], signal: dict[str, Any]) -> bool:
@@ -2464,13 +2856,14 @@ def _runtime_scene_diagnosis_next_step(
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
-            f"再定位主问题簇 {cluster}，优先打开它的 rawRefs，并沿同一 component/runId/pageInstanceId 向后找恢复或重复崩溃。"
+            f"再定位主问题簇 {cluster}，优先打开 summary/package_index 里的 evidence_paths 对应文件，"
+            "并沿同一 component/runId/pageInstanceId 向后找恢复或重复崩溃。"
         )
     if severity == "warning" and active_cluster_count and first_signal:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
-            f"再定位主问题簇 {cluster}，判断它是退化、重试还是用户控制信号，必要时打开 rawRefs。"
+            f"再定位主问题簇 {cluster}，判断它是退化、重试还是用户控制信号，必要时打开 evidence_paths 对应文件。"
         )
     if policy_signal_count and first_signal:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstPolicyCluster"))
@@ -2499,7 +2892,7 @@ def _runtime_scene_diagnosis_next_step(
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
-            f"再追踪主问题簇 {cluster}，把它和首个信号、rawRefs、timeline 顺序对齐。"
+            f"再追踪主问题簇 {cluster}，把它和首个信号、证据路径、timeline 顺序对齐。"
         )
     return (
         f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再按推荐阅读顺序对照 timeline、lifecycle 和子日志确认周期完整性。"
@@ -2516,7 +2909,7 @@ def _runtime_scene_diagnosis_signal_payload(event: dict[str, Any] | None) -> dic
         "phase": str(event.get("phase") or ""),
         "eventCode": str(event.get("eventCode") or ""),
         "message": _truncate_text(str(event.get("message") or ""), 320),
-        "rawRefs": event.get("rawRefs") if isinstance(event.get("rawRefs"), list) else [],
+        "rawRefs": _runtime_scene_signal_raw_refs(event),
     }
 
 
@@ -2822,10 +3215,12 @@ def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, 
             "conversations_dir": CONVERSATIONS_DIR,
             "agent_dir": AGENT_DIR,
             "artifacts_dir": ARTIFACTS_DIR,
+            "research_dir": RESEARCH_DIR,
             "updated_at": _now_utc(),
         }
     )
     manifest["package"] = package
+    _save_runtime_scene_research_summary(scene_dir)
     _save_runtime_scene_package_index(scene_dir, package_index)
     _save_runtime_scene_summary(scene_dir, manifest, package_index)
     _save_scene_manifest(scene_dir, manifest)

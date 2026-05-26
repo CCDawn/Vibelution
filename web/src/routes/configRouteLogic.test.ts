@@ -302,19 +302,19 @@ describe("configRouteLogic", () => {
 });
 
 describe("config route copy", () => {
-  it("uses task-model language instead of exposing profile jargon", () => {
+  it("uses LLM-config language instead of exposing profile jargon", () => {
     const zhCopy = JSON.stringify(CONFIG_COPY.zh);
     const enCopy = Object.entries(CONFIG_COPY.en)
       .filter(([key]) => !["runtimeProfile"].includes(key))
       .map(([, value]) => value)
       .join("\n");
 
-    expect(CONFIG_COPY.zh.profilesTitle).toBe("任务模型");
-    expect(CONFIG_COPY.en.profilesTitle).toBe("Task Models");
+    expect(CONFIG_COPY.zh.profilesTitle).toBe("LLM 配置");
+    expect(CONFIG_COPY.en.profilesTitle).toBe("LLM Configs");
     expect(CONFIG_COPY.zh.profileTableActions).toBe("连接");
     expect(CONFIG_COPY.en.profileTableActions).toBe("Connection");
-    expect(CONFIG_COPY.zh.editProfiles).toBe("编辑任务模型");
-    expect(CONFIG_COPY.en.editProfiles).toBe("Edit task models");
+    expect(CONFIG_COPY.zh.editProfiles).toBe("编辑 LLM 配置");
+    expect(CONFIG_COPY.en.editProfiles).toBe("Edit LLM configs");
     expect(CONFIG_COPY.zh.openEnvironment).toBe("打开系统环境变量");
     expect(CONFIG_COPY.en.openEnvironment).toBe("Open system environment variables");
     expect(zhCopy).not.toContain("配置档");
@@ -337,5 +337,16 @@ describe("config route copy", () => {
     expect(visibleCopy.en).not.toMatch(/\bdrafts?\b/i);
     expect(visibleCopy.en).not.toMatch(/\bJSON\b/i);
     expect(visibleCopy.en).not.toMatch(/\bJSON editor\b/i);
+  });
+
+  it("groups model configs and system prompts without a standalone git section", () => {
+    expect(CONFIG_COPY.zh.groupModelingTitle).toBe("模型配置");
+    expect(CONFIG_COPY.en.groupModelingTitle).toBe("Model Configs");
+    expect(CONFIG_COPY.zh.groupPromptTitle).toBe("系统提示词");
+    expect(CONFIG_COPY.en.groupPromptTitle).toBe("System Prompts");
+
+    const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
+    expect(visibleCopy).not.toContain("Git 提交");
+    expect(visibleCopy).not.toContain("Git Commits");
   });
 });

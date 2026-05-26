@@ -4,20 +4,18 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass, field
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from time import monotonic
 from typing import Any, Iterable
 
 from core.infrastructure.workspace_manager import get_workspace
 
+from .agent_runner import LLMResearchAgentRunner, ResearchAgentRunner
+from .agent_templates import RESEARCH_PROMPT_FILES, ensure_research_prompt_defaults, normalize_research_agent_config
 from .models import (
     CandidateTheme,
     EvidenceRecord,
     ResearchDiscoverySession,
     ResearchSource,
     SearchRun,
-    ThemeCard,
     new_id,
     utcnow_iso,
     validate_safe_id,
@@ -27,17 +25,10 @@ from .providers import (
     ResearchSearchProvider,
     SearchResult,
     new_session_id,
-    stable_evidence_id,
     stable_source_id,
 )
 from .repository import ResearchRepository
-from .scoring import calculate_recommendation_score, deduplicate_themes
-
-
-@dataclass
-class SearchExecution:
-    results: list[SearchResult] = field(default_factory=list)
-    attempts: list[dict[str, Any]] = field(default_factory=list)
+from .scoring import deduplicate_themes
 
 
 class ResearchThemeDiscoveryService:
@@ -46,9 +37,11 @@ class ResearchThemeDiscoveryService:
         *,
         repository: ResearchRepository | None = None,
         search_provider: ResearchSearchProvider | None = None,
+        agent_runner: ResearchAgentRunner | None = None,
     ):
         self.repository = repository or ResearchRepository()
         self.search_provider = search_provider or PublicResearchSearchProvider()
+        self.agent_runner = agent_runner or LLMResearchAgentRunner(search_provider=self.search_provider)
 
     def list_sessions(self) -> dict[str, Any]:
         sessions = self.repository.list_sessions()
@@ -82,6 +75,15 @@ class ResearchThemeDiscoveryService:
         snapshot["agentReport"] = self._agent_report(snapshot)
         return snapshot
 
+    def delete_session(self, session_id: str) -> dict[str, Any]:
+        session_id = validate_safe_id(session_id, label="session id")
+        self.repository.delete_session(session_id)
+        return {
+            "deleted": True,
+            "sessionId": session_id,
+            **self.list_sessions(),
+        }
+
     def run_broad_search(self, session_id: str) -> dict[str, Any]:
         session = self.repository.load_session(session_id)
         queries = self._broad_queries(session)
@@ -97,10 +99,18 @@ class ResearchThemeDiscoveryService:
         run.model_profile.update(self._agent_plan(session, phase="broad", queries=queries))
         self._append_search_run(session.session_id, run)
         try:
-            execution = self._search_all(queries)
+            execution = self.agent_runner.run_search(
+                phase="broad",
+                session=session,
+                suggested_queries=queries,
+                existing_sources=self.repository.load_sources(session.session_id),
+                trace_sink=self._search_trace_sink(run),
+            )
         except Exception as exc:
             self._fail_search_run(run, exc)
             raise
+        execution.trace = _merge_trace(run.model_profile.get("liveTrace"), execution.trace)
+        execution.profile["trace"] = execution.trace
         result_sources = self._sources_from_results(session.session_id, run.run_id, execution.results)
         source_counts = dict(Counter(item.kind for item in execution.results))
         failed_count = sum(1 for item in execution.attempts if item.get("status") == "failed")
@@ -110,6 +120,7 @@ class ResearchThemeDiscoveryService:
         run.completed_at = utcnow_iso()
         run.model_profile.update(
             {
+                "agentExecution": execution.profile,
                 "searchExecution": {
                     "attempts": execution.attempts,
                     "sourceCounts": source_counts,
@@ -129,14 +140,17 @@ class ResearchThemeDiscoveryService:
                 "sourceCount": len(result_sources),
                 "sourceCounts": source_counts,
                 "failedAttemptCount": failed_count,
+                "agentKey": execution.profile.get("agentKey"),
+                "agentExecution": execution.profile,
+                "trace": execution.trace,
             },
         )
         return self.get_session(session.session_id)
 
-    def run_deep_search(self, session_id: str) -> dict[str, Any]:
+    def run_deep_search(self, session_id: str, evidence_requests: list[str] | None = None) -> dict[str, Any]:
         session = self.repository.load_session(session_id)
         sources = self.repository.load_sources(session.session_id)
-        queries = self._deep_queries(session, sources)
+        queries = self._deep_queries(session, sources, evidence_requests=evidence_requests)
         run = SearchRun(
             run_id=new_id("deep-search"),
             session_id=session.session_id,
@@ -149,10 +163,18 @@ class ResearchThemeDiscoveryService:
         run.model_profile.update(self._agent_plan(session, phase="deep", queries=queries))
         self._append_search_run(session.session_id, run)
         try:
-            execution = self._search_all(queries)
+            execution = self.agent_runner.run_search(
+                phase="deep",
+                session=session,
+                suggested_queries=queries,
+                existing_sources=sources,
+                trace_sink=self._search_trace_sink(run),
+            )
         except Exception as exc:
             self._fail_search_run(run, exc)
             raise
+        execution.trace = _merge_trace(run.model_profile.get("liveTrace"), execution.trace)
+        execution.profile["trace"] = execution.trace
         result_sources = self._sources_from_results(session.session_id, run.run_id, execution.results)
         source_counts = dict(Counter(item.kind for item in execution.results))
         failed_count = sum(1 for item in execution.attempts if item.get("status") == "failed")
@@ -162,6 +184,7 @@ class ResearchThemeDiscoveryService:
         run.completed_at = utcnow_iso()
         run.model_profile.update(
             {
+                "agentExecution": execution.profile,
                 "searchExecution": {
                     "attempts": execution.attempts,
                     "sourceCounts": source_counts,
@@ -181,6 +204,10 @@ class ResearchThemeDiscoveryService:
                 "sourceCount": len(result_sources),
                 "sourceCounts": source_counts,
                 "failedAttemptCount": failed_count,
+                "evidenceRequests": _string_list(evidence_requests),
+                "agentKey": execution.profile.get("agentKey"),
+                "agentExecution": execution.profile,
+                "trace": execution.trace,
             },
         )
         return self.get_session(session.session_id)
@@ -189,12 +216,13 @@ class ResearchThemeDiscoveryService:
         session = self.repository.load_session(session_id)
         sources = self.repository.load_sources(session.session_id)
         evidence = self.repository.load_evidence(session.session_id)
-        known_ids = {item.evidence_id for item in evidence}
-        extracted = [item for source in sources for item in self._evidence_from_source(source)]
-        for item in extracted:
-            if item.evidence_id not in known_ids:
-                evidence.append(item)
-                known_ids.add(item.evidence_id)
+        evidence_result = self.agent_runner.extract_evidence(
+            session=session,
+            sources=sources,
+            existing_evidence=evidence,
+            trace_sink=self._stage_trace_sink(session.session_id, "evidence.extracting", "review"),
+        )
+        evidence = evidence_result.evidence
         self.repository.save_evidence(session.session_id, evidence)
         self._mark_downstream_stale(session.session_id, after_stage="evidence")
         self._touch_session(session, status="reviewing")
@@ -204,6 +232,10 @@ class ResearchThemeDiscoveryService:
             {
                 "evidenceCount": len(evidence),
                 "evidenceCounts": dict(Counter(item.evidence_type for item in evidence)),
+                "missingEvidenceRequests": evidence_result.missing_evidence_requests,
+                "agentKey": "review",
+                "agentExecution": evidence_result.profile,
+                "trace": evidence_result.trace,
             },
         )
         return self.get_session(session.session_id)
@@ -220,8 +252,15 @@ class ResearchThemeDiscoveryService:
         for theme in existing:
             if theme.status in {"draft", "shortlisted"}:
                 theme.status = "stale"
+        theme_result = self.agent_runner.generate_themes(
+            session=session,
+            sources=sources,
+            evidence=evidence,
+            parent_run_id=self._latest_run_id(session.session_id),
+            trace_sink=self._stage_trace_sink(session.session_id, "themes.generating", "themes"),
+        )
         selected = deduplicate_themes(
-            self._candidate_themes(session, sources, evidence),
+            theme_result.themes,
             limit=session.candidate_count,
         )
         for theme in selected:
@@ -229,7 +268,16 @@ class ResearchThemeDiscoveryService:
         self.repository.save_candidate_themes(session.session_id, [*existing, *selected])
         self._mark_theme_cards_stale(session.session_id)
         self._touch_session(session, status="reviewing")
-        self._event(session.session_id, "themes.generated", {"candidateCount": len(selected)})
+        self._event(
+            session.session_id,
+            "themes.generated",
+            {
+                "candidateCount": len(selected),
+                "agentKey": "themes",
+                "agentExecution": theme_result.profile,
+                "trace": theme_result.trace,
+            },
+        )
         return self.get_session(session.session_id)
 
     def select_theme(self, session_id: str, theme_id: str) -> dict[str, Any]:
@@ -266,11 +314,30 @@ class ResearchThemeDiscoveryService:
             if card.theme_id == theme_id and card.status == "draft":
                 card.status = "stale"
         sources = self.repository.load_sources(session.session_id)
-        card = self._theme_card(session, theme, sources)
+        card_result = self.agent_runner.generate_card(
+            session=session,
+            theme=theme,
+            sources=sources,
+            version=self._next_card_version(session.session_id, theme.theme_id),
+            trace_sink=self._stage_trace_sink(session.session_id, "theme_card.generating", "card"),
+        )
+        if card_result.card is None:
+            raise ValueError("card agent returned no usable theme card.")
+        card = card_result.card
         cards.append(card)
         self.repository.save_theme_cards(session.session_id, cards)
         self._touch_session(session, status="selected")
-        self._event(session.session_id, "theme_card.generated", {"themeId": theme_id, "cardId": card.card_id})
+        self._event(
+            session.session_id,
+            "theme_card.generated",
+            {
+                "themeId": theme_id,
+                "cardId": card.card_id,
+                "agentKey": "card",
+                "agentExecution": card_result.profile,
+                "trace": card_result.trace,
+            },
+        )
         return self.get_session(session.session_id)
 
     def approve_theme_card(self, session_id: str, card_id: str) -> dict[str, Any]:
@@ -313,6 +380,51 @@ class ResearchThemeDiscoveryService:
             runs.append(run)
         self.repository.save_search_runs(run.session_id, runs)
 
+    def _search_trace_sink(self, run: SearchRun):
+        def sink(item: dict[str, Any]) -> None:
+            trace = _trace_list(run.model_profile.get("liveTrace"))
+            trace.append(item)
+            run.model_profile["liveTrace"] = trace
+            run.model_profile["agentExecution"] = {
+                **dict(run.model_profile.get("agentExecution") or {}),
+                "agentKey": "broad" if run.phase == "broad" else "deep",
+                "executionMode": "running",
+                "trace": trace,
+            }
+            self._replace_search_run(run)
+
+        return sink
+
+    def _stage_trace_sink(self, session_id: str, event_code: str, agent_key: str):
+        event: dict[str, Any] | None = None
+
+        def sink(item: dict[str, Any]) -> None:
+            nonlocal event
+            trace = _trace_list((event or {}).get("fields", {}).get("trace") if event else [])
+            trace.append(item)
+            fields = {
+                "agentKey": agent_key,
+                "agentExecution": {
+                    "agentKey": agent_key,
+                    "executionMode": "running",
+                    "trace": trace,
+                },
+                "trace": trace,
+            }
+            if event is None:
+                event = {
+                    "eventCode": event_code,
+                    "timestamp": utcnow_iso(),
+                    "fields": fields,
+                }
+                self.repository.append_event(session_id, event)
+                return
+            event["timestamp"] = utcnow_iso()
+            event["fields"] = fields
+            self.repository.replace_event(session_id, event_code, event)
+
+        return sink
+
     def _fail_search_run(self, run: SearchRun, exc: Exception) -> None:
         run.status = "failed"
         run.completed_at = utcnow_iso()
@@ -330,74 +442,6 @@ class ResearchThemeDiscoveryService:
             f"search.{run.phase}.failed",
             {"errorType": exc.__class__.__name__, "message": str(exc), "queryCount": len(run.queries)},
         )
-
-    def _search_all(self, queries: Iterable[str]) -> SearchExecution:
-        tasks = []
-        query_list = list(queries)
-        if not query_list:
-            return SearchExecution()
-        execution = SearchExecution()
-        with ThreadPoolExecutor(max_workers=min(12, max(1, len(query_list) * 4))) as executor:
-            for query in query_list:
-                tasks.extend(
-                    [
-                        executor.submit(self._provider_search, "paper", query),
-                        executor.submit(self._provider_search, "github", query),
-                        executor.submit(self._provider_search, "dataset", query),
-                        executor.submit(self._provider_search, "web", query),
-                    ]
-                )
-            for task in as_completed(tasks):
-                try:
-                    results, attempt = task.result()
-                    execution.results.extend(results)
-                    execution.attempts.append(attempt)
-                except ValueError:
-                    raise
-                except Exception as exc:
-                    execution.attempts.append(
-                        {
-                            "kind": "unknown",
-                            "query": "",
-                            "status": "failed",
-                            "resultCount": 0,
-                            "durationMs": 0,
-                            "error": str(exc)[:500],
-                        }
-                    )
-                    continue
-        execution.attempts.sort(key=lambda item: (str(item.get("query") or ""), str(item.get("kind") or "")))
-        return execution
-
-    def _provider_search(self, kind: str, query: str) -> tuple[list[SearchResult], dict[str, Any]]:
-        started = monotonic()
-        method = {
-            "paper": self.search_provider.search_papers,
-            "github": self.search_provider.search_github,
-            "dataset": self.search_provider.search_datasets,
-            "web": self.search_provider.search_web,
-        }[kind]
-        try:
-            results = method(query)
-        except ValueError:
-            raise
-        except Exception as exc:
-            return [], {
-                "kind": kind,
-                "query": query,
-                "status": "failed",
-                "resultCount": 0,
-                "durationMs": round((monotonic() - started) * 1000),
-                "error": str(exc)[:500],
-            }
-        return results, {
-            "kind": kind,
-            "query": query,
-            "status": "completed",
-            "resultCount": len(results),
-            "durationMs": round((monotonic() - started) * 1000),
-            "error": "",
-        }
 
     def _sources_from_results(self, session_id: str, run_id: str, results: list[SearchResult]) -> list[ResearchSource]:
         return [
@@ -419,272 +463,6 @@ class ResearchThemeDiscoveryService:
         for source in sources:
             deduped[(source.kind, source.url)] = source
         return list(deduped.values())
-
-    def _evidence_from_source(self, source: ResearchSource) -> list[EvidenceRecord]:
-        if source.kind == "paper":
-            return [
-                EvidenceRecord(
-                    evidence_id=stable_evidence_id(source.source_id, "gap"),
-                    session_id=source.session_id,
-                    source_id=source.source_id,
-                    claim=f"{source.title} suggests a research gap or method question around {source.snippet[:180]}",
-                    evidence_type="gap",
-                    confidence="medium",
-                    note="Academic source treated as verified, but the extracted gap still needs literature confirmation.",
-                ),
-                EvidenceRecord(
-                    evidence_id=stable_evidence_id(source.source_id, "method"),
-                    session_id=source.session_id,
-                    source_id=source.source_id,
-                    claim=f"{source.title} can inform a method-transfer path for AI Scientist theme discovery.",
-                    evidence_type="method",
-                    confidence="medium",
-                    note="Method evidence is a candidate bridge, not proof of novelty.",
-                ),
-            ]
-        if source.kind == "dataset":
-            return [
-                EvidenceRecord(
-                    evidence_id=stable_evidence_id(source.source_id, "dataset"),
-                    session_id=source.session_id,
-                    source_id=source.source_id,
-                    claim=f"{source.title} indicates a possible public validation or benchmark path.",
-                    evidence_type="dataset",
-                    confidence="high",
-                    note="Dataset source supports feasibility, not final experimental sufficiency.",
-                )
-            ]
-        if source.kind == "github":
-            return [
-                EvidenceRecord(
-                    evidence_id=stable_evidence_id(source.source_id, "implementation"),
-                    session_id=source.session_id,
-                    source_id=source.source_id,
-                    claim=f"{source.title} indicates implementation or baseline clues for a prototype.",
-                    evidence_type="implementation",
-                    confidence="high",
-                    note="GitHub evidence supports buildability and baseline exploration.",
-                )
-            ]
-        return [
-            EvidenceRecord(
-                evidence_id=stable_evidence_id(source.source_id, "background"),
-                session_id=source.session_id,
-                source_id=source.source_id,
-                claim=f"{source.title} provides background context for competition fit and domain framing.",
-                evidence_type="background",
-                confidence="medium" if source.reliability == "normal" else "low",
-                note="Web background should not independently prove scientific novelty.",
-            )
-        ]
-
-    def _candidate_themes(
-        self,
-        session: ResearchDiscoverySession,
-        sources: list[ResearchSource],
-        evidence: list[EvidenceRecord],
-    ) -> list[CandidateTheme]:
-        source_ids = [item.source_id for item in sources[:8]]
-        evidence_ids = [item.evidence_id for item in evidence[:12]]
-        anchors = self._theme_anchors(session, sources, evidence)
-        themes: list[CandidateTheme] = []
-        novelty_paths = [
-            "problem_perspective",
-            "method_transfer",
-            "discipline_combination",
-            "application_scenario",
-            "problem_perspective",
-            "method_transfer",
-            "discipline_combination",
-            "application_scenario",
-        ]
-        for index, anchor in enumerate(anchors[:12]):
-            novelty_path = novelty_paths[index % len(novelty_paths)]
-            scores = self._scores_for_anchor(index, novelty_path, anchor, session)
-            themes.append(
-                CandidateTheme(
-                    theme_id=new_id("theme"),
-                    session_id=session.session_id,
-                    title=anchor["title"],
-                    one_line=anchor["oneLine"],
-                    interdisciplinary_combination=anchor["disciplines"],
-                    core_question=anchor["question"],
-                    novelty_path=novelty_path,  # type: ignore[arg-type]
-                    scores=scores,
-                    recommendation_score=calculate_recommendation_score(scores),
-                    source_ids=source_ids,
-                    evidence_ids=evidence_ids,
-                    uncertainty=anchor["uncertainty"],
-                    agent_review=anchor["agentReview"],
-                    status="draft",
-                    version=1,
-                    parent_run_id=self._latest_run_id(session.session_id),
-                )
-            )
-        return themes
-
-    def _theme_anchors(
-        self,
-        session: ResearchDiscoverySession,
-        sources: list[ResearchSource],
-        evidence: list[EvidenceRecord],
-    ) -> list[dict[str, Any]]:
-        keywords = self._keywords([session.open_goal, session.constraints, session.preferences, *[s.title for s in sources]])
-        primary = keywords[0] if keywords else "scientific discovery"
-        secondary = keywords[1] if len(keywords) > 1 else "causal reasoning"
-        tertiary = keywords[2] if len(keywords) > 2 else "open-source agents"
-        dataset_count = sum(1 for item in evidence if item.evidence_type == "dataset")
-        implementation_count = sum(1 for item in evidence if item.evidence_type == "implementation")
-        feasibility_note = (
-            "Dataset and implementation clues are present."
-            if dataset_count and implementation_count
-            else "Validation evidence is still thin and needs deeper search."
-        )
-        return [
-            {
-                "title": f"Mechanism-gap discovery for {primary}",
-                "oneLine": "Use AI Scientist to find mechanism-level gaps rather than only summarizing literature.",
-                "disciplines": ["computer science", "science of science", "causal reasoning"],
-                "question": f"Can an AI Scientist identify under-specified mechanisms in {primary} and turn them into falsifiable questions?",
-                "uncertainty": "Novelty depends on whether deep literature search finds existing mechanism-gap benchmarks.",
-                "agentReview": f"I recommend this because it makes the research problem about mechanisms, not a generic tool. {feasibility_note}",
-            },
-            {
-                "title": f"Causal falsifiability filters for {secondary} hypothesis generation",
-                "oneLine": "Transfer causal counterfactual thinking into AI-generated scientific hypothesis review.",
-                "disciplines": ["computer science", "causal science", "research methodology"],
-                "question": f"Can counterfactual constraints make AI-generated hypotheses about {secondary} more falsifiable and less speculative?",
-                "uncertainty": "Requires checking whether comparable causal filters already exist in AI Scientist systems.",
-                "agentReview": "This is strong on problem perspective and method transfer; the main gap is finding a clean benchmark.",
-            },
-            {
-                "title": f"Scientific blind-spot mapping across {primary} and {tertiary}",
-                "oneLine": "Build a theme around finding unexamined intersections instead of optimizing known benchmarks.",
-                "disciplines": ["computer science", "scientometrics", "open-source software"],
-                "question": f"Can source, paper, and dataset evidence reveal blind spots between {primary} and {tertiary}?",
-                "uncertainty": "Risk: it may look like literature mining unless framed around scientific question discovery.",
-                "agentReview": "The evidence mix supports a discovery workflow, but the final topic must keep a mechanism question visible.",
-            },
-            {
-                "title": f"Validation-first theme selection for AI Scientist in {primary}",
-                "oneLine": "Study how AI Scientist should choose topics by novelty while preserving minimum verifiability.",
-                "disciplines": ["computer science", "experimental design", "AI evaluation"],
-                "question": f"How can AI Scientist rank novel {primary} topics without selecting ideas that cannot be tested?",
-                "uncertainty": "This may be meta-scientific; competition fit is high, but domain specificity must be sharpened.",
-                "agentReview": "This fits the current workbench exactly and can be shown clearly, though it risks being too self-referential.",
-            },
-            {
-                "title": f"Cognitive-control inspired uncertainty review for {secondary}",
-                "oneLine": "Borrow metacognitive uncertainty review to make AI Scientist topic proposals more rigorous.",
-                "disciplines": ["computer science", "cognitive neuroscience", "metacognition"],
-                "question": f"Can metacognitive review signals improve how AI Scientist rejects weakly evidenced {secondary} themes?",
-                "uncertainty": "Needs evidence that cognitive-control concepts transfer beyond metaphor.",
-                "agentReview": "This is novel by problem perspective and interdisciplinary lens; validation may require careful operationalization.",
-            },
-            {
-                "title": f"Open-source reproducibility gaps as AI Scientist research opportunities",
-                "oneLine": "Use GitHub and dataset evidence to find research questions hidden in reproducibility failures.",
-                "disciplines": ["computer science", "software engineering", "open science"],
-                "question": "Can AI Scientist turn reproducibility gaps in open-source projects into scientific hypotheses?",
-                "uncertainty": "May become engineering-heavy unless hypotheses explain why reproducibility breaks.",
-                "agentReview": "GitHub evidence makes this buildable; the scientific frame needs causal or mechanism language.",
-            },
-            {
-                "title": f"Dataset-absence as a signal for under-studied {primary} problems",
-                "oneLine": "Treat missing public datasets as a structured clue for scientific opportunity discovery.",
-                "disciplines": ["computer science", "data-centric AI", "science of science"],
-                "question": f"When does dataset absence reveal a real research gap rather than a poor search strategy in {primary}?",
-                "uncertainty": "The system must distinguish evidence absence from search failure.",
-                "agentReview": "This is conceptually sharp and honest about novelty limits, but first-stage results must expose uncertainty.",
-            },
-            {
-                "title": f"Competition-fit aware AI Scientist topic discovery for {primary}",
-                "oneLine": "Model how an AI Scientist balances scientific value, novelty, and feasibility under contest constraints.",
-                "disciplines": ["computer science", "decision science", "research planning"],
-                "question": f"Can contest constraints guide AI Scientist toward better {primary} research questions without overfitting to scoring rubrics?",
-                "uncertainty": "Strong for this project, but needs a specific scientific domain later.",
-                "agentReview": "This is useful for selection, but less novel than mechanism or causal-filter themes.",
-            },
-        ]
-
-    def _scores_for_anchor(
-        self,
-        index: int,
-        novelty_path: str,
-        anchor: dict[str, Any],
-        session: ResearchDiscoverySession,
-    ) -> dict[str, float]:
-        novelty_bonus = {
-            "problem_perspective": 9,
-            "method_transfer": 6,
-            "discipline_combination": 3,
-            "application_scenario": 0,
-        }.get(novelty_path, 0)
-        preference_bonus = 4 if "novel" in session.preferences.lower() or "新" in session.preferences else 0
-        base = 72 - min(index, 7) * 2
-        return {
-            "noveltyGap": min(96, base + novelty_bonus + preference_bonus),
-            "scientificValue": min(94, base + 7 if "mechanism" in anchor["title"].lower() else base + 4),
-            "technicalDepth": min(90, base + 5 if novelty_path in {"method_transfer", "problem_perspective"} else base),
-            "interdisciplinaryAuthenticity": min(92, base + 6 if len(anchor["disciplines"]) >= 3 else base),
-            "verifiability": min(88, base + 2),
-            "competitionFit": min(94, base + 8),
-            "implementationFeasibility": min(84, base + 1),
-        }
-
-    def _theme_card(
-        self,
-        session: ResearchDiscoverySession,
-        theme: CandidateTheme,
-        sources: list[ResearchSource],
-    ) -> ThemeCard:
-        references = [f"{source.title} - {source.url}" for source in sources if source.source_id in theme.source_ids][:8]
-        if not references:
-            references = [f"{source.title} - {source.url}" for source in sources[:5]]
-        return ThemeCard(
-            card_id=new_id("theme-card"),
-            session_id=session.session_id,
-            theme_id=theme.theme_id,
-            title=theme.title,
-            one_line=theme.one_line,
-            core_scientific_question=theme.core_question,
-            why_novel=(
-                f"This theme prioritizes {theme.novelty_path.replace('_', ' ')}. "
-                "It is framed as a candidate research gap, not as a proven undiscovered problem."
-            ),
-            why_competition_fit=(
-                "It fits AI Scientist because the system discovers a research question from sources, "
-                "keeps evidence provenance, and prepares a next-step scientific plan."
-            ),
-            interdisciplinary_combination=theme.interdisciplinary_combination,
-            possible_datasets=[
-                "Public benchmark or dataset source identified during discovery",
-                "Small curated validation set built from verified sources",
-            ],
-            possible_methods=[
-                "Evidence-grounded literature and source synthesis",
-                "Novelty-first scoring with uncertainty review",
-                "Human approval before deeper research planning",
-            ],
-            possible_experiments=[
-                "Compare selected theme quality against generic literature-search baselines",
-                "Ask domain reviewers to judge novelty, falsifiability, and evidence grounding",
-            ],
-            risks=[
-                "Current search evidence may miss prior work.",
-                "Novelty must be confirmed by deeper literature review before final submission.",
-                "Conceptual interdisciplinarity must become an operational hypothesis later.",
-            ],
-            references=references,
-            next_research_steps=[
-                "Run deeper paper search around the exact core question.",
-                "Verify dataset and benchmark availability.",
-                "Draft a falsifiable hypothesis and concept-level research plan.",
-            ],
-            agent_review=theme.agent_review,
-            status="draft",
-            version=self._next_card_version(session.session_id, theme.theme_id),
-        )
 
     def _mark_downstream_stale(self, session_id: str, *, after_stage: str) -> None:
         if after_stage in {"search", "evidence"}:
@@ -715,14 +493,31 @@ class ResearchThemeDiscoveryService:
         self.repository.save_session(session)
 
     def _event(self, session_id: str, event_code: str, fields: dict[str, Any]) -> None:
+        timestamp = utcnow_iso()
         self.repository.append_event(
             session_id,
             {
                 "eventCode": event_code,
-                "timestamp": utcnow_iso(),
+                "timestamp": timestamp,
                 "fields": fields,
             },
         )
+        try:
+            from core.web.services.runtime_scene_service import record_research_scene_event
+
+            record_research_scene_event(
+                event_code,
+                message=event_code,
+                level="error" if event_code.endswith(".failed") else "info",
+                outcome="failed" if event_code.endswith(".failed") else "succeeded",
+                phase=_research_phase_from_event_code(event_code),
+                fields=fields,
+                session_id=session_id,
+                agent_key=str(fields.get("agentKey") or ""),
+                occurred_at=timestamp,
+            )
+        except Exception:
+            pass
 
     def _session_summary(self, session: ResearchDiscoverySession) -> dict[str, Any]:
         snapshot = self.repository.load_snapshot(session.session_id)
@@ -876,16 +671,25 @@ class ResearchThemeDiscoveryService:
             f"{session.open_goal} novel research gaps hypothesis generation",
         ]
 
-    def _deep_queries(self, session: ResearchDiscoverySession, sources: list[ResearchSource]) -> list[str]:
+    def _deep_queries(
+        self,
+        session: ResearchDiscoverySession,
+        sources: list[ResearchSource],
+        *,
+        evidence_requests: list[str] | None = None,
+    ) -> list[str]:
         keywords = self._keywords([session.open_goal, session.constraints, session.preferences, *[item.title for item in sources]])
         if not keywords:
             keywords = ["AI Scientist", "causal hypothesis", "scientific discovery"]
         base = " ".join(keywords[:4])
-        return [
+        queries = [
             f"{base} falsifiable scientific hypothesis",
             f"{base} causal mechanism research gap",
             f"{base} public dataset benchmark open source",
         ]
+        for request in _string_list(evidence_requests)[:3]:
+            queries.append(f"{request} evidence public dataset benchmark open source")
+        return queries
 
     def _keywords(self, texts: list[str]) -> list[str]:
         words: list[str] = []
@@ -920,6 +724,7 @@ class ResearchThemeDiscoveryService:
 
     def _model_profile(self) -> dict[str, Any]:
         prompts = self._research_prompt_profile()
+        agent_bindings = self._research_agent_template_profile()
         return {
             "provider": "configured-vibelution-provider",
             "mode": "research-theme-discovery",
@@ -927,19 +732,28 @@ class ResearchThemeDiscoveryService:
             "runtimeDataPolicy": "live-public-network-only-by-default",
             "promptSource": prompts["root"],
             "promptFiles": prompts["files"],
+            "agentTemplateConfigPath": agent_bindings["configPath"],
+            "agentBindings": agent_bindings["agents"],
             "note": "MVP uses live public research search by default; tests may inject deterministic providers.",
+        }
+
+    def _research_agent_template_profile(self) -> dict[str, Any]:
+        workspace = get_workspace()
+        try:
+            raw = workspace.read_research_agent_config()
+        except Exception:
+            raw = {}
+        config = normalize_research_agent_config(raw)
+        return {
+            "configPath": str(workspace.get_research_agent_config_path()),
+            "agents": config["agents"],
         }
 
     def _research_prompt_profile(self) -> dict[str, Any]:
         workspace = get_workspace()
+        ensure_research_prompt_defaults(workspace)
         files = {}
-        for key, filename in {
-            "broad": "broad.md",
-            "deep": "deep.md",
-            "review": "review.md",
-            "themes": "themes.md",
-            "card": "card.md",
-        }.items():
+        for key, filename in RESEARCH_PROMPT_FILES.items():
             content = workspace.read_research_prompt(filename)
             files[key] = {
                 "filename": filename,
@@ -974,3 +788,52 @@ class ResearchThemeDiscoveryService:
                 "queries": queries,
             },
         }
+
+
+def _research_phase_from_event_code(event_code: str) -> str:
+    text = str(event_code or "").strip()
+    if text.startswith("search.broad."):
+        return "broad_search"
+    if text.startswith("search.deep."):
+        return "deep_search"
+    if text.startswith("evidence."):
+        return "evidence"
+    if text.startswith("themes."):
+        return "theme_generation"
+    if text.startswith("theme_card."):
+        return "theme_card"
+    if text.startswith("theme."):
+        return "theme_selection"
+    if text.startswith("session."):
+        return "session"
+    return "theme_discovery"
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item or "").strip()]
+
+
+def _trace_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _merge_trace(*values: Any) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for value in values:
+        for item in _trace_list(value):
+            key = (
+                str(item.get("timestamp") or ""),
+                str(item.get("kind") or ""),
+                str(item.get("title") or ""),
+                str(item.get("detail") or ""),
+            )
+            if key in seen:
+                continue
+            merged.append(item)
+            seen.add(key)
+    return merged
