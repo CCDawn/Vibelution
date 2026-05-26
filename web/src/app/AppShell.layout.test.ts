@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import styles from "./AppShell.module.css";
+import indexHtml from "../../index.html?raw";
+import manifestSource from "../../public/manifest.webmanifest?raw";
 import shellSource from "./AppShell.tsx?raw";
 
 describe("AppShell layout contract", () => {
@@ -53,5 +55,15 @@ describe("AppShell layout contract", () => {
     expect(styles.startupOverlay).toBeTypeOf("string");
     expect(styles.startupPanel).toBeTypeOf("string");
     expect(styles.startupKicker).toBeTypeOf("string");
+  });
+  it("themes the managed app window chrome to match the dark shell", () => {
+    const manifest = JSON.parse(manifestSource);
+
+    expect(indexHtml).toContain('name="theme-color" content="#12161a"');
+    expect(indexHtml).toContain('name="color-scheme" content="dark"');
+    expect(indexHtml).toContain('rel="manifest" href="/manifest.webmanifest"');
+    expect(manifest.theme_color).toBe("#12161a");
+    expect(manifest.background_color).toBe("#12161a");
+    expect(manifest.display).toBe("standalone");
   });
 });

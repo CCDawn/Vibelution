@@ -1,0 +1,21 @@
+{
+  "name": "Vibelution 工作台",
+  "short_name": "Vibelution",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#12161a",
+  "theme_color": "#12161a",
+  "icons": [
+    {
+      "src": "/vibelution-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/vibelution-icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
