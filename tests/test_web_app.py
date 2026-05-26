@@ -3565,7 +3565,6 @@ def test_turn_circuit_breaker_records_next_state_signal_with_turn_id(tmp_path, m
         },
         turn_id="turn-42",
         turn_index=2,
-        max_turns=4,
     )
 
     signals = _read_next_state_signals(tmp_path, session_id="session-live", turn_id="turn-42")
@@ -4013,7 +4012,7 @@ def test_stop_during_agent_call_does_not_record_late_completed_result(tmp_path, 
         detail_response = client.get("/api/sessions/session-live")
         assert detail_response.status_code == 200
         payload = detail_response.json()
-        assert latest_run["status"] == "stopped"
+        assert latest_run["status"] == "stopped_by_user"
         assert payload["currentPhase"] == "ready"
         assert "本轮已按请求停止" in payload["messages"][-1]["content"]
         assert "迟到完成结果" not in payload["messages"][-1]["content"]
@@ -4297,7 +4296,7 @@ def test_submit_session_message_allows_follow_up_when_previous_turn_finished(tmp
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
-        lambda: SimpleNamespace(max_continuation_turns=1),
+        lambda: SimpleNamespace(max_continuation_turns=2),
     )
 
     class DummyAgent:
@@ -4448,7 +4447,7 @@ def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypa
     assert payload["currentPhase"] == "ready"
 
 
-def test_submit_session_message_continues_after_bookkeeping_guard_progress(tmp_path, monkeypatch):
+def test_submit_session_message_continues_after_bookkeeping_progress(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -4458,7 +4457,7 @@ def test_submit_session_message_continues_after_bookkeeping_guard_progress(tmp_p
     )
     calls = []
 
-    class BookkeepingGuardAgent:
+    class BookkeepingProgressAgent:
         def seed_chat_history(self, messages):
             self.messages = list(messages)
 
@@ -4467,10 +4466,10 @@ def test_submit_session_message_continues_after_bookkeeping_guard_progress(tmp_p
             if len(calls) == 1:
                 return {
                     "status": "partial",
-                    "summary": "本轮已触发工具循环保护：这些调用主要是任务管理或状态查询，尚未产生新的证据读取。",
-                    "raw_output": "本轮已触发工具循环保护：这些调用主要是任务管理或状态查询，尚未产生新的证据读取。",
+                    "summary": "",
+                    "raw_output": "",
                     "outcome": "progress",
-                    "recommended_next_action": "停止任务清单操作，转向读取证据或直接给出结论。",
+                    "recommended_next_action": "继续读取证据或直接给出结论。",
                     "tool_call_count": 3,
                     "tool_trace": [
                         {"name": "get_git_status_summary_tool"},
@@ -4487,7 +4486,7 @@ def test_submit_session_message_continues_after_bookkeeping_guard_progress(tmp_p
                 "tool_trace": [],
             }
 
-    monkeypatch.setattr(session_service, "create_chat_agent", lambda: BookkeepingGuardAgent())
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: BookkeepingProgressAgent())
     monkeypatch.setattr(
         session_service,
         "_schedule_session_turn",
@@ -4502,12 +4501,13 @@ def test_submit_session_message_continues_after_bookkeeping_guard_progress(tmp_p
     assert response.status_code == 202, response.json()
     payload = response.json()
     assert len(calls) == 2
-    assert "停止任务清单操作" in calls[1]
+    assert "继续完成同一个用户目标" in calls[1]
+    assert "继续读取证据或直接给出结论" in calls[1]
     assert payload["messages"][-1]["content"] == "已找到优化点：任务管理工具不应算作有效证据推进。"
     assert payload["currentPhase"] == "ready"
 
 
-def test_submit_session_message_switches_to_no_tool_finalization_after_tool_guard(tmp_path, monkeypatch):
+def test_submit_session_message_keeps_tools_available_after_tool_progress(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -4517,7 +4517,7 @@ def test_submit_session_message_switches_to_no_tool_finalization_after_tool_guar
     )
     calls = []
 
-    class ToolGuardAgent:
+    class ToolProgressAgent:
         def seed_chat_history(self, messages):
             self.messages = list(messages)
 
@@ -4526,34 +4526,29 @@ def test_submit_session_message_switches_to_no_tool_finalization_after_tool_guar
             if len(calls) == 1:
                 return {
                     "status": "partial",
-                    "summary": (
-                        "本轮已触发工具循环保护：系统检测到连续工具调用没有形成可见回答，"
-                        "读取集中在 core/web/services/runtime_scene_service.py。"
-                    ),
-                    "raw_output": (
-                        "本轮已触发工具循环保护：系统检测到连续工具调用没有形成可见回答，"
-                        "读取集中在 core/web/services/runtime_scene_service.py。"
-                    ),
+                    "summary": "已读取 core/web/services/runtime_scene_service.py，下一步继续校准 runtime scene 摘要。",
+                    "raw_output": "已读取 core/web/services/runtime_scene_service.py，下一步继续校准 runtime scene 摘要。",
                     "outcome": "progress",
                     "recommended_next_action": "基于已读证据给出可见结论。",
                     "tool_call_count": 3,
                     "tool_trace": [
-                        {"name": "get_code_entity_tool"},
+                        {"name": "code_symbol_tool"},
                         {"name": "read_file_tool"},
                         {"name": "grep_search_tool"},
                     ],
                 }
-            assert disable_tools is True
+            assert disable_tools is False
+            assert "工具循环保护" not in str(initial_prompt)
             return {
                 "status": "completed",
-                "summary": "已基于现有证据收束：runtime scene 摘要需要减少重复读取路径。",
-                "raw_output": "已基于现有证据收束：runtime scene 摘要需要减少重复读取路径。",
+                "summary": "已修正工具路径并收束：runtime scene 摘要需要基于返回内容继续推进。",
+                "raw_output": "已修正工具路径并收束：runtime scene 摘要需要基于返回内容继续推进。",
                 "outcome": "done",
-                "tool_call_count": 0,
+                "tool_call_count": 1,
                 "tool_trace": [],
             }
 
-    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ToolGuardAgent())
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ToolProgressAgent())
     monkeypatch.setattr(
         session_service,
         "_schedule_session_turn",
@@ -4569,10 +4564,13 @@ def test_submit_session_message_switches_to_no_tool_finalization_after_tool_guar
     payload = response.json()
     assert len(calls) == 2
     assert calls[0]["disable_tools"] is False
-    assert calls[1]["disable_tools"] is True
-    assert "本回合已经禁用工具" in calls[1]["prompt"]
+    assert calls[1]["disable_tools"] is False
+    assert "继续完成同一个用户目标" in calls[1]["prompt"]
     assert "基于已读证据给出可见结论" in calls[1]["prompt"]
-    assert payload["messages"][-1]["content"] == "已基于现有证据收束：runtime scene 摘要需要减少重复读取路径。"
+    assert "工具结果是否真正服务于用户目标" not in calls[1]["prompt"]
+    assert "禁用工具" not in calls[1]["prompt"]
+    assert "工具循环保护" not in calls[1]["prompt"]
+    assert payload["messages"][-1]["content"] == "已修正工具路径并收束：runtime scene 摘要需要基于返回内容继续推进。"
     assert payload["currentPhase"] == "ready"
 
 
@@ -4752,7 +4750,7 @@ def test_submit_session_message_does_not_persist_xml_protocol_as_reply_or_task(t
     assert active_task["goal"] == "请继续检查 BDD 调试工具规划"
 
 
-def test_submit_session_message_surfaces_continuation_limit(tmp_path, monkeypatch):
+def test_submit_session_message_ignores_configured_continuation_limit_until_done(tmp_path, monkeypatch):
     (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
     (tmp_path / "tests" / "prompt_debugger.py").write_text("pass\n", encoding="utf-8")
     _seed_chat_state(tmp_path, task_status="reading")
@@ -4762,26 +4760,38 @@ def test_submit_session_message_surfaces_continuation_limit(tmp_path, monkeypatc
         "get_web_chat_config",
         lambda: SimpleNamespace(max_continuation_turns=1),
     )
+    calls = []
 
-    class ProgressOnlyAgent:
+    class ProgressThenDoneAgent:
         def seed_chat_history(self, messages):
             self.messages = list(messages)
 
         def run_single_turn(self, initial_prompt=None):
+            calls.append(initial_prompt)
+            if len(calls) < 3:
+                return {
+                    "status": "completed",
+                    "summary": "",
+                    "raw_output": "",
+                    "outcome": "progress",
+                    "next_action": "继续读取测试工具结构并形成规划。",
+                    "read_files": ["tests/prompt_debugger.py"],
+                    "tool_call_count": 1,
+                    "tool_trace": [
+                        {"name": "read_file_tool", "args": {"file_path": "tests/prompt_debugger.py"}},
+                    ],
+                }
             return {
                 "status": "completed",
-                "summary": "",
-                "raw_output": "",
-                "outcome": "progress",
-                "next_action": "继续读取测试工具结构并形成规划。",
+                "summary": "规划完成：包装 prompt_debugger 的 BDD 场景过滤能力。",
+                "raw_output": "规划完成：包装 prompt_debugger 的 BDD 场景过滤能力。",
+                "outcome": "done",
                 "read_files": ["tests/prompt_debugger.py"],
-                "tool_call_count": 1,
-                "tool_trace": [
-                    {"name": "read_file_tool", "args": {"file_path": "tests/prompt_debugger.py"}},
-                ],
+                "tool_call_count": 0,
+                "tool_trace": [],
             }
 
-    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ProgressOnlyAgent())
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ProgressThenDoneAgent())
     monkeypatch.setattr(
         session_service,
         "_schedule_session_turn",
@@ -4795,12 +4805,179 @@ def test_submit_session_message_surfaces_continuation_limit(tmp_path, monkeypatc
 
     assert response.status_code == 202
     payload = response.json()
-    assert "任务级持续上限" in payload["messages"][-1]["content"]
-    assert "发送“继续”" in payload["messages"][-1]["content"]
-    assert payload["currentPhase"] == "paused_limit"
+    assert len(calls) == 3
+    assert "任务级持续上限" not in payload["messages"][-1]["content"]
+    assert payload["messages"][-1]["content"] == "规划完成：包装 prompt_debugger 的 BDD 场景过滤能力。"
+    assert payload["currentPhase"] == "ready"
     latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
-    assert latest_run["status"] == "paused_limit"
+    assert latest_run["status"] == "completed"
     assert latest_run["finishedAt"]
+
+
+def test_submit_session_message_preserves_visible_progress_without_limit_prompt(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+    calls = []
+
+    class VisibleProgressAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            calls.append(initial_prompt)
+            if len(calls) == 1:
+                return {
+                    "status": "completed",
+                    "summary": "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。",
+                    "raw_output": "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。",
+                    "outcome": "progress",
+                    "next_action": "继续收口剩余日志路径。",
+                    "tool_call_count": 1,
+                    "tool_trace": [{"name": "cli_tool", "args": {"command": "python -m py_compile core/logging/__init__.py"}}],
+                }
+            return {
+                "status": "completed",
+                "summary": "[outcome=done]",
+                "raw_output": "[outcome=done]",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: VisibleProgressAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续优化日志系统"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assistant = payload["messages"][-1]
+    assert len(calls) == 2
+    assert assistant["content"] == "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。"
+    assert "任务级持续上限" not in assistant["content"]
+    assert payload["currentPhase"] == "ready"
+    latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
+    assert latest_run["status"] == "completed"
+    state = load_chat_state(tmp_path)
+    active_task = state["conversations"][0]["active_task"]
+    assert active_task["latest_summary"] == "我已经完成第一项优化，并通过基础验证。下一步继续收口剩余日志路径。"
+    assert active_task.get("next_action", "") == ""
+
+
+def test_submit_session_message_continues_repeated_visible_progress_until_done(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=4),
+    )
+    calls = []
+    repeated_reply = "已完成日志审查：问题集中在 continuation loop 反复发送同一段可见进展。"
+
+    class RepeatingVisibleProgressAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            calls.append(initial_prompt)
+            if len(calls) < 3:
+                return {
+                    "status": "completed",
+                    "summary": repeated_reply,
+                    "raw_output": repeated_reply,
+                    "outcome": "progress",
+                    "next_action": "继续收束同一问题。",
+                    "tool_call_count": 1,
+                    "tool_trace": [{"name": "read_file_tool", "args": {"file_path": "core/web/services/session_service.py"}}],
+                }
+            return {
+                "status": "completed",
+                "summary": "[outcome=done]",
+                "raw_output": "[outcome=done]",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: RepeatingVisibleProgressAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "分析对话重复输出问题"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assistant = payload["messages"][-1]
+    assert len(calls) == 3
+    assert assistant["content"] == repeated_reply
+    assert assistant["content"].count(repeated_reply) == 1
+    assert "任务级持续上限" not in assistant["content"]
+    assert payload["currentPhase"] == "ready"
+    latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
+    assert latest_run["status"] == "completed"
+
+
+def test_submit_session_message_completed_turn_ignores_low_configured_limit(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+
+    class DoneAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "已经完成优化并验证通过。",
+                "raw_output": "已经完成优化并验证通过。",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DoneAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "完成这个优化"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-1]["content"] == "已经完成优化并验证通过。"
+    assert "任务级持续上限" not in payload["messages"][-1]["content"]
+    assert payload["currentPhase"] == "ready"
+    latest_run = session_service.load_chat_turn_work_run_summary()["latest"]
+    assert latest_run["status"] == "completed"
 
 
 def test_submit_session_continue_preserves_unfinished_task_goal(tmp_path, monkeypatch):
@@ -4838,7 +5015,7 @@ def test_submit_session_continue_preserves_unfinished_task_goal(tmp_path, monkey
                 "status": "completed",
                 "summary": "继续完成规划：建议包装 prompt_debugger 的 BDD 场景过滤能力。",
                 "raw_output": "继续完成规划：建议包装 prompt_debugger 的 BDD 场景过滤能力。",
-                "outcome": "progress",
+                "outcome": "done",
                 "read_files": ["tests/prompt_debugger.py"],
                 "tool_call_count": 0,
                 "tool_trace": [],
@@ -4964,7 +5141,7 @@ def test_submit_session_continue_recovers_goal_when_active_task_is_continue(tmp_
     monkeypatch.setattr(
         session_service,
         "get_web_chat_config",
-        lambda: SimpleNamespace(max_continuation_turns=1),
+        lambda: SimpleNamespace(max_continuation_turns=2),
     )
     prompts = []
 
@@ -4974,17 +5151,27 @@ def test_submit_session_continue_recovers_goal_when_active_task_is_continue(tmp_
 
         def run_single_turn(self, initial_prompt=None):
             prompts.append(initial_prompt)
+            if len(prompts) == 1:
+                return {
+                    "status": "completed",
+                    "summary": "<state",
+                    "raw_output": "<state",
+                    "outcome": "progress",
+                    "next_action": "继续读取测试工具结构并形成规划。",
+                    "read_files": ["tests/prompt_debugger.py"],
+                    "tool_call_count": 1,
+                    "tool_trace": [
+                        {"name": "read_file_tool", "args": {"file_path": "tests/prompt_debugger.py"}},
+                    ],
+                }
             return {
                 "status": "completed",
-                "summary": "<state",
-                "raw_output": "<state",
-                "outcome": "progress",
-                "next_action": "继续读取测试工具结构并形成规划。",
+                "summary": "规划已恢复：先包装 prompt_debugger 的 BDD 场景过滤能力。",
+                "raw_output": "规划已恢复：先包装 prompt_debugger 的 BDD 场景过滤能力。",
+                "outcome": "done",
                 "read_files": ["tests/prompt_debugger.py"],
-                "tool_call_count": 1,
-                "tool_trace": [
-                    {"name": "read_file_tool", "args": {"file_path": "tests/prompt_debugger.py"}},
-                ],
+                "tool_call_count": 0,
+                "tool_trace": [],
             }
 
     monkeypatch.setattr(session_service, "create_chat_agent", lambda: ResumeAgent())
@@ -5002,13 +5189,15 @@ def test_submit_session_continue_recovers_goal_when_active_task_is_continue(tmp_
     assert response.status_code == 202
     assert prompts[0] == "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报"
     payload = response.json()
-    assert "任务级持续上限" in payload["messages"][-1]["content"]
+    assert len(prompts) == 2
+    assert payload["messages"][-1]["content"] == "规划已恢复：先包装 prompt_debugger 的 BDD 场景过滤能力。"
+    assert "任务级持续上限" not in payload["messages"][-1]["content"]
     assert "<state" not in payload["messages"][-1]["content"]
     state = load_chat_state(tmp_path)
     active_task = state["conversations"][0]["active_task"]
     assert active_task["goal"] == "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报"
     assert active_task["title"] == "做一个测试工具吧,能够更快速的进行BDD调试,先规划一下,然后向我汇报"
-    assert active_task["latest_summary"] != "<state"
+    assert active_task["latest_summary"] == "规划已恢复：先包装 prompt_debugger 的 BDD 场景过滤能力。"
 
 
 def test_persist_turn_result_cleans_parameter_and_requires_real_stop(tmp_path, monkeypatch):

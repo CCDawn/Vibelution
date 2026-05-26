@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import os
 import re
+import inspect
 import threading
 import time
 import json
 from typing import Dict, Callable, Any, Optional
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 # 核心模块导入
@@ -80,6 +82,108 @@ def _summarize_tool_result(result: Any) -> dict[str, Any]:
         "resultPreview": text[:320],
         "resultLength": len(text),
     }
+
+
+def _format_tool_argument_error(
+    tool_name: str,
+    func: Callable,
+    tool_args: dict[str, Any],
+    error: Exception | str,
+) -> str:
+    """Return an agent-readable correction hint for invalid tool arguments."""
+    payload = tool_args if isinstance(tool_args, dict) else {}
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return (
+            f"[工具参数错误] {tool_name} 参数不符合工具函数要求：{error}。"
+            "请查看当前工具描述，改正参数名与参数类型后重试。"
+        )
+
+    parameters = [
+        param
+        for param in signature.parameters.values()
+        if param.kind not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+        and not str(param.name).startswith("_")
+    ]
+    required = [
+        param.name
+        for param in parameters
+        if param.default is inspect.Parameter.empty
+    ]
+    optional = [
+        param.name
+        for param in parameters
+        if param.default is not inspect.Parameter.empty
+    ]
+    received = sorted(str(key) for key in payload.keys() if not str(key).startswith("_"))
+    example_items: list[str] = []
+    for param in parameters:
+        if param.default is not inspect.Parameter.empty:
+            value = param.default
+        else:
+            annotation = param.annotation
+            if annotation in {int, "int"}:
+                value = 1
+            elif annotation in {float, "float"}:
+                value = 1.0
+            elif annotation in {bool, "bool"}:
+                value = False
+            else:
+                value = f"<{param.name}>"
+        example_items.append(f'"{param.name}": {json.dumps(value, ensure_ascii=False)}')
+    example = "{" + ", ".join(example_items[:8]) + "}"
+    return (
+        f"[工具参数错误] {tool_name} 参数不符合当前工具签名：{error}。"
+        f" 必填参数：{', '.join(required) if required else '无'}。"
+        f" 可选参数：{', '.join(optional) if optional else '无'}。"
+        f" 已收到参数：{', '.join(received) if received else '无'}。"
+        f" 示例：{tool_name}({example})。"
+        "请按工具描述修正参数名和类型后重试。"
+    )
+
+
+def _validate_tool_arguments(tool_name: str, func: Callable, tool_args: dict[str, Any]) -> str | None:
+    payload = tool_args if isinstance(tool_args, dict) else {}
+    try:
+        signature = inspect.signature(func)
+        signature.bind(**payload)
+    except TypeError as exc:
+        return _format_tool_argument_error(tool_name, func, payload, exc)
+    except ValueError:
+        return None
+
+    type_errors: list[str] = []
+    for name, value in payload.items():
+        if str(name).startswith("_") or value is None or name not in signature.parameters:
+            continue
+        annotation = signature.parameters[name].annotation
+        expected_name = ""
+        expected_type: Any = None
+        if annotation in {str, "str"}:
+            expected_name = "str"
+            expected_type = str
+        elif annotation in {int, "int"}:
+            expected_name = "int"
+            expected_type = int
+        elif annotation in {float, "float"}:
+            expected_name = "float"
+            expected_type = (int, float)
+        elif annotation in {bool, "bool"}:
+            expected_name = "bool"
+            expected_type = bool
+        if expected_type is None:
+            continue
+        if expected_name == "int" and isinstance(value, bool):
+            type_errors.append(f"{name} 需要 int，收到 bool")
+        elif expected_name == "bool" and not isinstance(value, bool):
+            type_errors.append(f"{name} 需要 bool，收到 {type(value).__name__}")
+        elif expected_name != "bool" and not isinstance(value, expected_type):
+            type_errors.append(f"{name} 需要 {expected_name}，收到 {type(value).__name__}")
+
+    if type_errors:
+        return _format_tool_argument_error(tool_name, func, payload, "; ".join(type_errors))
+    return None
 
 
 def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any]:
@@ -171,119 +275,50 @@ class ToolExecutor:
 
     _READ_ONLY_BLOCKED_TOOLS = {
         "spawn_agent_tool",
+        "apply_patch_tool",
         "apply_diff_edit_tool",
         "write_file_tool",
-        "create_file",
-        "create_file_tool",
-        "write_dynamic_prompt_tool",
-        "add_insight_to_dynamic_tool",
         "commit_compressed_memory_tool",
         "record_learning_tool",
         "trigger_self_restart_tool",
-        "enter_hibernation_tool",
         "open_evolution_transaction_tool",
         "close_evolution_transaction_tool",
-        "execute_shell_command",
-        "execute_shell_command_tool",
-        "run_powershell",
-        "run_powershell_tool",
-        "run_batch",
-        "run_batch_tool",
         "cli_tool",
         "task_create_tool",
         "task_update_tool",
+        "plan_update_tool",
         "task_start_tool",
         "task_stop_tool",
+        "clean_workspace_debris_tool",
+        "update_diagnosis_rules_tool",
+        "update_self_model_tool",
+        "record_evolution_tool",
         "compress_context_tool",
     }
 
     def _register_default_tools(self):
-        """注册默认工具映射 — Key_Tools 工具自动推导，程序化工具手动注册"""
-        from tools import (
-            list_directory_tool,
-            check_python_syntax_tool, extract_symbols_tool, backup_project_tool,
-            cleanup_test_files_tool, execute_shell_command_tool, run_powershell_tool,
-            run_batch_tool, self_test_tool, get_agent_status_tool,
-            read_file_tool, create_file_tool, glob_files_tool,
-            read_memory_tool,
-            get_current_goal_tool, get_core_context_tool,
-            read_dynamic_prompt_tool,
-            add_insight_to_dynamic_tool,
-            get_memory_summary_tool, write_dynamic_prompt_tool,
-            find_function_calls_tool, find_definitions_tool,
-            search_imports_tool, search_and_read_tool,
-            preview_diff_tool, get_file_entities_tool,
-            spawn_agent_tool,
-            python_symbol_tool, python_lint_tool,
-        )
-        from core.infrastructure.mental_model import (
-            get_mental_state_tool, update_diagnosis_rules_tool,
-            update_self_model_tool, get_self_model_tool, record_evolution_tool,
-        )
+        """注册默认工具映射：只注册 canonical agent 工具名和内部委派入口。"""
+        from tools.agent_tools import spawn_agent as spawn_agent_tool
 
         # ── 从 Key_Tools 自动推导工具映射 ──────────────────────────────
         from tools.Key_Tools import create_key_tools
         for tool in create_key_tools():
             self._tool_map[tool.name] = tool.func
 
-        # ── 程序化工具手动注册 (不对 LLM 暴露) ─────────────────────────
-        self._tool_map.update({
-            "list_directory": list_directory_tool,
-            "check_python_syntax": check_python_syntax_tool,
-            "extract_symbols": extract_symbols_tool,
-            "backup_project": backup_project_tool,
-            "cleanup_test_files": cleanup_test_files_tool,
-            "execute_shell_command": execute_shell_command_tool,
-            "run_powershell": run_powershell_tool,
-            "run_batch": run_batch_tool,
-            "self_test": self_test_tool,
-            "get_agent_status": get_agent_status_tool,
-            "read_file": read_file_tool,
-            "create_file": create_file_tool,
-            "glob_files": glob_files_tool,
-            "read_memory": read_memory_tool,
-            "get_current_goal": get_current_goal_tool,
-            "get_core_context": get_core_context_tool,
-            "read_dynamic_prompt": read_dynamic_prompt_tool,
-            "add_insight_to_dynamic": add_insight_to_dynamic_tool,
-            "get_memory_summary": get_memory_summary_tool,
-            "write_dynamic_prompt": write_dynamic_prompt_tool,
-            "find_function_calls": find_function_calls_tool,
-            "find_definitions": find_definitions_tool,
-            "search_imports": search_imports_tool,
-            "search_and_read": search_and_read_tool,
-            "preview_diff": preview_diff_tool,
-            "get_file_entities": get_file_entities_tool,
-            "get_file_entities_tool": get_file_entities_tool,
-            # 只供主 agent 调度层内部使用，不向 LLM 工具目录暴露。
-            "spawn_agent_tool": spawn_agent_tool,
-            "python_symbol": python_symbol_tool,
-            "python_lint": python_lint_tool,
-            # 心智模型工具
-            "get_mental_state": get_mental_state_tool,
-            "update_diagnosis_rules": update_diagnosis_rules_tool,
-            "update_self_model": update_self_model_tool,
-            "get_self_model": get_self_model_tool,
-            "record_evolution": record_evolution_tool,
-        })
+        # 只供主 agent 调度层内部使用，不向 LLM 工具目录暴露。
+        self._tool_map["spawn_agent_tool"] = spawn_agent_tool
 
         self._timeout_map = {
-            "execute_shell_command": 60,
-            "run_powershell": 60,
-            "run_batch": 60,
-            "self_test": 30,
-            "check_python_syntax": 10,
+            "cli_tool": 60,
             "grep_search_tool": 30,
-            "find_function_calls": 30,
-            "find_definitions": 30,
-            "search_and_read": 30,
-            "backup_project": 60,
+            "web_fetch_tool": 30,
             "web_search_tool": 30,
-            "python_symbol_tool": 30,
+            "run_test_for_tool": 120,
+            "code_symbol_tool": 30,
             "python_lint_tool": 60,
             "spawn_agent_tool": 150,
         }
-        self._retryable_tools = {"grep_search_tool", "search_and_read"}
+        self._retryable_tools = {"grep_search_tool"}
 
     def register_tool(self, name: str, func: Callable, timeout: int = 30):
         """注册自定义工具"""
@@ -373,35 +408,66 @@ class ToolExecutor:
 
         self._track_tool_decision_alignment(tool_name)
 
-        # 发布工具开始事件
-        self._event_bus.publish(EventNames.TOOL_START, {
-            "name": tool_name,
-            "args": tool_args,
-        })
-
         if tool_name not in self._tool_map:
-            error_msg = f"[错误] 未知工具 {tool_name}"
+            available_tools = ", ".join(sorted(self._tool_map)[:24])
+            error_msg = (
+                "[错误] 未知工具：该工具名不在当前工具目录中。"
+                f"当前可用工具包括：{available_tools}。"
+                "请选择功能匹配的工具名，并按该工具的参数 schema 重试。"
+            )
             self._event_bus.publish(EventNames.TOOL_ERROR, {
-                "name": tool_name,
+                "name": "[unknown_tool]",
                 "error": error_msg,
             })
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.failed",
-                tool_name=tool_name,
+                tool_name="[unknown_tool]",
                 message=error_msg,
                 level="error",
                 outcome="failed",
-                fields={**_summarize_tool_args(tool_args), "error": error_msg},
+                fields={
+                    **_summarize_tool_args(tool_args),
+                    "error": error_msg,
+                    "unknownToolNameLength": len(str(tool_name or "")),
+                },
                 lifecycle=True,
             )
             return (error_msg, None)
+
+        # 发布工具开始事件。未知工具不发布 start，避免把错误工具名写入可见事件流。
+        self._event_bus.publish(EventNames.TOOL_START, {
+            "name": tool_name,
+            "args": tool_args,
+        })
 
         func = self._tool_map[tool_name]
         timeout = self._resolve_timeout(tool_name, tool_args)
         call_args = dict(tool_args or {})
         # 内部治理哨兵只用于执行权限判断，不能透传给真实工具函数。
         call_args.pop("_internal_delegate", None)
+        argument_error = _validate_tool_arguments(tool_name, func, call_args)
+        if argument_error:
+            self._event_bus.publish(EventNames.TOOL_ERROR, {
+                "name": tool_name,
+                "error": argument_error,
+            })
+            self._record_runtime_signals(tool_name, tool_args, argument_error)
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.invalid_args",
+                tool_name=tool_name,
+                message=argument_error,
+                level="warning",
+                outcome="failed",
+                fields={
+                    **_summarize_tool_args(tool_args),
+                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "error": argument_error,
+                },
+                lifecycle=True,
+            )
+            return (argument_error, None)
         cancel_checker = self._snapshot_cancel_checker()
         if tool_name == "spawn_agent_tool" and "_cancel_checker" not in call_args:
             call_args["_cancel_checker"] = lambda: self._current_cancel_reason(cancel_checker)
@@ -432,7 +498,8 @@ class ToolExecutor:
                     lifecycle=True,
                 )
                 return (error_msg, None)
-            future = executor.submit(func, **call_args)
+            tool_context = copy_context()
+            future = executor.submit(tool_context.run, func, **call_args)
             deadline = time.monotonic() + max(float(timeout), 0.1)
             while True:
                 cancel_reason = self._current_cancel_reason(cancel_checker)
@@ -550,6 +617,31 @@ class ToolExecutor:
             )
             return (error_msg, None)
 
+        except TypeError as e:
+            executor.shutdown(wait=False, cancel_futures=True)
+            error_msg = _format_tool_argument_error(tool_name, func, call_args, e)
+            self._event_bus.publish(EventNames.TOOL_ERROR, {
+                "name": tool_name,
+                "error": error_msg,
+            })
+            self._record_runtime_signals(tool_name, tool_args, error_msg)
+            _record_tool_scene_event(
+                "execute",
+                "tool.execute.invalid_args",
+                tool_name=tool_name,
+                message=error_msg,
+                level="warning",
+                outcome="failed",
+                fields={
+                    **_summarize_tool_args(tool_args),
+                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "errorType": "TypeError",
+                    "error": str(e),
+                },
+                lifecycle=True,
+            )
+            return (error_msg, None)
+
         except Exception as e:
             executor.shutdown(wait=False, cancel_futures=True)
             error_msg = f"[错误] {type(e).__name__}: {e}"
@@ -611,27 +703,10 @@ class ToolExecutor:
         spawn_block = self._check_spawn_agent_permission(tool_name, tool_args)
         if spawn_block:
             return spawn_block
-        duplicate_block = self._check_duplicate_intent_block(session, tool_name, tool_args)
-        if duplicate_block:
-            return duplicate_block
-        focus_block = self._check_attention_focus_block(session, tool_name, tool_args)
-        if focus_block:
-            return focus_block
-        read_block = self._check_read_path_guard(session, tool_name, tool_args)
-        if read_block:
-            return read_block
         evolution_block = self._check_evolution_mutation_guard(session, tool_name, tool_args)
         if evolution_block:
             return evolution_block
-        pattern = self._detect_tool_pattern(tool_name, tool_args)
-        if not pattern:
-            return None
-        blocked = session.get_blocked_tool_pattern(pattern)
-        if not blocked:
-            return None
-        hint = blocked.get("hint", "")
-        suffix = f" 建议改用：{hint}" if hint else ""
-        return f"[短路] {pattern} 本轮已被阻塞：{blocked.get('reason', '')}.{suffix}"
+        return None
 
     @staticmethod
     def _check_evolution_mutation_guard(session, tool_name: str, tool_args: dict) -> Optional[str]:
@@ -652,176 +727,6 @@ class ToolExecutor:
         if (tool_args or {}).get("_internal_delegate") is True:
             return None
         return "[短路] spawn_agent_tool 仅允许主 agent 的委派治理层内部调用，不能直接作为普通工具发起。"
-
-    @staticmethod
-    def _parse_pending_read_hint(hint: str) -> tuple[str, int, int] | None:
-        if not hint:
-            return None
-        match = re.search(r'file_path="([^"]+)".*offset=(\d+).*max_lines=(\d+)', hint)
-        if not match:
-            return None
-        return match.group(1), int(match.group(2)), int(match.group(3))
-
-    @staticmethod
-    def _read_navigation_message(file_path: str, existing_ranges: list[dict]) -> str:
-        if existing_ranges:
-            first_start = min(int(item.get("start_line", 0) or 0) for item in existing_ranges)
-            last_end = max(int(item.get("end_line", 0) or 0) for item in existing_ranges)
-            range_text = f"已读约第 {first_start}-{last_end} 行，共 {len(existing_ranges)} 段"
-        else:
-            range_text = "当前还没有可靠已读区间"
-        return (
-            f"[阅读纠偏] {file_path} {range_text}。不要继续线性翻页；"
-            "请先说明缺少哪类证据，再按目标改用 grep_search_tool 定位文本/调用点，"
-            "或用 list_file_entities_tool / get_code_entity_tool 读取结构和目标实体。"
-        )
-
-    @classmethod
-    def _check_attention_focus_block(cls, session, tool_name: str, tool_args: dict) -> Optional[str]:
-        """存在未完成续读时，记录偏离提示，但不再强制短路。"""
-        latest_pending = session.get_latest_pending_continuation()
-        if not latest_pending:
-            return None
-
-        if str(latest_pending.get("strength") or "strong") != "strong":
-            return None
-
-        pending_hint = str(latest_pending.get("hint") or "").strip()
-        pending_path = str(latest_pending.get("path") or "").replace("\\", "/")
-        parsed = cls._parse_pending_read_hint(pending_hint)
-        if not pending_hint or not pending_path or not parsed:
-            return None
-
-        _, expected_offset, expected_max_lines = parsed
-        if tool_name in {"grep_search_tool", "list_file_entities_tool", "get_file_entities"}:
-            session.record_blocker(
-                "continuation_focus",
-                f"当前已存在 {pending_path} 的未完成续读，不应回退到 {tool_name}。",
-                f"先判断当前目标缺少哪类证据；只有确实需要相邻下文时才读 {pending_path} offset={expected_offset}, max_lines={expected_max_lines}",
-                severity="hint",
-            )
-            return None
-
-        if tool_name == "get_code_entity_tool":
-            file_path = str((tool_args or {}).get("file_path") or "").replace("\\", "/")
-            if not file_path or file_path != pending_path:
-                session.record_blocker(
-                    "continuation_focus",
-                    f"当前优先续读目标是 {pending_path}，不应切换到新的实体读取。",
-                    f"先判断当前目标缺少哪类证据；只有确实需要相邻下文时才读 {pending_path} offset={expected_offset}, max_lines={expected_max_lines}",
-                    severity="hint",
-                )
-                return None
-        return None
-
-    @staticmethod
-    def _check_duplicate_intent_block(session, tool_name: str, tool_args: dict) -> Optional[str]:
-        """对同轮完全重复的搜索/实体读取做前置短路。"""
-        if tool_name == "grep_search_tool":
-            query = str((tool_args or {}).get("regex_pattern") or "")
-            scope = str((tool_args or {}).get("search_dir") or "")
-            if query and session.has_search_query(query, scope):
-                session.record_blocker(
-                    "duplicate_search",
-                    f"{query} 在 {scope or '.'} 中本轮已搜索过，无需重复搜索。",
-                    "改读已命中文件、缩小范围，或直接开始修改/验证",
-                )
-                return (
-                    f"[短路] {query} 在 {scope or '.'} 中本轮已搜索过。"
-                    " 建议改用：read_file_tool 读取已命中文件，或更换关键词/缩小范围。"
-                )
-
-        if tool_name == "get_code_entity_tool":
-            file_path = str((tool_args or {}).get("file_path") or "")
-            entity = str((tool_args or {}).get("entity_name") or "")
-            normalized = file_path.replace("\\", "/")
-            if file_path and entity and session.has_read_entity(file_path, entity):
-                session.record_blocker(
-                    "duplicate_entity_guard",
-                    f"{entity} 在 {normalized} 中本轮已读过，无需重复读取。",
-                    "改读调用点、相邻上下文，或直接进入修改/验证",
-                )
-                return (
-                    f"[短路] {entity} 在当前轮次已读取过。"
-                    " 建议改用：读取相邻上下文、调用点，或直接开始修改/验证。"
-                )
-        return None
-
-    @classmethod
-    def _check_read_path_guard(cls, session, tool_name: str, tool_args: dict) -> Optional[str]:
-        if tool_name not in {"read_file_tool", "read_file"}:
-            return None
-        file_path = str((tool_args or {}).get("file_path") or "")
-        if not file_path:
-            return None
-        normalized_file_path = file_path.replace("\\", "/")
-        offset = int((tool_args or {}).get("offset") or 0)
-        max_lines = int((tool_args or {}).get("max_lines") or 0)
-        start_line = offset + 1
-        end_line = offset + max_lines if max_lines > 0 else offset
-        existing_ranges = session.get_read_ranges(normalized_file_path)
-
-        latest_pending = session.get_latest_pending_continuation()
-        if latest_pending:
-            if str(latest_pending.get("strength") or "strong") != "strong":
-                latest_pending = None
-        if latest_pending:
-            parsed_latest = cls._parse_pending_read_hint(str(latest_pending.get("hint") or ""))
-            latest_path = str(latest_pending.get("path") or "")
-            if parsed_latest and latest_path:
-                _, latest_offset, latest_max_lines = parsed_latest
-                if normalized_file_path != latest_path:
-                    session.record_blocker(
-                        "continuation_focus",
-                        f"当前优先续读目标是 {latest_path} offset={latest_offset}，不应切换到 {file_path} offset={offset}。",
-                        f"先判断目标证据缺口；只有确实需要相邻下文时才读 {latest_path} offset={latest_offset}, max_lines={latest_max_lines}",
-                        severity="hint",
-                    )
-                    return None
-
-        pending = session.get_latest_pending_continuation(normalized_file_path)
-        if pending:
-            parsed = cls._parse_pending_read_hint(str(pending.get("hint") or ""))
-            if parsed:
-                _, expected_offset, expected_max_lines = parsed
-                if offset != expected_offset:
-                    session.record_blocker(
-                        "continuation_drift",
-                        f"{file_path} 存在未完成续读，应从 offset={expected_offset} 开始，而不是 {offset}。",
-                        f"先判断目标证据缺口；只有确实需要相邻下文时才读 offset={expected_offset}, max_lines={expected_max_lines}",
-                        severity="hint",
-                    )
-                    return None
-
-        if max_lines >= 40:
-            if len(existing_ranges) >= 3:
-                navigation = cls._read_navigation_message(file_path, existing_ranges)
-                session.record_blocker(
-                    "read_navigation_redirect",
-                    navigation,
-                    "改用目标化搜索、结构工具或实体级读取；若证据已足够则总结/修改/验证。",
-                    severity="hint",
-                )
-                return navigation
-            overlaps = session.get_overlapping_read_ranges(normalized_file_path, start_line, end_line)
-            for item in overlaps:
-                existing_start = int(item.get("start_line", 0))
-                existing_end = int(item.get("end_line", 0))
-                overlap_start = max(existing_start, start_line)
-                overlap_end = min(existing_end, end_line)
-                overlap_size = max(0, overlap_end - overlap_start + 1)
-                request_size = max(1, end_line - start_line + 1)
-                if overlap_size / request_size >= 0.6:
-                    session.record_blocker(
-                        "duplicate_read_guard",
-                        f"{file_path} 第 {start_line}-{end_line} 行与已读区间 {existing_start}-{existing_end} 高度重叠。",
-                        "改用目标化搜索、结构工具、实体读取，或缩小到尚未读取的相邻区间"
-                    )
-                    return (
-                        f"[短路] 当前读取区间与已读内容高度重叠（{existing_start}-{existing_end}）。"
-                        " 建议改用：目标化搜索、结构工具、实体读取，或缩小到未读相邻区间。"
-                    )
-        return None
 
     def _record_runtime_signals(self, tool_name: str, tool_args: dict, result: Any) -> None:
         """把工具执行结果转成会话级短期约束。"""
@@ -943,53 +848,43 @@ class ToolExecutor:
         )
 
         reading_signal_tools = {
-            "read_file_tool", "read_file", "get_code_entity_tool", "list_file_entities_tool",
-            "grep_search_tool", "get_file_entities", "python_symbol_tool", "python_lint_tool",
+            "read_file_tool", "code_symbol_tool",
+            "grep_search_tool", "python_lint_tool",
             "run_test_for_tool", "cli_tool",
         }
         action_phase_tools = {
             "open_evolution_transaction_tool",
             "close_evolution_transaction_tool",
             "trigger_self_restart_tool",
+            "apply_patch_tool",
             "write_file_tool",
-            "replace_in_file_tool",
             "task_create_tool",
             "task_update_tool",
+            "plan_update_tool",
         }
 
-        if tool_name in {"read_file_tool", "read_file", "get_code_entity_tool", "list_file_entities_tool", "grep_search_tool", "get_file_entities"}:
+        if tool_name in {"read_file_tool", "code_symbol_tool", "grep_search_tool"}:
             session.note_diagnostic_inspection()
             session.note_diagnostic_observation()
-        elif tool_name == "python_symbol_tool":
-            session.note_diagnostic_inspection()
-            session.note_diagnostic_observation("python symbol lookup")
 
         if session.get_attention_snapshot().get("feedback_loop_ready"):
-            if tool_name in {"read_file_tool", "read_file", "get_code_entity_tool", "grep_search_tool", "python_symbol_tool", "python_lint_tool", "run_test_for_tool"}:
+            if tool_name in {"read_file_tool", "code_symbol_tool", "grep_search_tool", "python_lint_tool", "run_test_for_tool"}:
                 anchor = ""
-                if tool_name in {"read_file_tool", "read_file", "python_lint_tool"}:
+                if tool_name in {"read_file_tool", "python_lint_tool"}:
                     anchor = str((tool_args or {}).get("file_path") or "")
-                elif tool_name == "get_code_entity_tool":
-                    anchor = str((tool_args or {}).get("entity_name") or "")
+                elif tool_name == "code_symbol_tool":
+                    anchor = str((tool_args or {}).get("entity_name") or (tool_args or {}).get("symbol") or (tool_args or {}).get("file_path") or "")
                 elif tool_name == "grep_search_tool":
                     anchor = str((tool_args or {}).get("regex_pattern") or "")
-                elif tool_name == "python_symbol_tool":
-                    anchor = str((tool_args or {}).get("symbol") or "")
                 session.freeze_scope(anchor or session.get_attention_snapshot().get("feedback_loop_target") or "当前诊断锚点")
 
-        if tool_name in {"read_file_tool", "read_file"}:
+        if tool_name == "read_file_tool":
             self._record_file_read(session, tool_args, result_text, tool_name)
-        elif tool_name == "get_code_entity_tool":
+        elif tool_name == "code_symbol_tool" and str((tool_args or {}).get("mode") or "").lower() == "entity":
             path = str((tool_args or {}).get("file_path") or "")
-            entity = str((tool_args or {}).get("entity_name") or "")
+            entity = str((tool_args or {}).get("entity_name") or (tool_args or {}).get("symbol") or "")
             if path:
                 session.clear_pending_continuation(path=path)
-            if session.has_read_entity(path, entity):
-                session.record_blocker(
-                    "duplicate_read",
-                    f"{entity} 本轮已读过，除非需要补相邻上下文，否则避免重复读取。",
-                    "改读调用点、相邻区间或直接开始修改"
-                )
             session.record_read_entity(
                 path,
                 entity,
@@ -997,12 +892,6 @@ class ToolExecutor:
         elif tool_name == "grep_search_tool":
             query = str((tool_args or {}).get("regex_pattern") or "")
             scope = str((tool_args or {}).get("search_dir") or "")
-            if session.has_search_query(query, scope):
-                session.record_blocker(
-                    "duplicate_search",
-                    f"`{query}` 在 `{scope or '.'}` 中本轮已搜索过。",
-                    "缩小范围、换关键词，或直接阅读已命中文件"
-                )
             session.record_search_query(
                 query,
                 scope,
@@ -1055,12 +944,6 @@ class ToolExecutor:
         if match:
             start_line = int(match.group(1))
             end_line = int(match.group(2))
-            if session.has_read_range_overlap(file_path, start_line, end_line):
-                session.record_blocker(
-                    "duplicate_read",
-                    f"{file_path} 第 {start_line}-{end_line} 行本轮已读过。",
-                    "改读相邻区间、目标实体，或直接开始修改/验证"
-                )
             session.record_read_range(file_path, start_line, end_line, source=tool_name)
         else:
             offset = int((tool_args or {}).get("offset") or 0)
@@ -1068,22 +951,7 @@ class ToolExecutor:
             if max_lines > 0:
                 start_line = offset + 1
                 end_line = offset + max_lines
-                if session.has_read_range_overlap(file_path, start_line, end_line):
-                    session.record_blocker(
-                        "duplicate_read",
-                        f"{file_path} 第 {start_line}-{end_line} 行本轮已读过。",
-                        "改读相邻区间、目标实体，或直接开始修改/验证"
-                    )
                 session.record_read_range(file_path, start_line, end_line, source=tool_name)
-
-        navigation_match = re.search(r"\[阅读导航\]\s*(.+)", result_text)
-        if navigation_match:
-            session.record_blocker(
-                "read_navigation",
-                navigation_match.group(1).strip(),
-                "按目标选择搜索、结构工具或实体级读取；不要默认顺序翻页。",
-                severity="hint",
-            )
 
     @staticmethod
     def _track_tool_decision_alignment(tool_name: str):
