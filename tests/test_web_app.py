@@ -4179,6 +4179,65 @@ def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypa
     assert payload["currentPhase"] == "ready"
 
 
+def test_submit_session_message_continues_after_bookkeeping_guard_progress(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=2),
+    )
+    calls = []
+
+    class BookkeepingGuardAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            calls.append(initial_prompt)
+            if len(calls) == 1:
+                return {
+                    "status": "partial",
+                    "summary": "本轮已触发工具循环保护：这些调用主要是任务管理或状态查询，尚未产生新的证据读取。",
+                    "raw_output": "本轮已触发工具循环保护：这些调用主要是任务管理或状态查询，尚未产生新的证据读取。",
+                    "outcome": "progress",
+                    "recommended_next_action": "停止任务清单操作，转向读取证据或直接给出结论。",
+                    "tool_call_count": 3,
+                    "tool_trace": [
+                        {"name": "get_git_status_summary_tool"},
+                        {"name": "task_create_tool"},
+                        {"name": "task_update_tool"},
+                    ],
+                }
+            return {
+                "status": "completed",
+                "summary": "已找到优化点：任务管理工具不应算作有效证据推进。",
+                "raw_output": "已找到优化点：任务管理工具不应算作有效证据推进。",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: BookkeepingGuardAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "寻找可以优化的地方并汇报"},
+    )
+
+    assert response.status_code == 202, response.json()
+    payload = response.json()
+    assert len(calls) == 2
+    assert "停止任务清单操作" in calls[1]
+    assert payload["messages"][-1]["content"] == "已找到优化点：任务管理工具不应算作有效证据推进。"
+    assert payload["currentPhase"] == "ready"
+
+
 def test_submit_session_message_keeps_previous_continuation_reply_when_done_marker_follows(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

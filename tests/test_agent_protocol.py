@@ -637,16 +637,33 @@ class TestToolMessageFlow:
     def test_round_state_tracks_consecutive_tool_only_steps(self):
         state = RoundStateController(max_iterations=5)
 
-        state.note_response_tools(1, "")
-        state.note_response_tools(1, "")
+        state.note_response_tools(1, "", tool_names=["read_file_tool"])
+        state.note_response_tools(1, "", tool_names=["grep_search_tool"])
         assert state.consecutive_tool_only_steps == 2
 
-        state.note_response_tools(1, "已形成阶段性结论")
+        state.note_response_tools(1, "已形成阶段性结论", tool_names=["read_file_tool"])
         assert state.consecutive_tool_only_steps == 0
 
-        state.note_response_tools(1, "")
+        state.note_response_tools(1, "", tool_names=["read_file_tool"])
         state.note_response_tools(0, "")
         assert state.consecutive_tool_only_steps == 0
+
+    def test_round_state_tracks_bookkeeping_tools_as_no_new_evidence(self):
+        state = RoundStateController(max_iterations=5)
+
+        state.note_response_tools(1, "", tool_names=["task_create_tool"])
+        state.note_response_tools(1, "", tool_names=["task_update_tool"])
+
+        assert state.consecutive_tool_only_steps == 0
+        assert state.consecutive_bookkeeping_tool_only_steps == 2
+        assert state.no_new_evidence_steps == 2
+        assert state.substantive_tool_calls == 0
+
+        state.note_response_tools(1, "", tool_names=["read_file_tool"])
+        assert state.consecutive_bookkeeping_tool_only_steps == 0
+        assert state.consecutive_tool_only_steps == 1
+        assert state.no_new_evidence_steps == 0
+        assert state.substantive_tool_calls == 1
 
     def test_turn_outcome_controller_handles_lifecycle_and_finalization(self):
         state = RoundStateController(max_iterations=5)
@@ -1215,7 +1232,8 @@ class TestToolMessageFlow:
 
         result = agent.run_single_turn(initial_prompt="probe")
 
-        assert result["status"] == "completed"
+        assert result["status"] == "partial"
+        assert result["outcome"] == "progress"
         assert "工具循环保护" in result["summary"]
         assert "tool_executor.py" in result["summary"]
         assert result["raw_output"] == result["summary"]
@@ -1280,7 +1298,8 @@ class TestToolMessageFlow:
 
         result = agent.run_single_turn(initial_prompt="probe")
 
-        assert result["status"] == "completed"
+        assert result["status"] == "partial"
+        assert result["outcome"] == "progress"
         assert "工具循环保护" in result["summary"]
         assert "grep_search_tool" in result["summary"]
         assert result["raw_output"] == result["summary"]
@@ -1334,8 +1353,10 @@ class TestToolMessageFlow:
 
         result = agent.run_single_turn(initial_prompt="probe")
 
-        assert result["status"] == "completed"
+        assert result["status"] == "partial"
+        assert result["outcome"] == "progress"
         assert "工具循环保护" in result["summary"]
+        assert "任务管理" in result["summary"]
         assert "get_git_status_summary_tool" in result["summary"]
         assert result["raw_output"] == result["summary"]
 
@@ -2597,10 +2618,30 @@ class TestRuntimeStateMemoryFlow:
             consecutive_tool_only_steps=3,
             delegation_failures=0,
             total_tool_calls=3,
+            substantive_tool_calls=3,
         )
 
         assert reason is not None
         assert "只有工具调用" in reason
+
+    def test_should_stop_for_bookkeeping_only_responses(self):
+        controller = TurnOutcomeController(
+            max_consecutive_failures=3,
+            get_attention_snapshot=lambda: {"convergence_state": "open"},
+        )
+
+        reason = controller.should_stop_for_convergence(
+            iteration=2,
+            no_new_evidence_steps=2,
+            consecutive_tool_only_steps=0,
+            consecutive_bookkeeping_tool_only_steps=2,
+            delegation_failures=0,
+            total_tool_calls=2,
+            substantive_tool_calls=0,
+        )
+
+        assert reason is not None
+        assert "任务管理" in reason
 
     def test_readonly_platform_judgment_completion_is_detected(self):
         goal = (
