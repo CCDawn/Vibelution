@@ -2269,6 +2269,7 @@ def _run_session_continuation_loop(
 
     result: Any = None
     last_visible_result: dict[str, Any] | None = None
+    disable_tools_for_turn = False
     for turn_index in range(1, max_turns + 1):
         stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
         if stop_reason:
@@ -2321,7 +2322,11 @@ def _run_session_continuation_loop(
             "model_request",
             turn_id=getattr(turn_control, "turn_id", ""),
         )
-        result = agent.run_single_turn(initial_prompt=prompt)
+        result = _run_agent_single_turn(
+            agent,
+            initial_prompt=prompt,
+            disable_tools=disable_tools_for_turn,
+        )
         return_stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
         if return_stop_reason:
             _record_session_turn_lifecycle_event(
@@ -2388,6 +2393,52 @@ def _run_session_continuation_loop(
             )
             return _annotate_continuation_result(result, turn_index, max_turns, reached_limit=False)
 
+        if (
+            _is_tool_loop_guard_progress_result(result)
+            and not disable_tools_for_turn
+            and turn_index < max_turns
+        ):
+            prompt = _build_tool_guard_finalization_prompt(
+                original_prompt=initial_prompt,
+                effective_prompt=prompt,
+                latest_result=result,
+                history_messages=history_messages,
+                turn_index=turn_index,
+            )
+            disable_tools_for_turn = True
+            _set_session_turn_progress_live_output(
+                session_id,
+                "followup_prepare",
+                turn_id=getattr(turn_control, "turn_id", ""),
+            )
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "tool_guard_finalization_prompt_built",
+                turn_id=getattr(turn_control, "turn_id", ""),
+                outcome="running",
+                fields={
+                    "turnIndex": turn_index,
+                    "nextPromptLength": len(prompt),
+                    "disableTools": True,
+                    "toolCallCount": _coerce_nonnegative_int(result.get("tool_call_count") or 0)
+                    if isinstance(result, dict)
+                    else 0,
+                },
+            )
+            _record_session_turn_trace_event(
+                session_id,
+                getattr(turn_control, "turn_id", ""),
+                "state",
+                {
+                    "phase": "tool_guard_finalization_prompt_built",
+                    "turnIndex": turn_index,
+                    "disableTools": True,
+                },
+                status="running",
+                summary="Tool-loop guard switched the next continuation to a no-tool finalization turn.",
+            )
+            continue
+
         if turn_index >= max_turns:
             _record_session_turn_lifecycle_event(
                 session_id,
@@ -2409,6 +2460,7 @@ def _run_session_continuation_loop(
             history_messages=history_messages,
             turn_index=turn_index,
         )
+        disable_tools_for_turn = False
         _set_session_turn_progress_live_output(
             session_id,
             "followup_prepare",
@@ -2426,6 +2478,18 @@ def _run_session_continuation_loop(
         )
 
     return _build_continuation_limit_result(result, max_turns, max_turns)
+
+
+def _run_agent_single_turn(agent: Any, *, initial_prompt: str, disable_tools: bool = False) -> Any:
+    runner = getattr(agent, "run_single_turn")
+    if disable_tools:
+        try:
+            signature = inspect.signature(runner)
+        except (TypeError, ValueError):
+            signature = None
+        if signature is not None and "disable_tools" in signature.parameters:
+            return runner(initial_prompt=initial_prompt, disable_tools=True)
+    return runner(initial_prompt=initial_prompt)
 
 
 def _persist_session_turn_result(
@@ -4845,6 +4909,65 @@ def _build_followup_prompt(
     ]
     if next_action:
         lines.append(f"优先执行上一轮下一步：{next_action}")
+    return "\n".join(lines)
+
+
+def _is_tool_loop_guard_progress_result(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    contract = build_chat_coding_result_contract(result)
+    outcome = str(contract.get("outcome") or result.get("outcome") or result.get("task_outcome") or "").strip().lower()
+    if outcome != "progress":
+        return False
+    visible = _visible_reply_candidate(result)
+    next_action = str(contract.get("next_action") or result.get("recommended_next_action") or "").strip()
+    combined = f"{visible}\n{next_action}"
+    return (
+        "工具循环保护" in combined
+        or "连续工具调用没有形成可见回答" in combined
+        or "连续多轮只有工具调用" in combined
+        or "不要继续调用任务管理或重复读取工具" in combined
+    )
+
+
+def _build_tool_guard_finalization_prompt(
+    *,
+    original_prompt: str,
+    effective_prompt: str,
+    latest_result: Any,
+    history_messages: list[dict[str, Any]],
+    turn_index: int,
+) -> str:
+    goal = _unwrap_continuation_goal(effective_prompt or original_prompt)
+    if _is_continue_request(goal):
+        goal = _unwrap_continuation_goal(_latest_effective_user_message(history_messages) or original_prompt)
+    visible = trim_lines(_visible_reply_candidate(latest_result), max_lines=4) if isinstance(latest_result, dict) else ""
+    next_action = ""
+    tool_names: list[str] = []
+    if isinstance(latest_result, dict):
+        contract = build_chat_coding_result_contract(latest_result)
+        next_action = trim_lines(
+            contract.get("next_action") or latest_result.get("recommended_next_action") or "",
+            max_lines=2,
+        )
+        for item in list(latest_result.get("tool_trace") or [])[-6:]:
+            if isinstance(item, dict):
+                name = str(item.get("name") or item.get("tool") or "").strip()
+                if name:
+                    tool_names.append(name)
+    tool_chain = " -> ".join(dict.fromkeys(tool_names)) if tool_names else "上一轮工具链"
+    lines = [
+        f"继续完成同一个用户目标：{goal}",
+        f"上一内部回合触发工具循环保护（第 {turn_index} 轮），工具链：{tool_chain}。",
+        "本回合已经禁用工具。禁止再读取文件、搜索、创建任务、更新任务或发起子 agent。",
+        "必须基于当前会话已有证据直接给用户输出可见结论。",
+        "如果证据不足，也要明确说明已读到什么、还缺什么、下一步建议；不要再请求工具。",
+        "请直接输出最终回答正文；不要只输出 <state>，不要返回工具调用协议。",
+    ]
+    if visible:
+        lines.append(f"上一轮可见进展：{visible}")
+    if next_action:
+        lines.append(f"上一轮建议：{next_action}")
     return "\n".join(lines)
 
 
