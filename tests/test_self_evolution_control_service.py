@@ -654,6 +654,85 @@ def test_self_evolution_worktree_isolation_ignores_false_string_flags():
     assert reason == ""
 
 
+def test_start_self_evolution_worktree_run_delegates_risky_goal_to_supervised_review(monkeypatch):
+    calls: list[dict] = []
+    snapshot = {"runId": "swte-self-risk", "status": "queued"}
+
+    monkeypatch.setattr(
+        service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True, "supervised_evolution": True}},
+    )
+    monkeypatch.setattr(
+        service,
+        "start_supervised_worktree_run",
+        lambda payload: calls.append(copy.deepcopy(payload)) or snapshot,
+    )
+
+    result = service.start_self_evolution_worktree_run(
+        {
+            "goal": "修复自进化候选回流并提交",
+            "bundleName": "closed_loop_v1",
+            "uiRoute": "/evolution/self",
+        }
+    )
+
+    assert result == snapshot
+    assert calls[0]["bundleName"] == "closed_loop_v1"
+    assert calls[0]["mode"] == "manual"
+    assert calls[0]["keepWorktree"] is True
+    assert calls[0]["requestSource"] == "api:evolution.self.worktree-runs"
+    assert calls[0]["initiator"] == "self_evolution_risky_write"
+    assert calls[0]["clientAction"] == "start_self_evolution_worktree_run"
+    assert calls[0]["selfEvolutionGoal"] == "修复自进化候选回流并提交"
+    assert calls[0]["selfEvolutionRiskReason"] == "goal_write_marker"
+    assert calls[0]["requiresSupervisedReview"] is True
+
+
+def test_start_self_evolution_worktree_run_rejects_readonly_goal(monkeypatch):
+    monkeypatch.setattr(
+        service,
+        "get_workbench_contract",
+        lambda: {"modeAvailability": {"self_evolution": True, "supervised_evolution": True}},
+    )
+    monkeypatch.setattr(
+        service,
+        "start_supervised_worktree_run",
+        lambda payload: pytest.fail("readonly goals should not start a worktree run"),
+    )
+
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="worktree isolation"):
+        service.start_self_evolution_worktree_run(
+            {"goal": "分析候选池回流", "bundleName": "closed_loop_v1"}
+        )
+
+
+def test_self_evolution_worktree_run_route_forwards_to_service(monkeypatch):
+    calls: list[dict] = []
+    snapshot = {"runId": "swte-route", "status": "queued"}
+
+    monkeypatch.setattr(
+        evolution_routes,
+        "start_self_evolution_worktree_run",
+        lambda payload: calls.append(copy.deepcopy(payload)) or snapshot,
+    )
+
+    response = client.post(
+        "/api/evolution/self/worktree-runs",
+        json={
+            "goal": "修复自进化候选回流并提交",
+            "bundleName": "closed_loop_v1",
+            "mode": "manual",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json() == snapshot
+    assert calls[0]["goal"] == "修复自进化候选回流并提交"
+    assert calls[0]["bundleName"] == "closed_loop_v1"
+    assert calls[0]["mode"] == "manual"
+
+
 @pytest.mark.parametrize(
     "manager_result",
     [
