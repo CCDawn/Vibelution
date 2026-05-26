@@ -32,6 +32,7 @@ import {
   hasResponseBlock,
   hasUserContent,
 } from "./messageSections";
+import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import styles from "./ConversationView.module.css";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
@@ -563,6 +564,52 @@ export function ConversationView({
     );
   }
 
+  function responseSegmentLabel(segment: ResponseSegment) {
+    switch (segment.kind) {
+      case "status":
+        return t("responseSegmentStatus");
+      case "commit":
+        return t("responseSegmentCommit");
+      case "verification":
+        return t("responseSegmentVerification");
+      case "code":
+        return segment.language || t("responseSegmentCode");
+      case "files":
+        return t("responseSegmentFiles");
+      case "logs":
+        return t("responseSegmentLogs");
+      case "answer":
+      default:
+        return t("responseSegmentAnswer");
+    }
+  }
+
+  function renderResponseSegment(segment: ResponseSegment) {
+    const label = responseSegmentLabel(segment);
+    const isCodeLike = ["code", "commit", "verification", "files", "logs"].includes(segment.kind)
+      && (segment.language || segment.content.includes("\n") || segment.kind === "code");
+    return (
+      <section
+        key={segment.id}
+        className={`${styles.responseSegment} ${styles[`responseSegment_${segment.kind}`]}`}
+      >
+        <div className={styles.responseSegmentHeader}>
+          <span className={styles.responseSegmentLabel}>{label}</span>
+          {segment.language && segment.kind !== "code" ? (
+            <span className={styles.responseSegmentMeta}>{segment.language}</span>
+          ) : null}
+        </div>
+        {isCodeLike ? (
+          <pre className={styles.responseSegmentPre}>
+            <code>{segment.content}</code>
+          </pre>
+        ) : (
+          <p className={styles.messageBody}>{segment.content}</p>
+        )}
+      </section>
+    );
+  }
+
   return (
     <div className={styles.surface}>
       {showHeader ? (
@@ -634,6 +681,7 @@ export function ConversationView({
         ) : (
           messages.map((message) => {
             const operationGroups = buildConversationOperationGroups(message, operationLabels);
+            const responseSegments = parseResponseSegments(message.content);
             const responseExpanded = getExpansionState(message.id, "response", true);
             const isEditingMessage = message.role === "user" && message.id === editingMessageId;
             const turnClassName = [
@@ -702,7 +750,7 @@ export function ConversationView({
                       </button>
                       {responseExpanded ? (
                         <div className={styles.responseBody}>
-                          <p className={styles.messageBody}>{message.content}</p>
+                          {responseSegments.map(renderResponseSegment)}
                         </div>
                       ) : null}
                     </section>

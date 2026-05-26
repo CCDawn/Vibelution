@@ -502,9 +502,83 @@
 }
 
 .responseBody {
+  display: grid;
+  gap: 12px;
   min-width: 0;
   padding-top: 12px;
   border-top: 1px solid color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
+}
+
+.responseSegment {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+}
+
+.responseSegment_answer {
+  padding-left: 0;
+  border-left-color: transparent;
+}
+
+.responseSegment_status {
+  border-left-color: color-mix(in srgb, var(--accent-warm) 56%, transparent);
+}
+
+.responseSegment_commit,
+.responseSegment_verification {
+  border-left-color: color-mix(in srgb, var(--accent-cool) 58%, transparent);
+}
+
+.responseSegment_files,
+.responseSegment_logs,
+.responseSegment_code {
+  border-left-color: color-mix(in srgb, var(--fg-tertiary) 34%, transparent);
+}
+
+.responseSegmentHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.responseSegment_answer .responseSegmentHeader {
+  display: none;
+}
+
+.responseSegmentLabel {
+  color: inherit;
+  font-weight: 720;
+}
+
+.responseSegmentMeta {
+  max-width: 160px;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.responseSegmentPre {
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  overflow: auto;
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 78%, var(--surface-page));
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
 }
 
 .messageCard {
