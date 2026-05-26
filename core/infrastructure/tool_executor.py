@@ -662,6 +662,20 @@ class ToolExecutor:
             return None
         return match.group(1), int(match.group(2)), int(match.group(3))
 
+    @staticmethod
+    def _read_navigation_message(file_path: str, existing_ranges: list[dict]) -> str:
+        if existing_ranges:
+            first_start = min(int(item.get("start_line", 0) or 0) for item in existing_ranges)
+            last_end = max(int(item.get("end_line", 0) or 0) for item in existing_ranges)
+            range_text = f"已读约第 {first_start}-{last_end} 行，共 {len(existing_ranges)} 段"
+        else:
+            range_text = "当前还没有可靠已读区间"
+        return (
+            f"[阅读纠偏] {file_path} {range_text}。不要继续线性翻页；"
+            "请先说明缺少哪类证据，再按目标改用 grep_search_tool 定位文本/调用点，"
+            "或用 list_file_entities_tool / get_code_entity_tool 读取结构和目标实体。"
+        )
+
     @classmethod
     def _check_attention_focus_block(cls, session, tool_name: str, tool_args: dict) -> Optional[str]:
         """存在未完成续读时，记录偏离提示，但不再强制短路。"""
@@ -683,7 +697,7 @@ class ToolExecutor:
             session.record_blocker(
                 "continuation_focus",
                 f"当前已存在 {pending_path} 的未完成续读，不应回退到 {tool_name}。",
-                f"先执行 read_file_tool(file_path=\"{pending_path}\", offset={expected_offset}, max_lines={expected_max_lines})",
+                f"先判断当前目标缺少哪类证据；只有确实需要相邻下文时才读 {pending_path} offset={expected_offset}, max_lines={expected_max_lines}",
                 severity="hint",
             )
             return None
@@ -694,7 +708,7 @@ class ToolExecutor:
                 session.record_blocker(
                     "continuation_focus",
                     f"当前优先续读目标是 {pending_path}，不应切换到新的实体读取。",
-                    f"先执行 read_file_tool(file_path=\"{pending_path}\", offset={expected_offset}, max_lines={expected_max_lines})",
+                    f"先判断当前目标缺少哪类证据；只有确实需要相邻下文时才读 {pending_path} offset={expected_offset}, max_lines={expected_max_lines}",
                     severity="hint",
                 )
                 return None
@@ -760,7 +774,7 @@ class ToolExecutor:
                     session.record_blocker(
                         "continuation_focus",
                         f"当前优先续读目标是 {latest_path} offset={latest_offset}，不应切换到 {file_path} offset={offset}。",
-                        f"先执行 read_file_tool(file_path=\"{latest_path}\", offset={latest_offset}, max_lines={latest_max_lines})",
+                        f"先判断目标证据缺口；只有确实需要相邻下文时才读 {latest_path} offset={latest_offset}, max_lines={latest_max_lines}",
                         severity="hint",
                     )
                     return None
@@ -774,25 +788,21 @@ class ToolExecutor:
                     session.record_blocker(
                         "continuation_drift",
                         f"{file_path} 存在未完成续读，应从 offset={expected_offset} 开始，而不是 {offset}。",
-                        f"先执行 read_file_tool(file_path=\"{file_path}\", offset={expected_offset}, max_lines={expected_max_lines})",
+                        f"先判断目标证据缺口；只有确实需要相邻下文时才读 offset={expected_offset}, max_lines={expected_max_lines}",
                         severity="hint",
                     )
                     return None
 
         if max_lines >= 40:
             if len(existing_ranges) >= 3:
-                first_start = min(int(item.get("start_line", 0) or 0) for item in existing_ranges)
-                last_end = max(int(item.get("end_line", 0) or 0) for item in existing_ranges)
+                navigation = cls._read_navigation_message(file_path, existing_ranges)
                 session.record_blocker(
-                    "tool_loop_guard",
-                    f"{file_path} 本轮已连续读取 {len(existing_ranges)} 段（约第 {first_start}-{last_end} 行）。",
-                    "停止继续顺着续读读取，先基于已读证据总结、修改或验证。",
-                    severity="block",
+                    "read_navigation_redirect",
+                    navigation,
+                    "改用目标化搜索、结构工具或实体级读取；若证据已足够则总结/修改/验证。",
+                    severity="hint",
                 )
-                return (
-                    f"[短路] {file_path} 本轮已连续读取 {len(existing_ranges)} 段。"
-                    " 继续顺着续读会造成工具循环；请先基于已读证据总结、修改或验证。"
-                )
+                return navigation
             overlaps = session.get_overlapping_read_ranges(normalized_file_path, start_line, end_line)
             for item in overlaps:
                 existing_start = int(item.get("start_line", 0))
@@ -805,11 +815,11 @@ class ToolExecutor:
                     session.record_blocker(
                         "duplicate_read_guard",
                         f"{file_path} 第 {start_line}-{end_line} 行与已读区间 {existing_start}-{existing_end} 高度重叠。",
-                        "优先顺着续读继续，或缩小到尚未读取的相邻区间"
+                        "改用目标化搜索、结构工具、实体读取，或缩小到尚未读取的相邻区间"
                     )
                     return (
                         f"[短路] 当前读取区间与已读内容高度重叠（{existing_start}-{existing_end}）。"
-                        " 建议改用：顺着上一条续读继续，或缩小到未读相邻区间。"
+                        " 建议改用：目标化搜索、结构工具、实体读取，或缩小到未读相邻区间。"
                     )
         return None
 
@@ -1066,13 +1076,13 @@ class ToolExecutor:
                     )
                 session.record_read_range(file_path, start_line, end_line, source=tool_name)
 
-        continuation_match = re.search(r"\[续读\]\s*(.+)", result_text)
-        if continuation_match:
-            session.record_pending_continuation(
-                tool_name,
-                continuation_match.group(1).strip(),
-                file_path,
-                strength="weak",
+        navigation_match = re.search(r"\[阅读导航\]\s*(.+)", result_text)
+        if navigation_match:
+            session.record_blocker(
+                "read_navigation",
+                navigation_match.group(1).strip(),
+                "按目标选择搜索、结构工具或实体级读取；不要默认顺序翻页。",
+                severity="hint",
             )
 
     @staticmethod

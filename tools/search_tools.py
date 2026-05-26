@@ -313,11 +313,14 @@ def grep_search_tool(
         output_lines.append(f"\n... (搜索预览已截断，仅显示前 {preview_blocks} 个预览块)")
         if grouped:
             first_file = next(iter(grouped.keys()))
-            output_lines.append(f'[续读] read_file_tool(file_path="{first_file}", offset=0, max_lines=80)')
+            output_lines.append(
+                f'[阅读导航] 搜索结果仍有更多命中；不要默认从头分页读取 {first_file}。'
+                "请围绕命中行、目标符号或错误关键词读取局部上下文。"
+            )
         else:
-            output_lines.append("[续读] 缩小 regex_pattern / search_dir，或对目标文件使用 read_file_tool 分页读取")
+            output_lines.append("[阅读导航] 缩小 regex_pattern / search_dir，或围绕目标文件的命中行读取局部上下文")
     else:
-        output_lines.append("\n[续读] 若需要完整上下文，请对上面命中的目标文件继续分页读取")
+        output_lines.append("\n[阅读导航] 若需要更多上下文，请围绕上面命中的目标文件、行号或实体读取，不要默认线性翻页")
 
     output_lines.append("\n" + "=" * 80)
     output_lines.append(f"[搜索完成] 共 {len(results)} 个匹配")

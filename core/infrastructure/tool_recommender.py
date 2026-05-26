@@ -31,13 +31,17 @@ def decide_next_tools(snapshot: Dict[str, Any]) -> ToolDecision:
     if pending_continuations:
         latest = pending_continuations[-1]
         path = latest.get("path") or ""
-        reason = f"上一段结果未读完，先沿续读线索补读 {path}。" if path else "上一段结果未读完，先沿续读线索补读。"
+        reason = (
+            f"上一段结果还有剩余内容，但不要默认顺序补读 {path}；先按目标判断缺少文本命中、结构还是实体上下文。"
+            if path
+            else "上一段结果还有剩余内容，但不要默认顺序补读；先按目标判断缺少哪类证据。"
+        )
         return ToolDecision(
-            next_intent="inspect_range",
-            recommended_tools=["read_file_tool"],
-            avoid_tools=["grep_search_tool", "cli_tool"],
+            next_intent="choose_read_target",
+            recommended_tools=["grep_search_tool", "list_file_entities_tool", "get_code_entity_tool", "read_file_tool"],
+            avoid_tools=["cli_tool"],
             reason=reason,
-            fallback_if_failed=["get_code_entity_tool", "list_file_entities_tool"],
+            fallback_if_failed=["python_symbol_tool"],
         )
 
     if task == "verify":

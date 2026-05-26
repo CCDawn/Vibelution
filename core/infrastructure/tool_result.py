@@ -61,6 +61,8 @@ def _extract_range_info(result_kind: str, result_str: str) -> str:
 def _extract_continuation_hint(result_kind: str, result_str: str) -> str:
     if result_kind == "file_read":
         for line in result_str.splitlines():
+            if line.startswith("[阅读导航] "):
+                return line[len("[阅读导航] ") :].strip()
             if line.startswith("[续读] "):
                 return line[len("[续读] ") :].strip()
     if result_kind == "python_structure":
@@ -92,12 +94,12 @@ def _compact_file_read(result_str: str, max_chars: int, continuation_hint: str) 
     compact_lines.extend(["", "--- Content Preview ---"])
     compact_lines.extend(head_excerpt)
     if tail_excerpt:
-        compact_lines.append("... [中间内容省略，优先按续读提示补局部上下文] ...")
+        compact_lines.append("... [中间内容省略，请按目标选择命中行/实体/相邻窗口补局部上下文] ...")
         compact_lines.extend(tail_excerpt)
     compact_lines.append("--- End Preview ---")
     compact_lines.append(f"[...结果已截断，原长度 {len(result_str)} 字符...]")
     if continuation_hint:
-        compact_lines.append(f"[截断信息] 建议续读={continuation_hint}")
+        compact_lines.append(f"[截断信息] 阅读导航={continuation_hint}")
 
     compact = "\n".join(compact_lines)
     if len(compact) <= max_chars + 180:
@@ -134,7 +136,7 @@ def _compact_search_result(result_str: str, max_chars: int, continuation_hint: s
     compact_lines = summary_lines + preview_lines
     compact_lines.append(f"[...结果已截断，原长度 {len(result_str)} 字符...]")
     if continuation_hint:
-        compact_lines.append(f"[截断信息] 建议续读={continuation_hint}")
+        compact_lines.append(f"[截断信息] 阅读导航={continuation_hint}")
     compact = "\n".join(line for line in compact_lines if line is not None)
     if len(compact) <= max_chars + 200:
         return compact
@@ -187,7 +189,7 @@ def package_tool_result(
     if range_info:
         suffix_lines.append(f"[截断信息] 当前范围={range_info}")
     if continuation_hint:
-        suffix_lines.append(f"[截断信息] 建议续读={continuation_hint}")
+        suffix_lines.append(f"[截断信息] 阅读导航={continuation_hint}")
     suffix = "\n" + "\n".join(suffix_lines)
     budget = max(0, max_chars - len(suffix) - 1)
     if budget < max(8, max_chars // 3):
