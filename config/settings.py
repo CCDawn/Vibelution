@@ -592,8 +592,10 @@ class ConfigLoader:
             # === Web 工作台配置 ===
             f"{prefix}WORKBENCH_BACKEND_PORT": "workbench.backend_port",
             f"{prefix}WORKBENCH_FRONTEND_PORT": "workbench.frontend_port",
+            f"{prefix}WORKBENCH_WINDOW_MODE": "workbench.window_mode",
             "VIBELUTION_PORT": "workbench.backend_port",
             "VIBELUTION_FRONTEND_PORT": "workbench.frontend_port",
+            "VIBELUTION_WORKBENCH_WINDOW_MODE": "workbench.window_mode",
 
             # === 上下文压缩配置 ===
             f"{prefix}COMPRESSION_ENABLED": "context_compression.enabled",

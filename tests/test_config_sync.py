@@ -90,6 +90,7 @@ def test_config_loader_normalizes_nested_public_blocks():
     assert len(config.prompt.sections) == len(raw["prompt"]["sections"])
     assert config.workbench.backend_port == raw["workbench"]["backend_port"]
     assert config.workbench.frontend_port == raw["workbench"]["frontend_port"]
+    assert config.workbench.window_mode == raw["workbench"]["window_mode"]
 
 
 def test_evolution_default_allowlist_includes_safe_modify_probe_file():
@@ -106,11 +107,21 @@ def test_workbench_ports_have_defaults_and_validate_range():
 
     assert config.workbench.backend_port == 8000
     assert config.workbench.frontend_port == 5173
+    assert config.workbench.window_mode == "windowed"
 
     with pytest.raises(ValueError):
         AppConfig.model_validate({"workbench": {"backend_port": 0, "frontend_port": 5173}})
     with pytest.raises(ValueError):
         AppConfig.model_validate({"workbench": {"backend_port": 8000, "frontend_port": 70000}})
+
+
+def test_workbench_window_mode_normalizes_and_validates():
+    config = AppConfig.model_validate({"workbench": {"window_mode": "FULLSCREEN"}})
+
+    assert config.workbench.window_mode == "fullscreen"
+
+    with pytest.raises(ValueError):
+        AppConfig.model_validate({"workbench": {"window_mode": "borderless"}})
 
 
 def test_workbench_port_helpers_read_saved_config_without_settings_cache(monkeypatch, tmp_path):
@@ -190,13 +201,16 @@ def test_config_loader_accepts_agent_workbench_port_aliases(monkeypatch, tmp_pat
     config_file.write_text("[workbench]\nbackend_port = 9101\nfrontend_port = 6200\n", encoding="utf-8")
     monkeypatch.delenv("VIBELUTION_PORT", raising=False)
     monkeypatch.delenv("VIBELUTION_FRONTEND_PORT", raising=False)
+    monkeypatch.delenv("VIBELUTION_WORKBENCH_WINDOW_MODE", raising=False)
     monkeypatch.setenv("AGENT_WORKBENCH_BACKEND_PORT", "9301")
     monkeypatch.setenv("AGENT_WORKBENCH_FRONTEND_PORT", "6400")
+    monkeypatch.setenv("AGENT_WORKBENCH_WINDOW_MODE", "fullscreen")
 
     config = ConfigLoader(str(config_file)).load()
 
     assert config.workbench.backend_port == 9301
     assert config.workbench.frontend_port == 6400
+    assert config.workbench.window_mode == "fullscreen"
 
 
 def test_config_loader_prefers_vibelution_workbench_port_over_agent_alias(monkeypatch, tmp_path):
@@ -204,13 +218,16 @@ def test_config_loader_prefers_vibelution_workbench_port_over_agent_alias(monkey
     config_file.write_text("[workbench]\nbackend_port = 9101\nfrontend_port = 6200\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_WORKBENCH_BACKEND_PORT", "9301")
     monkeypatch.setenv("AGENT_WORKBENCH_FRONTEND_PORT", "6400")
+    monkeypatch.setenv("AGENT_WORKBENCH_WINDOW_MODE", "fullscreen")
     monkeypatch.setenv("VIBELUTION_PORT", "9401")
     monkeypatch.setenv("VIBELUTION_FRONTEND_PORT", "6500")
+    monkeypatch.setenv("VIBELUTION_WORKBENCH_WINDOW_MODE", "windowed")
 
     config = ConfigLoader(str(config_file)).load()
 
     assert config.workbench.backend_port == 9401
     assert config.workbench.frontend_port == 6500
+    assert config.workbench.window_mode == "windowed"
 
 
 def test_config_loader_ignores_invalid_agent_workbench_port_aliases(monkeypatch, tmp_path):
@@ -245,5 +262,6 @@ def test_main_and_example_configs_load_through_entrypoints():
     assert example_loader.tools.restart_enabled is True
     assert example_loader.workbench.backend_port == 8000
     assert example_loader.workbench.frontend_port == 5173
+    assert example_loader.workbench.window_mode == "windowed"
     assert main_loader.pet_heart.enabled is True
     assert settings_primary_provider_kind == main_primary_provider_kind

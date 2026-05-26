@@ -1474,11 +1474,20 @@ class RuntimeConfig(BaseModel):
 
 
 class WorkbenchConfig(BaseModel):
-    """本地 Web 工作台端口配置。"""
+    """本地 Web 工作台启动配置。"""
     model_config = ConfigDict(extra="ignore")
 
     backend_port: int = Field(default=8000, ge=1, le=65535, description="后端服务端口")
     frontend_port: int = Field(default=5173, ge=1, le=65535, description="前端开发服务端口")
+    window_mode: str = Field(default="windowed", description="工作台窗口模式：windowed / fullscreen")
+
+    @field_validator("window_mode")
+    @classmethod
+    def normalize_window_mode(cls, v: str) -> str:
+        value = (v or "windowed").strip().lower()
+        if value not in {"windowed", "fullscreen"}:
+            raise ValueError("window_mode must be one of: windowed, fullscreen")
+        return value
 
 
 # ============================================================================
