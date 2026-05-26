@@ -45,4 +45,17 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("onStartWorktreeRun={() => startSelfWorktreeRunMutation.mutate()}");
     expect(routeSource).toContain("startWorktreeError={startSelfWorktreeRunMutation.error?.message ?? \"\"}");
   });
+
+  it("surfaces self-origin worktree review gates without auto-merging", () => {
+    expect(routeSource).toContain("worktreeRunsQuery");
+    expect(routeSource).toContain('"/api/evolution/worktree-runs"');
+    expect(routeSource).toContain("isSelfEvolutionWorktreeRun");
+    expect(routeSource).toContain("worktreeReviewGate");
+    expect(routeSource).toContain("highlightedReviewPending");
+    expect(routeSource).toContain("worktreeActionMutation");
+    expect(routeSource).toContain('action: "approve_review"');
+    expect(routeSource).toContain('reviewerNote: t("selfWorktreeReviewNote")');
+    expect(routeSource).toContain("approveSelfWorktreeReview");
+    expect(routeSource).toContain("selfWorktreeReviewHint");
+  });
 });
