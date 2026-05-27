@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1 - 2026-05-27
+
+- Fixed a startup overlay false positive where non-blocking lifecycle proof items could mark an already running workbench as failed.
+- Kept advisory runtime source freshness signals visible in lifecycle proof without blocking open/steady workbench sessions.
+
 ## 0.2.0 - 2026-05-27
 
 - Added multi-agent conversation and chat room foundations, including persistent agent registry, conversation APIs, and group context handling.

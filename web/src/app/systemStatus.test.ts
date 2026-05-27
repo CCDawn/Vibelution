@@ -364,6 +364,57 @@ describe("systemStatus", () => {
     });
 
     expect(steady.active).toBe(false);
+
+    const advisoryFailureAfterReady = deriveStartupProgressState({
+      runtimeManager: {
+        running: true,
+        runtimeState: "running",
+        managerPid: 1001,
+        stateVersion: 5,
+      },
+      workbench: {
+        ...runtimeWorkbenchBase,
+        desiredState: "open",
+        observedState: "open",
+        phase: "steady",
+        backendPid: 222,
+        browserWindowPid: 0,
+        browserManaged: true,
+        browserWindowAlive: false,
+        url: "http://127.0.0.1:8000",
+        lastReason: "launcher_start",
+        statusLine: "工作台正在运行。",
+        failureMessage: "",
+      },
+      lifecycleProof: {
+        overallState: "failed",
+        overallLabel: "异常",
+        summary: "运行器源码签名已过期，下一次控制命令需要换代。",
+        verifiedAt: "2026-05-24T13:00:05Z",
+        desiredState: "open",
+        observedState: "open",
+        phase: "steady",
+        browserManaged: true,
+        projectRootMatches: true,
+        components: [
+          {
+            id: "source_freshness",
+            label: "运行器源码",
+            state: "failed",
+            ok: false,
+            requiredForOpen: false,
+            requiredForClosed: false,
+            detail: "运行器源码签名已过期，下一次控制命令需要换代。",
+            pid: 0,
+            verifiedAt: "2026-05-24T13:00:05Z",
+          },
+        ],
+        activeWorkRuns: { count: 0, kinds: [], items: [] },
+        residualProcesses: { count: 0, items: [] },
+      },
+    });
+
+    expect(advisoryFailureAfterReady.active).toBe(false);
   });
 
   it("summarizes frontend build failures with the first TypeScript error", () => {
