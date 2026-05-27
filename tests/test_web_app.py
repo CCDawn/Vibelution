@@ -5945,6 +5945,67 @@ def test_runtime_lifecycle_proof_marks_ready_when_components_agree(monkeypatch):
     }
 
 
+def test_runtime_lifecycle_proof_keeps_advisory_source_staleness_non_blocking(monkeypatch):
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+            "latest": {
+                "chat_turn": None,
+                "self_evolution_run": None,
+                "supervised_evolution_run": None,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runtime_service,
+        "_load_runtime_manager_snapshot",
+        lambda: {
+            "daemonRunning": True,
+            "runtimeState": "running",
+            "managerPid": 9912,
+            "stateVersion": 18,
+            "projectRoot": str(runtime_service.PROJECT_ROOT),
+            "runtimeManager": {"sourceMatches": False},
+            "workbench": {
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 3001,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 3001,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "browserWindowPid": 0,
+                "browserWindowAlive": False,
+                "browserManaged": True,
+                "url": "http://127.0.0.1:8000",
+                "lastReason": "start",
+                "failureMessage": "",
+            },
+        },
+    )
+
+    payload = runtime_service.get_runtime_summary()
+
+    proof = payload["lifecycleProof"]
+    source_component = next(component for component in proof["components"] if component["id"] == "source_freshness")
+    assert proof["overallState"] == "ready"
+    assert source_component["state"] == "failed"
+    assert source_component["requiredForOpen"] is False
+
+
 def test_runtime_lifecycle_proof_does_not_mark_closed_with_active_work_runs(monkeypatch):
     monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})

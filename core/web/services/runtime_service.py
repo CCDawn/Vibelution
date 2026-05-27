@@ -907,7 +907,14 @@ def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, 
         },
     ]
 
-    failed = phase == "failed" or bool(failure_message) or any(item["state"] == "failed" for item in components)
+    failed = phase == "failed" or bool(failure_message) or any(
+        item["state"] == "failed"
+        and (
+            (desired_state == "open" and bool(item.get("requiredForOpen")))
+            or (desired_state == "closed" and bool(item.get("requiredForClosed")))
+        )
+        for item in components
+    )
     if failed:
         overall_state = "failed"
     elif desired_state == "open" and observed_state == "open":

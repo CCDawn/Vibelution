@@ -132,8 +132,13 @@ export function deriveStartupProgressState(
   const failureMessage = textValue(rawFailureMessage);
   const statusLine = textValue(workbench?.statusLine);
   const summary = textValue(lifecycleProof?.summary);
+  const backendReady = Boolean(workbench?.backendHealthy || workbench?.backendAlive || workbench?.backendObserved);
+  const workbenchReady = desiredState === "open"
+    && observedState === "open"
+    && phase === "steady"
+    && backendReady;
 
-  if (failureMessage || phase === "failed" || lifecycleState === "failed") {
+  if (failureMessage || phase === "failed" || (lifecycleState === "failed" && !workbenchReady)) {
     const failureSummary = summarizeStartupFailure(rawFailureMessage || failureMessage || statusLine || summary, lang);
     return {
       active: true,
