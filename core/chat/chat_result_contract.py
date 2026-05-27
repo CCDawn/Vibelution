@@ -12,9 +12,7 @@ READ_TOOL_NAMES = {
     "read_file_tool",
     "grep_search_tool",
     "glob_tool",
-    "list_file_entities_tool",
-    "get_code_entity_tool",
-    "python_symbol_tool",
+    "code_symbol_tool",
 }
 
 WRITE_TOOL_NAMES = {
@@ -25,8 +23,6 @@ WRITE_TOOL_NAMES = {
 VERIFY_TOOL_NAMES = {
     "run_test_for_tool",
     "python_lint_tool",
-    "check_python_syntax",
-    "self_test",
 }
 
 PATH_ARG_KEYS = (

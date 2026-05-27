@@ -1,0 +1,513 @@
+.route {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: var(--surface-page, rgba(18, 20, 22, 0.74));
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: var(--route-topbar-padding);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-header, rgba(22, 25, 28, 0.78));
+}
+
+.header h1,
+.panelHeader h2,
+.discussionHeader h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  line-height: 1.15;
+}
+
+.header h1 {
+  font-size: var(--route-topbar-title-size);
+}
+
+.header p,
+.discussionHeader p,
+.emptyText,
+.emptyState p,
+.actionHint {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.actionHint {
+  color: var(--fg-tertiary);
+}
+
+.eyebrow,
+.panelEyebrow {
+  margin: 0 0 3px;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.iconButton,
+.primaryButton,
+.secondaryButton,
+.createButton,
+.emptyActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+  color: var(--fg-secondary);
+}
+
+.iconButton {
+  width: 36px;
+}
+
+.primaryButton {
+  padding: 0 12px;
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-cool) 20%, var(--surface-card));
+}
+
+.secondaryButton,
+.createButton,
+.applyButton {
+  width: 100%;
+  padding: 0 12px;
+}
+
+.createButton,
+.emptyActionButton,
+.applyButton {
+  border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--border-soft));
+  color: var(--fg-primary);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-cool) 30%, var(--surface-card)),
+    color-mix(in srgb, var(--accent-cool) 16%, var(--surface-card))
+  );
+}
+
+.emptyActionButton {
+  padding: 0 14px;
+}
+
+.iconButton:hover,
+.primaryButton:hover,
+.secondaryButton:hover,
+.createButton:hover,
+.emptyActionButton:hover,
+.applyButton:hover,
+.sessionIconButton:hover,
+.sessionDeleteButton:hover,
+.newAgentButton:hover,
+.configLink:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.createButton:disabled,
+.emptyActionButton:disabled,
+.applyButton:disabled,
+.sessionIconButton:disabled,
+.sessionDeleteButton:disabled,
+.newAgentButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--route-summary-gap);
+  padding: 8px 12px 0;
+}
+
+.summaryCard,
+.panel,
+.discussion {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+}
+
+.summaryCard {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--route-summary-padding);
+}
+
+.summaryCard span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.summaryCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(360px, 1.6fr) minmax(260px, 0.9fr);
+  gap: 10px;
+  min-height: 0;
+  padding: 10px 12px 12px;
+}
+
+.panel,
+.discussion {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.participantPanel {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.panelHeader,
+.discussionHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.discussionActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.configLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 35%, var(--border-soft));
+  border-radius: 999px;
+  color: var(--accent-warm-2);
+  font-size: 0.74rem;
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
+.configNotice,
+.inlineError {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--accent-warm-2);
+  font-size: 0.8rem;
+  line-height: 1.4;
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+}
+
+.inlineError {
+  color: var(--state-error);
+  background: color-mix(in srgb, var(--state-error) 10%, transparent);
+}
+
+.panelHeader h2,
+.discussionHeader h2 {
+  font-size: 0.95rem;
+}
+
+.roomList,
+.sessionList,
+.messageList {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.roomButton,
+.sessionItem,
+.messageCard {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+}
+
+.roomButton {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 10px;
+  color: var(--fg-secondary);
+  text-align: left;
+}
+
+.roomButtonActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
+}
+
+.roomButton strong,
+.sessionItem strong,
+.messageCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roomButton span,
+.sessionItem small,
+.messageCard span {
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+}
+
+.discussion {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.statusPill,
+.modeReady,
+.modePlanned {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.modeButton {
+  cursor: pointer;
+}
+
+.modeButton:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.modeSelected {
+  border-color: color-mix(in srgb, var(--accent-cool) 52%, var(--border-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-cool) 32%, transparent);
+}
+
+.statusPill,
+.modeReady {
+  color: var(--state-success);
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
+}
+
+.modePlanned {
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
+.topicBar,
+.createBox {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.createBoxHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.createBoxHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.createBoxHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+}
+
+.topicBar {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.topicBar input,
+.createBox input {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  color: var(--fg-primary);
+}
+
+.messageList {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+}
+
+.messageCard {
+  padding: 10px 12px;
+}
+
+.messageCard header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.messageCard p {
+  margin: 8px 0 0;
+  color: var(--fg-secondary);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.messageCardFailed {
+  border-color: color-mix(in srgb, var(--state-error) 35%, var(--border-soft));
+}
+
+.emptyState {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  min-height: 220px;
+  color: var(--fg-tertiary);
+  text-align: center;
+}
+
+.sessionItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 9px 10px;
+}
+
+.sessionSelectLine {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sessionSelectLine span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.sessionActions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sessionIconButton,
+.sessionDeleteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-secondary);
+  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+}
+
+.sessionDeleteButton {
+  color: var(--state-error);
+}
+
+.sessionTitleInput {
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  color: var(--fg-primary);
+}
+
+.newAgentButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 34px;
+  margin-bottom: 8px;
+  border: 1px dashed color-mix(in srgb, var(--accent-cool) 45%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+}
+
+.modeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+@media (max-width: 1040px) {
+  .workspace {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(340px, 1.4fr);
+  }
+
+  .workspace > .panel:last-child {
+    grid-column: 1 / -1;
+    min-height: 260px;
+  }
+}
+
+@media (max-width: 760px) {
+  .summaryGrid,
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .topicBar {
+    grid-template-columns: 1fr;
+  }
+}

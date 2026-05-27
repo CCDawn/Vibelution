@@ -2,6 +2,26 @@
 # -*- coding: utf-8 -*-
 
 from core.infrastructure.tool_recommender import decide_next_tools
+from core.infrastructure.tool_intents import TOOL_INTENTS, humanize_tool_name
+from tools.Key_Tools import create_llm_facing_tools
+
+
+LEGACY_AGENT_TOOL_NAMES = {
+    "read_file",
+    "list_directory",
+    "check_python_syntax",
+    "create_file",
+    "execute_shell_command",
+    "run_powershell",
+    "run_batch",
+    "find_definitions_tool",
+    "find_function_calls_tool",
+    "get_file_entities",
+    "get_file_entities_tool",
+    "list_file_entities_tool",
+    "get_code_entity_tool",
+    "python_symbol_tool",
+}
 
 
 def test_locate_defaults_to_search_then_symbol():
@@ -18,6 +38,18 @@ def test_locate_defaults_to_search_then_symbol():
     assert decision.next_intent == "locate_text"
     assert "grep_search_tool" in decision.recommended_tools
     assert "cli_tool" in decision.avoid_tools
+
+
+def test_tool_intents_recommend_only_llm_facing_canonical_tools():
+    visible_names = {tool.name for tool in create_llm_facing_tools()}
+
+    for intent in TOOL_INTENTS.values():
+        recommended = set(intent.recommended_tools)
+        assert not (recommended & LEGACY_AGENT_TOOL_NAMES)
+        assert recommended <= visible_names
+
+    for legacy_name in LEGACY_AGENT_TOOL_NAMES:
+        assert humanize_tool_name(legacy_name) == legacy_name
 
 
 def test_pending_continuation_guides_target_selection_without_forcing_range_read():
@@ -40,8 +72,7 @@ def test_pending_continuation_guides_target_selection_without_forcing_range_read
 
     assert decision.next_intent == "choose_read_target"
     assert "grep_search_tool" in decision.recommended_tools
-    assert "list_file_entities_tool" in decision.recommended_tools
-    assert "get_code_entity_tool" in decision.recommended_tools
+    assert "code_symbol_tool" in decision.recommended_tools
     assert "read_file_tool" in decision.recommended_tools
     assert "cli_tool" in decision.avoid_tools
     assert "core/demo.py" in decision.reason

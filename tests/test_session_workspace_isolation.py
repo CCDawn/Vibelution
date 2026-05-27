@@ -118,6 +118,50 @@ def test_run_session_turn_injects_session_workspace(tmp_path, monkeypatch):
     assert "## " in readable_log.read_text(encoding="utf-8")
 
 
+def test_run_session_turn_uses_selected_agent_profile(tmp_path, monkeypatch):
+    _seed_session(tmp_path, "session-live")
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_profile_id"] = "subagent_explorer"
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    captured = {}
+
+    class ProfileAwareAgent:
+        def __init__(self, workspace_path=None, config=None):
+            captured["workspace_path"] = str(workspace_path or "")
+            captured["primary_profile_id"] = config.llm.get_profile(role="primary").profile_id
+            captured["primary_model"] = config.llm.get_profile(role="primary").model
+            captured["explorer_model"] = config.llm.get_profile("subagent_explorer").model
+
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "done",
+                "raw_output": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    base_config = session_service.get_config()
+    base_config = base_config.model_copy(deep=True)
+    base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
+    base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
+    base_config.llm.profiles["subagent_explorer"].model = "explorer-model"
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    monkeypatch.setattr(session_service, "create_chat_agent", ProfileAwareAgent)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
+
+    session_service.submit_session_message("session-live", "do it", mental_model_enabled=False)
+
+    assert Path(captured["workspace_path"]) == (tmp_path / "workspace" / "sessions" / "session-live").resolve()
+    assert captured["primary_profile_id"] == "primary"
+    assert captured["primary_model"] == "explorer-model"
+    assert captured["explorer_model"] == "explorer-model"
+
+
 def test_tool_storage_overrides_are_context_local(tmp_path):
     session_workspace = tmp_path / "workspace" / "sessions" / "session-live"
     session_workspace.mkdir(parents=True)

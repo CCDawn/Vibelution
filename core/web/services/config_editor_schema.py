@@ -10,6 +10,7 @@ RUNTIME_PROFILE_OPTIONS = ["safe_local", "safe_remote", "debug", "ci"]
 AGENT_MODE_OPTIONS = ["chat", "self_evolution", "supervised_evolution"]
 SEGMENTATION_STRATEGY_OPTIONS = ["task_contiguous"]
 AVATAR_PRESET_OPTIONS = ["lobster", "shrimp", "crab", "cat", "chick", "bunny", "slime", "penguin", "moose"]
+USER_AVATAR_PRESET_OPTIONS = ["default", "circle", "spark", "codex", "minimal", "initial"]
 WORKBENCH_WINDOW_MODE_OPTIONS = ["windowed", "fullscreen"]
 
 SECTION_LABELS = {
@@ -17,6 +18,7 @@ SECTION_LABELS = {
         "runtime": "运行时",
         "workbench": "工作台启动",
         "avatar": "形象",
+        "user_profile": "用户信息",
         "llm.profiles": "模型配置",
         "llm.discovery": "模型发现",
         "agent": "智能体",
@@ -41,6 +43,7 @@ SECTION_LABELS = {
         "runtime": "Runtime",
         "workbench": "Workbench Startup",
         "avatar": "Avatar",
+        "user_profile": "User Info",
         "llm.profiles": "Model Configs",
         "llm.discovery": "Model Discovery",
         "agent": "Agent",
@@ -72,6 +75,11 @@ FIELD_LABELS = {
         "workbench.frontend_port": "前端页面端口",
         "workbench.window_mode": "窗口模式",
         "avatar.preset": "形象预设",
+        "user_profile.display_name": "用户显示名",
+        "user_profile.bio": "用户背景",
+        "user_profile.preferences": "用户偏好",
+        "user_profile.avatar_preset": "用户头像",
+        "user_profile.avatar_image_path": "本地头像图片",
         "llm.profiles.primary.provider_id": "模型服务绑定",
         "llm.profiles.primary.model": "模型名称",
         "llm.profiles.primary.temperature": "温度",
@@ -149,6 +157,11 @@ FIELD_LABELS = {
         "workbench.frontend_port": "Frontend Page Port",
         "workbench.window_mode": "Workbench Window Mode",
         "avatar.preset": "Avatar Preset",
+        "user_profile.display_name": "User Display Name",
+        "user_profile.bio": "User Background",
+        "user_profile.preferences": "User Preferences",
+        "user_profile.avatar_preset": "User Avatar",
+        "user_profile.avatar_image_path": "Local Avatar Image",
         "llm.profiles.primary.provider_id": "Provider Binding",
         "llm.profiles.primary.model": "Model Name",
         "llm.profiles.primary.temperature": "Temperature",
@@ -296,6 +309,7 @@ BADGE_LABELS = {
         "Path": "路径",
         "Text": "文本",
         "Multiline": "多行文本",
+        "Image": "图片",
     },
     "en": {
         "Group": "Group",
@@ -311,6 +325,7 @@ BADGE_LABELS = {
         "Path": "Path",
         "Text": "Text",
         "Multiline": "Multiline",
+        "Image": "Image",
     },
 }
 
@@ -340,6 +355,11 @@ FIELD_HINTS = {
         "git.commit_message_prompt": "Git 页面生成提交说明时使用的系统提示词模板。可使用 {summary}、{files}、{diff}、{branch} 占位符。",
         "network.proxy_enabled": "启用后，科研调研等真实公网请求会通过下方代理地址访问。",
         "network.proxy_url": "填写 HTTP/HTTPS 代理地址，例如 http://127.0.0.1:7890。",
+        "user_profile.display_name": "用于工作台和对话消息的用户名称；为空时回退到系统用户名。",
+        "user_profile.bio": "简短用户背景，会作为 agent 的参考依据进入系统提示词。",
+        "user_profile.preferences": "用户偏好列表，会作为 agent 的参考依据进入系统提示词。",
+        "user_profile.avatar_preset": "用户头像预设，仅用于前端显示，不把图片内容传给模型。",
+        "user_profile.avatar_image_path": "上传本地图片后会复制到项目头像目录，仅用于前端显示，不把图片内容传给模型。",
     },
     "en": {
         "runtime.profile": "Sets the default runtime posture. Start with safe_local or debug in most cases.",
@@ -366,6 +386,11 @@ FIELD_HINTS = {
         "git.commit_message_prompt": "System prompt template for generated commit messages. Supports {summary}, {files}, {diff}, and {branch}.",
         "network.proxy_enabled": "When enabled, real public research requests use the proxy URL below.",
         "network.proxy_url": "HTTP/HTTPS proxy URL, for example http://127.0.0.1:7890.",
+        "user_profile.display_name": "User name used by the workbench and chat messages. Falls back to the OS user name when empty.",
+        "user_profile.bio": "Short user background included as agent reference context.",
+        "user_profile.preferences": "User preference list included as agent reference context.",
+        "user_profile.avatar_preset": "User avatar preset for frontend display only. Image content is not sent to the model.",
+        "user_profile.avatar_image_path": "Local image uploads are copied into the project avatar directory for frontend display only. Image content is not sent to the model.",
     },
 }
 
@@ -373,6 +398,7 @@ EDITOR_SECTION_SPECS = [
     ("runtime", "runtime"),
     ("workbench", "workbench"),
     ("avatar", "avatar"),
+    ("user-profile", "user_profile"),
     ("llm-profiles", "llm.profiles"),
     ("llm-discovery", "llm.discovery"),
     ("agent", "agent"),
@@ -462,6 +488,8 @@ def _field_options(path: str, lang: str) -> list[dict[str, str]]:
         return [{"value": value, "label": labels.get(lang, labels["en"]).get(value, value)} for value in WORKBENCH_WINDOW_MODE_OPTIONS]
     if path == "avatar.preset":
         return [{"value": value, "label": value} for value in AVATAR_PRESET_OPTIONS]
+    if path == "user_profile.avatar_preset":
+        return [{"value": value, "label": value} for value in USER_AVATAR_PRESET_OPTIONS]
     if path in {"agent.default_mode", "agent.modes.default_shell_mode", "agent.modes.default_headless_mode"}:
         return [{"value": value, "label": value} for value in AGENT_MODE_OPTIONS]
     if path == "evolution.chat_dataset.segmentation_strategy":
@@ -479,7 +507,9 @@ def _field_options_for_config(path: str, public_config: dict[str, Any], lang: st
 
 
 def _field_kind(path: str, value: Any, options: list[dict[str, str]] | None = None) -> tuple[str, str]:
-    if path == "git.commit_message_prompt":
+    if path == "user_profile.avatar_image_path":
+        return "image", "Image"
+    if path in {"git.commit_message_prompt", "user_profile.bio"}:
         return "multiline", "Multiline"
     if isinstance(value, bool):
         return "boolean", "Toggle"
@@ -501,7 +531,8 @@ def _field_kind(path: str, value: Any, options: list[dict[str, str]] | None = No
         return "secret", "Secret"
     if any(token in path for token in ("url", "api_base", "base_url")):
         return "url", "URL"
-    if any(token in path for token in ("path", "workspace", "directory", "directories", "file", "log")):
+    path_tokens = set(str(path or "").replace("-", "_").replace(".", "_").split("_"))
+    if path_tokens.intersection({"path", "workspace", "directory", "directories", "file", "log"}):
         return "path", "Path"
     return "text", "Text"
 

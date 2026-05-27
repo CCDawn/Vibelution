@@ -98,6 +98,12 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     assert summary["schema_version"] == 2
     assert summary["package_id"] == scene_id
     assert summary["display_name"] == package_index["display_name"]
+    assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
+    assert summary["agent_brief"]["needs_action"] is True
+    assert summary["agent_brief"]["actionability"] == "fix_required"
+    assert summary["agent_brief"]["primary_issue"] == "llm.invoke.failed"
+    assert summary["agent_brief"]["active_cluster_count"] == 1
+    assert summary["agent_brief"]["evidence_refs"]
     assert summary["primary_files"]["package_index"] == "package_index.json"
     assert summary["primary_files"]["manifest"] == "manifest.json"
     assert summary["primary_files"]["timeline"] == "timeline.jsonl"
@@ -114,7 +120,9 @@ def test_runtime_scene_event_writes_standalone_package_index(tmp_path, monkeypat
     assert summary["event_counts"]["lifecycle_events"] == 2
     assert summary["event_counts"]["errors"] == 1
     assert summary["event_counts"]["warnings"] == 1
-    assert summary["event_counts"]["research_logs"] == 0
+    assert summary["event_counts"]["research_files"] == 0
+    assert summary["event_counts"]["research_events"] == 0
+    assert "research_logs" not in summary["event_counts"]
     assert summary["diagnosis"]["severity"] == "error"
     assert summary["diagnosis"]["issueState"]["activeClusterCount"] == 2
     assert summary["diagnosis"]["evidencePaths"][0] == "events/llm.jsonl"
@@ -184,7 +192,9 @@ def test_research_scene_event_writes_dedicated_research_package_section(tmp_path
     assert research_summary["event_codes"]["research.prompt.updated"] == 1
     assert research_summary["agents"]["broad"] == 1
     summary = json.loads(scene_dir.joinpath("summary.json").read_text(encoding="utf-8"))
-    assert summary["event_counts"]["research_logs"] == 2
+    assert summary["event_counts"]["research_files"] == 2
+    assert summary["event_counts"]["research_events"] == 1
+    assert "research_logs" not in summary["event_counts"]
     assert summary["sections"]["research"]["path"] == "research"
 
 

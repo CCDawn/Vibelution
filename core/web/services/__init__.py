@@ -2,6 +2,9 @@
 
 __all__ = [
     "chat_review_service",
+    "chat_room_service",
+    "agent_directory_service",
+    "conversation_service",
     "config_service",
     "diagnostics_service",
     "evolution_service",

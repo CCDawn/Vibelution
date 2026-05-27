@@ -69,6 +69,8 @@ type Copy = {
   matrixPrompt: string;
   conversationMemory: string;
   conversationMemoryHint: string;
+  researchMemory: string;
+  researchMemoryHint: string;
   selfEvolutionMemory: string;
   selfEvolutionMemoryHint: string;
   supervisedEvolutionMemory: string;
@@ -160,7 +162,7 @@ type Copy = {
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
 export type MemoryRouteView = "overview" | "effective" | "manage" | "sources";
-type MemoryChannel = "conversation" | "self_evolution" | "supervised_evolution" | "explicit_read";
+type MemoryChannel = "conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read";
 type ChannelFilter = MemoryChannel | "";
 type MemoryPair = {
   section: MemorySection;
@@ -177,7 +179,7 @@ type EditDraft = {
 };
 
 const FILTER_MODES: FilterMode[] = ["all", "prompt", "visible", "manual", "missing"];
-const MEMORY_CHANNELS: MemoryChannel[] = ["conversation", "self_evolution", "supervised_evolution", "explicit_read"];
+const MEMORY_CHANNELS: MemoryChannel[] = ["conversation", "research", "self_evolution", "supervised_evolution", "explicit_read"];
 
 const COPY: Record<"zh" | "en", Copy> = {
   zh: {
@@ -222,6 +224,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     matrixPrompt: "进 prompt",
     conversationMemory: "对话",
     conversationMemoryHint: "当前会话历史、PromptManager 与 Git 现场。",
+    researchMemory: "科研",
+    researchMemoryHint: "科研知识库、来源溯源、论断、证据与缺口。",
     selfEvolutionMemory: "自进化",
     selfEvolutionMemoryHint: "自进化 run prompt、事务和建议基线。",
     supervisedEvolutionMemory: "监督进化",
@@ -352,6 +356,8 @@ const COPY: Record<"zh" | "en", Copy> = {
     matrixPrompt: "in prompt",
     conversationMemory: "Conversation",
     conversationMemoryHint: "Current session history, PromptManager, and Git state.",
+    researchMemory: "Research",
+    researchMemoryHint: "Research knowledge base, source provenance, claims, evidence, and gaps.",
     selfEvolutionMemory: "Self evolution",
     selfEvolutionMemoryHint: "Run prompt, transactions, and advisory baselines.",
     supervisedEvolutionMemory: "Supervised evolution",
@@ -589,6 +595,9 @@ function channelLabel(copy: Copy, channelId: MemoryChannel) {
   if (channelId === "conversation") {
     return copy.conversationMemory;
   }
+  if (channelId === "research") {
+    return copy.researchMemory;
+  }
   if (channelId === "self_evolution") {
     return copy.selfEvolutionMemory;
   }
@@ -601,6 +610,9 @@ function channelLabel(copy: Copy, channelId: MemoryChannel) {
 function channelHint(copy: Copy, channelId: MemoryChannel) {
   if (channelId === "conversation") {
     return copy.conversationMemoryHint;
+  }
+  if (channelId === "research") {
+    return copy.researchMemoryHint;
   }
   if (channelId === "self_evolution") {
     return copy.selfEvolutionMemoryHint;
@@ -627,6 +639,9 @@ function itemChannelPills(copy: Copy, item: MemoryItem) {
 function channelFilterLabel(copy: Copy, channelFilter: ChannelFilter) {
   if (channelFilter === "conversation") {
     return copy.conversationMemory;
+  }
+  if (channelFilter === "research") {
+    return copy.researchMemory;
   }
   if (channelFilter === "self_evolution") {
     return copy.selfEvolutionMemory;
@@ -1030,6 +1045,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         title: copy.conversationMemory,
         hint: copy.conversationMemoryHint,
         ...countChannelItems(allPairs, "conversation"),
+      },
+      {
+        id: "research",
+        channel: "research" as const,
+        title: copy.researchMemory,
+        hint: copy.researchMemoryHint,
+        ...countChannelItems(allPairs, "research"),
       },
       {
         id: "self",

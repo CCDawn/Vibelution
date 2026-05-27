@@ -23,6 +23,7 @@ from core.runtime_manager.evolution_store import (
 from core.runtime_manager.work_run_leases import leases_for_snapshot
 
 from .i18n import get_web_language, text_for
+from .avatar_image_service import avatar_image_url
 from .session_service import (
     get_active_session_detail,
     list_active_session_work_runs,
@@ -85,6 +86,7 @@ def get_runtime_summary() -> dict:
     work_runs = _work_run_summary()
     workbench = _workbench_payload(lang, runtime_manager)
     lifecycle_proof = _runtime_lifecycle_proof(lang, runtime_manager, workbench, work_runs)
+    user_profile = _user_profile_payload(public_config)
     task_summary = (
         active_session.get("taskSummary")
         or text_for(
@@ -110,7 +112,8 @@ def get_runtime_summary() -> dict:
         "modeAvailability": contract["modeAvailability"],
         "domainAvailability": contract["domainAvailability"],
         "agentName": "Vibelution",
-        "userName": _local_user_name(),
+        "userName": _display_user_name(public_config),
+        "userProfile": user_profile,
         "agentStatusLine": _agent_status_line(lang, status, current_phase),
         "sessionTitle": active_session.get("title")
         or text_for(lang, zh="网页工作台 Shell", en="Web workbench shell"),
@@ -452,6 +455,26 @@ def _local_user_name() -> str:
         return ""
 
 
+def _user_profile_payload(public_config: dict | None) -> dict[str, object]:
+    profile = public_config.get("user_profile", {}) if isinstance(public_config, dict) else {}
+    if not isinstance(profile, dict):
+        profile = {}
+    preferences = profile.get("preferences") if isinstance(profile.get("preferences"), list) else []
+    return {
+        "displayName": str(profile.get("display_name") or "").strip(),
+        "bio": str(profile.get("bio") or "").strip(),
+        "preferences": [str(item).strip() for item in preferences if str(item).strip()],
+        "avatarPreset": str(profile.get("avatar_preset") or "default").strip() or "default",
+        "avatarImageUrl": avatar_image_url(profile.get("avatar_image_path")),
+    }
+
+
+def _display_user_name(public_config: dict | None) -> str:
+    profile = _user_profile_payload(public_config)
+    display_name = str(profile.get("displayName") or "").strip()
+    return display_name or _local_user_name()
+
+
 def _stop_active_chat_turns_before_shutdown() -> list[dict[str, object]]:
     """Persist active chat partials before the backend/launcher is closed."""
 
@@ -559,6 +582,7 @@ def _force_cancel_supervised_worktree_evolution_for_shutdown(reason: str) -> lis
 
 def _work_run_summary() -> dict[str, dict[str, dict | None]]:
     chat = load_chat_turn_work_run_summary()
+    chat_room = _safe_load_chat_room_work_run_summary()
     self_active = _safe_load_evolution_work_run("self", active=True)
     self_latest = _safe_load_evolution_work_run("self", active=False)
     supervised_active = _safe_load_evolution_work_run("supervised", active=True)
@@ -568,16 +592,33 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
     return {
         "active": {
             "chat_turn": chat.get("active"),
+            "chat_room_round": chat_room.get("active"),
             "self_evolution_run": self_active,
             "supervised_evolution_run": supervised_active,
             "supervised_worktree_evolution_run": supervised_worktree_active,
         },
         "latest": {
             "chat_turn": chat.get("latest"),
+            "chat_room_round": chat_room.get("latest"),
             "self_evolution_run": self_latest,
             "supervised_evolution_run": supervised_latest,
             "supervised_worktree_evolution_run": supervised_worktree_latest,
         },
+    }
+
+
+def _safe_load_chat_room_work_run_summary() -> dict[str, dict | None]:
+    try:
+        from . import chat_room_service
+
+        payload = chat_room_service.load_chat_room_work_run_summary()
+    except Exception:
+        return {"active": None, "latest": None}
+    if not isinstance(payload, dict):
+        return {"active": None, "latest": None}
+    return {
+        "active": payload.get("active") if isinstance(payload.get("active"), dict) else None,
+        "latest": payload.get("latest") if isinstance(payload.get("latest"), dict) else None,
     }
 
 

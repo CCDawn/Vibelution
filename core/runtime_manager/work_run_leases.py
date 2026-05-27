@@ -128,6 +128,8 @@ def default_leases_for_run_kind(run_kind: str) -> list[str]:
     kind = normalize_run_kind(run_kind)
     if kind == "chat_turn":
         return [READONLY_CHAT_LEASE]
+    if kind == "chat_room_round":
+        return [READONLY_CHAT_LEASE]
     if kind == "supervised_evolution_run":
         return [EVALUATION_LEASE]
     if kind == "supervised_worktree_evolution_run":

@@ -12,7 +12,7 @@ from langchain_core.messages import ToolMessage
 from core.infrastructure.workspace_manager import get_workspace
 from core.llm import get_llm_client
 
-from .agent_templates import RESEARCH_PROMPT_FILES, normalize_research_agent_config
+from .agent_templates import normalize_research_agent_config
 from .models import (
     CandidateTheme,
     EvidenceRecord,
@@ -66,6 +66,7 @@ class ResearchAgentRunner:
         session: ResearchDiscoverySession,
         suggested_queries: list[str],
         existing_sources: list[ResearchSource],
+        knowledge_context: dict[str, Any] | None = None,
         trace_sink: TraceSink | None = None,
     ) -> AgentSearchResult:
         raise NotImplementedError
@@ -116,6 +117,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         session: ResearchDiscoverySession,
         suggested_queries: list[str],
         existing_sources: list[ResearchSource],
+        knowledge_context: dict[str, Any] | None = None,
         trace_sink: TraceSink | None = None,
     ) -> AgentSearchResult:
         agent_key = "broad" if phase == "broad" else "deep"
@@ -130,7 +132,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         )
         _append_trace(
             trace,
-            _trace("prompt", "读取阶段提示词", f"载入 `{RESEARCH_PROMPT_FILES[agent_key]}`，并附加结构化 JSON 输出契约。"),
+            _trace("prompt", "读取阶段提示词", f"载入 `{profile.get('promptFilename') or ''}`，并附加结构化 JSON 输出契约。"),
             trace_sink,
         )
         _append_trace(trace, _trace("plan", "准备搜索种子", " / ".join(suggested_queries[:4])), trace_sink)
@@ -147,6 +149,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
                         "preferences": session.preferences,
                         "suggestedQueries": suggested_queries,
                         "existingSources": [_source_context(item) for item in existing_sources[:16]],
+                        "knowledgeContext": knowledge_context or {},
                     },
                     ensure_ascii=False,
                 ),
@@ -203,6 +206,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
                 "toolCallCount": tool_call_count,
                 "final": final_payload or {},
                 "executionMode": "llm_agent_with_search_tools",
+                "knowledgeContextDecision": (knowledge_context or {}).get("decision") or "",
                 "trace": trace,
             },
             trace=trace,
@@ -400,7 +404,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         profile = self._agent_profile(agent_key)
         trace: list[dict[str, Any]] = []
         _append_trace(trace, _trace("agent", f"{profile.get('label') or agent_key} 启动", f"使用 LLM 配置 `{profile['llmConfigId']}`。"), trace_sink)
-        _append_trace(trace, _trace("prompt", "读取阶段提示词", f"载入 `{RESEARCH_PROMPT_FILES[agent_key]}`，并附加结构化 JSON 输出契约。"), trace_sink)
+        _append_trace(trace, _trace("prompt", "读取阶段提示词", f"载入 `{profile.get('promptFilename') or ''}`，并附加结构化 JSON 输出契约。"), trace_sink)
         _append_trace(trace, _trace("input", "整理阶段输入", _payload_summary(payload)), trace_sink)
         client = get_llm_client(profile_id=profile["llmConfigId"])
         response = client.invoke(
@@ -466,7 +470,10 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
 
     def _system_prompt(self, agent_key: str, contract: str) -> str:
         workspace = get_workspace()
-        filename = RESEARCH_PROMPT_FILES[agent_key]
+        profile = self._agent_profile(agent_key)
+        filename = str(profile.get("promptFilename") or "").strip()
+        if not filename:
+            raise ValueError(f"Research agent {agent_key} has no prompt file configured.")
         prompt = workspace.read_research_prompt(filename)
         return f"{prompt.strip()}\n\n{contract.strip()}\n\nReturn valid JSON only. Do not wrap it in Markdown."
 
@@ -484,6 +491,7 @@ class DeterministicResearchAgentRunner(ResearchAgentRunner):
         session: ResearchDiscoverySession,
         suggested_queries: list[str],
         existing_sources: list[ResearchSource],
+        knowledge_context: dict[str, Any] | None = None,
         trace_sink: TraceSink | None = None,
     ) -> AgentSearchResult:
         results: list[SearchResult] = []
@@ -522,6 +530,7 @@ class DeterministicResearchAgentRunner(ResearchAgentRunner):
             profile={
                 "executionMode": "deterministic_test_double",
                 "agentKey": "broad" if phase == "broad" else "deep",
+                "knowledgeContextDecision": (knowledge_context or {}).get("decision") or "",
                 "trace": trace,
             },
             trace=trace,

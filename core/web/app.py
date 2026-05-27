@@ -17,6 +17,9 @@ from starlette.responses import Response
 
 from .control import WebControlGuardMiddleware, control_token_payload, ensure_control_source, trusted_control_origins
 from .routes.config import router as config_router
+from .routes.agents import router as agents_router
+from .routes.chat_rooms import router as chat_rooms_router
+from .routes.conversations import router as conversations_router
 from .routes.diagnostics import router as diagnostics_router
 from .routes.evolution import router as evolution_router
 from .routes.files import router as files_router
@@ -39,6 +42,10 @@ INDEX_CACHE_HEADERS = {
     "Pragma": "no-cache",
     "Expires": "0",
 }
+
+
+class UTF8JSONResponse(JSONResponse):
+    media_type = "application/json; charset=utf-8"
 
 
 def _looks_like_static_asset_request(full_path: str) -> bool:
@@ -172,6 +179,7 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
         lifespan=_lifespan,
+        default_response_class=UTF8JSONResponse,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -193,7 +201,10 @@ def create_app() -> FastAPI:
         return control_token_payload()
 
     app.include_router(runtime_router, prefix="/api")
+    app.include_router(agents_router, prefix="/api")
+    app.include_router(conversations_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
+    app.include_router(chat_rooms_router, prefix="/api")
     app.include_router(tools_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
     app.include_router(git_router, prefix="/api")

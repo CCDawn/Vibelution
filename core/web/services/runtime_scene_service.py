@@ -1031,11 +1031,11 @@ def _save_scene_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
 
 def _save_runtime_scene_package_index(scene_dir: Path, package_index: dict[str, Any]) -> None:
     index_path = scene_dir / PACKAGE_INDEX_PATH
-    payload = _runtime_scene_package_index_payload(package_index)
+    payload = _runtime_scene_package_index_payload(scene_dir, package_index)
     index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _runtime_scene_package_index_payload(package_index: dict[str, Any]) -> dict[str, Any]:
+def _runtime_scene_package_index_payload(scene_dir: Path, package_index: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": 2,
         "package_id": package_index["packageId"],
@@ -1058,6 +1058,7 @@ def _runtime_scene_package_index_payload(package_index: dict[str, Any]) -> dict[
         "agent_dir": AGENT_DIR,
         "artifacts_dir": ARTIFACTS_DIR,
         "research_dir": RESEARCH_DIR,
+        "snapshot_metadata": _runtime_scene_snapshot_metadata(scene_dir),
     }
 
 
@@ -1089,6 +1090,8 @@ def _runtime_scene_summary_payload(
         "ended_at": package_index["endedAt"],
         "duration_seconds": package_index["durationSeconds"],
         "event_counts": _runtime_scene_summary_counts(scene_dir),
+        "snapshot_metadata": _runtime_scene_snapshot_metadata(scene_dir),
+        "agent_brief": _runtime_scene_agent_brief(diagnosis),
         "diagnosis": diagnosis,
         "primary_files": {
             "summary": SUMMARY_PATH,
@@ -1130,6 +1133,93 @@ def _runtime_scene_summary_payload(
     }
 
 
+def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
+    """Build a compact agent-facing diagnosis view for one runtime scene.
+
+    The full ``diagnosis`` object is intentionally rich, but most agent-side
+    triage only needs to know whether action is required, what the primary
+    issue is, and which evidence paths should be opened first.  Keeping this
+    brief in ``summary.json`` reduces repeated reads of timeline/raw logs.
+    """
+    issue_state = diagnosis.get("issueState") if isinstance(diagnosis.get("issueState"), dict) else {}
+    evidence_paths = diagnosis.get("evidencePaths") if isinstance(diagnosis.get("evidencePaths"), list) else []
+    severity = str(diagnosis.get("severity") or issue_state.get("severity") or "info")
+    active_clusters = issue_state.get("activeClusters") if isinstance(issue_state.get("activeClusters"), list) else []
+    active_count = int(issue_state.get("activeClusterCount") or 0)
+    if severity in {"error", "warning"} and active_clusters:
+        active_count = len(
+            [
+                cluster
+                for cluster in active_clusters
+                if isinstance(cluster, dict) and str(cluster.get("severity") or "") == severity
+            ]
+        )
+    policy_count = int(issue_state.get("policyClusterCount") or 0)
+    historical_count = int(issue_state.get("historicalClusterCount") or 0)
+    first_signal = diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else {}
+    primary_issue = str(
+        first_signal.get("event")
+        or first_signal.get("type")
+        or first_signal.get("eventCode")
+        or first_signal.get("component")
+        or _runtime_scene_diagnosis_status(issue_state)
+        or "none"
+    )
+
+    if active_count > 0 or severity in {"error", "critical"}:
+        diagnosis_status = "active_issue"
+        needs_action = True
+        actionability = "fix_required"
+        do_not_do = ["do not ignore active clusters without checking their evidence paths"]
+    elif policy_count > 0:
+        diagnosis_status = "policy_only"
+        needs_action = False
+        actionability = "policy_acknowledge_only"
+        do_not_do = ["do not treat expected policy blocks as product/runtime bugs"]
+    elif historical_count > 0:
+        diagnosis_status = "resolved"
+        needs_action = False
+        actionability = "no_action_needed"
+        do_not_do = ["do not keep chasing historical recovered errors as active blockers"]
+    else:
+        diagnosis_status = "healthy"
+        needs_action = False
+        actionability = "no_action_needed"
+        do_not_do = ["do not open raw logs unless a new signal appears"]
+
+    return {
+        "diagnosis_status": diagnosis_status,
+        "needs_action": needs_action,
+        "actionability": actionability,
+        "primary_issue": primary_issue,
+        "severity": severity,
+        "active_cluster_count": active_count,
+        "policy_cluster_count": policy_count,
+        "historical_cluster_count": historical_count,
+        "next_minimal_action": str(diagnosis.get("agentNextStep") or "read summary.json first"),
+        "evidence_refs": evidence_paths[:5],
+        "do_not_do": do_not_do,
+    }
+
+
+def _runtime_scene_snapshot_metadata(scene_dir: Path) -> dict[str, Any]:
+    timeline = _read_scene_timeline(scene_dir)
+    lifecycle = _read_scene_lifecycle(scene_dir, timeline)
+    last_event_timestamp = ""
+    for event in [*timeline, *lifecycle]:
+        ts = str(event.get("ts") or event.get("timestamp") or event.get("recordedAt") or "")
+        if ts and (not last_event_timestamp or ts > last_event_timestamp):
+            last_event_timestamp = ts
+    return {
+        "generated_at": _now_utc(),
+        "source_event_count": len(timeline) + len(lifecycle),
+        "timeline_event_count": len(timeline),
+        "lifecycle_event_count": len(lifecycle),
+        "last_event_timestamp": last_event_timestamp,
+        "is_live_snapshot": not _runtime_scene_has_completed(_load_scene_manifest(scene_dir)),
+    }
+
+
 def _sync_runtime_scene_package_sidecars_if_stale(
     scene_dir: Path,
     manifest: dict[str, Any],
@@ -1148,16 +1238,24 @@ def _runtime_scene_package_sidecars_are_stale(
     manifest: dict[str, Any],
     package_index: dict[str, Any],
 ) -> bool:
-    expected_index = _runtime_scene_package_index_payload(package_index)
-    actual_index = _load_scene_json(scene_dir / PACKAGE_INDEX_PATH)
+    expected_index = _runtime_scene_sidecar_compare_payload(
+        _runtime_scene_package_index_payload(scene_dir, package_index)
+    )
+    actual_index = _runtime_scene_sidecar_compare_payload(
+        _load_scene_json(scene_dir / PACKAGE_INDEX_PATH)
+    )
     if set(actual_index) != set(expected_index):
         return True
     for key, expected_value in expected_index.items():
         if actual_index.get(key) != expected_value:
             return True
 
-    expected_summary = _runtime_scene_summary_payload(scene_dir, manifest, package_index)
-    actual_summary = _load_scene_json(scene_dir / SUMMARY_PATH)
+    expected_summary = _runtime_scene_sidecar_compare_payload(
+        _runtime_scene_summary_payload(scene_dir, manifest, package_index)
+    )
+    actual_summary = _runtime_scene_sidecar_compare_payload(
+        _load_scene_json(scene_dir / SUMMARY_PATH)
+    )
     if set(actual_summary) - {"generated_at"} != set(expected_summary) - {"generated_at"}:
         return True
     for key, expected_value in expected_summary.items():
@@ -1179,6 +1277,16 @@ def _runtime_scene_package_sidecars_are_stale(
     return any(package.get(key) != expected_value for key, expected_value in expected_package_values.items())
 
 
+def _runtime_scene_sidecar_compare_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload) if isinstance(payload, dict) else {}
+    snapshot_metadata = normalized.get("snapshot_metadata")
+    if isinstance(snapshot_metadata, dict):
+        stable_snapshot = dict(snapshot_metadata)
+        stable_snapshot.pop("generated_at", None)
+        normalized["snapshot_metadata"] = stable_snapshot
+    return normalized
+
+
 def _load_scene_json(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -1196,6 +1304,7 @@ def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:
     artifacts = _list_artifacts(scene_dir)
     event_logs = _list_event_logs(scene_dir)
     research_logs = _list_research_logs(scene_dir)
+    research_events = _read_jsonl_file(scene_dir / RESEARCH_EVENTS_PATH)
     severity = _runtime_scene_severity_summary(timeline)
     return {
         "timeline_events": len(timeline),
@@ -1205,7 +1314,8 @@ def _runtime_scene_summary_counts(scene_dir: Path) -> dict[str, int]:
         "agent_logs": len(agent_logs),
         "artifacts": len(artifacts),
         "event_logs": len(event_logs),
-        "research_logs": len(research_logs),
+        "research_files": len(research_logs),
+        "research_events": len(research_events),
         "supervised_evolution_logs": _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_runs")
         + _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/supervised_worktree_runs"),
         "self_evolution_logs": _count_runtime_scene_files(scene_dir, f"{AGENT_DIR}/self_evolution_runs"),
@@ -2837,7 +2947,7 @@ def _runtime_scene_diagnosis_next_step(
     key_entries: list[dict[str, str]],
     startup_trace: dict[str, Any],
 ) -> str:
-    first_path = key_entries[0]["path"] if key_entries else recommended_order[0] if recommended_order else SUMMARY_PATH
+    first_path = recommended_order[0] if recommended_order else key_entries[0]["path"] if key_entries else SUMMARY_PATH
     package_anchor = str(scene_dir_name or scene_id).strip() or scene_id
     historical_errors = int(issue_state.get("historicalErrorCount") or 0)
     historical_warnings = int(issue_state.get("historicalWarningCount") or 0)

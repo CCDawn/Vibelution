@@ -22,7 +22,7 @@
     bus.subscribe("tool:call", on_tool_called)
 
     # 发布事件
-    bus.publish("tool:call", {"name": "read_file", "args": {...}})
+    bus.publish("tool:call", {"name": "read_file_tool", "args": {...}})
 
     # 取消订阅
     bus.unsubscribe("tool:call", on_tool_called)
@@ -151,7 +151,7 @@ class EventBus:
         # 基本使用
         bus = EventBus()
         bus.subscribe("tool:call", my_handler)
-        bus.publish("tool:call", {"name": "read_file"})
+        bus.publish("tool:call", {"name": "read_file_tool"})
 
         # 通配符订阅
         bus.subscribe("tool:*", wildcard_handler)

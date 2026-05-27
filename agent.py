@@ -172,7 +172,7 @@ class SelfEvolvingAgent:
         self.config.set_api_key(self.api_key or "")
 
         # 创建主要工具
-        self.key_tools = Key_Tools.create_llm_facing_tools()
+        self.key_tools = self._filter_tools_for_current_agent(Key_Tools.create_llm_facing_tools())
         self.key_tool_maps = {tool.name for tool in self.key_tools}
         self._key_tool_map = {
             tool.name: tool for tool in self.key_tools if getattr(tool, "name", "")
@@ -316,8 +316,17 @@ class SelfEvolvingAgent:
         """初始化统一 LLM client。"""
         llm = get_llm_client(role="primary", config=self.config)
         self._base_llm = llm
-        self.llm_with_tools = llm.bind_tools(self.key_tools)
+        self.llm_with_tools = llm.bind_tools(self._filter_tools_for_current_agent(self.key_tools))
         self._bound_llm_cache = {"default": self.llm_with_tools}
+
+    @staticmethod
+    def _filter_tools_for_current_agent(tools: List[Any]) -> List[Any]:
+        try:
+            from core.web.services.agent_directory_service import filter_llm_tools_for_current_agent
+
+            return filter_llm_tools_for_current_agent(tools)
+        except Exception:
+            return list(tools or [])
 
     @staticmethod
     def _restart_allowed_tool_names() -> tuple[str, ...]:
@@ -348,7 +357,7 @@ class SelfEvolvingAgent:
                 return self.llm_with_tools
             if base_llm is getattr(self, "_base_llm", None):
                 return self.llm_with_tools
-            return base_llm.bind_tools(self.key_tools)
+            return base_llm.bind_tools(self._filter_tools_for_current_agent(self.key_tools))
 
         if base_llm is not getattr(self, "_base_llm", None):
             allowed_tools = [
@@ -356,6 +365,7 @@ class SelfEvolvingAgent:
                 for name in self._restart_allowed_tool_names()
                 if name in self._key_tool_map
             ]
+            allowed_tools = self._filter_tools_for_current_agent(allowed_tools)
             return base_llm.bind_tools(allowed_tools) if allowed_tools else base_llm
         cached = self._bound_llm_cache.get("restart_focus")
         if cached is not None:
@@ -366,6 +376,7 @@ class SelfEvolvingAgent:
             for name in self._restart_allowed_tool_names()
             if name in self._key_tool_map
         ]
+        allowed_tools = self._filter_tools_for_current_agent(allowed_tools)
         if not allowed_tools:
             return self.llm_with_tools
 
@@ -770,7 +781,9 @@ class SelfEvolvingAgent:
             content = str(item.get("content") or "").strip()
             if not content:
                 continue
-            if role == "user":
+            if role in {"runtime_context", "runtime", "system"}:
+                restored.append(SystemMessage(content=content))
+            elif role == "user":
                 restored.append(build_chat_user_message(content))
             elif role == "assistant":
                 restored.append(AIMessage(content=content))
@@ -779,6 +792,16 @@ class SelfEvolvingAgent:
             self._active_turn_goal = ""
             return
         self._active_turn_messages = restored
+        self._active_turn_goal = "__chat_session__"
+
+    def seed_runtime_context(self, content: str) -> None:
+        """Add non-chat runtime context without making it a user/assistant message."""
+        text = str(content or "").strip()
+        if not text or self._get_mode_policy().mode != AgentMode.CHAT:
+            return
+        if not self._active_turn_messages:
+            self._active_turn_messages = [SystemMessage(content="")]
+        self._active_turn_messages.insert(1, SystemMessage(content=text))
         self._active_turn_goal = "__chat_session__"
 
     def export_turn_carryover(self) -> Dict[str, Any]:

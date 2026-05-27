@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigationType } from "react-router-dom";
-import { GitBranch, LoaderCircle, Moon, Power, RefreshCw, Settings, Sun } from "lucide-react";
+import { Brain, ChevronDown, GitBranch, LoaderCircle, Moon, Power, RefreshCw, ScrollText, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -38,7 +38,9 @@ import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { resolvePollingInterval } from "./pollingPolicy";
 import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
+import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
 import styles from "./AppShell.module.css";
+import packageJson from "../../package.json";
 
 function linkClassName({ isActive }: { isActive: boolean }) {
   return isActive ? `${styles.navLink} ${styles.navLinkActive}` : styles.navLink;
@@ -46,6 +48,7 @@ function linkClassName({ isActive }: { isActive: boolean }) {
 
 const API_FAILURE_TELEMETRY_THROTTLE_MS = 15_000;
 const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
+const APP_VERSION = packageJson.version;
 
 export function shouldSuppressApiFailureTelemetry(
   failure: FetchJsonFailureReport,
@@ -234,6 +237,7 @@ export function AppShell() {
   const [shutdownSettled, setShutdownSettled] = useState(false);
   const [shutdownRequested, setShutdownRequested] = useState(false);
   const [restartRequested, setRestartRequested] = useState(false);
+  const [utilityOpen, setUtilityOpen] = useState(false);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -244,6 +248,7 @@ export function AppShell() {
   );
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
+  const utilityMenuRef = useRef<HTMLDivElement | null>(null);
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(`page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
@@ -359,7 +364,17 @@ export function AppShell() {
     },
     lang,
   );
-  const startupPanel = startupProgress.active ? startupProgress : startupLoadingProgress;
+  const startupLoadingShouldBlock =
+    startupLoadingProgress.active
+    && startupLoadingProgress.tone === "failed"
+    && !configQuery.data
+    && !runtimeQuery.data
+    && !backendHealthQuery.data;
+  const startupPanel = startupProgress.active
+    ? startupProgress
+    : startupLoadingShouldBlock
+      ? startupLoadingProgress
+      : { active: false, title: "", detail: "", stage: "", tone: "idle" as const };
   const shutdownLocallyComplete = shouldTreatShutdownAsLocallyComplete({
     shutdownRequested,
     backendState,
@@ -386,6 +401,9 @@ export function AppShell() {
   const gitTitle = gitAvailable
     ? `${t("gitStatus")}: ${gitStatus?.summary ?? ""}`
     : gitStatus?.error || t("gitUnavailable");
+  const closeUtilityMenu = useCallback(() => {
+    setUtilityOpen(false);
+  }, []);
 
   const frontendStateLabel = {
     connected: t("systemFrontend_connected"),
@@ -513,6 +531,33 @@ export function AppShell() {
     applyWorkbenchDocumentLanguage(document, lang);
     document.title = t("appTitle");
   }, [lang, t]);
+
+  useEffect(() => {
+    if (!utilityOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && utilityMenuRef.current?.contains(target)) {
+        return;
+      }
+      setUtilityOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setUtilityOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [utilityOpen]);
 
   useEffect(() => {
     setFetchJsonFailureReporter((failure) => {
@@ -1029,6 +1074,9 @@ export function AppShell() {
         <div className={styles.brandBlock}>
           <div className={styles.brandCopy}>
             <span className={styles.brand}>Vibelution</span>
+            <span className={styles.versionPill} title={`Vibelution v${APP_VERSION}`}>
+              v{APP_VERSION}
+            </span>
             <span className={styles.brandSubtle}>{t("brandSubtle")}</span>
           </div>
           <div className={styles.topClock} title={timezone} aria-label={`${t("systemTime")}: ${currentTime}`}>
@@ -1109,70 +1157,122 @@ export function AppShell() {
               {t("navSelfEvolution")}
             </span>
           )}
-          <NavLink to="/logs" className={linkClassName}>
-            {t("navLogs")}
-          </NavLink>
-          <NavLink to="/tools" className={linkClassName}>
-            {t("navTools")}
-          </NavLink>
           <NavLink to="/research" className={linkClassName}>
             {t("navResearch")}
-          </NavLink>
-          <NavLink to="/git" className={linkClassName}>
-            {t("navGit")}
-          </NavLink>
-          <NavLink to="/memory" className={linkClassName}>
-            {t("navMemory")}
           </NavLink>
         </nav>
 
         <div className={styles.topActions}>
-          <div className={styles.gitCluster} aria-label={t("gitStatusGuide")} title={gitTitle}>
-            <div className={styles.gitChip}>
-              <GitBranch size={14} />
+          <div
+            ref={utilityMenuRef}
+            className={
+              utilityOpen
+                ? `${styles.utilityCluster} ${styles.utilityClusterOpen}`
+                : styles.utilityCluster
+            }
+            aria-label={t("topUtilityMenu")}
+            title={t("topUtilityMenu")}
+            onMouseEnter={() => setUtilityOpen(true)}
+            onMouseLeave={(event) => {
+              if (!event.currentTarget.contains(document.activeElement)) {
+                setUtilityOpen(false);
+              }
+            }}
+            onBlur={(event) => {
+              const nextTarget = event.relatedTarget;
+              if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+                setUtilityOpen(false);
+              }
+            }}
+          >
+            <button
+              type="button"
+              className={styles.utilityTrigger}
+              aria-haspopup="menu"
+              aria-expanded={utilityOpen}
+              aria-label={t("topUtilityMenu")}
+              title={t("topUtilityMenu")}
+              onClick={() => setUtilityOpen(true)}
+              onFocus={() => setUtilityOpen(true)}
+            >
+              <Wrench size={15} />
+              <span className={styles.utilityTriggerLabel}>{t("topUtilityMenuShort")}</span>
               <span className={`${styles.statusDot} ${styles[`status_${gitTone}`]}`} />
-              <span className={styles.gitBranchName}>{gitBranch}</span>
-              <strong className={styles.gitCount}>{gitValue}</strong>
-            </div>
-            <div className={styles.gitPanel} role="note" aria-live="polite">
-              <div className={styles.gitPanelHeader}>
-                <strong>{t("gitStatusGuide")}</strong>
-                <span>{gitStatus?.summary || t("gitStatusGuideHint")}</span>
+              <ChevronDown size={13} className={styles.utilityChevron} />
+            </button>
+            <div
+              className={styles.utilityPanel}
+              role="menu"
+              aria-label={t("topUtilityMenu")}
+              hidden={!utilityOpen}
+            >
+              <div className={styles.utilityPanelHeader}>
+                <strong>{t("topUtilityMenu")}</strong>
+                <span>{t("topUtilityMenuHint")}</span>
               </div>
-              <div className={styles.gitMetaGrid}>
-                <span>{t("gitBranch")}</span>
-                <strong>{gitBranch}</strong>
-                <span>{t("gitUpstream")}</span>
-                <strong>{gitStatus?.upstream?.name || gitStatus?.upstream?.remote || t("gitNoUpstream")}</strong>
+              <div className={styles.utilityButtonGrid}>
+                <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
+                  <ScrollText size={16} />
+                  <span>{t("navLogs")}</span>
+                </NavLink>
+                <NavLink to="/tools" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
+                  <Wrench size={16} />
+                  <span>{t("navTools")}</span>
+                </NavLink>
+                <NavLink to="/memory" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
+                  <Brain size={16} />
+                  <span>{t("navMemory")}</span>
+                </NavLink>
+                <NavLink to="/git" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
+                  <GitBranch size={16} />
+                  <span>{t("navGit")}</span>
+                </NavLink>
               </div>
-              <div className={styles.gitCountGrid}>
-                <span>
-                  <strong>{gitStatus?.counts.staged ?? 0}</strong>
-                  {t("gitStaged")}
-                </span>
-                <span>
-                  <strong>{gitStatus?.counts.unstaged ?? 0}</strong>
-                  {t("gitUnstaged")}
-                </span>
-                <span>
-                  <strong>{gitStatus?.counts.untracked ?? 0}</strong>
-                  {t("gitUntracked")}
-                </span>
-                <span>
-                  <strong>{gitStatus?.counts.deleted ?? 0}</strong>
-                  {t("gitDeleted")}
-                </span>
-              </div>
-              <div className={styles.gitFileList}>
-                {(gitStatus?.files ?? []).slice(0, 6).map((file) => (
-                  <div key={`${file.status}-${file.path}`} className={styles.gitFileItem}>
-                    <code>{file.status}</code>
-                    <span>{file.path}</span>
+              <div className={styles.gitMiniPanel} aria-label={t("gitStatusGuide")} title={gitTitle}>
+                <div className={styles.gitMiniHeader}>
+                  <div className={styles.gitChip}>
+                    <GitBranch size={14} />
+                    <span className={`${styles.statusDot} ${styles[`status_${gitTone}`]}`} />
+                    <span className={styles.gitBranchName}>{gitBranch}</span>
+                    <strong className={styles.gitCount}>{gitValue}</strong>
                   </div>
-                ))}
-                {gitStatus?.truncated ? <p>{t("gitTruncated")}</p> : null}
-                {gitStatus && gitStatus.available && !gitStatus.files.length ? <p>{t("gitNoChanges")}</p> : null}
-                {gitStatus && !gitStatus.available ? <p>{gitStatus.error || t("gitUnavailable")}</p> : null}
+                  <span>{gitStatus?.summary || t("gitStatusGuideHint")}</span>
+                </div>
+                <div className={styles.gitMetaGrid}>
+                  <span>{t("gitBranch")}</span>
+                  <strong>{gitBranch}</strong>
+                  <span>{t("gitUpstream")}</span>
+                  <strong>{gitStatus?.upstream?.name || gitStatus?.upstream?.remote || t("gitNoUpstream")}</strong>
+                </div>
+                <div className={styles.gitCountGrid}>
+                  <span>
+                    <strong>{gitStatus?.counts.staged ?? 0}</strong>
+                    {t("gitStaged")}
+                  </span>
+                  <span>
+                    <strong>{gitStatus?.counts.unstaged ?? 0}</strong>
+                    {t("gitUnstaged")}
+                  </span>
+                  <span>
+                    <strong>{gitStatus?.counts.untracked ?? 0}</strong>
+                    {t("gitUntracked")}
+                  </span>
+                  <span>
+                    <strong>{gitStatus?.counts.deleted ?? 0}</strong>
+                    {t("gitDeleted")}
+                  </span>
+                </div>
+                <div className={styles.gitFileList}>
+                  {(gitStatus?.files ?? []).slice(0, 6).map((file) => (
+                    <div key={`${file.status}-${file.path}`} className={styles.gitFileItem}>
+                      <code>{file.status}</code>
+                      <span>{file.path}</span>
+                    </div>
+                  ))}
+                  {gitStatus?.truncated ? <p>{t("gitTruncated")}</p> : null}
+                  {gitStatus && gitStatus.available && !gitStatus.files.length ? <p>{t("gitNoChanges")}</p> : null}
+                  {gitStatus && !gitStatus.available ? <p>{gitStatus.error || t("gitUnavailable")}</p> : null}
+                </div>
               </div>
             </div>
           </div>
@@ -1268,7 +1368,12 @@ export function AppShell() {
             aria-label={restartWorkbenchLabel}
             title={restartWorkbenchLabel}
             onClick={() => {
-              void beginRestart();
+              const proceed = () => {
+                void beginRestart();
+              };
+              if (requestWorkbenchExitGuard("restart", proceed)) {
+                proceed();
+              }
             }}
             disabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
           >
@@ -1280,7 +1385,12 @@ export function AppShell() {
             aria-label={closeWorkbenchLabel}
             title={closeWorkbenchLabel}
             onClick={() => {
-              void beginShutdown();
+              const proceed = () => {
+                void beginShutdown();
+              };
+              if (requestWorkbenchExitGuard("shutdown", proceed)) {
+                proceed();
+              }
             }}
             disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
           >

@@ -78,6 +78,9 @@ def normalize_chat_message(item: Any) -> dict[str, Any] | None:
         normalized["mental_snapshot"] = dict(mental_snapshot)
     if tool_calls:
         normalized["tool_calls"] = tool_calls
+    metadata = item.get("metadata")
+    if isinstance(metadata, dict) and metadata:
+        normalized["metadata"] = dict(metadata)
     return normalized
 
 

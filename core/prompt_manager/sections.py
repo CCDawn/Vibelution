@@ -146,6 +146,55 @@ def make_runtime_goal_section(ctx: BuildContext) -> SystemPromptSection:
     )
 
 
+def make_user_profile_section() -> SystemPromptSection:
+    """用户画像：从公开配置读取，作为 agent 的用户参考上下文。"""
+
+    def _compact(value: Any, limit: int) -> str:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 1)].rstrip() + "…"
+
+    def compute() -> Optional[str]:
+        try:
+            from config.public_config import load_public_config
+
+            public_config = load_public_config()
+        except Exception:
+            return None
+
+        profile = public_config.get("user_profile", {}) if isinstance(public_config, dict) else {}
+        if not isinstance(profile, dict):
+            return None
+
+        display_name = _compact(profile.get("display_name"), 80)
+        bio = _compact(profile.get("bio"), 280)
+        raw_preferences = profile.get("preferences")
+        preferences = raw_preferences if isinstance(raw_preferences, list) else []
+        preference_lines = [_compact(item, 160) for item in preferences if _compact(item, 160)]
+
+        if not display_name and not bio and not preference_lines:
+            return None
+
+        lines = ["## 用户画像", "以下信息来自用户在设置区维护的用户信息，是与用户协作时的参考依据。"]
+        if display_name:
+            lines.append(f"- 用户显示名: {display_name}")
+        if bio:
+            lines.append(f"- 用户背景: {bio}")
+        if preference_lines:
+            lines.append("- 用户偏好:")
+            lines.extend(f"  - {item}" for item in preference_lines[:12])
+        return "\n".join(lines)
+
+    return SystemPromptSection(
+        name="USER_PROFILE",
+        compute=compute,
+        cache_break=True,
+        priority=19,
+        description="用户在设置区维护的身份、背景与协作偏好",
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 静态章节工厂（cache_break=False）
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -191,15 +240,22 @@ def make_codebase_map_section() -> SystemPromptSection:
 
 
 def make_tools_index_section(project_root: Path) -> SystemPromptSection:
-    """工具索引 — 从 Key_Tools.create_key_tools() 动态提取已注册工具。"""
+    """工具索引 — 只列出默认暴露给 LLM 的 canonical 工具。"""
 
     def compute() -> Optional[str]:
         try:
-            from tools.Key_Tools import create_key_tools
-            tools = create_key_tools()
+            from tools.Key_Tools import create_llm_facing_tools
+            tools = create_llm_facing_tools()
             if not tools:
                 return None
-            lines = ["## 工具索引", f"共 {len(tools)} 个已注册工具：", ""]
+            lines = [
+                "## 工具索引",
+                f"共 {len(tools)} 个可直接调用工具：",
+                "",
+                "工具使用原则：工具错误是可观察反馈；参数错误时按返回的必填/可选参数和示例修正后重试；",
+                "工具结果和用户目标不一致时，换用更匹配的工具或收窄参数；只有安全、权限、停止和事务类拦截属于硬边界。",
+                "",
+            ]
             for t in tools:
                 desc = getattr(t, 'description', '') or ''
                 first_line = desc.strip().split('\n')[0].strip()
@@ -216,7 +272,7 @@ def make_tools_index_section(project_root: Path) -> SystemPromptSection:
         compute=compute,
         cache_break=False,
         priority=90,
-        description="已注册工具索引（动态生成）",
+        description="LLM 可调用工具索引（动态生成）",
     )
 
 
@@ -556,6 +612,7 @@ def create_default_sections(
     # ── 内置动态章节 ──
 
     sections.append(make_task_checklist_section())
+    sections.append(make_user_profile_section())
     sections.append(make_codebase_map_section())
     sections.append(make_git_memory_section())
     sections.append(make_runtime_log_index_section())

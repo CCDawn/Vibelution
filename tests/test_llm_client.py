@@ -1,5 +1,6 @@
 from langchain_core.messages import AIMessage
 import pytest
+from types import SimpleNamespace
 
 from config import Settings
 from core.orchestration.response_processor import ResponseProcessor
@@ -305,6 +306,41 @@ def test_invoke_preserves_reasoning_content_in_ai_message():
 
     assert message.content == "已完成"
     assert message.additional_kwargs["reasoning_content"] == "先分析再作答"
+
+
+def test_invoke_records_cached_input_token_observation(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+        }
+    )
+    recorded = []
+
+    def backend(_payload):
+        return {
+            "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 8,
+                "total_tokens": 108,
+                "prompt_tokens_details": {"cached_tokens": 64},
+            },
+        }
+
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=backend)
+    message = client.invoke([{"role": "user", "content": "ping"}])
+
+    assert message.response_metadata["usage_observation"]["cached_input_tokens"] == 64
+    assert message.response_metadata["usage_observation"]["cache_hit_rate"] == pytest.approx(0.64)
+    success_event = next(item for item in recorded if item[0][1] == "llm.invoke.succeeded")
+    assert success_event[1]["fields"]["cachedInputTokens"] == 64
+    assert success_event[1]["fields"]["cacheHitRate"] == pytest.approx(0.64)
 
 
 def test_llm_error_exposes_legacy_error_type_alias():
@@ -1196,6 +1232,34 @@ def test_provider_retry_does_not_use_compression_profile_as_fallback():
     )
 
     assert fallback is None
+
+
+def test_usage_observation_accepts_provider_usage_objects():
+    class UsageObject:
+        prompt_tokens = 100
+        completion_tokens = 20
+        total_tokens = 120
+        prompt_tokens_details = {"cached_tokens": 32}
+
+    response = SimpleNamespace(usage=UsageObject())
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://pixel.try-chatapi.com/v1",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+        }
+    )
+    client = LLMClient(config=config, backend=lambda _payload: response)
+
+    usage = client._usage_from_response(response, latency_ms=7)
+
+    assert usage.input_tokens == 100
+    assert usage.output_tokens == 20
+    assert usage.cached_input_tokens == 32
+    assert usage.provider_raw_usage["prompt_tokens_details"] == {"cached_tokens": 32}
 
 
 def test_context_recovery_uses_larger_context_profile_only():

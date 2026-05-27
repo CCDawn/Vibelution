@@ -17,6 +17,10 @@ describe("SelfEvolutionTrack static assets", () => {
     expect(selfEvolutionSource).toContain("--self-sidebar-width");
   });
 
+  it("uses the compact workbench conversation density on the self-evolution workspace", () => {
+    expect(selfEvolutionSource).toContain('density="compact"');
+  });
+
   it("shows a supervised worktree escalation action for risky write start errors", () => {
     expect(selfEvolutionSource).toContain("isWorktreeIsolationStartError");
     expect(selfEvolutionSource).toContain("worktreeIsolationStartError");

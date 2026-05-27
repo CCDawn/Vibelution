@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from inspect import Parameter, signature
 from typing import Any, Iterable
 
 from core.infrastructure.workspace_manager import get_workspace
 
 from .agent_runner import LLMResearchAgentRunner, ResearchAgentRunner
 from .agent_templates import RESEARCH_PROMPT_FILES, ensure_research_prompt_defaults, normalize_research_agent_config
+from .knowledge_base import ResearchKnowledgeBase
 from .models import (
     CandidateTheme,
     EvidenceRecord,
@@ -38,10 +40,12 @@ class ResearchThemeDiscoveryService:
         repository: ResearchRepository | None = None,
         search_provider: ResearchSearchProvider | None = None,
         agent_runner: ResearchAgentRunner | None = None,
+        knowledge_base: ResearchKnowledgeBase | None = None,
     ):
         self.repository = repository or ResearchRepository()
         self.search_provider = search_provider or PublicResearchSearchProvider()
         self.agent_runner = agent_runner or LLMResearchAgentRunner(search_provider=self.search_provider)
+        self.knowledge_base = knowledge_base or ResearchKnowledgeBase(path=self.repository.root.parent / "knowledge_base.json")
 
     def list_sessions(self) -> dict[str, Any]:
         sessions = self.repository.list_sessions()
@@ -87,6 +91,13 @@ class ResearchThemeDiscoveryService:
     def run_broad_search(self, session_id: str) -> dict[str, Any]:
         session = self.repository.load_session(session_id)
         queries = self._broad_queries(session)
+        existing_sources = self.repository.load_sources(session.session_id)
+        knowledge_preflight = self._knowledge_preflight(
+            session=session,
+            phase="broad",
+            queries=queries,
+            existing_sources=existing_sources,
+        )
         run = SearchRun(
             run_id=new_id("broad-search"),
             session_id=session.session_id,
@@ -97,14 +108,30 @@ class ResearchThemeDiscoveryService:
             model_profile=self._model_profile(),
         )
         run.model_profile.update(self._agent_plan(session, phase="broad", queries=queries))
+        run.model_profile["knowledgePreflight"] = knowledge_preflight
         self._append_search_run(session.session_id, run)
+        self._event(
+            session.session_id,
+            "search.broad.started",
+            {
+                "runId": run.run_id,
+                "phase": run.phase,
+                "queryCount": len(queries),
+                "provider": run.provider,
+                "agentKey": "broad",
+                "knowledgePreflight": knowledge_preflight,
+            },
+        )
+        trace_sink = self._search_trace_sink(run)
+        trace_sink(self._knowledge_preflight_trace(knowledge_preflight))
         try:
-            execution = self.agent_runner.run_search(
+            execution = self._run_agent_search(
                 phase="broad",
                 session=session,
                 suggested_queries=queries,
-                existing_sources=self.repository.load_sources(session.session_id),
-                trace_sink=self._search_trace_sink(run),
+                existing_sources=existing_sources,
+                knowledge_context=knowledge_preflight,
+                trace_sink=trace_sink,
             )
         except Exception as exc:
             self._fail_search_run(run, exc)
@@ -130,18 +157,43 @@ class ResearchThemeDiscoveryService:
         )
         self._replace_search_run(run)
         self.repository.save_sources(session.session_id, self._dedupe_sources(sources))
+        try:
+            knowledge_summary = self._archive_sources_to_knowledge_base(
+                session=session,
+                phase="broad",
+                sources=result_sources,
+                search_run=run,
+            )
+        except Exception as exc:
+            self._event(
+                session.session_id,
+                "knowledge_base.ingest.failed",
+                {
+                    "runId": run.run_id,
+                    "phase": "broad",
+                    "sourceCount": len(result_sources),
+                    "agentKey": "broad",
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc),
+                },
+            )
+            raise
         self._mark_downstream_stale(session.session_id, after_stage="search")
         self._touch_session(session, status="reviewing")
         self._event(
             session.session_id,
             "search.broad.completed",
             {
+                "runId": run.run_id,
+                "phase": "broad",
                 "queryCount": len(queries),
                 "sourceCount": len(result_sources),
                 "sourceCounts": source_counts,
                 "failedAttemptCount": failed_count,
                 "agentKey": execution.profile.get("agentKey"),
                 "agentExecution": execution.profile,
+                "knowledgePreflight": knowledge_preflight,
+                "knowledgeBase": knowledge_summary,
                 "trace": execution.trace,
             },
         )
@@ -151,6 +203,12 @@ class ResearchThemeDiscoveryService:
         session = self.repository.load_session(session_id)
         sources = self.repository.load_sources(session.session_id)
         queries = self._deep_queries(session, sources, evidence_requests=evidence_requests)
+        knowledge_preflight = self._knowledge_preflight(
+            session=session,
+            phase="deep",
+            queries=queries,
+            existing_sources=sources,
+        )
         run = SearchRun(
             run_id=new_id("deep-search"),
             session_id=session.session_id,
@@ -161,14 +219,31 @@ class ResearchThemeDiscoveryService:
             model_profile=self._model_profile(),
         )
         run.model_profile.update(self._agent_plan(session, phase="deep", queries=queries))
+        run.model_profile["knowledgePreflight"] = knowledge_preflight
         self._append_search_run(session.session_id, run)
+        self._event(
+            session.session_id,
+            "search.deep.started",
+            {
+                "runId": run.run_id,
+                "phase": run.phase,
+                "queryCount": len(queries),
+                "provider": run.provider,
+                "agentKey": "deep",
+                "evidenceRequests": _string_list(evidence_requests),
+                "knowledgePreflight": knowledge_preflight,
+            },
+        )
+        trace_sink = self._search_trace_sink(run)
+        trace_sink(self._knowledge_preflight_trace(knowledge_preflight))
         try:
-            execution = self.agent_runner.run_search(
+            execution = self._run_agent_search(
                 phase="deep",
                 session=session,
                 suggested_queries=queries,
                 existing_sources=sources,
-                trace_sink=self._search_trace_sink(run),
+                knowledge_context=knowledge_preflight,
+                trace_sink=trace_sink,
             )
         except Exception as exc:
             self._fail_search_run(run, exc)
@@ -194,12 +269,35 @@ class ResearchThemeDiscoveryService:
         )
         self._replace_search_run(run)
         self.repository.save_sources(session.session_id, self._dedupe_sources(merged_sources))
+        try:
+            knowledge_summary = self._archive_sources_to_knowledge_base(
+                session=session,
+                phase="deep",
+                sources=result_sources,
+                search_run=run,
+            )
+        except Exception as exc:
+            self._event(
+                session.session_id,
+                "knowledge_base.ingest.failed",
+                {
+                    "runId": run.run_id,
+                    "phase": "deep",
+                    "sourceCount": len(result_sources),
+                    "agentKey": "deep",
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc),
+                },
+            )
+            raise
         self._mark_downstream_stale(session.session_id, after_stage="search")
         self._touch_session(session, status="reviewing")
         self._event(
             session.session_id,
             "search.deep.completed",
             {
+                "runId": run.run_id,
+                "phase": "deep",
                 "queryCount": len(queries),
                 "sourceCount": len(result_sources),
                 "sourceCounts": source_counts,
@@ -207,37 +305,65 @@ class ResearchThemeDiscoveryService:
                 "evidenceRequests": _string_list(evidence_requests),
                 "agentKey": execution.profile.get("agentKey"),
                 "agentExecution": execution.profile,
+                "knowledgePreflight": knowledge_preflight,
+                "knowledgeBase": knowledge_summary,
                 "trace": execution.trace,
             },
         )
         return self.get_session(session.session_id)
 
+    def get_knowledge_base(self, *, query: str = "", kind: str = "", category: str = "", limit: int = 100) -> dict[str, Any]:
+        return self.knowledge_base.payload(query=query, kind=kind, category=category, limit=limit)
+
     def extract_evidence(self, session_id: str) -> dict[str, Any]:
         session = self.repository.load_session(session_id)
         sources = self.repository.load_sources(session.session_id)
         evidence = self.repository.load_evidence(session.session_id)
-        evidence_result = self.agent_runner.extract_evidence(
-            session=session,
-            sources=sources,
-            existing_evidence=evidence,
-            trace_sink=self._stage_trace_sink(session.session_id, "evidence.extracting", "review"),
-        )
-        evidence = evidence_result.evidence
-        self.repository.save_evidence(session.session_id, evidence)
-        self._mark_downstream_stale(session.session_id, after_stage="evidence")
-        self._touch_session(session, status="reviewing")
         self._event(
             session.session_id,
-            "evidence.extracted",
+            "evidence.extraction.started",
             {
+                "sourceCount": len(sources),
                 "evidenceCount": len(evidence),
-                "evidenceCounts": dict(Counter(item.evidence_type for item in evidence)),
-                "missingEvidenceRequests": evidence_result.missing_evidence_requests,
                 "agentKey": "review",
-                "agentExecution": evidence_result.profile,
-                "trace": evidence_result.trace,
             },
         )
+        try:
+            evidence_result = self.agent_runner.extract_evidence(
+                session=session,
+                sources=sources,
+                existing_evidence=evidence,
+                trace_sink=self._stage_trace_sink(session.session_id, "evidence.extracting", "review"),
+            )
+            evidence = evidence_result.evidence
+            self.repository.save_evidence(session.session_id, evidence)
+            self._mark_downstream_stale(session.session_id, after_stage="evidence")
+            self._touch_session(session, status="reviewing")
+            self._event(
+                session.session_id,
+                "evidence.extracted",
+                {
+                    "evidenceCount": len(evidence),
+                    "evidenceCounts": dict(Counter(item.evidence_type for item in evidence)),
+                    "missingEvidenceRequests": evidence_result.missing_evidence_requests,
+                    "agentKey": "review",
+                    "agentExecution": evidence_result.profile,
+                    "trace": evidence_result.trace,
+                },
+            )
+        except Exception as exc:
+            self._event(
+                session.session_id,
+                "evidence.extraction.failed",
+                {
+                    "sourceCount": len(sources),
+                    "evidenceCount": len(evidence),
+                    "agentKey": "review",
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc),
+                },
+            )
+            raise
         return self.get_session(session.session_id)
 
     def generate_themes(self, session_id: str) -> dict[str, Any]:
@@ -245,39 +371,88 @@ class ResearchThemeDiscoveryService:
         sources = self.repository.load_sources(session.session_id)
         evidence = self.repository.load_evidence(session.session_id)
         if not sources:
+            self._event(
+                session.session_id,
+                "themes.generation.failed",
+                {
+                    "agentKey": "themes",
+                    "reason": "missing_sources",
+                    "sourceCount": 0,
+                    "evidenceCount": len(evidence),
+                    "errorType": "ValueError",
+                    "message": "Run search before generating themes.",
+                },
+            )
             raise ValueError("Run search before generating themes.")
         if not evidence:
+            self._event(
+                session.session_id,
+                "themes.generation.failed",
+                {
+                    "agentKey": "themes",
+                    "reason": "missing_evidence",
+                    "sourceCount": len(sources),
+                    "evidenceCount": 0,
+                    "errorType": "ValueError",
+                    "message": "Extract evidence before generating themes.",
+                },
+            )
             raise ValueError("Extract evidence before generating themes.")
         existing = self.repository.load_candidate_themes(session.session_id)
         for theme in existing:
             if theme.status in {"draft", "shortlisted"}:
                 theme.status = "stale"
-        theme_result = self.agent_runner.generate_themes(
-            session=session,
-            sources=sources,
-            evidence=evidence,
-            parent_run_id=self._latest_run_id(session.session_id),
-            trace_sink=self._stage_trace_sink(session.session_id, "themes.generating", "themes"),
-        )
-        selected = deduplicate_themes(
-            theme_result.themes,
-            limit=session.candidate_count,
-        )
-        for theme in selected:
-            theme.status = "shortlisted"
-        self.repository.save_candidate_themes(session.session_id, [*existing, *selected])
-        self._mark_theme_cards_stale(session.session_id)
-        self._touch_session(session, status="reviewing")
         self._event(
             session.session_id,
-            "themes.generated",
+            "themes.generation.started",
             {
-                "candidateCount": len(selected),
                 "agentKey": "themes",
-                "agentExecution": theme_result.profile,
-                "trace": theme_result.trace,
+                "sourceCount": len(sources),
+                "evidenceCount": len(evidence),
+                "candidateCount": session.candidate_count,
             },
         )
+        try:
+            theme_result = self.agent_runner.generate_themes(
+                session=session,
+                sources=sources,
+                evidence=evidence,
+                parent_run_id=self._latest_run_id(session.session_id),
+                trace_sink=self._stage_trace_sink(session.session_id, "themes.generating", "themes"),
+            )
+            selected = deduplicate_themes(
+                theme_result.themes,
+                limit=session.candidate_count,
+            )
+            for theme in selected:
+                theme.status = "shortlisted"
+            self.repository.save_candidate_themes(session.session_id, [*existing, *selected])
+            self._mark_theme_cards_stale(session.session_id)
+            self._touch_session(session, status="reviewing")
+            self._event(
+                session.session_id,
+                "themes.generated",
+                {
+                    "candidateCount": len(selected),
+                    "agentKey": "themes",
+                    "agentExecution": theme_result.profile,
+                    "trace": theme_result.trace,
+                },
+            )
+        except Exception as exc:
+            self._event(
+                session.session_id,
+                "themes.generation.failed",
+                {
+                    "agentKey": "themes",
+                    "sourceCount": len(sources),
+                    "evidenceCount": len(evidence),
+                    "candidateCount": session.candidate_count,
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc),
+                },
+            )
+            raise
         return self.get_session(session.session_id)
 
     def select_theme(self, session_id: str, theme_id: str) -> dict[str, Any]:
@@ -286,8 +461,29 @@ class ResearchThemeDiscoveryService:
         themes = self.repository.load_candidate_themes(session.session_id)
         target = next((item for item in themes if item.theme_id == theme_id), None)
         if target is None:
+            self._event(
+                session.session_id,
+                "theme.selection.failed",
+                {
+                    "themeId": theme_id,
+                    "candidateCount": len(themes),
+                    "errorType": "FileNotFoundError",
+                    "message": "Candidate theme not found.",
+                },
+            )
             raise FileNotFoundError("Candidate theme not found.")
         if target.status == "stale":
+            self._event(
+                session.session_id,
+                "theme.selection.failed",
+                {
+                    "themeId": theme_id,
+                    "candidateCount": len(themes),
+                    "reason": "stale_theme",
+                    "errorType": "ValueError",
+                    "message": "Cannot select a stale candidate theme without rerunning or restoring it.",
+                },
+            )
             raise ValueError("Cannot select a stale candidate theme without rerunning or restoring it.")
         for theme in themes:
             if theme.theme_id == theme_id:
@@ -306,38 +502,84 @@ class ResearchThemeDiscoveryService:
         themes = self.repository.load_candidate_themes(session.session_id)
         theme = next((item for item in themes if item.theme_id == theme_id), None)
         if theme is None:
+            self._event(
+                session.session_id,
+                "theme_card.generation.failed",
+                {
+                    "themeId": theme_id,
+                    "agentKey": "card",
+                    "errorType": "FileNotFoundError",
+                    "message": "Candidate theme not found.",
+                },
+            )
             raise FileNotFoundError("Candidate theme not found.")
         if theme.status == "stale":
+            self._event(
+                session.session_id,
+                "theme_card.generation.failed",
+                {
+                    "themeId": theme_id,
+                    "agentKey": "card",
+                    "reason": "stale_theme",
+                    "errorType": "ValueError",
+                    "message": "Cannot generate a theme card from a stale candidate theme.",
+                },
+            )
             raise ValueError("Cannot generate a theme card from a stale candidate theme.")
         cards = self.repository.load_theme_cards(session.session_id)
         for card in cards:
             if card.theme_id == theme_id and card.status == "draft":
                 card.status = "stale"
         sources = self.repository.load_sources(session.session_id)
-        card_result = self.agent_runner.generate_card(
-            session=session,
-            theme=theme,
-            sources=sources,
-            version=self._next_card_version(session.session_id, theme.theme_id),
-            trace_sink=self._stage_trace_sink(session.session_id, "theme_card.generating", "card"),
-        )
-        if card_result.card is None:
-            raise ValueError("card agent returned no usable theme card.")
-        card = card_result.card
-        cards.append(card)
-        self.repository.save_theme_cards(session.session_id, cards)
-        self._touch_session(session, status="selected")
         self._event(
             session.session_id,
-            "theme_card.generated",
+            "theme_card.generation.started",
             {
                 "themeId": theme_id,
-                "cardId": card.card_id,
                 "agentKey": "card",
-                "agentExecution": card_result.profile,
-                "trace": card_result.trace,
+                "sourceCount": len(sources),
+                "themeCardCount": len(cards),
             },
         )
+        try:
+            card_result = self.agent_runner.generate_card(
+                session=session,
+                theme=theme,
+                sources=sources,
+                version=self._next_card_version(session.session_id, theme.theme_id),
+                trace_sink=self._stage_trace_sink(session.session_id, "theme_card.generating", "card"),
+            )
+            if card_result.card is None:
+                raise ValueError("card agent returned no usable theme card.")
+            card = card_result.card
+            cards.append(card)
+            self.repository.save_theme_cards(session.session_id, cards)
+            self._touch_session(session, status="selected")
+            self._event(
+                session.session_id,
+                "theme_card.generated",
+                {
+                    "themeId": theme_id,
+                    "cardId": card.card_id,
+                    "agentKey": "card",
+                    "agentExecution": card_result.profile,
+                    "trace": card_result.trace,
+                },
+            )
+        except Exception as exc:
+            self._event(
+                session.session_id,
+                "theme_card.generation.failed",
+                {
+                    "themeId": theme_id,
+                    "agentKey": "card",
+                    "sourceCount": len(sources),
+                    "themeCardCount": len(cards),
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc),
+                },
+            )
+            raise
         return self.get_session(session.session_id)
 
     def approve_theme_card(self, session_id: str, card_id: str) -> dict[str, Any]:
@@ -346,8 +588,29 @@ class ResearchThemeDiscoveryService:
         cards = self.repository.load_theme_cards(session.session_id)
         target = next((item for item in cards if item.card_id == card_id), None)
         if target is None:
+            self._event(
+                session.session_id,
+                "theme_card.approval.failed",
+                {
+                    "cardId": card_id,
+                    "themeCardCount": len(cards),
+                    "errorType": "FileNotFoundError",
+                    "message": "Theme card not found.",
+                },
+            )
             raise FileNotFoundError("Theme card not found.")
         if target.status == "stale":
+            self._event(
+                session.session_id,
+                "theme_card.approval.failed",
+                {
+                    "cardId": card_id,
+                    "themeCardCount": len(cards),
+                    "reason": "stale_theme_card",
+                    "errorType": "ValueError",
+                    "message": "Cannot approve a stale theme card.",
+                },
+            )
             raise ValueError("Cannot approve a stale theme card.")
         for card in cards:
             if card.card_id == card_id:
@@ -358,10 +621,37 @@ class ResearchThemeDiscoveryService:
         return self.get_session(session.session_id)
 
     def run_draft(self, session_id: str) -> dict[str, Any]:
-        self.run_broad_search(session_id)
-        self.run_deep_search(session_id)
-        self.extract_evidence(session_id)
-        return self.generate_themes(session_id)
+        session = self.repository.load_session(session_id)
+        self._event(session.session_id, "draft.started", {"agentKey": "draft"})
+        try:
+            self.run_broad_search(session.session_id)
+            self.run_deep_search(session.session_id)
+            self.extract_evidence(session.session_id)
+            payload = self.generate_themes(session.session_id)
+        except Exception as exc:
+            self._event(
+                session.session_id,
+                "draft.failed",
+                {
+                    "agentKey": "draft",
+                    "errorType": exc.__class__.__name__,
+                    "message": str(exc),
+                },
+            )
+            raise
+        summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        self._event(
+            session.session_id,
+            "draft.completed",
+            {
+                "agentKey": "draft",
+                "sourceCount": summary.get("sourceCount") or 0,
+                "evidenceCount": summary.get("evidenceCount") or 0,
+                "candidateCount": summary.get("candidateThemeCount") or 0,
+                "themeCardCount": summary.get("themeCardCount") or 0,
+            },
+        )
+        return payload
 
     def _append_search_run(self, session_id: str, run: SearchRun) -> None:
         runs = self.repository.load_search_runs(session_id)
@@ -380,6 +670,27 @@ class ResearchThemeDiscoveryService:
             runs.append(run)
         self.repository.save_search_runs(run.session_id, runs)
 
+    def _run_agent_search(
+        self,
+        *,
+        phase: str,
+        session: ResearchDiscoverySession,
+        suggested_queries: list[str],
+        existing_sources: list[ResearchSource],
+        knowledge_context: dict[str, Any],
+        trace_sink,
+    ):
+        kwargs = {
+            "phase": phase,
+            "session": session,
+            "suggested_queries": suggested_queries,
+            "existing_sources": existing_sources,
+            "trace_sink": trace_sink,
+        }
+        if _accepts_kwarg(self.agent_runner.run_search, "knowledge_context"):
+            kwargs["knowledge_context"] = knowledge_context
+        return self.agent_runner.run_search(**kwargs)
+
     def _search_trace_sink(self, run: SearchRun):
         def sink(item: dict[str, Any]) -> None:
             trace = _trace_list(run.model_profile.get("liveTrace"))
@@ -394,6 +705,98 @@ class ResearchThemeDiscoveryService:
             self._replace_search_run(run)
 
         return sink
+
+    def _knowledge_preflight(
+        self,
+        *,
+        session: ResearchDiscoverySession,
+        phase: str,
+        queries: list[str],
+        existing_sources: list[ResearchSource],
+    ) -> dict[str, Any]:
+        library = self.knowledge_base.payload(limit=250)
+        summary = library.get("summary") if isinstance(library.get("summary"), dict) else {}
+        tokens = _knowledge_tokens(
+            " ".join(
+                [
+                    session.open_goal,
+                    session.constraints,
+                    session.preferences,
+                    phase,
+                    *queries,
+                ]
+            )
+        )
+        entries = _rank_knowledge_entries(library.get("entries"), tokens, limit=12)
+        claims = _rank_knowledge_records(library.get("claims"), tokens, limit=8)
+        evidence = _rank_knowledge_records(library.get("evidence"), tokens, limit=8)
+        gaps = _rank_knowledge_records(library.get("gaps"), tokens, limit=8)
+        total_entries = int(summary.get("entryCount") or 0)
+        if total_entries <= 0:
+            decision = "kb_empty_search_required"
+            reason = "科研知识库还没有可复用来源，本阶段需要继续真实联网搜索。"
+        elif entries or claims or evidence or gaps:
+            decision = "reuse_and_search"
+            reason = "科研知识库已有相关来源和认知记录，先复用这些线索，再继续真实联网补齐缺口。"
+        else:
+            decision = "search_required"
+            reason = "科研知识库已有内容，但没有找到与本阶段查询明显相关的记录，需要继续真实联网搜索。"
+        matched_kinds = Counter(str(item.get("kind") or "unknown") for item in entries)
+        known_kinds = {str(source.kind) for source in existing_sources}
+        missing_kinds = [
+            kind
+            for kind in ["paper", "github", "dataset", "web"]
+            if kind not in known_kinds and kind not in matched_kinds
+        ]
+        return {
+            "phase": phase,
+            "decision": decision,
+            "reason": reason,
+            "checkedAt": utcnow_iso(),
+            "queryCount": len(queries),
+            "queryTokens": sorted(tokens)[:40],
+            "existingSessionSourceCount": len(existing_sources),
+            "knowledgeBasePath": library.get("path") or "",
+            "totalEntryCount": total_entries,
+            "totalClaimCount": int(summary.get("claimCount") or 0),
+            "totalEvidenceCount": int(summary.get("evidenceCount") or 0),
+            "totalGapCount": int(summary.get("gapCount") or 0),
+            "matchedEntryCount": len(entries),
+            "matchedClaimCount": len(claims),
+            "matchedEvidenceCount": len(evidence),
+            "matchedGapCount": len(gaps),
+            "sourceKindCounts": dict(matched_kinds),
+            "missingSourceKinds": missing_kinds,
+            "recentQueries": _unique_strings(
+                query
+                for entry in entries
+                for query in [str(item) for item in entry.get("queries") or []]
+                if query
+            )[:12],
+            "recentSources": [_knowledge_source_view(item) for item in entries[:8]],
+            "matchedClaims": [_knowledge_record_view(item) for item in claims[:5]],
+            "matchedEvidence": [_knowledge_record_view(item) for item in evidence[:5]],
+            "matchedGaps": [_knowledge_record_view(item) for item in gaps[:5]],
+            "reuseGuidance": [
+                "把 matchedClaims/matchedEvidence/matchedGaps 当作已知上下文，不要重复把同一来源当成新发现。",
+                "仍然调用真实搜索工具，优先补齐 missingSourceKinds、陈旧证据和未验证 gap。",
+                "如果搜索结果与知识库重复，要更新溯源和 hitCount，而不是生成重复结论。",
+            ],
+        }
+
+    def _knowledge_preflight_trace(self, preflight: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "kind": "memory",
+            "title": "科研知识库预检",
+            "detail": (
+                f"{preflight.get('reason')} matchedSources={preflight.get('matchedEntryCount')}; "
+                f"matchedClaims={preflight.get('matchedClaimCount')}; "
+                f"matchedEvidence={preflight.get('matchedEvidenceCount')}; "
+                f"matchedGaps={preflight.get('matchedGapCount')}; "
+                f"missingKinds={', '.join(preflight.get('missingSourceKinds') or []) or 'none'}"
+            )[:1200],
+            "timestamp": utcnow_iso(),
+        }
 
     def _stage_trace_sink(self, session_id: str, event_code: str, agent_key: str):
         event: dict[str, Any] | None = None
@@ -440,7 +843,15 @@ class ResearchThemeDiscoveryService:
         self._event(
             run.session_id,
             f"search.{run.phase}.failed",
-            {"errorType": exc.__class__.__name__, "message": str(exc), "queryCount": len(run.queries)},
+            {
+                "runId": run.run_id,
+                "phase": run.phase,
+                "agentKey": "broad" if run.phase == "broad" else "deep",
+                "errorType": exc.__class__.__name__,
+                "message": str(exc),
+                "queryCount": len(run.queries),
+                "knowledgePreflight": run.model_profile.get("knowledgePreflight") or {},
+            },
         )
 
     def _sources_from_results(self, session_id: str, run_id: str, results: list[SearchResult]) -> list[ResearchSource]:
@@ -463,6 +874,18 @@ class ResearchThemeDiscoveryService:
         for source in sources:
             deduped[(source.kind, source.url)] = source
         return list(deduped.values())
+
+    def _archive_sources_to_knowledge_base(
+        self,
+        *,
+        session: ResearchDiscoverySession,
+        phase: str,
+        sources: list[ResearchSource],
+        search_run: SearchRun | None = None,
+    ) -> dict[str, Any]:
+        if not sources:
+            return {"added": 0, "updated": 0, "total": len(self.knowledge_base.payload(limit=1)["entries"])}
+        return self.knowledge_base.ingest_sources(session=session, phase=phase, sources=sources, search_run=search_run)
 
     def _mark_downstream_stale(self, session_id: str, *, after_stage: str) -> None:
         if after_stage in {"search", "evidence"}:
@@ -509,9 +932,9 @@ class ResearchThemeDiscoveryService:
                 event_code,
                 message=event_code,
                 level="error" if event_code.endswith(".failed") else "info",
-                outcome="failed" if event_code.endswith(".failed") else "succeeded",
+                outcome=_research_outcome_from_event_code(event_code),
                 phase=_research_phase_from_event_code(event_code),
-                fields=fields,
+                fields=_research_runtime_scene_fields(event_code, fields),
                 session_id=session_id,
                 agent_key=str(fields.get("agentKey") or ""),
                 occurred_at=timestamp,
@@ -752,8 +1175,18 @@ class ResearchThemeDiscoveryService:
     def _research_prompt_profile(self) -> dict[str, Any]:
         workspace = get_workspace()
         ensure_research_prompt_defaults(workspace)
+        agent_config = normalize_research_agent_config(workspace.read_research_agent_config())
         files = {}
-        for key, filename in RESEARCH_PROMPT_FILES.items():
+        deleted_default_agents = set(agent_config.get("deletedDefaultAgents") or [])
+        prompt_files = {
+            key: filename for key, filename in RESEARCH_PROMPT_FILES.items() if key not in deleted_default_agents
+        }
+        for agent in agent_config["agents"]:
+            key = str(agent.get("key") or "").strip()
+            filename = str(agent.get("promptFilename") or "").strip()
+            if key and filename:
+                prompt_files[key] = filename
+        for key, filename in prompt_files.items():
             content = workspace.read_research_prompt(filename)
             files[key] = {
                 "filename": filename,
@@ -792,10 +1225,14 @@ class ResearchThemeDiscoveryService:
 
 def _research_phase_from_event_code(event_code: str) -> str:
     text = str(event_code or "").strip()
+    if text.startswith("draft."):
+        return "draft"
     if text.startswith("search.broad."):
         return "broad_search"
     if text.startswith("search.deep."):
         return "deep_search"
+    if text.startswith("knowledge_base."):
+        return "knowledge_base"
     if text.startswith("evidence."):
         return "evidence"
     if text.startswith("themes."):
@@ -809,10 +1246,261 @@ def _research_phase_from_event_code(event_code: str) -> str:
     return "theme_discovery"
 
 
+def _research_outcome_from_event_code(event_code: str) -> str:
+    text = str(event_code or "").strip()
+    if text.endswith(".failed"):
+        return "failed"
+    if text.endswith(".started") or text.endswith(".extracting") or text.endswith(".generating"):
+        return "started"
+    if text.endswith(".blocked"):
+        return "blocked"
+    return "succeeded"
+
+
+def _research_runtime_scene_fields(event_code: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Keep runtime-scene research events compact and non-duplicative."""
+
+    if not isinstance(fields, dict):
+        return {}
+    payload: dict[str, Any] = {}
+    passthrough_keys = (
+        "sessionId",
+        "runId",
+        "phase",
+        "agentKey",
+        "provider",
+        "themeId",
+        "cardId",
+        "candidateCount",
+        "queryCount",
+        "sourceCount",
+        "evidenceCount",
+        "themeCardCount",
+        "failedAttemptCount",
+        "errorType",
+        "message",
+        "reason",
+    )
+    for key in passthrough_keys:
+        if key in fields:
+            payload[key] = fields.get(key)
+
+    if "sourceCounts" in fields:
+        payload["sourceCounts"] = fields.get("sourceCounts")
+    if "evidenceCounts" in fields:
+        payload["evidenceCounts"] = fields.get("evidenceCounts")
+    if "evidenceRequests" in fields:
+        payload["evidenceRequests"] = _string_list(fields.get("evidenceRequests"))[:8]
+    if "missingEvidenceRequests" in fields:
+        payload["missingEvidenceRequests"] = _string_list(fields.get("missingEvidenceRequests"))[:8]
+
+    preflight = fields.get("knowledgePreflight")
+    if isinstance(preflight, dict):
+        payload["knowledgePreflight"] = {
+            "decision": preflight.get("decision") or "",
+            "queryCount": preflight.get("queryCount") or 0,
+            "matchedEntryCount": preflight.get("matchedEntryCount") or 0,
+            "matchedClaimCount": preflight.get("matchedClaimCount") or 0,
+            "matchedEvidenceCount": preflight.get("matchedEvidenceCount") or 0,
+            "matchedGapCount": preflight.get("matchedGapCount") or 0,
+            "missingSourceKinds": _string_list(preflight.get("missingSourceKinds"))[:8],
+        }
+
+    knowledge_base = fields.get("knowledgeBase")
+    if isinstance(knowledge_base, dict):
+        payload["knowledgeBase"] = {
+            "added": knowledge_base.get("added") or 0,
+            "updated": knowledge_base.get("updated") or 0,
+            "total": knowledge_base.get("total") or 0,
+            "claims": knowledge_base.get("claims") or 0,
+            "evidence": knowledge_base.get("evidence") or 0,
+            "gaps": knowledge_base.get("gaps") or 0,
+            "path": knowledge_base.get("path") or "",
+        }
+
+    agent_execution = fields.get("agentExecution")
+    if isinstance(agent_execution, dict):
+        payload["agentExecution"] = _research_agent_execution_summary(agent_execution)
+
+    trace = fields.get("trace")
+    if trace is None and isinstance(agent_execution, dict):
+        trace = agent_execution.get("trace")
+    trace_summary = _research_trace_summary(trace)
+    if trace_summary:
+        payload["trace"] = trace_summary
+
+    if not payload:
+        payload["eventCode"] = event_code
+    return payload
+
+
+def _research_agent_execution_summary(profile: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "agentKey": profile.get("agentKey") or "",
+        "templateId": profile.get("templateId") or "",
+        "llmConfigId": profile.get("llmConfigId") or "",
+        "executionMode": profile.get("executionMode") or "",
+        "toolCallCount": profile.get("toolCallCount") or 0,
+        "knowledgeContextDecision": profile.get("knowledgeContextDecision") or "",
+        "missingEvidenceRequestCount": len(_string_list(profile.get("missingEvidenceRequests"))),
+        "traceCount": len(_trace_list(profile.get("trace"))),
+    }
+
+
+def _research_trace_summary(value: Any) -> dict[str, Any]:
+    trace = _trace_list(value)
+    if not trace:
+        return {}
+    latest = trace[-1]
+    return {
+        "count": len(trace),
+        "latest": {
+            "kind": str(latest.get("kind") or "")[:80],
+            "title": str(latest.get("title") or "")[:160],
+            "timestamp": str(latest.get("timestamp") or "")[:80],
+        },
+    }
+
+
 def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item or "").strip()]
+
+
+def _accepts_kwarg(callable_object, name: str) -> bool:
+    try:
+        parameters = signature(callable_object).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in parameters or any(item.kind == Parameter.VAR_KEYWORD for item in parameters.values())
+
+
+def _knowledge_tokens(text: str) -> set[str]:
+    stopwords = {
+        "about",
+        "after",
+        "agent",
+        "based",
+        "benchmark",
+        "candidate",
+        "current",
+        "dataset",
+        "datasets",
+        "evidence",
+        "from",
+        "github",
+        "hypothesis",
+        "interdisciplinary",
+        "model",
+        "novel",
+        "open",
+        "paper",
+        "public",
+        "research",
+        "science",
+        "scientific",
+        "scientist",
+        "search",
+        "source",
+        "theme",
+        "with",
+    }
+    tokens = {
+        token.lower()
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_-]{3,}|[\u4e00-\u9fff]{2,}", str(text or ""))
+    }
+    return {token for token in tokens if token not in stopwords}
+
+
+def _rank_knowledge_entries(records: Any, tokens: set[str], *, limit: int) -> list[dict[str, Any]]:
+    return _rank_knowledge_items(
+        records,
+        tokens,
+        limit=limit,
+        fields=("title", "summary", "kind", "reliability"),
+        list_fields=("tags", "categories", "queries"),
+        tie_breaker="lastSeenAt",
+    )
+
+
+def _rank_knowledge_records(records: Any, tokens: set[str], *, limit: int) -> list[dict[str, Any]]:
+    return _rank_knowledge_items(
+        records,
+        tokens,
+        limit=limit,
+        fields=("content", "summary", "status", "type"),
+        list_fields=("tags",),
+        tie_breaker="updatedAt",
+    )
+
+
+def _rank_knowledge_items(
+    records: Any,
+    tokens: set[str],
+    *,
+    limit: int,
+    fields: tuple[str, ...],
+    list_fields: tuple[str, ...],
+    tie_breaker: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(records, list):
+        return []
+    ranked: list[tuple[int, str, dict[str, Any]]] = []
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        haystack_parts = [str(item.get(field) or "") for field in fields]
+        for field in list_fields:
+            haystack_parts.extend(str(value) for value in item.get(field) or [])
+        haystack = " ".join(haystack_parts).lower()
+        score = sum(1 for token in tokens if token in haystack)
+        if not tokens:
+            score = 1
+        if score <= 0:
+            continue
+        ranked.append((score, str(item.get(tie_breaker) or ""), item))
+    ranked.sort(key=lambda value: (value[0], value[1]), reverse=True)
+    return [item for _score, _date, item in ranked[: max(1, min(50, int(limit or 10)))]]
+
+
+def _knowledge_source_view(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "knowledgeId": entry.get("knowledgeId"),
+        "kind": entry.get("kind"),
+        "title": entry.get("title"),
+        "url": entry.get("url"),
+        "summary": str(entry.get("summary") or "")[:500],
+        "reliability": entry.get("reliability"),
+        "lastSeenAt": entry.get("lastSeenAt"),
+        "hitCount": entry.get("hitCount"),
+        "tags": (entry.get("tags") or [])[:8],
+        "sourceIds": (entry.get("sourceIds") or [])[:8],
+    }
+
+
+def _knowledge_record_view(record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "recordId": record.get("recordId"),
+        "type": record.get("type"),
+        "summary": record.get("summary"),
+        "content": str(record.get("content") or "")[:600],
+        "status": record.get("status"),
+        "confidence": record.get("confidence"),
+        "knowledgeIds": (record.get("knowledgeIds") or [])[:8],
+        "sourceIds": (record.get("sourceIds") or [])[:8],
+        "tags": (record.get("tags") or [])[:8],
+        "updatedAt": record.get("updatedAt"),
+    }
+
+
+def _unique_strings(values: Iterable[Any]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        item = str(value or "").strip()
+        if item and item not in result:
+            result.append(item)
+    return result
 
 
 def _trace_list(value: Any) -> list[dict[str, Any]]:

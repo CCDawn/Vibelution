@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+import scripts.evolution_harness as evolution_harness
 from scripts.evolution_harness import (
     build_post_restart_observation,
     build_live_case_io_payload,
@@ -60,6 +61,26 @@ def test_build_agent_command_for_test_mode():
     assert "--skip-doctor" in cmd
     assert "--test" in cmd
     assert "agent.py" in cmd
+
+
+def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path: Path):
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = "abc123\n"
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return Result()
+
+    monkeypatch.setattr(evolution_harness.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(evolution_harness.subprocess, "run", fake_run)
+
+    assert evolution_harness.run_git(tmp_path, "rev-parse", "HEAD") == "abc123"
+    assert calls[0][0] == ["git", "rev-parse", "HEAD"]
+    assert calls[0][1]["creationflags"] & 0x08000000
 
 
 def test_build_agent_command_for_single_turn_prompt():
@@ -274,6 +295,7 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
             self.returncode = -15
 
     process = FakeProcess()
+    popen_calls = []
     worktree = tmp_path / "worktree"
     worktree.mkdir()
 
@@ -293,7 +315,12 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
     )
     monkeypatch.setattr("scripts.evolution_harness.create_worktree", lambda repo_root, snapshot, harness_id: worktree)
     monkeypatch.setattr("scripts.evolution_harness.create_harness_config", lambda path: None)
-    monkeypatch.setattr("scripts.evolution_harness.subprocess.Popen", lambda *args, **kwargs: process)
+    def fake_popen(*args, **kwargs):
+        popen_calls.append((args, kwargs))
+        return process
+
+    monkeypatch.setattr(evolution_harness.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr("scripts.evolution_harness.subprocess.Popen", fake_popen)
     monkeypatch.setattr("scripts.evolution_harness.start_stream_reader", lambda *args, **kwargs: type("Thread", (), {"join": lambda self, timeout=None: None})())
     monkeypatch.setattr("scripts.evolution_harness.terminate_harness_processes", lambda path: process.terminate())
     monkeypatch.setattr("scripts.evolution_harness.write_report", lambda result, path=None: tmp_path / "report.json")
@@ -314,6 +341,7 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
     assert result.status == "cancelled"
     assert result.reason == "operator stop"
     assert process.terminated is True
+    assert popen_calls[0][1]["creationflags"] & 0x08000000
 
 
 def test_should_finish_post_restart_observation_waits_for_meaningful_child_event():

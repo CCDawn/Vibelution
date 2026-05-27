@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -51,7 +52,216 @@ def _safe_rel(path: Path) -> str:
         return path.as_posix()
 
 
-def python_symbol_tool(
+def _iter_python_files(scope: str = "", file_path: str = "") -> List[Path]:
+    if file_path:
+        path = _resolve_path(file_path)
+        return [path] if path.exists() and path.suffix == ".py" else []
+    root = _resolve_path(scope or ".")
+    if root.is_file():
+        return [root] if root.suffix == ".py" else []
+    if not root.exists():
+        return []
+    ignored_parts = {".git", ".venv", "__pycache__", "node_modules", "dist", "build"}
+    files: List[Path] = []
+    for item in root.rglob("*.py"):
+        if any(part in ignored_parts for part in item.parts):
+            continue
+        files.append(item)
+        if len(files) >= 1200:
+            break
+    return files
+
+
+def _entity_matches_symbol(entity: Dict[str, Any], symbol: str) -> bool:
+    name = str(entity.get("name") or "")
+    class_name = str(entity.get("class_name") or "")
+    return name == symbol or (class_name and f"{class_name}.{name}" == symbol)
+
+
+def _definition_results(symbol: str, *, scope: str = "", file_path: str = "", max_results: int = 20) -> List[Dict[str, Any]]:
+    from tools.code_analysis_tools import get_file_entities
+
+    results: List[Dict[str, Any]] = []
+    for path in _iter_python_files(scope=scope, file_path=file_path):
+        entities = get_file_entities(str(path))
+        for kind in ("class", "function", "async_function"):
+            for entity in entities.get(kind, []):
+                if _entity_matches_symbol(entity, symbol):
+                    results.append(
+                        {
+                            "path": _safe_rel(path),
+                            "kind": kind,
+                            "symbol": entity.get("name"),
+                            "qualified_symbol": entity.get("name"),
+                            "line": entity.get("lineno"),
+                            "end_line": entity.get("end_lineno"),
+                        }
+                    )
+        for class_entity in entities.get("class", []):
+            for method in class_entity.get("methods", []):
+                if _entity_matches_symbol(method, symbol):
+                    results.append(
+                        {
+                            "path": _safe_rel(path),
+                            "kind": "method",
+                            "symbol": method.get("name"),
+                            "qualified_symbol": f"{class_entity.get('name')}.{method.get('name')}",
+                            "line": method.get("lineno"),
+                            "end_line": method.get("end_lineno"),
+                        }
+                    )
+        if len(results) >= max_results:
+            return results[:max_results]
+    return results[:max_results]
+
+
+def _reference_results(symbol: str, *, scope: str = "", file_path: str = "", max_results: int = 20) -> List[Dict[str, Any]]:
+    pattern = re.compile(rf"\b{re.escape(symbol)}\b")
+    results: List[Dict[str, Any]] = []
+    for path in _iter_python_files(scope=scope, file_path=file_path):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except UnicodeDecodeError:
+            continue
+        for idx, line in enumerate(lines, start=1):
+            if not pattern.search(line):
+                continue
+            results.append(
+                {
+                    "path": _safe_rel(path),
+                    "line": idx,
+                    "preview": line.strip()[:240],
+                }
+            )
+            if len(results) >= max_results:
+                return results
+    return results
+
+
+def code_symbol_tool(
+    mode: str,
+    file_path: str = "",
+    symbol: str = "",
+    entity_name: str = "",
+    line: int = 0,
+    column: int = 0,
+    scope: str = ".",
+    max_results: int = 20,
+) -> str:
+    """Unified code navigation tool for outlines, entities, definitions, and references."""
+
+    normalized_mode = str(mode or "").strip().lower()
+    target_symbol = str(entity_name or symbol or "").strip()
+    try:
+        max_results = max(1, min(int(max_results or 20), 100))
+    except (TypeError, ValueError):
+        max_results = 20
+
+    if normalized_mode == "outline":
+        if not file_path:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "mode": normalized_mode,
+                    "message": "outline 模式需要 file_path。",
+                    "example": {"mode": "outline", "file_path": "core/web/services/session_service.py"},
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        from tools.code_analysis_tools import list_file_entities
+
+        return list_file_entities(file_path=file_path, entity_type="all")
+
+    if normalized_mode == "entity":
+        if not file_path or not target_symbol:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "mode": normalized_mode,
+                    "message": "entity 模式需要 file_path 和 symbol 或 entity_name。",
+                    "example": {
+                        "mode": "entity",
+                        "file_path": "core/web/services/session_service.py",
+                        "symbol": "_run_session_continuation_loop",
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        from tools.code_analysis_tools import get_code_entity
+
+        return get_code_entity(file_path=file_path, entity_name=target_symbol)
+
+    if normalized_mode in {"definition", "references", "hover"}:
+        if file_path and line:
+            return python_symbol_query(
+                file_path=file_path,
+                line=int(line),
+                column=int(column or 0),
+                action=normalized_mode,
+                max_results=max_results,
+            )
+        if not target_symbol:
+            return json.dumps(
+                {
+                    "status": "error",
+                    "mode": normalized_mode,
+                    "message": f"{normalized_mode} 模式需要 symbol，或提供 file_path + line + column。",
+                    "example": {"mode": normalized_mode, "symbol": "ToolExecutor", "scope": "core"},
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        if normalized_mode == "hover":
+            return json.dumps(
+                {
+                    "status": "error",
+                    "mode": normalized_mode,
+                    "message": "hover 模式需要 file_path + line + column。",
+                    "example": {
+                        "mode": "hover",
+                        "file_path": "core/infrastructure/tool_executor.py",
+                        "line": 1,
+                        "column": 0,
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        results = (
+            _definition_results(target_symbol, scope=scope, file_path=file_path, max_results=max_results)
+            if normalized_mode == "definition"
+            else _reference_results(target_symbol, scope=scope, file_path=file_path, max_results=max_results)
+        )
+        return json.dumps(
+            {
+                "status": "ok",
+                "mode": normalized_mode,
+                "symbol": target_symbol,
+                "scope": scope,
+                "file_path": file_path,
+                "count": len(results),
+                "results": results,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    return json.dumps(
+        {
+            "status": "error",
+            "mode": normalized_mode,
+            "message": "不支持的 mode。",
+            "supported_modes": ["outline", "entity", "definition", "references", "hover"],
+            "example": {"mode": "outline", "file_path": "agent.py"},
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+def python_symbol_query(
     file_path: str,
     line: int,
     column: int,
@@ -246,6 +456,7 @@ def python_lint_tool(target: str = ".", max_issues: int = 100) -> str:
 
 
 __all__ = [
-    "python_symbol_tool",
+    "code_symbol_tool",
+    "python_symbol_query",
     "python_lint_tool",
 ]

@@ -16,8 +16,8 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CONTENT_LIMIT = 8000
 LIST_LIMIT = 20
-MEMORY_CHANNELS = {"conversation", "self_evolution", "supervised_evolution", "explicit_read"}
-MEMORY_CHANNEL_ORDER = ["conversation", "self_evolution", "supervised_evolution", "explicit_read"]
+MEMORY_CHANNELS = {"conversation", "research", "self_evolution", "supervised_evolution", "explicit_read"}
+MEMORY_CHANNEL_ORDER = ["conversation", "research", "self_evolution", "supervised_evolution", "explicit_read"]
 VISIBILITY_CLASSES = {"prompt", "agent_visible", "manual", "diagnostic", "missing"}
 USER_MANAGED_SECTION_ID = "user-managed-memory"
 USER_MANAGED_SOURCE_KIND = "user_managed_memory"
@@ -214,6 +214,7 @@ def _base_memory_sections(root: Path, warnings: list[str]) -> list[dict[str, Any
         _runtime_memory_section(root),
         _prompt_memory_section(root),
         _workspace_database_section(root),
+        _research_memory_section(root),
         _git_memory_section(root),
         _chat_session_memory_section(root),
         _self_evolution_memory_section(root),
@@ -530,6 +531,66 @@ def _workspace_database_section(root: Path) -> dict[str, Any]:
     )
 
 
+def _research_memory_section(root: Path) -> dict[str, Any]:
+    knowledge_path = root / "workspace" / "research" / "knowledge_base.json"
+    knowledge_exists = knowledge_path.exists()
+    payload = _load_json(knowledge_path, fallback={})
+    summary = _research_knowledge_summary(payload)
+    item_summary = (
+        f"{summary['entryCount']} 个来源，{summary['claimCount']} 条论断，"
+        f"{summary['evidenceCount']} 条证据，{summary['gapCount']} 个缺口；"
+        "用于科研 agent 联网前复用资料、检查重复搜索，并为后续自进化记忆提供来源。"
+    )
+    item_content = {
+        "schemaVersion": summary["schemaVersion"],
+        "entryCount": summary["entryCount"],
+        "claimCount": summary["claimCount"],
+        "evidenceCount": summary["evidenceCount"],
+        "gapCount": summary["gapCount"],
+        "hypothesisCount": summary["hypothesisCount"],
+        "experimentCount": summary["experimentCount"],
+        "recentSources": summary["recentSources"],
+        "agentEvolutionMemory": summary["agentEvolutionMemory"],
+    }
+    if not knowledge_exists:
+        item_summary = "科研知识库尚未生成；运行科研广撒网或深搜后会创建 workspace/research/knowledge_base.json。"
+        item_content = {
+            **item_content,
+            "status": "missing",
+            "nextStep": "Run a research broad or deep search to create the knowledge base.",
+        }
+    items = [
+        _virtual_data_item(
+            item_id="research-knowledge-base",
+            title="research knowledge_base.json",
+            kind="research_knowledge_base",
+            source="科研知识库",
+            path=_rel(root, knowledge_path),
+            updated_at=str(payload.get("updatedAt") or _mtime(knowledge_path)) if isinstance(payload, dict) else _mtime(knowledge_path),
+            agent_visible=knowledge_exists,
+            in_prompt=False,
+            used_by=["ResearchKnowledgeBase", "research theme discovery agents", "/api/research/knowledge-base"],
+            channels=["research", "self_evolution", "explicit_read"],
+            visibility_class="agent_visible" if knowledge_exists else "missing",
+            summary=item_summary,
+            content=item_content,
+            content_type="json",
+            exists=knowledge_exists,
+        )
+    ]
+    return _section(
+        "research-memory",
+        "科研记忆",
+        "research_knowledge_memory",
+        "tool_accessible",
+        "科研 agent 可通过 ResearchKnowledgeBase 与 /api/research/knowledge-base 使用；当前不默认注入普通对话 prompt。",
+        _rel(root, knowledge_path),
+        "/api/research/knowledge-base",
+        "科研调研来源、可追溯认知层和后续自进化记忆桥接。它复用现有 Memory 总览，不另建孤立入口。",
+        items,
+    )
+
+
 def _git_memory_section(root: Path) -> dict[str, Any]:
     db_path = root / "workspace" / "agent_brain.db"
     git_snapshot = _git_snapshot(root)
@@ -839,6 +900,48 @@ def _runtime_scene_memory_section(root: Path) -> dict[str, Any]:
     )
 
 
+def _research_knowledge_summary(payload: Any) -> dict[str, Any]:
+    data = payload if isinstance(payload, dict) else {}
+    entries = data.get("entries") if isinstance(data.get("entries"), list) else []
+    claims = data.get("claims") if isinstance(data.get("claims"), list) else []
+    evidence = data.get("evidence") if isinstance(data.get("evidence"), list) else []
+    gaps = data.get("gaps") if isinstance(data.get("gaps"), list) else []
+    hypotheses = data.get("hypotheses") if isinstance(data.get("hypotheses"), list) else []
+    experiments = data.get("experiments") if isinstance(data.get("experiments"), list) else []
+    recent_sources = []
+    for item in sorted(
+        [entry for entry in entries if isinstance(entry, dict)],
+        key=lambda entry: str(entry.get("lastSeenAt") or entry.get("firstSeenAt") or ""),
+        reverse=True,
+    )[:8]:
+        recent_sources.append(
+            {
+                "knowledgeId": str(item.get("knowledgeId") or ""),
+                "kind": str(item.get("kind") or ""),
+                "title": _clip(str(item.get("title") or ""), 160),
+                "lastSeenAt": str(item.get("lastSeenAt") or ""),
+                "hitCount": item.get("hitCount") or 0,
+            }
+        )
+    evolution_memory = data.get("agentEvolutionMemory") if isinstance(data.get("agentEvolutionMemory"), dict) else {}
+    return {
+        "schemaVersion": int(data.get("schemaVersion") or 0) if isinstance(data.get("schemaVersion"), int) else data.get("schemaVersion") or 0,
+        "entryCount": len(entries),
+        "claimCount": len(claims),
+        "evidenceCount": len(evidence),
+        "gapCount": len(gaps),
+        "hypothesisCount": len(hypotheses),
+        "experimentCount": len(experiments),
+        "recentSources": recent_sources,
+        "agentEvolutionMemory": {
+            "experienceRefs": len(evolution_memory.get("experienceRefs") or []),
+            "reflectionRefs": len(evolution_memory.get("reflectionRefs") or []),
+            "candidateRefs": len(evolution_memory.get("candidateRefs") or []),
+            "strategyNotes": len(evolution_memory.get("strategyNotes") or []),
+        },
+    }
+
+
 def _section(
     section_id: str,
     title: str,
@@ -1070,6 +1173,46 @@ def _data_item(
         content_type=content_type,
         content_truncated=limited["truncated"],
         exists=True,
+    )
+
+
+def _virtual_data_item(
+    *,
+    item_id: str,
+    title: str,
+    kind: str,
+    source: str,
+    path: str,
+    updated_at: str,
+    agent_visible: bool,
+    in_prompt: bool,
+    used_by: list[str],
+    summary: str,
+    content: Any,
+    content_type: str,
+    exists: bool,
+    channels: list[str] | None = None,
+    visibility_class: str | None = None,
+) -> dict[str, Any]:
+    text = _json_text(content) if content_type == "json" else str(content or "")
+    limited = _limit_text(text)
+    return _memory_item_payload(
+        item_id=item_id,
+        title=title,
+        kind=kind,
+        source=source,
+        path=path,
+        updated_at=updated_at,
+        agent_visible=agent_visible,
+        in_prompt=in_prompt,
+        used_by=used_by,
+        channels=channels,
+        visibility_class=visibility_class,
+        summary=_clip(summary, 360),
+        content=limited["content"],
+        content_type=content_type,
+        content_truncated=limited["truncated"],
+        exists=exists,
     )
 
 

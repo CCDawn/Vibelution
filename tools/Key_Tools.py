@@ -50,20 +50,22 @@ from core.infrastructure.workspace_cleaner import (
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
-    python_symbol_tool as _python_symbol_impl,
+    code_symbol_tool as _code_symbol_impl,
     python_lint_tool as _python_lint_impl,
 )
+from tools.plan_tools import plan_update_tool as _plan_update_impl
 
 _CLI_TOOL_DOCSTRING = """
 【CLI】执行任意 Shell 命令。
 
-优先使用专用工具 (read_file_tool / grep_search_tool / glob_tool / run_test_for_tool) 而非此工具。
+适合运行项目命令、脚本、编译、测试和诊断命令。读文件、搜索、文件匹配和测试映射通常优先使用专用工具
+(read_file_tool / grep_search_tool / glob_tool / run_test_for_tool)，这样返回更结构化、上下文更小。
 
-=== 核心纪律 ===
-1. 禁止交互式命令 (vim, top, less) 和无休止命令 (ping, tail -f)
-2. 谨慎使用命令链与管道: `&&`、`||`、`|`、`;`、`` ` ``、`$()`
-3. 长输出尽量不要用 pipe 截断；优先专用工具分页、缩小 pytest 目标，或直接读取结果文件
-4. 超过 500 行的文件禁止全量读取，优先 read_file_tool / grep_search_tool
+=== 使用建议 ===
+1. 避免交互式命令 (vim, top, less) 和无休止命令 (ping, tail -f)。
+2. 命令链与管道 (`&&`、`||`、`|`、`;`、`` ` ``、`$()`) 会增加失败面，能拆开时分步运行。
+3. 长输出优先通过专用工具分页、缩小 pytest 目标，或直接读取结果文件。
+4. 读取大文件时优先 read_file_tool / grep_search_tool，以便按目标收窄上下文。
 
 === 闭环 ===
 修改代码后按顺序分开执行:
@@ -73,6 +75,8 @@ _CLI_TOOL_DOCSTRING = """
 Args:
     command: Shell 命令
     timeout: 文件操作 30s, 编译 60s, 测试/网络 120s
+    cwd: 工作目录，默认项目根目录
+    max_output_chars: 最大返回字符数，默认 12000；超出时保留开头和结尾摘要
 """
 
 
@@ -89,9 +93,9 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def commit_compressed_memory_tool(new_core_context: str, next_goal: str) -> str:
         """
-        【重启前必调】将本世代的核心发现和技术洞察压缩存盘。
+        【重启前记忆压缩】将本世代的核心发现和技术洞察压缩存盘。
 
-        调用此工具后，下次苏醒时会自动加载上次存盘的记忆。
+        适合在自我重启、长任务交接或上下文压缩前使用。调用后，下次苏醒时会自动加载上次存盘的记忆。
 
         Args:
             new_core_context: 核心发现（不超过300字），总结本次进化发现的技术要点
@@ -107,8 +111,8 @@ def create_key_tools() -> List[BaseTool]:
         """
         触发 Agent 自我重启。
 
-        用于应用代码更新。每次代码修改并自检通过后必须调用！
-        注意重启后你的上下文会消失，所以你需要在重启前保存好你的上下文。
+        适合在代码更新已经完成且验证通过后应用运行时更新。
+        重启会丢失当前上下文；重启前可先用 commit_compressed_memory_tool 保存必要摘要。
 
         Args:
             reason: 重启原因
@@ -149,7 +153,7 @@ def create_key_tools() -> List[BaseTool]:
         """
         全局正则表达式搜索 (Cursor/Aider 范式)。
 
-        在项目中快速搜索代码，支持正则表达式。优先于 `cli_tool` 的 `cat`/`Get-Content` 使用！
+        在项目中快速搜索代码，支持正则表达式。适合替代 `cli_tool` 的 `cat`/`Get-Content` 粗读方式。
 
         Args:
             regex_pattern: 正则表达式模式
@@ -172,7 +176,7 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def apply_diff_edit_tool(file_path: str, diff_text: str) -> str:
         """
-        代码编辑器 — 修改代码的唯一工具。内建格式验证，无需单独验证步骤。
+        SEARCH/REPLACE 代码编辑器。适合对单个文件做局部替换。
 
         格式：
         <<<<<<< SEARCH
@@ -197,63 +201,70 @@ def create_key_tools() -> List[BaseTool]:
         return apply_diff_edit(file_path=file_path, diff_text=diff_text, allow_fuzzy=True)
 
     @tool
-    def list_file_entities_tool(file_path: str, entity_type: str = "all") -> str:
+    def apply_patch_tool(patch_text: str, cwd: str = ".") -> str:
         """
-        【AST 透视】列出 Python 文件的所有类和函数骨架。
+        Codex 风格 patch 编辑器。适合一次提交多文件 Add/Update/Delete patch。
 
-        初次遇到任何未知的 .py 文件时，**第一步必须是**
-        调用此工具获取结构大纲，禁止直接读取全文件！
+        格式：
+        *** Begin Patch
+        *** Update File: path/to/file.py
+        @@
+        -old line
+        +new line
+        *** End Patch
 
         Args:
-            file_path: Python 文件路径
-            entity_type: 过滤类型 ('class', 'function', 'all')
+            patch_text: Codex 风格 patch 文本
+            cwd: 相对路径解析根目录，默认项目根目录
 
         Returns:
-            格式化的实体列表，包含名称、类型、位置
+            JSON 格式的修改结果；格式或匹配失败时返回可纠正错误。
         """
-        from tools.code_analysis_tools import list_file_entities
-        return list_file_entities(file_path, entity_type)
+        from tools.code_analysis_tools import apply_patch_edit
+        return apply_patch_edit(patch_text=patch_text, cwd=cwd)
 
     @tool
-    def get_code_entity_tool(file_path: str, entity_name: str) -> str:
+    def code_symbol_tool(
+        mode: str,
+        file_path: str = "",
+        symbol: str = "",
+        entity_name: str = "",
+        line: int = 0,
+        column: int = 0,
+        scope: str = ".",
+        max_results: int = 20,
+    ) -> str:
         """
-        【AST 精准抽血】直接提取特定类或函数的完整代码。
+        【Python 结构感知】统一查询 Python 文件结构、目标实体、定义、引用和悬浮信息。
 
-        在 list_file_entities 获取大纲后，使用此工具精准提取目标代码。
+        常用模式：
+        - mode="outline": 查看单个 Python 文件的类/函数/方法大纲，需要提供 file_path。
+        - mode="entity": 读取指定类、函数或方法源码，需要提供 file_path，并用 symbol 或 entity_name 指定目标。
+        - mode="definition": 查找符号定义；可提供 symbol + scope，也可提供 file_path + line + column。
+        - mode="references": 查找符号引用；可提供 symbol + scope，也可提供 file_path + line + column。
+        - mode="hover": 查询光标位置说明，需要提供 file_path + line + column。
 
         Args:
-            file_path: Python 文件路径
-            entity_name: 类名或函数名
-
-        Returns:
-            实体的完整代码及行号范围
-        """
-        from tools.code_analysis_tools import get_code_entity
-        return get_code_entity(file_path, entity_name)
-
-    @tool
-    def python_symbol_tool(file_path: str, line: int, column: int, action: str = "definition", max_results: int = 20) -> str:
-        """
-        【Python 结构感知】像语言服务器一样查询符号定义、引用或悬浮信息。
-
-        适合跨模块定位真实入口、查看波及面、确认某个调用最终落点。
-        当前基于 Jedi；若环境未安装 Jedi，会返回结构化降级结果。
-
-        Args:
-            file_path: Python 文件路径
-            line: 1-based 行号
-            column: 0-based 列号
-            action: definition / references / hover
+            mode: outline / entity / definition / references / hover
+            file_path: Python 文件路径；outline/entity/hover 必填，definition/references 可选
+            symbol: 符号名；entity/definition/references 可用，如 "ClassName.method" 或 "function_name"
+            entity_name: entity 模式的实体名，等价于 symbol
+            line: 1-based 行号；definition/references/hover 可用
+            column: 0-based 列号；definition/references/hover 可用
+            scope: 按 symbol 搜索定义/引用时的目录范围
             max_results: 最多返回多少条结果
 
         Returns:
-            JSON 格式的符号查询结果
+            结构化符号查询结果
         """
-        return _python_symbol_impl(
+        return _code_symbol_impl(
+            mode=mode,
             file_path=file_path,
+            symbol=symbol,
+            entity_name=entity_name,
             line=line,
             column=column,
-            action=action,
+            scope=scope,
             max_results=max_results,
         )
 
@@ -299,7 +310,7 @@ def create_key_tools() -> List[BaseTool]:
         适用于阅读文档、查看 API 响应、分析网页文章等场景。
 
         Args:
-            url: 要抓取的完整 URL（必须以 http:// 或 https:// 开头）
+            url: 要抓取的完整 URL（需要以 http:// 或 https:// 开头）
             max_chars: 最大返回字符数，默认 8000
 
         Returns:
@@ -412,7 +423,7 @@ def create_key_tools() -> List[BaseTool]:
 
     # ── 文件操作工具 ────────────────────────────────────────────────────────
 
-    def _cli_tool_impl(command: str = "", timeout: int = 60) -> str:
+    def _cli_tool_impl(command: str = "", timeout: int = 60, cwd: str = "", max_output_chars: int = 12000) -> str:
         from tools.shell_tools import execute_shell_command
         if not command:
             return '{"status": "error", "code": "MISSING_COMMAND", "message": "cli_tool 需要提供 command 参数"}'
@@ -420,7 +431,20 @@ def create_key_tools() -> List[BaseTool]:
             timeout = int(timeout)
         except (TypeError, ValueError):
             timeout = 60
-        return execute_shell_command(command, timeout=timeout)
+        try:
+            max_output_chars = int(max_output_chars)
+        except (TypeError, ValueError):
+            max_output_chars = 12000
+        result = execute_shell_command(command, timeout=timeout, cwd=cwd or None)
+        if max_output_chars > 0 and len(result) > max_output_chars:
+            head_size = max(2000, max_output_chars // 2)
+            tail_size = max(2000, max_output_chars - head_size)
+            result = (
+                f"{result[:head_size]}\n\n"
+                f"[输出已截断: 原始 {len(result)} 字符，仅保留前 {head_size} 和后 {tail_size} 字符]\n\n"
+                f"{result[-tail_size:]}"
+            )
+        return result
 
     cli_tool = StructuredTool.from_function(_cli_tool_impl, name="cli_tool", description=_CLI_TOOL_DOCSTRING)
 
@@ -486,7 +510,7 @@ def create_key_tools() -> List[BaseTool]:
         """
         【初始化任务清单】将子任务列表注册到系统内存并持久化。
 
-        模型应首先分析当前状态，然后调用此工具注册本轮任务清单。
+        适合在多步骤任务开始时登记本轮目标和子任务，帮助后续恢复、继续和审查。
 
         Args:
             task_list: [{"description": "子任务描述"}, ...]
@@ -500,9 +524,9 @@ def create_key_tools() -> List[BaseTool]:
     @tool
     def task_update_tool(task_id: int, is_completed: bool, result_summary: str = "") -> str:
         """
-        【更新任务状态】要求模型在每步操作后必须调用。
+        【更新任务状态】记录任务进度、阶段结果和完成状态。
 
-        每次完成以下任一操作后，必须立即调用：
+        适合在以下关键节点后调用：
         - 修改了任意文件（新建/编辑/删除）
         - 运行了测试或构建命令
         - 执行了任何有副作用的工具调用
@@ -530,6 +554,24 @@ def create_key_tools() -> List[BaseTool]:
             格式化 Markdown 表格
         """
         return _task_list_impl()
+
+    @tool
+    def plan_update_tool(plan: List[Dict], explanation: str = "", plan_id: str = "current") -> str:
+        """
+        【临时计划】更新本轮 Codex 风格计划状态。
+
+        适合展示当前回合的短计划，状态为 pending / in_progress / completed。
+        与 task_create_tool 不同，此工具用于轻量计划展示，不代表持久任务承诺。
+
+        Args:
+            plan: [{"step": "步骤", "status": "pending|in_progress|completed"}, ...]
+            explanation: 本次计划更新说明
+            plan_id: 计划 ID，默认 current
+
+        Returns:
+            JSON 格式的计划更新结果。
+        """
+        return _plan_update_impl(plan=plan, explanation=explanation, plan_id=plan_id)
 
     # ── 后台任务工具 ──────────────────────────────────────────────────────
 
@@ -588,7 +630,7 @@ def create_key_tools() -> List[BaseTool]:
         【测试映射运行】根据源文件路径自动查找对应测试文件并运行。
 
         映射规则：tools/xxx.py → tests/test_xxx.py
-        修改代码后必须调用此工具验证！
+        适合在修改代码后快速找到并运行对应测试。
 
         Args:
             source_path: 源文件相对路径（如 "tools/shell_tools.py"）
@@ -847,9 +889,8 @@ def create_key_tools() -> List[BaseTool]:
         # 代码分析
         grep_search_tool,
         apply_diff_edit_tool,
-        list_file_entities_tool,
-        get_code_entity_tool,
-        python_symbol_tool,
+        apply_patch_tool,
+        code_symbol_tool,
         python_lint_tool,
         web_search_tool,
         web_fetch_tool,
@@ -868,6 +909,7 @@ def create_key_tools() -> List[BaseTool]:
         task_create_tool,
         task_update_tool,
         task_list_tool,
+        plan_update_tool,
         # 后台任务
         task_start_tool,
         task_output_tool,

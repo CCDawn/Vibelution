@@ -8,7 +8,7 @@
 .pageStack {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 16px;
+  gap: 10px;
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -20,7 +20,7 @@
 }
 
 .workspaceLayout {
-  grid-template-columns: var(--self-sidebar-width, 320px) 10px minmax(0, 1fr);
+  grid-template-columns: var(--self-sidebar-width, 304px) 10px minmax(0, 1fr);
   align-items: stretch;
   height: 100%;
   min-height: 0;
@@ -29,7 +29,7 @@
 
 .sideColumn {
   display: grid;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 
@@ -129,7 +129,7 @@
   border-radius: 8px;
   background: var(--surface-panel);
   box-shadow: var(--shadow-soft);
-  padding: 18px;
+  padding: 14px;
 }
 
 .sectionHeader,
@@ -160,7 +160,7 @@
 }
 
 .sectionTitle {
-  font-size: 1.1rem;
+  font-size: 1rem;
 }
 
 .subsurfaceTitle {
@@ -274,7 +274,7 @@
 .messageBox,
 .messageList {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .noticeBanner {
@@ -352,7 +352,7 @@
 
 .petAvatarStage {
   position: relative;
-  min-height: 240px;
+  min-height: 164px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background:
@@ -366,8 +366,8 @@
 .petAvatarHalo {
   position: absolute;
   inset: auto;
-  width: 180px;
-  height: 180px;
+  width: 132px;
+  height: 132px;
   border-radius: 999px;
   background: radial-gradient(circle, color-mix(in srgb, var(--accent-warm) 22%, transparent), rgba(216, 167, 91, 0));
   filter: blur(4px);
@@ -378,14 +378,14 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 7px;
   animation: petFloat 4s ease-in-out infinite;
   filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.35));
 }
 
 .petAvatarBody {
-  width: 104px;
-  height: 138px;
+  width: 74px;
+  height: 98px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
   border-radius: 48% 48% 42% 42%;
   background:
@@ -395,8 +395,8 @@
 }
 
 .petAvatarClaw {
-  width: 44px;
-  height: 58px;
+  width: 30px;
+  height: 42px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, transparent);
   border-radius: 60% 42% 58% 46%;
   background: color-mix(in srgb, var(--accent-warm) 34%, #b73f35);
@@ -412,8 +412,8 @@
 
 .petAvatarBadge {
   position: absolute;
-  left: 14px;
-  bottom: 14px;
+  left: 10px;
+  bottom: 10px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -441,7 +441,7 @@
 
 .detailRow {
   align-items: center;
-  padding-bottom: 10px;
+  padding-bottom: 8px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.08);
 }
 
@@ -465,16 +465,16 @@
 }
 
 .stripItem {
-  min-height: 78px;
-  padding: 12px 13px;
+  min-height: 58px;
+  padding: 9px 10px;
   display: grid;
-  gap: 8px;
+  gap: 5px;
 }
 
 .compactMetricGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .subsection {
@@ -548,12 +548,12 @@
 
 .vitalList {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .vitalItem {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .vitalTrack {

@@ -251,7 +251,7 @@ class TestMentalModel:
 
     def test_diagnosis_history(self, mental_model):
         """get_diagnosis_history returns history list"""
-        for name in ("read_file_tool", "grep_search_tool", "python_symbol_tool"):
+        for name in ("read_file_tool", "grep_search_tool", "code_symbol_tool"):
             mental_model._on_tool_result(
                 Event(EventNames.TOOL_SUCCESS, {"name": name, "result": "ok"}),
                 success=True,

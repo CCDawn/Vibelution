@@ -385,6 +385,20 @@ MODEL_PRESETS: Dict[str, ModelPreset] = {
         max_tokens=8192,
         description="MiniMax M2 大模型，支持长上下文",
     ),
+
+    # ========================================================================
+    # Xiaomi MiMo / 小米 MiMo
+    # ========================================================================
+    "xiaomi-mimo-v2.5-pro-token-plan": ModelPreset(
+        name="小米 MiMo V2.5 Pro Token Plan",
+        provider="xiaomi",
+        model_name="mimo-v2.5-pro",
+        api_base="https://token-plan-cn.xiaomimimo.com/v1",
+        api_key_env="MIMO_API_KEY",
+        default_temperature=0.7,
+        max_tokens=128000,
+        description="小米 MiMo Token Plan OpenAI 兼容接入模板，默认中国集群",
+    ),
 }
 
 
@@ -442,6 +456,11 @@ PROVIDER_METADATA: Dict[str, Dict[str, str]] = {
         "name": "MiniMax",
         "website": "https://www.minimax.io",
         "docs": "https://www.minimaxi.com/document",
+    },
+    "xiaomi": {
+        "name": "小米 MiMo",
+        "website": "https://mimo.mi.com",
+        "docs": "https://platform.xiaomimimo.com/docs/zh-CN/price/tokenplan/quick-access",
     },
 }
 
@@ -602,6 +621,11 @@ MODEL_ALIASES: Dict[str, str] = {
     # MiniMax 别名
     "minimax": "minimax-m2",
     "m2": "minimax-m2",
+
+    # 小米 MiMo 别名
+    "mimo": "xiaomi-mimo-v2.5-pro-token-plan",
+    "mimo-v2.5-pro": "xiaomi-mimo-v2.5-pro-token-plan",
+    "xiaomi-mimo": "xiaomi-mimo-v2.5-pro-token-plan",
 }
 
 

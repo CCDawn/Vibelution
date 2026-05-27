@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Apple,
   BookPlus,
+  Bot,
   Check,
   ChevronRight,
   HeartHandshake,
@@ -11,6 +12,7 @@ import {
   Search,
   Sparkles,
   Trash2,
+  UsersRound,
   X,
 } from "lucide-react";
 import {
@@ -30,12 +32,17 @@ import { useLocation } from "react-router-dom";
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
+  AgentInstance,
+  ChatRoomDetail,
+  ChatRoomMode,
   FileContent,
   FileTreeNode,
   PetActionResponse,
   PetSummary,
   RuntimeSummary,
+  SessionAgentTemplate,
   SessionChatReviewCandidateResponse,
+  ConversationSummary,
   SessionDetail,
   SessionSummary,
   SessionStreamEvent,
@@ -98,6 +105,7 @@ const MAX_RIGHT_PANEL_WIDTH = 560;
 const TARGET_CENTER_PANE_WIDTH = 420;
 const KEYBOARD_RESIZE_STEP = 24;
 const MENTAL_MODEL_TOGGLE_STORAGE_KEY = "vibelution.chat.mentalModelEnabled";
+const CHAT_CENTER_FIRST_MEDIA_QUERY = "(max-width: 980px)";
 
 type ResizableSide = "left" | "right";
 type PetInteractionAction = "feed" | "talk" | "care";
@@ -304,6 +312,28 @@ function writeStoredMentalModelToggle(enabled: boolean) {
   window.localStorage.setItem(MENTAL_MODEL_TOGGLE_STORAGE_KEY, enabled ? "true" : "false");
 }
 
+function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
+  return {
+    conversationId: session.id,
+    type: "direct_agent",
+    title: session.agentDisplayName || session.title,
+    agentId: session.agentId,
+    directSessionId: session.id,
+    roomId: "",
+    status: session.status,
+    summary: session.taskSummary,
+    updatedAt: session.updatedAt || session.lastActive,
+    workspacePath: session.agentWorkspacePath || session.workspacePath || "",
+    agentProfileId: session.agentProfileId,
+    agentTemplateLabel: session.agentTemplateLabel,
+  };
+}
+
+function latestChatRoomRound(room: ChatRoomDetail | null | undefined) {
+  const rounds = room?.rounds ?? [];
+  return rounds.length ? rounds[rounds.length - 1] : null;
+}
+
 export function ChatCodingRoute() {
   const { lang, t, statusLabel } = useAppI18n();
   const queryClient = useQueryClient();
@@ -325,6 +355,8 @@ export function ChatCodingRoute() {
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(false);
   const [rightPaneCollapsed, setRightPaneCollapsed] = useState(false);
+  const [centerFirstLayout, setCenterFirstLayout] = useState(false);
+  const centerFirstAutoCollapseRef = useRef(false);
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>({});
   const [sessionComposerErrors, setSessionComposerErrors] = useState<Record<string, string>>({});
   const [sessionEditTargets, setSessionEditTargets] = useState<Record<string, { messageId: string; original: string }>>({});
@@ -341,6 +373,15 @@ export function ChatCodingRoute() {
   const [featurePresetState, setFeaturePresetState] = useState<Record<FeaturePresetKey, boolean>>(
     DEFAULT_CHAT_FEATURE_PRESETS,
   );
+  const [groupComposerOpen, setGroupComposerOpen] = useState(false);
+  const [groupTitleDraft, setGroupTitleDraft] = useState("");
+  const [groupModeDraft, setGroupModeDraft] = useState("round_robin");
+  const [groupSelectedAgentIds, setGroupSelectedAgentIds] = useState<string[]>([]);
+  const [activeGroupRoomId, setActiveGroupRoomId] = useState("");
+  const [groupTopicDraft, setGroupTopicDraft] = useState("");
+  const [groupRoomActionError, setGroupRoomActionError] = useState("");
+  const [groupManageSessionIds, setGroupManageSessionIds] = useState<string[]>([]);
+  const [groupManageModeDraft, setGroupManageModeDraft] = useState("round_robin");
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
@@ -367,6 +408,33 @@ export function ChatCodingRoute() {
     refetchInterval: resolvePollingInterval(pageVisible, 3_000),
     refetchIntervalInBackground: false,
   });
+  const conversationsQuery = useQuery({
+    queryKey: queryKeys.conversations(),
+    queryFn: () => fetchJson<ConversationSummary[]>("/api/conversations"),
+    refetchInterval: resolvePollingInterval(pageVisible, 3_000),
+    refetchIntervalInBackground: false,
+  });
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents(),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
+    enabled: groupComposerOpen,
+  });
+  const chatRoomModesQuery = useQuery({
+    queryKey: queryKeys.chatRoomModes(),
+    queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
+    enabled: groupComposerOpen || Boolean(activeGroupRoomId),
+  });
+  const activeGroupRoomQuery = useQuery({
+    queryKey: queryKeys.chatRoom(activeGroupRoomId || "none"),
+    queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`),
+    enabled: Boolean(activeGroupRoomId),
+    refetchInterval: activeGroupRoomId ? resolvePollingInterval(pageVisible, 3_000) : false,
+    refetchIntervalInBackground: false,
+  });
+  const sessionAgentTemplatesQuery = useQuery({
+    queryKey: queryKeys.sessionAgentTemplates(),
+    queryFn: () => fetchJson<SessionAgentTemplate[]>("/api/sessions/agent-templates"),
+  });
   const syncSessionDetail = useCallback(
     (detail: SessionDetail) => {
       queryClient.setQueryData(queryKeys.session(detail.id), detail);
@@ -389,6 +457,7 @@ export function ChatCodingRoute() {
       && sessionsQuery.data?.some((session) => session.id === requestedSessionId)
       && activeSessionId !== requestedSessionId
     ) {
+      setActiveGroupRoomId("");
       setActiveSession(requestedSessionId);
       return;
     }
@@ -465,6 +534,7 @@ export function ChatCodingRoute() {
       }));
       syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error, variables) => {
@@ -520,6 +590,7 @@ export function ChatCodingRoute() {
       });
       syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error, variables) => {
@@ -545,6 +616,7 @@ export function ChatCodingRoute() {
       }));
       syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error, variables) => {
@@ -564,6 +636,7 @@ export function ChatCodingRoute() {
         method: "POST",
       }),
     onSuccess: (nextDetail) => {
+      setActiveGroupRoomId("");
       setActiveSession(nextDetail.id);
       setSessionFilter("");
       setSessionComposerErrors((current) => ({
@@ -572,6 +645,7 @@ export function ChatCodingRoute() {
       }));
       syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error) => {
@@ -580,6 +654,118 @@ export function ChatCodingRoute() {
         __sessions__: describeError(error, t("createSessionFailed")),
       }));
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    },
+  });
+
+  const createGroupRoomMutation = useMutation({
+    mutationFn: async ({ title, agentIds, mode }: { title: string; agentIds: string[]; mode: string }) =>
+      fetchJson<ChatRoomDetail>("/api/chat-rooms", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ title, agentIds, mode }),
+      }),
+    onSuccess: (room) => {
+      setGroupComposerOpen(false);
+      setGroupTitleDraft("");
+      setGroupModeDraft("round_robin");
+      setGroupSelectedAgentIds([]);
+      setSessionFilter("");
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: "",
+      }));
+      setActiveGroupRoomId(room.roomId);
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(room.roomId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+    },
+    onError: (error) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: describeError(
+          error,
+          lang === "zh" ? "创建群聊失败" : "Create group chat failed",
+        ),
+      }));
+    },
+  });
+
+  const startGroupRoundMutation = useMutation({
+    mutationFn: async ({ roomId, topic, mode }: { roomId: string; topic: string; mode: string }) =>
+      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/rounds`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ topic, mode }),
+      }),
+    onSuccess: (room) => {
+      setActiveGroupRoomId(room.roomId);
+      setGroupTopicDraft("");
+      setGroupRoomActionError("");
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(room.roomId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+    },
+    onError: (error) => {
+      setGroupRoomActionError(describeError(error, lang === "zh" ? "启动群聊讨论失败" : "Run group discussion failed"));
+      if (activeGroupRoomId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(activeGroupRoomId) });
+      }
+    },
+  });
+
+  const updateGroupRoomMutation = useMutation({
+    mutationFn: async ({ roomId, sessionIds, mode }: { roomId: string; sessionIds: string[]; mode: string }) =>
+      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          participantSessionIds: sessionIds,
+          mode,
+        }),
+      }),
+    onSuccess: (room) => {
+      setActiveGroupRoomId(room.roomId);
+      setGroupManageSessionIds(room.participants.map((participant) => participant.sessionId));
+      setGroupManageModeDraft(room.mode || "round_robin");
+      setGroupRoomActionError("");
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(room.roomId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+    },
+    onError: (error) => {
+      setGroupRoomActionError(describeError(error, lang === "zh" ? "更新群聊失败" : "Update group failed"));
+      if (activeGroupRoomId) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(activeGroupRoomId) });
+      }
+    },
+  });
+
+  const deleteGroupRoomMutation = useMutation({
+    mutationFn: async ({ roomId }: { roomId: string }) =>
+      fetchJson<{ deleted: boolean; roomId: string }>(`/api/chat-rooms/${roomId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: (_payload, variables) => {
+      setActiveGroupRoomId("");
+      setGroupTopicDraft("");
+      setGroupRoomActionError("");
+      setGroupManageSessionIds([]);
+      setGroupManageModeDraft("round_robin");
+      queryClient.removeQueries({ queryKey: queryKeys.chatRoom(variables.roomId), exact: true });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+    },
+    onError: (error) => {
+      setGroupRoomActionError(describeError(error, lang === "zh" ? "删除群聊失败" : "Delete group failed"));
     },
   });
 
@@ -605,6 +791,7 @@ export function ChatCodingRoute() {
       queryClient.removeQueries({ queryKey: queryKeys.session(variables.sessionId), exact: true });
       syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error, variables) => {
@@ -635,12 +822,42 @@ export function ChatCodingRoute() {
       }));
       syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
     },
     onError: (error, variables) => {
       setSessionComposerErrors((current) => ({
         ...current,
         [variables.sessionId]: describeError(error, t("renameSessionFailed")),
+      }));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+    },
+  });
+
+  const updateSessionAgentMutation = useMutation({
+    mutationFn: async ({ sessionId, agentProfileId }: { sessionId: string; agentProfileId: string }) =>
+      fetchJson<SessionDetail>(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ agentProfileId }),
+      }),
+    onSuccess: (nextDetail, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+      }));
+      syncSessionDetail(nextDetail);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessionAgentTemplates() });
+    },
+    onError: (error, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(error, lang === "zh" ? "保存会话 Agent 配置失败" : "Save session agent config failed"),
       }));
       void queryClient.invalidateQueries({ queryKey: queryKeys.session(variables.sessionId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
@@ -695,11 +912,21 @@ export function ChatCodingRoute() {
     },
   });
 
+  const activeGroupRoom = activeGroupRoomQuery.data;
+
   useEffect(() => {
     if (activeSessionId && sessionDetailQuery.data) {
       hydrateSession(activeSessionId, [], "agent");
     }
   }, [activeSessionId, hydrateSession, sessionDetailQuery.data]);
+
+  useEffect(() => {
+    if (!activeGroupRoom) {
+      return;
+    }
+    setGroupManageSessionIds(activeGroupRoom.participants.map((participant) => participant.sessionId));
+    setGroupManageModeDraft(activeGroupRoom.mode || "round_robin");
+  }, [activeGroupRoom]);
 
   useEffect(() => {
     if (!activeSessionId || !pageVisible || typeof EventSource === "undefined") {
@@ -832,6 +1059,30 @@ export function ChatCodingRoute() {
   }, [syncPanelWidthsToLayout]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const mediaQuery = window.matchMedia(CHAT_CENTER_FIRST_MEDIA_QUERY);
+    function applyCenterFirstState(matches: boolean) {
+      setCenterFirstLayout(matches);
+      if (matches && !centerFirstAutoCollapseRef.current) {
+        centerFirstAutoCollapseRef.current = true;
+        setLeftRailCollapsed(true);
+        setRightPaneCollapsed(true);
+      }
+      if (!matches) {
+        centerFirstAutoCollapseRef.current = false;
+      }
+    }
+    applyCenterFirstState(mediaQuery.matches);
+    const handleChange = (event: MediaQueryListEvent) => {
+      applyCenterFirstState(event.matches);
+    };
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
+
+  useEffect(() => {
     if (!dragState) {
       return;
     }
@@ -904,6 +1155,44 @@ export function ChatCodingRoute() {
   const runtime = runtimeQuery.data;
   const pet = petQuery.data;
   const detail = sessionDetailQuery.data;
+  const activeGroupRound = latestChatRoomRound(activeGroupRoom);
+  const groupPanelActive = Boolean(activeGroupRoomId);
+  const groupRoundRunning = String(activeGroupRoom?.status ?? "").trim().toLowerCase() === "running";
+  const groupManageSessionSet = useMemo(() => new Set(groupManageSessionIds), [groupManageSessionIds]);
+  const activeGroupParticipantSessionSet = useMemo(
+    () => new Set((activeGroupRoom?.participants ?? []).map((participant) => participant.sessionId)),
+    [activeGroupRoom?.participants],
+  );
+  const groupManageChanged = Boolean(
+    activeGroupRoom
+    && (
+      groupManageModeDraft !== (activeGroupRoom.mode || "round_robin")
+      || groupManageSessionIds.length !== activeGroupParticipantSessionSet.size
+      || groupManageSessionIds.some((sessionId) => !activeGroupParticipantSessionSet.has(sessionId))
+    ),
+  );
+  const groupManageDisabled =
+    !activeGroupRoom
+    || groupRoundRunning
+    || updateGroupRoomMutation.isPending
+    || groupManageSessionIds.length === 0
+    || !groupManageModeDraft;
+  const groupDeleteDisabled =
+    !activeGroupRoom
+    || groupRoundRunning
+    || deleteGroupRoomMutation.isPending;
+  const activeSurfaceTitle = groupPanelActive
+    ? activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
+    : detail?.title ?? runtime?.sessionTitle ?? t("loadingSession");
+  const activeSurfaceStatus = groupPanelActive
+    ? statusLabel(activeGroupRoom?.status ?? "ready")
+    : statusLabel(detail?.status || detail?.currentPhase || "idle");
+  const activeSurfaceLine = groupPanelActive
+    ? (
+      activeGroupRound?.summary
+      || `${activeGroupRoom?.participants?.length ?? 0} ${lang === "zh" ? "位 Agent" : "agents"} · ${activeGroupRoom?.mode ?? "round_robin"}`
+    )
+    : "";
   const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
     dataUpdatedAt: sessionDetailQuery.dataUpdatedAt,
     errorUpdatedAt: sessionDetailQuery.errorUpdatedAt,
@@ -919,6 +1208,11 @@ export function ChatCodingRoute() {
   const activeDraft = activeSessionId ? sessionDrafts[activeSessionId] ?? "" : "";
   const activeComposerError = activeSessionId ? sessionComposerErrors[activeSessionId] ?? "" : "";
   const activeEditTarget = activeSessionId ? sessionEditTargets[activeSessionId] ?? null : null;
+  const sessionAgentTemplates = sessionAgentTemplatesQuery.data ?? [];
+  const activeAgentProfileId = detail?.agentProfileId || detail?.agentTemplateId || "primary";
+  const activeAgentTemplate = sessionAgentTemplates.find((template) => template.profileId === activeAgentProfileId);
+  const agentTemplateSavePending =
+    updateSessionAgentMutation.isPending && updateSessionAgentMutation.variables?.sessionId === activeSessionId;
   const latestUserMessageId = useMemo(() => deriveLatestUserMessageId(detail?.messages), [detail?.messages]);
   const resolvedEditTarget = resolveLatestEditTarget(activeEditTarget, latestUserMessageId);
   const activeDraftEffective = resolveComposerDraftValue(activeDraft, activeEditTarget, resolvedEditTarget);
@@ -1004,6 +1298,11 @@ export function ChatCodingRoute() {
     : runtime
       ? `${numberFormatter.format(runtime.contextUsage.used)} / ${numberFormatter.format(runtime.contextUsage.limit)}`
       : t("loadingContext");
+  const sessionCacheUsage = detail?.cacheUsage;
+  const cacheHitRatePercent = Math.round(Math.max(0, Math.min(1, sessionCacheUsage?.turnCacheHitRate ?? 0)) * 100);
+  const cacheHitLine = sessionCacheUsage
+    ? `${numberFormatter.format(sessionCacheUsage.turnCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.turnInputTokens)} · ${cacheHitRatePercent}%`
+    : t("cacheObservationPending");
   const compression = runtime?.contextCompression;
   const compressionCurrentPercent = compression
     ? Math.round(Math.max(0, Math.min(1, compression.usageRatio || 0)) * 100)
@@ -1026,6 +1325,9 @@ export function ChatCodingRoute() {
       ? formatRelativeTime(compression.updatedAt, Date.now(), locale) || formatTime(compression.updatedAt)
       : "";
   const sessionStateLabel = (() => {
+    if (groupPanelActive) {
+      return activeSurfaceStatus;
+    }
     switch (runtime?.sessionState) {
       case "thinking":
         return t("sessionStateThinking");
@@ -1037,12 +1339,14 @@ export function ChatCodingRoute() {
         return statusLabel(runtime?.sessionState ?? detail?.currentPhase ?? "idle");
     }
   })();
-  const sessionStateLine = runtime?.sessionStateLine
-    ?? (sessionDetailErrorState.blockingError
-      ? sessionDetailErrorMessage
-      : detail?.taskSummary || t("preparingShell"));
+  const sessionStateLine = groupPanelActive
+    ? activeSurfaceLine
+    : runtime?.sessionStateLine
+      ?? (sessionDetailErrorState.blockingError
+        ? sessionDetailErrorMessage
+        : detail?.taskSummary || t("preparingShell"));
   const activeTask = detail?.activeTask ?? null;
-  const sessionStateValue = String(runtime?.sessionState ?? detail?.currentPhase ?? "idle")
+  const sessionStateValue = String(groupPanelActive ? activeGroupRoom?.status ?? "ready" : runtime?.sessionState ?? detail?.currentPhase ?? "idle")
     .trim()
     .toLowerCase();
   const currentTaskSummary =
@@ -1065,6 +1369,13 @@ export function ChatCodingRoute() {
         label: t("currentTask"),
         value: currentTaskSummary,
         title: currentTaskSummary,
+      },
+      {
+        label: t("promptCache"),
+        value: cacheHitLine,
+        title: sessionCacheUsage
+          ? `${t("promptCacheLast")} ${numberFormatter.format(sessionCacheUsage.lastCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.lastInputTokens)} · ${t("promptCacheTotal")} ${numberFormatter.format(sessionCacheUsage.totalCachedInputTokens)} / ${numberFormatter.format(sessionCacheUsage.totalInputTokens)}`
+          : t("cacheObservationPending"),
       },
     ],
     [t("preparingShell"), t("loadingSession"), t("loadingContext")],
@@ -1133,18 +1444,37 @@ export function ChatCodingRoute() {
     .filter(Boolean)
     .join(" · ");
 
-  const filteredSessions = useMemo(() => {
+  const sessionsById = useMemo(() => {
+    return new Map((sessionsQuery.data ?? []).map((session) => [session.id, session]));
+  }, [sessionsQuery.data]);
+
+  const groupCandidateAgents = useMemo(() => {
+    return (agentsQuery.data ?? []).filter((agent) => {
+      return (
+        String(agent.kind ?? "").trim() === "persistent"
+        && String(agent.status ?? "").trim() !== "archived"
+        && String(agent.directSessionId ?? "").trim()
+      );
+    });
+  }, [agentsQuery.data]);
+
+  const readyChatRoomModes = useMemo(() => {
+    const modes = (chatRoomModesQuery.data ?? []).filter((mode) => String(mode.status ?? "").trim() === "ready");
+    return modes.length ? modes : [{ id: "round_robin", label: "Round robin", status: "ready" }];
+  }, [chatRoomModesQuery.data]);
+
+  const filteredConversations = useMemo(() => {
     const term = sessionFilter.trim().toLowerCase();
-    const sessions = sessionsQuery.data ?? [];
+    const conversations = conversationsQuery.data ?? (sessionsQuery.data ?? []).map(sessionToConversationSummary);
     if (!term) {
-      return sessions;
+      return conversations;
     }
-    return sessions.filter((session) =>
-      [session.title, session.taskSummary, session.status, session.currentPhase].some((value) =>
-        value.toLowerCase().includes(term),
+    return conversations.filter((conversation) =>
+      [conversation.title, conversation.summary, conversation.status, conversation.type, conversation.agentTemplateLabel ?? ""].some((value) =>
+        String(value ?? "").toLowerCase().includes(term),
       ),
     );
-  }, [sessionFilter, sessionsQuery.data]);
+  }, [conversationsQuery.data, sessionFilter, sessionsQuery.data]);
 
   const filteredTree = useMemo(
     () => filterTree(fileTreeQuery.data ?? [], fileFilter),
@@ -1280,11 +1610,110 @@ export function ChatCodingRoute() {
   }
 
   function handleCreateSession() {
+    setActiveGroupRoomId("");
     setSessionComposerErrors((current) => ({
       ...current,
       __sessions__: "",
     }));
     createSessionMutation.mutate();
+  }
+
+  function handleOpenDirectSession(sessionId: string) {
+    setActiveGroupRoomId("");
+    setGroupRoomActionError("");
+    setActiveSession(sessionId);
+  }
+
+  function handleOpenGroupRoom(roomId: string) {
+    if (!roomId) {
+      return;
+    }
+    setActiveGroupRoomId(roomId);
+    setGroupRoomActionError("");
+    void queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(roomId) });
+  }
+
+  function handleToggleGroupManageSession(sessionId: string) {
+    if (!sessionId || groupRoundRunning || updateGroupRoomMutation.isPending) {
+      return;
+    }
+    setGroupRoomActionError("");
+    setGroupManageSessionIds((current) =>
+      current.includes(sessionId)
+        ? current.filter((item) => item !== sessionId)
+        : [...current, sessionId],
+    );
+  }
+
+  function handleToggleGroupComposer() {
+    setSessionComposerErrors((current) => ({
+      ...current,
+      __sessions__: "",
+    }));
+    setGroupComposerOpen((open) => {
+      const nextOpen = !open;
+      if (nextOpen && !groupTitleDraft.trim()) {
+        setGroupTitleDraft(lang === "zh" ? "Agent 群聊" : "Agent group");
+      }
+      return nextOpen;
+    });
+  }
+
+  function handleToggleGroupAgent(agentId: string) {
+    setSessionComposerErrors((current) => ({
+      ...current,
+      __sessions__: "",
+    }));
+    setGroupSelectedAgentIds((current) =>
+      current.includes(agentId) ? current.filter((item) => item !== agentId) : [...current, agentId],
+    );
+  }
+
+  function handleCreateGroupRoom() {
+    const title = groupTitleDraft.trim();
+    const agentIds = groupSelectedAgentIds.filter(Boolean);
+    if (!title || agentIds.length < 2 || createGroupRoomMutation.isPending) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        __sessions__: lang === "zh" ? "请输入群聊名称，并至少选择两个 Agent。" : "Enter a group name and choose at least two agents.",
+      }));
+      return;
+    }
+    createGroupRoomMutation.mutate({
+      title,
+      agentIds,
+      mode: groupModeDraft || "round_robin",
+    });
+  }
+
+  function handleStartGroupRound() {
+    const topic = groupTopicDraft.trim();
+    if (!activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundRunning) {
+      return;
+    }
+    startGroupRoundMutation.mutate({
+      roomId: activeGroupRoomId,
+      topic,
+      mode: activeGroupRoom?.mode || "round_robin",
+    });
+  }
+
+  function handleApplyGroupRoomManagement() {
+    if (!activeGroupRoomId || groupManageDisabled) {
+      return;
+    }
+    updateGroupRoomMutation.mutate({
+      roomId: activeGroupRoomId,
+      sessionIds: groupManageSessionIds,
+      mode: groupManageModeDraft || "round_robin",
+    });
+  }
+
+  function handleDeleteActiveGroupRoom() {
+    if (!activeGroupRoomId || groupDeleteDisabled) {
+      return;
+    }
+    deleteGroupRoomMutation.mutate({ roomId: activeGroupRoomId });
   }
 
   function handleDeleteSession(session: SessionSummary) {
@@ -1345,6 +1774,18 @@ export function ChatCodingRoute() {
       return;
     }
     renameSessionMutation.mutate({ sessionId: session.id, title });
+  }
+
+  function handleAgentTemplateChange(agentProfileId: string) {
+    if (!activeSessionId || !agentProfileId || agentProfileId === activeAgentProfileId) {
+      return;
+    }
+    setSessionComposerErrors((current) => ({
+      ...current,
+      [activeSessionId]: "",
+      __sessions__: "",
+    }));
+    updateSessionAgentMutation.mutate({ sessionId: activeSessionId, agentProfileId });
   }
 
   function handleResizeStart(side: ResizableSide, event: PointerEvent<HTMLDivElement>) {
@@ -1420,13 +1861,17 @@ export function ChatCodingRoute() {
   );
 
   return (
-    <div ref={layoutRef} className={styles.layout} style={layoutStyle}>
+    <div
+      ref={layoutRef}
+      className={centerFirstLayout ? `${styles.layout} ${styles.layoutCenterFirst}` : styles.layout}
+      style={layoutStyle}
+    >
       <aside className={leftRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={leftRailCollapsed}>
         <section className={styles.leftBlock}>
           <div className={styles.sectionHeader}>
             <div className={styles.sectionIdentity}>
               <p className={styles.blockEyebrow}>{t("currentSession")}</p>
-              <h3 className={styles.sectionTitle}>{detail?.title ?? runtime?.sessionTitle ?? t("loadingSession")}</h3>
+              <h3 className={styles.sectionTitle}>{activeSurfaceTitle}</h3>
             </div>
             <span className={`${styles.sessionStatePill} ${styles[`sessionStatePill_${sessionStateValue}`]}`}>
               {sessionStateLabel}
@@ -1453,7 +1898,7 @@ export function ChatCodingRoute() {
             </div>
             <span className={styles.featurePresetScope}>{t("chatFeaturePanelScope")}</span>
           </div>
-          <div className={styles.featurePresetGrid}>
+          <div className={styles.featurePrimarySlot}>
             <button
               type="button"
               className={
@@ -1473,23 +1918,21 @@ export function ChatCodingRoute() {
                 {mentalModelEnabledForNextTurn ? t("mentalModelNextTurnOn") : t("mentalModelNextTurnOff")}
               </span>
             </button>
+          </div>
+          <div className={styles.featureChipRow}>
             {CHAT_FEATURE_PRESETS.map((item) => {
               const enabled = featurePresetState[item.key];
               return (
                 <button
                   key={item.key}
                   type="button"
-                  className={enabled ? `${styles.featureToggle} ${styles.featureToggleActive}` : styles.featureToggle}
+                  className={enabled ? `${styles.featureChip} ${styles.featureChipActive}` : styles.featureChip}
                   aria-pressed={enabled}
                   onClick={() => toggleFeaturePreset(item.key)}
+                  title={t(item.hintKey)}
                 >
-                  <span className={styles.featureToggleText}>
-                    <strong>{t(item.labelKey)}</strong>
-                    <span>{t(item.hintKey)}</span>
-                  </span>
-                  <span className={styles.featureToggleState}>
-                    {enabled ? t("chatFeatureEnabled") : t("chatFeatureDisabled")}
-                  </span>
+                  <strong>{t(item.labelKey)}</strong>
+                  <span aria-hidden="true" />
                 </button>
               );
             })}
@@ -1497,129 +1940,24 @@ export function ChatCodingRoute() {
           <p className={styles.featurePresetNote}>{t("chatFeaturePanelHint")}</p>
         </section>
 
-        <section className={styles.leftBlock}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("mentalState")}</p>
-              <p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>
-            </div>
-            <span className={`${styles.mentalStateBadge} ${styles[`mentalStateBadge_${mentalCognitiveStateValue}`]}`}>
-              {mentalStateLabel}
-            </span>
-          </div>
-          <p className={styles.contextLineCompact}>{mentalSummary}</p>
-          <p className={styles.oneLineValue} title={mentalWhisper}>
-            <span>{t("mentalWhisper")}</span>
-            {mentalWhisper}
-          </p>
-          <details className={styles.compactDetails}>
-            <summary>
-              <ChevronRight size={14} />
-              <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
-              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
-            </summary>
-            <div className={styles.inlineStatGrid}>
-              <div className={styles.inlineStat}>
-                <span>{t("state")}</span>
-                <strong>{mentalCognitiveStateLabel}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalConfidence")}</span>
-                <strong>{mentalConfidence}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalSource")}</span>
-                <strong>{mentalSourceLabel}</strong>
-              </div>
-              <div className={styles.inlineStat}>
-                <span>{t("mentalLastUpdated")}</span>
-                <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
-              </div>
-            </div>
-          </details>
-        </section>
-
-        <section className={styles.leftBlock}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("petSpace")}</p>
-              <h3 className={styles.sectionTitle}>{pet?.name ?? t("loadingPetState")}</h3>
-            </div>
-            <span className={styles.metricValue}>{t("level")} {pet?.level ?? 0}</span>
-          </div>
-          <p className={styles.contextLineCompact}>{petCompactLine}</p>
-          <details className={styles.compactDetails}>
-            <summary>
-              <ChevronRight size={14} />
-              <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
-              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
-            </summary>
-            <div className={styles.inlineMetaList}>
-              <span className={styles.inlineMetaPill}>
-                <span>{t("preset")}</span>
-                <strong>{petPresetLabel}</strong>
-              </span>
-              <span className={styles.inlineMetaPill}>
-                <span>{t("dailyTokens")}</span>
-                <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
-              </span>
-            </div>
-            <p className={styles.detailNote}>
-              <span>{t("petBoundary")}</span>
-              {t("petBoundaryLine")}
-            </p>
-            <div className={styles.vitalStackCompact}>
-              {petVitals.map((vital) => (
-                <div key={vital.key} className={styles.vitalItemCompact}>
-                  <div className={styles.vitalLabelRow}>
-                    <span>{vital.label}</span>
-                    <strong>{vital.value}</strong>
-                  </div>
-                  <div className={styles.progressTrack}>
-                    <div className={styles.progressFillCool} style={{ width: `${vital.value}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </details>
-        </section>
-
-        <section className={styles.leftBlock}>
+        <section className={`${styles.leftBlock} ${styles.resourceBlock}`}>
           <div className={styles.sectionHeader}>
             <p className={styles.blockEyebrow}>{t("contextInUse")}</p>
             <span className={styles.metricValue}>{contextPercent}%</span>
           </div>
-          <p className={styles.contextUsageValue}>{contextStatusLine}</p>
-          <div className={styles.progressTrack}>
-            <div className={styles.progressFillWarm} style={{ width: `${contextPercent}%` }} />
-          </div>
-          <p className={styles.backendNote}>
-            {contextUsageMetaLine}
-          </p>
-        </section>
-
-        <section className={styles.leftBlock}>
-          <div className={styles.sectionHeader}>
-            <div className={styles.sectionIdentity}>
-              <p className={styles.blockEyebrow}>{t("contextCompression")}</p>
-              <p className={styles.sectionMetaLine}>
-                {compression?.enabled === false ? t("compressionDisabled") : `${t("compressionCurrentLevel")} ${compressionLevelLabel}`}
-              </p>
+          <div className={styles.resourceSplit}>
+            <div className={styles.resourceMetric}>
+              <span>{t("contextInUse")}</span>
+              <strong title={contextStatusLine}>{contextStatusLine}</strong>
             </div>
-            <span className={styles.metricValue}>{compressionCurrentPercent}%</span>
-          </div>
-          <p className={styles.contextUsageValue}>{compressionMainLine}</p>
-          <div className={styles.progressTrack}>
-            <div className={styles.progressFillWarm} style={{ width: `${compressionCurrentPercent}%` }} />
+            <div className={styles.resourceMetric}>
+              <span>{t("contextCompression")}</span>
+              <strong>{compressionCurrentPercent}% · {compressionLevelLabel}</strong>
+            </div>
           </div>
           <p className={styles.oneLineValue} title={lastCompression?.reason || lastCompressionLine}>
             <span>{t("compressionLastRun")}</span>
             {lastCompressionLine}
-          </p>
-          <p className={styles.backendNote}>
-            {lastCompression
-              ? lastCompression.summaryWritten ? t("compressionSummaryStored") : t("compressionSummaryNotStored")
-              : compressionUpdatedLine || t("compressionNoRecord")}
           </p>
           <details className={styles.compactDetails}>
             <summary>
@@ -1644,69 +1982,118 @@ export function ChatCodingRoute() {
           </details>
         </section>
 
-        <section className={styles.petShowcase} aria-label={t("petSpace")}>
-          <div className={styles.petShowcaseStage} aria-hidden="true">
-            <div className={styles.petShowcaseAura} />
-            <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinClass}`}>
-              <span className={styles.petShowcaseEarLeft} />
-              <span className={styles.petShowcaseEarRight} />
-              <span className={styles.petShowcaseFace}>
-                <span className={styles.petShowcaseEye} />
-                <span className={styles.petShowcaseMuzzle} />
-                <span className={styles.petShowcaseEye} />
-              </span>
-              <span className={styles.petShowcaseSymbol}>{petAvatarSymbol}</span>
-              <span className={styles.petShowcaseFootLeft} />
-              <span className={styles.petShowcaseFootRight} />
+        <section className={`${styles.leftBlock} ${styles.companionBlock}`}>
+          <div className={styles.sectionHeader}>
+            <div className={styles.sectionIdentity}>
+              <p className={styles.blockEyebrow}>{t("mentalState")} / {t("petSpace")}</p>
+              <p className={styles.sectionMetaLine}>{mentalCompactLine || mentalSourceLabel}</p>
             </div>
-          </div>
-          <div className={styles.petShowcaseInfo}>
-            <div className={styles.petShowcaseTop}>
-              <p className={styles.blockEyebrow}>{t("petSpace")}</p>
-              <span>{t("level")} {pet?.level ?? 0}</span>
-            </div>
-            <h3 className={styles.petShowcaseName}>{pet?.name ?? t("loadingPetState")}</h3>
-            <p className={styles.petShowcaseLine}>
-              {petPresetLabel} · {petCompanionLine}
-            </p>
-          </div>
-          <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
-            <button
-              type="button"
-              className={styles.petShowcaseAction}
-              onClick={() => handlePetInteraction("feed")}
-              disabled={petActionMutation.isPending}
-              title={petInteractionLabels.feedTitle}
-            >
-              <Apple size={14} />
-              <span>{petInteractionLabels.feed}</span>
-            </button>
-            <button
-              type="button"
-              className={styles.petShowcaseAction}
-              onClick={() => handlePetInteraction("talk")}
-              disabled={petActionMutation.isPending}
-              title={petInteractionLabels.talkTitle}
-            >
-              <MessageCircleHeart size={14} />
-              <span>{petInteractionLabels.talk}</span>
-            </button>
-            <button
-              type="button"
-              className={styles.petShowcaseAction}
-              onClick={() => handlePetInteraction("care")}
-              disabled={petActionMutation.isPending}
-              title={petInteractionLabels.careTitle}
-            >
-              <HeartHandshake size={14} />
-              <span>{petInteractionLabels.care}</span>
-            </button>
-            <span className={styles.petShowcaseActionHint}>
-              <Sparkles size={13} />
-              <span>{petInteractionLabels.pending}</span>
+            <span className={`${styles.mentalStateBadge} ${styles[`mentalStateBadge_${mentalCognitiveStateValue}`]}`}>
+              {mentalStateLabel}
             </span>
           </div>
-          {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
+          <p className={styles.contextLineCompact}>{mentalSummary}</p>
+          <div className={styles.companionCompact}>
+            <div className={styles.petMiniAvatar} aria-hidden="true">
+              <div className={`${styles.petShowcaseAvatar} ${petAvatarSkinClass}`}>
+                <span className={styles.petShowcaseEarLeft} />
+                <span className={styles.petShowcaseEarRight} />
+                <span className={styles.petShowcaseFace}>
+                  <span className={styles.petShowcaseEye} />
+                  <span className={styles.petShowcaseMuzzle} />
+                  <span className={styles.petShowcaseEye} />
+                </span>
+                <span className={styles.petShowcaseSymbol}>{petAvatarSymbol}</span>
+                <span className={styles.petShowcaseFootLeft} />
+                <span className={styles.petShowcaseFootRight} />
+              </div>
+            </div>
+            <div className={styles.companionCopy}>
+              <div className={styles.companionTopLine}>
+                <strong>{pet?.name ?? t("loadingPetState")}</strong>
+                <span>{t("level")} {pet?.level ?? 0} · {petPresetLabel}</span>
+              </div>
+              <p title={petCompactLine}>{petCompactLine}</p>
+            </div>
+          </div>
+          <details className={styles.compactDetails}>
+            <summary>
+              <ChevronRight size={14} />
+              <span className={styles.compactDetailsClosedLabel}>{t("expandSection")}</span>
+              <span className={styles.compactDetailsOpenLabel}>{t("collapseSection")}</span>
+            </summary>
+            <p className={styles.oneLineValue} title={mentalWhisper}>
+              <span>{t("mentalWhisper")}</span>
+              {mentalWhisper}
+            </p>
+            <div className={styles.inlineStatGrid}>
+              <div className={styles.inlineStat}>
+                <span>{t("state")}</span>
+                <strong>{mentalCognitiveStateLabel}</strong>
+              </div>
+              <div className={styles.inlineStat}>
+                <span>{t("mentalConfidence")}</span>
+                <strong>{mentalConfidence}</strong>
+              </div>
+              <div className={styles.inlineStat}>
+                <span>{t("mentalSource")}</span>
+                <strong>{mentalSourceLabel}</strong>
+              </div>
+              <div className={styles.inlineStat}>
+                <span>{t("mentalLastUpdated")}</span>
+                <strong title={formatTime(mental?.updatedAt ?? "")}>{mentalRelativeTime}</strong>
+              </div>
+            </div>
+            <div className={styles.inlineMetaList}>
+              <span className={styles.inlineMetaPill}>
+                <span>{t("dailyTokens")}</span>
+                <strong>{numberFormatter.format(pet?.dailyTokens ?? 0)}</strong>
+              </span>
+              {petVitals.map((vital) => (
+                <span key={vital.key} className={styles.inlineMetaPill}>
+                  <span>{vital.label}</span>
+                  <strong>{vital.value}</strong>
+                </span>
+              ))}
+            </div>
+            <div className={styles.petShowcaseActions} aria-label={petInteractionLabels.group}>
+              <button
+                type="button"
+                className={styles.petShowcaseAction}
+                onClick={() => handlePetInteraction("feed")}
+                disabled={petActionMutation.isPending}
+                title={petInteractionLabels.feedTitle}
+              >
+                <Apple size={14} />
+                <span>{petInteractionLabels.feed}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.petShowcaseAction}
+                onClick={() => handlePetInteraction("talk")}
+                disabled={petActionMutation.isPending}
+                title={petInteractionLabels.talkTitle}
+              >
+                <MessageCircleHeart size={14} />
+                <span>{petInteractionLabels.talk}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.petShowcaseAction}
+                onClick={() => handlePetInteraction("care")}
+                disabled={petActionMutation.isPending}
+                title={petInteractionLabels.careTitle}
+              >
+                <HeartHandshake size={14} />
+                <span>{petInteractionLabels.care}</span>
+              </button>
+              <span className={styles.petShowcaseActionHint}>
+                <Sparkles size={13} />
+                <span>{petInteractionLabels.pending}</span>
+              </span>
+            </div>
+            {petActionFeedback ? <p className={styles.petShowcaseFeedback}>{petActionFeedback}</p> : null}
+          </details>
         </section>
       </aside>
 
@@ -1729,13 +2116,18 @@ export function ChatCodingRoute() {
           <button
             type="button"
             className={
-              workspace.activeTab === "agent" ? `${styles.tab} ${styles.tabActive}` : styles.tab
+              groupPanelActive || workspace.activeTab === "agent" ? `${styles.tab} ${styles.tabActive}` : styles.tab
             }
-            onClick={() => activeSessionId && setActiveTab(activeSessionId, "agent")}
+            onClick={() => {
+              if (groupPanelActive) {
+                return;
+              }
+              activeSessionId && setActiveTab(activeSessionId, "agent");
+            }}
           >
-            {t("agentSession")}
+            {groupPanelActive ? (lang === "zh" ? "群聊" : "Group") : t("agentSession")}
           </button>
-          {workspace.openTabs.map((tabPath) => (
+          {!groupPanelActive && workspace.openTabs.map((tabPath) => (
             <div
               key={tabPath}
               className={
@@ -1765,7 +2157,194 @@ export function ChatCodingRoute() {
         </div>
 
         <div className={styles.centerSurface}>
-          {!activeSessionId && !sessionsQuery.isPending ? (
+          {groupPanelActive ? (
+            <div className={styles.groupConversationFrame}>
+              <header className={styles.groupConversationHeader}>
+                <div>
+                  <p>{activeGroupRoom?.mode ?? "round_robin"}</p>
+                  <h2>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h2>
+                  <span>
+                    {(activeGroupRoom?.participants ?? []).length} {lang === "zh" ? "位 Agent" : "agents"}
+                    {" · "}
+                    {statusLabel(activeGroupRoom?.status ?? "ready")}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={styles.groupRefreshButton}
+                  onClick={() => activeGroupRoomId && void activeGroupRoomQuery.refetch()}
+                  disabled={activeGroupRoomQuery.isFetching}
+                >
+                  {lang === "zh" ? "刷新" : "Refresh"}
+                </button>
+              </header>
+              {activeGroupRoomQuery.isError ? (
+                <div className={styles.inlineNotice}>
+                  {describeError(activeGroupRoomQuery.error, t("loadFailed"))}
+                </div>
+              ) : null}
+              {groupRoomActionError ? (
+                <div className={styles.inlineNotice}>{groupRoomActionError}</div>
+              ) : null}
+              <section className={styles.groupManagementPanel} aria-label={lang === "zh" ? "群聊管理" : "Group management"}>
+                <div className={styles.groupManagementHeader}>
+                  <div>
+                    <strong>{lang === "zh" ? "群聊管理" : "Group management"}</strong>
+                    <span>
+                      {groupManageSessionIds.length}/{sessionsQuery.data?.length ?? 0}
+                      {" "}
+                      {lang === "zh" ? "位 Agent 已选择" : "agents selected"}
+                    </span>
+                  </div>
+                  <div className={styles.groupManagementActions}>
+                    <button
+                      type="button"
+                      className={groupManageChanged ? styles.groupApplyButton : styles.groupSecondaryButton}
+                      disabled={groupManageDisabled || !groupManageChanged}
+                      onClick={handleApplyGroupRoomManagement}
+                    >
+                      <Check size={14} />
+                      <span>
+                        {updateGroupRoomMutation.isPending
+                          ? (lang === "zh" ? "应用中" : "Applying")
+                          : (lang === "zh" ? "应用变更" : "Apply")}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.groupDeleteButton}
+                      disabled={groupDeleteDisabled}
+                      onClick={handleDeleteActiveGroupRoom}
+                    >
+                      <Trash2 size={14} />
+                      <span>
+                        {deleteGroupRoomMutation.isPending
+                          ? (lang === "zh" ? "删除中" : "Deleting")
+                          : (lang === "zh" ? "删除" : "Delete")}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+                <div className={styles.groupManagementControls}>
+                  <label className={styles.groupModeSelect}>
+                    <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
+                    <select
+                      value={groupManageModeDraft}
+                      disabled={groupRoundRunning || updateGroupRoomMutation.isPending}
+                      onChange={(event) => {
+                        setGroupRoomActionError("");
+                        setGroupManageModeDraft(event.target.value);
+                      }}
+                    >
+                      {readyChatRoomModes.map((mode) => (
+                        <option key={mode.id} value={mode.id}>
+                          {mode.label || mode.id}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className={styles.groupMemberPicker}>
+                    {(sessionsQuery.data ?? []).map((session) => {
+                      const selected = groupManageSessionSet.has(session.id);
+                      return (
+                        <label
+                          key={session.id}
+                          className={
+                            selected
+                              ? `${styles.groupMemberChip} ${styles.groupMemberChipSelected}`
+                              : styles.groupMemberChip
+                          }
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={groupRoundRunning || updateGroupRoomMutation.isPending}
+                            onChange={() => handleToggleGroupManageSession(session.id)}
+                          />
+                          <span>{session.title}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                {groupRoundRunning ? (
+                  <p className={styles.groupManagementHint}>
+                    {lang === "zh" ? "群聊运行中，成员和模式会在本轮结束后允许修改。" : "The group is running. Members and mode can be changed after this round finishes."}
+                  </p>
+                ) : null}
+              </section>
+              <div className={styles.groupMessageTimeline}>
+                {(activeGroupRoom?.rounds ?? []).length ? (
+                  (activeGroupRoom?.rounds ?? []).map((round) => (
+                    <section key={round.roundId} className={styles.groupRoundBlock}>
+                      <header>
+                        <div>
+                          <strong>{round.topic}</strong>
+                          <span>{round.mode} · {statusLabel(round.status)}</span>
+                        </div>
+                        <time>{formatTime(round.updatedAt || round.startedAt)}</time>
+                      </header>
+                      {round.summary ? <p className={styles.groupRoundSummary}>{round.summary}</p> : null}
+                      <div className={styles.groupMessageList}>
+                        {(round.messages ?? []).map((message) => (
+                          <article
+                            key={message.messageId}
+                            className={
+                              message.status === "failed"
+                                ? `${styles.groupMessageCard} ${styles.groupMessageCardFailed}`
+                                : styles.groupMessageCard
+                            }
+                          >
+                            <header>
+                              <strong>{message.speakerTitle}</strong>
+                              <span>{statusLabel(message.status)}</span>
+                            </header>
+                            <p>{message.content || message.summary || (lang === "zh" ? "暂无内容" : "No content yet")}</p>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                  ))
+                ) : (
+                  <div className={styles.groupEmptyState}>
+                    <UsersRound size={28} />
+                    <p>{lang === "zh" ? "群聊已创建，输入议题后开始第一轮讨论。" : "The group is ready. Enter a topic to start the first round."}</p>
+                  </div>
+                )}
+              </div>
+              <div className={styles.groupComposerBar}>
+                <input
+                  value={groupTopicDraft}
+                  onChange={(event) => setGroupTopicDraft(event.target.value)}
+                  disabled={startGroupRoundMutation.isPending || groupRoundRunning}
+                  placeholder={lang === "zh" ? "输入下一轮群聊议题" : "Topic for the next group round"}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleStartGroupRound();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={handleStartGroupRound}
+                  disabled={
+                    !groupTopicDraft.trim()
+                    || startGroupRoundMutation.isPending
+                    || groupRoundRunning
+                    || !activeGroupRoom
+                  }
+                >
+                  <UsersRound size={15} />
+                  <span>
+                    {startGroupRoundMutation.isPending || groupRoundRunning
+                      ? (lang === "zh" ? "讨论中" : "Running")
+                      : (lang === "zh" ? "启动一轮" : "Run round")}
+                  </span>
+                </button>
+              </div>
+            </div>
+          ) : !activeSessionId && !sessionsQuery.isPending ? (
             <div className={styles.emptySurface}>{t("noSessionsYet")}</div>
           ) : sessionDetailErrorState.blockingError ? (
             <div className={styles.emptySurface}>
@@ -1786,6 +2365,8 @@ export function ChatCodingRoute() {
                   messages={detail.messages}
                   assistantDisplayName={pet?.name}
                   userDisplayName={runtime?.userName}
+                  userAvatarPreset={runtime?.userProfile?.avatarPreset}
+                  userAvatarImageUrl={runtime?.userProfile?.avatarImageUrl}
                   taskSummary={currentTaskSummary}
                   defaultFileContext={detail.defaultFileContext}
                   showHeader={false}
@@ -1893,31 +2474,196 @@ export function ChatCodingRoute() {
 
         {rightPanel === "sessions" ? (
           <div className={styles.panelBody}>
-            <button
-              type="button"
-              className={styles.newSessionButton}
-              onClick={handleCreateSession}
-              disabled={createSessionMutation.isPending}
-            >
-              <Plus size={15} />
-              <span>{createSessionMutation.isPending ? t("creatingSession") : t("newSession")}</span>
-            </button>
+            <div className={styles.sessionActionRow}>
+              <button
+                type="button"
+                className={styles.newSessionButton}
+                onClick={handleCreateSession}
+                disabled={createSessionMutation.isPending}
+              >
+                <Plus size={15} />
+                <span>{createSessionMutation.isPending ? t("creatingSession") : t("newSession")}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.newGroupButton}
+                onClick={handleToggleGroupComposer}
+                aria-expanded={groupComposerOpen}
+                disabled={createGroupRoomMutation.isPending}
+              >
+                <UsersRound size={15} />
+                <span>{groupComposerOpen ? (lang === "zh" ? "收起" : "Close") : (lang === "zh" ? "新建群聊" : "New group")}</span>
+              </button>
+            </div>
+            {groupComposerOpen ? (
+              <section className={styles.groupComposerPanel} aria-label={lang === "zh" ? "新建群聊" : "New group chat"}>
+                <label className={styles.groupComposerField}>
+                  <span>{lang === "zh" ? "群名" : "Name"}</span>
+                  <input
+                    className={styles.groupComposerInput}
+                    value={groupTitleDraft}
+                    maxLength={80}
+                    onChange={(event) => setGroupTitleDraft(event.target.value)}
+                  />
+                </label>
+                <label className={styles.groupComposerField}>
+                  <span>{lang === "zh" ? "模式" : "Mode"}</span>
+                  <select
+                    className={styles.groupComposerInput}
+                    value={groupModeDraft}
+                    onChange={(event) => setGroupModeDraft(event.target.value)}
+                    disabled={chatRoomModesQuery.isPending || createGroupRoomMutation.isPending}
+                  >
+                    {readyChatRoomModes.map((mode) => (
+                      <option key={mode.id} value={mode.id}>
+                        {mode.label || mode.id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与 Agent" : "Choose agents"}>
+                  {agentsQuery.isPending ? (
+                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "正在读取 Agent..." : "Loading agents..."}</p>
+                  ) : groupCandidateAgents.length ? (
+                    groupCandidateAgents.map((agent) => {
+                      const selected = groupSelectedAgentIds.includes(agent.agentId);
+                      return (
+                        <label key={agent.agentId} className={selected ? `${styles.groupAgentOption} ${styles.groupAgentOptionSelected}` : styles.groupAgentOption}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={createGroupRoomMutation.isPending}
+                            onChange={() => handleToggleGroupAgent(agent.agentId)}
+                          />
+                          <span>
+                            <strong>{agent.displayName || agent.agentId}</strong>
+                            <small>{agent.profileId || agent.templateId || "primary"}</small>
+                          </span>
+                        </label>
+                      );
+                    })
+                  ) : (
+                    <p className={styles.groupComposerEmpty}>{lang === "zh" ? "暂无可加入群聊的持久 Agent。" : "No persistent agents are available."}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className={styles.createGroupButton}
+                  onClick={handleCreateGroupRoom}
+                  disabled={createGroupRoomMutation.isPending || groupSelectedAgentIds.length < 2 || !groupTitleDraft.trim()}
+                >
+                  <UsersRound size={15} />
+                  <span>{createGroupRoomMutation.isPending ? (lang === "zh" ? "创建中" : "Creating") : (lang === "zh" ? "创建群聊" : "Create group")}</span>
+                </button>
+              </section>
+            ) : null}
             {sessionComposerErrors.__sessions__ ? (
               <div className={styles.panelState}>{sessionComposerErrors.__sessions__}</div>
+            ) : null}
+            {detail && !groupPanelActive ? (
+              <section className={styles.agentTemplatePanel} aria-label={lang === "zh" ? "会话 Agent 配置" : "Session agent config"}>
+                <div className={styles.agentTemplateHeader}>
+                  <Bot size={15} />
+                  <div>
+                    <strong>{lang === "zh" ? "会话 Agent" : "Session agent"}</strong>
+                    <span>
+                      {agentTemplateSavePending
+                        ? (lang === "zh" ? "保存中" : "Saving")
+                        : activeAgentTemplate?.label ?? detail.agentTemplateLabel ?? activeAgentProfileId}
+                    </span>
+                  </div>
+                </div>
+                <select
+                  className={styles.agentTemplateSelect}
+                  value={activeAgentProfileId}
+                  disabled={sessionAgentTemplatesQuery.isPending || updateSessionAgentMutation.isPending || sessionBusy}
+                  onChange={(event) => handleAgentTemplateChange(event.target.value)}
+                  aria-label={lang === "zh" ? "选择当前会话使用的 Agent 模板" : "Choose the agent template for this session"}
+                >
+                  {sessionAgentTemplates.length ? (
+                    sessionAgentTemplates.map((template) => (
+                      <option key={template.templateId} value={template.profileId}>
+                        {template.label} · {template.model || template.providerKind || template.profileId}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={activeAgentProfileId}>
+                      {detail.agentTemplateLabel ?? activeAgentProfileId}
+                    </option>
+                  )}
+                </select>
+                <p className={styles.agentTemplateMeta}>
+                  {activeAgentTemplate
+                    ? `${activeAgentTemplate.providerKind || "-"} · ${activeAgentTemplate.model || "-"}`
+                    : lang === "zh" ? "使用当前保存的会话 Agent 配置。" : "Using the saved session agent config."}
+                  {activeAgentTemplate?.missingApiKey
+                    ? (lang === "zh" ? " · 该配置缺少密钥" : " · missing key")
+                    : ""}
+                </p>
+              </section>
             ) : null}
             {sessionsErrorState.transientError ? (
               <div className={styles.panelNotice} role="status">{sessionsErrorMessage}</div>
             ) : null}
             {sessionsErrorState.blockingError ? (
               <div className={styles.panelState}>{sessionsErrorMessage}</div>
-            ) : sessionsQuery.isPending && !sessionsQuery.data ? (
+            ) : conversationsQuery.isPending && !conversationsQuery.data && sessionsQuery.isPending && !sessionsQuery.data ? (
               <div className={styles.panelState}>{t("loadingSession")}</div>
-            ) : filteredSessions.length === 0 ? (
+            ) : filteredConversations.length === 0 ? (
               <div className={styles.panelState}>
                 {sessionFilter.trim() ? t("noSessionMatches") : t("noSessionsYet")}
               </div>
             ) : (
-              filteredSessions.map((session) => {
+              filteredConversations.map((conversation) => {
+                if (conversation.type === "group_room") {
+                  const roomId = conversation.roomId || conversation.conversationId;
+                  return (
+                    <div
+                      key={`group-${roomId}`}
+                      aria-current={activeGroupRoomId === roomId ? "true" : undefined}
+                      className={
+                        activeGroupRoomId === roomId
+                          ? `${styles.sessionItem} ${styles.sessionItemActive}`
+                          : styles.sessionItem
+                      }
+                    >
+                      <button
+                        type="button"
+                        className={styles.sessionItemMain}
+                        onClick={() => handleOpenGroupRoom(roomId)}
+                      >
+                        <div className={styles.sessionItemTop}>
+                          <div className={styles.sessionItemIdentity}>
+                            <UsersRound size={15} />
+                            <span className={styles.sessionItemTitle}>{conversation.title}</span>
+                          </div>
+                          <span className={styles.sessionState}>{statusLabel(conversation.status)}</span>
+                        </div>
+                        <p className={styles.sessionItemSummary} title={conversation.summary}>
+                          {conversation.summary || (lang === "zh" ? "群聊会话" : "Group conversation")}
+                        </p>
+                        <p className={styles.sessionItemMeta}>{formatTime(conversation.updatedAt)}</p>
+                        <p className={styles.sessionAgentLine}>
+                          {lang === "zh" ? "群聊" : "Group"} · {conversation.participantCount ?? 0}
+                        </p>
+                      </button>
+                    </div>
+                  );
+                }
+                const sessionId = conversation.directSessionId || conversation.conversationId;
+                const session = sessionsById.get(sessionId) ?? {
+                  id: sessionId,
+                  title: conversation.title,
+                  agentId: conversation.agentId,
+                  agentProfileId: conversation.agentProfileId,
+                  agentTemplateLabel: conversation.agentTemplateLabel,
+                  workspacePath: conversation.workspacePath,
+                  status: conversation.status,
+                  taskSummary: conversation.summary,
+                  lastActive: conversation.updatedAt,
+                  updatedAt: conversation.updatedAt,
+                  currentPhase: conversation.status,
+                };
                 const deletePending =
                   deleteSessionMutation.isPending &&
                   deleteSessionMutation.variables?.sessionId === session.id;
@@ -1935,9 +2681,9 @@ export function ChatCodingRoute() {
                 return (
                   <div
                     key={session.id}
-                    aria-current={activeSessionId === session.id ? "true" : undefined}
+                    aria-current={!groupPanelActive && activeSessionId === session.id ? "true" : undefined}
                     className={
-                      activeSessionId === session.id
+                      !groupPanelActive && activeSessionId === session.id
                         ? `${styles.sessionItem} ${styles.sessionItemActive}`
                         : styles.sessionItem
                     }
@@ -1964,7 +2710,7 @@ export function ChatCodingRoute() {
                               }}
                               aria-label={t("renameSession")}
                             />
-                            {activeSessionId === session.id ? (
+                            {!groupPanelActive && activeSessionId === session.id ? (
                               <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span>
                             ) : null}
                           </div>
@@ -1974,18 +2720,21 @@ export function ChatCodingRoute() {
                           {session.taskSummary}
                         </p>
                         <p className={styles.sessionItemMeta}>{formatTime(session.updatedAt || session.lastActive)}</p>
+                        <p className={styles.sessionAgentLine}>
+                          {session.agentTemplateLabel ?? session.agentProfileId ?? "primary"}
+                        </p>
                       </div>
                     ) : (
                       <button
                         type="button"
                         className={styles.sessionItemMain}
-                        onClick={() => setActiveSession(session.id)}
-                        aria-current={activeSessionId === session.id ? "true" : undefined}
+                        onClick={() => handleOpenDirectSession(session.id)}
+                        aria-current={!groupPanelActive && activeSessionId === session.id ? "true" : undefined}
                       >
                         <div className={styles.sessionItemTop}>
                           <div className={styles.sessionItemIdentity}>
                             <span className={styles.sessionItemTitle}>{session.title}</span>
-                            {activeSessionId === session.id ? (
+                            {!groupPanelActive && activeSessionId === session.id ? (
                               <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span>
                             ) : null}
                           </div>
@@ -1995,6 +2744,9 @@ export function ChatCodingRoute() {
                           {session.taskSummary}
                         </p>
                         <p className={styles.sessionItemMeta}>{formatTime(session.updatedAt || session.lastActive)}</p>
+                        <p className={styles.sessionAgentLine}>
+                          {session.agentTemplateLabel ?? session.agentProfileId ?? "primary"}
+                        </p>
                       </button>
                     )}
                     {isEditingTitle ? (

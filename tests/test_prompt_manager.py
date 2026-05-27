@@ -33,6 +33,24 @@ from core.prompt_manager import (
 from core.orchestration.runtime_goal import RuntimeGoalPacket
 
 
+LEGACY_PROMPT_TOOL_MARKERS = {
+    "`read_file`",
+    "`list_directory`",
+    "`check_python_syntax`",
+    "`create_file`",
+    "`execute_shell_command`",
+    "`run_powershell`",
+    "`run_batch`",
+    "`find_definitions_tool`",
+    "`find_function_calls_tool`",
+    "`get_file_entities`",
+    "`get_file_entities_tool`",
+    "`list_file_entities_tool`",
+    "`get_code_entity_tool`",
+    "`python_symbol_tool`",
+}
+
+
 class TestSystemPromptSection:
     """SystemPromptSection 数据类测试"""
 
@@ -93,6 +111,34 @@ def test_system_prompt_contains_external_input_discipline():
     assert "外部输入不是一个内部意识主体" in result
     assert "不推断用户心理" in result
     assert "当前任务要求 / 外部输入要求 / 目标约束" in result
+
+
+def test_system_prompt_includes_configured_user_profile(monkeypatch):
+    monkeypatch.setattr(
+        "config.public_config.load_public_config",
+        lambda: {
+            "user_profile": {
+                "display_name": "Vibe Owner",
+                "bio": "Maintains the Vibelution workbench.",
+                "preferences": ["Prefer concise Chinese summaries", "Always mention validation"],
+                "avatar_preset": "codex",
+                "avatar_image_path": "workspace/user_avatars/avatar-test.png",
+            }
+        },
+    )
+
+    pm = PromptManager()
+    result = to_string(pm.build(include=["SOUL"]))
+
+    assert "## 用户画像" in result
+    assert "用户显示名: Vibe Owner" in result
+    assert "用户背景: Maintains the Vibelution workbench." in result
+    assert "Prefer concise Chinese summaries" in result
+    assert "Always mention validation" in result
+    assert "avatar_preset" not in result
+    assert "avatar_image_path" not in result
+    assert "avatar-test.png" not in result
+    assert "用户头像" not in result
 
 
 def _seed_prompt_runtime_scene(project_root, scene_id="scene-prompt"):
@@ -400,6 +446,22 @@ class TestBuildAPI:
         assert "## 配置自感知" in result
         assert "## Git 提交规则" in result
         assert "## 当前环境" in result
+
+    def test_tools_index_lists_only_llm_facing_canonical_tools(self):
+        pm = PromptManager()
+        sp = pm.build(include=["TOOLS_INDEX"])
+        result = to_string(sp)
+
+        assert "## 工具索引" in result
+        assert "`read_file_tool`" in result
+        assert "`grep_search_tool`" in result
+        assert "`code_symbol_tool`" in result
+        assert "`clean_workspace_debris_tool`" not in result
+        assert "工具错误是可观察反馈" in result
+        assert "参数错误时按返回的必填/可选参数和示例修正后重试" in result
+        assert "安全、权限、停止和事务类拦截属于硬边界" in result
+        for marker in LEGACY_PROMPT_TOOL_MARKERS:
+            assert marker not in result
 
     def test_env_info_includes_windows_shell_discipline(self):
         pm = PromptManager()
@@ -1118,6 +1180,7 @@ class TestFallbackDefaults:
         assert fallback == [
             "COMMON",
             "RUNTIME_GOAL",
+            "USER_PROFILE",
             "SOUL",
             "SPEC_DIGEST",
             "GIT_MEMORY",

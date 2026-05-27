@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Database,
   ExternalLink,
+  Image as ImageIcon,
   Languages,
   Pencil,
   Play,
@@ -15,6 +16,8 @@ import {
   ShieldAlert,
   SlidersHorizontal,
   Trash2,
+  Upload,
+  X,
 } from "lucide-react";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type BlockerFunction, useBlocker } from "react-router-dom";
@@ -33,27 +36,37 @@ import {
   ConfigModelOption,
   ConfigModelPresetOption,
   ConfigWorkspace,
+  AgentInstance,
   HealthDiagnostics,
   HealthFinding,
   HealthQuickAction,
   LogHelper,
+  ResearchPromptWorkspace,
   SessionHelper,
 } from "../api/types";
 import {
   applyModelOptionToProfileDraft,
   asRecord,
+  avatarCropSourceRect,
   clonePublicConfig,
   collectModelDetailKeys,
   defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
+  groupConfigProfileCards,
   getString,
+  clampAvatarCropOffset,
   groupModelPresets,
   hasPendingSecretChanges,
+  listSupervisedAgentInstances,
   modelLibraryIdFromParts,
   PROVIDER_KIND_OPTIONS,
   resolveProfileDisplayState,
+  resolveResearchAgentInstance,
   resolveModelEditability,
   shouldBlockConfigLeave,
+  supervisedAgentRole,
+  supervisedAgentRoleLabel,
+  type ConfigProfileModeGroupLabels,
   uniqueModelLibraryId,
   type ModelPresetGroupLabels,
   type PublicConfigShape,
@@ -108,6 +121,15 @@ type ProfileDraft = {
 
 type ProfileEditState = {
   modelId: string;
+};
+
+type ResearchAgentDraft = {
+  key: string;
+  label: string;
+  promptFilename: string;
+  templateId: string;
+  llmConfigId: string;
+  enabled: boolean;
 };
 
 type ConfigSectionUiState = {
@@ -269,8 +291,8 @@ export const CONFIG_COPY = {
     groupOverviewSaveSummary: "查看保存状态、重新读取配置，并处理系统环境变量。",
     groupWorkbenchTitle: "工作台与界面",
     groupWorkbenchSummary: "默认入口、语言、前后端端口与重启后生效的工作台设置。",
-    groupAvatarPetTitle: "形象与陪伴体",
-    groupAvatarPetSummary: "统一管理形象、宠物与陪伴体相关配置。",
+    groupAvatarPetTitle: "用户、形象与陪伴体",
+    groupAvatarPetSummary: "统一管理用户信息、形象、宠物与陪伴体相关配置。",
     groupModelingTitle: "模型配置",
     groupModelingSummary: "模型库、LLM 配置、模型发现，以及会调用大模型的功能入口都放在这里。",
     groupPromptTitle: "系统提示词",
@@ -327,6 +349,35 @@ export const CONFIG_COPY = {
     profileTableActions: "连接",
     profileTableCurrent: "当前配置",
     profileTableStaged: "本次修改预览",
+    profileGroupChat: "对话模式",
+    profileGroupSupport: "心智与压缩",
+    profileGroupSubagents: "子代理模式",
+    profileGroupEvolution: "进化模式",
+    profileGroupResearch: "科研模型配置",
+    profileGroupOther: "其他模型配置",
+    researchAgentPoolTitle: "统一 Agent 配置",
+    researchAgentPoolBody: "这里展示监督进化与科研 Agent 的真实绑定；模型、提示词、私聊会话和工作区必须在这里对齐。",
+    supervisedAgentPoolTitle: "监督进化 Agent",
+    supervisedAgentPoolBody: "基线、候选、评审、审计和裁决都作为独立持久 Agent 出现在这里；当前先统一可见和可配置，执行链后续继续接入。",
+    supervisedAgentRole: "角色",
+    supervisedAgentEmpty: "暂无监督进化 Agent，刷新后会自动同步。",
+    researchAgentAdd: "新增科研 Agent",
+    researchAgentKey: "Agent Key",
+    researchAgentName: "名称",
+    researchAgentInstance: "Persistent Agent",
+    researchAgentSession: "私聊会话",
+    researchAgentWorkspace: "工作区",
+    researchAgentUnlinked: "等待同步",
+    researchAgentPrompt: "提示词文件",
+    researchAgentTemplate: "模板",
+    researchAgentLlm: "LLM 配置",
+    researchAgentEnabled: "启用",
+    researchAgentSave: "保存 Agent",
+    researchAgentDelete: "删除",
+    researchAgentEmpty: "暂无科研 Agent。",
+    researchAgentBusy: "保存科研 Agent 中",
+    researchAgentDeleteBlocked: "删除失败：",
+    llmConfigMissing: "未找到对应 LLM 配置",
     modelEditorCreate: "新增模型",
     modelEditorEdit: "编辑模型",
     preset: "预设",
@@ -427,6 +478,16 @@ export const CONFIG_COPY = {
     saveSection: "确认分区修改",
     cancelSection: "取消编辑",
     sectionSavePending: "保存分区修改中",
+    uploadAvatarImage: "上传本地图片",
+    clearAvatarImage: "清除图片",
+    avatarImageUploading: "上传头像图片中",
+    avatarImageUploadFailed: "头像图片上传失败：",
+    avatarCropTitle: "裁剪头像",
+    avatarCropHint: "拖动图片调整位置，使用滑杆缩放；确认后会保存 1:1 裁剪结果。",
+    avatarCropZoom: "缩放",
+    avatarCropConfirm: "确认裁剪",
+    avatarCropCancel: "取消裁剪",
+    avatarCropPreview: "头像预览",
     fieldCountLabel: "字段",
     emptyValue: "空",
     itemLabel: "条目",
@@ -479,8 +540,8 @@ export const CONFIG_COPY = {
     groupOverviewSaveSummary: "Review save status, reload config, and open system environment variables.",
     groupWorkbenchTitle: "Workbench and Interface",
     groupWorkbenchSummary: "Default entry, language, frontend/backend ports, and workbench settings that apply after restart.",
-    groupAvatarPetTitle: "Avatar and Companion",
-    groupAvatarPetSummary: "Manage avatar, pet, and companion-facing settings together.",
+    groupAvatarPetTitle: "User, Avatar, and Companion",
+    groupAvatarPetSummary: "Manage user info, avatar, pet, and companion-facing settings together.",
     groupModelingTitle: "Model Configs",
     groupModelingSummary: "Keep the model library, LLM configs, discovery, and LLM-using feature bindings together.",
     groupPromptTitle: "System Prompts",
@@ -537,6 +598,35 @@ export const CONFIG_COPY = {
     profileTableActions: "Connection",
     profileTableCurrent: "Current config",
     profileTableStaged: "Change preview",
+    profileGroupChat: "Chat mode",
+    profileGroupSupport: "Mental and compression",
+    profileGroupSubagents: "Subagent mode",
+    profileGroupEvolution: "Evolution mode",
+    profileGroupResearch: "Research model configs",
+    profileGroupOther: "Other model configs",
+    researchAgentPoolTitle: "Unified agent config",
+    researchAgentPoolBody: "Shows the real binding for supervised evolution and research agents: model, prompt, direct session, and workspace stay aligned here.",
+    supervisedAgentPoolTitle: "Supervised evolution agents",
+    supervisedAgentPoolBody: "Baseline, candidate, reviewer, auditor, and judge are visible as independent persistent agents. This pass unifies visibility/config first; execution-chain binding follows.",
+    supervisedAgentRole: "Role",
+    supervisedAgentEmpty: "No supervised evolution agents yet. Reload to sync them automatically.",
+    researchAgentAdd: "Add research agent",
+    researchAgentKey: "Agent key",
+    researchAgentName: "Name",
+    researchAgentInstance: "Persistent agent",
+    researchAgentSession: "Direct session",
+    researchAgentWorkspace: "Workspace",
+    researchAgentUnlinked: "Pending sync",
+    researchAgentPrompt: "Prompt file",
+    researchAgentTemplate: "Template",
+    researchAgentLlm: "LLM config",
+    researchAgentEnabled: "Enabled",
+    researchAgentSave: "Save agent",
+    researchAgentDelete: "Delete",
+    researchAgentEmpty: "No research agents yet.",
+    researchAgentBusy: "Saving research agent",
+    researchAgentDeleteBlocked: "Delete failed: ",
+    llmConfigMissing: "LLM config not found",
     modelEditorCreate: "Create model",
     modelEditorEdit: "Edit model",
     preset: "Preset",
@@ -637,6 +727,16 @@ export const CONFIG_COPY = {
     saveSection: "Confirm section changes",
     cancelSection: "Cancel editing",
     sectionSavePending: "Saving section changes",
+    uploadAvatarImage: "Upload local image",
+    clearAvatarImage: "Clear image",
+    avatarImageUploading: "Uploading avatar image",
+    avatarImageUploadFailed: "Avatar image upload failed: ",
+    avatarCropTitle: "Crop avatar",
+    avatarCropHint: "Drag the image to reposition it and use the slider to zoom. Confirm saves a 1:1 crop.",
+    avatarCropZoom: "Zoom",
+    avatarCropConfirm: "Confirm crop",
+    avatarCropCancel: "Cancel crop",
+    avatarCropPreview: "Avatar preview",
     fieldCountLabel: "fields",
     emptyValue: "Empty",
     itemLabel: "Item",
@@ -714,7 +814,7 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "avatar-pet",
       title: copy.groupAvatarPetTitle,
       summary: copy.groupAvatarPetSummary,
-      memberSectionIds: ["avatar", "pet"],
+      memberSectionIds: ["user-profile", "avatar", "pet"],
     },
     {
       id: "models-profiles",
@@ -754,6 +854,17 @@ function emptyProfileDraft(sourceProfileId = "primary"): ProfileDraft {
 function emptyProfileEditState(modelId = ""): ProfileEditState {
   return {
     modelId,
+  };
+}
+
+function emptyResearchAgentDraft(): ResearchAgentDraft {
+  return {
+    key: "",
+    label: "",
+    promptFilename: "",
+    templateId: "",
+    llmConfigId: "",
+    enabled: true,
   };
 }
 
@@ -1327,7 +1438,51 @@ type ConfigSectionEditorProps = {
   uiState: ConfigSectionUiState;
   onUiStateChange: (sectionId: string, nextState: ConfigSectionUiState) => void;
   onSaveSection: (path: string, nextValue: unknown) => Promise<boolean>;
+  onAvatarImageUpload: (file: File) => Promise<AvatarImageUploadResponse | null>;
 };
+
+type AvatarImageUploadResponse = {
+  path: string;
+  url: string;
+  contentType: string;
+  sizeBytes: number;
+};
+
+type AvatarCropDraft = {
+  absolutePath: string;
+  fileName: string;
+  objectUrl: string;
+  imageWidth: number;
+  imageHeight: number;
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+};
+
+type AvatarCropDrag = {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startOffsetX: number;
+  startOffsetY: number;
+};
+
+const AVATAR_CROP_FRAME_SIZE = 320;
+const AVATAR_CROP_PREVIEW_SIZE = 112;
+const AVATAR_CROP_OUTPUT_SIZE = 512;
+
+function avatarImagePreviewUrl(value: unknown): string {
+  const path = getString(value).replace(/\\/g, "/").trim();
+  const prefix = "workspace/user_avatars/";
+  if (!path.startsWith(prefix)) {
+    return "";
+  }
+  const filename = path.slice(prefix.length);
+  if (!/^[A-Za-z0-9_.-]+$/.test(filename)) {
+    return "";
+  }
+  return `/api/config/avatar-image/${encodeURIComponent(filename)}`;
+}
 
 function ConfigSectionEditor({
   section,
@@ -1339,17 +1494,31 @@ function ConfigSectionEditor({
   uiState,
   onUiStateChange,
   onSaveSection,
+  onAvatarImageUpload,
 }: ConfigSectionEditorProps) {
   const sectionExpanded = uiState.expanded;
   const editing = uiState.editing;
   const expandedPaths = uiState.expandedPaths;
   const draftValue = editing ? clonePublicConfig(uiState.draftValue ?? value) : clonePublicConfig(value);
+  const [uploadingImagePath, setUploadingImagePath] = useState("");
+  const [avatarCrop, setAvatarCrop] = useState<AvatarCropDraft | null>(null);
+  const [avatarCropError, setAvatarCropError] = useState("");
+  const avatarCropDragRef = useRef<AvatarCropDrag | null>(null);
 
   useEffect(() => {
     if (active && !sectionExpanded) {
       onUiStateChange(section.id, { ...uiState, expanded: true });
     }
   }, [active, onUiStateChange, section.id, sectionExpanded, uiState]);
+
+  useEffect(() => {
+    const objectUrl = avatarCrop?.objectUrl;
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [avatarCrop?.objectUrl]);
 
   function updateSectionDraft(absolutePath: string, nextValue: unknown) {
     const prefix = `${section.path}.`;
@@ -1370,6 +1539,65 @@ function ConfigSectionEditor({
     });
   }
 
+  function clampAvatarCrop(next: AvatarCropDraft): AvatarCropDraft {
+    const offset = clampAvatarCropOffset({
+      imageWidth: next.imageWidth,
+      imageHeight: next.imageHeight,
+      frameSize: AVATAR_CROP_FRAME_SIZE,
+      zoom: next.zoom,
+      offsetX: next.offsetX,
+      offsetY: next.offsetY,
+    });
+    return { ...next, ...offset };
+  }
+
+  async function beginAvatarCrop(file: File, absolutePath: string) {
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      throw new Error("头像只支持 PNG、JPG 或 WebP 图片。");
+    }
+    const image = await loadImageForCrop(file);
+    setAvatarCropError("");
+    setAvatarCrop((current) => {
+      if (current?.objectUrl) {
+        URL.revokeObjectURL(current.objectUrl);
+      }
+      return clampAvatarCrop({
+        absolutePath,
+        fileName: file.name,
+        objectUrl: image.objectUrl,
+        imageWidth: image.width,
+        imageHeight: image.height,
+        zoom: 1,
+        offsetX: 0,
+        offsetY: 0,
+      });
+    });
+  }
+
+  async function confirmAvatarCrop() {
+    if (!avatarCrop) {
+      return;
+    }
+    setUploadingImagePath(avatarCrop.absolutePath);
+    try {
+      const croppedFile = await createCroppedAvatarFile(avatarCrop);
+      const result = await onAvatarImageUpload(croppedFile);
+      if (result?.path) {
+        updateSectionDraft(avatarCrop.absolutePath, result.path);
+        setAvatarCrop(null);
+      }
+    } catch (error) {
+      setAvatarCropError(readableErrorMessage(error));
+    } finally {
+      setUploadingImagePath("");
+    }
+  }
+
+  function cancelAvatarCrop() {
+    setAvatarCropError("");
+    setAvatarCrop(null);
+  }
+
   async function handleSave() {
     const ok = await onSaveSection(section.path, draftValue);
     if (ok) {
@@ -1383,6 +1611,27 @@ function ConfigSectionEditor({
 
   function renderFieldView(fieldValue: unknown, absolutePath: string) {
     const meta = metaMap[absolutePath];
+    if (meta?.kind === "image") {
+      const previewUrl = avatarImagePreviewUrl(fieldValue);
+      return (
+        <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView} ${styles.avatarImageCard}`}>
+          <div className={styles.treeFieldHead}>
+            <span className={styles.treeFieldLabel}>{configLabel(metaMap, absolutePath)}</span>
+          </div>
+          {configHint(metaMap, absolutePath) ? <p className={styles.treeHint}>{configHint(metaMap, absolutePath)}</p> : null}
+          <div className={styles.avatarImageValue}>
+            {previewUrl ? (
+              <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
+            ) : (
+              <span className={styles.avatarImagePlaceholder}>
+                <ImageIcon size={16} />
+              </span>
+            )}
+            <span>{formatConfigDisplayValue(fieldValue, meta?.kind, copy)}</span>
+          </div>
+        </article>
+      );
+    }
     return (
       <article key={absolutePath} className={`${styles.treeFieldCard} ${styles.treeFieldCardView}`}>
         <div className={styles.treeFieldHead}>
@@ -1397,9 +1646,173 @@ function ConfigSectionEditor({
   function renderFieldEditor(fieldValue: unknown, absolutePath: string) {
     const meta = metaMap[absolutePath];
     const kind = meta?.kind ?? "text";
+    const imageUploading = uploadingImagePath === absolutePath;
     let control;
 
-    if (kind === "boolean") {
+    if (kind === "image") {
+      const previewUrl = avatarImagePreviewUrl(fieldValue);
+      const cropDraft = avatarCrop?.absolutePath === absolutePath ? avatarCrop : null;
+      const imageUploading = uploadingImagePath === absolutePath;
+      const cropScale = cropDraft
+        ? (AVATAR_CROP_FRAME_SIZE / Math.min(cropDraft.imageWidth, cropDraft.imageHeight)) * cropDraft.zoom
+        : 1;
+      const cropImageStyle: CSSProperties | undefined = cropDraft
+        ? {
+            width: cropDraft.imageWidth * cropScale,
+            height: cropDraft.imageHeight * cropScale,
+            transform: `translate(calc(-50% + ${cropDraft.offsetX}px), calc(-50% + ${cropDraft.offsetY}px))`,
+          }
+        : undefined;
+      const cropPreviewRatio = AVATAR_CROP_PREVIEW_SIZE / AVATAR_CROP_FRAME_SIZE;
+      const cropPreviewImageStyle: CSSProperties | undefined = cropDraft
+        ? {
+            width: cropDraft.imageWidth * cropScale * cropPreviewRatio,
+            height: cropDraft.imageHeight * cropScale * cropPreviewRatio,
+            transform: `translate(calc(-50% + ${cropDraft.offsetX * cropPreviewRatio}px), calc(-50% + ${cropDraft.offsetY * cropPreviewRatio}px))`,
+          }
+        : undefined;
+      control = (
+        <div className={styles.avatarImageEditor}>
+          <div className={styles.avatarImageValue}>
+            {previewUrl ? (
+              <img src={previewUrl} alt="" className={styles.avatarImagePreview} />
+            ) : (
+              <span className={styles.avatarImagePlaceholder}>
+                <ImageIcon size={16} />
+              </span>
+            )}
+            <span>{configLabel(metaMap, absolutePath)}</span>
+          </div>
+          {cropDraft ? (
+            <div className={styles.avatarCropPanel}>
+              <div className={styles.avatarCropHeader}>
+                <div>
+                  <strong>{copy.avatarCropTitle}</strong>
+                  <p>{copy.avatarCropHint}</p>
+                </div>
+                <span>{copy.avatarCropPreview}</span>
+              </div>
+              <div className={styles.avatarCropWorkspace}>
+                <div
+                  className={styles.avatarCropFrame}
+                  onPointerDown={(event) => {
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    avatarCropDragRef.current = {
+                      pointerId: event.pointerId,
+                      startClientX: event.clientX,
+                      startClientY: event.clientY,
+                      startOffsetX: cropDraft.offsetX,
+                      startOffsetY: cropDraft.offsetY,
+                    };
+                  }}
+                  onPointerMove={(event) => {
+                    const drag = avatarCropDragRef.current;
+                    if (!drag || drag.pointerId !== event.pointerId) {
+                      return;
+                    }
+                    const next = clampAvatarCrop({
+                      ...cropDraft,
+                      offsetX: drag.startOffsetX + event.clientX - drag.startClientX,
+                      offsetY: drag.startOffsetY + event.clientY - drag.startClientY,
+                    });
+                    setAvatarCrop(next);
+                  }}
+                  onPointerUp={(event) => {
+                    if (avatarCropDragRef.current?.pointerId === event.pointerId) {
+                      avatarCropDragRef.current = null;
+                    }
+                  }}
+                  onPointerCancel={() => {
+                    avatarCropDragRef.current = null;
+                  }}
+                >
+                  <img src={cropDraft.objectUrl} alt="" className={styles.avatarCropImage} style={cropImageStyle} draggable={false} />
+                  <span className={styles.avatarCropMask} />
+                </div>
+                <div className={styles.avatarCropPreviewWrap}>
+                  <div className={styles.avatarCropPreview}>
+                    <img src={cropDraft.objectUrl} alt="" className={styles.avatarCropImage} style={cropPreviewImageStyle} draggable={false} />
+                  </div>
+                </div>
+              </div>
+              <label className={styles.avatarCropZoomField}>
+                <span>{copy.avatarCropZoom}</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="3"
+                  step="0.01"
+                  value={cropDraft.zoom}
+                  onChange={(event) => {
+                    const zoom = Number(event.target.value);
+                    setAvatarCrop(clampAvatarCrop({ ...cropDraft, zoom }));
+                  }}
+                />
+              </label>
+              <div className={styles.avatarImageActions}>
+                <button
+                  type="button"
+                  className={`${styles.primaryButton} ${styles.compactButton}`}
+                  disabled={disabled || imageUploading}
+                  onClick={() => {
+                    void confirmAvatarCrop();
+                  }}
+                >
+                  <Save size={14} />
+                  {imageUploading ? copy.avatarImageUploading : copy.avatarCropConfirm}
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.actionButton} ${styles.compactButton}`}
+                  disabled={disabled || imageUploading}
+                  onClick={cancelAvatarCrop}
+                >
+                  <X size={14} />
+                  {copy.avatarCropCancel}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          <div className={styles.avatarImageActions}>
+            <label className={`${styles.actionButton} ${styles.compactButton} ${styles.fileUploadButton}`}>
+              <Upload size={14} />
+              {cropDraft ? copy.uploadAvatarImage : imageUploading ? copy.avatarImageUploading : copy.uploadAvatarImage}
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                disabled={disabled || imageUploading}
+                onChange={async (event) => {
+                  const file = event.currentTarget.files?.[0];
+                  event.currentTarget.value = "";
+                  if (!file) {
+                    return;
+                  }
+                  try {
+                    await beginAvatarCrop(file, absolutePath);
+                  } catch (error) {
+                    setAvatarCropError(readableErrorMessage(error));
+                  } finally {
+                    setUploadingImagePath("");
+                  }
+                }}
+              />
+            </label>
+            {getString(fieldValue) ? (
+              <button
+                type="button"
+                className={`${styles.actionButton} ${styles.compactButton}`}
+                disabled={disabled || imageUploading}
+                onClick={() => updateSectionDraft(absolutePath, "")}
+              >
+                <X size={14} />
+                {copy.clearAvatarImage}
+              </button>
+            ) : null}
+          </div>
+          {avatarCropError ? <p className={styles.inlineError}>{avatarCropError}</p> : null}
+        </div>
+      );
+    } else if (kind === "boolean") {
       control = (
         <label className={styles.toggleField}>
           <input
@@ -1698,6 +2111,82 @@ async function requestJson<T>(url: string, body?: unknown, method = "POST"): Pro
   });
 }
 
+async function fileToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function loadImageForCrop(file: File): Promise<{ objectUrl: string; width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      resolve({ objectUrl, width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("无法读取这张图片。"));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("无法读取裁剪后的图片。"));
+    image.src = src;
+  });
+}
+
+async function createCroppedAvatarFile(draft: AvatarCropDraft): Promise<File> {
+  const image = await loadImageElement(draft.objectUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = AVATAR_CROP_OUTPUT_SIZE;
+  canvas.height = AVATAR_CROP_OUTPUT_SIZE;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("当前浏览器无法裁剪图片。");
+  }
+  const source = avatarCropSourceRect({
+    imageWidth: draft.imageWidth,
+    imageHeight: draft.imageHeight,
+    frameSize: AVATAR_CROP_FRAME_SIZE,
+    zoom: draft.zoom,
+    offsetX: draft.offsetX,
+    offsetY: draft.offsetY,
+  });
+  context.drawImage(
+    image,
+    source.sx,
+    source.sy,
+    source.size,
+    source.size,
+    0,
+    0,
+    AVATAR_CROP_OUTPUT_SIZE,
+    AVATAR_CROP_OUTPUT_SIZE,
+  );
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((result) => {
+      if (result) {
+        resolve(result);
+        return;
+      }
+      reject(new Error("头像裁剪失败。"));
+    }, "image/png");
+  });
+  const stem = draft.fileName.replace(/\.[^.]+$/, "").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "avatar";
+  return new File([blob], `${stem}-cropped.png`, { type: "image/png" });
+}
+
 export function ConfigRoute() {
   const queryClient = useQueryClient();
   const pageRef = useRef<HTMLDivElement | null>(null);
@@ -1710,6 +2199,14 @@ export function ConfigRoute() {
   const healthDiagnosticsQuery = useQuery({
     queryKey: queryKeys.diagnosticsHealth(),
     queryFn: () => fetchJson<HealthDiagnostics>("/api/diagnostics/health"),
+  });
+  const researchPromptsQuery = useQuery({
+    queryKey: queryKeys.researchThemeDiscoveryPrompts(),
+    queryFn: () => fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/prompts"),
+  });
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents(),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
   });
 
   const [draftConfig, setDraftConfig] = useState<PublicConfigShape | null>(null);
@@ -1727,6 +2224,7 @@ export function ConfigRoute() {
   const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
   const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfileDraft());
   const [profileEditors, setProfileEditors] = useState<Record<string, ProfileEditState>>({});
+  const [researchAgentDraft, setResearchAgentDraft] = useState<ResearchAgentDraft>(emptyResearchAgentDraft());
   const [expandedModels, setExpandedModels] = useState<Record<string, boolean>>({});
   const [profileFormExpanded, setProfileFormExpanded] = useState(false);
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
@@ -1849,6 +2347,23 @@ export function ConfigRoute() {
     },
     [copy, workspace?.modelPresetOptions],
   );
+  const profileModeGroups = useMemo(() => {
+    const labels: ConfigProfileModeGroupLabels = {
+      chat: copy.profileGroupChat,
+      support: copy.profileGroupSupport,
+      subagents: copy.profileGroupSubagents,
+      evolution: copy.profileGroupEvolution,
+      research: copy.profileGroupResearch,
+      other: copy.profileGroupOther,
+    };
+    return groupConfigProfileCards(workspace?.profileCards ?? [], labels);
+  }, [copy, workspace?.profileCards]);
+  const researchWorkspace = researchPromptsQuery.data;
+  const researchAgents = researchWorkspace?.agents ?? [];
+  const researchAgentTemplates = researchWorkspace?.agentTemplates ?? [];
+  const researchLlmConfigs = researchWorkspace?.llmConfigs ?? [];
+  const agentInstances = agentsQuery.data ?? [];
+  const supervisedAgents = useMemo(() => listSupervisedAgentInstances(agentInstances), [agentInstances]);
 
   useEffect(() => {
     if (!visibleSidebarGroups.length) {
@@ -2098,6 +2613,23 @@ export function ConfigRoute() {
     }
   }
 
+  async function handleAvatarImageUpload(file: File): Promise<AvatarImageUploadResponse | null> {
+    setBusyAction(copy.avatarImageUploading);
+    try {
+      return await requestJson<AvatarImageUploadResponse>("/api/config/avatar-image", {
+        filename: file.name,
+        contentType: file.type,
+        dataBase64: await fileToBase64(file),
+      });
+    } catch (error) {
+      const message = markError(error);
+      setNotice({ tone: "error", text: `${copy.avatarImageUploadFailed}${message}` });
+      return null;
+    } finally {
+      setBusyAction("");
+    }
+  }
+
   function resolveSelectedProfileModelId(profileId: string, fallback = ""): string {
     return profileEditors[profileId]?.modelId ?? fallback;
   }
@@ -2119,6 +2651,62 @@ export function ConfigRoute() {
       ...current,
       [profileId]: emptyProfileEditState(modelId),
     }));
+  }
+
+  function editResearchAgent(agent: ResearchAgentDraft) {
+    setResearchAgentDraft({ ...agent });
+  }
+
+  async function saveResearchAgent(draft: ResearchAgentDraft = researchAgentDraft) {
+    const key = draft.key.trim();
+    if (!key) {
+      setNotice({ tone: "error", text: copy.researchAgentKey });
+      return;
+    }
+    setBusyAction(copy.researchAgentBusy);
+    try {
+      const response = await requestJson<ResearchPromptWorkspace>("/api/research/theme-discovery/agent-templates", {
+        key,
+        label: draft.label,
+        promptFilename: draft.promptFilename,
+        templateId: draft.templateId || researchAgentTemplates[0]?.templateId || "",
+        llmConfigId: draft.llmConfigId || researchLlmConfigs[0]?.configId || "",
+        enabled: draft.enabled,
+      }, "PUT");
+      queryClient.setQueryData(queryKeys.researchThemeDiscoveryPrompts(), response);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
+      setResearchAgentDraft(emptyResearchAgentDraft());
+      setNotice({ tone: "success", text: copy.profileDraftSaved });
+    } catch (error) {
+      markError(error);
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function deleteResearchAgent(agentKey: string) {
+    setBusyAction(copy.researchAgentBusy);
+    try {
+      const response = await fetchJson<ResearchPromptWorkspace>(
+        `/api/research/theme-discovery/agent-templates/${encodeURIComponent(agentKey)}`,
+        { method: "DELETE" },
+      );
+      queryClient.setQueryData(queryKeys.researchThemeDiscoveryPrompts(), response);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
+      if (researchAgentDraft.key === agentKey) {
+        setResearchAgentDraft(emptyResearchAgentDraft());
+      }
+      setNotice({ tone: "success", text: copy.profileDraftSaved });
+    } catch (error) {
+      const message = markError(error);
+      setNotice({ tone: "error", text: `${copy.researchAgentDeleteBlocked}${message}` });
+    } finally {
+      setBusyAction("");
+    }
   }
 
   function toggleExpandedModel(modelId: string) {
@@ -2857,76 +3445,258 @@ export function ConfigRoute() {
                 </tr>
               </thead>
               <tbody>
-                {workspace.profileCards.map((profile) => {
-                  const profileEditor = profileEditors[profile.profileId];
-                  const isEditingProfile = profilesEditing && Boolean(profileEditor);
-                  const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
-                  const selectedModel = modelOptionsById.get(selectedModelId) ?? null;
-                  const displayState = resolveProfileDisplayState(profile, selectedModelId, selectedModel, isEditingProfile);
-                  const keyStateClassName =
-                    displayState.apiKeyState === "missing" || displayState.apiKeyState === "clear_pending"
-                      ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
-                      : styles.inlineBadge;
-                  return (
-                    <tr key={profile.profileId}>
-                      <td className={styles.profileTaskCell}>
-                        <strong>{profile.label}</strong>
-                        <span>{profile.profileId}</span>
-                        {displayState.selectionDirty ? <span className={styles.inlineBadge}>{copy.profileTableStaged}</span> : null}
-                      </td>
-                      <td>
-                        {isEditingProfile ? (
-                          <label className={`${styles.field} ${styles.profileTableSelect}`}>
-                            <span>{copy.selectedModel}</span>
-                            <select
-                              value={selectedModelId}
-                              disabled={structuredActionsDisabled}
-                              onChange={(event) => updateProfileModelDraft(profile.profileId, event.target.value)}
+                {profileModeGroups.flatMap((group) => [
+                  <tr key={`group-${group.id}`} className={styles.profileGroupRow}>
+                    <td colSpan={5}>{group.label}</td>
+                  </tr>,
+                  ...group.profiles.map((profile) => {
+                    const profileEditor = profileEditors[profile.profileId];
+                    const isEditingProfile = profilesEditing && Boolean(profileEditor);
+                    const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
+                    const selectedModel = modelOptionsById.get(selectedModelId) ?? null;
+                    const displayState = resolveProfileDisplayState(profile, selectedModelId, selectedModel, isEditingProfile);
+                    const keyStateClassName =
+                      displayState.apiKeyState === "missing" || displayState.apiKeyState === "clear_pending"
+                        ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
+                        : styles.inlineBadge;
+                    return (
+                      <tr key={profile.profileId}>
+                        <td className={styles.profileTaskCell}>
+                          <strong>{profile.label}</strong>
+                          <span>{profile.profileId}</span>
+                          <span className={styles.inlineBadge}>{group.label}</span>
+                          {displayState.selectionDirty ? <span className={styles.inlineBadge}>{copy.profileTableStaged}</span> : null}
+                        </td>
+                        <td>
+                          {isEditingProfile ? (
+                            <label className={`${styles.field} ${styles.profileTableSelect}`}>
+                              <span>{copy.selectedModel}</span>
+                              <select
+                                value={selectedModelId}
+                                disabled={structuredActionsDisabled}
+                                onChange={(event) => updateProfileModelDraft(profile.profileId, event.target.value)}
+                              >
+                                <option value="" />
+                                {modelOptions.map((option) => (
+                                  <option key={option.model_id} value={option.model_id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : (
+                            <div className={styles.profileModelCell}>
+                              <strong>{profile.requiredModelMissing ? copy.requiredModelMissing : displayState.selectedModelLabel}</strong>
+                              <span>{displayState.model || "-"}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <strong>{displayState.providerKind || "-"}</strong>
+                          <span>{displayState.baseUrl || "-"}</span>
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <span className={keyStateClassName}>{keyStateLabel(displayState.apiKeyState)}</span>
+                        </td>
+                        <td>
+                          <div className={styles.profileTableActions}>
+                            <button
+                              type="button"
+                              className={`${styles.actionButton} ${styles.compactButton}`}
+                              disabled={structuredActionsDisabled || !selectedModelId}
+                              onClick={() =>
+                                isEditingProfile
+                                  ? handleTestSelectedProfile(profile.profileId, profile.selectedModelId)
+                                  : handleTestProfile(profile.profileId)
+                              }
                             >
-                              <option value="" />
-                              {modelOptions.map((option) => (
-                                <option key={option.model_id} value={option.model_id}>
-                                  {option.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        ) : (
-                          <div className={styles.profileModelCell}>
-                            <strong>{profile.requiredModelMissing ? copy.requiredModelMissing : displayState.selectedModelLabel}</strong>
-                            <span>{displayState.model || "-"}</span>
+                              <Play size={14} />
+                              {isEditingProfile ? copy.testSelectedModel : copy.testConnection}
+                            </button>
                           </div>
-                        )}
-                      </td>
-                      <td className={styles.profileMetaCell}>
-                        <strong>{displayState.providerKind || "-"}</strong>
-                        <span>{displayState.baseUrl || "-"}</span>
-                      </td>
-                      <td className={styles.profileMetaCell}>
-                        <span className={keyStateClassName}>{keyStateLabel(displayState.apiKeyState)}</span>
-                      </td>
-                      <td>
-                        <div className={styles.profileTableActions}>
-                          <button
-                            type="button"
-                            className={`${styles.actionButton} ${styles.compactButton}`}
-                            disabled={structuredActionsDisabled || !selectedModelId}
-                            onClick={() =>
-                              isEditingProfile
-                                ? handleTestSelectedProfile(profile.profileId, profile.selectedModelId)
-                                : handleTestProfile(profile.profileId)
-                            }
-                          >
-                            <Play size={14} />
-                            {isEditingProfile ? copy.testSelectedModel : copy.testConnection}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                      </tr>
+                    );
+                  }),
+                ])}
               </tbody>
             </table>
+          </div>
+          <div className={styles.researchAgentPool}>
+            <div className={styles.formHeader}>
+              <div className={styles.formHeaderIntro}>
+                <Blocks size={16} />
+                <div>
+                  <span>{copy.researchAgentPoolTitle}</span>
+                  <p className={styles.helperText}>{copy.researchAgentPoolBody}</p>
+                </div>
+              </div>
+              <span className={styles.countPill}>{supervisedAgents.length + researchAgents.length} / {agentInstances.length}</span>
+            </div>
+            <div className={styles.formHeader}>
+              <div className={styles.formHeaderIntro}>
+                <ShieldAlert size={16} />
+                <div>
+                  <span>{copy.supervisedAgentPoolTitle}</span>
+                  <p className={styles.helperText}>{copy.supervisedAgentPoolBody}</p>
+                </div>
+              </div>
+              <span className={styles.countPill}>{supervisedAgents.length}</span>
+            </div>
+            <div className={styles.profileTableWrap}>
+              <table className={styles.profileTable}>
+                <thead>
+                  <tr>
+                    <th>{copy.supervisedAgentRole}</th>
+                    <th>{copy.researchAgentInstance}</th>
+                    <th>{copy.researchAgentLlm}</th>
+                    <th>{copy.researchAgentPrompt}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {supervisedAgents.length ? supervisedAgents.map((agent) => {
+                    const profile = workspace.profileCards.find((item) => item.profileId === agent.profileId);
+                    return (
+                      <tr key={agent.agentId}>
+                        <td className={styles.profileTaskCell}>
+                          <strong>{supervisedAgentRoleLabel(agent)}</strong>
+                          <span>{supervisedAgentRole(agent)}</span>
+                          <span className={styles.inlineBadge}>{copy.profileGroupEvolution}</span>
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <strong>{agent.displayName}</strong>
+                          <span>{agent.agentId}</span>
+                          <span>{copy.researchAgentSession}: {agent.directSessionId || "-"}</span>
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <strong>{profile?.label ?? agent.profileId}</strong>
+                          <span>{profile ? `${profile.providerKind} / ${profile.model}` : copy.llmConfigMissing}</span>
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <span>{copy.researchAgentWorkspace}: {agent.workspacePath || "-"}</span>
+                        </td>
+                      </tr>
+                    );
+                  }) : (
+                    <tr>
+                      <td colSpan={4}>{agentsQuery.isPending ? copy.loading : copy.supervisedAgentEmpty}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className={styles.profileTableWrap}>
+              <table className={styles.profileTable}>
+                <thead>
+                  <tr>
+                    <th>{copy.researchAgentName}</th>
+                    <th>{copy.researchAgentInstance}</th>
+                    <th>{copy.researchAgentTemplate}</th>
+                    <th>{copy.researchAgentLlm}</th>
+                    <th>{copy.researchAgentPrompt}</th>
+                    <th>{copy.profileTableActions}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {researchAgents.length ? researchAgents.map((agent) => {
+                    const llmConfig = researchLlmConfigs.find((item) => item.configId === agent.llmConfigId);
+                    const template = researchAgentTemplates.find((item) => item.templateId === agent.templateId);
+                    const linkedAgentId = agent.agentId ?? agent.agentInstanceId ?? "";
+                    const linkedAgent = resolveResearchAgentInstance(agent, agentInstances);
+                    const directSessionId = agent.directSessionId || linkedAgent?.directSessionId || "";
+                    return (
+                      <tr key={agent.key}>
+                        <td className={styles.profileTaskCell}>
+                          <strong>{agent.label || agent.key}</strong>
+                          <span>{agent.key}</span>
+                          <span className={agent.enabled ? styles.inlineBadge : `${styles.inlineBadge} ${styles.inlineBadgeWarning}`}>
+                            {agent.enabled ? copy.researchAgentEnabled : copy.no}
+                          </span>
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <strong>{linkedAgent?.displayName || copy.researchAgentUnlinked}</strong>
+                          <span>{linkedAgent?.agentId || linkedAgentId || copy.researchAgentUnlinked}</span>
+                          <span>{copy.researchAgentSession}: {directSessionId || "-"}</span>
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <strong>{template?.label ?? agent.templateId}</strong>
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <strong>{llmConfig?.label ?? agent.llmConfigId}</strong>
+                          <span>{llmConfig ? `${llmConfig.providerKind} / ${llmConfig.model}` : copy.llmConfigMissing}</span>
+                        </td>
+                        <td className={styles.profileMetaCell}>
+                          <span>{agent.promptFilename}</span>
+                          <span>{copy.researchAgentWorkspace}: {linkedAgent?.workspacePath || "-"}</span>
+                        </td>
+                        <td>
+                          <div className={styles.profileTableActions}>
+                            <button type="button" className={`${styles.actionButton} ${styles.compactButton}`} onClick={() => editResearchAgent(agent)}>
+                              <Pencil size={14} />
+                              {copy.editSection}
+                            </button>
+                            <button type="button" className={`${styles.actionButton} ${styles.compactButton}`} onClick={() => deleteResearchAgent(agent.key)}>
+                              <Trash2 size={14} />
+                              {copy.researchAgentDelete}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }) : (
+                    <tr>
+                      <td colSpan={6}>{researchPromptsQuery.isPending || agentsQuery.isPending ? copy.loading : copy.researchAgentEmpty}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className={styles.formGrid}>
+              <label className={styles.field}>
+                <span>{copy.researchAgentKey}</span>
+                <input value={researchAgentDraft.key} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, key: event.target.value }))} />
+              </label>
+              <label className={styles.field}>
+                <span>{copy.researchAgentName}</span>
+                <input value={researchAgentDraft.label} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, label: event.target.value }))} />
+              </label>
+              <label className={styles.field}>
+                <span>{copy.researchAgentPrompt}</span>
+                <input value={researchAgentDraft.promptFilename} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, promptFilename: event.target.value }))} />
+              </label>
+              <label className={styles.field}>
+                <span>{copy.researchAgentTemplate}</span>
+                <select value={researchAgentDraft.templateId} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, templateId: event.target.value }))}>
+                  <option value="" />
+                  {researchAgentTemplates.map((template) => (
+                    <option key={template.templateId} value={template.templateId}>{template.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className={styles.field}>
+                <span>{copy.researchAgentLlm}</span>
+                <select value={researchAgentDraft.llmConfigId} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, llmConfigId: event.target.value }))}>
+                  <option value="" />
+                  {researchLlmConfigs.map((config) => (
+                    <option key={config.configId} value={config.configId}>{config.label} / {config.model}</option>
+                  ))}
+                </select>
+              </label>
+              <label className={`${styles.field} ${styles.checkboxField}`}>
+                <span>{copy.researchAgentEnabled}</span>
+                <input type="checkbox" checked={researchAgentDraft.enabled} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, enabled: event.target.checked }))} />
+              </label>
+            </div>
+            <div className={styles.formActions}>
+              <button type="button" className={styles.primaryButton} disabled={Boolean(busyAction)} onClick={() => saveResearchAgent()}>
+                <Save size={14} />
+                {copy.researchAgentSave}
+              </button>
+              <button type="button" className={styles.actionButton} onClick={() => setResearchAgentDraft(emptyResearchAgentDraft())}>
+                <RotateCcw size={14} />
+                {copy.cancelEditing}
+              </button>
+            </div>
           </div>
           <div ref={profileFormRef} className={styles.formSurface}>
             <div className={styles.formHeader}>
@@ -3490,6 +4260,7 @@ export function ConfigRoute() {
             uiState={sectionUiState[section.id] ?? defaultSectionUiState()}
             onUiStateChange={updateSectionUiState}
             onSaveSection={saveConfigSection}
+            onAvatarImageUpload={handleAvatarImageUpload}
           />
         ))}
 

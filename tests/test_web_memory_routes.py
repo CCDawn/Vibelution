@@ -64,6 +64,36 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     session_memory = tmp_path / "workspace" / "sessions" / "session-1" / "memory"
     session_memory.mkdir(parents=True)
     (session_memory / "memory.json").write_text('{"session":"one"}', encoding="utf-8")
+    research_root = tmp_path / "workspace" / "research"
+    research_root.mkdir(parents=True)
+    (research_root / "knowledge_base.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 2,
+                "updatedAt": "2026-05-26T12:00:00Z",
+                "entries": [
+                    {
+                        "knowledgeId": "rk-one",
+                        "kind": "paper",
+                        "title": "AI Scientist source",
+                        "lastSeenAt": "2026-05-26T12:00:00Z",
+                        "hitCount": 2,
+                    }
+                ],
+                "claims": [{"recordId": "rkc-one"}],
+                "evidence": [{"recordId": "rke-one"}],
+                "gaps": [{"recordId": "rkg-one"}],
+                "agentEvolutionMemory": {
+                    "experienceRefs": ["exp-one"],
+                    "reflectionRefs": [],
+                    "candidateRefs": [],
+                    "strategyNotes": [],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
     (tmp_path / "workspace" / "gym").mkdir(parents=True)
     (tmp_path / "workspace" / "gym" / "active_promotions.json").write_text("[]", encoding="utf-8")
     supervised_root = tmp_path / "workspace" / "supervised_evolution"
@@ -84,13 +114,14 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     sections = {section["id"]: section for section in payload["sections"]}
     assert payload["schemaVersion"] == 3
     assert payload["projectRoot"] == str(tmp_path.resolve())
-    assert payload["summary"]["sectionCount"] == 10
+    assert payload["summary"]["sectionCount"] == 11
     assert set(sections) == {
         "user-managed-memory",
         "project-memory",
         "runtime-memory",
         "prompt-memory",
         "workspace-database",
+        "research-memory",
         "git-memory",
         "chat-session-memory",
         "self-evolution-memory",
@@ -120,6 +151,13 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     sqlite_items = {item["id"]: item for item in sections["workspace-database"]["items"]}
     assert '"count": 1' in sqlite_items["sqlite-longtermmemory"]["content"]
     assert sqlite_items["sqlite-longtermmemory"]["channels"] == ["explicit_read"]
+    research_items = {item["id"]: item for item in sections["research-memory"]["items"]}
+    assert sections["research-memory"]["sourceApi"] == "/api/research/knowledge-base"
+    assert research_items["research-knowledge-base"]["channels"] == ["research", "self_evolution", "explicit_read"]
+    assert research_items["research-knowledge-base"]["agentVisible"] is True
+    assert research_items["research-knowledge-base"]["inPrompt"] is False
+    assert '"claimCount": 1' in research_items["research-knowledge-base"]["content"]
+    assert "1 条论断" in research_items["research-knowledge-base"]["summary"]
     self_items = {item["id"]: item for item in sections["self-evolution-memory"]["items"]}
     assert self_items["self-evolution-transactions"]["channels"] == ["self_evolution"]
     supervised_items = {item["id"]: item for item in sections["supervised-evolution-memory"]["items"]}
@@ -139,6 +177,22 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     assert project_items["overview.html"]["contentType"] == "html"
     assert project_items["overview.html"]["summary"].startswith("HTML 页面：")
     assert "<html" not in project_items["overview.html"]["summary"].lower()
+
+
+def test_memory_overview_marks_research_knowledge_base_missing_before_first_search(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/memory/overview")
+
+    assert response.status_code == 200, response.json()
+    sections = {section["id"]: section for section in response.json()["sections"]}
+    research_item = {item["id"]: item for item in sections["research-memory"]["items"]}["research-knowledge-base"]
+    assert research_item["exists"] is False
+    assert research_item["agentVisible"] is False
+    assert research_item["visibilityClass"] == "missing"
+    assert research_item["channels"] == ["research", "self_evolution", "explicit_read"]
+    assert "科研知识库尚未生成" in research_item["summary"]
+    assert '"status": "missing"' in research_item["content"]
 
 
 def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path, monkeypatch):

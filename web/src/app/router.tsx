@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
 import { ChatCodingRoute } from "../routes/ChatCodingRoute";
+import { ChatRoomsRoute } from "../routes/ChatRoomsRoute";
 import { ConfigRoute } from "../routes/ConfigRoute";
 import { EvolutionRoute } from "../routes/EvolutionRoute";
 import { GitRoute } from "../routes/GitRoute";
@@ -29,6 +30,14 @@ export const router = createBrowserRouter([
         element: (
           <WorkbenchDomainRoute domain="chat">
             <ChatCodingRoute />
+          </WorkbenchDomainRoute>
+        ),
+      },
+      {
+        path: "chat-rooms",
+        element: (
+          <WorkbenchDomainRoute domain="chat">
+            <ChatRoomsRoute />
           </WorkbenchDomainRoute>
         ),
       },

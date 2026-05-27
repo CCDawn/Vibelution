@@ -7,13 +7,13 @@ from types import SimpleNamespace
 from tools import python_intelligence_tools as pit
 
 
-def test_python_symbol_tool_degrades_cleanly_without_jedi(monkeypatch, tmp_path):
+def test_python_symbol_query_degrades_cleanly_without_jedi(monkeypatch, tmp_path):
     source = tmp_path / "demo.py"
     source.write_text("x = 1\n", encoding="utf-8")
     monkeypatch.setattr(pit, "_module_available", lambda name: False if name == "jedi" else True)
     monkeypatch.setattr(pit, "_project_root", lambda: tmp_path)
 
-    payload = json.loads(pit.python_symbol_tool(str(source), 1, 0))
+    payload = json.loads(pit.python_symbol_query(str(source), 1, 0))
 
     assert payload["status"] == "unavailable"
     assert payload["missing_dependency"] == "jedi"
@@ -61,7 +61,33 @@ def test_python_lint_tool_parses_ruff_json(monkeypatch, tmp_path):
     assert payload["issues"][0]["code"] == "F401"
 
 
-def test_python_symbol_tool_parses_jedi_results(monkeypatch, tmp_path):
+def test_code_symbol_tool_unifies_outline_entity_and_symbol_search(tmp_path, monkeypatch):
+    source = tmp_path / "demo_symbols.py"
+    source.write_text(
+        "class Demo:\n"
+        "    def run(self):\n"
+        "        return helper()\n\n"
+        "def helper():\n"
+        "    return 1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(pit, "_project_root", lambda: tmp_path)
+
+    outline = pit.code_symbol_tool(mode="outline", file_path=str(source))
+    entity = pit.code_symbol_tool(mode="entity", file_path=str(source), symbol="Demo.run")
+    definitions = json.loads(pit.code_symbol_tool(mode="definition", symbol="helper", scope=str(tmp_path)))
+    references = json.loads(pit.code_symbol_tool(mode="references", symbol="helper", scope=str(tmp_path)))
+
+    assert "Demo" in outline
+    assert "helper" in outline
+    assert "def run" in entity
+    assert definitions["status"] == "ok"
+    assert definitions["results"][0]["symbol"] == "helper"
+    assert references["status"] == "ok"
+    assert references["count"] >= 2
+
+
+def test_python_symbol_query_parses_jedi_results(monkeypatch, tmp_path):
     source = tmp_path / "demo.py"
     source.write_text("value = 1\nprint(value)\n", encoding="utf-8")
     monkeypatch.setattr(pit, "_module_available", lambda name: True)
@@ -95,7 +121,7 @@ def test_python_symbol_tool_parses_jedi_results(monkeypatch, tmp_path):
     fake_jedi = SimpleNamespace(Script=DummyScript)
     monkeypatch.setitem(__import__("sys").modules, "jedi", fake_jedi)
 
-    payload = json.loads(pit.python_symbol_tool(str(source), 2, 6, action="hover"))
+    payload = json.loads(pit.python_symbol_query(str(source), 2, 6, action="hover"))
 
     assert payload["status"] == "ok"
     assert payload["action"] == "hover"

@@ -400,7 +400,7 @@ def test_runtime_metrics_include_reading_sufficiency():
     from core.infrastructure.agent_session import get_session_state
 
     session = get_session_state()
-    session.set_reading_strategy("modify", "get_code_entity_tool -> read_file_tool")
+    session.set_reading_strategy("modify", "code_symbol_tool -> read_file_tool")
     session.set_reading_sufficiency("修改上下文已足够，可开始动手并保留验证闭环。")
 
     ui = UIManager()
@@ -434,7 +434,7 @@ def test_runtime_metrics_include_tool_decision():
     from core.infrastructure.agent_session import get_session_state
 
     session = get_session_state()
-    session.set_tool_decision("inspect_entity", ["get_code_entity_tool", "read_file_tool"], ["cli_tool"])
+    session.set_tool_decision("inspect_entity", ["code_symbol_tool", "read_file_tool"], ["cli_tool"])
 
     ui = UIManager()
     ui.reset_workspace()
@@ -442,8 +442,8 @@ def test_runtime_metrics_include_tool_decision():
 
     assert metrics["next_tool_intent"] == "inspect_entity"
     assert metrics["next_tool_intent_label"] == "精读实体"
-    assert metrics["recommended_tools"][0] == "get_code_entity_tool"
-    assert metrics["recommended_tools_label"].startswith("读目标实体")
+    assert metrics["recommended_tools"][0] == "code_symbol_tool"
+    assert metrics["recommended_tools_label"].startswith("代码符号")
     assert "cli_tool" in metrics["avoid_tools"]
     assert "命令兜底" in metrics["avoid_tools_label"]
 
@@ -473,7 +473,7 @@ def test_pet_panel_renders_tool_decision():
     from core.infrastructure.agent_session import get_session_state
 
     session = get_session_state()
-    session.set_tool_decision("inspect_entity", ["get_code_entity_tool", "read_file_tool"], ["cli_tool"])
+    session.set_tool_decision("inspect_entity", ["code_symbol_tool", "read_file_tool"], ["cli_tool"])
     session.set_reading_sufficiency("理解上下文已基本够用，可开始归纳实现或准备修改。")
 
     ui = UIManager()
@@ -484,7 +484,7 @@ def test_pet_panel_renders_tool_decision():
     rendered = console.export_text()
 
     assert "精读实体" in rendered
-    assert "读目标实体 -> 读局部片段" in rendered
+    assert "代码符号 -> 读局部片段" in rendered
     assert "命令兜底" in rendered
 
 
@@ -566,14 +566,19 @@ def test_note_token_usage_updates_turn_and_total_counts():
     ui.note_turn_start(2)
     start_input = ui._total_input_tokens
     start_output = ui._total_output_tokens
+    start_cached_input = ui._total_cached_input_tokens
 
-    ui.note_token_usage(120, 45, observed=True)
-    ui.note_token_usage(30, 15, observed=True)
+    ui.note_token_usage(120, 45, cached_input_tokens=60, observed=True)
+    ui.note_token_usage(30, 15, cached_input_tokens=45, observed=True)
 
     assert ui._turn_input_tokens == 150
     assert ui._turn_output_tokens == 60
+    assert ui._turn_cached_input_tokens == 90
+    assert ui._last_input_tokens == 30
+    assert ui._last_cached_input_tokens == 30
     assert ui._total_input_tokens == start_input + 150
     assert ui._total_output_tokens == start_output + 60
+    assert ui._total_cached_input_tokens == start_cached_input + 90
 
 
 def test_token_totals_persist_across_workspace_reset(tmp_path):

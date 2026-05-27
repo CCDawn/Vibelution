@@ -146,8 +146,16 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.matrixCardActive");
     expect(routeSource).toContain("aria-pressed={activeChannel === card.channel}");
     expect(routeSource).toContain("onClick={() => handleChannelCardClick(card.channel)}");
+    expect(routeSource).toContain("channel: \"research\" as const");
     expect(routeSource).toContain("channel: \"self_evolution\" as const");
     expect(routeSource).toContain("channel: \"supervised_evolution\" as const");
+  });
+
+  it("exposes research as a first-class memory channel", () => {
+    expect(routeSource).toContain('type MemoryChannel = "conversation" | "research"');
+    expect(routeSource).toContain('const MEMORY_CHANNELS: MemoryChannel[] = ["conversation", "research"');
+    expect(routeSource).toContain("copy.researchMemory");
+    expect(routeSource).toContain("copy.researchMemoryHint");
   });
 
   it("prioritizes impact explanation before raw memory content", () => {

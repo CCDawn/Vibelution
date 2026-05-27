@@ -30,6 +30,7 @@ AST 分析：
 """
 
 import ast
+import json
 import re
 import os
 from pathlib import Path
@@ -756,6 +757,176 @@ def apply_diff_edit(file_path: str, diff_text: str, allow_fuzzy: bool = False) -
     return '\n'.join(result)
 
 
+def _resolve_patch_path(cwd: str | Path, file_path: str) -> Path:
+    path = Path(str(file_path or "").strip())
+    if path.is_absolute():
+        return path
+    return (Path(cwd).resolve() / path).resolve()
+
+
+def _split_apply_patch_sections(patch_text: str) -> Tuple[bool, str, List[Tuple[str, str, List[str]]]]:
+    lines = str(patch_text or "").splitlines()
+    if not lines or lines[0].strip() != "*** Begin Patch":
+        return False, "格式错误: 缺少 *** Begin Patch", []
+    if lines[-1].strip() != "*** End Patch":
+        return False, "格式错误: 缺少 *** End Patch", []
+
+    sections: List[Tuple[str, str, List[str]]] = []
+    index = 1
+    while index < len(lines) - 1:
+        line = lines[index]
+        if not line.strip():
+            index += 1
+            continue
+        action = ""
+        target = ""
+        for prefix, name in (
+            ("*** Add File: ", "add"),
+            ("*** Update File: ", "update"),
+            ("*** Delete File: ", "delete"),
+        ):
+            if line.startswith(prefix):
+                action = name
+                target = line[len(prefix):].strip()
+                break
+        if not action or not target:
+            return False, f"格式错误: 无法识别 patch 指令：{line}", []
+        index += 1
+        body: List[str] = []
+        while index < len(lines) - 1 and not lines[index].startswith("*** "):
+            body.append(lines[index])
+            index += 1
+        sections.append((action, target, body))
+
+    if not sections:
+        return False, "格式错误: patch 中没有文件操作。", []
+    return True, "", sections
+
+
+def _apply_patch_update(path: Path, body: List[str]) -> Tuple[bool, str]:
+    if not path.exists():
+        return False, f"[patch] 错误: 文件不存在 - {path}"
+    if not path.is_file():
+        return False, f"[patch] 错误: 路径不是文件 - {path}"
+
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception as exc:
+        return False, f"[patch] 错误: 无法读取文件 - {exc}"
+
+    hunks: List[Tuple[str, str]] = []
+    old_lines: List[str] = []
+    new_lines: List[str] = []
+    in_hunk = False
+
+    def flush_hunk() -> None:
+        nonlocal old_lines, new_lines
+        if old_lines or new_lines:
+            hunks.append(("\n".join(old_lines), "\n".join(new_lines)))
+        old_lines = []
+        new_lines = []
+
+    for raw_line in body:
+        if raw_line.startswith("@@"):
+            flush_hunk()
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if not raw_line:
+            old_lines.append("")
+            new_lines.append("")
+            continue
+        prefix = raw_line[0]
+        value = raw_line[1:]
+        if prefix == " ":
+            old_lines.append(value)
+            new_lines.append(value)
+        elif prefix == "-":
+            old_lines.append(value)
+        elif prefix == "+":
+            new_lines.append(value)
+        else:
+            return False, f"[patch] 错误: hunk 行需要以空格、+ 或 - 开头：{raw_line}"
+    flush_hunk()
+
+    if not hunks:
+        return False, "[patch] 错误: Update File 缺少 @@ hunk。"
+
+    new_content = content
+    for old_text, new_text in hunks:
+        if old_text == "":
+            return False, "[patch] 错误: Update hunk 缺少可定位的上下文或删除行。"
+        if old_text not in new_content:
+            similar = _find_similar_snippet(new_content, old_text)
+            return False, (
+                "[patch] 错误: 在文件中找不到 hunk 内容。\n"
+                f"[目标文件] {path}\n"
+                f"[搜索内容]\n{old_text[:400]}\n\n{similar}"
+            )
+        new_content = new_content.replace(old_text, new_text, 1)
+
+    try:
+        path.write_text(new_content, encoding="utf-8", newline="")
+    except Exception as exc:
+        return False, f"[patch] 错误: 无法写入文件 - {exc}"
+    return True, f"[patch] 更新: {path}"
+
+
+def apply_patch_edit(patch_text: str, cwd: str = ".") -> str:
+    """Apply a Codex-style patch with Add/Update/Delete file sections."""
+    ok, message, sections = _split_apply_patch_sections(patch_text)
+    if not ok:
+        return (
+            f"[patch] {message}\n"
+            "示例:\n"
+            "*** Begin Patch\n"
+            "*** Update File: path/to/file.py\n"
+            "@@\n"
+            "-old\n"
+            "+new\n"
+            "*** End Patch"
+        )
+
+    cwd_path = Path(cwd or ".").resolve()
+    changed: List[str] = []
+    for action, target, body in sections:
+        path = _resolve_patch_path(cwd_path, target)
+        if action == "add":
+            if path.exists():
+                return f"[patch] 错误: Add File 目标已存在 - {path}"
+            add_lines = []
+            for raw_line in body:
+                if not raw_line.startswith("+"):
+                    return f"[patch] 错误: Add File 内容行需要以 + 开头：{raw_line}"
+                add_lines.append(raw_line[1:])
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(add_lines) + ("\n" if add_lines else ""), encoding="utf-8")
+            changed.append(str(path))
+        elif action == "delete":
+            if not path.exists():
+                return f"[patch] 错误: Delete File 目标不存在 - {path}"
+            if not path.is_file():
+                return f"[patch] 错误: Delete File 目标不是文件 - {path}"
+            path.unlink()
+            changed.append(str(path))
+        elif action == "update":
+            success, result = _apply_patch_update(path, body)
+            if not success:
+                return result
+            changed.append(str(path))
+
+    return json.dumps(
+        {
+            "status": "ok",
+            "changedFiles": changed,
+            "changeCount": len(changed),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
 def validate_diff_format(diff_text: str) -> Tuple[bool, str]:
     """
     验证 diff_text 格式是否正确
@@ -868,12 +1039,12 @@ __all__ = [
     # AST 工具
     'get_code_entity',
     'list_file_entities',
-    'list_file_entities_tool',
     'get_file_entities',
     'extract_method_from_class',
     # Diff 工具
     'apply_diff_edit',
     'apply_diff_edit_tool',
+    'apply_patch_edit',
     'validate_diff_format',
     'validate_diff_format_tool',
     'preview_diff',

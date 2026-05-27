@@ -1014,10 +1014,8 @@ def get_codebase_map(force_refresh: bool = False) -> str:
 
 _FILE_MODIFYING_TOOLS = {
     "write_file_tool",
-    "write_file",
-    "edit_file",
-    "replace_in_file",
-    "create_file",
+    "apply_diff_edit_tool",
+    "apply_patch_tool",
 }
 
 
@@ -1037,6 +1035,11 @@ def extract_file_path(tool_name: str, tool_args: dict) -> Optional[str]:
         相对文件路径，或 None
     """
     filepath = tool_args.get("file_path") or tool_args.get("path") or ""
+    if not filepath and tool_name == "apply_patch_tool":
+        patch_text = str(tool_args.get("patch_text") or "")
+        match = re.search(r"^\*\*\* (?:Update|Add|Delete) File: (.+)$", patch_text, flags=re.MULTILINE)
+        if match:
+            filepath = match.group(1).strip()
     if not filepath:
         return None
 

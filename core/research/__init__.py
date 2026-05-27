@@ -8,6 +8,7 @@ from .models import (
     SearchRun,
     ThemeCard,
 )
+from .knowledge_base import ResearchKnowledgeBase
 from .theme_discovery import ResearchThemeDiscoveryService
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "EvidenceRecord",
     "ResearchDiscoverySession",
     "ResearchSource",
+    "ResearchKnowledgeBase",
     "ResearchThemeDiscoveryService",
     "SearchRun",
     "ThemeCard",

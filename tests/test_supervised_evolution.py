@@ -290,6 +290,63 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert "policy:" in rendered
 
 
+def test_run_supervised_evolution_session_persists_agent_bindings(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json").write_text(
+        json.dumps(
+            {
+                "benchmark": "dry",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "cases": [
+                    {
+                        "case_id": "agent-bound-case",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "baseline",
+                        "candidate_prompt": "candidate",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_runner(**kwargs):
+        return _fake_result("success", "ok", str(kwargs["prompt"]))
+
+    bindings = {
+        "baseline": {
+            "agentId": "agent-baseline",
+            "displayName": "监督进化基线 Agent",
+            "profileId": "supervised_baseline",
+            "directSessionId": "session-baseline",
+            "workspacePath": "workspace/agents/agent-baseline",
+        },
+        "candidate": {
+            "agentId": "agent-candidate",
+            "displayName": "监督进化候选 Agent",
+            "profileId": "supervised_candidate",
+            "directSessionId": "session-candidate",
+            "workspacePath": "workspace/agents/agent-candidate",
+        },
+    }
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=fake_runner,
+        agent_bindings=bindings,
+    )
+
+    assert decision.agent_bindings["baseline"]["agentId"] == "agent-baseline"
+    assert decision.baseline_runs[0].agent_binding["profileId"] == "supervised_baseline"
+    assert decision.candidate_runs[0].agent_binding["directSessionId"] == "session-candidate"
+    persisted = json.loads(Path(decision.decision_path or "").read_text(encoding="utf-8"))
+    assert persisted["agent_bindings"]["candidate"]["agentId"] == "agent-candidate"
+    assert persisted["baseline_runs"][0]["agent_binding"]["agentId"] == "agent-baseline"
+
+
 def test_materialized_reviewed_chat_case_enters_supervised_run_with_review_provenance(tmp_path: Path):
     ensure_dataset_registry(tmp_path)
     dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "chat_reviewed_multiturn.jsonl"

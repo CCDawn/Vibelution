@@ -57,6 +57,7 @@ _OPENAI_COMPAT_PROVIDER_KINDS = {
     "local",
     "openai_compatible",
     "siliconflow",
+    "xiaomi",
     "zhipu",
 }
 

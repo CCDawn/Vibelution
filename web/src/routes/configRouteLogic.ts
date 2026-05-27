@@ -1,4 +1,4 @@
-import type { ConfigDraftMeta, ConfigModelOption, ConfigModelPresetOption, ConfigProfileCard } from "../api/types";
+import type { AgentInstance, ConfigDraftMeta, ConfigModelOption, ConfigModelPresetOption, ConfigProfileCard, ResearchAgentConfig } from "../api/types";
 
 export type PublicConfigShape = Record<string, unknown>;
 
@@ -54,9 +54,77 @@ export type ProfileDisplayState = {
   selectionDirty: boolean;
 };
 
+export type ConfigProfileModeGroupId = "chat" | "support" | "subagents" | "evolution" | "research" | "other";
+
+export type ConfigProfileModeGroupLabels = Record<ConfigProfileModeGroupId, string>;
+
+export type ConfigProfileModeGroup = {
+  id: ConfigProfileModeGroupId;
+  label: string;
+  profiles: ConfigProfileCard[];
+};
+
 export type ModelEditability = {
   editable: boolean;
   deletable: boolean;
+};
+
+export function resolveResearchAgentInstance(
+  researchAgent: Pick<ResearchAgentConfig, "key" | "agentId" | "agentInstanceId">,
+  agentInstances: AgentInstance[],
+): AgentInstance | null {
+  const linkedAgentId = researchAgent.agentId || researchAgent.agentInstanceId || "";
+  const byId = agentInstances.find((agent) => agent.agentId === linkedAgentId);
+  if (byId) {
+    return byId;
+  }
+  return agentInstances.find((agent) => agent.metadata?.researchAgentKey === researchAgent.key) ?? null;
+}
+
+export function supervisedAgentRole(agent: Pick<AgentInstance, "metadata">): string {
+  const value = agent.metadata?.supervisedRole;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function supervisedAgentRoleLabel(agent: AgentInstance): string {
+  const value = agent.metadata?.supervisedRoleLabel;
+  return typeof value === "string" && value.trim() ? value.trim() : supervisedAgentRole(agent);
+}
+
+export function listSupervisedAgentInstances(agentInstances: AgentInstance[]): AgentInstance[] {
+  const roleOrder = new Map([
+    ["baseline", 0],
+    ["candidate", 1],
+    ["reviewer", 2],
+    ["auditor", 3],
+    ["judge", 4],
+  ]);
+  return agentInstances
+    .filter((agent) => supervisedAgentRole(agent))
+    .slice()
+    .sort((left, right) => {
+      const leftOrder = roleOrder.get(supervisedAgentRole(left)) ?? 99;
+      const rightOrder = roleOrder.get(supervisedAgentRole(right)) ?? 99;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+      return supervisedAgentRoleLabel(left).localeCompare(supervisedAgentRoleLabel(right));
+    });
+}
+
+export type AvatarCropGeometry = {
+  imageWidth: number;
+  imageHeight: number;
+  frameSize: number;
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
+};
+
+export type AvatarCropSourceRect = {
+  sx: number;
+  sy: number;
+  size: number;
 };
 
 export function clonePublicConfig<T>(value: T): T {
@@ -69,6 +137,31 @@ export function asRecord(value: unknown): Record<string, unknown> {
 
 export function getString(value: unknown): string {
   return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+export function clampAvatarCropOffset(geometry: AvatarCropGeometry): { offsetX: number; offsetY: number } {
+  const scale = Math.max(geometry.frameSize / Math.min(geometry.imageWidth, geometry.imageHeight), 0.0001) * Math.max(geometry.zoom, 1);
+  const renderedWidth = geometry.imageWidth * scale;
+  const renderedHeight = geometry.imageHeight * scale;
+  const maxX = Math.max(0, (renderedWidth - geometry.frameSize) / 2);
+  const maxY = Math.max(0, (renderedHeight - geometry.frameSize) / 2);
+  return {
+    offsetX: maxX === 0 ? 0 : Math.min(maxX, Math.max(-maxX, geometry.offsetX)),
+    offsetY: maxY === 0 ? 0 : Math.min(maxY, Math.max(-maxY, geometry.offsetY)),
+  };
+}
+
+export function avatarCropSourceRect(geometry: AvatarCropGeometry): AvatarCropSourceRect {
+  const clamped = clampAvatarCropOffset(geometry);
+  const scale = Math.max(geometry.frameSize / Math.min(geometry.imageWidth, geometry.imageHeight), 0.0001) * Math.max(geometry.zoom, 1);
+  const sourceSize = geometry.frameSize / scale;
+  const sx = (geometry.imageWidth - sourceSize) / 2 - clamped.offsetX / scale;
+  const sy = (geometry.imageHeight - sourceSize) / 2 - clamped.offsetY / scale;
+  return {
+    sx: Math.max(0, Math.min(geometry.imageWidth - sourceSize, sx)),
+    sy: Math.max(0, Math.min(geometry.imageHeight - sourceSize, sy)),
+    size: sourceSize,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -151,6 +244,45 @@ export function resolveModelEditability(option: ConfigModelOption): ModelEditabi
     : { editable: false, deletable: false };
 }
 
+export function profileModeGroupId(profileId: string): ConfigProfileModeGroupId {
+  const normalized = profileId.trim();
+  if (normalized === "primary") {
+    return "chat";
+  }
+  if (normalized === "mental_model" || normalized === "compression") {
+    return "support";
+  }
+  if (normalized === "subagent_worker" || normalized === "subagent_explorer") {
+    return "subagents";
+  }
+  if (normalized === "supervised_baseline" || normalized === "supervised_candidate") {
+    return "evolution";
+  }
+  if (normalized.startsWith("research_")) {
+    return "research";
+  }
+  return "other";
+}
+
+export function groupConfigProfileCards(
+  profiles: ConfigProfileCard[],
+  labels: ConfigProfileModeGroupLabels,
+): ConfigProfileModeGroup[] {
+  const groups: ConfigProfileModeGroup[] = [
+    { id: "chat", label: labels.chat, profiles: [] },
+    { id: "support", label: labels.support, profiles: [] },
+    { id: "subagents", label: labels.subagents, profiles: [] },
+    { id: "evolution", label: labels.evolution, profiles: [] },
+    { id: "research", label: labels.research, profiles: [] },
+    { id: "other", label: labels.other, profiles: [] },
+  ];
+  const groupById = new Map(groups.map((group) => [group.id, group]));
+  for (const profile of profiles) {
+    groupById.get(profileModeGroupId(profile.profileId))?.profiles.push(profile);
+  }
+  return groups.filter((group) => group.profiles.length);
+}
+
 export function presetCategory(preset: ConfigModelPresetOption): ModelPresetGroupId {
   const explicit = getString(preset.category).trim().toLowerCase();
   if (explicit === "relay" || explicit === "openai_compatible" || explicit === "local" || explicit === "official") {
@@ -224,6 +356,7 @@ export const PROVIDER_KIND_OPTIONS: ProviderKindOption[] = [
   { value: "openai", label: "OpenAI" },
   { value: "deepseek", label: "DeepSeek" },
   { value: "minimax", label: "MiniMax" },
+  { value: "xiaomi", label: "Xiaomi MiMo" },
   { value: "anthropic", label: "Anthropic" },
   { value: "google", label: "Google" },
   { value: "aliyun", label: "DashScope" },

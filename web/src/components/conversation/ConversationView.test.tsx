@@ -15,7 +15,11 @@ function renderConversation(
     editingMessageId?: string;
     editUserMessageDisabled?: boolean;
     composerValue?: string;
+    density?: "default" | "compact";
     nextStateSignals?: ChatNextStateSignalSummary[];
+    userAvatarPreset?: string;
+    userAvatarImageUrl?: string;
+    userDisplayName?: string;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -32,6 +36,7 @@ function renderConversation(
         title="Session"
         phase="ready"
         messages={messages}
+        density={options.density}
         showHeader={false}
         showSessionOverview={false}
         composerValue={options.composerValue ?? ""}
@@ -39,6 +44,9 @@ function renderConversation(
         composerDisabled={false}
         composerPending={false}
         nextStateSignals={options.nextStateSignals}
+        userAvatarPreset={options.userAvatarPreset}
+        userAvatarImageUrl={options.userAvatarImageUrl}
+        userDisplayName={options.userDisplayName}
         editingMessageId={options.editingMessageId}
         editUserMessageDisabled={options.editUserMessageDisabled}
         editUserMessageLabel="Edit and resend"
@@ -52,6 +60,50 @@ function renderConversation(
 }
 
 describe("ConversationView edit resend affordance", () => {
+  it("can render the opt-in compact workbench density", () => {
+    const html = renderConversation([], { density: "compact" });
+
+    expect(html).toContain("surfaceCompact");
+  });
+
+  it("uses the configured user avatar preset for user turns", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user",
+          role: "user",
+          content: "Use my profile",
+          timestamp: "2026-05-22T00:00:00Z",
+        },
+      ],
+      { userAvatarPreset: "codex", userDisplayName: "Vibe Owner" },
+    );
+
+    expect(html).toContain(">C</div>");
+    expect(html).toContain("Vibe Owner");
+  });
+
+  it("prefers the configured user avatar image for user turns", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user",
+          role: "user",
+          content: "Use my local avatar",
+          timestamp: "2026-05-22T00:00:00Z",
+        },
+      ],
+      {
+        userAvatarPreset: "codex",
+        userAvatarImageUrl: "/api/config/avatar-image/avatar-test.png",
+        userDisplayName: "Vibe Owner",
+      },
+    );
+
+    expect(html).toContain('src="/api/config/avatar-image/avatar-test.png"');
+    expect(html).not.toContain(">C</div>");
+  });
+
   it("renders edit controls for user messages only", () => {
     const html = renderConversation([
       {
@@ -169,6 +221,65 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("`task_create_tool`");
     expect(html).toContain("<ul");
     expect(html).toContain("ConversationView.tsx");
+  });
+
+  it("renders common markdown blocks without exposing heading markers", () => {
+    const html = renderConversation([
+      {
+        id: "message-assistant",
+        role: "assistant",
+        content: [
+          "### Python 编译检查通过",
+          "",
+          "执行：",
+          "",
+          "```bash",
+          "python -m py_compile core/web/services/runtime_scene_service.py",
+          "```",
+          "",
+          "结果：",
+          "",
+          "- 通过",
+          "- 无输出",
+          "",
+          "---",
+          "",
+          "## 未完成但已明确原因的验证",
+        ].join("\n"),
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+    ]);
+
+    expect(html).toContain("markdownHeading");
+    expect(html).toContain(">Python 编译检查通过</h4>");
+    expect(html).toContain("<ul");
+    expect(html).toContain("通过");
+    expect(html).toContain("markdownDivider");
+    expect(html).toContain(">未完成但已明确原因的验证</h3>");
+    expect(html).not.toContain("### Python 编译检查通过");
+    expect(html).not.toContain("## 未完成但已明确原因的验证");
+    expect(html).not.toContain("```bash");
+  });
+
+  it("renders markdown in user messages with the same safe renderer", () => {
+    const html = renderConversation([
+      {
+        id: "message-user",
+        role: "user",
+        content: [
+          "### 我的目标",
+          "",
+          "- 修复显示",
+          "- 保持安全",
+        ].join("\n"),
+        timestamp: "2026-05-22T00:00:00Z",
+      },
+    ]);
+
+    expect(html).toContain("markdownHeading");
+    expect(html).toContain(">我的目标</h4>");
+    expect(html).toContain("<ul");
+    expect(html).not.toContain("### 我的目标");
   });
 
   it("marks the active edit target and disables edit controls while busy", () => {

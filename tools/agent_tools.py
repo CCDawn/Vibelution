@@ -46,8 +46,16 @@ def _subagent_process_group_kwargs() -> Dict[str, Any]:
     """Start subagents in a killable process group where the platform supports it."""
 
     if os.name == "nt":
-        return {"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+        flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)) | int(
+            getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        )
+        return {"creationflags": flags} if flags else {}
     return {"start_new_session": True}
+
+
+def _subprocess_no_window_kwargs() -> Dict[str, int]:
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": flags} if flags else {}
 
 
 def _terminate_process_tree(process: subprocess.Popen) -> None:
@@ -61,6 +69,7 @@ def _terminate_process_tree(process: subprocess.Popen) -> None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
+                **_subprocess_no_window_kwargs(),
             )
             if getattr(result, "returncode", 1) == 0:
                 return
