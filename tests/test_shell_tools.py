@@ -479,12 +479,105 @@ class TestExecuteShellCommand:
         result = execute_shell_command(command="echo test | findstr test")
         assert "test" in result.lower()
 
+    def test_windows_shell_commands_hide_console_windows(self, monkeypatch):
+        """Windows 后台 cli_tool 命令应隐藏瞬时 cmd 窗口。"""
+        calls = []
+
+        class Result:
+            stdout = "ok\n"
+            stderr = ""
+            returncode = 0
+
+        def fake_run(command, **kwargs):
+            calls.append((command, kwargs))
+            return Result()
+
+        monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
+        monkeypatch.setattr(shell_tools_module.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+        monkeypatch.setattr(shell_tools_module.subprocess, "run", fake_run)
+
+        result = execute_shell_command(command="git status", cwd=str(Path.cwd()))
+
+        assert result == "ok"
+        assert "git status" in calls[0][0]
+        assert calls[0][1]["creationflags"] & 0x08000000
+
     def test_windows_unix_marker_command_returns_cross_platform_warning(self):
         """Windows 下遇到 Unix shell 片段应直接返回兼容警告，避免误判路径问题。"""
         with patch.object(shell_tools_module, "IS_WINDOWS", True), patch.object(shell_tools_module, "IS_UNIX", False):
             result = execute_shell_command(command="python -m pytest tests/ --collect-only -q 2>/dev/null | tail -5")
         assert "[跨平台警告]" in result
         assert "Unix shell 片段" in result
+
+    def test_default_python_command_uses_project_venv(self, tmp_path, monkeypatch):
+        """裸 python 调用应默认改写到项目 .venv 解释器。"""
+        fake_root = tmp_path / "project"
+        fake_python = fake_root / ".venv" / "Scripts" / "python.exe"
+        fake_python.parent.mkdir(parents=True)
+        fake_python.write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(shell_tools_module, "PROJECT_ROOT", fake_root)
+        monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
+
+        rewritten = shell_tools_module._rewrite_default_python_command("python -m py_compile tools/shell_tools.py")
+
+        assert rewritten == f'"{fake_python}" -m py_compile tools/shell_tools.py'
+
+    def test_default_python_command_keeps_non_leading_python(self, tmp_path, monkeypatch):
+        """只改写命令开头的默认 python，避免误改参数或脚本内容。"""
+        fake_root = tmp_path / "project"
+        fake_python = fake_root / ".venv" / "Scripts" / "python.exe"
+        fake_python.parent.mkdir(parents=True)
+        fake_python.write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(shell_tools_module, "PROJECT_ROOT", fake_root)
+        monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
+
+        command = "echo python -m pytest"
+
+        assert shell_tools_module._rewrite_default_python_command(command) == command
+
+    def test_default_py_launcher_command_uses_project_venv(self, tmp_path, monkeypatch):
+        """裸 py 调用也应改写到项目 .venv，避免走系统启动器。"""
+        fake_root = tmp_path / "project"
+        fake_python = fake_root / ".venv" / "Scripts" / "python.exe"
+        fake_python.parent.mkdir(parents=True)
+        fake_python.write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(shell_tools_module, "PROJECT_ROOT", fake_root)
+        monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
+
+        rewritten = shell_tools_module._rewrite_default_python_command("py -m pytest tests/test_shell_tools.py -q")
+
+        assert rewritten == f'"{fake_python}" -m pytest tests/test_shell_tools.py -q'
+
+    def test_default_pytest_command_uses_project_venv_module(self, tmp_path, monkeypatch):
+        """裸 pytest 调用应通过项目 .venv 的 python -m pytest 执行。"""
+        fake_root = tmp_path / "project"
+        fake_python = fake_root / ".venv" / "Scripts" / "python.exe"
+        fake_python.parent.mkdir(parents=True)
+        fake_python.write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(shell_tools_module, "PROJECT_ROOT", fake_root)
+        monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
+
+        rewritten = shell_tools_module._rewrite_default_python_command("pytest tests/test_shell_tools.py -q")
+
+        assert rewritten == f'"{fake_python}" -m pytest tests/test_shell_tools.py -q'
+
+    def test_default_pip_command_uses_project_venv_module(self, tmp_path, monkeypatch):
+        """裸 pip 调用应通过项目 .venv 的 python -m pip 执行。"""
+        fake_root = tmp_path / "project"
+        fake_python = fake_root / ".venv" / "Scripts" / "python.exe"
+        fake_python.parent.mkdir(parents=True)
+        fake_python.write_text("", encoding="utf-8")
+
+        monkeypatch.setattr(shell_tools_module, "PROJECT_ROOT", fake_root)
+        monkeypatch.setattr(shell_tools_module, "IS_WINDOWS", True)
+
+        rewritten = shell_tools_module._rewrite_default_python_command("pip install pytest")
+
+        assert rewritten == f'"{fake_python}" -m pip install pytest'
 
     def test_empty_command(self):
         """测试空命令"""

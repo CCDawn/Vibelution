@@ -108,6 +108,7 @@ def run_workbench_session(
     checkpoint_callback: Callable[[dict[str, Any]], None] | None = None,
     cancel_checker: Callable[[], object] | None = None,
     project_root: Path | None = None,
+    agent_bindings: dict[str, Any] | None = None,
 ) -> SupervisedWorkbenchRunResult:
     from .supervised_evolution import format_decision_record_summary, run_supervised_evolution_session
 
@@ -123,6 +124,8 @@ def run_workbench_session(
         kwargs["cancel_checker"] = cancel_checker
     if project_root is not None:
         kwargs["project_root"] = project_root
+    if agent_bindings is not None:
+        kwargs["agent_bindings"] = agent_bindings
     decision = run_supervised_evolution_session(**kwargs)
     lineage_index_path = (decision.policy_action or {}).get("lineage_index_path")
     return SupervisedWorkbenchRunResult(

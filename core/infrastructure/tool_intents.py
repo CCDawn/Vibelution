@@ -24,22 +24,22 @@ TOOL_INTENTS = {
     ),
     "locate_symbol": ToolIntent(
         name="locate_symbol",
-        recommended_tools=["python_symbol_tool", "find_definitions_tool"],
+        recommended_tools=["code_symbol_tool", "grep_search_tool"],
         description="优先确认定义、引用或真实落点。",
     ),
     "locate_calls": ToolIntent(
         name="locate_calls",
-        recommended_tools=["find_function_calls_tool"],
+        recommended_tools=["grep_search_tool", "code_symbol_tool"],
         description="定位函数/方法调用点。",
     ),
     "inspect_structure": ToolIntent(
         name="inspect_structure",
-        recommended_tools=["list_file_entities_tool"],
+        recommended_tools=["code_symbol_tool"],
         description="先看结构骨架，避免直接吞整文件。",
     ),
     "inspect_entity": ToolIntent(
         name="inspect_entity",
-        recommended_tools=["get_code_entity_tool", "list_file_entities_tool"],
+        recommended_tools=["code_symbol_tool"],
         description="精读类、函数、方法实体。",
     ),
     "inspect_range": ToolIntent(
@@ -97,11 +97,7 @@ def humanize_tool_intent(intent: str) -> str:
 def humanize_tool_name(tool_name: str) -> str:
     mapping = {
         "grep_search_tool": "搜索命中",
-        "python_symbol_tool": "符号定位",
-        "find_definitions_tool": "查定义",
-        "find_function_calls_tool": "查调用",
-        "list_file_entities_tool": "看结构骨架",
-        "get_code_entity_tool": "读目标实体",
+        "code_symbol_tool": "代码符号",
         "read_file_tool": "读局部片段",
         "python_lint_tool": "Lint 检查",
         "run_test_for_tool": "运行测试",

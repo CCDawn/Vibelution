@@ -37,6 +37,13 @@ import styles from "./ConversationView.module.css";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 
+type MarkdownBlock =
+  | { type: "heading"; level: 1 | 2 | 3 | 4; content: string }
+  | { type: "paragraph"; content: string }
+  | { type: "unorderedList"; items: string[] }
+  | { type: "orderedList"; items: string[] }
+  | { type: "divider" };
+
 export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
   return messages
     .map((message) => {
@@ -76,6 +83,20 @@ function isBusyConversationPhase(phase: string) {
   return ["queued", "running", "stopping"].includes(String(phase || "").trim().toLowerCase());
 }
 
+function userAvatarSymbol(preset: string | undefined, label: string) {
+  const normalized = String(preset ?? "").trim().toLowerCase();
+  if (normalized === "spark") {
+    return "*";
+  }
+  if (normalized === "codex") {
+    return "C";
+  }
+  if (normalized === "minimal") {
+    return ".";
+  }
+  return label.trim().slice(0, 1).toUpperCase() || "U";
+}
+
 export function shouldShowNextStateSignalInConversation(
   signal: ChatNextStateSignalSummary,
   phase: string,
@@ -91,9 +112,13 @@ type ConversationViewProps = {
   title: string;
   phase: string;
   messages: ConversationMessage[];
+  className?: string;
+  density?: "default" | "compact";
   eyebrowLabel?: string;
   assistantDisplayName?: string;
   userDisplayName?: string;
+  userAvatarPreset?: string;
+  userAvatarImageUrl?: string;
   taskSummary?: string;
   defaultFileContext: string;
   summaryItems?: Array<{
@@ -139,9 +164,13 @@ export function ConversationView({
   title,
   phase,
   messages,
+  className,
+  density = "default",
   eyebrowLabel,
   assistantDisplayName,
   userDisplayName,
+  userAvatarPreset,
+  userAvatarImageUrl,
   taskSummary,
   defaultFileContext,
   summaryItems,
@@ -196,6 +225,7 @@ export function ConversationView({
       : (submitPendingLabel ?? t("sendPending"));
   const assistantLabel = assistantDisplayName?.trim() || t("agent");
   const userLabel = userDisplayName?.trim() || t("operator");
+  const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
   const handlePrimaryAction = resolvedActionMode === "stop" ? onStop ?? onSubmit : onSubmit;
   const timestampFormatter = useMemo(
     () =>
@@ -612,17 +642,55 @@ export function ConversationView({
   }
 
   function renderResponseText(content: string) {
-    const listItems = parseSimpleList(content);
-    if (listItems.length > 0) {
+    const blocks = parseMarkdownBlocks(content);
+    if (blocks.length === 0) {
+      return null;
+    }
+    return (
+      <div className={styles.markdownBody}>
+        {blocks.map((block, index) => renderMarkdownBlock(block, index))}
+      </div>
+    );
+  }
+
+  function renderMarkdownBlock(block: MarkdownBlock, index: number) {
+    if (block.type === "heading") {
+      const HeadingTag = block.level <= 2 ? "h3" : "h4";
       return (
-        <ul className={styles.responseSegmentList}>
-          {listItems.map((item, index) => (
-            <li key={`${item}-${index}`}>{renderInlineContent(item)}</li>
+        <HeadingTag
+          key={`heading-${index}-${block.content}`}
+          className={`${styles.markdownHeading} ${styles[`markdownHeading${block.level}`]}`}
+        >
+          {renderInlineContent(block.content)}
+        </HeadingTag>
+      );
+    }
+    if (block.type === "divider") {
+      return <hr key={`divider-${index}`} className={styles.markdownDivider} />;
+    }
+    if (block.type === "unorderedList") {
+      return (
+        <ul key={`ul-${index}`} className={styles.responseSegmentList}>
+          {block.items.map((item, itemIndex) => (
+            <li key={`${item}-${itemIndex}`}>{renderInlineContent(item)}</li>
           ))}
         </ul>
       );
     }
-    return <p className={styles.messageBody}>{renderInlineContent(content)}</p>;
+    if (block.type === "orderedList") {
+      return (
+        <ol key={`ol-${index}`} className={styles.responseSegmentList}>
+          {block.items.map((item, itemIndex) => (
+            <li key={`${item}-${itemIndex}`}>{renderInlineContent(item)}</li>
+          ))}
+        </ol>
+      );
+    }
+    return (
+      <p key={`paragraph-${index}`} className={styles.messageBody}>
+        {renderInlineContent(block.content)}
+      </p>
+    );
   }
 
   function renderInlineContent(content: string) {
@@ -639,16 +707,91 @@ export function ConversationView({
     });
   }
 
-  function parseSimpleList(content: string) {
-    const lines = content.split("\n").map((line) => line.trim()).filter(Boolean);
-    if (lines.length < 2 || !lines.every((line) => /^[-*]\s+/.test(line))) {
-      return [];
+  function parseMarkdownBlocks(content: string): MarkdownBlock[] {
+    const lines = String(content ?? "").replace(/\r\n/g, "\n").split("\n");
+    const blocks: MarkdownBlock[] = [];
+    let paragraphLines: string[] = [];
+
+    function flushParagraph() {
+      const paragraph = paragraphLines.join("\n").trim();
+      if (paragraph) {
+        blocks.push({ type: "paragraph", content: paragraph });
+      }
+      paragraphLines = [];
     }
-    return lines.map((line) => line.replace(/^[-*]\s+/, "").trim()).filter(Boolean);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const trimmed = line.trim();
+      if (!trimmed) {
+        flushParagraph();
+        continue;
+      }
+
+      const heading = trimmed.match(/^(#{1,4})\s+(.+?)\s*#*$/);
+      if (heading) {
+        flushParagraph();
+        blocks.push({
+          type: "heading",
+          level: Math.min(4, heading[1].length) as 1 | 2 | 3 | 4,
+          content: heading[2].trim(),
+        });
+        continue;
+      }
+
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+        flushParagraph();
+        blocks.push({ type: "divider" });
+        continue;
+      }
+
+      const unorderedMatch = trimmed.match(/^[-*]\s+(.+)$/);
+      if (unorderedMatch) {
+        flushParagraph();
+        const items = [unorderedMatch[1].trim()];
+        for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+          const nextMatch = lines[nextIndex].trim().match(/^[-*]\s+(.+)$/);
+          if (!nextMatch) {
+            break;
+          }
+          items.push(nextMatch[1].trim());
+          index = nextIndex;
+        }
+        blocks.push({ type: "unorderedList", items });
+        continue;
+      }
+
+      const orderedMatch = trimmed.match(/^\d+[.)]\s+(.+)$/);
+      if (orderedMatch) {
+        flushParagraph();
+        const items = [orderedMatch[1].trim()];
+        for (let nextIndex = index + 1; nextIndex < lines.length; nextIndex += 1) {
+          const nextMatch = lines[nextIndex].trim().match(/^\d+[.)]\s+(.+)$/);
+          if (!nextMatch) {
+            break;
+          }
+          items.push(nextMatch[1].trim());
+          index = nextIndex;
+        }
+        blocks.push({ type: "orderedList", items });
+        continue;
+      }
+
+      paragraphLines.push(line);
+    }
+
+    flushParagraph();
+    return blocks;
   }
 
   return (
-    <div className={styles.surface}>
+    <div
+      className={[
+        styles.surface,
+        density === "compact" ? styles.surfaceCompact : "",
+        className ?? "",
+      ].filter(Boolean).join(" ")}
+    >
       {showHeader ? (
         <div className={styles.header}>
           <div>
@@ -732,7 +875,13 @@ export function ConversationView({
                 className={turnClassName}
               >
                 <div className={styles.turnAvatar} aria-hidden="true">
-                  {message.role === "assistant" ? <Sparkles size={18} /> : userLabel.slice(0, 1).toUpperCase()}
+                  {message.role === "assistant" ? (
+                    <Sparkles size={18} />
+                  ) : userAvatarImageUrl ? (
+                    <img src={userAvatarImageUrl} alt="" className={styles.turnAvatarImage} />
+                  ) : (
+                    userAvatarLabel
+                  )}
                 </div>
             <div className={styles.turnContent}>
                   <div className={styles.turnMeta}>
@@ -765,7 +914,7 @@ export function ConversationView({
                   </div>
 
                   {hasUserContent(message) ? (
-                    <p className={styles.userMessageBody}>{message.content}</p>
+                    <div className={styles.userMessageBody}>{renderResponseText(message.content)}</div>
                   ) : null}
 
                   {renderOperationGroup(message.id, "thought", operationGroups.thoughts, Boolean(message.streaming))}

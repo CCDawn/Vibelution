@@ -585,6 +585,13 @@ def test_model_preset_options_include_codex_preset():
     assert presets["custom_relay_responses"]["category"] == "relay"
     assert presets["custom_relay_responses"]["provider"]["kind"] == "relay"
     assert presets["custom_relay_responses"]["model"]["transport"] == "responses"
+    assert "xiaomi_mimo_v2_5_pro_token_plan" in presets
+    assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["category"] == "official"
+    assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["model"] == "mimo-v2.5-pro"
+    assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["provider"]["kind"] == "xiaomi"
+    assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["provider"]["base_url"] == (
+        "https://token-plan-cn.xiaomimimo.com/v1"
+    )
     assert "deepseek_v4_flash" in presets
     assert presets["deepseek_v4_flash"]["model"]["model"] == "deepseek-v4-flash"
     assert presets["deepseek_v4_flash"]["model"]["contract"] == "reasoning_chat"
@@ -631,6 +638,26 @@ def test_apply_relay_model_preset_materializes_openai_compatible_provider():
     assert model["transport"] == "responses"
     assert model["contract"] == "tool_chat"
     assert model["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+    build_effective_config(updated)
+
+
+def test_apply_xiaomi_mimo_token_plan_preset_materializes_provider():
+    public_config = load_public_config()
+    public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_pro_token_plan", None)
+
+    updated = apply_llm_model_preset(public_config, "xiaomi_mimo_v2_5_pro_token_plan")
+    model = updated["llm"]["model_library"]["xiaomi_mimo_v2_5_pro_token_plan"]
+
+    assert model["provider"]["kind"] == "xiaomi"
+    assert model["provider"]["api_key_env"] == "MIMO_API_KEY"
+    assert model["provider"]["base_url"] == "https://token-plan-cn.xiaomimimo.com/v1"
+    assert model["provider"]["compat_mode"] == "openai"
+    assert model["provider"]["requires_api_key"] is True
+    assert model["provider"]["context_window"] == 1000000
+    assert model["model"] == "mimo-v2.5-pro"
+    assert model["transport"] == "chat_completions"
+    assert model["contract"] == "tool_chat"
+    assert model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
     build_effective_config(updated)
 
 
@@ -715,6 +742,17 @@ def test_default_public_config_includes_new_official_model_templates():
     assert deepseek_model["contract"] == "reasoning_chat"
     assert deepseek_model["reasoning_state_field"] == "reasoning_content"
     assert deepseek_model["max_output_tokens"] == 384000
+
+    xiaomi_model = public_config["llm"]["model_library"]["xiaomi_mimo_v2_5_pro_token_plan"]
+
+    assert xiaomi_model["provider"]["kind"] == "xiaomi"
+    assert xiaomi_model["provider"]["api_key_env"] == "MIMO_API_KEY"
+    assert xiaomi_model["provider"]["base_url"] == "https://token-plan-cn.xiaomimimo.com/v1"
+    assert xiaomi_model["provider"]["context_window"] == 1000000
+    assert xiaomi_model["model"] == "mimo-v2.5-pro"
+    assert xiaomi_model["contract"] == "tool_chat"
+    assert xiaomi_model["max_output_tokens"] == 128000
+    assert xiaomi_model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
     build_effective_config(public_config)
 
 
@@ -962,7 +1000,7 @@ def test_runtime_llm_probe_uses_real_backend_with_small_payload(monkeypatch):
 
     assert result["ok"] is True
     assert result["probe"] == "runtime_provider"
-    assert result["runtime_route"] == "openai/responses/gpt-5.5"
+    assert result["runtime_route"] == captured["model"]
     assert result["max_tokens"] == 1
     assert captured["max_tokens"] == 1
     assert captured["stream"] is False

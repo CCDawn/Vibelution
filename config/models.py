@@ -43,10 +43,12 @@ PROVIDER_API_KEY_ENV_MAP: Dict[str, str] = {
     "siliconflow": "SILICONFLOW_API_KEY",
     "groq": "GROQ_API_KEY",
     "minimax": "MINIMAX_API_KEY",
+    "xiaomi": "MIMO_API_KEY",
 }
 
 PROVIDER_API_KEY_ENV_ALIASES: Dict[str, List[str]] = {
     "minimax": ["MINIMAX2_7_API_KEY", "minimax2.7"],
+    "xiaomi": ["XIAOMI_MIMO_API_KEY"],
 }
 
 VALID_AGENT_MODES = ("chat", "self_evolution", "supervised_evolution")
@@ -691,6 +693,36 @@ class AvatarConfig(BaseModel):
         default="lobster",
         description="预设形象: lobster(龙虾), shrimp(小虾米), crab(小螃蟹), cat(猫猫), chick(小鸡), bunny(兔兔), slime(果冻团), penguin(企鹅), moose(驼鹿)"
     )
+
+
+# ============================================================================
+# 用户画像配置
+# ============================================================================
+
+class UserProfileConfig(BaseModel):
+    """用户画像配置，供 UI 展示和 agent 运行时参考。"""
+    model_config = ConfigDict(extra="ignore")
+
+    display_name: str = Field(default="", description="用户显示名。为空时回退到系统用户名。")
+    bio: str = Field(default="", description="给 agent 参考的简短用户背景。")
+    preferences: List[str] = Field(default_factory=list, description="给 agent 参考的用户偏好列表。")
+    avatar_preset: str = Field(default="default", description="用户头像预设，用于 Web UI 展示。")
+    avatar_image_path: str = Field(default="", description="用户本地头像图片路径，仅限 Web UI 展示。")
+
+    @field_validator("display_name", "bio", "avatar_preset", "avatar_image_path")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return (value or "").strip()
+
+    @field_validator("preferences")
+    @classmethod
+    def normalize_preferences(cls, value: List[str]) -> List[str]:
+        normalized: List[str] = []
+        for item in value or []:
+            text = str(item or "").strip()
+            if text:
+                normalized.append(text)
+        return normalized
 
 
 # ============================================================================
@@ -1626,6 +1658,7 @@ class AppConfig(BaseModel):
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     avatar: AvatarConfig = Field(default_factory=AvatarConfig)
+    user_profile: UserProfileConfig = Field(default_factory=UserProfileConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     web_chat: WebChatConfig = Field(default_factory=WebChatConfig)
     context_compression: ContextCompressionConfig = Field(

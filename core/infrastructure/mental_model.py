@@ -391,7 +391,7 @@ class MentalModel:
         """从工具名称和参数中提取目标文件路径"""
         file_modifying_tools = {
             'apply_diff_edit_tool', 'write_file_tool',
-            'read_file_tool', 'replace_in_file_tool',
+            'read_file_tool',
         }
 
         if tool_name not in file_modifying_tools:

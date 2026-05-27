@@ -5,20 +5,27 @@ import {
 } from "./ConfigRoute";
 import {
   applyModelOptionToProfileDraft,
+  avatarCropSourceRect,
+  clampAvatarCropOffset,
   collectModelDetailKeys,
   defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
+  groupConfigProfileCards,
   groupModelPresets,
   hasPendingSecretChanges,
+  listSupervisedAgentInstances,
   modelLibraryIdFromParts,
   PROVIDER_KIND_OPTIONS,
   presetCategory,
   resolveProfileDisplayState,
+  resolveResearchAgentInstance,
   resolveModelEditability,
   shouldBlockConfigLeave,
+  supervisedAgentRole,
+  supervisedAgentRoleLabel,
   type PublicConfigShape,
 } from "./configRouteLogic";
-import type { ConfigModelOption, ConfigModelPresetOption, ConfigProfileCard } from "../api/types";
+import type { AgentInstance, ConfigModelOption, ConfigModelPresetOption, ConfigProfileCard } from "../api/types";
 
 function preset(
   presetId: string,
@@ -91,6 +98,106 @@ describe("configRouteLogic", () => {
     expect(groups[2].presets.map((item) => item.preset_id)).toEqual(["local_model"]);
   });
 
+  it("groups LLM configs by mode before rendering the settings table", () => {
+    const profiles = [
+      { profileId: "research_broad", label: "科研广搜" },
+      { profileId: "primary", label: "主智能体" },
+      { profileId: "supervised_candidate", label: "监督候选" },
+      { profileId: "subagent_worker", label: "子代理 Worker" },
+      { profileId: "compression", label: "压缩配置" },
+      { profileId: "custom_writer", label: "自定义" },
+    ].map((item) => ({
+      ...item,
+      modelRef: "",
+      selectedModelId: "",
+      selectedModelLabel: "",
+      model: "",
+      providerKind: "",
+      baseUrl: "",
+      apiKeyEnv: "",
+      apiKeyConfigured: false,
+      apiKeyState: "missing",
+      apiKeySource: "",
+      requiredModelMissing: false,
+    })) satisfies ConfigProfileCard[];
+
+    const groups = groupConfigProfileCards(profiles, {
+      chat: "对话模式",
+      support: "心智与压缩",
+      subagents: "子代理模式",
+      evolution: "进化模式",
+      research: "科研模型配置",
+      other: "其他模型配置",
+    });
+
+    expect(groups.map((group) => group.id)).toEqual(["chat", "support", "subagents", "evolution", "research", "other"]);
+    expect(groups.map((group) => group.profiles.map((profile) => profile.profileId))).toEqual([
+      ["primary"],
+      ["compression"],
+      ["subagent_worker"],
+      ["supervised_candidate"],
+      ["research_broad"],
+      ["custom_writer"],
+    ]);
+  });
+
+  it("resolves research agents to persistent AgentInstances by id or metadata key", () => {
+    const instances: AgentInstance[] = [
+      {
+        agentId: "agent-paper",
+        displayName: "Paper Reader",
+        kind: "persistent",
+        templateId: "research_broad",
+        profileId: "research_broad",
+        directSessionId: "session-paper",
+        workspacePath: "workspace/agents/agent-paper",
+        toolPolicyId: "default",
+        memoryPolicyId: "memory-agent-paper",
+        createdBy: "research_agent_pool",
+        status: "active",
+        metadata: { researchAgentKey: "paper_reader" },
+        createdAt: "",
+        updatedAt: "",
+      },
+    ];
+
+    expect(resolveResearchAgentInstance({ key: "other", agentId: "agent-paper" }, instances)?.directSessionId).toBe(
+      "session-paper",
+    );
+    expect(resolveResearchAgentInstance({ key: "paper_reader" }, instances)?.agentId).toBe("agent-paper");
+    expect(resolveResearchAgentInstance({ key: "missing" }, instances)).toBeNull();
+  });
+
+  it("lists supervised evolution AgentInstances by fixed role order", () => {
+    const makeAgent = (agentId: string, role: string, label = ""): AgentInstance => ({
+      agentId,
+      displayName: label || agentId,
+      kind: "persistent",
+      templateId: "primary",
+      profileId: "primary",
+      directSessionId: `session-${agentId}`,
+      workspacePath: `workspace/agents/${agentId}`,
+      toolPolicyId: "default",
+      memoryPolicyId: `memory-${agentId}`,
+      createdBy: "supervised_evolution",
+      status: "active",
+      metadata: role ? { supervisedRole: role, supervisedRoleLabel: label } : {},
+      createdAt: "",
+      updatedAt: "",
+    });
+    const instances = [
+      makeAgent("agent-judge", "judge", "裁决"),
+      makeAgent("agent-research", ""),
+      makeAgent("agent-baseline", "baseline", "基线"),
+      makeAgent("agent-candidate", "candidate", "候选"),
+    ];
+
+    const supervised = listSupervisedAgentInstances(instances);
+
+    expect(supervised.map((agent) => supervisedAgentRole(agent))).toEqual(["baseline", "candidate", "judge"]);
+    expect(supervisedAgentRoleLabel(supervised[0])).toBe("基线");
+  });
+
   it("applies a model option to a profile draft and removes stale model binding fields", () => {
     const publicConfig: PublicConfigShape = {
       llm: {
@@ -138,6 +245,7 @@ describe("configRouteLogic", () => {
     expect(modelLibraryIdFromParts("", "gpt-5.5")).toBe("gpt_5_5");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("openai_compatible");
     expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("relay");
+    expect(PROVIDER_KIND_OPTIONS.map((item) => item.value)).toContain("xiaomi");
     expect(PROVIDER_KIND_OPTIONS[0].value).toBe("relay");
   });
 
@@ -298,6 +406,35 @@ describe("configRouteLogic", () => {
         nextPathname: "/config",
       }),
     ).toBe(false);
+  });
+
+  it("keeps avatar crop movement inside the visible square", () => {
+    const offset = clampAvatarCropOffset({
+      imageWidth: 1200,
+      imageHeight: 800,
+      frameSize: 320,
+      zoom: 1,
+      offsetX: 999,
+      offsetY: -999,
+    });
+
+    expect(offset.offsetX).toBe(80);
+    expect(offset.offsetY).toBe(0);
+  });
+
+  it("derives the avatar crop source rect from zoom and offset", () => {
+    const rect = avatarCropSourceRect({
+      imageWidth: 1200,
+      imageHeight: 800,
+      frameSize: 320,
+      zoom: 2,
+      offsetX: 80,
+      offsetY: 0,
+    });
+
+    expect(rect.size).toBe(400);
+    expect(rect.sx).toBe(300);
+    expect(rect.sy).toBe(200);
   });
 });
 

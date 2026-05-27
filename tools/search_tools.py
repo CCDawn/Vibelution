@@ -257,7 +257,7 @@ def grep_search_tool(
         f"[搜索] 目录: {search_dir_path if not is_single_file else search_dir_path / target_filename}",
         f"[搜索] 类型: {include_ext}",
         f"[搜索] 找到 {len(results)} 个匹配，分布在 {len(grouped)} 个文件",
-        "[搜索] 阅读策略: 先看文件分组与首个命中，再按需用 read_file_tool / get_code_entity_tool 精读",
+        "[搜索] 阅读策略: 先看文件分组与首个命中，再按需用 read_file_tool 或 code_symbol_tool 精读",
         "",
         "[搜索摘要]",
     ]

@@ -192,6 +192,19 @@
   white-space: nowrap;
 }
 
+.versionPill {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--shell-surface-muted) 78%, transparent);
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .brandSubtle {
   color: var(--fg-tertiary);
   font-size: 0.78rem;
@@ -448,14 +461,157 @@
   pointer-events: auto;
 }
 
-.gitCluster {
+.utilityCluster {
   position: relative;
   display: flex;
   outline: none;
 }
 
-.gitCluster:focus-visible .gitChip {
-  box-shadow: 0 0 0 1px rgba(216, 167, 91, 0.55);
+.utilityTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: var(--shell-surface);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.utilityTrigger:hover,
+.utilityCluster:focus-within .utilityTrigger {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--shell-panel-soft);
+}
+
+.utilityTriggerLabel {
+  color: var(--fg-primary);
+  font-weight: 650;
+}
+
+.utilityChevron {
+  color: var(--fg-tertiary);
+  transition: transform 150ms ease;
+}
+
+.utilityCluster:hover .utilityChevron,
+.utilityCluster:focus-within .utilityChevron,
+.utilityClusterOpen .utilityChevron {
+  transform: rotate(180deg);
+}
+
+.utilityPanel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(420px, calc(100vw - 40px));
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
+    var(--shell-panel);
+  box-shadow: 0 18px 40px var(--shell-shadow);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.utilityPanel[hidden] {
+  display: none;
+}
+
+.utilityClusterOpen .utilityPanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.utilityPanelHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.utilityPanelHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+}
+
+.utilityPanelHeader span {
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.utilityButtonGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+}
+
+.utilityButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-secondary);
+  background: var(--shell-card);
+  text-decoration: none;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+.utilityButton:hover,
+.utilityButtonActive {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-warm) 14%, var(--shell-card));
+}
+
+.utilityButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.gitMiniPanel {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.gitMiniHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.gitMiniHeader > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gitChip {
@@ -487,48 +643,6 @@
 .gitCount {
   color: var(--accent-warm-2);
   font-size: 0.8rem;
-}
-
-.gitPanel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
-  width: min(380px, calc(100vw - 40px));
-  display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  background:
-    linear-gradient(180deg, var(--shell-panel-soft), var(--shell-panel)),
-    var(--shell-panel);
-  box-shadow: 0 18px 40px var(--shell-shadow);
-  opacity: 0;
-  transform: translateY(-4px);
-  pointer-events: none;
-  transition: opacity 150ms ease, transform 150ms ease;
-}
-
-.gitCluster:hover .gitPanel,
-.gitCluster:focus-within .gitPanel {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-
-.gitPanelHeader {
-  display: grid;
-  gap: 4px;
-}
-
-.gitPanelHeader strong {
-  font-size: 0.92rem;
-}
-
-.gitPanelHeader span {
-  color: var(--fg-secondary);
-  font-size: 0.8rem;
-  line-height: 1.45;
 }
 
 .gitMetaGrid {
@@ -994,47 +1108,139 @@
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 900px) {
+  .shell {
+    --shell-topbar-height: 100px;
+  }
+
   .topBar {
-    display: flex;
-    flex-direction: column;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "nav nav";
     align-items: stretch;
-    gap: 12px;
+    gap: 8px 10px;
+    padding: 8px 12px;
   }
 
   .brandBlock {
-    flex-wrap: wrap;
+    grid-area: brand;
+    overflow: hidden;
     gap: 8px;
   }
 
-  .brandCopy {
-    width: 100%;
+  .brandSubtle {
+    display: none;
   }
 
   .topClock {
-    max-width: 100%;
+    max-width: 220px;
+    padding-inline: 8px;
   }
 
   .activeWorkChip {
-    width: 100%;
-    max-width: 100%;
-  }
-
-  .activeWorkDetailPanel {
-    left: 0;
-    width: 100%;
+    max-width: 220px;
   }
 
   .nav {
-    align-self: flex-start;
+    grid-area: nav;
+    justify-self: start;
+    max-width: calc(100vw - 24px);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .navLink {
+    flex: 0 0 auto;
+    min-height: 30px;
+    padding-inline: 9px;
+    font-size: 0.82rem;
   }
 
   .topActions {
-    justify-self: auto;
-    justify-content: flex-end;
+    grid-area: actions;
+    justify-self: end;
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .utilityTriggerLabel,
+  .statusBadgeLabel {
+    display: none;
+  }
+
+  .statusSummaryChip {
+    max-width: 142px;
+    min-height: 32px;
+  }
+
+  .actionIconButton {
+    width: 32px;
+    height: 32px;
   }
 
   .statusGuideGrid {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    --shell-topbar-height: 96px;
+  }
+
+  .topBar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px 8px;
+    padding: 7px 10px;
+  }
+
+  .brand {
+    font-size: 1rem;
+  }
+
+  .topClock {
+    max-width: 168px;
+    gap: 6px;
+  }
+
+  .activeWorkChip {
+    max-width: 148px;
+    gap: 6px;
+  }
+
+  .activeWorkKicker,
+  .activeWorkStatus {
+    display: none;
+  }
+
+  .activeWorkDetailPanel {
+    left: 0;
+    width: min(320px, calc(100vw - 20px));
+  }
+
+  .topActions {
+    gap: 4px;
+  }
+
+  .statusSummaryChip {
+    max-width: 104px;
+    padding-inline: 7px;
+  }
+
+  .statusSummaryCount {
+    display: none;
+  }
+
+  .utilityPanel,
+  .statusGuidePanel {
+    right: -10px;
+    width: calc(100vw - 20px);
   }
 }

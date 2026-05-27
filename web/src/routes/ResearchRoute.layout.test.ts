@@ -7,11 +7,18 @@ describe("ResearchRoute layout contract", () => {
   it("renders the API-backed theme discovery MVP", () => {
     expect(routeSource).toContain("ResearchRoute");
     expect(routeSource).toContain("/api/research/theme-discovery/sessions");
+    expect(routeSource).toContain("/api/research/flow-canvas");
+    expect(routeSource).toContain("/api/research/flow-canvas/execute");
+    expect(routeSource).toContain("ResearchFlowCanvas");
+    expect(routeSource).toContain("ResearchFlowExecutionResponse");
     expect(routeSource).toContain("AUTO_DRAFT_STEPS");
     expect(routeSource).toContain("runWorkflow");
     expect(routeSource).toContain("pauseAutoDraft");
     expect(routeSource).toContain("autoDraftPauseRequested");
     expect(routeSource).toContain("workflowMode");
+    expect(routeSource).toContain("showLegacyWorkflowModeControl");
+    expect(routeSource).toContain("workflowControlsDisabled");
+    expect(routeSource).not.toContain("enabled: activeView === \"discovery\"");
     expect(routeSource).toContain("activeView === \"discovery\"");
     expect(routeSource).toContain("initialPayload");
     expect(routeSource).toContain("autoDraftStepIndex");
@@ -21,6 +28,11 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).toContain("Problem Statement");
     expect(routeSource).toContain("科学价值 40 分、技术深度 30 分、应用潜力 30 分");
     expect(routeSource).toContain("nextManualWorkflowStep");
+    expect(routeSource).toContain("flowStageItems");
+    expect(routeSource).toContain("flowNodeStage");
+    expect(routeSource).toContain("nextRunnableFlowNode");
+    expect(routeSource).toContain("flowNodeCanExecute");
+    expect(routeSource).toContain("runFlowNode");
     expect(routeSource).toContain("missingEvidenceRequests");
     expect(routeSource).toContain("confirmEvidenceSearch");
     expect(routeSource).toContain("candidateCardPreview");
@@ -50,6 +62,8 @@ describe("ResearchRoute layout contract", () => {
     expect(styles.intakeFields).toBeTypeOf("string");
     expect(styles.intakeField).toBeTypeOf("string");
     expect(styles.intakeField_primary).toBeTypeOf("string");
+    expect(styles.intakeField_tall).toBeTypeOf("string");
+    expect(styles.intakeField_medium).toBeTypeOf("string");
     expect(styles.sessionDeleteButton).toBeTypeOf("string");
     expect(styles.pipelinePanel).toBeTypeOf("string");
     expect(styles.evidencePanel).toBeTypeOf("string");
@@ -67,6 +81,7 @@ describe("ResearchRoute layout contract", () => {
     expect(styles.stageRail).toBeTypeOf("string");
     expect(styles.stageCard).toBeTypeOf("string");
     expect(styles.stageCard_active).toBeTypeOf("string");
+    expect(styles.stageCard_compact).toBeTypeOf("string");
     expect(styles.stageSelectButton).toBeTypeOf("string");
     expect(styles.stageBody).toBeTypeOf("string");
     expect(styles.workflowModeControl).toBeTypeOf("string");
@@ -81,7 +96,8 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).toContain("activeStage");
     expect(routeSource).toContain("ResearchStageOutput");
     expect(routeSource).toContain("AgentTracePanel");
-    expect(routeSource).toContain("stageDescription(stage.id, lang)");
+    expect(routeSource).toContain("defaultCollapsed");
+    expect(routeSource).toContain("stageDescription(stage, lang)");
     expect(routeSource).toContain("等待开始广撒网调研");
     expect(routeSource).toContain("等待抽取证据");
     expect(routeSource).toContain("等待生成候选主题");
@@ -89,6 +105,8 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).toContain("ResearchTraceDetail");
     expect(routeSource).toContain("回到最新");
     expect(routeSource).toContain("工具调用与上下文过程");
+    expect(routeSource).toContain("showAllSources");
+    expect(routeSource).toContain("sourceToggleButton");
     expect(routeSource).toContain("formatTraceTimestamp");
     expect(routeSource).toContain("runFailure");
     expect(routeSource).toContain("failed");

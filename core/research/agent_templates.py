@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -64,6 +65,32 @@ RESEARCH_AGENT_LABELS = {
     "themes": "主题生成 agent",
     "card": "主题卡 agent",
 }
+
+_RESEARCH_AGENT_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+
+
+def normalize_research_agent_key(key: str) -> str:
+    """Return a stable research agent key or raise for unsafe input."""
+
+    normalized = str(key or "").strip().lower().replace("-", "_")
+    if not _RESEARCH_AGENT_KEY_RE.fullmatch(normalized):
+        raise ValueError("Research agent key must use lowercase letters, numbers, and underscores.")
+    return normalized
+
+
+def research_prompt_filename_for_key(key: str) -> str:
+    return f"{normalize_research_agent_key(key)}.md"
+
+
+def normalize_research_prompt_filename(filename: str, key: str) -> str:
+    fallback = research_prompt_filename_for_key(key)
+    value = str(filename or "").strip().replace("\\", "/").split("/")[-1]
+    if not value:
+        return fallback
+    if not value.lower().endswith(".md"):
+        value = f"{value}.md"
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", value).strip("._")
+    return safe if safe and safe.lower().endswith(".md") else fallback
 
 RESEARCH_DEFAULT_PROMPTS = {
     "broad": """# 广撒网探索 agent 默认提示词
@@ -218,7 +245,20 @@ RESEARCH_DEFAULT_PROMPTS = {
 def research_default_prompt(key: str) -> str:
     """Return the default prompt for a research agent key."""
 
-    return RESEARCH_DEFAULT_PROMPTS.get(str(key or "").strip().lower(), "")
+    normalized = str(key or "").strip().lower()
+    if normalized in RESEARCH_DEFAULT_PROMPTS:
+        return RESEARCH_DEFAULT_PROMPTS[normalized]
+    title = normalized.replace("_", " ").strip() or "custom research agent"
+    return f"""# {title} 默认提示词
+
+你是 Vibelution 科研闭环中的自定义科研 Agent。
+
+## 工作要求
+- 围绕当前科研流程节点的目标执行任务。
+- 明确输入、证据、推理过程和输出。
+- 不凭空编造来源；不确定时显式标注。
+- 输出应便于后续科研 Agent 或人工节点继续使用。
+"""
 
 
 def ensure_research_prompt_defaults(workspace: Any) -> None:
@@ -239,6 +279,11 @@ def normalize_research_agent_config(raw: dict[str, Any] | None) -> dict[str, Any
 
     raw = raw if isinstance(raw, dict) else {}
     raw_agents = raw.get("agents") if isinstance(raw.get("agents"), list) else []
+    deleted_default_agents = {
+        str(item or "").strip().lower()
+        for item in raw.get("deletedDefaultAgents", [])
+        if str(item or "").strip()
+    } if isinstance(raw.get("deletedDefaultAgents"), list) else set()
     raw_by_key = {
         str(item.get("key") or "").strip().lower(): item
         for item in raw_agents
@@ -246,7 +291,11 @@ def normalize_research_agent_config(raw: dict[str, Any] | None) -> dict[str, Any
     }
     known_templates = {item["templateId"] for item in RESEARCH_AGENT_TEMPLATES}
     agents: list[dict[str, Any]] = []
+    seen: set[str] = set()
     for key, filename in RESEARCH_PROMPT_FILES.items():
+        if key in deleted_default_agents and key not in raw_by_key:
+            seen.add(key)
+            continue
         existing = raw_by_key.get(key, {})
         template_id = str(existing.get("templateId") or "").strip()
         if template_id not in known_templates:
@@ -264,7 +313,30 @@ def normalize_research_agent_config(raw: dict[str, Any] | None) -> dict[str, Any
                 "enabled": bool(existing.get("enabled", True)),
             }
         )
+        seen.add(key)
+    for key, existing in raw_by_key.items():
+        if key in seen:
+            continue
+        try:
+            normalized_key = normalize_research_agent_key(key)
+        except ValueError:
+            continue
+        template_id = str(existing.get("templateId") or "").strip()
+        if template_id not in known_templates:
+            template_id = RESEARCH_AGENT_TEMPLATES[0]["templateId"]
+        llm_config_id = str(existing.get("llmConfigId") or existing.get("profileId") or "").strip()
+        agents.append(
+            {
+                "key": normalized_key,
+                "label": str(existing.get("label") or normalized_key.replace("_", " ").title()),
+                "promptFilename": normalize_research_prompt_filename(str(existing.get("promptFilename") or ""), normalized_key),
+                "templateId": template_id,
+                "llmConfigId": llm_config_id,
+                "enabled": bool(existing.get("enabled", True)),
+            }
+        )
     return {
         "schemaVersion": 1,
+        "deletedDefaultAgents": sorted(deleted_default_agents),
         "agents": agents,
     }

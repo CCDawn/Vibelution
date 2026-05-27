@@ -16,5 +16,5 @@ def test_build_reading_strategy_returns_tool_sequence():
     strategy = build_reading_strategy("理解这个 Python 文件的结构")
 
     assert strategy.task_type == "understand"
-    assert "get_code_entity_tool" in strategy.recommended_tools
+    assert "code_symbol_tool" in strategy.recommended_tools
     assert strategy.rationale

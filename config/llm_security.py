@@ -20,6 +20,8 @@ _ALLOWED_API_KEY_ENV_PREFIXES = (
     "DASHSCOPE_",
     "MINIMAX_",
     "MINIMAX",
+    "MIMO_",
+    "XIAOMI_",
     "SILICONFLOW_",
     "ZHIPU_",
     "GROQ_",
@@ -68,6 +70,12 @@ _REMOTE_PROVIDER_HOSTS = {
     "openai": {"api.openai.com"},
     "relay": {"pixel.try-chatapi.com", "ai-pixel.online"},
     "siliconflow": {"api.siliconflow.cn"},
+    "xiaomi": {
+        "api.xiaomimimo.com",
+        "token-plan-ams.xiaomimimo.com",
+        "token-plan-cn.xiaomimimo.com",
+        "token-plan-sgp.xiaomimimo.com",
+    },
     "zhipu": {"open.bigmodel.cn"},
 }
 

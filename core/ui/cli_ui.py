@@ -135,11 +135,15 @@ class UIManager:
         self._iterations = 0
         self._turn_input_tokens = 0
         self._turn_output_tokens = 0
+        self._turn_cached_input_tokens = 0
         self._total_input_tokens = 0
         self._total_output_tokens = 0
+        self._total_cached_input_tokens = 0
         self._current_context_tokens = 0
         self._context_token_limit = 0
         self._last_request_input_tokens = 0
+        self._last_input_tokens = 0
+        self._last_cached_input_tokens = 0
         self._context_compression_state: Dict[str, Any] = {}
         self._completed_evolutions = 0
         self._seen_closed_evolution_txns: set[str] = set()
@@ -197,9 +201,12 @@ class UIManager:
         self._iterations = 0
         self._turn_input_tokens = 0
         self._turn_output_tokens = 0
+        self._turn_cached_input_tokens = 0
         self._current_context_tokens = 0
         self._context_token_limit = 0
         self._last_request_input_tokens = 0
+        self._last_input_tokens = 0
+        self._last_cached_input_tokens = 0
         self._context_compression_state = {}
         self._current_goal = ""
         self._status = "IDLE"
@@ -219,6 +226,7 @@ class UIManager:
             data = json.loads(self._runtime_state_path.read_text(encoding="utf-8"))
             self._total_input_tokens = max(0, int(data.get("total_input_tokens") or 0))
             self._total_output_tokens = max(0, int(data.get("total_output_tokens") or 0))
+            self._total_cached_input_tokens = max(0, int(data.get("total_cached_input_tokens") or 0))
             compression = data.get("context_compression")
             self._context_compression_state = compression if isinstance(compression, dict) else {}
             if "completed_evolutions" in data:
@@ -231,6 +239,7 @@ class UIManager:
         except Exception:
             self._total_input_tokens = 0
             self._total_output_tokens = 0
+            self._total_cached_input_tokens = 0
             self._completed_evolutions = 0
             self._seen_closed_evolution_txns = set()
 
@@ -259,6 +268,7 @@ class UIManager:
             payload = {
                 "total_input_tokens": max(0, int(self._total_input_tokens or 0)),
                 "total_output_tokens": max(0, int(self._total_output_tokens or 0)),
+                "total_cached_input_tokens": max(0, int(self._total_cached_input_tokens or 0)),
                 "completed_evolutions": max(0, int(self._completed_evolutions or 0)),
                 "seen_closed_evolution_txns": sorted(self._seen_closed_evolution_txns)[-200:],
                 "current_context_tokens": max(0, int(self._current_context_tokens or 0)),
@@ -266,6 +276,9 @@ class UIManager:
                 "context_compression": dict(self._context_compression_state or {}),
                 "turn_input_tokens": max(0, int(self._turn_input_tokens or 0)),
                 "turn_output_tokens": max(0, int(self._turn_output_tokens or 0)),
+                "turn_cached_input_tokens": max(0, int(self._turn_cached_input_tokens or 0)),
+                "last_input_tokens": max(0, int(self._last_input_tokens or 0)),
+                "last_cached_input_tokens": max(0, int(self._last_cached_input_tokens or 0)),
                 "status": str(self._status or "").upper(),
                 "runtime_status": str(self._runtime.last_status or "").upper(),
                 "current_goal": str(self._current_goal or "").strip(),
@@ -736,14 +749,25 @@ class UIManager:
         self._pet_state.mental_whisper = whisper or ""
         self._update_status_line()
 
-    def note_token_usage(self, input_tokens: int = 0, output_tokens: int = 0, observed: bool = True):
+    def note_token_usage(
+        self,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cached_input_tokens: int = 0,
+        observed: bool = True,
+    ):
         if observed:
             input_count = max(0, int(input_tokens or 0))
             output_count = max(0, int(output_tokens or 0))
+            cached_count = min(max(0, int(cached_input_tokens or 0)), input_count) if input_count else 0
             self._turn_input_tokens += input_count
             self._turn_output_tokens += output_count
+            self._turn_cached_input_tokens += cached_count
             self._total_input_tokens += input_count
             self._total_output_tokens += output_count
+            self._total_cached_input_tokens += cached_count
+            self._last_input_tokens = input_count
+            self._last_cached_input_tokens = cached_count
             self._save_runtime_totals()
         else:
             with self._runtime_lock:
@@ -767,7 +791,10 @@ class UIManager:
             self._runtime.current_turn = max(0, int(turn or 0))
         self._turn_input_tokens = 0
         self._turn_output_tokens = 0
+        self._turn_cached_input_tokens = 0
         self._last_request_input_tokens = 0
+        self._last_input_tokens = 0
+        self._last_cached_input_tokens = 0
         self._save_runtime_state()
         self._update_status_line()
 
@@ -2860,6 +2887,13 @@ class UIManager:
             self._turn_input_tokens = max(0, int(input_tokens or 0))
         if output_tokens is not None:
             self._turn_output_tokens = max(0, int(output_tokens or 0))
+        cached_input_tokens = runtime_telemetry.get("cached_input_tokens")
+        if cached_input_tokens is not None:
+            self._turn_cached_input_tokens = min(
+                max(0, int(cached_input_tokens or 0)),
+                max(0, int(self._turn_input_tokens or 0)),
+            )
+            self._last_cached_input_tokens = self._turn_cached_input_tokens
         self._save_runtime_state()
         self._update_status_line()
 

@@ -22,7 +22,7 @@ export type MemoryItem = {
   agentVisible: boolean;
   inPrompt: boolean;
   visibilityClass: "prompt" | "agent_visible" | "manual" | "diagnostic" | "missing" | string;
-  channels: Array<"conversation" | "self_evolution" | "supervised_evolution" | "explicit_read" | string>;
+  channels: Array<"conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read" | string>;
   usedBy: string[];
   summary: string;
   content: string;
@@ -649,13 +649,17 @@ export type WorkRunSnapshot = {
 export type WorkRunSummary = {
   active: {
     chat_turn: WorkRunSnapshot | null;
+    chat_room_round: WorkRunSnapshot | null;
     self_evolution_run: WorkRunSnapshot | null;
     supervised_evolution_run: WorkRunSnapshot | null;
+    supervised_worktree_evolution_run: WorkRunSnapshot | null;
   };
   latest: {
     chat_turn: WorkRunSnapshot | null;
+    chat_room_round: WorkRunSnapshot | null;
     self_evolution_run: WorkRunSnapshot | null;
     supervised_evolution_run: WorkRunSnapshot | null;
+    supervised_worktree_evolution_run: WorkRunSnapshot | null;
   };
 };
 
@@ -716,6 +720,13 @@ export type RuntimeSummary = {
   domainAvailability: DomainAvailability;
   agentName: string;
   userName: string;
+  userProfile?: {
+    displayName: string;
+    bio: string;
+    preferences: string[];
+    avatarPreset: string;
+    avatarImageUrl: string;
+  };
   agentStatusLine: string;
   sessionTitle: string;
   taskSummary: string;
@@ -838,12 +849,106 @@ export type RuntimeRestartResponse = RuntimeControlResponse;
 export type SessionSummary = {
   id: string;
   title: string;
+  agentId?: string;
+  agentDisplayName?: string;
+  agentProfileId?: string;
+  agentTemplateId?: string;
+  agentTemplateLabel?: string;
   workspacePath?: string;
+  agentWorkspacePath?: string;
   status: string;
   taskSummary: string;
   lastActive: string;
   updatedAt: string;
   currentPhase: string;
+};
+
+export type ToolPolicy = {
+  policyId: string;
+  allowedTools: string[];
+  preferredTools: string[];
+  blockedTools: string[];
+  readScopes: string[];
+  writeScopes: string[];
+  allowedCommandKinds: string[];
+  blockedCommandPatterns: string[];
+  networkAccess: string;
+  mutationAccess: string;
+  maxCallsPerTurn: number;
+  perToolRules: Record<string, unknown>;
+};
+
+export type MemoryPolicy = {
+  policyId: string;
+  privateMemoryRoot: string;
+  episodicEventsPath: string;
+  groupContextEventsPath: string;
+  toolObservationsPath: string;
+  summariesPath: string;
+  readSharedGroups: string[];
+  writeSharedGroups: string[];
+};
+
+export type GroupContextEvent = {
+  eventId: string;
+  sourceRoomId: string;
+  sourceRoundId: string;
+  targetAgentId: string;
+  targetSessionId: string;
+  topic: string;
+  summary: string;
+  ownMessage: string;
+  peerHighlights: string[];
+  promptEligible: boolean;
+  createdAt: string;
+};
+
+export type AgentInstance = {
+  agentId: string;
+  displayName: string;
+  kind: "persistent" | string;
+  templateId: string;
+  profileId: string;
+  directSessionId: string;
+  workspacePath: string;
+  toolPolicyId: string;
+  memoryPolicyId: string;
+  createdBy: string;
+  status: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  memoryPolicy?: MemoryPolicy;
+  toolPolicy?: ToolPolicy;
+  groupContextEvents?: GroupContextEvent[];
+};
+
+export type ConversationSummary = {
+  conversationId: string;
+  type: "direct_agent" | "group_room" | string;
+  title: string;
+  agentId?: string;
+  directSessionId?: string;
+  roomId?: string;
+  status: string;
+  summary: string;
+  updatedAt: string;
+  workspacePath: string;
+  participantCount?: number;
+  mode?: string;
+  agentProfileId?: string;
+  agentTemplateLabel?: string;
+};
+
+export type SessionAgentTemplate = {
+  templateId: string;
+  profileId: string;
+  label: string;
+  model: string;
+  providerKind: string;
+  apiKeyConfigured: boolean;
+  requiresApiKey: boolean;
+  missingApiKey: boolean;
 };
 
 export type SessionActiveTask = {
@@ -904,6 +1009,7 @@ export type ConversationMessage = {
   mentalSnapshot?: MentalStateSnapshot;
   streaming?: boolean;
   toolCalls?: ToolCall[];
+  metadata?: Record<string, unknown>;
 };
 
 export type SessionTurnError = {
@@ -945,8 +1051,23 @@ export type SessionDetail = SessionSummary & {
     toolCallCount: number;
     source: string;
   };
+  cacheUsage?: {
+    lastInputTokens: number;
+    lastCachedInputTokens: number;
+    turnInputTokens: number;
+    turnCachedInputTokens: number;
+    turnCacheHitRate: number;
+    totalInputTokens: number;
+    totalCachedInputTokens: number;
+    totalCacheHitRate: number;
+    updatedAt: string;
+    source: string;
+  };
   lastTurnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
+  groupContextEvents?: GroupContextEvent[];
+  toolPolicy?: ToolPolicy | null;
+  memoryPolicy?: MemoryPolicy | null;
   stopRequested: boolean;
   stopRequestedAt: string;
   stopReason: string;
@@ -967,6 +1088,73 @@ export type SessionChatReviewCandidateResponse = {
   qualitySignals: string[];
   rawExcerptPath: string;
   summary: string;
+};
+
+export type ChatRoomMode = {
+  id: string;
+  label: string;
+  status: "ready" | "planned" | string;
+};
+
+export type ChatRoomParticipant = {
+  participantId: string;
+  kind: string;
+  agentId?: string;
+  directSessionId?: string;
+  sessionId: string;
+  title: string;
+  workspacePath?: string;
+  agentProfileId?: string;
+  agentTemplateId?: string;
+  agentTemplateLabel?: string;
+  enabled: boolean;
+  status: string;
+  recentMessages?: Array<{
+    role: string;
+    content: string;
+  }>;
+};
+
+export type ChatRoomMessage = {
+  messageId: string;
+  participantId: string;
+  agentId?: string;
+  sessionId: string;
+  speakerTitle: string;
+  status: string;
+  content: string;
+  summary: string;
+  errorType?: string;
+  timestamp: string;
+};
+
+export type ChatRoomRound = {
+  roundId: string;
+  roomId: string;
+  topic: string;
+  mode: string;
+  config: Record<string, unknown>;
+  status: string;
+  speakerOrder: string[];
+  messages: ChatRoomMessage[];
+  summary: string;
+  startedAt: string;
+  updatedAt: string;
+  finishedAt: string;
+};
+
+export type ChatRoomDetail = {
+  roomId: string;
+  title: string;
+  mode: string;
+  config: Record<string, unknown>;
+  participants: ChatRoomParticipant[];
+  rounds: ChatRoomRound[];
+  status: string;
+  activeRoundId: string;
+  createdAt: string;
+  updatedAt: string;
+  availableModes: ChatRoomMode[];
 };
 
 export type FileTreeNode = {
@@ -1876,6 +2064,7 @@ export type ConfigEditorMeta = {
     | "secret"
     | "url"
     | "path"
+    | "image"
     | "text"
     | "multiline";
   badge: string;
@@ -2166,6 +2355,9 @@ export type ResearchAgentConfig = {
   templateId: string;
   llmConfigId: string;
   enabled: boolean;
+  agentId?: string;
+  agentInstanceId?: string;
+  directSessionId?: string;
 };
 
 export type ResearchLlmConfigOption = {
@@ -2218,6 +2410,35 @@ export type ResearchFlowEdge = {
   target: string;
   label: string;
   condition: string;
+  type:
+    | "success"
+    | "evidence_loop"
+    | "approval_gate"
+    | "human_handoff"
+    | "selection"
+    | "failure"
+    | "blocked"
+    | string;
+};
+
+export type ResearchFlowValidationIssue = {
+  severity: "error" | "warning" | string;
+  code: string;
+  message: string;
+  nodeId?: string;
+  edgeId?: string;
+  source?: string;
+  target?: string;
+};
+
+export type ResearchFlowValidation = {
+  valid: boolean;
+  summary: {
+    errorCount: number;
+    warningCount: number;
+    issueCount?: number;
+  };
+  issues: ResearchFlowValidationIssue[];
 };
 
 export type ResearchFlowCanvas = {
@@ -2231,6 +2452,133 @@ export type ResearchFlowCanvas = {
   };
   nodes: ResearchFlowNode[];
   edges: ResearchFlowEdge[];
+  validation?: ResearchFlowValidation;
+};
+
+export type ResearchFlowExecution = {
+  sessionId: string;
+  nodeId: string;
+  nodeLabel: string;
+  actionKey: string;
+  status: "done" | "failed" | string;
+  routeOutcome: string;
+  activatedNodeIds: string[];
+  message: string;
+};
+
+export type ResearchFlowExecutionResponse = {
+  canvas: ResearchFlowCanvas;
+  session: ResearchDiscoverySessionPayload;
+  execution: ResearchFlowExecution;
+};
+
+export type ResearchKnowledgeProvenance = {
+  sourceId: string;
+  sessionId: string;
+  searchRunId: string;
+  phase: string;
+  provider: string;
+  queries: string[];
+  retrievedAt: string;
+  seenAt: string;
+};
+
+export type ResearchKnowledgeEntry = {
+  knowledgeId: string;
+  dedupeKey: string;
+  kind: "paper" | "github" | "dataset" | "web" | string;
+  title: string;
+  url: string;
+  summary: string;
+  reliability: "verified" | "normal" | "weak" | string;
+  categories: string[];
+  tags: string[];
+  sourceIds: string[];
+  sessionIds: string[];
+  searchRunIds: string[];
+  phases: string[];
+  providers: string[];
+  queries: string[];
+  provenance: ResearchKnowledgeProvenance[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  firstRetrievedAt: string;
+  lastRetrievedAt: string;
+  hitCount: number;
+  metadata: Record<string, unknown>;
+};
+
+export type ResearchKnowledgeRecord = {
+  recordId: string;
+  dedupeKey: string;
+  type: string;
+  content: string;
+  summary: string;
+  status: string;
+  confidence: number;
+  sourceIds: string[];
+  knowledgeIds: string[];
+  sessionIds: string[];
+  evidenceIds: string[];
+  claimIds: string[];
+  gapIds: string[];
+  tags: string[];
+  provenance: ResearchKnowledgeProvenance[];
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ResearchKnowledgeBasePayload = {
+  schemaVersion: number;
+  updatedAt: string;
+  path: string;
+  entries: ResearchKnowledgeEntry[];
+  claims: ResearchKnowledgeRecord[];
+  evidence: ResearchKnowledgeRecord[];
+  gaps: ResearchKnowledgeRecord[];
+  hypotheses: ResearchKnowledgeRecord[];
+  experiments: ResearchKnowledgeRecord[];
+  agentEvolutionMemory: {
+    schemaVersion: number;
+    purpose: string;
+    experienceRefs: string[];
+    reflectionRefs: string[];
+    candidateRefs: string[];
+    strategyNotes: ResearchKnowledgeRecord[];
+  };
+  summary: {
+    entryCount: number;
+    visibleCount: number;
+    kindCounts: Record<string, number>;
+    categoryCounts: Record<string, number>;
+    claimCount: number;
+    visibleClaimCount: number;
+    evidenceCount: number;
+    visibleEvidenceCount: number;
+    gapCount: number;
+    visibleGapCount: number;
+  };
+  agentContext: {
+    purpose: string;
+    entryCount: number;
+    visibleCount: number;
+    claimCount: number;
+    evidenceCount: number;
+    gapCount: number;
+    recentQueries: string[];
+    recentSources: Array<{
+      knowledgeId: string;
+      kind: string;
+      title: string;
+      url: string;
+      lastSeenAt: string;
+      hitCount: number;
+      tags: string[];
+    }>;
+    cognitiveLayers: string[];
+    reusePolicy: string;
+  };
 };
 
 export type ResearchDiscoverySession = {

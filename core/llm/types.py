@@ -22,6 +22,7 @@ class UsageStats:
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    cached_input_tokens: int = 0
     provider_raw_usage: Dict[str, Any] = field(default_factory=dict)
     estimated_cost: float = 0.0
     latency_ms: int = 0

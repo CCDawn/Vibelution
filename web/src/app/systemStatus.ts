@@ -5,7 +5,7 @@ export type SystemStatusTone = "idle" | "running" | "failed" | "caution";
 export type FrontendSystemState = "connected" | "background" | "offline";
 export type BackendSystemState = "checking" | "healthy" | "offline" | "unhealthy";
 export type RuntimeControllerState = "managed" | "closing" | "unmanaged" | "failed";
-export type ActiveWorkKind = "supervised" | "self" | "chat";
+export type ActiveWorkKind = "supervised" | "self" | "chat" | "chat_room";
 
 export type ActiveWorkIndicatorItem = {
   kind: ActiveWorkKind;
@@ -46,8 +46,10 @@ type RuntimeWorkSnapshot = {
   workRuns?: {
     active?: {
       chat_turn?: ActiveWorkRunSnapshot | null;
+      chat_room_round?: ActiveWorkRunSnapshot | null;
       self_evolution_run?: ActiveWorkRunSnapshot | null;
       supervised_evolution_run?: ActiveWorkRunSnapshot | null;
+      supervised_worktree_evolution_run?: ActiveWorkRunSnapshot | null;
     } | null;
   } | null;
   taskSummary?: string | null;
@@ -314,6 +316,7 @@ export function deriveActiveWorkIndicator(
   const candidates = [
     buildActiveWorkCandidate("supervised", active.supervised_evolution_run, runtime, lang),
     buildActiveWorkCandidate("self", active.self_evolution_run, runtime, lang),
+    buildActiveWorkCandidate("chat_room", active.chat_room_round, runtime, lang),
     buildActiveWorkCandidate("chat", active.chat_turn, runtime, lang),
   ].filter((item): item is ActiveWorkIndicatorItem => Boolean(item));
 
@@ -430,12 +433,14 @@ function activeWorkKindLabel(kind: ActiveWorkKind, lang: "zh" | "en"): string {
     return {
       supervised: "Supervised evolution",
       self: "Self evolution",
+      chat_room: "Agent room",
       chat: "Chat",
     }[kind];
   }
   return {
     supervised: "监督进化",
     self: "自进化",
+    chat_room: "Agent 群聊",
     chat: "对话",
   }[kind];
 }
@@ -466,6 +471,11 @@ function activeWorkSummary(
       "summary",
       "currentTask",
     ]) || (lang === "en" ? "Self-evolution pass is active" : "自进化任务正在运行");
+  }
+
+  if (kind === "chat_room") {
+    return firstTextValue(run, ["topic", "summary", "currentTask"])
+      || (lang === "en" ? "Agent room round is active" : "Agent 群聊正在讨论");
   }
 
   return firstTextValue(run, ["userMessage", "summary", "currentTask"])

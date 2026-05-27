@@ -38,6 +38,9 @@ import {
   ResearchCandidateTheme,
   ResearchDiscoverySessionList,
   ResearchDiscoverySessionPayload,
+  ResearchFlowCanvas,
+  ResearchFlowExecutionResponse,
+  ResearchFlowNode,
   ResearchPromptWorkspace,
   ResearchSource,
   ResearchThemeCard,
@@ -55,6 +58,11 @@ type DraftInput = {
 type ResearchViewKey = "discovery" | "prompts";
 type ResearchStageKey = "broad" | "deep" | "evidence" | "themes" | "card";
 type ResearchWorkflowMode = "manual" | "auto";
+
+type FlowStageItem = {
+  node: ResearchFlowNode;
+  stage: ResearchStageKey;
+};
 
 type ResearchPromptDraft = {
   key: string;
@@ -330,6 +338,8 @@ export function ResearchRoute() {
   const [activeView, setActiveView] = useState<ResearchViewKey>("discovery");
   const [activePromptKey, setActivePromptKey] = useState<(typeof RESEARCH_PROMPT_KEYS)[number]>("broad");
   const [activeStage, setActiveStage] = useState<ResearchStageKey>("broad");
+  const [activeFlowNodeId, setActiveFlowNodeId] = useState("");
+  const [runningFlowNodeId, setRunningFlowNodeId] = useState("");
   const [runningStage, setRunningStage] = useState<ResearchStageKey | "draft" | "">("");
   const [workflowMode, setWorkflowMode] = useState<ResearchWorkflowMode>("manual");
   const [autoDraftPauseRequested, setAutoDraftPauseRequested] = useState(false);
@@ -375,6 +385,11 @@ export function ResearchRoute() {
   });
 
   const active = sessionQuery.data;
+  const flowCanvasQuery = useQuery({
+    queryKey: queryKeys.researchFlowCanvas(),
+    queryFn: () => fetchJson<ResearchFlowCanvas>("/api/research/flow-canvas"),
+    refetchInterval: runningStage ? 1200 : false,
+  });
   const promptsQuery = useQuery({
     queryKey: queryKeys.researchThemeDiscoveryPrompts(),
     queryFn: () => fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/prompts"),
@@ -416,9 +431,34 @@ export function ResearchRoute() {
     selectedTheme?.themeId,
   ]);
   const missingEvidenceRequests = useMemo(() => latestMissingEvidenceRequests(active), [active]);
+  const flowStageItems = useMemo(
+    () => (flowCanvasQuery.data?.nodes ?? []).map((node) => ({ node, stage: flowNodeStage(node) })),
+    [flowCanvasQuery.data?.nodes],
+  );
+  const activeFlowItem =
+    flowStageItems.find((item) => item.node.id === activeFlowNodeId) ??
+    flowStageItems.find((item) => item.stage === activeStage) ??
+    flowStageItems[0];
+  const effectiveStage = activeFlowItem?.stage ?? activeStage;
+  const nextFlowNode = useMemo(() => nextRunnableFlowNode(flowCanvasQuery.data?.nodes ?? []), [flowCanvasQuery.data?.nodes]);
+
+  useEffect(() => {
+    if (!flowStageItems.length) {
+      return;
+    }
+    const current = flowStageItems.find((item) => item.node.id === activeFlowNodeId);
+    if (current) {
+      setActiveStage(current.stage);
+      return;
+    }
+    const next = flowStageItems[0];
+    setActiveFlowNodeId(next.node.id);
+    setActiveStage(next.stage);
+  }, [activeFlowNodeId, flowStageItems]);
 
   const invalidateResearch = async (sessionId?: string) => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySessions() });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
     if (sessionId || activeSessionId) {
       await queryClient.invalidateQueries({
         queryKey: queryKeys.researchThemeDiscoverySession(sessionId || activeSessionId),
@@ -468,6 +508,26 @@ export function ResearchRoute() {
       await invalidateResearch(payload.session.sessionId);
     },
     onSettled: () => {
+      setRunningStage("");
+    },
+  });
+
+  const flowExecuteMutation = useMutation({
+    mutationFn: ({ nodeId }: { nodeId?: string }) =>
+      fetchJson<ResearchFlowExecutionResponse>("/api/research/flow-canvas/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: activeSessionId, nodeId }),
+      }),
+    onSuccess: async (result) => {
+      const executedNode = result.canvas.nodes.find((node) => node.id === result.execution.nodeId);
+      setActiveSessionId(result.execution.sessionId);
+      setActiveFlowNodeId(result.execution.nodeId);
+      setActiveStage(flowNodeStage(executedNode));
+      await invalidateResearch(result.execution.sessionId);
+    },
+    onSettled: () => {
+      setRunningFlowNodeId("");
       setRunningStage("");
     },
   });
@@ -548,19 +608,23 @@ export function ResearchRoute() {
     if (!activeSessionId) {
       return;
     }
-    if (workflowMode === "manual") {
-      const next = nextManualWorkflowStep(active);
-      if (!next) {
-        return;
-      }
-      runAction(next.suffix, next.stage, next.body);
+    if (nextFlowNode) {
+      runFlowNode(nextFlowNode);
+    }
+  };
+
+  const runFlowNode = (node: ResearchFlowNode) => {
+    if (!activeSessionId) {
       return;
     }
-    autoDraftMutation.mutate({
-      initialPayload: active,
-      sessionId: activeSessionId,
-      startIndex: autoDraftStartIndex(active),
-    });
+    const stage = flowNodeStage(node);
+    setActiveFlowNodeId(node.id);
+    setActiveStage(stage);
+    setRunningFlowNodeId(node.id);
+    setRunningStage(stage);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySession(activeSessionId) });
+    flowExecuteMutation.mutate({ nodeId: node.id });
   };
 
   const runAction = (suffix: string, stage?: ResearchStageKey, body?: unknown) => {
@@ -619,14 +683,21 @@ export function ResearchRoute() {
     deleteSessionMutation.mutate(sessionId);
   };
 
-  const busy = createMutation.isPending || deleteSessionMutation.isPending || actionMutation.isPending || autoDraftMutation.isPending;
+  const busy =
+    createMutation.isPending ||
+    deleteSessionMutation.isPending ||
+    actionMutation.isPending ||
+    autoDraftMutation.isPending ||
+    flowExecuteMutation.isPending;
   const actionError =
     createMutation.error ||
     deleteSessionMutation.error ||
     actionMutation.error ||
     autoDraftMutation.error ||
+    flowExecuteMutation.error ||
     sessionQuery.error ||
-    sessionsQuery.error;
+    sessionsQuery.error ||
+    flowCanvasQuery.error;
   const promptWorkspace = promptsQuery.data;
   const promptItems = useMemo(
     () => RESEARCH_PROMPT_KEYS.map((key) => promptDrafts[key]).filter(Boolean),
@@ -656,9 +727,13 @@ export function ResearchRoute() {
       promptsQuery.data &&
       promptsQuery.data?.prompts.find((prompt) => prompt.key === activePromptItem.key)?.content !== activePromptItem.content,
   );
-  const activeStageMeta = STAGES.find((stage) => stage.id === activeStage) ?? STAGES[0];
-  const activeStageLabel = stageLabel(activeStageMeta.id, copy);
-  const activeStageStatus = displayedStageStatus(activeStage, active, runningStage);
+  const activeStageMeta = STAGES.find((stage) => stage.id === effectiveStage) ?? STAGES[0];
+  const activeStageLabel = activeFlowItem?.node.label || stageLabel(activeStageMeta.id, copy);
+  const activeStageStatus = activeFlowItem
+    ? displayedFlowNodeStatus(activeFlowItem.node, runningFlowNodeId)
+    : displayedStageStatus(effectiveStage, active, runningStage);
+  const showLegacyWorkflowModeControl = !flowStageItems.length;
+  const workflowControlsDisabled = busy || !activeSessionId || !nextFlowNode;
 
   const savePromptMutation = useMutation({
     mutationFn: (payload: { key: string; content: string }) =>
@@ -724,40 +799,38 @@ export function ResearchRoute() {
               流程画布
             </Link>
           </nav>
-          {activeView === "discovery" ? (
-            <>
-              <div className={styles.workflowModeControl} aria-label={copy.workflowMode}>
-                <span>{copy.workflowMode}</span>
-                <button
-                  type="button"
-                  className={workflowMode === "manual" ? styles.workflowModeButton_active : styles.workflowModeButton}
-                  onClick={() => setWorkflowMode("manual")}
-                  aria-pressed={workflowMode === "manual"}
-                >
-                  {copy.manualMode}
-                </button>
-                <button
-                  type="button"
-                  className={workflowMode === "auto" ? styles.workflowModeButton_active : styles.workflowModeButton}
-                  onClick={() => setWorkflowMode("auto")}
-                  aria-pressed={workflowMode === "auto"}
-                >
-                  {copy.autoMode}
-                </button>
-              </div>
-              {autoDraftMutation.isPending ? (
-                <button className={styles.secondaryButton} disabled={autoDraftPauseRequested} onClick={pauseAutoDraft}>
-                  <Pause size={16} />
-                  {autoDraftPauseRequested ? copy.pausing : copy.pause}
-                </button>
-              ) : (
-                <button className={styles.primaryButton} disabled={busy || !activeSessionId} onClick={runWorkflow}>
-                  <Sparkles size={16} />
-                  {workflowMode === "manual" ? copy.continueWorkflow : copy.runDraft}
-                </button>
-              )}
-            </>
+          {showLegacyWorkflowModeControl ? (
+            <div className={styles.workflowModeControl} aria-label={copy.workflowMode}>
+              <span>{copy.workflowMode}</span>
+              <button
+                type="button"
+                className={workflowMode === "manual" ? styles.workflowModeButton_active : styles.workflowModeButton}
+                onClick={() => setWorkflowMode("manual")}
+                aria-pressed={workflowMode === "manual"}
+              >
+                {copy.manualMode}
+              </button>
+              <button
+                type="button"
+                className={workflowMode === "auto" ? styles.workflowModeButton_active : styles.workflowModeButton}
+                onClick={() => setWorkflowMode("auto")}
+                aria-pressed={workflowMode === "auto"}
+              >
+                {copy.autoMode}
+              </button>
+            </div>
           ) : null}
+          {autoDraftMutation.isPending ? (
+            <button className={styles.secondaryButton} disabled={autoDraftPauseRequested} onClick={pauseAutoDraft}>
+              <Pause size={16} />
+              {autoDraftPauseRequested ? copy.pausing : copy.pause}
+            </button>
+          ) : (
+            <button className={styles.primaryButton} disabled={workflowControlsDisabled} onClick={runWorkflow}>
+              <Sparkles size={16} />
+              {copy.continueWorkflow}
+            </button>
+          )}
         </div>
       </header>
 
@@ -998,14 +1071,14 @@ export function ResearchRoute() {
                 <span>{copy.openGoal}</span>
                 <textarea value={draft.openGoal} onChange={(event) => setDraft({ ...draft, openGoal: event.target.value })} />
               </label>
-              <label className={styles.intakeField}>
+              <label className={`${styles.intakeField} ${styles.intakeField_tall}`}>
                 <span>{copy.constraints}</span>
                 <textarea
                   value={draft.constraints}
                   onChange={(event) => setDraft({ ...draft, constraints: event.target.value })}
                 />
               </label>
-              <label className={styles.intakeField}>
+              <label className={`${styles.intakeField} ${styles.intakeField_medium}`}>
                 <span>{copy.preferences}</span>
                 <textarea
                   value={draft.preferences}
@@ -1064,7 +1137,7 @@ export function ResearchRoute() {
               <p className={styles.panelEyebrow}>Theme Discovery MVP</p>
               <h2>{activeStageLabel}</h2>
             </div>
-            <span className={styles.countPill}>{stageStatusLabel(activeStageStatus, copy)}</span>
+            <span className={styles.countPill}>{flowStatusLabel(activeStageStatus, copy)}</span>
           </div>
 
           <ResearchStageOutput
@@ -1079,7 +1152,7 @@ export function ResearchRoute() {
             missingEvidenceRequests={missingEvidenceRequests}
             selectedCard={selectedCard}
             selectedTheme={selectedTheme}
-            stage={activeStage}
+            stage={effectiveStage}
             runningStage={runningStage}
           />
         </section>
@@ -1087,34 +1160,28 @@ export function ResearchRoute() {
             <aside className={styles.sideColumn}>
               <section className={styles.processPanel}>
             <div className={styles.stageRail}>
-              {STAGES.map((stage, index) => {
-                const StageIcon = stage.icon;
-                const label = stageLabel(stage.id, copy);
-                const status = displayedStageStatus(stage.id, active, runningStage);
-                const actionLabel = stageActionLabel(status, stage.id, copy);
+              {(flowStageItems.length ? flowStageItems : defaultFlowStageItems(copy)).map((item, index) => {
+                const stage = item.stage;
+                const StageIcon = flowStageIcon(stage, item.node.type);
+                const label = item.node.label || stageLabel(stage, copy);
+                const status = displayedFlowNodeStatus(item.node, runningFlowNodeId);
+                const actionLabel = stageActionLabel(status, stage, copy);
                 const ActionIcon = status === "done" || status === "failed" ? RefreshCw : Play;
-                const action =
-                  stage.id === "broad"
-                    ? () => runAction("run-broad-search", stage.id)
-                    : stage.id === "deep"
-                      ? () => runAction("run-deep-search", stage.id)
-                      : stage.id === "evidence"
-                        ? () => runAction("extract-evidence", stage.id)
-                        : stage.id === "themes"
-                          ? () => runAction("generate-themes", stage.id)
-                          : selectedTheme
-                            ? () => runThemeAction(selectedTheme, "theme-card", stage.id)
-                            : undefined;
+                const isActiveStage = activeFlowItem?.node.id === item.node.id;
+                const canRun = Boolean(activeSessionId && item.node.id && !flowExecuteMutation.isPending && flowNodeCanExecute(status));
                 return (
                   <article
-                    key={stage.id}
-                    className={`${styles.stageCard} ${activeStage === stage.id ? styles.stageCard_active : ""}`}
+                    key={item.node.id}
+                    className={`${styles.stageCard} ${isActiveStage ? styles.stageCard_active : styles.stageCard_compact}`}
                   >
                     <button
                       type="button"
                       className={styles.stageSelectButton}
-                      aria-pressed={activeStage === stage.id}
-                      onClick={() => setActiveStage(stage.id)}
+                      aria-pressed={isActiveStage}
+                      onClick={() => {
+                        setActiveFlowNodeId(item.node.id);
+                        setActiveStage(stage);
+                      }}
                     >
                       <div className={styles.stageIndex}>
                         <StageIcon size={16} />
@@ -1123,21 +1190,21 @@ export function ResearchRoute() {
                       <div className={styles.stageHeader}>
                         <div>
                           <strong>{label}</strong>
-                          <small>{stageDescription(stage.id, lang)}</small>
+                          <small>{item.node.description || item.node.routeCondition || stageDescription(stage, lang)}</small>
                         </div>
-                        <span>{stageStatusLabel(status, copy)}</span>
+                        <span>{flowStatusLabel(status, copy)}</span>
                       </div>
                     </button>
-                    <div className={styles.stageBody}>
+                    {isActiveStage ? <div className={styles.stageBody}>
                       <button
                         className={styles.secondaryButton}
-                        disabled={busy || !activeSessionId || !action}
-                        onClick={action}
+                        disabled={busy || !canRun}
+                        onClick={() => runFlowNode(item.node)}
                       >
                         <ActionIcon size={14} />
                         <span>{actionLabel}</span>
                       </button>
-                    </div>
+                    </div> : null}
                   </article>
                 );
               })}
@@ -1159,6 +1226,78 @@ function latestThemeCard(cards: ResearchThemeCard[], themeId?: string): Research
 
 function latestSearchRun(runs: ResearchDiscoverySessionPayload["searchRuns"], phase: "broad" | "deep") {
   return [...runs].reverse().find((run) => run.phase === phase);
+}
+
+function defaultFlowStageItems(copy: (typeof COPY)["zh"]): FlowStageItem[] {
+  return STAGES.map((stage, index) => ({
+    stage: stage.id,
+    node: {
+      id: stage.id,
+      label: stageLabel(stage.id, copy),
+      type: stage.id === "card" ? "artifact" : "agent",
+      status: "ready",
+      x: 0,
+      y: index * 120,
+      agentKey: stage.id,
+      promptKey: stage.id,
+      llmConfigId: "",
+      description: "",
+      routeCondition: "",
+    },
+  }));
+}
+
+function flowNodeStage(node: Partial<ResearchFlowNode> | undefined): ResearchStageKey {
+  const key = `${node?.id ?? ""} ${node?.agentKey ?? ""} ${node?.promptKey ?? ""}`.toLowerCase();
+  if (key.includes("theme_card") || key.includes(" card") || key.endsWith("card")) {
+    return "card";
+  }
+  if (key.includes("broad")) {
+    return "broad";
+  }
+  if (key.includes("deep")) {
+    return "deep";
+  }
+  if (key.includes("review") || key.includes("evidence")) {
+    return "evidence";
+  }
+  if (key.includes("theme") || key.includes("human_choice")) {
+    return "themes";
+  }
+  if (node?.type === "artifact") {
+    return "card";
+  }
+  if (node?.type === "decision" || node?.type === "evaluation") {
+    return "evidence";
+  }
+  if (node?.type === "human") {
+    return "themes";
+  }
+  return "broad";
+}
+
+function flowStageIcon(stage: ResearchStageKey, nodeType: string) {
+  if (stage === "broad") return SearchCheck;
+  if (stage === "deep") return Target;
+  if (stage === "evidence") return BookOpenCheck;
+  if (stage === "card") return BadgeCheck;
+  if (nodeType === "human") return GitBranch;
+  return BrainCircuit;
+}
+
+function nextRunnableFlowNode(nodes: ResearchFlowNode[]): ResearchFlowNode | undefined {
+  return nodes.find((node) => ["ready", "needs_review", "needs_evidence"].includes(String(node.status || "")));
+}
+
+function flowNodeCanExecute(status: string) {
+  return ["ready", "needs_review", "needs_evidence", "needs_input", "done", "failed", "stale"].includes(status);
+}
+
+function displayedFlowNodeStatus(node: ResearchFlowNode, runningNodeId: string) {
+  if (runningNodeId === node.id) {
+    return "running";
+  }
+  return node.status || "idle";
 }
 
 function autoDraftStartIndex(active: ResearchDiscoverySessionPayload | undefined) {
@@ -1331,7 +1470,7 @@ function ResearchStageOutput({
       <AgentTracePanel
         active={active}
         copy={copy}
-        defaultCollapsed={stage === "themes" || stage === "card"}
+        defaultCollapsed
         isRunning={runningStage === stage || runningStage === "draft"}
         stage={stage}
       />
@@ -1348,12 +1487,14 @@ function StageSources({
   lang: "zh" | "en";
   phase: "broad" | "deep";
 }) {
+  const [showAllSources, setShowAllSources] = useState(false);
   const run = latestSearchRun(active.searchRuns, phase);
   const sources =
     phase === "broad"
       ? active.sources
       : active.sources.filter((source) => !run?.runId || source.searchRunId === run.runId);
-  const visibleSources = sources.slice(0, 12);
+  const visibleSources = showAllSources ? sources : sources.slice(0, 12);
+  const hiddenSourceCount = Math.max(0, sources.length - visibleSources.length);
   return (
     <div className={styles.evidenceList}>
       {!visibleSources.length ? <p className={styles.emptyText}>{phase === "broad" ? "还没有广撒网来源。" : "还没有定向深搜来源。"}</p> : null}
@@ -1368,6 +1509,21 @@ function StageSources({
           </small>
         </article>
       ))}
+      {sources.length > 12 ? (
+        <button
+          type="button"
+          className={`${styles.secondaryButton} ${styles.sourceToggleButton}`}
+          onClick={() => setShowAllSources((current) => !current)}
+        >
+          {showAllSources
+            ? lang === "zh"
+              ? "收起来源"
+              : "Collapse sources"
+            : lang === "zh"
+              ? `显示全部 ${sources.length} 条来源（还有 ${hiddenSourceCount} 条）`
+              : `Show all ${sources.length} sources (${hiddenSourceCount} more)`}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -2309,6 +2465,20 @@ function stageStatusLabel(status: string, copy: (typeof COPY)["zh"]) {
   if (status === "done") return copy.complete;
   if (status === "running") return copy.running;
   if (status === "failed") return copy.failed;
+  return copy.ready;
+}
+
+function flowStatusLabel(status: string, copy: (typeof COPY)["zh"]) {
+  const english = copy.ready === "Ready";
+  if (status === "done" || status === "completed") return copy.complete;
+  if (status === "running") return copy.running;
+  if (status === "failed") return copy.failed;
+  if (status === "needs_review") return english ? "Review" : "待审查";
+  if (status === "needs_input") return english ? "Input" : "待输入";
+  if (status === "needs_evidence") return english ? "Evidence" : "缺证据";
+  if (status === "blocked") return english ? "Blocked" : "阻塞";
+  if (status === "stale") return copy.stale;
+  if (status === "skipped") return english ? "Skipped" : "跳过";
   return copy.ready;
 }
 

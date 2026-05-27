@@ -7,6 +7,11 @@
   overflow: hidden;
 }
 
+.surfaceCompact {
+  border-radius: 8px;
+  background: var(--surface-panel-strong);
+}
+
 .header {
   flex: 0 0 auto;
   display: flex;
@@ -14,6 +19,11 @@
   justify-content: space-between;
   gap: 12px;
   padding: 18px 20px 14px;
+}
+
+.surfaceCompact .header {
+  padding: 13px 16px 9px;
+  align-items: center;
 }
 
 .headerControls {
@@ -38,6 +48,10 @@
   font-size: 1.32rem;
 }
 
+.surfaceCompact .title {
+  font-size: 1.12rem;
+}
+
 .phase {
   display: inline-flex;
   align-items: center;
@@ -58,6 +72,11 @@
   padding: 14px 20px 0;
 }
 
+.surfaceCompact .summaryGrid {
+  gap: 8px;
+  padding: 8px 16px 0;
+}
+
 .summaryCard {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -67,6 +86,11 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
+}
+
+.surfaceCompact .summaryCard {
+  min-height: 78px;
+  padding: 9px 10px;
 }
 
 .summaryLabel {
@@ -95,6 +119,11 @@
   gap: 12px;
   padding: 12px 20px 0;
   min-height: 0;
+}
+
+.surfaceCompact .metaStack {
+  gap: 8px;
+  padding: 8px 16px 0;
 }
 
 .sessionMeta {
@@ -150,10 +179,21 @@
   min-height: 0;
   overflow: auto;
   scrollbar-gutter: stable;
-  padding: 20px 24px 18px;
+  padding: 18px clamp(22px, 3vw, 38px) 18px;
   display: grid;
   align-content: start;
   gap: 14px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--surface-panel-strong) 74%, transparent), transparent 18%),
+    var(--surface-panel-strong);
+}
+
+.surfaceCompact .timeline {
+  padding: 14px 18px 16px;
+  gap: 12px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--surface-panel-strong) 84%, transparent), transparent 20%),
+    var(--surface-panel-strong);
 }
 
 .emptyState {
@@ -168,9 +208,10 @@
 .userTurn {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
-  gap: 12px;
+  column-gap: 12px;
   width: 100%;
   min-width: 0;
+  align-items: start;
 }
 
 .userTurn {
@@ -197,15 +238,15 @@
 .turnAvatar {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  margin-top: 1px;
+  width: 40px;
+  height: 40px;
+  margin-top: 2px;
   border-radius: 999px;
   background:
     radial-gradient(circle at 35% 25%, color-mix(in srgb, var(--accent-warm) 90%, white), transparent 42%),
     linear-gradient(145deg, color-mix(in srgb, var(--accent-warm) 78%, var(--accent-cool)), var(--accent-cool));
   color: var(--surface-page);
-  font-size: 0.8rem;
+  font-size: 0.98rem;
   font-weight: 800;
 }
 
@@ -217,31 +258,47 @@
     linear-gradient(145deg, color-mix(in srgb, var(--accent-cool) 82%, white), color-mix(in srgb, var(--accent-warm) 72%, var(--accent-cool)));
 }
 
+.turnAvatarImage {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
 .turnContent {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  gap: 6px;
 }
 
 .userTurn .turnContent {
   grid-column: 1;
   grid-row: 1;
   justify-self: end;
-  width: min(72%, 980px);
+  width: min(74%, 920px);
+  padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent-cool) 10%, transparent), transparent 56%),
+    color-mix(in srgb, var(--surface-card) 82%, transparent);
 }
 
 .assistantTurn .turnContent {
-  width: 100%;
+  width: min(100%, 980px);
+  padding: 0 0 0 12px;
+  border-left: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
 }
 
 .turnMeta {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 12px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.84rem;
+  font-size: 0.72rem;
+  line-height: 1.2;
 }
 
 .turnMetaIdentity {
@@ -257,6 +314,10 @@
   justify-content: flex-end;
   gap: 8px;
   min-width: 0;
+  color: var(--fg-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  white-space: nowrap;
 }
 
 .turnIconButton {
@@ -306,8 +367,8 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 1.02rem;
-  font-weight: 760;
+  font-size: 0.9rem;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -330,17 +391,23 @@
   max-width: 100%;
   margin: 0;
   color: var(--fg-primary);
-  font-size: 1.06rem;
-  font-weight: 680;
-  line-height: 1.58;
+  font-size: 0.93rem;
+  font-weight: 560;
+  line-height: 1.5;
   overflow-wrap: anywhere;
   text-align: left;
   white-space: pre-wrap;
 }
 
+.userMessageBody .messageBody {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+}
+
 .operationGroup {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -350,19 +417,23 @@
   gap: 8px;
   width: fit-content;
   max-width: 100%;
-  padding: 0;
-  border: none;
-  background: transparent;
+  min-height: 25px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
   color: var(--fg-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.96rem;
+  font-size: 0.76rem;
   font-weight: 620;
 }
 
 .operationSummary:hover,
 .responseToggle:hover {
   color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 76%, var(--accent-warm) 5%);
 }
 
 .operationTimeline {
@@ -388,11 +459,11 @@
 .operationItem {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto auto 18px;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  min-height: 42px;
+  min-height: 32px;
   min-width: 0;
-  padding: 6px 0;
+  padding: 4px 0;
   color: var(--fg-secondary);
 }
 
@@ -429,13 +500,13 @@
 
 .operationName {
   color: var(--fg-secondary);
-  font-size: 0.96rem;
+  font-size: 0.8rem;
   font-weight: 590;
 }
 
 .operationSummaryText {
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
 }
 
 .operationStatus {
@@ -443,7 +514,7 @@
   align-items: center;
   gap: 5px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   white-space: nowrap;
 }
 
@@ -467,7 +538,7 @@
 .operationDuration {
   min-width: 48px;
   color: var(--fg-tertiary);
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   text-align: right;
   white-space: nowrap;
 }
@@ -478,7 +549,7 @@
 
 .responseSection {
   display: grid;
-  gap: 12px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -490,40 +561,51 @@
 .responseToggle {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: fit-content;
-  padding: 0;
-  border: none;
-  background: transparent;
+  min-height: 23px;
+  padding: 2px 6px 2px 0;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 34%, transparent);
   color: var(--fg-tertiary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: 0.74rem;
+  font-weight: 620;
 }
 
 .responseBody {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
-  padding-top: 12px;
-  border-top: 1px solid color-mix(in srgb, var(--fg-tertiary) 16%, transparent);
+  padding: 6px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
 }
 
 .responseSegment {
   display: grid;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
-  padding-left: 12px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 10%, transparent);
   border-left: 2px solid color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 46%, transparent);
 }
 
 .responseSegment_answer {
-  padding-left: 0;
+  padding: 0;
+  border: 0;
   border-left-color: transparent;
+  background: transparent;
 }
 
 .responseSegment_status {
   border-left-color: color-mix(in srgb, var(--accent-warm) 56%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 8%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface-card) 52%, transparent);
 }
 
 .responseSegment_commit,
@@ -543,7 +625,7 @@
   gap: 8px;
   min-width: 0;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
+  font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -572,12 +654,15 @@
   margin: 0;
   overflow: auto;
   border-radius: 8px;
-  padding: 11px 12px;
-  background: color-mix(in srgb, var(--surface-panel-strong) 78%, var(--surface-page));
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 88%, transparent), var(--surface-page)),
+    var(--surface-page);
   color: var(--fg-primary);
   font-family: var(--font-mono);
-  font-size: 0.9rem;
-  line-height: 1.55;
+  font-size: 0.8rem;
+  line-height: 1.46;
   white-space: pre-wrap;
 }
 
@@ -594,11 +679,12 @@
 
 .responseSegmentList {
   display: grid;
-  gap: 5px;
+  gap: 3px;
   margin: 0;
   padding-left: 20px;
   color: var(--fg-primary);
-  line-height: 1.58;
+  font-size: 0.92rem;
+  line-height: 1.46;
   overflow-wrap: anywhere;
 }
 
@@ -677,9 +763,53 @@
 .messageBody {
   margin: 0;
   color: var(--fg-primary);
+  font-size: 0.92rem;
   white-space: pre-wrap;
-  line-height: 1.6;
+  line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.markdownBody {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  max-width: 82ch;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.markdownHeading {
+  margin: 0;
+  color: var(--fg-primary);
+  font-family: var(--font-display);
+  letter-spacing: 0;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.markdownHeading1,
+.markdownHeading2 {
+  font-size: 1rem;
+  font-weight: 760;
+}
+
+.markdownHeading3 {
+  font-size: 0.94rem;
+  font-weight: 730;
+}
+
+.markdownHeading4 {
+  color: var(--fg-secondary);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.markdownDivider {
+  width: 100%;
+  height: 1px;
+  margin: 2px 0;
+  border: 0;
+  background: color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
 }
 
 .sectionBlock {
@@ -796,10 +926,18 @@
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 12px;
-  padding: 16px 20px 20px;
+  gap: 10px;
+  padding: 12px 18px 16px;
   border-top: 1px solid var(--border-soft);
-  background: var(--surface-panel-strong);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel-strong) 92%, transparent), var(--surface-panel-strong)),
+    var(--surface-panel-strong);
+  box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.12);
+}
+
+.surfaceCompact .composer {
+  gap: 8px;
+  padding: 10px 14px 12px;
 }
 
 .turnError {
@@ -955,7 +1093,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 8px 10px;
+  min-height: 32px;
+  padding: 6px 9px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-panel-strong));
@@ -989,7 +1128,8 @@
 }
 
 .input {
-  min-height: 84px;
+  min-height: 72px;
+  max-height: 180px;
   resize: none;
   border-radius: 8px;
   border: 1px solid var(--border-soft);
@@ -999,6 +1139,12 @@
   font: inherit;
 }
 
+.surfaceCompact .input {
+  min-height: 58px;
+  max-height: 140px;
+  padding: 10px 12px;
+}
+
 .input:disabled {
   color: var(--fg-tertiary);
   cursor: not-allowed;
@@ -1006,13 +1152,20 @@
 
 .sendButton {
   align-self: end;
-  padding: 10px 16px;
+  min-width: 76px;
+  min-height: 40px;
+  padding: 10px 15px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
   color: var(--accent-warm-2);
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
+}
+
+.surfaceCompact .sendButton {
+  min-height: 38px;
+  padding: 9px 14px;
 }
 
 .sendButton:hover:not(:disabled) {
@@ -1073,7 +1226,8 @@
 
 @media (max-width: 760px) {
   .timeline {
-    padding-inline: 14px;
+    padding: 16px 12px;
+    gap: 14px;
   }
 
   .backToBottomButton {
@@ -1084,6 +1238,30 @@
   .messageCard {
     min-width: min(220px, 100%);
     max-width: 100%;
+  }
+
+  .assistantTurn,
+  .userTurn {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .turnAvatar {
+    display: none;
+  }
+
+  .userTurn .turnContent,
+  .assistantTurn .turnContent {
+    grid-column: 1;
+    width: 100%;
+  }
+
+  .composer {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 10px 12px 12px;
+  }
+
+  .sendButton {
+    justify-self: end;
   }
 
   .turnError {

@@ -93,4 +93,9 @@ describe("AppShell navigation telemetry", () => {
       ),
     ).toEqual([]);
   });
+
+  it("keeps group chat out of the top navigation because it lives in the chat page", () => {
+    expect(appShellSource).not.toContain('to="/chat-rooms"');
+    expect(appShellSource).not.toContain('t("navChatRooms")');
+  });
 });

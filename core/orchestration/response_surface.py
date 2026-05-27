@@ -127,9 +127,23 @@ class ResponseSurfaceController:
         ui = self._ui_getter()
         input_tokens = 0
         output_tokens = 0
+        cached_input_tokens = 0
         usage = self._extract_usage_payload(response)
         if usage:
             input_tokens, output_tokens = self._extract_usage_tokens(usage)
+            cached_input_tokens = self._extract_cached_input_tokens(usage)
+
+        usage_observation = self._extract_usage_observation(response)
+        if usage_observation:
+            cached_input_tokens = max(
+                cached_input_tokens,
+                self._read_int_from_mapping(
+                    usage_observation,
+                    "cached_input_tokens",
+                    "cachedInputTokens",
+                    "cached_tokens",
+                ),
+            )
 
         estimated = False
         if not input_tokens and messages is not None:
@@ -157,7 +171,12 @@ class ResponseSurfaceController:
                 pet.trigger_heartbeat()
             except Exception:
                 pass
-            ui.note_token_usage(input_tokens, output_tokens, observed=True)
+            ui.note_token_usage(
+                input_tokens,
+                output_tokens,
+                cached_input_tokens=cached_input_tokens,
+                observed=True,
+            )
         else:
             ui.note_token_usage(observed=False)
         return input_tokens, output_tokens
@@ -176,6 +195,15 @@ class ResponseSurfaceController:
                 if isinstance(usage, dict) and usage:
                     return usage
 
+        return {}
+
+    @staticmethod
+    def _extract_usage_observation(response: Any) -> Dict[str, Any]:
+        response_metadata = getattr(response, "response_metadata", None)
+        if isinstance(response_metadata, dict):
+            usage_observation = response_metadata.get("usage_observation")
+            if isinstance(usage_observation, dict) and usage_observation:
+                return usage_observation
         return {}
 
     @staticmethod
@@ -209,6 +237,31 @@ class ResponseSurfaceController:
                 input_tokens = max(0, total_tokens - output_tokens)
 
         return input_tokens, output_tokens
+
+    @staticmethod
+    def _read_int_from_mapping(data: Dict[str, Any] | Any, *keys: str) -> int:
+        if not isinstance(data, dict):
+            return 0
+        for key in keys:
+            value = data.get(key)
+            if value not in (None, ""):
+                try:
+                    return max(0, int(value))
+                except (TypeError, ValueError):
+                    continue
+        return 0
+
+    @classmethod
+    def _extract_cached_input_tokens(cls, usage: Dict[str, Any] | Any) -> int:
+        if not isinstance(usage, dict):
+            return 0
+        prompt_details = usage.get("prompt_tokens_details")
+        input_details = usage.get("input_token_details")
+        return max(
+            cls._read_int_from_mapping(usage, "cached_tokens", "cached_input_tokens"),
+            cls._read_int_from_mapping(prompt_details, "cached_tokens", "cached_input_tokens"),
+            cls._read_int_from_mapping(input_details, "cached_tokens", "cached_input_tokens"),
+        )
 
     def emit_visible_response(
         self,

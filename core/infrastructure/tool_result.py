@@ -38,11 +38,11 @@ class ToolResultEnvelope:
 def _infer_result_kind(tool_name: str = "", result_str: str = "") -> str:
     name = (tool_name or "").lower()
     text = result_str or ""
-    if name in {"read_file_tool", "read_file"} or text.startswith("[文件]"):
+    if name == "read_file_tool" or text.startswith("[文件]"):
         return "file_read"
-    if name in {"get_code_entity_tool", "list_file_entities_tool", "python_symbol_tool"} or text.startswith("[AST]"):
+    if name == "code_symbol_tool" or text.startswith("[AST]"):
         return "python_structure"
-    if name in {"grep_search_tool", "search_and_read", "find_definitions", "find_function_calls"} or text.startswith("[搜索]"):
+    if name == "grep_search_tool" or text.startswith("[搜索]"):
         return "search"
     if text.startswith("{") or text.startswith("["):
         return "structured_text"
@@ -66,7 +66,7 @@ def _extract_continuation_hint(result_kind: str, result_str: str) -> str:
             if line.startswith("[续读] "):
                 return line[len("[续读] ") :].strip()
     if result_kind == "python_structure":
-        return "优先继续使用 get_code_entity_tool / list_file_entities_tool 做实体级补读。"
+        return "优先继续使用 code_symbol_tool 的 outline/entity/definition/references 模式做结构化补读。"
     if result_kind == "search":
         return "优先缩小搜索范围，或按命中文件继续读取局部上下文。"
     return ""

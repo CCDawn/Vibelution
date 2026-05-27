@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from core.web.services.avatar_image_service import resolve_user_avatar_file, store_user_avatar_image
 from core.web.services.config_service import (
     ConfigConflictError,
     apply_config_workspace,
@@ -83,6 +85,12 @@ class ConfigDiscoverModelsPayload(ConfigDraftPayload):
     apiKey: str = ""
 
 
+class ConfigAvatarImagePayload(BaseModel):
+    filename: str = ""
+    contentType: str = ""
+    dataBase64: str = ""
+
+
 def _raise_config_http_error(exc: Exception) -> None:
     if isinstance(exc, ConfigConflictError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -105,6 +113,29 @@ def config_open_environment() -> dict:
         return open_system_environment_settings()
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)
+
+
+@router.post("/config/avatar-image")
+def config_upload_avatar_image(payload: ConfigAvatarImagePayload) -> dict:
+    try:
+        return store_user_avatar_image(
+            filename=payload.filename,
+            content_type=payload.contentType,
+            data_base64=payload.dataBase64,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
+
+
+@router.get("/config/avatar-image/{filename}")
+def config_get_avatar_image(filename: str) -> FileResponse:
+    try:
+        path = resolve_user_avatar_file(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Avatar image not found") from exc
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Avatar image not found")
+    return FileResponse(path)
 
 
 @router.post("/config/draft/preview")

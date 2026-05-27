@@ -674,8 +674,9 @@ def _prepare_submitted_public_config(public_config: dict[str, Any] | None, old_p
 
 def _assert_base_hash_matches(base_hash: str, old_public: dict[str, Any], lang: str) -> str:
     current_hash = public_config_hash(with_git_config_defaults(old_public))
+    raw_current_hash = public_config_hash(old_public)
     expected_hash = str(base_hash or "").strip()
-    if expected_hash and expected_hash != current_hash:
+    if expected_hash and expected_hash not in {current_hash, raw_current_hash}:
         raise ConfigConflictError(
             text_for(
                 lang,
@@ -728,7 +729,7 @@ def get_config_workspace() -> dict[str, Any]:
 def preview_config_workspace(public_config: dict[str, Any] | None, draft_meta: dict | None = None, base_hash: str = "") -> dict[str, Any]:
     """Validate and normalize a draft config without persisting it."""
 
-    old_public = with_git_config_defaults(load_public_config())
+    old_public = load_public_config()
     submitted = _prepare_submitted_public_config(public_config, old_public)
     return _build_workspace(
         submitted,
@@ -1239,7 +1240,7 @@ def apply_config_workspace(
     draft_meta: dict | None = None,
     base_hash: str = "",
 ) -> dict[str, Any]:
-    old_public = with_git_config_defaults(load_public_config())
+    old_public = load_public_config()
     submitted = _prepare_submitted_public_config(public_config, old_public)
     lang = _resolve_workspace_language(submitted)
     _assert_base_hash_matches(base_hash, old_public, lang)

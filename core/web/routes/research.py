@@ -9,9 +9,11 @@ from core.web.services.research_service import (
     approve_theme_card,
     create_theme_discovery_session,
     delete_theme_discovery_session,
+    execute_research_flow_canvas_node,
     extract_theme_discovery_evidence,
     generate_candidate_themes,
     generate_theme_card,
+    get_research_knowledge_base,
     get_research_flow_canvas,
     get_theme_discovery_session,
     list_theme_discovery_sessions,
@@ -21,6 +23,7 @@ from core.web.services.research_service import (
     run_theme_discovery_draft,
     select_candidate_theme,
     save_research_agent_binding,
+    delete_research_agent_binding,
     save_research_flow_canvas,
     save_research_prompt,
 )
@@ -43,8 +46,11 @@ class ResearchPromptUpdatePayload(BaseModel):
 
 class ResearchAgentTemplateUpdatePayload(BaseModel):
     key: str = Field("", max_length=64)
+    label: str = Field("", max_length=120)
+    promptFilename: str = Field("", max_length=160)
     templateId: str = Field("", max_length=128)
     llmConfigId: str = Field("", max_length=128)
+    enabled: bool | None = None
 
 
 class ResearchDeepSearchPayload(BaseModel):
@@ -56,6 +62,21 @@ class ResearchFlowCanvasPayload(BaseModel):
     viewport: dict = Field(default_factory=dict)
     nodes: list[dict] = Field(default_factory=list, max_length=80)
     edges: list[dict] = Field(default_factory=list, max_length=160)
+
+
+class ResearchFlowCanvasExecutionPayload(BaseModel):
+    sessionId: str = Field("", max_length=128)
+    nodeId: str | None = Field(default=None, max_length=128)
+
+
+@router.get("/research/knowledge-base")
+def research_knowledge_base(
+    query: str = "",
+    kind: str = "",
+    category: str = "",
+    limit: int = 100,
+) -> dict:
+    return get_research_knowledge_base(query=query, kind=kind, category=category, limit=limit)
 
 
 @router.get("/research/theme-discovery/sessions")
@@ -148,7 +169,22 @@ def research_theme_discovery_prompts_update(payload: ResearchPromptUpdatePayload
 @router.put("/research/theme-discovery/agent-templates")
 def research_theme_discovery_agent_templates_update(payload: ResearchAgentTemplateUpdatePayload) -> dict:
     try:
-        return save_research_agent_binding(payload.key, payload.templateId, payload.llmConfigId)
+        return save_research_agent_binding(
+            payload.key,
+            payload.templateId,
+            payload.llmConfigId,
+            label=payload.label,
+            prompt_filename=payload.promptFilename,
+            enabled=payload.enabled,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/research/theme-discovery/agent-templates/{agent_key}")
+def research_theme_discovery_agent_templates_delete(agent_key: str) -> dict:
+    try:
+        return delete_research_agent_binding(agent_key)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -167,6 +203,11 @@ def research_flow_canvas_update(payload: ResearchFlowCanvasPayload) -> dict:
         return save_research_flow_canvas(payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/research/flow-canvas/execute")
+def research_flow_canvas_execute(payload: ResearchFlowCanvasExecutionPayload) -> dict:
+    return _run_research_action(lambda: execute_research_flow_canvas_node(payload.sessionId, payload.nodeId))
 
 
 def _run_research_action(action):

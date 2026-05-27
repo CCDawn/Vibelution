@@ -32,6 +32,7 @@ from fastapi.testclient import TestClient
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
+    agent_directory_service,
     chat_review_service,
     config_service,
     evolution_service,
@@ -45,6 +46,7 @@ from core.web.services import (
     supervised_worktree_evolution_service,
     workbench_contract_service,
 )
+import core.web.services.avatar_image_service as avatar_image_service
 from tests.test_gym_runner import RunnerFakeAdapter
 
 
@@ -362,6 +364,8 @@ def test_runtime_summary_shape():
     payload = response.json()
     assert payload["agentName"] == "Vibelution"
     assert isinstance(payload["userName"], str)
+    assert "userProfile" in payload
+    assert set(payload["userProfile"]) == {"displayName", "bio", "preferences", "avatarPreset", "avatarImageUrl"}
     assert "mode" in payload
     assert "profile" in payload
     assert "sessionState" in payload
@@ -383,6 +387,44 @@ def test_runtime_summary_shape():
     assert "lifecycleProof" in payload
     assert "overallState" in payload["lifecycleProof"]
     assert "components" in payload["lifecycleProof"]
+
+
+def test_runtime_summary_prefers_configured_user_profile(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["user_profile"] = {
+        "display_name": "Vibe Owner",
+        "bio": "Prefers direct operational summaries.",
+        "preferences": ["Keep answers compact", "Mention validation evidence"],
+        "avatar_preset": "codex",
+        "avatar_image_path": "workspace/user_avatars/avatar-test.png",
+    }
+    monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setattr(runtime_service, "_local_user_name", lambda: "os-user")
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["userName"] == "Vibe Owner"
+    assert payload["userProfile"] == {
+        "displayName": "Vibe Owner",
+        "bio": "Prefers direct operational summaries.",
+        "preferences": ["Keep answers compact", "Mention validation evidence"],
+        "avatarPreset": "codex",
+        "avatarImageUrl": "/api/config/avatar-image/avatar-test.png",
+    }
+
+
+def test_runtime_summary_ignores_unsafe_user_avatar_path(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["user_profile"] = {
+        "display_name": "Vibe Owner",
+        "avatar_preset": "codex",
+        "avatar_image_path": "../outside.png",
+    }
+    monkeypatch.setattr(runtime_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    payload = runtime_service.get_runtime_summary()
+
+    assert payload["userProfile"]["avatarImageUrl"] == ""
 
 
 def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
@@ -2075,6 +2117,35 @@ def test_session_detail_context_usage_comes_from_persisted_messages_after_restar
     assert payload["contextUsage"]["used"] > 0
 
 
+def test_session_detail_exposes_prompt_cache_observation(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    runtime_state = {
+        "turn_input_tokens": 1000,
+        "turn_cached_input_tokens": 640,
+        "last_input_tokens": 500,
+        "last_cached_input_tokens": 320,
+        "total_input_tokens": 5000,
+        "total_cached_input_tokens": 2500,
+        "updated_at": "2026-05-18T12:03:00",
+    }
+    runtime_state_path = tmp_path / "workspace" / "ui_runtime_state.json"
+    runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_state_path.write_text(json.dumps(runtime_state), encoding="utf-8")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    cache_usage = response.json()["cacheUsage"]
+    assert cache_usage["turnInputTokens"] == 1000
+    assert cache_usage["turnCachedInputTokens"] == 640
+    assert cache_usage["lastInputTokens"] == 500
+    assert cache_usage["lastCachedInputTokens"] == 320
+    assert cache_usage["turnCacheHitRate"] == pytest.approx(0.64)
+    assert cache_usage["totalCacheHitRate"] == pytest.approx(0.5)
+    assert cache_usage["source"] == "ui_runtime_state"
+
+
 def test_session_detail_keeps_persisted_tool_only_assistant_message(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     state = load_chat_state(tmp_path)
@@ -2244,6 +2315,49 @@ def test_update_session_title_persists_to_list_and_detail(tmp_path, monkeypatch)
 
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["title"] == "重命名后的会话"
+
+
+def test_update_session_agent_profile_persists_to_list_and_detail(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
+    base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+
+    response = client.patch(
+        "/api/sessions/session-live",
+        json={"agentProfileId": "subagent_explorer"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "session-live"
+    assert payload["agentProfileId"] == "subagent_explorer"
+    assert payload["agentTemplateId"] == "subagent_explorer"
+
+    sessions_response = client.get("/api/sessions")
+    assert sessions_response.status_code == 200
+    assert sessions_response.json()[0]["agentProfileId"] == "subagent_explorer"
+
+    state = load_chat_state(tmp_path)
+    assert state["conversations"][0]["agent_profile_id"] == "subagent_explorer"
+
+
+def test_session_agent_templates_list_config_profiles(monkeypatch):
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
+    base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
+    base_config.llm.profiles["subagent_explorer"].model = "explorer-model"
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+
+    response = client.get("/api/sessions/agent-templates")
+
+    assert response.status_code == 200
+    payload = response.json()
+    templates = {item["templateId"]: item for item in payload}
+    assert templates["primary"]["profileId"] == "primary"
+    assert templates["subagent_explorer"]["model"] == "explorer-model"
 
 
 def test_update_session_title_rejects_empty_title(tmp_path, monkeypatch):
@@ -3287,10 +3401,12 @@ def test_runtime_summary_exposes_work_run_kinds(monkeypatch):
 
     assert set(payload["workRuns"]["active"]) == {
         "chat_turn",
+        "chat_room_round",
         "self_evolution_run",
         "supervised_evolution_run",
         "supervised_worktree_evolution_run",
     }
+    assert payload["workRuns"]["active"]["chat_room_round"] is None
     assert payload["workRuns"]["active"]["self_evolution_run"]["runKind"] == "self_evolution_run"
     assert payload["workRuns"]["active"]["self_evolution_run"]["leases"] == [
         "evolution_transaction",
@@ -6383,6 +6499,12 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert preset_options["custom_openai_compatible_relay"]["provider"]["kind"] == "openai_compatible"
     assert preset_options["custom_relay_responses"]["category"] == "relay"
     assert preset_options["custom_relay_responses"]["model"]["transport"] == "responses"
+    assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["category"] == "official"
+    assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["provider"]["kind"] == "xiaomi"
+    assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["provider"]["base_url"] == (
+        "https://token-plan-cn.xiaomimimo.com/v1"
+    )
+    assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["model"] == "mimo-v2.5-pro"
     assert "modelOptions" in payload
     assert "profileCards" in payload
     profile_cards = {item["profileId"]: item for item in payload["profileCards"]}
@@ -6427,6 +6549,9 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_sections["runtime"]["path"] == "runtime"
     assert "workbench" in editor_sections
     assert editor_sections["workbench"]["path"] == "workbench"
+    assert "user-profile" in editor_sections
+    assert editor_sections["user-profile"]["path"] == "user_profile"
+    assert editor_sections["user-profile"]["title"] == "用户信息"
     assert payload["publicConfig"]["workbench"]["backend_port"] == 8000
     assert payload["publicConfig"]["workbench"]["frontend_port"] == 5173
     assert payload["publicConfig"]["workbench"]["window_mode"] == "windowed"
@@ -6443,6 +6568,14 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
         {"value": "fullscreen", "label": "沉浸全屏"},
     ]
     assert "重启工作台" in editor_meta["workbench.window_mode"]["hint"]
+    assert editor_meta["user_profile.display_name"]["kind"] == "text"
+    assert editor_meta["user_profile.display_name"]["label"] == "用户显示名"
+    assert editor_meta["user_profile.bio"]["kind"] == "multiline"
+    assert editor_meta["user_profile.preferences"]["kind"] == "string_list"
+    assert editor_meta["user_profile.avatar_preset"]["kind"] == "select"
+    assert editor_meta["user_profile.avatar_preset"]["options"]
+    assert editor_meta["user_profile.avatar_image_path"]["kind"] == "image"
+    assert "本地图片" in editor_meta["user_profile.avatar_image_path"]["hint"]
     assert editor_meta["network.proxy_enabled"]["kind"] == "boolean"
     assert editor_meta["network.proxy_enabled"]["label"] == "启用代理"
     assert editor_meta["network.proxy_url"]["kind"] == "url"
@@ -6463,6 +6596,67 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert sections_by_id["health-diagnostics"]["title"] == "健康诊断"
     assert any(section["id"] == "overview" for section in payload["sections"])
     assert any(section["id"] == "shell" for section in payload["sections"])
+
+
+def test_config_avatar_image_upload_stores_safe_project_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(avatar_image_service, "USER_AVATAR_DIR", tmp_path / "user_avatars")
+    png_payload = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+
+    response = client.post(
+        "/api/config/avatar-image",
+        json={
+            "filename": "my avatar.png",
+            "contentType": "image/png",
+            "dataBase64": base64.b64encode(png_payload).decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["path"].startswith("workspace/user_avatars/avatar-")
+    assert payload["path"].endswith(".png")
+    assert payload["url"].startswith("/api/config/avatar-image/avatar-")
+    saved_files = list((tmp_path / "user_avatars").glob("*.png"))
+    assert len(saved_files) == 1
+    assert saved_files[0].read_bytes() == png_payload
+
+    image_response = client.get(payload["url"])
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"].startswith("image/png")
+    assert image_response.content == png_payload
+
+
+def test_config_avatar_image_upload_rejects_disguised_image(monkeypatch, tmp_path):
+    monkeypatch.setattr(avatar_image_service, "USER_AVATAR_DIR", tmp_path / "user_avatars")
+
+    response = client.post(
+        "/api/config/avatar-image",
+        json={
+            "filename": "not-image.png",
+            "contentType": "image/png",
+            "dataBase64": base64.b64encode(b"not a png").decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 422
+    assert not (tmp_path / "user_avatars").exists()
+
+
+def test_config_avatar_image_upload_rejects_oversized_image(monkeypatch, tmp_path):
+    monkeypatch.setattr(avatar_image_service, "USER_AVATAR_DIR", tmp_path / "user_avatars")
+    monkeypatch.setattr(avatar_image_service, "MAX_USER_AVATAR_IMAGE_BYTES", 8)
+
+    response = client.post(
+        "/api/config/avatar-image",
+        json={
+            "filename": "avatar.png",
+            "contentType": "image/png",
+            "dataBase64": base64.b64encode(b"\x89PNG\r\n\x1a\nextra").decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 422
+    assert not (tmp_path / "user_avatars").exists()
 
 
 def test_health_diagnostics_endpoint_returns_log_helpers(tmp_path, monkeypatch):
@@ -8358,6 +8552,8 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     _reset_supervised_live_state()
     monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         supervised_control_service._RUN_EXECUTOR,
         "submit",
@@ -8381,9 +8577,12 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     assert payload["datasetName"] == "custom_prompt_jsonl"
     assert payload["bundleName"] == "custom_prompt_jsonl_v1"
     assert payload["keepWorktree"] is True
+    assert payload["agentBindings"]["baseline"]["profileId"] == "supervised_baseline"
+    assert payload["agentBindings"]["candidate"]["profileId"] == "supervised_candidate"
 
     assert active_response.status_code == 200
     assert active_response.json()["runId"] == payload["runId"]
+    assert active_response.json()["agentBindings"]["baseline"]["agentId"] == payload["agentBindings"]["baseline"]["agentId"]
 
     stream = supervised_control_service.stream_active_supervised_run_events(
         initial_snapshot=active_response.json()
@@ -8402,6 +8601,26 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     assert event["event"] == "supervised_run"
     assert event_payload["snapshot"]["runId"] == payload["runId"]
     assert event_payload["snapshot"]["status"] == "queued"
+    assert event_payload["snapshot"]["agentBindings"]["baseline"]["agentId"] == payload["agentBindings"]["baseline"]["agentId"]
+
+    supervised_control_service._handle_progress_event(
+        payload["runId"],
+        {
+            "event": "role_start",
+            "session_id": "supervised-demo",
+            "case_index": 1,
+            "case_total": 1,
+            "case_id": "case_1",
+            "role": "baseline",
+            "scenario": "transaction",
+            "mode": "single_turn",
+            "prompt": "fix bug",
+            "agent_binding": payload["agentBindings"]["baseline"],
+        },
+    )
+    progress_snapshot = supervised_control_service.get_supervised_run_snapshot(payload["runId"])
+    assert progress_snapshot["currentAgentBinding"]["agentId"] == payload["agentBindings"]["baseline"]["agentId"]
+    assert progress_snapshot["eventTail"][-1]["agentBinding"]["profileId"] == "supervised_baseline"
 
     state_path = tmp_path / "workspace" / "supervised_evolution" / "workbench_state.json"
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "custom_prompt_jsonl_v1.json"

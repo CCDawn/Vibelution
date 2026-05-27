@@ -16,10 +16,12 @@ from core.web.services.session_service import (
     delete_chat_session,
     edit_and_resubmit_session_message,
     get_session_detail,
+    list_session_agent_templates,
     list_sessions,
     request_stop_session_turn,
     stream_session_events,
     submit_session_message,
+    update_chat_session,
     update_chat_session_title,
 )
 
@@ -40,7 +42,13 @@ class SessionMessageEditPayload(SessionMessagePayload):
 
 
 class SessionUpdatePayload(BaseModel):
-    title: str = ""
+    title: str | None = None
+    agentProfileId: str | None = None
+
+
+@router.get("/sessions/agent-templates")
+def session_agent_templates() -> list[dict]:
+    return list_session_agent_templates()
 
 
 @router.get("/sessions")
@@ -64,7 +72,13 @@ def session_detail(session_id: str) -> dict:
 @router.patch("/sessions/{session_id}")
 def session_update(session_id: str, payload: SessionUpdatePayload) -> dict:
     try:
-        return update_chat_session_title(session_id, payload.title)
+        if payload.agentProfileId is not None:
+            return update_chat_session(
+                session_id,
+                title=payload.title,
+                agent_profile_id=payload.agentProfileId,
+            )
+        return update_chat_session_title(session_id, payload.title or "")
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionValidationError as exc:

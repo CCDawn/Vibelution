@@ -19,8 +19,6 @@ class EvolutionGovernor:
     _RISKY_PATHS = {"agent.py"}
     _FILE_PATH_TOOLS = {
         "write_file_tool",
-        "create_file",
-        "create_file_tool",
         "apply_diff_edit_tool",
     }
     _DYNAMIC_PROMPT_TOOLS = {

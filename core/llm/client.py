@@ -140,6 +140,49 @@ def _safe_payload_route_summary(payload: Dict[str, Any], profile: Any, provider:
     }
 
 
+def _read_usage_int(container: Any, *keys: str) -> int:
+    if not isinstance(container, dict):
+        return 0
+    for key in keys:
+        value = container.get(key)
+        if value not in (None, ""):
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+def _usage_to_dict(usage: Any) -> Dict[str, Any]:
+    if isinstance(usage, dict):
+        return usage
+    if usage is None:
+        return {}
+    if hasattr(usage, "model_dump"):
+        try:
+            payload = usage.model_dump()
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+    payload: Dict[str, Any] = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "input_token_count",
+        "output_token_count",
+        "cached_tokens",
+        "cached_input_tokens",
+        "prompt_tokens_details",
+        "input_token_details",
+    ):
+        if hasattr(usage, key):
+            payload[key] = getattr(usage, key)
+    return payload
+
+
 def _with_retry_details(llm_error: LLMError, *, attempt: int, max_attempts: int) -> LLMError:
     details = dict(getattr(llm_error, "details", {}) or {})
     details.update(
@@ -353,15 +396,23 @@ class LLMClient:
         usage = getattr(response, "usage", None)
         if usage is None and isinstance(response, dict):
             usage = response.get("usage")
-        usage = usage or {}
-        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or usage.get("prompt_tokens", 0) or 0)
-        completion_tokens = int(getattr(usage, "completion_tokens", 0) or usage.get("completion_tokens", 0) or 0)
-        total_tokens = int(getattr(usage, "total_tokens", 0) or usage.get("total_tokens", 0) or (prompt_tokens + completion_tokens))
+        usage = _usage_to_dict(usage)
+        prompt_tokens = _read_usage_int(usage, "prompt_tokens", "input_tokens", "input_token_count")
+        completion_tokens = _read_usage_int(usage, "completion_tokens", "output_tokens", "output_token_count")
+        total_tokens = _read_usage_int(usage, "total_tokens") or (prompt_tokens + completion_tokens)
+        prompt_details = usage.get("prompt_tokens_details")
+        input_details = usage.get("input_token_details")
+        cached_tokens = max(
+            _read_usage_int(usage, "cached_tokens", "cached_input_tokens"),
+            _read_usage_int(prompt_details, "cached_tokens", "cached_input_tokens"),
+            _read_usage_int(input_details, "cached_tokens", "cached_input_tokens"),
+        )
         return UsageStats(
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
             total_tokens=total_tokens,
-            provider_raw_usage=usage if isinstance(usage, dict) else dict(usage),
+            cached_input_tokens=min(cached_tokens, prompt_tokens) if prompt_tokens else cached_tokens,
+            provider_raw_usage=usage,
             estimated_cost=0.0,
             latency_ms=latency_ms,
         )
@@ -428,6 +479,10 @@ class LLMClient:
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
+                "cachedInputTokens": usage.cached_input_tokens,
+                "cacheHitRate": round(usage.cached_input_tokens / usage.input_tokens, 4)
+                if usage.input_tokens > 0
+                else 0.0,
                 "latencyMs": latency_ms,
                 "metadata": metadata or {},
             },
@@ -445,6 +500,17 @@ class LLMClient:
                 "provider": self.provider.kind,
                 "model": self.profile.model,
                 "usage": usage.provider_raw_usage,
+                "usage_observation": {
+                    "input_tokens": usage.input_tokens,
+                    "output_tokens": usage.output_tokens,
+                    "total_tokens": usage.total_tokens,
+                    "cached_input_tokens": usage.cached_input_tokens,
+                    "cache_hit_rate": (
+                        usage.cached_input_tokens / usage.input_tokens
+                        if usage.input_tokens > 0
+                        else 0.0
+                    ),
+                },
                 "latency_ms": latency_ms,
                 "capabilities": self.capabilities.__dict__,
                 "metadata": metadata or {},
@@ -605,6 +671,10 @@ class LLMClient:
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
+                "cachedInputTokens": usage.cached_input_tokens,
+                "cacheHitRate": round(usage.cached_input_tokens / usage.input_tokens, 4)
+                if usage.input_tokens > 0
+                else 0.0,
                 "latencyMs": latency_ms,
             },
             lifecycle=True,

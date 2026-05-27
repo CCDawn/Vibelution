@@ -78,6 +78,10 @@ def default_git_config() -> dict[str, str]:
 
 def with_git_config_defaults(public_config: dict[str, Any]) -> dict[str, Any]:
     payload = copy.deepcopy(public_config) if isinstance(public_config, dict) else {}
+    user_profile = payload.setdefault("user_profile", {})
+    if not isinstance(user_profile, dict):
+        payload["user_profile"] = user_profile = {}
+    user_profile.setdefault("avatar_image_path", "")
     git_cfg = payload.setdefault("git", {})
     if not isinstance(git_cfg, dict):
         payload["git"] = git_cfg = {}

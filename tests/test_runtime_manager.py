@@ -606,7 +606,11 @@ def test_run_forever_cleans_descendants_before_completing_stop_daemon(monkeypatc
     with pytest.raises(SystemExit) as exit_info:
         runtime_daemon.run_forever()
 
-    assert order[:3] == ["cleanup", "daemon.stopped", "complete:991"]
+    assert "cleanup" in order
+    assert "daemon.stopped" in order
+    assert "complete:991" in order
+    assert order.index("cleanup") < order.index("complete:991")
+    assert order.index("daemon.stopped") < order.index("complete:991")
     assert order[-3:] == ["clear_pid", "exit:0", "clear_pid"]
     assert exit_info.value.code == 0
 

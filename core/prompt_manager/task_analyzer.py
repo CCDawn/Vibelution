@@ -896,10 +896,8 @@ class TaskAnalyzer:
         ]
         inspect_tools = {
             "read_file_tool",
-            "get_code_entity_tool",
-            "list_file_entities_tool",
+            "code_symbol_tool",
             "grep_search_tool",
-            "get_file_entities_tool",
         }
         inspect_idx = [
             idx for idx, item in enumerate(tool_calls)

@@ -252,10 +252,10 @@ export function SelfEvolutionTrack({
   const [selectedHistoryTxnIds, setSelectedHistoryTxnIds] = useState<string[]>([]);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     if (typeof window === "undefined") {
-      return 320;
+      return 304;
     }
     const saved = Number(window.localStorage.getItem(SELF_SIDEBAR_WIDTH_STORAGE_KEY) || "");
-    return Number.isFinite(saved) ? Math.max(280, Math.min(420, saved)) : 320;
+    return Number.isFinite(saved) ? Math.max(260, Math.min(400, saved)) : 304;
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const pageVisible = usePageVisibility();
@@ -526,7 +526,7 @@ export function SelfEvolutionTrack({
 
     const handleMove = (moveEvent: PointerEvent) => {
       const nextWidth = startWidth + (moveEvent.clientX - startX);
-      setSidebarWidth(Math.max(280, Math.min(420, nextWidth)));
+      setSidebarWidth(Math.max(260, Math.min(400, nextWidth)));
     };
 
     const handleUp = () => {
@@ -753,6 +753,7 @@ export function SelfEvolutionTrack({
             <div className={styles.conversationShell}>
               <ConversationView
                 sessionId={latestRun?.runId || "self-evolution"}
+                density="compact"
                 eyebrowLabel={t("selfEvolutionMode")}
                 title={t("selfWorkspacePage")}
                 phase={runSemantics?.phase || latestRun?.status || overview.readiness.state}

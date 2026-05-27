@@ -220,7 +220,7 @@
   display: grid;
   align-self: stretch;
   align-content: start;
-  gap: 10px;
+  gap: 14px;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -243,13 +243,13 @@
 }
 
 .intakePanel {
-  gap: 8px;
-  padding: 10px;
+  gap: 13px;
+  padding: 16px;
 }
 
 .historyPanel {
-  gap: 10px;
-  padding: 12px;
+  gap: 12px;
+  padding: 16px;
 }
 
 .pipelinePanel {
@@ -612,15 +612,15 @@
 
 .intakeFields {
   display: grid;
-  gap: 7px;
+  gap: 12px;
   min-width: 0;
 }
 
 .intakeField {
   display: grid;
-  gap: 3px;
+  gap: 8px;
   min-width: 0;
-  padding: 7px 9px 6px;
+  padding: 12px 14px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
@@ -635,13 +635,13 @@
 
 .intakeField span {
   color: var(--fg-tertiary);
-  font-size: 0.7rem;
+  font-size: 0.78rem;
 }
 
 .intakeField textarea {
   width: 100%;
-  min-height: 38px;
-  max-height: 74px;
+  min-height: 112px;
+  max-height: 260px;
   resize: vertical;
   border: 0;
   border-radius: 6px;
@@ -649,14 +649,24 @@
   color: var(--fg-primary);
   background: transparent;
   font: inherit;
-  font-size: 0.76rem;
-  line-height: 1.32;
+  font-size: 0.88rem;
+  line-height: 1.55;
   scrollbar-gutter: stable;
 }
 
 .intakeField_primary textarea {
-  min-height: 50px;
-  max-height: 86px;
+  min-height: 156px;
+  max-height: 360px;
+}
+
+.intakeField_tall textarea {
+  min-height: 620px;
+  max-height: 760px;
+}
+
+.intakeField_medium textarea {
+  min-height: 470px;
+  max-height: 640px;
 }
 
 .intakeField:focus-within {
@@ -670,16 +680,16 @@
 
 .sessionList {
   display: grid;
-  gap: 7px;
-  max-height: 300px;
+  gap: 10px;
+  max-height: 420px;
   overflow: auto;
   padding-right: 2px;
 }
 
 .sessionRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  gap: 0;
   align-items: stretch;
   min-width: 0;
   border: 1px solid var(--border-soft);
@@ -695,10 +705,10 @@
 
 .sessionButton {
   display: grid;
-  gap: 4px;
+  gap: 7px;
   width: 100%;
   min-width: 0;
-  padding: 9px 10px;
+  padding: 14px 16px;
   border: 0;
   border-radius: 8px 0 0 8px;
   color: var(--fg-secondary);
@@ -711,10 +721,10 @@
   overflow: hidden;
   color: var(--fg-primary);
   display: -webkit-box;
-  font-size: 0.82rem;
-  line-height: 1.32;
+  font-size: 0.9rem;
+  line-height: 1.42;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
 }
 
 .sessionButton span,
@@ -786,6 +796,10 @@
 .stageCard_active {
   border-color: color-mix(in srgb, var(--accent-cool) 46%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card));
+}
+
+.stageCard_compact {
+  grid-template-columns: 1fr;
 }
 
 .stageSelectButton {
@@ -1893,6 +1907,12 @@
 .evidenceCard > span {
   color: var(--fg-tertiary);
   font-size: 0.68rem;
+}
+
+.sourceToggleButton {
+  justify-self: stretch;
+  min-height: 30px;
+  font-size: 0.72rem;
 }
 
 .agentReport {

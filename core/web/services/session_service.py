@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import json
 import queue
 import re
@@ -17,6 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from config.settings import get_config
 from config.settings import get_web_chat_config
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.chat_result_formatter import format_chat_reply
@@ -57,7 +59,17 @@ from core.ui.chat_state import (
     save_chat_state,
 )
 
+from . import agent_directory_service
 from .i18n import get_web_language, text_for
+from .agent_directory_service import (
+    active_agent_runtime,
+    archive_agent_instance,
+    build_agent_runtime_context_block,
+    ensure_agent_for_session,
+    get_agent,
+    list_group_context_events_for_agent,
+    resolve_memory_policy_for_agent,
+)
 from .runtime_scene_service import record_runtime_scene_conversation_event, record_runtime_scene_event
 
 
@@ -90,6 +102,7 @@ _REPLACEMENT_ONLY_PREFIX_PATTERN = re.compile(r"^\?{3,}(?=[:：\s]|$)")
 _REPLACEMENT_ONLY_TEXT_PATTERN = re.compile(r"^\?{3,}$")
 _SESSION_WORKSPACE_SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
+DEFAULT_SESSION_AGENT_PROFILE_ID = "primary"
 
 
 class SessionNotFoundError(ValueError):
@@ -146,8 +159,41 @@ def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> boo
     return changed
 
 
+def _ensure_conversation_agent_metadata(conversation: dict[str, Any]) -> bool:
+    _sync_agent_directory_project_root()
+    conversation_id = str(conversation.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
+    if not conversation_id:
+        return False
+    title = str(conversation.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip() or DEFAULT_CHAT_CONVERSATION_TITLE
+    agent_profile_id = _normalize_session_agent_profile_id(
+        conversation.get("agent_profile_id") or conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+    )
+    session_workspace = str(conversation.get("workspace_path") or _session_workspace_relative_path(conversation_id))
+    agent = ensure_agent_for_session(
+        conversation_id,
+        display_name=title,
+        profile_id=agent_profile_id,
+        existing_agent_id=str(conversation.get("agent_id") or conversation.get("agentId") or "").strip(),
+        session_workspace_path=session_workspace,
+    )
+    agent_id = str(agent.get("agentId") or "").strip()
+    changed = False
+    if agent_id and conversation.get("agent_id") != agent_id:
+        conversation["agent_id"] = agent_id
+        changed = True
+    if agent_id and conversation.get("agentId") != agent_id:
+        conversation["agentId"] = agent_id
+        changed = True
+    return changed
+
+
+def _sync_agent_directory_project_root() -> None:
+    if agent_directory_service.PROJECT_ROOT != PROJECT_ROOT:
+        agent_directory_service.PROJECT_ROOT = PROJECT_ROOT
+
+
 @contextmanager
-def _session_tool_workspace_override(session_workspace: str | Path):
+def _session_tool_workspace_override(session_workspace: str | Path, memory_workspace: str | Path | None = None):
     try:
         from core.infrastructure.mental_model import active_mental_workspace
         from core.orchestration.task_planner import task_storage_override
@@ -156,10 +202,11 @@ def _session_tool_workspace_override(session_workspace: str | Path):
     except Exception:
         yield
         return
+    memory_root = memory_workspace or session_workspace
     with (
         active_mental_workspace(session_workspace),
         workspace_root_override(session_workspace),
-        memory_storage_override(session_workspace),
+        memory_storage_override(memory_root),
         task_storage_override(session_workspace),
     ):
         yield
@@ -302,10 +349,17 @@ def get_active_session_detail() -> dict | None:
     return _build_session_detail(conversations[0])
 
 
-def create_chat_session() -> dict:
+def create_chat_session(
+    *,
+    title: str = "",
+    agent_profile_id: str | None = None,
+    created_by: str = "user",
+) -> dict:
     """Create a new empty chat session and make it active."""
 
     lang = get_web_language()
+    normalized_agent_profile_id = _normalize_session_agent_profile_id(agent_profile_id or DEFAULT_SESSION_AGENT_PROFILE_ID)
+    _validate_session_agent_profile_id(normalized_agent_profile_id, lang=lang)
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
         conversations = payload.get("conversations")
@@ -318,12 +372,26 @@ def create_chat_session() -> dict:
         }
         now = _now_timestamp()
         session_id = _new_conversation_id(existing_ids)
+        normalized_title = trim_lines(title or "", max_lines=1).strip() or text_for(lang, zh="新会话", en="New session")
         conversation = _make_empty_conversation(
             session_id,
-            title=text_for(lang, zh="新会话", en="New session"),
+            title=normalized_title,
             timestamp=now,
         )
+        conversation["agent_profile_id"] = normalized_agent_profile_id
         _ensure_conversation_workspace_metadata(conversation)
+        _sync_agent_directory_project_root()
+        agent = ensure_agent_for_session(
+            session_id,
+            display_name=normalized_title,
+            profile_id=normalized_agent_profile_id,
+            session_workspace_path=str(conversation.get("workspace_path") or _session_workspace_relative_path(session_id)),
+            created_by=created_by,
+        )
+        agent_id = str(agent.get("agentId") or "").strip()
+        if agent_id:
+            conversation["agent_id"] = agent_id
+            conversation["agentId"] = agent_id
         conversations.append(conversation)
         payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
         payload["active_conversation_id"] = session_id
@@ -333,19 +401,57 @@ def create_chat_session() -> dict:
     return get_session_detail(session_id) or {}
 
 
-def update_chat_session_title(session_id: str, title: str) -> dict:
-    """Persist a user-facing chat session title."""
+def list_session_agent_templates() -> list[dict[str, Any]]:
+    """Return LLM-backed agent templates that a chat session can bind to."""
+
+    lang = get_web_language()
+    config = get_config()
+    templates: list[dict[str, Any]] = []
+    for profile_id in sorted(config.llm.profiles):
+        profile = config.llm.get_profile(profile_id=profile_id)
+        provider = config.llm.get_provider(profile.provider_id)
+        api_key_configured = bool(config.get_api_key_for_profile(profile_id=profile_id))
+        requires_api_key = bool(getattr(provider, "requires_api_key", False))
+        templates.append(
+            {
+                "templateId": str(profile_id),
+                "profileId": str(profile_id),
+                "label": _session_agent_profile_label(str(profile_id), lang),
+                "model": str(profile.model or ""),
+                "providerKind": str(provider.kind or ""),
+                "apiKeyConfigured": api_key_configured or not requires_api_key,
+                "requiresApiKey": requires_api_key,
+                "missingApiKey": requires_api_key and not api_key_configured,
+            }
+        )
+    return templates
+
+
+def update_chat_session(
+    session_id: str,
+    *,
+    title: str | None = None,
+    agent_profile_id: str | None = None,
+) -> dict:
+    """Persist user-facing chat session settings."""
 
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
     if not conversation_id:
         raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
 
-    normalized_title = trim_lines(title or "", max_lines=1).strip()
-    if not normalized_title:
-        raise SessionValidationError(text_for(lang, zh="请输入会话名称。", en="Enter a session name."))
-    if len(normalized_title) > 120:
-        normalized_title = normalized_title[:120].rstrip()
+    normalized_title: str | None = None
+    if title is not None:
+        normalized_title = trim_lines(title or "", max_lines=1).strip()
+        if not normalized_title:
+            raise SessionValidationError(text_for(lang, zh="请输入会话名称。", en="Enter a session name."))
+        if len(normalized_title) > 120:
+            normalized_title = normalized_title[:120].rstrip()
+
+    normalized_agent_profile_id: str | None = None
+    if agent_profile_id is not None:
+        normalized_agent_profile_id = _normalize_session_agent_profile_id(agent_profile_id)
+        _validate_session_agent_profile_id(normalized_agent_profile_id, lang=lang)
 
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -353,13 +459,24 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
         if conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
         _ensure_conversation_workspace_metadata(conversation)
+        _ensure_conversation_agent_metadata(conversation)
 
-        conversation["title"] = normalized_title
+        if normalized_title is not None:
+            conversation["title"] = normalized_title
+        if normalized_agent_profile_id is not None:
+            conversation["agent_profile_id"] = normalized_agent_profile_id
+        _ensure_conversation_agent_metadata(conversation)
         payload["updated_at"] = _now_timestamp()
         save_chat_state(PROJECT_ROOT, payload)
 
     _publish_session_detail_snapshot(conversation_id)
     return get_session_detail(conversation_id) or {}
+
+
+def update_chat_session_title(session_id: str, title: str) -> dict:
+    """Persist a user-facing chat session title."""
+
+    return update_chat_session(session_id, title=title)
 
 
 def delete_chat_session(session_id: str) -> dict:
@@ -390,6 +507,8 @@ def delete_chat_session(session_id: str) -> dict:
         if target_index < 0 or target_conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
         _ensure_conversation_workspace_metadata(target_conversation)
+        _ensure_conversation_agent_metadata(target_conversation)
+        target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
 
         normalized_target = _normalize_conversation(target_conversation) or {}
         if _is_session_busy_for_delete(conversation_id, normalized_target):
@@ -441,6 +560,11 @@ def delete_chat_session(session_id: str) -> dict:
     _set_session_running(conversation_id, False)
     _clear_session_turn_control(conversation_id)
     _clear_session_live_output(conversation_id)
+    if target_agent_id:
+        try:
+            archive_agent_instance(target_agent_id)
+        except Exception:
+            pass
     return get_session_detail(next_active_id) or {}
 
 
@@ -764,6 +888,11 @@ def submit_session_message(
         if not lease_decision.allowed:
             raise SessionBusyError(_localize_lease_conflict(lease_decision.reason, lang=lang))
 
+        agent_profile_id = _normalize_session_agent_profile_id(
+            conversation.get("agent_profile_id") or conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+        )
+        _ensure_conversation_agent_metadata(conversation)
+        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
         previous_messages = normalize_chat_messages(conversation.get("messages") or [])
         user_entry = _make_chat_message("user", message)
         conversation["messages"] = previous_messages + [user_entry]
@@ -846,6 +975,8 @@ def submit_session_message(
         "history_messages": previous_messages,
         "mental_model_enabled": mental_model_enabled,
         "active_task": active_task,
+        "agent_profile_id": agent_profile_id,
+        "agent_id": agent_id,
     }
     _record_session_turn_scheduled_event(context)
     try:
@@ -944,6 +1075,11 @@ def edit_and_resubmit_session_message(
         if not lease_decision.allowed:
             raise SessionBusyError(_localize_lease_conflict(lease_decision.reason, lang=lang))
 
+        agent_profile_id = _normalize_session_agent_profile_id(
+            conversation.get("agent_profile_id") or conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+        )
+        _ensure_conversation_agent_metadata(conversation)
+        agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
         original_entry = dict(previous_messages[target_index])
         user_entry = _make_chat_message("user", message)
         edited_messages = previous_messages[:target_index] + [user_entry]
@@ -1036,6 +1172,9 @@ def edit_and_resubmit_session_message(
         "user_message_source": user_message_source,
         "history_messages": edited_messages[:target_index],
         "mental_model_enabled": mental_model_enabled,
+        "active_task": active_task,
+        "agent_profile_id": agent_profile_id,
+        "agent_id": agent_id,
     }
     _record_session_turn_scheduled_event(context)
     try:
@@ -1125,6 +1264,7 @@ def _load_conversations() -> tuple[str, list[dict[str, Any]]]:
     for raw in list(payload.get("conversations") or []):
         if isinstance(raw, dict):
             changed = _ensure_conversation_workspace_metadata(raw) or changed
+            changed = _ensure_conversation_agent_metadata(raw) or changed
         conversation = _normalize_conversation(raw)
         if conversation is not None:
             conversations.append(conversation)
@@ -1229,6 +1369,10 @@ def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
     workspace_path = _session_workspace_relative_path(conversation_id)
     _ensure_session_workspace(conversation_id)
     title = str(raw.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip() or DEFAULT_CHAT_CONVERSATION_TITLE
+    agent_profile_id = _normalize_session_agent_profile_id(
+        raw.get("agent_profile_id") or raw.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+    )
+    agent_id = str(raw.get("agent_id") or raw.get("agentId") or "").strip()
     messages = _normalize_messages(conversation_id, raw.get("messages") or [])
     last_turn_status = str(raw.get("last_turn_status") or "").strip().lower()
     last_turn_error = _normalize_session_turn_error(raw.get("last_turn_error") or raw.get("lastTurnError"))
@@ -1244,6 +1388,8 @@ def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
     return {
         "id": conversation_id,
         "title": title,
+        "agentId": agent_id,
+        "agentProfileId": agent_profile_id,
         "workspacePath": workspace_path,
         "messages": messages,
         "lastTurnStatus": last_turn_status,
@@ -1279,6 +1425,9 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["mentalSnapshot"] = mental_snapshot
         if tool_calls:
             entry["toolCalls"] = tool_calls
+        metadata = raw.get("metadata")
+        if isinstance(metadata, dict) and metadata:
+            entry["metadata"] = dict(metadata)
         messages.append(entry)
     return messages
 
@@ -1465,10 +1614,22 @@ def _build_session_summary(conversation: dict[str, Any]) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
     summary = _latest_message_summary(conversation.get("messages") or [])
     updated_at = str(conversation.get("updatedAt") or "").strip()
+    agent_profile_id = _normalize_session_agent_profile_id(
+        conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+    )
+    agent_id = str(conversation.get("agentId") or "").strip()
+    agent = get_agent(agent_id) if agent_id else None
+    agent_workspace_path = str((agent or {}).get("workspacePath") or "").strip()
     return {
         "id": conversation["id"],
         "title": conversation["title"],
+        "agentId": agent_id,
+        "agentDisplayName": str((agent or {}).get("displayName") or conversation["title"]).strip(),
+        "agentProfileId": agent_profile_id,
+        "agentTemplateId": agent_profile_id,
+        "agentTemplateLabel": _session_agent_profile_label(agent_profile_id, get_web_language()),
         "workspacePath": str(conversation.get("workspacePath") or _session_workspace_relative_path(conversation["id"])),
+        "agentWorkspacePath": agent_workspace_path,
         "status": status,
         "taskSummary": summary,
         "lastActive": updated_at,
@@ -1497,6 +1658,7 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
     ) or "agent"
     detail_messages = _messages_with_live_output(conversation["id"], conversation.get("messages") or [])
     context_usage = _build_session_context_usage(conversation["id"], detail_messages)
+    cache_usage = _build_session_cache_usage()
     detail = {
         **summary,
         "activeTask": _active_task_to_api(active_task),
@@ -1507,13 +1669,60 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
         "readFiles": read_files,
         "messages": detail_messages,
         "contextUsage": context_usage,
+        "cacheUsage": cache_usage,
         "lastTurnError": _session_turn_error_to_api(conversation.get("lastTurnError")),
         "nextStateSignals": _recent_chat_next_state_signal_summaries(conversation["id"], limit=5),
+        "groupContextEvents": list_group_context_events_for_agent(summary.get("agentId") or "", limit=8)
+        if summary.get("agentId")
+        else [],
+        "toolPolicy": (get_agent(summary.get("agentId") or "") or {}).get("toolPolicy") if summary.get("agentId") else None,
+        "memoryPolicy": (get_agent(summary.get("agentId") or "") or {}).get("memoryPolicy") if summary.get("agentId") else None,
         "stopRequested": bool(turn_snapshot["stopRequested"]),
         "stopRequestedAt": str(turn_snapshot["stopRequestedAt"] or "").strip(),
         "stopReason": str(turn_snapshot["stopReason"] or "").strip(),
     }
     return detail
+
+
+def _build_session_cache_usage() -> dict[str, Any]:
+    runtime_state_path = PROJECT_ROOT / "workspace" / "ui_runtime_state.json"
+    try:
+        payload = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    turn_input_tokens = _coerce_nonnegative_int(payload.get("turn_input_tokens") or 0)
+    turn_cached_input_tokens = min(
+        _coerce_nonnegative_int(payload.get("turn_cached_input_tokens") or 0),
+        turn_input_tokens,
+    ) if turn_input_tokens else 0
+    last_input_tokens = _coerce_nonnegative_int(payload.get("last_input_tokens") or 0)
+    last_cached_input_tokens = _coerce_nonnegative_int(payload.get("last_cached_input_tokens") or 0)
+    if not last_input_tokens and last_cached_input_tokens:
+        last_input_tokens = turn_input_tokens
+    if last_input_tokens:
+        last_cached_input_tokens = min(last_cached_input_tokens, last_input_tokens)
+    else:
+        last_cached_input_tokens = 0
+    total_input_tokens = _coerce_nonnegative_int(payload.get("total_input_tokens") or 0)
+    total_cached_input_tokens = min(
+        _coerce_nonnegative_int(payload.get("total_cached_input_tokens") or 0),
+        total_input_tokens,
+    ) if total_input_tokens else 0
+    return {
+        "lastInputTokens": last_input_tokens,
+        "lastCachedInputTokens": last_cached_input_tokens,
+        "turnInputTokens": turn_input_tokens,
+        "turnCachedInputTokens": turn_cached_input_tokens,
+        "turnCacheHitRate": (turn_cached_input_tokens / turn_input_tokens) if turn_input_tokens > 0 else 0.0,
+        "totalInputTokens": total_input_tokens,
+        "totalCachedInputTokens": total_cached_input_tokens,
+        "totalCacheHitRate": (total_cached_input_tokens / total_input_tokens) if total_input_tokens > 0 else 0.0,
+        "updatedAt": str(payload.get("updated_at") or "").strip(),
+        "source": "ui_runtime_state",
+    }
 
 
 def _build_session_context_usage(session_id: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1809,6 +2018,7 @@ def _make_empty_conversation(session_id: str, *, title: str, timestamp: str) -> 
     return {
         "conversation_id": str(session_id or "").strip(),
         "title": str(title or "").strip() or DEFAULT_CHAT_CONVERSATION_TITLE,
+        "agent_profile_id": DEFAULT_SESSION_AGENT_PROFILE_ID,
         "workspace_path": _session_workspace_relative_path(session_id),
         "updated_at": str(timestamp or "").strip() or _now_timestamp(),
         "last_turn_status": "ready",
@@ -1816,6 +2026,55 @@ def _make_empty_conversation(session_id: str, *, title: str, timestamp: str) -> 
         "active_task": None,
         "messages": [],
     }
+
+
+def _normalize_session_agent_profile_id(value: Any) -> str:
+    normalized = str(value or "").strip()
+    return normalized or DEFAULT_SESSION_AGENT_PROFILE_ID
+
+
+def _session_agent_profile_label(profile_id: str, lang: str) -> str:
+    labels = {
+        "primary": text_for(lang, zh="主 Agent", en="Primary agent"),
+        "subagent_worker": text_for(lang, zh="执行 Agent", en="Worker agent"),
+        "subagent_explorer": text_for(lang, zh="探索 Agent", en="Explorer agent"),
+        "mental_model": text_for(lang, zh="心智模型 Agent", en="Mental model agent"),
+        "supervised_baseline": text_for(lang, zh="监督基线 Agent", en="Supervised baseline agent"),
+        "supervised_candidate": text_for(lang, zh="监督候选 Agent", en="Supervised candidate agent"),
+        "research_broad": text_for(lang, zh="广搜 Agent", en="Broad research agent"),
+        "research_deep": text_for(lang, zh="深搜 Agent", en="Deep research agent"),
+        "research_review": text_for(lang, zh="审查 Agent", en="Review agent"),
+        "research_themes": text_for(lang, zh="主题 Agent", en="Theme agent"),
+        "research_card": text_for(lang, zh="主题卡 Agent", en="Card agent"),
+        "compression": text_for(lang, zh="压缩 Agent", en="Compression agent"),
+    }
+    normalized = _normalize_session_agent_profile_id(profile_id)
+    return labels.get(normalized, normalized.replace("_", " ").strip().title() or normalized)
+
+
+def _validate_session_agent_profile_id(profile_id: str, *, lang: str) -> None:
+    normalized = _normalize_session_agent_profile_id(profile_id)
+    if normalized not in get_config().llm.profiles:
+        raise SessionValidationError(
+            text_for(
+                lang,
+                zh=f"未找到 Agent 模板：{normalized}",
+                en=f"Agent template not found: {normalized}",
+            )
+        )
+
+
+def _session_agent_config_for_profile(profile_id: str) -> Any:
+    normalized = _normalize_session_agent_profile_id(profile_id)
+    config = copy.deepcopy(get_config())
+    if normalized == DEFAULT_SESSION_AGENT_PROFILE_ID:
+        return config
+    if normalized not in config.llm.profiles:
+        return config
+    selected = copy.deepcopy(config.llm.profiles[normalized])
+    selected.profile_id = DEFAULT_SESSION_AGENT_PROFILE_ID
+    config.llm.profiles[DEFAULT_SESSION_AGENT_PROFILE_ID] = selected
+    return config
 
 
 def _is_session_busy_for_delete(conversation_id: str, conversation: dict[str, Any]) -> bool:
@@ -2019,6 +2278,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     turn_capture = SessionTurnCapture(session_id=session_id, turn_id=turn_id)
     mental_model_enabled = _normalize_optional_bool(context.get("mental_model_enabled"))
     session_workspace = _ensure_session_workspace(session_id)
+    _sync_agent_directory_project_root()
+    agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
+    agent = get_agent(agent_id) if agent_id else None
+    agent_workspace = str((agent or {}).get("workspacePath") or "").strip()
+    memory_policy = resolve_memory_policy_for_agent(agent_id) if agent_id else {}
+    memory_root = str(memory_policy.get("privateMemoryRoot") or "").strip()
     _record_session_turn_lifecycle_event(
         session_id,
         "worker_started",
@@ -2028,6 +2293,12 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "workspacePath": _session_workspace_relative_path(session_id),
             "hasTurnControl": isinstance(turn_control, SessionTurnControl),
             "mentalModelEnabled": mental_model_enabled,
+            "agentProfileId": _normalize_session_agent_profile_id(
+                context.get("agent_profile_id") or context.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+            ),
+            "agentId": agent_id,
+            "agentWorkspacePath": agent_workspace,
+            "agentMemoryRoot": memory_root,
         },
     )
     _record_session_execution_registry_event(
@@ -2054,7 +2325,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     )
     _set_session_turn_progress_live_output(session_id, "agent_prepare", turn_id=turn_id)
     try:
-        with mental_model_enabled_override(mental_model_enabled), _session_tool_workspace_override(session_workspace):
+        with (
+            active_agent_runtime(agent_id, session_id=session_id, turn_id=turn_id),
+            mental_model_enabled_override(mental_model_enabled),
+            _session_tool_workspace_override(session_workspace, memory_workspace=agent_workspace or session_workspace),
+        ):
             initial_stop_reason = _get_turn_control_stop_reason(turn_control)
             if initial_stop_reason:
                 _record_session_turn_lifecycle_event(
@@ -2086,7 +2361,10 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "mentalModelEnabled": mental_model_enabled,
                     },
                 )
-                agent = _create_chat_agent_for_session(session_workspace)
+                agent_profile_id = _normalize_session_agent_profile_id(
+                    context.get("agent_profile_id") or context.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+                )
+                agent = _create_chat_agent_for_session(session_workspace, agent_profile_id=agent_profile_id)
                 _record_session_turn_lifecycle_event(
                     session_id,
                     "agent_created",
@@ -2095,18 +2373,23 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     fields={
                         "agentType": type(agent).__name__,
                         "workspacePath": _session_workspace_relative_path(session_id),
+                        "agentProfileId": agent_profile_id,
                     },
                 )
                 mental_override_configurer = getattr(agent, "set_mental_model_enabled_override", None)
                 if callable(mental_override_configurer):
                     mental_override_configurer(mental_model_enabled)
                 restore = getattr(agent, "seed_chat_history", None)
+                runtime_context_seed = getattr(agent, "seed_runtime_context", None)
                 stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 history_messages = _history_messages_for_agent_seed(context.get("history_messages") or [])
+                runtime_context_block = build_agent_runtime_context_block(agent_id) if agent_id else ""
                 if callable(restore) and history_messages:
                     restore(history_messages)
+                if callable(runtime_context_seed) and runtime_context_block:
+                    runtime_context_seed(runtime_context_block)
                 _record_session_turn_lifecycle_event(
                     session_id,
                     "history_seeded",
@@ -2115,6 +2398,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     fields={
                         "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
                         "seededHistoryMessageCount": len(history_messages),
+                        "agentRuntimeContextIncluded": bool(runtime_context_block),
                         "restoreAvailable": callable(restore),
                     },
                 )
@@ -2209,7 +2493,11 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         _publish_session_detail_snapshot(session_id)
 
 
-def _create_chat_agent_for_session(session_workspace: Path) -> Any:
+def _create_chat_agent_for_session(
+    session_workspace: Path,
+    agent_profile_id: str = DEFAULT_SESSION_AGENT_PROFILE_ID,
+) -> Any:
+    agent_config = _session_agent_config_for_profile(agent_profile_id)
     factory = create_chat_agent
     try:
         signature = inspect.signature(factory)
@@ -2217,17 +2505,27 @@ def _create_chat_agent_for_session(session_workspace: Path) -> Any:
             "workspace_path" in signature.parameters
             or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
         )
+        accepts_config = (
+            "config" in signature.parameters
+            or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
+        )
     except (TypeError, ValueError):
         accepts_workspace = True
+        accepts_config = True
+    kwargs: dict[str, Any] = {}
     if accepts_workspace:
-        return factory(workspace_path=session_workspace)
+        kwargs["workspace_path"] = session_workspace
+    if accepts_config:
+        kwargs["config"] = agent_config
+    if kwargs:
+        return factory(**kwargs)
     return factory()
 
 
-def create_chat_agent(workspace_path: str | Path | None = None) -> Any:
+def create_chat_agent(workspace_path: str | Path | None = None, config: Any | None = None) -> Any:
     from agent import SelfEvolvingAgent
 
-    return SelfEvolvingAgent(mode="chat", workspace_path=str(workspace_path) if workspace_path else None)
+    return SelfEvolvingAgent(config=config, mode="chat", workspace_path=str(workspace_path) if workspace_path else None)
 
 
 def _run_session_continuation_loop(

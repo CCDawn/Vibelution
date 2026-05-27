@@ -17,9 +17,43 @@ describe("AppShell layout contract", () => {
     expect(styles.statusSummaryCount).toBeTypeOf("string");
   });
 
+  it("shows the current app version in the brand area", () => {
+    expect(shellSource).toContain("APP_VERSION");
+    expect(shellSource).toContain("packageJson.version");
+    expect(shellSource).toContain("versionPill");
+    expect(styles.versionPill).toBeTypeOf("string");
+  });
+
   it("exposes the research preview from the primary navigation", () => {
     expect(shellSource).toContain('to="/research"');
     expect(shellSource).toContain('t("navResearch")');
+  });
+
+  it("collapses logs tools memory and git behind one hover utility menu", () => {
+    const primaryNav = shellSource.slice(
+      shellSource.indexOf("<nav className={styles.nav}>"),
+      shellSource.indexOf("</nav>"),
+    );
+
+    expect(primaryNav).not.toContain('to="/logs"');
+    expect(primaryNav).not.toContain('to="/tools"');
+    expect(primaryNav).not.toContain('to="/memory"');
+    expect(primaryNav).not.toContain('to="/git"');
+    expect(shellSource).toContain("utilityCluster");
+    expect(shellSource).toContain("utilityClusterOpen");
+    expect(shellSource).toContain("utilityPanel");
+    expect(shellSource).toContain("aria-expanded={utilityOpen}");
+    expect(shellSource).toContain("hidden={!utilityOpen}");
+    expect(shellSource).toContain('event.key === "Escape"');
+    expect(shellSource).toContain('to="/logs"');
+    expect(shellSource).toContain('to="/tools"');
+    expect(shellSource).toContain('to="/memory"');
+    expect(shellSource).toContain("Brain");
+    expect(shellSource).toContain('to="/git"');
+    expect(styles.utilityTrigger).toBeTypeOf("string");
+    expect(styles.utilityPanel).toBeTypeOf("string");
+    expect(styles.utilityClusterOpen).toBeTypeOf("string");
+    expect(styles.utilityButtonGrid).toBeTypeOf("string");
   });
 
   it("keeps active work details out of the primary top bar chip", () => {
@@ -43,12 +77,17 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('"/api/runtime/restart"');
     expect(shellSource).toContain("restartWorkbenchLabel");
     expect(shellSource).toContain("beginRestart");
+    expect(shellSource).toContain("requestWorkbenchExitGuard");
+    expect(shellSource).toContain('requestWorkbenchExitGuard("restart"');
+    expect(shellSource).toContain('requestWorkbenchExitGuard("shutdown"');
   });
 
   it("renders a startup progress overlay from loading and lifecycle state", () => {
     expect(shellSource).toContain("deriveStartupLoadingState");
     expect(shellSource).toContain("deriveStartupProgressState");
     expect(shellSource).toContain("startupPanel.active");
+    expect(shellSource).toContain("startupLoadingShouldBlock");
+    expect(shellSource).toContain('startupLoadingProgress.tone === "failed"');
     expect(shellSource).toContain("startupOverlay");
     expect(shellSource).toContain("startupKicker");
 
@@ -56,6 +95,13 @@ describe("AppShell layout contract", () => {
     expect(styles.startupPanel).toBeTypeOf("string");
     expect(styles.startupKicker).toBeTypeOf("string");
   });
+
+  it("keeps the global shell usable on narrow screens", () => {
+    expect(styles.topClock).toBeTypeOf("string");
+    expect(styles.utilityTriggerLabel).toBeTypeOf("string");
+    expect(styles.statusBadgeLabel).toBeTypeOf("string");
+  });
+
   it("themes the managed app window chrome to match the dark shell", () => {
     const manifest = JSON.parse(manifestSource);
 

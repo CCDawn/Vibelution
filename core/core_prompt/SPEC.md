@@ -12,7 +12,7 @@
         get_recent_changes_tool
         → 了解变更范围、上次产出、本次目标
         若涉及跨模块 Python 修改：
-        python_symbol_tool(file_path, line, column, action=definition/references)
+        code_symbol_tool(mode=definition/references, file_path, line, column)
         → 先确认真实入口、引用关系、波及面
 [决策]  Core First 检查（见第2节）
 [执行]  修改代码
@@ -55,7 +55,7 @@
 
 Python 是当前项目的主语言，因此以下流程默认启用：
 
-1. 跨模块修改前，优先调用 `python_symbol_tool`
+1. 跨模块修改前，优先调用 `code_symbol_tool`
 2. 需要判断波及面时，优先查看 `references`
 3. 需要理解符号含义时，优先查看 `hover`
 4. Python 代码修改后，优先调用 `python_lint_tool`
@@ -63,7 +63,7 @@ Python 是当前项目的主语言，因此以下流程默认启用：
 
 强规则：
 
-- `python_symbol_tool` 用于确认真实定义、引用关系、调用落点，不用纯文本猜依赖。
+- `code_symbol_tool` 用于确认真实定义、引用关系、调用落点，也用于读取文件结构和目标实体，不用纯文本猜依赖。
 - `python_lint_tool` 是 Python 修改后的第一道静态门，不跳过。
 - 若环境缺少 `jedi` 或 `ruff`，允许降级，但要明确知道自己处于降级状态。
 

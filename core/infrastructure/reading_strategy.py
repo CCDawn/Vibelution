@@ -45,24 +45,24 @@ def build_reading_strategy(prompt: str = "", current_status: str = "", last_vali
     if task_type == "modify":
         return ReadingStrategy(
             task_type=task_type,
-            recommended_tools=["list_file_entities_tool", "get_code_entity_tool", "read_file_tool"],
+            recommended_tools=["code_symbol_tool", "read_file_tool"],
             rationale="优先实体级精读，避免整文件吞入。",
         )
     if task_type == "analyze":
         return ReadingStrategy(
             task_type=task_type,
-            recommended_tools=["grep_search_tool", "python_symbol_tool", "read_file_tool"],
+            recommended_tools=["grep_search_tool", "code_symbol_tool", "read_file_tool"],
             rationale="先定位症状路径，再补局部证据做归因。",
         )
     if task_type == "understand":
         return ReadingStrategy(
             task_type=task_type,
-            recommended_tools=["list_file_entities_tool", "get_code_entity_tool", "read_file_tool"],
+            recommended_tools=["code_symbol_tool", "read_file_tool"],
             rationale="先看结构，再读目标实体和局部上下文。",
         )
     return ReadingStrategy(
         task_type="locate",
-        recommended_tools=["grep_search_tool", "python_symbol_tool", "list_file_entities_tool"],
+        recommended_tools=["grep_search_tool", "code_symbol_tool"],
         rationale="先缩小范围，再决定读哪个实体或区间。",
     )
 

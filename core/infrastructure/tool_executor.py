@@ -84,6 +84,20 @@ def _summarize_tool_result(result: Any) -> dict[str, Any]:
     }
 
 
+def _record_current_agent_tool_observation(tool_name: str, status: str, tool_args: dict[str, Any], summary: str = "") -> None:
+    try:
+        from core.web.services.agent_directory_service import write_current_tool_observation
+
+        write_current_tool_observation(
+            tool_name=tool_name,
+            status=status,
+            summary=summary,
+            arg_keys=sorted(str(key) for key in (tool_args or {}).keys() if str(key) != "_cancel_checker"),
+        )
+    except Exception:
+        return
+
+
 def _format_tool_argument_error(
     tool_name: str,
     func: Callable,
@@ -372,6 +386,25 @@ class ToolExecutor:
         tool_args = parse_tool_args(tool_args or {})
         started_at = time.monotonic()
 
+        policy_block = self._check_agent_tool_policy_block(tool_name, tool_args)
+        if policy_block:
+            self._event_bus.publish(EventNames.TOOL_ERROR, {
+                "name": tool_name,
+                "error": policy_block,
+            })
+            _record_current_agent_tool_observation(tool_name, "policy_blocked", tool_args, policy_block)
+            _record_tool_scene_event(
+                "execute",
+                "tool.policy_blocked",
+                tool_name=tool_name,
+                message=policy_block,
+                level="warning",
+                outcome="blocked",
+                fields=_summarize_tool_args(tool_args),
+                lifecycle=True,
+            )
+            return (policy_block, None)
+
         readonly_block = self._check_readonly_subagent_block(tool_name)
         if readonly_block:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
@@ -419,6 +452,7 @@ class ToolExecutor:
                 "name": "[unknown_tool]",
                 "error": error_msg,
             })
+            _record_current_agent_tool_observation(str(tool_name or "[unknown_tool]"), "unknown_tool", tool_args, error_msg)
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.failed",
@@ -453,6 +487,7 @@ class ToolExecutor:
                 "error": argument_error,
             })
             self._record_runtime_signals(tool_name, tool_args, argument_error)
+            _record_current_agent_tool_observation(tool_name, "invalid_args", tool_args, argument_error)
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.invalid_args",
@@ -567,6 +602,12 @@ class ToolExecutor:
 
             self._record_runtime_signals(tool_name, tool_args, result)
             semantic = _classify_tool_semantic_result(tool_name, result)
+            _record_current_agent_tool_observation(
+                tool_name,
+                str(semantic.get("outcome") or "succeeded"),
+                tool_args,
+                str(result or "")[:320],
+            )
             _record_tool_scene_event(
                 "execute",
                 str(semantic.get("eventCode") or "tool.execute.succeeded"),
@@ -600,6 +641,7 @@ class ToolExecutor:
                 "error": error_msg,
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
+            _record_current_agent_tool_observation(tool_name, "timeout", tool_args, error_msg)
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.timeout",
@@ -625,6 +667,7 @@ class ToolExecutor:
                 "error": error_msg,
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
+            _record_current_agent_tool_observation(tool_name, "invalid_args", tool_args, error_msg)
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.invalid_args",
@@ -650,6 +693,7 @@ class ToolExecutor:
                 "error": error_msg,
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
+            _record_current_agent_tool_observation(tool_name, "failed", tool_args, error_msg)
             _record_tool_scene_event(
                 "execute",
                 "tool.execute.failed",
@@ -707,6 +751,18 @@ class ToolExecutor:
         if evolution_block:
             return evolution_block
         return None
+
+    @staticmethod
+    def _check_agent_tool_policy_block(tool_name: str, tool_args: dict) -> Optional[str]:
+        try:
+            from core.web.services.agent_directory_service import evaluate_current_tool_policy
+
+            decision = evaluate_current_tool_policy(tool_name, tool_args or {})
+        except Exception:
+            return None
+        if getattr(decision, "allowed", True):
+            return None
+        return str(getattr(decision, "message", "") or "[工具策略提示] 当前工具调用被该 Agent 的 ToolPolicy 拦截。")
 
     @staticmethod
     def _check_evolution_mutation_guard(session, tool_name: str, tool_args: dict) -> Optional[str]:

@@ -831,7 +831,41 @@ class TestToolMessageFlow:
 
         assert input_tokens == 44
         assert output_tokens == 11
-        assert captured["tokens"][-1] == ((44, 11), {"observed": True})
+        assert captured["tokens"][-1] == ((44, 11), {"cached_input_tokens": 0, "observed": True})
+
+    def test_response_surface_controller_forwards_cached_input_tokens(self):
+        captured = {"tokens": []}
+
+        class DummyUI:
+            def note_token_usage(self, *args, **kwargs):
+                captured["tokens"].append((args, kwargs))
+
+        controller = ResponseSurfaceController(
+            estimate_tokens=lambda _messages: 100,
+            ui_getter=lambda: DummyUI(),
+            logger=SimpleNamespace(log_token_usage=lambda *_args, **_kwargs: None),
+            debug_logger=SimpleNamespace(info=lambda *_args, **_kwargs: None),
+            pet_getter=lambda: SimpleNamespace(record_tokens=lambda *_args, **_kwargs: None, trigger_heartbeat=lambda: None),
+            print_tokens=lambda *_args, **_kwargs: None,
+        )
+        round_state = RoundStateController(max_iterations=3)
+        response = SimpleNamespace(
+            usage_metadata={
+                "prompt_tokens": 80,
+                "completion_tokens": 12,
+                "prompt_tokens_details": {"cached_tokens": 48},
+            },
+        )
+
+        input_tokens, output_tokens = controller.record_token_usage(
+            response=response,
+            round_state=round_state,
+            current_turn=11,
+        )
+
+        assert input_tokens == 80
+        assert output_tokens == 12
+        assert captured["tokens"][-1] == ((80, 12), {"cached_input_tokens": 48, "observed": True})
 
     def test_response_surface_controller_estimates_tokens_when_usage_is_missing(self):
         captured = {"tokens": []}
@@ -865,7 +899,7 @@ class TestToolMessageFlow:
         assert round_state.total_input_tokens == 123
         assert round_state.total_output_tokens == 11
         assert token_logs == [(123, 11, 10)]
-        assert captured["tokens"][-1] == ((123, 11), {"observed": True})
+        assert captured["tokens"][-1] == ((123, 11), {"cached_input_tokens": 0, "observed": True})
 
     def test_execute_tools_parallel_returns_restart_action_and_stops_followups(self):
         messages = []
@@ -1686,6 +1720,8 @@ class TestToolMessageFlow:
         monkeypatch.setattr("tools.agent_tools.subprocess.Popen", CancellablePopen)
         monkeypatch.setattr("tools.agent_tools.os.name", "nt")
         monkeypatch.setattr("tools.agent_tools.subprocess.run", fake_run)
+        monkeypatch.setattr("tools.agent_tools.subprocess.CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
+        monkeypatch.setattr("tools.agent_tools.subprocess.CREATE_NO_WINDOW", 0x08000000, raising=False)
 
         result = spawn_agent_impl(
             task_type="diagnose",
@@ -1699,9 +1735,10 @@ class TestToolMessageFlow:
         assert payload["status"] == "cancelled"
         assert payload["stop_reason"] == "操作者请求停止当前轮。"
         assert CancellablePopen.killed is False
-        assert CancellablePopen.kwargs["creationflags"] == __import__("subprocess").CREATE_NEW_PROCESS_GROUP
+        assert CancellablePopen.kwargs["creationflags"] == 0x08000200
         assert taskkill_calls
         assert taskkill_calls[0][0] == ["taskkill", "/PID", "43210", "/T", "/F"]
+        assert taskkill_calls[0][1]["creationflags"] & 0x08000000
 
     def test_spawn_agent_streams_live_stdout_before_final_marker(self, monkeypatch):
         class FakePipe:

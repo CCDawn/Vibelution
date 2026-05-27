@@ -38,10 +38,10 @@ def decide_next_tools(snapshot: Dict[str, Any]) -> ToolDecision:
         )
         return ToolDecision(
             next_intent="choose_read_target",
-            recommended_tools=["grep_search_tool", "list_file_entities_tool", "get_code_entity_tool", "read_file_tool"],
+            recommended_tools=["grep_search_tool", "code_symbol_tool", "read_file_tool"],
             avoid_tools=["cli_tool"],
             reason=reason,
-            fallback_if_failed=["python_symbol_tool"],
+            fallback_if_failed=["code_symbol_tool"],
         )
 
     if task == "verify":
@@ -57,16 +57,16 @@ def decide_next_tools(snapshot: Dict[str, Any]) -> ToolDecision:
         enough = "已足够" in sufficiency or "可开始动手" in sufficiency
         return ToolDecision(
             next_intent="inspect_entity" if not enough else "edit_target",
-            recommended_tools=["get_code_entity_tool", "read_file_tool"] if not enough else ["apply_diff_edit_tool"],
+            recommended_tools=["code_symbol_tool", "read_file_tool"] if not enough else ["apply_diff_edit_tool"],
             avoid_tools=["grep_search_tool"] if enough else ["cli_tool"],
             reason="修改任务先拿到目标实体和上下文；证据足够后直接进入编辑。",
-            fallback_if_failed=["list_file_entities_tool", "grep_search_tool"],
+            fallback_if_failed=["code_symbol_tool", "grep_search_tool"],
         )
 
     if task == "understand":
         return ToolDecision(
             next_intent="inspect_structure" if not read_entities else "inspect_entity",
-            recommended_tools=["list_file_entities_tool", "get_code_entity_tool"],
+            recommended_tools=["code_symbol_tool", "read_file_tool"],
             avoid_tools=["cli_tool"],
             reason="理解任务先看结构，再看实体。",
             fallback_if_failed=["read_file_tool"],
@@ -78,7 +78,7 @@ def decide_next_tools(snapshot: Dict[str, Any]) -> ToolDecision:
             recommended_tools=["grep_search_tool", "read_file_tool"],
             avoid_tools=["cli_tool"],
             reason="归因任务先定位症状，再补局部证据。",
-            fallback_if_failed=["python_symbol_tool"],
+            fallback_if_failed=["code_symbol_tool"],
         )
 
     has_location = bool(read_searches)
@@ -88,10 +88,10 @@ def decide_next_tools(snapshot: Dict[str, Any]) -> ToolDecision:
         avoid.append("grep_search_tool")
     return ToolDecision(
         next_intent="locate_text" if not has_location else ("inspect_entity" if not has_detail else "inspect_range"),
-        recommended_tools=["grep_search_tool", "python_symbol_tool"] if not has_location else (["get_code_entity_tool", "list_file_entities_tool"] if not has_detail else ["read_file_tool"]),
+        recommended_tools=["grep_search_tool", "code_symbol_tool"] if not has_location else (["code_symbol_tool", "read_file_tool"] if not has_detail else ["read_file_tool"]),
         avoid_tools=avoid + ["cli_tool"],
         reason="定位任务先命中，再转实体或局部上下文。",
-        fallback_if_failed=["python_symbol_tool", "read_file_tool"],
+        fallback_if_failed=["code_symbol_tool", "read_file_tool"],
     )
 
 

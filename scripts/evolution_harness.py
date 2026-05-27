@@ -63,6 +63,13 @@ SAFE_MODIFY_PROBE_CONTENT = (
 )
 HARNESS_MANAGED_DIRTY_PATHS = {"config.harness.toml"}
 HARNESS_REQUIRED_PACKAGES = ("litellm", "ruff")
+
+
+def _subprocess_no_window_kwargs() -> Dict[str, int]:
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": flags} if flags else {}
+
+
 DEFAULT_SAFE_MODIFY_PROMPT = (
     "执行一轮安全修改/回滚演化探针："
     "1) 调用 open_evolution_transaction_tool 开账，summary 写“harness safe modify probe”；"
@@ -178,6 +185,7 @@ def run_git(repo_root: Path, *args: str) -> str:
         encoding="utf-8",
         errors="replace",
         check=False,
+        **_subprocess_no_window_kwargs(),
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -291,6 +299,7 @@ def build_synthetic_venv(worktree_path: Path) -> None:
         encoding="utf-8",
         errors="replace",
         check=True,
+        **_subprocess_no_window_kwargs(),
     )
     install_missing_harness_packages(resolve_venv_python(target), worktree_path=worktree_path)
 
@@ -323,6 +332,7 @@ def install_missing_harness_packages(python_executable: Path, *, worktree_path: 
         encoding="utf-8",
         errors="replace",
         check=True,
+        **_subprocess_no_window_kwargs(),
     )
 
 
@@ -340,6 +350,7 @@ def _python_module_available(python_executable: Path, module_name: str) -> bool:
             errors="replace",
             timeout=15,
             check=False,
+            **_subprocess_no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -543,6 +554,7 @@ def remove_worktree(repo_root: Path, worktree_path: Path) -> None:
         encoding="utf-8",
         errors="replace",
         check=False,
+        **_subprocess_no_window_kwargs(),
     )
     shutil.rmtree(worktree_path, ignore_errors=True)
 
@@ -558,6 +570,7 @@ def delete_checkpoint_ref(repo_root: Path, ref_name: Optional[str]) -> None:
         encoding="utf-8",
         errors="replace",
         check=False,
+        **_subprocess_no_window_kwargs(),
     )
 
 
@@ -582,6 +595,7 @@ def is_python_executable_usable(path: Path) -> bool:
             errors="replace",
             timeout=10,
             check=False,
+            **_subprocess_no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -1927,6 +1941,7 @@ def run_harness(
         errors="replace",
         env=env,
         bufsize=1,
+        **_subprocess_no_window_kwargs(),
     )
 
     sink: queue.Queue = queue.Queue()

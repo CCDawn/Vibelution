@@ -16,6 +16,7 @@
 .detailCard,
 .matrixCard,
 .formSurface,
+.researchAgentPool,
 .modelCard,
 .metricCard,
 .applyBar {
@@ -476,6 +477,14 @@
   background: var(--surface-card-hover);
 }
 
+.profileGroupRow td {
+  padding: 7px 10px;
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card-subtle));
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .profileTaskCell,
 .profileModelCell,
 .profileMetaCell {
@@ -512,6 +521,41 @@
   justify-content: flex-start;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.researchAgentPool {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.checkboxField input {
+  width: auto;
+  min-height: 20px;
+  justify-self: start;
+}
+
+.countPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: var(--surface-card-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .detailCard,
@@ -1283,6 +1327,187 @@
   grid-column: 2;
   grid-row: 1;
   min-width: 0;
+}
+
+.avatarImageCard {
+  grid-template-columns: minmax(132px, 0.38fr) minmax(0, 1fr);
+}
+
+.avatarImageValue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg-secondary);
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.avatarImagePreview,
+.avatarImagePlaceholder {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-card);
+}
+
+.avatarImagePreview {
+  object-fit: cover;
+}
+
+.avatarImagePlaceholder {
+  display: grid;
+  place-items: center;
+  color: var(--fg-tertiary);
+}
+
+.avatarImageEditor {
+  display: grid;
+  gap: 10px;
+}
+
+.avatarImageActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.avatarCropPanel {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 86%, transparent);
+}
+
+.avatarCropHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+}
+
+.avatarCropHeader strong {
+  display: block;
+  color: var(--fg-primary);
+  font-size: 0.95rem;
+}
+
+.avatarCropHeader p {
+  margin: 3px 0 0;
+  color: var(--fg-tertiary);
+  line-height: 1.35;
+}
+
+.avatarCropHeader > span {
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+}
+
+.avatarCropWorkspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(92px, 120px);
+  align-items: center;
+  gap: 14px;
+}
+
+.avatarCropFrame,
+.avatarCropPreview {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  background:
+    linear-gradient(45deg, color-mix(in srgb, var(--surface-card-muted) 92%, white) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in srgb, var(--surface-card-muted) 92%, white) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--surface-card-muted) 92%, white) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--surface-card-muted) 92%, white) 75%),
+    var(--surface-card);
+  background-size: 18px 18px;
+  background-position: 0 0, 0 9px, 9px -9px, -9px 0;
+}
+
+.avatarCropFrame {
+  width: min(100%, 320px);
+  aspect-ratio: 1;
+  border-radius: 8px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.avatarCropFrame:active {
+  cursor: grabbing;
+}
+
+.avatarCropImage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: none;
+  user-select: none;
+  pointer-events: none;
+  transform-origin: center;
+}
+
+.avatarCropMask {
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.54);
+  box-shadow:
+    inset 0 0 0 999px rgba(0, 0, 0, 0.08),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+
+.avatarCropPreviewWrap {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+}
+
+.avatarCropPreview {
+  width: 112px;
+  height: 112px;
+  border-radius: 999px;
+}
+
+.avatarCropZoomField {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+}
+
+.avatarCropZoomField input {
+  width: 100%;
+}
+
+.inlineError {
+  margin: 0;
+  color: var(--state-error);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.fileUploadButton {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.fileUploadButton input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .treeBody {

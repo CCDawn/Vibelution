@@ -48,6 +48,7 @@ from .evolution_service import (
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import list_active_session_work_runs
+from .supervised_agent_service import supervised_agent_bindings
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -271,6 +272,7 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
         dataset_limit = None
 
     _raise_if_supervised_lease_conflict(lang=lang)
+    agent_bindings = supervised_agent_bindings()
 
     context = {
         "runId": f"web-supervised-{uuid4().hex[:12]}",
@@ -281,6 +283,7 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
         "bundleName": bundle_name,
         "keepWorktree": keep_worktree,
         "startedAt": _now_timestamp(),
+        "agentBindings": agent_bindings,
     }
     state = _initial_run_state(context)
 
@@ -1018,6 +1021,7 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
             {
                 "phase": "preflight",
                 "bundle_name": context["bundleName"],
+                "agent_bindings": context.get("agentBindings") or {},
             },
         )
         if not _supervised_run_should_execute(run_id):
@@ -1029,6 +1033,7 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
             checkpoint_callback=lambda checkpoint: _checkpoint_supervised_run(run_id, checkpoint),
             cancel_checker=lambda: _supervised_run_cancel_reason(run_id),
             project_root=PROJECT_ROOT,
+            agent_bindings=context.get("agentBindings") or {},
         )
     except _SupervisedRunInterrupted:
         return
@@ -1191,6 +1196,7 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["currentCaseScenario"] = str(event.get("scenario") or "")
             state["currentCaseMode"] = str(event.get("mode") or "")
             state["currentCasePrompt"] = str(event.get("prompt") or "")
+            state["currentAgentBinding"] = _agent_binding_snapshot(event.get("agent_binding"))
             state["currentCaseIo"] = None
             state["latestMessage"] = _event_summary(event)
             state["runtimeStatus"] = "stopping" if stop_requested else "waiting" if pause_requested else "running"
@@ -1226,6 +1232,7 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["currentCaseScenario"] = str(event.get("scenario") or state.get("currentCaseScenario") or "")
             state["currentCaseMode"] = str(event.get("mode") or state.get("currentCaseMode") or "")
             state["currentCasePrompt"] = str(event.get("prompt") or state.get("currentCasePrompt") or "")
+            state["currentAgentBinding"] = _agent_binding_snapshot(event.get("agent_binding") or state.get("currentAgentBinding"))
             state["currentCaseIo"] = _case_io_payload(event)
             latest_output = str(((state.get("currentCaseIo") or {}).get("latestOutput")) or "").strip()
             latest_label = str(((state.get("currentCaseIo") or {}).get("latestOutputLabel")) or "").strip()
@@ -1273,6 +1280,7 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
             state["caseTotal"] = max(0, int(event.get("case_total") or state.get("caseTotal") or 0))
             state["currentCaseId"] = str(event.get("case_id") or "")
             state["currentRole"] = str(event.get("role") or "")
+            state["currentAgentBinding"] = _agent_binding_snapshot(event.get("agent_binding") or state.get("currentAgentBinding"))
             state["latestMessage"] = _event_summary(event)
             state["runtimeStatus"] = "stopping" if stop_requested else "waiting" if pause_requested else "running"
             if stop_requested:
@@ -1399,6 +1407,7 @@ def _initial_run_state(context: dict[str, Any]) -> dict[str, Any]:
         "currentCaseScenario": "",
         "currentCaseMode": "",
         "currentCasePrompt": "",
+        "currentAgentBinding": {},
         "currentCaseIo": None,
         "currentTask": text_for(
             lang,
@@ -1412,6 +1421,7 @@ def _initial_run_state(context: dict[str, Any]) -> dict[str, Any]:
         "lineageIndexPath": "",
         "lineageSummary": "",
         "activeAdvisoryCount": 0,
+        "agentBindings": _agent_bindings_snapshot(context.get("agentBindings") or {}),
         "pauseRequested": False,
         "pauseRequestedAt": "",
         "pausedAt": "",
@@ -1434,6 +1444,7 @@ def _initial_run_state(context: dict[str, Any]) -> dict[str, Any]:
                 "datasetLimit": context["datasetLimit"],
                 "bundleName": context["bundleName"],
                 "keepWorktree": bool(context["keepWorktree"]),
+                "agentBindings": _agent_bindings_snapshot(context.get("agentBindings") or {}),
             }
         ],
         _MANAGER_CONTROL_KEY: _build_manager_control_payload(),
@@ -1449,6 +1460,42 @@ def _build_manager_control_payload() -> dict[str, Any]:
         "ownerPid": os.getpid(),
         "kind": "supervised",
         "claimedAt": _now_timestamp(),
+    }
+
+
+def _agent_bindings_snapshot(bindings: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(bindings, dict):
+        return {}
+    snapshot: dict[str, Any] = {}
+    for role, binding in bindings.items():
+        if not isinstance(binding, dict):
+            continue
+        normalized_role = str(role or binding.get("role") or "").strip()
+        if not normalized_role:
+            continue
+        snapshot[normalized_role] = {
+            "agentId": str(binding.get("agentId") or "").strip(),
+            "displayName": str(binding.get("displayName") or "").strip(),
+            "profileId": str(binding.get("profileId") or "").strip(),
+            "directSessionId": str(binding.get("directSessionId") or "").strip(),
+            "workspacePath": str(binding.get("workspacePath") or "").strip(),
+            "role": str(binding.get("role") or normalized_role).strip(),
+            "roleLabel": str(binding.get("roleLabel") or "").strip(),
+        }
+    return snapshot
+
+
+def _agent_binding_snapshot(binding: Any) -> dict[str, Any]:
+    if not isinstance(binding, dict):
+        return {}
+    return {
+        "agentId": str(binding.get("agentId") or "").strip(),
+        "displayName": str(binding.get("displayName") or "").strip(),
+        "profileId": str(binding.get("profileId") or "").strip(),
+        "directSessionId": str(binding.get("directSessionId") or "").strip(),
+        "workspacePath": str(binding.get("workspacePath") or "").strip(),
+        "role": str(binding.get("role") or "").strip(),
+        "roleLabel": str(binding.get("roleLabel") or "").strip(),
     }
 
 
@@ -1900,6 +1947,7 @@ def _event_tail_entry(event: dict[str, Any], *, timestamp: str) -> dict[str, Any
         "errorType": str(event.get("error_type") or ""),
         "elapsedSeconds": _optional_float(event.get("elapsed_seconds")),
         "resultStatus": str(event.get("status") or ""),
+        "agentBinding": _agent_binding_snapshot(event.get("agent_binding")),
     }
 
 
@@ -1934,6 +1982,8 @@ def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -
         "reason": str(item.get("reason") or ""),
         "errorType": str(item.get("errorType") or ""),
         "elapsedSeconds": _optional_float(item.get("elapsedSeconds")),
+        "agentId": str(((item.get("agentBinding") or {}).get("agentId")) or ""),
+        "agentProfileId": str(((item.get("agentBinding") or {}).get("profileId")) or ""),
     }
     _record_supervised_scene_event(
         "progress",
@@ -1948,6 +1998,7 @@ def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -
             "timestamp": str(item.get("timestamp") or ""),
             "title": str(item.get("title") or ""),
             "summary": str(item.get("summary") or ""),
+            "agentBinding": dict(item.get("agentBinding") or {}),
         },
         lifecycle=lifecycle,
     )

@@ -143,6 +143,7 @@ class SupervisedEvolutionRun:
     new_conversation_files: List[str] = field(default_factory=list)
     new_debug_files: List[str] = field(default_factory=list)
     evolution_summary: Dict[str, Any] = field(default_factory=dict)
+    agent_binding: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -205,6 +206,7 @@ class SupervisedEvolutionDecision:
     candidate_success_rate: float
     score_delta: float
     advisory_context: Dict[str, Any] = field(default_factory=dict)
+    agent_bindings: Dict[str, Any] = field(default_factory=dict)
     summary: Dict[str, Any] = field(default_factory=dict)
     decision_path: Optional[str] = None
     policy_action: Dict[str, Any] = field(default_factory=dict)
@@ -250,6 +252,7 @@ def _to_supervised_run(
     mode: str,
     result: HarnessResult,
     report_path: Optional[Path],
+    agent_binding: Optional[Dict[str, Any]] = None,
 ) -> SupervisedEvolutionRun:
     materialized_prompt = _materialized_prompt_from_result(result) or prompt
     return SupervisedEvolutionRun(
@@ -269,6 +272,7 @@ def _to_supervised_run(
         new_conversation_files=result.new_conversation_files,
         new_debug_files=result.new_debug_files,
         evolution_summary=result.evolution_summary,
+        agent_binding=dict(agent_binding or {}),
     )
 
 
@@ -280,6 +284,26 @@ def _materialized_prompt_from_result(result: HarnessResult) -> str:
         if str(item) == "--prompt" and index + 1 < len(command):
             return str(command[index + 1] or "").strip()
     return ""
+
+
+def _normalize_supervised_agent_bindings(bindings: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(bindings, dict):
+        return {}
+    normalized: Dict[str, Any] = {}
+    for raw_role, raw_binding in bindings.items():
+        role = str(raw_role or "").strip()
+        if not role or not isinstance(raw_binding, dict):
+            continue
+        normalized[role] = {
+            "agentId": str(raw_binding.get("agentId") or "").strip(),
+            "displayName": str(raw_binding.get("displayName") or "").strip(),
+            "profileId": str(raw_binding.get("profileId") or "").strip(),
+            "directSessionId": str(raw_binding.get("directSessionId") or "").strip(),
+            "workspacePath": str(raw_binding.get("workspacePath") or "").strip(),
+            "role": str(raw_binding.get("role") or role).strip(),
+            "roleLabel": str(raw_binding.get("roleLabel") or "").strip(),
+        }
+    return normalized
 
 
 def _success_rate(items: List[SupervisedEvolutionRun]) -> float:
@@ -1480,6 +1504,7 @@ def run_supervised_evolution_session(
     progress_callback: Optional[ProgressCallback] = None,
     checkpoint_callback: Optional[CheckpointCallback] = None,
     cancel_checker: Optional[CancelChecker] = None,
+    agent_bindings: Optional[Dict[str, Any]] = None,
 ) -> SupervisedEvolutionDecision:
     root = (project_root or get_workspace().project_root).resolve()
     bundle_path = resolve_supervised_bundle_path(bundle_name, project_root=root)
@@ -1490,6 +1515,7 @@ def run_supervised_evolution_session(
     runner = harness_runner or run_harness
     advisory_context = build_active_advisory_snapshot(project_root=root)
     advisory_lines = summarize_active_advisory_baselines(project_root=root, limit=3)
+    normalized_agent_bindings = _normalize_supervised_agent_bindings(agent_bindings)
 
     baseline_runs: List[SupervisedEvolutionRun] = []
     candidate_runs: List[SupervisedEvolutionRun] = []
@@ -1506,6 +1532,7 @@ def run_supervised_evolution_session(
             "keep_worktree": keep_worktree,
             "active_advisory_count": advisory_context.get("active_count", 0),
             "active_advisory_lines": advisory_lines,
+            "agent_bindings": normalized_agent_bindings,
         },
     )
     _run_checkpoint(
@@ -1515,6 +1542,7 @@ def run_supervised_evolution_session(
             "session_id": session_id,
             "bundle_name": str(bundle.get("bundle_name") or bundle_name),
             "case_total": len(cases),
+            "agent_bindings": normalized_agent_bindings,
         },
     )
 
@@ -1532,6 +1560,7 @@ def run_supervised_evolution_session(
             ("baseline", baseline_prompt, baseline_runs),
             ("candidate", candidate_prompt, candidate_runs),
         ):
+            role_agent_binding = dict(normalized_agent_bindings.get(role) or {})
             _run_checkpoint(
                 checkpoint_callback,
                 {
@@ -1542,6 +1571,7 @@ def run_supervised_evolution_session(
                     "case_total": len(cases),
                     "case_id": case_id,
                     "role": role,
+                    "agent_binding": role_agent_binding,
                 },
             )
             _emit_progress(
@@ -1558,6 +1588,7 @@ def run_supervised_evolution_session(
                     "prompt": prompt,
                     "timeout_seconds": timeout_seconds,
                     "keep_worktree": keep_worktree,
+                    "agent_binding": role_agent_binding,
                 },
             )
             try:
@@ -1574,6 +1605,7 @@ def run_supervised_evolution_session(
                             "scenario": scenario,
                             "mode": mode,
                             "prompt": prompt,
+                            "agent_binding": role_agent_binding,
                             **payload,
                         },
                     )
@@ -1606,6 +1638,7 @@ def run_supervised_evolution_session(
                         "mode": mode,
                         "error_type": type(exc).__name__,
                         "error": str(exc),
+                        "agent_binding": role_agent_binding,
                     },
                 )
                 raise
@@ -1630,6 +1663,7 @@ def run_supervised_evolution_session(
                     "worktree_path": result.worktree_path,
                     "report_path": str(report_path),
                     "drift_warning": _has_drift_warning(status=result.status, reason=result.reason),
+                    "agent_binding": role_agent_binding,
                 },
             )
             sink.append(
@@ -1641,6 +1675,7 @@ def run_supervised_evolution_session(
                     mode=mode,
                     result=result,
                     report_path=report_path,
+                    agent_binding=role_agent_binding,
                 )
             )
             if result.status == "cancelled":
@@ -1658,6 +1693,7 @@ def run_supervised_evolution_session(
                         "mode": mode,
                         "reason": reason,
                         "report_path": str(report_path),
+                        "agent_binding": role_agent_binding,
                     },
                 )
                 raise SupervisedEvolutionCancelled(reason, session_id=session_id)
@@ -1671,6 +1707,7 @@ def run_supervised_evolution_session(
                     "case_total": len(cases),
                     "case_id": case_id,
                     "role": role,
+                    "agent_binding": role_agent_binding,
                 },
             )
         _run_checkpoint(
@@ -1716,6 +1753,7 @@ def run_supervised_evolution_session(
         candidate_success_rate=_success_rate(candidate_runs),
         score_delta=score_delta,
         advisory_context=advisory_context,
+        agent_bindings=normalized_agent_bindings,
         summary={
             "case_count": len(cases),
             "baseline_successes": sum(1 for item in baseline_runs if item.status == "success"),

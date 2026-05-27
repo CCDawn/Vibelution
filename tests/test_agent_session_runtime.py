@@ -59,7 +59,7 @@ def test_language_drift_heuristic():
 
 def test_reading_sufficiency_changes_with_evidence():
     session = reset_session_state()
-    session.set_reading_strategy("modify", "get_code_entity_tool -> read_file_tool")
+    session.set_reading_strategy("modify", "code_symbol_tool -> read_file_tool")
 
     assert "证据还不够" in session.evaluate_reading_sufficiency()
 
@@ -73,7 +73,7 @@ def test_clear_reading_guidance_clears_sufficiency_and_decision():
     session = reset_session_state()
     session.set_reading_strategy("verify", "grep_search_tool -> read_file_tool")
     session.set_reading_sufficiency("验证证据已具备，可继续修复或复测。")
-    session.set_tool_decision("inspect_entity", ["get_code_entity_tool"], ["cli_tool"])
+    session.set_tool_decision("inspect_entity", ["code_symbol_tool"], ["cli_tool"])
 
     session.clear_reading_guidance(clear_decision=True)
     snapshot = session.get_attention_snapshot()
@@ -152,13 +152,13 @@ def test_get_overlapping_ranges_and_latest_continuation():
 
 def test_tool_decision_and_deviation_render():
     session = reset_session_state()
-    session.set_tool_decision("inspect_entity", ["get_code_entity_tool", "read_file_tool"], ["cli_tool"])
+    session.set_tool_decision("inspect_entity", ["code_symbol_tool", "read_file_tool"], ["cli_tool"])
     session.record_tool_deviation("cli_tool", "当前存在更合适的主通道工具。")
 
     summary = session.render_runtime_constraints()
 
     assert "下一步意图：精读实体" in summary
-    assert "读目标实体 -> 读局部片段" in summary
+    assert "代码符号 -> 读局部片段" in summary
     assert "命令兜底" in summary
 
 

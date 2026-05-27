@@ -117,6 +117,13 @@ CURRENT_SYSTEM = platform.system().lower()  # "windows" | "linux" | "darwin"
 IS_WINDOWS = CURRENT_SYSTEM == "windows"
 IS_UNIX = CURRENT_SYSTEM in ("linux", "darwin")
 
+
+def _subprocess_no_window_kwargs() -> dict:
+    """Hide transient console windows for background tool commands on Windows."""
+    flags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    return {"creationflags": flags} if flags else {}
+
+
 # Linux/macOS 特有命令集合（在 Windows 上需要特殊处理）
 LINUX_COMMANDS = {
     'grep', 'egrep', 'fgrep', 'awk', 'sed', 'find', 'xargs',
@@ -230,6 +237,49 @@ def _has_unix_shell_markers(command: str) -> bool:
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.absolute()
 _WORKSPACE_ROOT_OVERRIDE: ContextVar[str] = ContextVar("vibelution_workspace_root_override", default="")
+
+
+def _get_project_python_executable() -> Path:
+    """返回项目默认 Python 解释器路径。"""
+    if IS_WINDOWS:
+        return PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    return PROJECT_ROOT / ".venv" / "bin" / "python"
+
+
+def _rewrite_default_python_command(command: str) -> str:
+    """将默认 Python 相关入口改写为项目虚拟环境解释器。
+
+    只处理命令开头的裸入口，避免误改字符串、参数或其他工具名。
+    支持：
+    - python / python.exe / py / py.exe
+    - pytest / pytest.exe -> python -m pytest
+    - pip / pip.exe -> python -m pip
+
+    若项目虚拟环境不存在，则保持原命令不变，让系统按原有 PATH 规则执行。
+    """
+    if not isinstance(command, str):
+        return command
+
+    project_python = _get_project_python_executable()
+    if not project_python.exists():
+        return command
+
+    pattern = r"^(?P<prefix>\s*)(?P<entry>python(?:\.exe)?|py(?:\.exe)?|pytest(?:\.exe)?|pip(?:\.exe)?)(?P<suffix>\s+|$)"
+    match = re.match(pattern, command, flags=re.IGNORECASE)
+    if not match:
+        return command
+
+    quoted_python = f'"{project_python}"'
+    entry = match.group("entry").lower()
+    rest = command[match.end():]
+    suffix = match.group("suffix")
+    prefix = match.group("prefix")
+
+    if entry.startswith("pytest"):
+        return f"{prefix}{quoted_python} -m pytest{suffix}{rest}"
+    if entry.startswith("pip"):
+        return f"{prefix}{quoted_python} -m pip{suffix}{rest}"
+    return f"{prefix}{quoted_python}{suffix}{rest}"
 
 
 @contextmanager
@@ -491,6 +541,7 @@ def execute_shell_command(
     # -------------------------------------------------------------------------
     # 跨平台命令适配
     # -------------------------------------------------------------------------
+    command = _rewrite_default_python_command(command)
     final_command = command.strip()
 
     if IS_WINDOWS:
@@ -554,7 +605,8 @@ def execute_shell_command(
             text=True,
             encoding=system_encoding,
             errors='replace',
-            timeout=timeout_int
+            timeout=timeout_int,
+            **_subprocess_no_window_kwargs(),
         )
 
         output_parts = []
@@ -810,7 +862,7 @@ def read_file(
                 f"[剩余] 还有 {remaining_lines} 行未显示；不要因为存在剩余内容就默认顺序翻页。",
                 (
                     "[阅读导航] 下一步应按当前目标选择：若在找文本/调用点，用 grep_search_tool；"
-                    "若在理解结构，用 list_file_entities_tool / get_code_entity_tool；"
+                    "若在理解结构，用 code_symbol_tool 的 outline/entity 模式；"
                     f"只有目标确实需要相邻下文时，才读取 offset={end_line}, max_lines={adaptive_max_lines}。"
                 ),
             ])
