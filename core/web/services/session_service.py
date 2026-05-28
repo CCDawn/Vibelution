@@ -11,7 +11,6 @@ import re
 import secrets
 import threading
 import hashlib
-import inspect
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -4606,7 +4605,7 @@ def _run_session_continuation_loop(
             turn_id=getattr(turn_control, "turn_id", ""),
         )
         turn_attachments = list(attachments or []) if turn_index == 1 else []
-        result = _run_agent_single_turn(agent, initial_prompt=prompt, attachments=turn_attachments)
+        result = run_existing_agent_single_turn(agent, initial_prompt=prompt, attachments=turn_attachments)
         return_stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
         if return_stop_reason:
             _record_session_turn_lifecycle_event(
@@ -4706,21 +4705,6 @@ def _run_session_continuation_loop(
                 "nextPromptLength": len(prompt),
             },
         )
-
-
-def _run_agent_single_turn(
-    agent: Any,
-    *,
-    initial_prompt: str,
-    disable_tools: bool = False,
-    attachments: list[dict[str, Any]] | None = None,
-) -> Any:
-    return run_existing_agent_single_turn(
-        agent,
-        initial_prompt=initial_prompt,
-        disable_tools=disable_tools,
-        attachments=attachments,
-    )
 
 
 def _build_llm_image_attachments(session_id: str, attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
