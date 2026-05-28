@@ -733,7 +733,7 @@ def test_research_agent_instance_sync_skips_current_direct_session_update(tmp_pa
     assert workspace.writes == 0
 
 
-def test_research_agent_instance_sync_replaces_archived_mode_binding_ref(tmp_path, monkeypatch):
+def test_research_agent_instance_sync_disables_archived_mode_binding_ref(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
             self.root = root / "workspace"
@@ -809,13 +809,16 @@ def test_research_agent_instance_sync_replaces_archived_mode_binding_ref(tmp_pat
     next_agent_id = result["agents"][0]["agentId"]
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
 
-    assert next_agent_id
-    assert next_agent_id != old_agent["agentId"]
-    assert bindings["defaultAgentId"] == next_agent_id
-    assert bindings["pool"] == [next_agent_id]
-    assert bindings["flowBindings"] == {"broad": next_agent_id}
+    assert next_agent_id == old_agent["agentId"]
+    assert result["agents"][0]["enabled"] is False
+    assert result["agents"][0]["agentStatus"] == "stale"
+    assert result["agents"][0]["staleAgentId"] == old_agent["agentId"]
+    assert bindings["defaultAgentId"] == ""
+    assert bindings["availableAgentIds"] == []
+    assert bindings["pool"] == []
+    assert bindings["flowBindings"] == {}
     assert workspace.written is not None
-    stale_events = [item for item in events if item[0][0] == "research.agent_instance.stale_replaced"]
+    stale_events = [item for item in events if item[0][0] == "research.agent_instance.stale_disabled"]
     assert stale_events[-1][1]["fields"]["staleAgentId"] == old_agent["agentId"]
     assert not [item for item in events if item[0][0] == "research.mode_binding.sync_failed"]
 
