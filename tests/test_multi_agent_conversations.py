@@ -86,6 +86,9 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     assert direct[0]["agentCode"] == "A001"
     assert direct[0]["agentDisplayName"] == agent["displayName"]
     assert direct[0]["agentDisplayName"] != direct[0]["title"]
+    assert direct[0]["agentPrimaryMode"] == "chat"
+    assert direct[0]["agentRoleKey"] == ""
+    assert direct[0]["agentPromptTemplateId"] == "prompt-chat-default"
 
 
 def test_legacy_session_is_repaired_with_agent_id_without_moving_session_workspace(tmp_path, monkeypatch):
@@ -231,6 +234,9 @@ def test_agent_and_conversation_api_create_direct_agent(tmp_path, monkeypatch):
     direct = next(item for item in conversations if item["type"] == "direct_agent")
     assert direct["agentId"] == agent["agentId"]
     assert direct["directSessionId"] == agent["directSessionId"]
+    assert direct["agentPrimaryMode"] == "chat"
+    assert direct["agentRoleKey"] == ""
+    assert direct["agentPromptTemplateId"] == "prompt-chat-default"
 
 
 def test_agent_directory_repairs_legacy_mode_role_and_prompt_fields(tmp_path, monkeypatch):
@@ -261,6 +267,108 @@ def test_agent_directory_repairs_legacy_mode_role_and_prompt_fields(tmp_path, mo
 
 
 def test_agent_directory_resolves_workspace_root_without_nested_workspace(tmp_path, monkeypatch):
+def test_conversation_index_exposes_agent_management_role_fields(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    detail = session_service.create_chat_session(title="科研成员")
+    agent = agent_directory_service.update_agent_instance(
+        detail["agentId"],
+        primary_mode="research",
+        role_key="research_capability_steward",
+        prompt_template_id="prompt-research-capability-steward",
+    )
+
+    sessions = session_service.list_sessions()
+    session = next(item for item in sessions if item["id"] == detail["id"])
+    conversations = conversation_service.list_conversations()
+    direct = next(item for item in conversations if item["conversationId"] == detail["id"])
+
+    assert session["agentPrimaryMode"] == "research"
+    assert session["agentRoleKey"] == "research_capability_steward"
+    assert session["agentPromptTemplateId"] == "prompt-research-capability-steward"
+    assert direct["agentId"] == agent["agentId"]
+    assert direct["agentPrimaryMode"] == "research"
+    assert direct["agentRoleKey"] == "research_capability_steward"
+    assert direct["agentPromptTemplateId"] == "prompt-research-capability-steward"
+
+
+def test_agent_directory_direct_session_appears_in_conversation_index_without_chat_state_entry(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "",
+            "conversations": [],
+        },
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="能力管家 Agent",
+        profile_id="primary",
+        primary_mode="research",
+        role_key="research_capability_steward",
+        prompt_template_id="prompt-research-capability-steward",
+        direct_session_id="session-research-steward",
+    )
+
+    sessions = session_service.list_sessions()
+    indexed = next(item for item in sessions if item["id"] == "session-research-steward")
+    conversations = conversation_service.list_conversations()
+    direct = next(item for item in conversations if item["conversationId"] == "session-research-steward")
+    detail = session_service.get_session_detail("session-research-steward")
+
+    assert indexed["agentId"] == agent["agentId"]
+    assert indexed["agentPrimaryMode"] == "research"
+    assert indexed["agentRoleKey"] == "research_capability_steward"
+    assert direct["agentPrimaryMode"] == "research"
+    assert direct["agentRoleKey"] == "research_capability_steward"
+    assert direct["agentPromptTemplateId"] == "prompt-research-capability-steward"
+    assert detail["id"] == "session-research-steward"
+    assert detail["agentId"] == agent["agentId"]
+    assert detail["messages"] == []
+    state = load_chat_state(tmp_path)
+    assert [item["conversation_id"] for item in state["conversations"]] == ["session-research-steward"]
+
+
+def test_agent_directory_direct_session_can_accept_messages_after_materialization(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "",
+            "conversations": [],
+        },
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="科研负责人",
+        profile_id="primary",
+        primary_mode="research",
+        role_key="research_ceo",
+        prompt_template_id="prompt-research-ceo",
+        direct_session_id="session-research-ceo",
+    )
+    monkeypatch.setattr(session_service, "_submit_scheduled_session_turn", lambda context: None)
+
+    response = client.post(
+        "/api/sessions/session-research-ceo/messages",
+        json={"content": "你好，先确认你的科研 CEO 身份。"},
+    )
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["id"] == "session-research-ceo"
+    assert payload["agentId"] == agent["agentId"]
+    assert payload["agentPrimaryMode"] == "research"
+    user_messages = [item for item in payload["messages"] if item["role"] == "user"]
+    assert user_messages
+    assert "科研 CEO" in user_messages[-1]["content"]
+    state = load_chat_state(tmp_path)
+    assert state["active_conversation_id"] == "session-research-ceo"
+    persisted = state["conversations"][0]
+    assert persisted["conversation_id"] == "session-research-ceo"
+    assert persisted["agent_id"] == agent["agentId"]
+    assert persisted["messages"][-1]["role"] == "user"
+
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", workspace_root)

@@ -62,6 +62,7 @@ _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 AgentRunner = Callable[[dict[str, Any], str, dict[str, Any]], dict[str, Any]]
 _CHAT_ROOM_ROUND_CONTROLS_LOCK = threading.Lock()
 _CHAT_ROOM_ROUND_CONTROLS: dict[str, dict[str, str]] = {}
+_MISSING_SESSION_STATUS_MESSAGE = "缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。"
 
 
 def _sync_agent_directory_project_root() -> None:
@@ -1522,7 +1523,18 @@ def _refresh_participants(
             participant["directSessionId"] = str(item.get("directSessionId") or participant.get("directSessionId") or participant.get("sessionId") or "").strip()
             refreshed.append(participant)
         else:
-            refreshed.append(dict(item))
+            fallback = dict(item)
+            session_id = str(fallback.get("sessionId") or fallback.get("directSessionId") or "").strip()
+            if session_id and str(fallback.get("agentId") or "").strip():
+                detail = session_service.get_session_detail(session_id) or {}
+                if bool(detail.get("agentMissing")):
+                    fallback["agentMissing"] = True
+                    fallback["agentId"] = str(detail.get("agentId") or fallback.get("agentId") or "").strip()
+                    fallback["agentCode"] = str(detail.get("agentCode") or fallback.get("agentCode") or "").strip()
+                    fallback["agentStatusCode"] = str(detail.get("agentStatusCode") or "missing_agent").strip()
+                    fallback["agentStatusMessage"] = str(detail.get("agentStatusMessage") or _MISSING_SESSION_STATUS_MESSAGE).strip()
+                    fallback["enabled"] = False
+            refreshed.append(fallback)
     return refreshed
 
 
@@ -1537,6 +1549,32 @@ def _repair_room_participants_in_state(
             continue
         participants = list(room.get("participants") or [])
         refreshed = _refresh_participants(participants, session_summaries=session_summaries)
+        previous_missing_sessions = {
+            str(item.get("sessionId") or item.get("directSessionId") or "").strip()
+            for item in participants
+            if isinstance(item, dict) and bool(item.get("agentMissing"))
+        }
+        newly_missing = [
+            item for item in refreshed
+            if isinstance(item, dict)
+            and bool(item.get("agentMissing"))
+            and str(item.get("sessionId") or item.get("directSessionId") or "").strip() not in previous_missing_sessions
+        ]
+        for participant in newly_missing:
+            _record_room_event(
+                "participant",
+                "chat_room.participant_agent_missing",
+                room,
+                fields={
+                    "sessionId": str(participant.get("sessionId") or participant.get("directSessionId") or "").strip(),
+                    "agentId": str(participant.get("agentId") or "").strip(),
+                    "agentStatusCode": str(participant.get("agentStatusCode") or "").strip(),
+                    "enabled": bool(participant.get("enabled")),
+                },
+                outcome="disabled",
+                level="warning",
+                lifecycle=True,
+            )
         if refreshed != participants:
             room["participants"] = refreshed
             room["updatedAt"] = utc_now_iso()

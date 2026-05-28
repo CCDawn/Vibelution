@@ -34,6 +34,9 @@ def list_conversations() -> list[dict[str, Any]]:
                 "workspacePath": str(session.get("agentWorkspacePath") or session.get("workspacePath") or "").strip(),
                 "agentProfileId": str(session.get("agentProfileId") or "").strip(),
                 "agentTemplateLabel": str(session.get("agentTemplateLabel") or "").strip(),
+                "agentPrimaryMode": str(session.get("agentPrimaryMode") or "").strip(),
+                "agentRoleKey": str(session.get("agentRoleKey") or "").strip(),
+                "agentPromptTemplateId": str(session.get("agentPromptTemplateId") or "").strip(),
             }
         )
     for room in chat_room_service.list_chat_rooms(session_summaries=session_summaries):

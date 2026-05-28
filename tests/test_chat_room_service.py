@@ -172,26 +172,59 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
 
 def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
-    state = load_chat_state(tmp_path)
-    state["conversations"][0]["agent_id"] = "agent-missing"
-    state["conversations"][0]["agentId"] = "agent-missing"
-    save_chat_state(tmp_path, state)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    recorded_room_events = []
+    recorded_session_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_room_events.append((args, kwargs)) or {"accepted": True},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_session_events.append((args, kwargs)) or {"accepted": True},
+    )
+    sessions = session_service.list_sessions()
     room = chat_room_service.create_chat_room(
         title="断链群聊",
         participant_session_ids=["session-alpha"],
     )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = "agent-missing"
+    state["conversations"][0]["agentId"] = "agent-missing"
+    save_chat_state(tmp_path, state)
 
     detail = chat_room_service.get_chat_room_detail(room["roomId"])
 
+    assert {item["id"] for item in sessions} == {"session-alpha", "session-beta"}
+    assert "session-alpha" not in {item["id"] for item in session_service.list_sessions()}
     participant = detail["participants"][0]
     assert participant["sessionId"] == "session-alpha"
-    assert participant["agentId"] == "agent-missing"
     assert participant["agentMissing"] is True
     assert participant["agentStatusCode"] == "missing_agent"
     assert "缺少有效 Agent" in participant["agentStatusMessage"]
     assert participant["enabled"] is False
+    hidden_events = [
+        event for event in recorded_session_events
+        if event[0][2] == "session.agent_missing.hidden_from_index"
+    ]
+    assert hidden_events
+    assert hidden_events[-1][1]["fields"]["sessionId"] == "session-alpha"
+    assert hidden_events[-1][1]["fields"]["agentId"] == "agent-missing"
+    assert hidden_events[-1][1]["fields"]["agentStatusCode"] == "missing_agent"
+    assert hidden_events[-1][1]["child_log_path"] == "conversations/session-alpha-agent-bindings.jsonl"
+    room_missing_events = [
+        event for event in recorded_room_events
+        if event[0][2] == "chat_room.participant_agent_missing"
+    ]
+    assert room_missing_events
+    assert room_missing_events[-1][1]["fields"]["roomId"] == room["roomId"]
+    assert room_missing_events[-1][1]["fields"]["sessionId"] == "session-alpha"
+    assert room_missing_events[-1][1]["fields"]["agentId"] == "agent-missing"
+    assert room_missing_events[-1][1]["fields"]["agentStatusCode"] == "missing_agent"
+    assert room_missing_events[-1][1]["fields"]["enabled"] is False
 
     try:
         chat_room_service.start_chat_room_round(
