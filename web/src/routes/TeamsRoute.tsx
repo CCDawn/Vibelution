@@ -4,8 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
+import {
+  PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT,
+  isProjectAgentBusEventRevoked,
+  listProjectAgentBusTimeline,
+  projectAgentBusEventsForTeam,
+  revokeProjectAgentBusMessage,
+  sendTeamProjectBusMessage,
+} from "../api/projectAgentBus";
 import { queryKeys } from "../api/queryKeys";
-import { AgentConfigWorkspace, ProjectAgentBusEvent, ProjectAgentBusTimeline, Team, TeamCanvasNode, TeamListPayload, TeamOrganizationCanvas } from "../api/types";
+import { AgentConfigWorkspace, Team, TeamCanvasNode, TeamListPayload, TeamOrganizationCanvas } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { agentDisplayInfo } from "./agentDisplay";
@@ -81,10 +89,6 @@ function nodeTone(node: TeamCanvasNode) {
   return styles.nodeOpen;
 }
 
-function projectBusEventRevoked(event: ProjectAgentBusEvent) {
-  return String(event.status ?? "").trim().toLowerCase() === "revoked";
-}
-
 export function TeamsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -106,7 +110,7 @@ export function TeamsRoute() {
   });
   const projectBusQuery = useQuery({
     queryKey: queryKeys.projectAgentBus(),
-    queryFn: () => fetchJson<ProjectAgentBusTimeline>("/api/project-agent-bus?limit=120"),
+    queryFn: () => listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT),
   });
   const activeAgents = useMemo(
     () => (workspaceQuery.data?.agents ?? []).filter((agent) => agent.status !== "archived"),
@@ -124,12 +128,8 @@ export function TeamsRoute() {
   const canvas = canvasFromTeam(selectedTeam);
   const selectedNode = canvas?.nodes.find((node) => node.id === selectedNodeId) ?? canvas?.nodes[0] ?? null;
   const teamBusEvents = useMemo(
-    () =>
-      [...(projectBusQuery.data?.events ?? [])]
-        .filter((event) => String(event.metadata?.teamId ?? "").trim() === selectedTeam?.teamId)
-        .reverse()
-        .slice(0, 6),
-    [projectBusQuery.data?.events, selectedTeam?.teamId],
+    () => projectAgentBusEventsForTeam(projectBusQuery.data, selectedTeam?.teamId),
+    [projectBusQuery.data, selectedTeam?.teamId],
   );
 
   useEffect(() => {
@@ -202,15 +202,7 @@ export function TeamsRoute() {
 
   const sendTeamMessageMutation = useMutation({
     mutationFn: (payload: { teamId: string; content: string; interruptMode: string }) =>
-      fetchJson<ProjectAgentBusEvent>(`/api/teams/${encodeURIComponent(payload.teamId)}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: payload.content,
-          interruptMode: payload.interruptMode,
-          wakeTarget: true,
-        }),
-      }),
+      sendTeamProjectBusMessage(payload),
     onSuccess: () => {
       setTeamMessage("");
       queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
@@ -220,13 +212,9 @@ export function TeamsRoute() {
 
   const revokeTeamMessageMutation = useMutation({
     mutationFn: (eventId: string) =>
-      fetchJson<ProjectAgentBusEvent>(`/api/project-agent-bus/messages/${encodeURIComponent(eventId)}/revoke`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reason: "Revoked from Agent Center team broadcast history.",
-          stopTargets: true,
-        }),
+      revokeProjectAgentBusMessage({
+        eventId,
+        reason: "Revoked from Agent Center team broadcast history.",
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
@@ -594,7 +582,7 @@ export function TeamsRoute() {
                 ) : teamBusEvents.length ? (
                   <div className={styles.teamHistoryList}>
                     {teamBusEvents.map((event) => {
-                      const revoked = projectBusEventRevoked(event);
+                      const revoked = isProjectAgentBusEventRevoked(event);
                       return (
                         <article key={event.eventId} className={revoked ? `${styles.teamHistoryItem} ${styles.teamHistoryItemRevoked}` : styles.teamHistoryItem}>
                           <div className={styles.teamHistoryHeader}>

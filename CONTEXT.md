@@ -26,6 +26,14 @@ _Avoid_: Command, function, action
 A single invocation of a **Tool** with concrete arguments and a recorded result.
 _Avoid_: Command run, operation
 
+**Project Agent Bus**:
+The project-wide Agent communication surface that records shared guidance, resolves mentions, fans out inbox delivery to active **Agents**, and supports recall/stop requests without scheduling a meeting.
+_Avoid_: Group chat, room, meeting scheduler
+
+**Team Broadcast**:
+A **Project Agent Bus** event scoped by Team metadata so a selected Agent Team can receive, observe, and revoke a shared instruction through the same bus timeline.
+_Avoid_: Separate team chat, ad hoc message list
+
 **Workbench**:
 The terminal shell that lets a user enter major Vibelution modes without remembering command-line flags.
 _Avoid_: Menu, launcher
@@ -174,6 +182,8 @@ _Avoid_: Reboot, relaunch
 - An **Agent** handles many **Turns** during a session.
 - A **Turn** may contain zero or more **Tool Calls**.
 - A **Tool Call** invokes exactly one **Tool**.
+- A **Project Agent Bus** event may deliver inbox messages to many active **Agents** and can later be recalled.
+- A **Team Broadcast** is a Team-scoped **Project Agent Bus** event, not a separate communication store.
 - The **Workbench** exposes major modes including chat, configuration, reset, and **Supervised Evolution**.
 - The **Evolution Engine** is host-agnostic and can be embedded into Vibelution or another Agent runtime.
 - An **Agent Harness Adapter** connects one host Agent implementation to the **Evolution Engine**.
