@@ -27,6 +27,7 @@ from .routes.git import router as git_router
 from .routes.logs import router as logs_router
 from .routes.memory import router as memory_router
 from .routes.pet import router as pet_router
+from .routes.project_agent_bus import router as project_agent_bus_router
 from .routes.research import router as research_router
 from .routes.reset import router as reset_router
 from .routes.runtime import router as runtime_router
@@ -206,6 +207,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
     app.include_router(chat_rooms_router, prefix="/api")
+    app.include_router(project_agent_bus_router, prefix="/api")
     app.include_router(skills_router, prefix="/api")
     app.include_router(tools_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
