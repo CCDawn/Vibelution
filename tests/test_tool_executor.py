@@ -92,6 +92,14 @@ class TestToolExecutorInit:
 
         assert "agent_message_tool" in names
 
+    def test_research_knowledge_tool_is_registered_and_llm_facing(self):
+        """科研知识库查询工具进入工具目录，但运行时还需要 Agent 显式授权。"""
+        canonical_names = {tool.name for tool in create_key_tools()}
+        llm_names = {tool.name for tool in create_llm_facing_tools()}
+
+        assert "research_knowledge_query_tool" in canonical_names
+        assert "research_knowledge_query_tool" in llm_names
+
     def test_tools_package_does_not_reexport_compat_aliases(self):
         """tools 包入口不再把底层 helper 伪装成 agent 工具别名。"""
         import tools
@@ -374,6 +382,23 @@ class TestToolExecutorTimeout:
         assert action is None
         assert "DelegationPolicy" in str(result) or "委托策略" in str(result)
         assert "禁止派发子 Agent" in str(result)
+
+    def test_research_knowledge_tool_requires_explicit_tool_policy_allow(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-policy",
+            "toolPolicy": {
+                "policyId": "tool-agent-policy",
+                "allowedTools": [],
+                "blockedTools": [],
+            },
+        })
+        result, action = executor.execute("research_knowledge_query_tool", {"query": "agentic"})
+
+        assert action is None
+        assert "research_knowledge_query_tool" in str(result)
+        assert "显式授权" in str(result)
 
     def test_spawn_agent_tool_internal_flag_is_not_forwarded_to_tool(self, executor):
         captured = {}
