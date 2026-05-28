@@ -20,6 +20,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}`");
     expect(routeSource).toContain('method: "DELETE"');
     expect(routeSource).toContain("fetchJson<ProjectAgentBusEvent>(`/api/teams/${encodeURIComponent(payload.teamId)}/messages`");
+    expect(routeSource).toContain('fetchJson<ProjectAgentBusTimeline>("/api/project-agent-bus?limit=120")');
+    expect(routeSource).toContain("/api/project-agent-bus/messages/${encodeURIComponent(eventId)}/revoke");
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas");
     expect(routeSource).toContain("Agent Center");
     expect(routeSource).toContain("team_organization_canvas");
@@ -45,6 +47,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("删除节点");
     expect(routeSource).toContain("团队广播");
     expect(routeSource).toContain("发送给团队");
+    expect(routeSource).toContain("最近团队广播");
+    expect(routeSource).toContain("teamBusEvents");
+    expect(routeSource).toContain("projectBusEventRevoked");
+    expect(routeSource).toContain("revokeTeamMessageMutation");
+    expect(routeSource).toContain("styles.teamHistoryPanel");
     expect(routeSource).toContain("interrupt_targets");
     expect(routeSource).toContain("edges: canvas.edges.filter((edge) => edge.source !== deletedNodeId && edge.target !== deletedNodeId)");
   });
