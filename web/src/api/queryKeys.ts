@@ -23,6 +23,7 @@ export const queryKeys = {
   chatRooms: () => ["chat-rooms"] as const,
   chatRoom: (id: string) => ["chat-rooms", id] as const,
   chatRoomModes: () => ["chat-rooms", "modes"] as const,
+  chatRoomPurposes: () => ["chat-rooms", "purposes"] as const,
   fileTree: () => ["files", "tree"] as const,
   fileContent: (path: string) => ["files", "content", path] as const,
   memoryOverview: () => ["memory", "overview"] as const,

@@ -1,10 +1,10 @@
 .nav {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
-  margin: 9px 12px 0;
-  padding: 5px;
+  margin: 7px 12px 0;
+  padding: 4px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 88%, transparent);
   border-radius: 8px;
   background:
@@ -16,9 +16,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 34px;
-  min-width: 112px;
-  padding: 0 14px;
+  min-height: 28px;
+  min-width: 104px;
+  padding: 0 12px;
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
   font-size: 0.86rem;

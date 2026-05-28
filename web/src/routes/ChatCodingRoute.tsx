@@ -38,6 +38,7 @@ import {
   ChatRoomMessage,
   ChatRoomParticipant,
   ChatRoomMode,
+  ChatRoomPurpose,
   ChatRoomStreamEvent,
   FileContent,
   MentalStateSnapshot,
@@ -86,6 +87,11 @@ import {
   clearPendingSelfEvolutionHandoff,
   loadPendingSelfEvolutionHandoff,
 } from "./selfEvolutionHandoff";
+import {
+  agentDisplayInfo,
+  participantAgentDisplayInfo,
+  sessionAgentDisplayInfo,
+} from "./agentDisplay";
 import styles from "./ChatCodingRoute.module.css";
 
 function encodeUtf8Base64(value: string): string {
@@ -115,6 +121,19 @@ function chatRoomModeLabel(mode: ChatRoomMode, lang: "zh" | "en") {
     return lang === "zh" ? "抢占式讨论" : "Opportunistic";
   }
   return mode.label || mode.id;
+}
+
+function chatRoomPurposeLabel(purpose: ChatRoomPurpose, lang: "zh" | "en") {
+  if (purpose.id === "chat") {
+    return lang === "zh" ? "聊天" : "Chat";
+  }
+  if (purpose.id === "discussion") {
+    return lang === "zh" ? "讨论" : "Discussion";
+  }
+  if (purpose.id === "meeting") {
+    return lang === "zh" ? "会议" : "Meeting";
+  }
+  return purpose.label || purpose.id;
 }
 
 function removeSessionImageAttachment(
@@ -349,41 +368,8 @@ function formatAgentIdentity(agentCode?: string, name?: string, fallback = "Agen
   return title || String(fallback || agentCode || "Agent").trim() || "Agent";
 }
 
-function metadataString(agent: Pick<AgentInstance, "metadata"> | undefined, key: string) {
-  const value = agent?.metadata?.[key];
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function formatAgentFunction(
-  templateLabel?: string,
-  profileId?: string,
-  roleKey?: string,
-  templateId?: string,
-  fallback = "primary",
-) {
-  return String(templateLabel || profileId || roleKey || templateId || fallback || "primary").trim() || "primary";
-}
-
-function formatAgentMeta(agentCode?: string, functionLabel?: string, profileId?: string) {
-  return [functionLabel ?? profileId ?? "primary"]
-    .map((item) => String(item ?? "").trim())
-    .filter(Boolean)
-    .join(" · ");
-}
-
-function formatAgentIdentityWithFunction(name: string | undefined, functionLabel: string | undefined) {
-  const identity = String(name ?? "").trim();
-  const role = String(functionLabel ?? "").trim();
-  return role ? `${identity || "Agent"} · ${role}` : identity || "Agent";
-}
-
-function formatAgentFunctionFromInstance(agent: AgentInstance | undefined, fallbackLabel?: string, fallbackProfileId?: string) {
-  return formatAgentFunction(
-    metadataString(agent, "functionalDisplayName") || fallbackLabel,
-    agent?.profileId || fallbackProfileId,
-    agent?.roleKey,
-    agent?.templateId,
-  );
+function agentRoleClass(tone: string) {
+  return `agentRoleTag_${tone}`;
 }
 
 function avatarInitials(agentCode?: string, name?: string, fallback = "AI") {
@@ -399,9 +385,10 @@ function sessionToConversationSummary(session: SessionSummary): ConversationSumm
   return {
     conversationId: session.id,
     type: "direct_agent",
-    title: formatAgentIdentity(session.agentCode, session.agentDisplayName || session.title, session.title),
+    title: String(session.title || session.agentDisplayName || session.id).trim(),
     agentId: session.agentId,
     agentCode: session.agentCode,
+    agentDisplayName: session.agentDisplayName,
     directSessionId: session.id,
     roomId: "",
     status: session.status,
@@ -437,6 +424,32 @@ function removeDeletedSessionFromConversations(
     return [nextConversation, ...filteredConversations];
   }
   return filteredConversations.map((conversation, index) =>
+    index === existingIndex
+      ? {
+          ...conversation,
+          ...nextConversation,
+        }
+      : conversation,
+  );
+}
+
+function mergeSessionDetailIntoConversations(
+  conversations: ConversationSummary[] | undefined,
+  detail: SessionDetail,
+): ConversationSummary[] | undefined {
+  if (!conversations) {
+    return conversations;
+  }
+  const nextConversation = sessionToConversationSummary(detail);
+  const existingIndex = conversations.findIndex(
+    (conversation) =>
+      conversation.type === "direct_agent"
+      && (conversation.directSessionId === detail.id || conversation.conversationId === detail.id),
+  );
+  if (existingIndex < 0) {
+    return [nextConversation, ...conversations];
+  }
+  return conversations.map((conversation, index) =>
     index === existingIndex
       ? {
           ...conversation,
@@ -540,6 +553,7 @@ export function ChatCodingRoute() {
   const [groupComposerOpen, setGroupComposerOpen] = useState(false);
   const [groupTitleDraft, setGroupTitleDraft] = useState("");
   const [groupModeDraft, setGroupModeDraft] = useState("round_robin");
+  const [groupPurposeDraft, setGroupPurposeDraft] = useState("discussion");
   const [groupSelectedAgentIds, setGroupSelectedAgentIds] = useState<string[]>([]);
   const [collapsedConversationGroups, setCollapsedConversationGroups] = useState<Record<ConversationGroupKey, boolean>>(
     DEFAULT_COLLAPSED_CONVERSATION_GROUPS,
@@ -552,6 +566,7 @@ export function ChatCodingRoute() {
   const [groupManageTitleDraft, setGroupManageTitleDraft] = useState("");
   const [groupManageSessionIds, setGroupManageSessionIds] = useState<string[]>([]);
   const [groupManageModeDraft, setGroupManageModeDraft] = useState("round_robin");
+  const [groupManagePurposeDraft, setGroupManagePurposeDraft] = useState("discussion");
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const sessionStreamErrorLoggedRef = useRef<Record<string, boolean>>({});
   const sessionStreamPayloadErrorLoggedRef = useRef<Record<string, boolean>>({});
@@ -600,6 +615,11 @@ export function ChatCodingRoute() {
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
     queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
+    enabled: groupComposerOpen || Boolean(activeGroupRoomId),
+  });
+  const chatRoomPurposesQuery = useQuery({
+    queryKey: queryKeys.chatRoomPurposes(),
+    queryFn: () => fetchJson<ChatRoomPurpose[]>("/api/chat-rooms/purposes"),
     enabled: groupComposerOpen || Boolean(activeGroupRoomId),
   });
   const activeGroupRoomQuery = useQuery({
@@ -848,18 +868,21 @@ export function ChatCodingRoute() {
   });
 
   const createGroupRoomMutation = useMutation({
-    mutationFn: async ({ title, agentIds, mode }: { title: string; agentIds: string[]; mode: string }) =>
+    mutationFn: async (
+      { title, agentIds, mode, purpose }: { title: string; agentIds: string[]; mode: string; purpose: string },
+    ) =>
       fetchJson<ChatRoomDetail>("/api/chat-rooms", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ title, agentIds, mode }),
+        body: JSON.stringify({ title, agentIds, mode, purpose }),
       }),
     onSuccess: (room) => {
       setGroupComposerOpen(false);
       setGroupTitleDraft("");
       setGroupModeDraft("round_robin");
+      setGroupPurposeDraft("discussion");
       setGroupSelectedAgentIds([]);
       setSessionFilter("");
       setSessionComposerErrors((current) => ({
@@ -885,13 +908,15 @@ export function ChatCodingRoute() {
   });
 
   const startGroupRoundMutation = useMutation({
-    mutationFn: async ({ roomId, topic, mode }: { roomId: string; topic: string; mode: string }) =>
+    mutationFn: async (
+      { roomId, topic, mode, purpose }: { roomId: string; topic: string; mode: string; purpose: string },
+    ) =>
       fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/rounds`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ topic, mode }),
+        body: JSON.stringify({ topic, mode, purpose }),
       }),
     onSuccess: (room) => {
       setActiveGroupRoomId(room.roomId);
@@ -933,7 +958,13 @@ export function ChatCodingRoute() {
 
   const updateGroupRoomMutation = useMutation({
     mutationFn: async (
-      { roomId, title, sessionIds, mode }: { roomId: string; title: string; sessionIds: string[]; mode: string },
+      { roomId, title, sessionIds, mode, purpose }: {
+        roomId: string;
+        title: string;
+        sessionIds: string[];
+        mode: string;
+        purpose: string;
+      },
     ) =>
       fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}`, {
         method: "PATCH",
@@ -944,6 +975,7 @@ export function ChatCodingRoute() {
           title,
           participantSessionIds: sessionIds,
           mode,
+          purpose,
         }),
       }),
     onSuccess: (room) => {
@@ -952,6 +984,7 @@ export function ChatCodingRoute() {
       setGroupManageTitleDraft(room.title || "");
       setGroupManageSessionIds(room.participants.map((participant) => participant.sessionId));
       setGroupManageModeDraft(room.mode || "round_robin");
+      setGroupManagePurposeDraft(room.purpose || "discussion");
       setGroupRoomActionError("");
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
@@ -1056,6 +1089,9 @@ export function ChatCodingRoute() {
         ...current,
         [variables.sessionId]: "",
       }));
+      queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations(), (conversations) =>
+        mergeSessionDetailIntoConversations(conversations, nextDetail),
+      );
       syncSessionDetail(nextDetail);
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
@@ -1168,6 +1204,7 @@ export function ChatCodingRoute() {
     );
     setGroupManageTitleDraft(activeGroupRoom.title || "");
     setGroupManageModeDraft(activeGroupRoom.mode || "round_robin");
+    setGroupManagePurposeDraft(activeGroupRoom.purpose || "discussion");
   }, [activeGroupRoom, sessionsQuery.data]);
 
   useEffect(() => {
@@ -1500,7 +1537,10 @@ export function ChatCodingRoute() {
   const pet = petQuery.data;
   const detail = sessionDetailQuery.data;
   const activeGroupRound = latestChatRoomRound(activeGroupRoom);
-  const groupRoundRunning = String(activeGroupRoom?.status ?? "").trim().toLowerCase() === "running";
+  const activeGroupRoomStatus = String(activeGroupRoom?.status ?? "").trim().toLowerCase();
+  const groupRoundRunning = activeGroupRoomStatus === "running";
+  const groupRoundStopping = activeGroupRoomStatus === "stopping";
+  const groupRoundActive = groupRoundRunning || groupRoundStopping;
   const activeGroupParticipantById = useMemo(() => {
     const entries = (activeGroupRoom?.participants ?? []).map((participant) => [participant.participantId, participant] as const);
     return new Map(entries);
@@ -1529,20 +1569,22 @@ export function ChatCodingRoute() {
     && (
       groupManageTitleDraft.trim() !== (activeGroupRoom.title || "").trim()
       || groupManageModeDraft !== (activeGroupRoom.mode || "round_robin")
+      || groupManagePurposeDraft !== (activeGroupRoom.purpose || "discussion")
       || groupManageSessionIds.length !== activeGroupParticipantSessionSet.size
       || groupManageSessionIds.some((sessionId) => !activeGroupParticipantSessionSet.has(sessionId))
     ),
   );
   const groupManageDisabled =
     !activeGroupRoom
-    || groupRoundRunning
+    || groupRoundActive
     || updateGroupRoomMutation.isPending
     || !groupManageTitleDraft.trim()
     || groupManageSessionIds.length < 2
-    || !groupManageModeDraft;
+    || !groupManageModeDraft
+    || !groupManagePurposeDraft;
   const groupDeleteDisabled =
     !activeGroupRoom
-    || groupRoundRunning
+    || groupRoundActive
     || deleteGroupRoomMutation.isPending;
   const groupStopDisabled =
     !activeGroupRoom
@@ -1557,7 +1599,7 @@ export function ChatCodingRoute() {
   const activeSurfaceLine = groupPanelActive
     ? (
       activeGroupRound?.summary
-      || `${activeGroupRoom?.participants?.length ?? 0} ${lang === "zh" ? "位 Agent" : "agents"} · ${activeGroupRoom?.mode ?? "round_robin"}`
+      || `${activeGroupRoom?.participants?.length ?? 0} ${lang === "zh" ? "位 Agent" : "agents"} · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`
     )
     : "";
   const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
@@ -1590,26 +1632,12 @@ export function ChatCodingRoute() {
   const activeAgentId = detail?.agentId || "";
   const activeSessionAgent = sessionAgentOptions.find((agent) => agent.agentId === activeAgentId);
   const activeAgentProfileId = activeSessionAgent?.profileId || detail?.agentProfileId || detail?.agentTemplateId || "primary";
-  const activeAgentFunctionLabel = activeSessionAgent
-    ? formatAgentFunction(
-      metadataString(activeSessionAgent, "functionalDisplayName"),
-      activeSessionAgent.profileId,
-      activeSessionAgent.roleKey,
-      activeSessionAgent.templateId,
-    )
-    : formatAgentFunction(detail?.agentTemplateLabel, activeAgentProfileId, undefined, detail?.agentTemplateId);
-  const activeAgentDisplayName = detail
-    ? formatAgentIdentity(
-      activeSessionAgent?.agentCode || detail.agentCode,
-      activeSessionAgent?.displayName || detail.agentDisplayName || detail.title,
-      detail.title,
-    )
-    : pet?.name;
-  const activeAgentMetaLabel = formatAgentMeta(
-    activeSessionAgent?.agentCode || detail?.agentCode,
-    activeAgentFunctionLabel,
-    activeAgentProfileId,
-  );
+  const activeAgentDisplay = detail
+    ? sessionAgentDisplayInfo(detail, activeSessionAgent, lang)
+    : { name: pet?.name || "Agent", functionLabel: "", tone: "chat" as const, meta: "" };
+  const activeAgentFunctionLabel = activeAgentDisplay.functionLabel;
+  const activeAgentDisplayName = activeAgentDisplay.name;
+  const activeAgentMetaLabel = activeAgentDisplay.meta || activeAgentFunctionLabel || activeAgentProfileId;
   const activeAgentStatusMessage = detail?.agentMissing
     ? detail.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent，部分内容无法继续运行。" : "Missing valid Agent. Some content cannot keep running.")
     : "";
@@ -1870,6 +1898,16 @@ export function ChatCodingRoute() {
     const modes = (chatRoomModesQuery.data ?? []).filter((mode) => String(mode.status ?? "").trim() === "ready");
     return modes.length ? modes : [{ id: "round_robin", label: "Round robin", status: "ready" }];
   }, [chatRoomModesQuery.data]);
+  const availableChatRoomPurposes = useMemo(() => {
+    const purposes = chatRoomPurposesQuery.data ?? [];
+    return purposes.length
+      ? purposes
+      : [
+          { id: "chat", label: "Chat", description: "" },
+          { id: "discussion", label: "Discussion", description: "" },
+          { id: "meeting", label: "Meeting", description: "" },
+        ];
+  }, [chatRoomPurposesQuery.data]);
 
   const filteredConversations = useMemo(() => {
     const term = sessionFilter.trim().toLowerCase();
@@ -1878,7 +1916,7 @@ export function ChatCodingRoute() {
       return conversations;
     }
     return conversations.filter((conversation) =>
-      [conversation.title, conversation.summary, conversation.status, conversation.type, conversation.agentCode ?? "", conversation.agentTemplateLabel ?? ""].some((value) =>
+      [conversation.title, conversation.summary, conversation.status, conversation.type, conversation.agentCode ?? "", conversation.agentDisplayName ?? "", conversation.agentTemplateLabel ?? ""].some((value) =>
         String(value ?? "").toLowerCase().includes(term),
       ),
     );
@@ -2143,7 +2181,7 @@ export function ChatCodingRoute() {
   }
 
   function handleToggleGroupManageSession(sessionId: string) {
-    if (!sessionId || groupRoundRunning || updateGroupRoomMutation.isPending) {
+    if (!sessionId || groupRoundActive || updateGroupRoomMutation.isPending) {
       return;
     }
     setGroupRoomActionError("");
@@ -2192,18 +2230,20 @@ export function ChatCodingRoute() {
       title,
       agentIds,
       mode: groupModeDraft || "round_robin",
+      purpose: groupPurposeDraft || "discussion",
     });
   }
 
   function handleStartGroupRound() {
     const topic = groupTopicDraft.trim();
-    if (!activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundRunning) {
+    if (!activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
       return;
     }
     startGroupRoundMutation.mutate({
       roomId: activeGroupRoomId,
       topic,
       mode: activeGroupRoom?.mode || "round_robin",
+      purpose: activeGroupRoom?.purpose || "discussion",
     });
   }
 
@@ -2225,6 +2265,7 @@ export function ChatCodingRoute() {
       title: groupManageTitleDraft.trim(),
       sessionIds: groupManageSessionIds,
       mode: groupManageModeDraft || "round_robin",
+      purpose: groupManagePurposeDraft || "discussion",
     });
   }
 
@@ -2421,6 +2462,10 @@ export function ChatCodingRoute() {
                 <span>{lang === "zh" ? "调度" : "Mode"}</span>
                 <strong>{activeGroupRoom?.mode ?? "round_robin"}</strong>
               </div>
+              <div className={styles.resourceMetric}>
+                <span>{lang === "zh" ? "目的" : "Purpose"}</span>
+                <strong>{activeGroupRoom?.purpose ?? "discussion"}</strong>
+              </div>
             </div>
             <section className={styles.groupManagementPanel} aria-label={lang === "zh" ? "群聊管理" : "Group management"}>
               <div className={styles.groupManagementHeader}>
@@ -2468,7 +2513,7 @@ export function ChatCodingRoute() {
                   <input
                     value={groupManageTitleDraft}
                     maxLength={80}
-                    disabled={groupRoundRunning || updateGroupRoomMutation.isPending}
+                    disabled={groupRoundActive || updateGroupRoomMutation.isPending}
                     onChange={(event) => {
                       setGroupRoomActionError("");
                       setGroupManageTitleDraft(event.target.value);
@@ -2479,7 +2524,7 @@ export function ChatCodingRoute() {
                   <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
                   <select
                     value={groupManageModeDraft}
-                    disabled={groupRoundRunning || updateGroupRoomMutation.isPending}
+                    disabled={groupRoundActive || updateGroupRoomMutation.isPending}
                     onChange={(event) => {
                       setGroupRoomActionError("");
                       setGroupManageModeDraft(event.target.value);
@@ -2488,6 +2533,23 @@ export function ChatCodingRoute() {
                     {readyChatRoomModes.map((mode) => (
                       <option key={mode.id} value={mode.id}>
                         {chatRoomModeLabel(mode, lang)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.groupModeSelect}>
+                  <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
+                  <select
+                    value={groupManagePurposeDraft}
+                    disabled={groupRoundRunning || updateGroupRoomMutation.isPending}
+                    onChange={(event) => {
+                      setGroupRoomActionError("");
+                      setGroupManagePurposeDraft(event.target.value);
+                    }}
+                  >
+                    {availableChatRoomPurposes.map((purpose) => (
+                      <option key={purpose.id} value={purpose.id}>
+                        {chatRoomPurposeLabel(purpose, lang)}
                       </option>
                     ))}
                   </select>
@@ -2502,11 +2564,7 @@ export function ChatCodingRoute() {
                   {(sessionsQuery.data ?? []).map((session) => {
                     const selected = groupManageSessionSet.has(session.id);
                     const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                    const agentFunction = formatAgentFunctionFromInstance(
-                      sessionAgent,
-                      session.agentTemplateLabel,
-                      session.agentProfileId,
-                    );
+                    const display = sessionAgentDisplayInfo(session, sessionAgent, lang);
                     const missingMessage = session.agentMissing
                       ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent" : "Missing valid Agent")
                       : "";
@@ -2522,12 +2580,14 @@ export function ChatCodingRoute() {
                         <input
                           type="checkbox"
                           checked={selected}
-                          disabled={groupRoundRunning || updateGroupRoomMutation.isPending}
+                          disabled={groupRoundActive || updateGroupRoomMutation.isPending}
                           onChange={() => handleToggleGroupManageSession(session.id)}
                         />
                         <span className={styles.groupMemberCopy}>
-                          <strong>{formatAgentIdentity(session.agentCode, session.agentDisplayName || session.title, session.title)}</strong>
-                          <small>{agentFunction}</small>
+                          <strong>{display.name}</strong>
+                          <small className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
+                            {display.functionLabel}
+                          </small>
                         </span>
                         {missingMessage ? (
                           <span className={styles.agentMissingInline} title={missingMessage}>
@@ -2539,7 +2599,7 @@ export function ChatCodingRoute() {
                   })}
                 </div>
               </div>
-              {groupRoundRunning ? (
+              {groupRoundActive ? (
                 <p className={styles.groupManagementHint}>
                   {lang === "zh" ? "群聊运行中，成员和模式会在本轮结束后允许修改。" : "The group is running. Members and mode can be changed after this round finishes."}
                 </p>
@@ -2848,7 +2908,11 @@ export function ChatCodingRoute() {
             <div className={styles.groupConversationFrame}>
               <header className={styles.groupConversationHeader}>
                 <div>
-                  <p>{activeGroupRoom?.mode ?? "round_robin"}</p>
+                  <p>
+                    {activeGroupRoom?.mode ?? "round_robin"}
+                    {" · "}
+                    {activeGroupRoom?.purpose ?? "discussion"}
+                  </p>
                   <h2>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h2>
                   <span>
                     {(activeGroupRoom?.participants ?? []).length} {lang === "zh" ? "位 Agent" : "agents"}
@@ -2870,7 +2934,7 @@ export function ChatCodingRoute() {
                   {describeError(activeGroupRoomQuery.error, t("loadFailed"))}
                 </div>
               ) : null}
-              <div className={styles.groupMessageTimeline} aria-live={groupRoundRunning ? "polite" : undefined}>
+              <div className={styles.groupMessageTimeline} aria-live={groupRoundActive ? "polite" : undefined}>
                 {(activeGroupRoom?.rounds ?? []).length ? (
                   (activeGroupRoom?.rounds ?? []).map((round, roundIndex) => {
                     const roundRunning = String(round.status ?? "").trim().toLowerCase() === "running";
@@ -2888,6 +2952,8 @@ export function ChatCodingRoute() {
                           {lang === "zh" ? `第 ${roundIndex + 1} 轮` : `Round ${roundIndex + 1}`}
                           {" · "}
                           {round.mode}
+                          {" · "}
+                          {round.purpose ?? activeGroupRoom?.purpose ?? "discussion"}
                           {" · "}
                           {statusLabel(round.status)}
                         </span>
@@ -2973,18 +3039,18 @@ export function ChatCodingRoute() {
                   disabled={
                     !groupTopicDraft.trim()
                     || startGroupRoundMutation.isPending
-                    || groupRoundRunning
+                    || groupRoundActive
                     || !activeGroupRoom
                   }
                 >
                   <UsersRound size={15} />
                   <span>
-                    {startGroupRoundMutation.isPending || groupRoundRunning
-                      ? (lang === "zh" ? "讨论中" : "Running")
+                    {startGroupRoundMutation.isPending || groupRoundActive
+                      ? (groupRoundStopping ? (lang === "zh" ? "停止中" : "Stopping") : (lang === "zh" ? "讨论中" : "Running"))
                       : (lang === "zh" ? "启动一轮" : "Run round")}
                   </span>
                 </button>
-                {groupRoundRunning ? (
+                {groupRoundActive ? (
                   <button
                     type="button"
                     className={styles.groupStopButton}
@@ -3182,12 +3248,8 @@ export function ChatCodingRoute() {
                   const participantMissingMessage = participant.agentMissing
                     ? participant.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent，已从群聊调度中停用。" : "Missing valid Agent. This member is disabled for group scheduling.")
                     : "";
-                  const participantFunction = formatAgentFunction(
-                    participant.agentTemplateLabel,
-                    participant.agentProfileId,
-                    undefined,
-                    participant.agentTemplateId,
-                  );
+                  const participantAgent = participant.agentId ? agentsById.get(participant.agentId) : undefined;
+                  const participantDisplay = participantAgentDisplayInfo(participant, participantAgent, lang);
                   const memberUpdated = formatRelativeTime(
                     memberMental?.updatedAt || memberDetail?.updatedAt || participantSession?.updatedAt || "",
                     Date.now(),
@@ -3206,10 +3268,10 @@ export function ChatCodingRoute() {
                           {avatarInitials(participant.agentCode, participant.title)}
                         </span>
                         <span className={styles.agentIndexCopy}>
-                          <strong>{formatAgentIdentity(participant.agentCode, participant.title, participant.sessionId)}</strong>
-                          <span>
-                            {formatAgentMeta(participant.agentCode, participantFunction, participant.agentProfileId)}
-                          </span>
+                          <strong>{participantDisplay.name}</strong>
+                          <em className={`${styles.agentRoleTag} ${styles[agentRoleClass(participantDisplay.tone)]}`}>
+                            {participantDisplay.functionLabel}
+                          </em>
                         </span>
                         <span className={participant.agentMissing ? styles.agentIndexWarning : styles.agentIndexStatus}>
                           {participant.agentMissing ? (lang === "zh" ? "缺少 Agent" : "Missing") : statusLabel(participant.status || participantSession?.status || "ready")}
@@ -3303,7 +3365,7 @@ export function ChatCodingRoute() {
                   />
                 </label>
                 <label className={styles.groupComposerField}>
-                  <span>{lang === "zh" ? "模式" : "Mode"}</span>
+                  <span>{lang === "zh" ? "调度模式" : "Mode"}</span>
                   <select
                     className={styles.groupComposerInput}
                     value={groupModeDraft}
@@ -3317,18 +3379,28 @@ export function ChatCodingRoute() {
                     ))}
                   </select>
                 </label>
+                <label className={styles.groupComposerField}>
+                  <span>{lang === "zh" ? "对话目的" : "Purpose"}</span>
+                  <select
+                    className={styles.groupComposerInput}
+                    value={groupPurposeDraft}
+                    onChange={(event) => setGroupPurposeDraft(event.target.value)}
+                    disabled={chatRoomPurposesQuery.isPending || createGroupRoomMutation.isPending}
+                  >
+                    {availableChatRoomPurposes.map((purpose) => (
+                      <option key={purpose.id} value={purpose.id}>
+                        {chatRoomPurposeLabel(purpose, lang)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <div className={styles.groupAgentPicker} aria-label={lang === "zh" ? "选择参与 Agent" : "Choose agents"}>
                   {agentsQuery.isPending ? (
                     <p className={styles.groupComposerEmpty}>{lang === "zh" ? "正在读取 Agent..." : "Loading agents..."}</p>
                   ) : groupCandidateAgents.length ? (
                     groupCandidateAgents.map((agent) => {
                       const selected = groupSelectedAgentIds.includes(agent.agentId);
-                      const agentFunction = formatAgentFunction(
-                        metadataString(agent, "functionalDisplayName"),
-                        agent.profileId,
-                        agent.roleKey,
-                        agent.templateId,
-                      );
+                      const display = agentDisplayInfo(agent, lang);
                       return (
                         <label key={agent.agentId} className={selected ? `${styles.groupAgentOption} ${styles.groupAgentOptionSelected}` : styles.groupAgentOption}>
                           <input
@@ -3338,8 +3410,10 @@ export function ChatCodingRoute() {
                             onChange={() => handleToggleGroupAgent(agent.agentId)}
                           />
                           <span>
-                            <strong>{formatAgentIdentity(agent.agentCode, agent.displayName || agent.agentId, agent.agentId)}</strong>
-                            <small>{formatAgentMeta(agent.agentCode, agentFunction, agent.profileId)}</small>
+                            <strong>{display.name}</strong>
+                            <small className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
+                              {display.functionLabel}
+                            </small>
                           </span>
                         </label>
                       );
@@ -3384,22 +3458,16 @@ export function ChatCodingRoute() {
                 >
                   {sessionAgentOptions.length ? (
                     sessionAgentOptions.map((agent) => {
-                      const agentName = formatAgentIdentity(agent.agentCode, agent.displayName || agent.agentId, agent.agentId);
-                      const agentFunction = formatAgentFunction(
-                        metadataString(agent, "functionalDisplayName"),
-                        agent.profileId,
-                        agent.roleKey,
-                        agent.templateId,
-                      );
+                      const display = agentDisplayInfo(agent, lang);
                       return (
                         <option key={agent.agentId} value={agent.agentId}>
-                          {formatAgentIdentityWithFunction(agentName, agentFunction)}
+                          {display.name} · {display.functionLabel}
                         </option>
                       );
                     })
                   ) : (
                     <option value={activeAgentId}>
-                      {formatAgentIdentityWithFunction(activeAgentDisplayName ?? activeAgentId, activeAgentFunctionLabel)}
+                      {activeAgentDisplayName ?? activeAgentId} · {activeAgentFunctionLabel}
                     </option>
                   )}
                 </select>
@@ -3487,6 +3555,7 @@ export function ChatCodingRoute() {
                   agentCode: conversation.agentCode,
                   agentProfileId: conversation.agentProfileId,
                   agentTemplateLabel: conversation.agentTemplateLabel,
+                  agentDisplayName: conversation.agentDisplayName,
                   workspacePath: conversation.workspacePath,
                   status: conversation.status,
                   taskSummary: conversation.summary,
@@ -3509,12 +3578,9 @@ export function ChatCodingRoute() {
                 const itemError = sessionComposerErrors[session.id] ?? "";
                 const itemIsNotice = itemError.startsWith(t("addSessionToReviewSucceeded"));
                 const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
-                const sessionAgentFunction = formatAgentFunctionFromInstance(
-                  sessionAgent,
-                  session.agentTemplateLabel,
-                  session.agentProfileId,
-                );
-                const sessionAgentMeta = formatAgentMeta(session.agentCode, sessionAgentFunction, session.agentProfileId);
+                const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang);
+                const sessionAgentName =
+                  sessionDisplay.name && sessionDisplay.name !== session.title ? sessionDisplay.name : "";
                 const missingAgentMessage = session.agentMissing
                   ? session.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent，当前会话缺少可运行内容。" : "Missing valid Agent. This session has no runnable Agent content.")
                   : "";
@@ -3565,7 +3631,10 @@ export function ChatCodingRoute() {
                             <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeDirect}`}>
                               {lang === "zh" ? "会话" : "Chat"}
                             </span>
-                            <span>{sessionAgentMeta}</span>
+                            {sessionAgentName ? <span>{sessionAgentName}</span> : null}
+                            <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
+                              {sessionDisplay.functionLabel}
+                            </span>
                             <time>{formatTime(session.updatedAt || session.lastActive)}</time>
                           </span>
                           {missingAgentMessage ? (
@@ -3586,7 +3655,7 @@ export function ChatCodingRoute() {
                         <span className={styles.conversationCopy}>
                           <span className={styles.conversationTitleRow}>
                             <span className={styles.sessionItemTitle}>
-                              {formatAgentIdentity(session.agentCode, session.agentDisplayName || session.title, session.title)}
+                              {session.title || sessionDisplay.name}
                             </span>
                             {!groupPanelActive && activeSessionId === session.id ? (
                               <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span>
@@ -3600,7 +3669,10 @@ export function ChatCodingRoute() {
                             <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeDirect}`}>
                               {lang === "zh" ? "会话" : "Chat"}
                             </span>
-                            <span>{sessionAgentMeta}</span>
+                            {sessionAgentName ? <span>{sessionAgentName}</span> : null}
+                            <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(sessionDisplay.tone)]}`}>
+                              {sessionDisplay.functionLabel}
+                            </span>
                             <time>{formatTime(session.updatedAt || session.lastActive)}</time>
                           </span>
                           {missingAgentMessage ? (

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./AgentsRoute.tsx?raw";
+import styles from "./AgentsRoute.module.css";
 import routerSource from "../app/router.tsx?raw";
 import shellSource from "../app/AppShell.tsx?raw";
 
@@ -147,12 +148,18 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.activityTimeline");
     expect(routeSource).toContain("copy.runtimeFocus");
     expect(routeSource).toContain("copy.runtimeNextStep");
+    expect(routeSource).toContain("copy.runtimeEvidence");
     expect(routeSource).toContain("styles.runtimeNextStep");
+    expect(routeSource).toContain("styles.runtimeEvidenceHint");
+    expect(styles.runtimeEvidenceHint).toBeTruthy();
+    expect(routeSource).toContain("RuntimeFocusEvidenceResult");
     expect(routeSource).toContain("findRuntimeFocusEvidence");
     expect(routeSource).toContain("runtimeFocusEvidence");
+    expect(routeSource).toContain("runtimeFocusEvidence.match?.runtimeSceneId");
     expect(routeSource).toContain("selectedAgent.runtimeStatus?.runId");
     expect(routeSource).toContain("selectedAgent.runtimeStatus?.sessionId");
-    expect(routeSource).toContain("openAgentLogs(runtimeFocusEvidence)");
+    expect(routeSource).toContain("runtimeEvidenceReasonLabel");
+    expect(routeSource).toContain("openAgentLogs(runtimeFocusEvidence.match)");
     expect(routeSource).toContain("openAgentSession");
     expect(routeSource).toContain("openAgentLogs");
     expect(routeSource).toContain("focusInboxMessage");
@@ -201,5 +208,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentTableHead");
     expect(routeSource).toContain("styles.agentRow");
     expect(routeSource).toContain("styles.detailPanel");
+  });
+
+  it("renders every Agent as a person name plus colored functional role tag", () => {
+    expect(routeSource).toContain("agentDisplayInfo(agent, lang)");
+    expect(routeSource).toContain("styles.agentRoleTag");
+    expect(routeSource).toContain("agentRoleTag_${display.tone}");
+    expect(routeSource).toContain("display.functionLabel");
   });
 });

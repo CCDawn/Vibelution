@@ -45,11 +45,95 @@ def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
 
     assert room["title"] == "方案群聊"
     assert room["mode"] == "round_robin"
+    assert room["purpose"] == "discussion"
+    assert [item["id"] for item in room["availablePurposes"]] == ["chat", "discussion", "meeting"]
     assert [item["sessionId"] for item in room["participants"]] == [
         "session-alpha",
         "session-beta",
     ]
     assert room["rounds"] == []
+
+
+def test_chat_room_purpose_changes_participant_prompt_and_round_payload(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    prompts = []
+    contexts = []
+
+    def fake_runner(participant, prompt, context):
+        prompts.append(prompt)
+        contexts.append(context)
+        return {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 自然回应",
+            "summary": "ok",
+        }
+
+    room = chat_room_service.create_chat_room(
+        title="自然聊天群",
+        participant_session_ids=["session-alpha", "session-beta"],
+        purpose="chat",
+    )
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "你们好",
+        agent_runner=fake_runner,
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert room["purpose"] == "chat"
+    assert latest_round["purpose"] == "chat"
+    assert contexts[0]["purpose"] == "chat"
+    assert "对话目的: chat" in prompts[0]
+    assert "像真实群聊一样回应当前用户话题" in prompts[0]
+    assert "不要写成任务报告" in prompts[0]
+    assert "会议协作" not in prompts[0]
+    assert any(
+        event[0][:3] == ("chat_room", "round", "chat_room.round.completed")
+        and event[1]["fields"]["purpose"] == "chat"
+        for event in recorded_events
+    )
+
+
+def test_chat_room_update_purpose_and_round_override_are_separate_from_scheduler_mode(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    prompts = []
+
+    def fake_runner(participant, prompt, context):
+        prompts.append(prompt)
+        return {"status": "completed", "raw_output": "ok", "summary": "ok"}
+
+    room = chat_room_service.create_chat_room(
+        title="目的可改群",
+        participant_session_ids=["session-alpha", "session-beta"],
+        mode="round_robin",
+        purpose="discussion",
+    )
+    updated = chat_room_service.update_chat_room(room["roomId"], purpose="meeting")
+
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "先开会再闲聊",
+        purpose="chat",
+        agent_runner=fake_runner,
+    )
+
+    latest_round = detail["rounds"][-1]
+    assert updated["mode"] == "round_robin"
+    assert updated["purpose"] == "meeting"
+    assert latest_round["mode"] == "round_robin"
+    assert latest_round["purpose"] == "chat"
+    assert "对话目的: chat" in prompts[0]
 
 
 def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path, monkeypatch):
@@ -686,7 +770,7 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
     assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
 
 
-def test_stop_chat_room_round_cancels_active_round_and_publishes_ready_detail(tmp_path, monkeypatch):
+def test_stop_chat_room_round_enters_stopping_then_publishes_ready_detail(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -725,30 +809,34 @@ def test_stop_chat_room_round_cancels_active_round_and_publishes_ready_detail(tm
         stopped = chat_room_service.stop_chat_room_round(room["roomId"], reason="pytest user stop")
 
         assert started["activeRoundId"]
-        assert stopped["status"] == "ready"
-        assert stopped["activeRoundId"] == ""
+        assert stopped["status"] == "stopping"
+        assert stopped["activeRoundId"] == started["activeRoundId"]
         latest_round = stopped["rounds"][-1]
         assert latest_round["roundId"] == started["activeRoundId"]
-        assert latest_round["status"] == "stopped"
-        assert "pytest user stop" in latest_round["summary"]
-        assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
-        user_stop_events = [
+        assert latest_round["status"] == "stopping"
+        assert latest_round["finishedAt"] == ""
+        assert chat_room_service.load_chat_room_work_run_summary()["active"]["status"] == "stopping"
+        stop_requested_events = [
             event
             for event in recorded_events
-            if event[0][:3] == ("chat_room", "round", "chat_room.round.user_stopped")
+            if event[0][:3] == ("chat_room", "round", "chat_room.round.stop_requested")
         ]
-        assert len(user_stop_events) == 1
-        assert user_stop_events[0][1]["outcome"] == "stopped"
-        assert user_stop_events[0][1]["lifecycle"] is True
-        assert user_stop_events[0][1]["fields"]["roomId"] == room["roomId"]
-        assert user_stop_events[0][1]["fields"]["roundId"] == started["activeRoundId"]
-        assert user_stop_events[0][1]["fields"]["reason"] == "pytest user stop"
+        assert len(stop_requested_events) == 1
+        assert stop_requested_events[0][1]["outcome"] == "stopping"
+        assert stop_requested_events[0][1]["lifecycle"] is True
+        assert stop_requested_events[0][1]["fields"]["roomId"] == room["roomId"]
+        assert stop_requested_events[0][1]["fields"]["roundId"] == started["activeRoundId"]
+        assert stop_requested_events[0][1]["fields"]["reason"] == "pytest user stop"
     finally:
         release_runner.set()
         executor.shutdown(wait=True, cancel_futures=True)
 
     final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert final_detail["status"] == "ready"
+    assert final_detail["activeRoundId"] == ""
     assert final_detail["rounds"][-1]["status"] == "stopped"
+    assert "pytest user stop" in final_detail["rounds"][-1]["summary"]
+    assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
 
 
 def test_stop_chat_room_round_rejects_room_without_active_round(tmp_path, monkeypatch):

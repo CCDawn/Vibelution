@@ -22,9 +22,10 @@ def list_conversations() -> list[dict[str, Any]]:
             {
                 "conversationId": str(session.get("id") or "").strip(),
                 "type": "direct_agent",
-                "title": str(session.get("agentDisplayName") or session.get("title") or "").strip(),
+                "title": str(session.get("title") or session.get("agentDisplayName") or "").strip(),
                 "agentId": str(session.get("agentId") or "").strip(),
                 "agentCode": str(session.get("agentCode") or "").strip(),
+                "agentDisplayName": str(session.get("agentDisplayName") or "").strip(),
                 "directSessionId": str(session.get("id") or "").strip(),
                 "roomId": "",
                 "status": str(session.get("status") or "").strip(),

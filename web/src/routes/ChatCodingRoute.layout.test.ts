@@ -105,7 +105,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleToggleGroupComposer");
     expect(routeSource).toContain("handleCreateGroupRoom");
     expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents\")");
-    expect(routeSource).toContain("body: JSON.stringify({ title, agentIds, mode })");
+    expect(routeSource).toContain("body: JSON.stringify({ title, agentIds, mode, purpose })");
     expect(routeSource).toContain("styles.groupComposerPanel");
     expect(routeSource).toContain("styles.groupAgentPicker");
     expect(routeSource).toContain("styles.createGroupButton");
@@ -130,7 +130,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleOpenGroupRoom");
     expect(routeSource).toContain("setRightPaneCollapsed(false)");
     expect(routeSource).toContain("chatRoomModeLabel(mode, lang)");
+    expect(routeSource).toContain("chatRoomPurposeLabel(purpose, lang)");
+    expect(routeSource).toContain("queryKeys.chatRoomPurposes()");
+    expect(routeSource).toContain("fetchJson<ChatRoomPurpose[]>(\"/api/chat-rooms/purposes\")");
     expect(routeSource).toContain("抢占式讨论");
+    expect(routeSource).toContain("对话目的");
+    expect(routeSource).toContain("purpose: groupPurposeDraft || \"discussion\"");
+    expect(routeSource).toContain("purpose: activeGroupRoom?.purpose || \"discussion\"");
+    expect(routeSource).toContain("purpose: groupManagePurposeDraft || \"discussion\"");
     expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`)");
     expect(routeSource).toContain("new EventSource(`/api/chat-rooms/${streamRoomId}/events`)");
     expect(routeSource).toContain("syncChatRoomDetail(payload.detail)");
@@ -139,11 +146,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("stopGroupRoundMutation");
     expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/stop`");
     expect(routeSource).toContain("handleStopGroupRound");
+    expect(routeSource).toContain("groupRoundStopping");
+    expect(routeSource).toContain("groupRoundActive");
     expect(routeSource).toContain("disabled={startGroupRoundMutation.isPending}");
     expect(routeSource).toContain("updateGroupRoomMutation");
     expect(routeSource).toContain("deleteGroupRoomMutation");
     expect(routeSource).toContain("groupManageTitleDraft");
     expect(routeSource).toContain("title: groupManageTitleDraft.trim()");
+    expect(routeSource).toContain("groupManagePurposeDraft");
     expect(routeSource).toContain("participantSessionIds: sessionIds");
     expect(routeSource).toContain("groupManageSessionIds.length < 2");
     expect(routeSource).toContain("setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId))");
@@ -202,15 +212,17 @@ describe("ChatCodingRoute layout contract", () => {
   });
 
   it("shows each visible agent with a functional role label, not only a person name", () => {
-    expect(routeSource).toContain("metadataString(agent, \"functionalDisplayName\")");
-    expect(routeSource).toContain("formatAgentFunctionFromInstance");
-    expect(routeSource).toContain("formatAgentIdentityWithFunction");
+    expect(routeSource).toContain("agentDisplayInfo(agent, lang)");
+    expect(routeSource).toContain("sessionAgentDisplayInfo(session, sessionAgent, lang)");
+    expect(routeSource).toContain("participantAgentDisplayInfo(participant, participantAgent, lang)");
     expect(routeSource).toContain("const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined");
-    expect(routeSource).toContain("const sessionAgentMeta = formatAgentMeta(session.agentCode, sessionAgentFunction, session.agentProfileId)");
-    expect(routeSource).toContain("const participantFunction = formatAgentFunction(");
+    expect(routeSource).toContain("const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang)");
+    expect(routeSource).toContain("const participantDisplay = participantAgentDisplayInfo(participant, participantAgent, lang)");
     expect(routeSource).toContain("styles.groupMemberCopy");
+    expect(routeSource).toContain("styles.agentRoleTag");
 
     expect(routeStyles.groupMemberCopy).toBeTypeOf("string");
+    expect(routeStyles.agentRoleTag).toBeTypeOf("string");
   });
 
   it("groups the unified conversation list like expandable contact folders", () => {
@@ -255,6 +267,22 @@ describe("ChatCodingRoute layout contract", () => {
     );
     expect(deleteMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
       deleteMutationSource.indexOf("void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() })"),
+    );
+  });
+
+  it("keeps renamed direct session titles visible before conversation refetch finishes", () => {
+    const renameMutationSource = routeSource.slice(routeSource.indexOf("const renameSessionMutation"));
+    expect(routeSource).toContain("mergeSessionDetailIntoConversations");
+    expect(routeSource).toContain("title: String(session.title || session.agentDisplayName || session.id).trim()");
+    expect(routeSource).toContain("agentDisplayName: conversation.agentDisplayName");
+    expect(routeSource).toContain("const sessionAgentName =");
+    expect(routeSource).toContain("{session.title || sessionDisplay.name}");
+    expect(renameMutationSource).toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
+    expect(renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
+      renameMutationSource.indexOf("syncSessionDetail(nextDetail)"),
+    );
+    expect(renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
+      renameMutationSource.indexOf("void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() })"),
     );
   });
 });

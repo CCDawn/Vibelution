@@ -105,6 +105,10 @@ type AgentActivityTimelineItem = {
   canOpenLogs: boolean;
   evidence: AgentRuntimeEvidenceMatch | null;
 };
+type RuntimeFocusEvidenceResult = {
+  match: AgentRuntimeEvidenceMatch | null;
+  reason: "run" | "source_run" | "session" | "fallback" | "missing";
+};
 
 const AGENT_PRIMARY_MODE_OPTIONS = ["chat", "research", "supervised_evolution", "self_evolution", "general"];
 
@@ -264,6 +268,24 @@ function runtimeNextStep(agent: AgentConfigWorkspaceAgent | null | undefined, la
     : "No active run is visible; inspect recent run history, Inbox, or open the direct session for the next task.";
 }
 
+function runtimeEvidenceReasonLabel(reason: RuntimeFocusEvidenceResult["reason"], lang: "zh" | "en") {
+  const zh: Record<RuntimeFocusEvidenceResult["reason"], string> = {
+    run: "按 run 命中",
+    source_run: "按 source run 命中",
+    session: "按 session 命中",
+    fallback: "回落证据",
+    missing: "暂无证据",
+  };
+  const en: Record<RuntimeFocusEvidenceResult["reason"], string> = {
+    run: "Matched by run",
+    source_run: "Matched by source run",
+    session: "Matched by session",
+    fallback: "Fallback evidence",
+    missing: "No evidence",
+  };
+  return (lang === "zh" ? zh : en)[reason];
+}
+
 function modeLabel(mode: string, lang: "zh" | "en") {
   const zh: Record<string, string> = {
     chat: "会话",
@@ -409,24 +431,29 @@ function buildActivityTimeline(
 function findRuntimeFocusEvidence(
   agent: AgentConfigWorkspaceAgent | null | undefined,
   evidence: AgentRuntimeEvidence | undefined,
-) {
+): RuntimeFocusEvidenceResult {
   const matches = evidence?.matches ?? [];
   if (!matches.length || !agent?.runtimeStatus) {
-    return matches[0] ?? null;
+    return { match: matches[0] ?? null, reason: matches[0] ? "fallback" : "missing" };
   }
   const runId = String(agent.runtimeStatus.runId || "").trim();
   const sessionId = String(agent.runtimeStatus.sessionId || agent.directSessionId || "").trim();
   const sourceRunId = runId.includes("-") ? runId.split("-").at(-1) ?? "" : "";
   const fieldValues = (item: AgentRuntimeEvidenceMatch) =>
     Object.values(item.matchedFields ?? {}).map((value) => String(value || "").trim());
-  const runMatch = matches.find((item) => {
-    const values = fieldValues(item);
-    return Boolean(runId && values.includes(runId)) || Boolean(sourceRunId && values.includes(sourceRunId));
-  });
+  const runMatch = matches.find((item) => runId && fieldValues(item).includes(runId));
   if (runMatch) {
-    return runMatch;
+    return { match: runMatch, reason: "run" };
   }
-  return matches.find((item) => sessionId && fieldValues(item).includes(sessionId)) ?? matches[0] ?? null;
+  const sourceRunMatch = matches.find((item) => sourceRunId && fieldValues(item).includes(sourceRunId));
+  if (sourceRunMatch) {
+    return { match: sourceRunMatch, reason: "source_run" };
+  }
+  const sessionMatch = matches.find((item) => sessionId && fieldValues(item).includes(sessionId));
+  if (sessionMatch) {
+    return { match: sessionMatch, reason: "session" };
+  }
+  return { match: matches[0] ?? null, reason: matches[0] ? "fallback" : "missing" };
 }
 
 function filterAgents(
@@ -912,6 +939,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         runtimeLatestRun: "最近运行",
         runtimeUpdated: "更新时间",
         runtimeNextStep: "建议下一步",
+        runtimeEvidence: "日志证据",
         runHistoryLoading: "正在读取运行历史...",
         noRunHistory: "还没有运行或子 Agent 记录。",
         inboxTitle: "Inbox 待办",
@@ -1044,6 +1072,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         runtimeLatestRun: "Latest run",
         runtimeUpdated: "Updated",
         runtimeNextStep: "Suggested next step",
+        runtimeEvidence: "Log evidence",
         runHistoryLoading: "Loading run history...",
         noRunHistory: "No run or sub-agent history yet.",
         inboxTitle: "Inbox pending",
@@ -2553,6 +2582,11 @@ export function AgentsRoute() {
                   <strong>{copy.runtimeNextStep}</strong>
                   <span>{runtimeNextStep(selectedAgent, lang)}</span>
                 </div>
+                <div className={styles.runtimeEvidenceHint}>
+                  <strong>{copy.runtimeEvidence}</strong>
+                  <span>{runtimeEvidenceReasonLabel(runtimeFocusEvidence.reason, lang)}</span>
+                  <code>{runtimeFocusEvidence.match?.runtimeSceneId || "-"}</code>
+                </div>
                 <div className={styles.timelineActions}>
                   {selectedAgent.runtimeStatus?.sessionId || selectedAgent.directSessionId ? (
                     <button
@@ -2563,9 +2597,9 @@ export function AgentsRoute() {
                       {copy.openSession}
                     </button>
                   ) : null}
-                  <button type="button" onClick={() => openAgentLogs(runtimeFocusEvidence)}>
+                  <button type="button" onClick={() => openAgentLogs(runtimeFocusEvidence.match)}>
                     <Search size={13} />
-                    {copy.openLogs}
+                    {runtimeFocusEvidence.match ? `${copy.openLogs} · ${runtimeFocusEvidence.match.runtimeSceneId}` : copy.openLogs}
                   </button>
                 </div>
               </section>

@@ -1430,6 +1430,7 @@ export type ConversationSummary = {
   title: string;
   agentId?: string;
   agentCode?: string;
+  agentDisplayName?: string;
   directSessionId?: string;
   roomId?: string;
   status: string;
@@ -1621,6 +1622,12 @@ export type ChatRoomMode = {
   status: "ready" | "planned" | string;
 };
 
+export type ChatRoomPurpose = {
+  id: "chat" | "discussion" | "meeting" | string;
+  label: string;
+  description?: string;
+};
+
 export type ChatRoomParticipant = {
   participantId: string;
   kind: string;
@@ -1664,6 +1671,7 @@ export type ChatRoomRound = {
   roomId: string;
   topic: string;
   mode: string;
+  purpose: string;
   config: Record<string, unknown>;
   status: string;
   speakerOrder: string[];
@@ -1678,6 +1686,7 @@ export type ChatRoomDetail = {
   roomId: string;
   title: string;
   mode: string;
+  purpose: string;
   config: Record<string, unknown>;
   participants: ChatRoomParticipant[];
   rounds: ChatRoomRound[];
@@ -1686,6 +1695,7 @@ export type ChatRoomDetail = {
   createdAt: string;
   updatedAt: string;
   availableModes: ChatRoomMode[];
+  availablePurposes: ChatRoomPurpose[];
 };
 
 export type ChatRoomStreamEvent = {
