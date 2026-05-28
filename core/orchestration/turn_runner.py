@@ -52,6 +52,33 @@ def create_agent_runtime(
     return agent_factory(mode=mode, workspace_path=workspace_path, config=config)
 
 
+def prepare_agent_turn(
+    agent: Any,
+    *,
+    carryover: dict[str, Any] | None = None,
+    runtime_context: str = "",
+    interrupt_checker: InterruptChecker | None = None,
+    chat_history: list[dict[str, Any]] | None = None,
+) -> None:
+    """Seed optional Agent turn inputs when the runtime supports them."""
+
+    seed_turn_carryover = getattr(agent, "seed_turn_carryover", None)
+    if callable(seed_turn_carryover) and carryover:
+        seed_turn_carryover(carryover)
+
+    seed_runtime_context = getattr(agent, "seed_runtime_context", None)
+    if callable(seed_runtime_context) and runtime_context:
+        seed_runtime_context(runtime_context)
+
+    stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
+    if callable(stop_configurer) and interrupt_checker:
+        stop_configurer(interrupt_checker)
+
+    restore_chat_history = getattr(agent, "seed_chat_history", None)
+    if callable(restore_chat_history) and chat_history:
+        restore_chat_history(chat_history)
+
+
 def run_existing_agent_single_turn(
     agent: Any,
     *,
@@ -95,17 +122,12 @@ def run_agent_single_turn(
         config=request.config,
         agent_factory=agent_factory,
     )
-    seed_turn_carryover = getattr(agent, "seed_turn_carryover", None)
-    if callable(seed_turn_carryover) and request.carryover:
-        seed_turn_carryover(request.carryover)
-
-    seed_runtime_context = getattr(agent, "seed_runtime_context", None)
-    if callable(seed_runtime_context) and request.runtime_context:
-        seed_runtime_context(request.runtime_context)
-
-    stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
-    if callable(stop_configurer) and request.interrupt_checker:
-        stop_configurer(request.interrupt_checker)
+    prepare_agent_turn(
+        agent,
+        carryover=request.carryover,
+        runtime_context=request.runtime_context,
+        interrupt_checker=request.interrupt_checker,
+    )
 
     raw_result = run_existing_agent_single_turn(agent, initial_prompt=request.initial_prompt)
     result = raw_result if isinstance(raw_result, dict) else {}
@@ -125,6 +147,7 @@ __all__ = [
     "AgentSingleTurnRequest",
     "AgentSingleTurnResult",
     "create_agent_runtime",
+    "prepare_agent_turn",
     "run_existing_agent_single_turn",
     "run_agent_single_turn",
 ]
