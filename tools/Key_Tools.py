@@ -50,6 +50,7 @@ from core.infrastructure.workspace_cleaner import (
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
+from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
     code_symbol_tool as _code_symbol_impl,
@@ -883,6 +884,39 @@ def create_key_tools() -> List[BaseTool]:
             input_artifact_id=input_artifact_id,
         )
 
+    @tool
+    def research_knowledge_query_tool(
+        query: str = "",
+        collection: str = "all",
+        kind: str = "",
+        category: str = "",
+        limit: int = 8,
+    ) -> str:
+        """
+        【科研知识库查询】只读查询 Vibelution 的科研知识库。
+
+        适合检索已沉淀的论文、GitHub、数据集、网页来源，以及从这些来源抽取出的 claims、evidence 和 gaps。
+        该工具涉及跨会话科研资料，默认不对所有 Agent 开放；只有 Agent 的 ToolPolicy.allowedTools 显式包含
+        research_knowledge_query_tool 时才可调用。
+
+        Args:
+            query: 查询关键词或短语，可为空以查看最近资料
+            collection: 查询集合，可选 all / entries / claims / evidence / gaps
+            kind: 可选来源类型过滤：paper / github / dataset / web
+            category: 可选分类过滤，如 literature / dataset / open_source / web_background
+            limit: 每个集合最多返回条数，范围 1-25
+
+        Returns:
+            JSON 格式的只读查询结果和摘要
+        """
+        return _research_knowledge_query_impl(
+            query=query,
+            collection=collection,
+            kind=kind,
+            category=category,
+            limit=limit,
+        )
+
     # ── 学习卸载工具 (P2) ──────────────────────────────────────────────────
 
     @tool
@@ -1001,6 +1035,7 @@ def create_key_tools() -> List[BaseTool]:
         # Agent 间通信
         agent_message_tool,
         image2_generate_tool,
+        research_knowledge_query_tool,
         # 学习卸载 (P2)
         record_learning_tool,
         search_memory_tool,

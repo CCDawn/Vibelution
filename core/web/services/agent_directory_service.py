@@ -44,6 +44,7 @@ AGENT_WORKSPACE_SUBDIRS = (
 AGENT_TERRITORY_WRITE_SCOPES = ("private",)
 AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
 TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
+EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {"research_knowledge_query_tool"}
 KNOWN_AGENT_PRIMARY_MODES = {"chat", "research", "self_evolution", "supervised_evolution", "general"}
 WRITE_RETRY_TIMEOUT_SECONDS = 2.0
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -775,11 +776,17 @@ def filter_llm_tools_for_current_agent(tools: Iterable[Any]) -> list[Any]:
     allowed = set(str(item or "").strip() for item in policy.get("allowedTools") or [] if str(item or "").strip())
     blocked = set(str(item or "").strip() for item in policy.get("blockedTools") or [] if str(item or "").strip())
     if not allowed and not blocked:
-        return list(tools or [])
+        return [
+            tool
+            for tool in list(tools or [])
+            if str(getattr(tool, "name", "") or "").strip() not in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
+        ]
     filtered = []
     for tool in list(tools or []):
         name = str(getattr(tool, "name", "") or "").strip()
         if not name:
+            continue
+        if name in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS and name not in allowed:
             continue
         if allowed and name not in allowed:
             continue
@@ -1116,6 +1123,14 @@ def evaluate_tool_policy(
     policy_id = str(policy.get("policyId") or policy.get("id") or "").strip() or DEFAULT_TOOL_POLICY_ID
     allowed = set(str(item or "").strip() for item in policy.get("allowedTools") or [] if str(item or "").strip())
     blocked = set(str(item or "").strip() for item in policy.get("blockedTools") or [] if str(item or "").strip())
+    if normalized_tool in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS and normalized_tool not in allowed:
+        return _blocked_decision(
+            normalized_tool,
+            "tool_requires_explicit_allow",
+            policy_id,
+            agent_id,
+            f"[工具策略提示] `{normalized_tool}` 是受限工具，需要在该 Agent 的 ToolPolicy.allowedTools 中显式授权后才能使用。",
+        )
     if allowed and normalized_tool not in allowed:
         return _blocked_decision(
             normalized_tool,
