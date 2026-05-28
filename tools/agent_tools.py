@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from core.orchestration.subagent_roles import ALLOWED_SUBAGENT_TASK_TYPES
@@ -24,6 +25,7 @@ from core.orchestration.subagent_roles import ALLOWED_SUBAGENT_TASK_TYPES
 # 子 agent 只允许由主 agent 派发一次，不允许继续级联委派。
 _MAX_RECURSION_DEPTH = 1
 _SUBAGENT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
+_MAX_SCENE_TEXT = 1200
 _stream_sink_local = threading.local()
 
 
@@ -147,6 +149,108 @@ def _normalize_context_pack(context_pack: Any) -> str:
     if isinstance(context_pack, str):
         return context_pack.strip()
     return json.dumps(context_pack, ensure_ascii=False, indent=2)
+
+
+def _now_iso() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat()
+
+
+def _safe_subagent_run_fragment(value: Any, *, fallback: str) -> str:
+    raw = str(value or "").strip()
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw).strip("._-")
+    if not token:
+        token = fallback
+    return token[:80].rstrip("._-") or fallback
+
+
+def _new_subagent_run_id(task_type: str, depth: int) -> str:
+    task_fragment = _safe_subagent_run_fragment(task_type or "inspect", fallback="inspect")
+    return f"subagent-{task_fragment}-d{max(int(depth or 0), 0)}-{uuid.uuid4().hex[:12]}"
+
+
+def _subagent_child_log_path(sub_run_id: str) -> str:
+    run_fragment = _safe_subagent_run_fragment(sub_run_id, fallback="subagent")
+    return f"agent/sub_agent_runs/{run_fragment}.jsonl"
+
+
+def _truncate_scene_text(value: Any, limit: int = _MAX_SCENE_TEXT) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "\n... truncated ..."
+
+
+def _scene_scope_summary(scope: Any) -> str:
+    if scope in (None, ""):
+        return ""
+    if isinstance(scope, (dict, list)):
+        return _truncate_scene_text(json.dumps(scope, ensure_ascii=False, sort_keys=True), 600)
+    return _truncate_scene_text(scope, 600)
+
+
+def _record_subagent_scene_event(
+    *,
+    sub_run_id: str,
+    event_code: str,
+    status: str,
+    task_type: str,
+    goal: str,
+    scope: Any = None,
+    level: str = "info",
+    outcome: str = "observed",
+    parent_session_id: str = "",
+    parent_turn: str = "",
+    pid: int | None = None,
+    fields: Optional[Dict[str, Any]] = None,
+    child_payload: Optional[Dict[str, Any]] = None,
+    lifecycle: bool = True,
+) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        event_fields: Dict[str, Any] = {
+            "runKind": "temporary_sub_agent_run",
+            "subRunId": sub_run_id,
+            "runId": sub_run_id,
+            "status": status,
+            "taskType": task_type or "inspect",
+            "goalPreview": _truncate_scene_text(goal, 240),
+            "scopeSummary": _scene_scope_summary(scope),
+            "parentSessionId": parent_session_id,
+            "parentTurn": parent_turn,
+        }
+        if pid is not None:
+            event_fields["pid"] = int(pid)
+        if fields:
+            event_fields.update(fields)
+        payload = {
+            "entryType": "temporary_sub_agent_run",
+            "subRunId": sub_run_id,
+            "status": status,
+            "taskType": task_type or "inspect",
+            "goalPreview": _truncate_scene_text(goal, 240),
+            "parentSessionId": parent_session_id,
+            "parentTurn": parent_turn,
+            "recordedAt": _now_iso(),
+        }
+        if child_payload:
+            payload.update(child_payload)
+        record_runtime_scene_event(
+            "agent",
+            "subagent",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome,
+            fields=event_fields,
+            child_log_path=_subagent_child_log_path(sub_run_id),
+            child_log_payload=payload,
+            lifecycle=lifecycle,
+        )
+    except Exception:
+        return
 
 
 def _extract_conversation_log_path(goal: str, scope: Any) -> Optional[Path]:
@@ -561,19 +665,53 @@ def spawn_agent(
     normalized_scope = _normalize_scope(scope)
     normalized_context_pack = _normalize_context_pack(context_pack)
     normalized_task_type = (task_type or "").strip().lower()
+    effective_task_type = normalized_task_type or "inspect"
+    sub_run_id = _new_subagent_run_id(effective_task_type, _get_recursion_depth() + 1)
+    parent_session_id = ""
+    parent_turn = ""
     fast_result = None
     if normalized_task_type and normalized_task_type not in ALLOWED_SUBAGENT_TASK_TYPES:
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.rejected",
+            status="error",
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            outcome="rejected",
+            level="warning",
+            fields={"reason": "unsupported_task_type"},
+        )
         return json.dumps(
             {
                 "status": "error",
                 "code": "UNSUPPORTED_SUBAGENT_TASK_TYPE",
                 "message": f"子 agent 仅支持固定模式: {', '.join(sorted(ALLOWED_SUBAGENT_TASK_TYPES))}",
+                "subRunId": sub_run_id,
             },
             ensure_ascii=False,
         )
     if normalized_task_type == "diagnose" and (normalized_constraints or {}).get("readonly"):
         fast_result = _fast_diagnose_conversation_log(goal or task, normalized_scope)
     if fast_result:
+        fast_result["subRunId"] = sub_run_id
+        fast_result["depth"] = _get_recursion_depth() + 1
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.fast_path_completed",
+            status=str(fast_result.get("status") or "completed"),
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            outcome="succeeded",
+            fields={"fastPath": str(fast_result.get("fast_path") or "conversation_log_scan")},
+            child_payload={
+                "fastPath": str(fast_result.get("fast_path") or "conversation_log_scan"),
+                "summary": _truncate_scene_text(fast_result.get("summary"), 600),
+                "evidenceCount": len(fast_result.get("evidence") or []),
+                "findingCount": len(fast_result.get("findings") or []),
+            },
+        )
         return json.dumps(fast_result, ensure_ascii=False)
     max_steps = 0
     try:
@@ -582,29 +720,64 @@ def spawn_agent(
         max_steps = 0
 
     if not task and not goal:
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.rejected",
+            status="error",
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            outcome="rejected",
+            level="warning",
+            fields={"reason": "missing_task"},
+        )
         return json.dumps(
-            {"status": "error", "code": "MISSING_TASK", "message": "任务描述不能为空"},
+            {"status": "error", "code": "MISSING_TASK", "message": "任务描述不能为空", "subRunId": sub_run_id},
             ensure_ascii=False,
         )
 
     depth = _get_recursion_depth()
     if depth >= _MAX_RECURSION_DEPTH:
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.rejected",
+            status="error",
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            outcome="rejected",
+            level="warning",
+            fields={"reason": "max_recursion", "depth": depth, "maxDepth": _MAX_RECURSION_DEPTH},
+        )
         return json.dumps(
             {
                 "status": "error",
                 "code": "MAX_RECURSION",
                 "message": "子 agent 不允许继续派发子 agent；请回到主 agent 收束。",
+                "subRunId": sub_run_id,
             },
             ensure_ascii=False,
         )
 
     agent_path = Path(__file__).parent.parent / "agent.py"
     if not agent_path.exists():
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.rejected",
+            status="error",
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            outcome="rejected",
+            level="error",
+            fields={"reason": "agent_not_found", "agentPath": str(agent_path)},
+        )
         return json.dumps(
             {
                 "status": "error",
                 "code": "AGENT_NOT_FOUND",
                 "message": f"找不到 agent.py: {agent_path}",
+                "subRunId": sub_run_id,
             },
             ensure_ascii=False,
         )
@@ -628,10 +801,11 @@ def spawn_agent(
 
         conversation = unified_logger.conversation
         parent_session_id = str(getattr(conversation, "_session_id", "") or "").strip()
+        parent_turn = str(getattr(conversation, "_turn_count", 0) or 0)
         if parent_session_id:
             env["VIBELUTION_LOG_SESSION_ID"] = parent_session_id
             env["VIBELUTION_LOG_ACTOR"] = "subagent"
-            env["VIBELUTION_LOG_PARENT_TURN"] = str(getattr(conversation, "_turn_count", 0) or 0)
+            env["VIBELUTION_LOG_PARENT_TURN"] = parent_turn
             env["VIBELUTION_LOG_ACTOR_LABEL"] = (task_type or "inspect").strip() or "inspect"
     except Exception:
         pass
@@ -661,14 +835,53 @@ def spawn_agent(
             **_subagent_process_group_kwargs(),
         )
     except Exception as e:
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.spawn_failed",
+            status="error",
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            parent_session_id=parent_session_id,
+            parent_turn=parent_turn,
+            outcome="failed",
+            level="error",
+            fields={"errorType": type(e).__name__},
+            child_payload={"errorType": type(e).__name__, "error": _truncate_scene_text(str(e), 600)},
+        )
         return json.dumps(
             {
                 "status": "error",
                 "code": "SPAWN_FAILED",
                 "message": f"无法启动子 Agent: {type(e).__name__}: {e}",
+                "subRunId": sub_run_id,
             },
             ensure_ascii=False,
         )
+
+    _record_subagent_scene_event(
+        sub_run_id=sub_run_id,
+        event_code="subagent.run.started",
+        status="running",
+        task_type=effective_task_type,
+        goal=goal or task,
+        scope=normalized_scope,
+        parent_session_id=parent_session_id,
+        parent_turn=parent_turn,
+        pid=getattr(process, "pid", None),
+        outcome="started",
+        fields={
+            "timeoutSeconds": max(int(timeout), 1),
+            "maxSteps": max_steps,
+            "hasContextPack": bool(normalized_context_pack),
+            "deliverableCount": len(normalized_deliverables),
+        },
+        child_payload={
+            "timeoutSeconds": max(int(timeout), 1),
+            "maxSteps": max_steps,
+            "pid": getattr(process, "pid", None),
+        },
+    )
 
     output_queue: queue.Queue[tuple[str, Optional[str]]] = queue.Queue()
     stdout_parts: List[str] = []
@@ -754,11 +967,32 @@ def spawn_agent(
             process.wait(timeout=5)
         except Exception:
             _terminate_process_tree(process)
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.cancelled",
+            status="cancelled",
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            parent_session_id=parent_session_id,
+            parent_turn=parent_turn,
+            pid=getattr(process, "pid", None),
+            outcome="cancelled",
+            level="warning",
+            fields={"stopReason": cancelled_reason},
+            child_payload={
+                "stopReason": cancelled_reason,
+                "processOutputPreview": _truncate_scene_text(process_output),
+                "rawOutputPreview": _truncate_scene_text(raw_output),
+            },
+        )
         return json.dumps(
             {
                 "status": "cancelled",
                 "task_type": task_type or "inspect",
                 "goal": goal or task[:100],
+                "subRunId": sub_run_id,
+                "depth": depth + 1,
                 "summary": "子 Agent 已随停止请求终止。",
                 "message": "子 Agent 已随停止请求终止。",
                 "stop_reason": cancelled_reason,
@@ -776,11 +1010,32 @@ def spawn_agent(
         raw_output = process_output
         if stderr:
             raw_output = (raw_output + f"\n\n[stderr]\n{stderr}").strip()
+        _record_subagent_scene_event(
+            sub_run_id=sub_run_id,
+            event_code="subagent.run.timeout",
+            status="timeout",
+            task_type=effective_task_type,
+            goal=goal or task,
+            scope=normalized_scope,
+            parent_session_id=parent_session_id,
+            parent_turn=parent_turn,
+            pid=getattr(process, "pid", None),
+            outcome="timeout",
+            level="error",
+            fields={"timeoutSeconds": max(int(timeout), 1)},
+            child_payload={
+                "timeoutSeconds": max(int(timeout), 1),
+                "processOutputPreview": _truncate_scene_text(process_output),
+                "rawOutputPreview": _truncate_scene_text(raw_output),
+            },
+        )
         return json.dumps(
             {
                 "status": "timeout",
                 "task_type": task_type or "inspect",
                 "goal": goal or task[:100],
+                "subRunId": sub_run_id,
+                "depth": depth + 1,
                 "summary": f"子 Agent 执行超时 ({timeout}s)",
                 "message": f"子 Agent 执行超时 ({timeout}s)",
                 "scope_touched": normalized_scope,
@@ -804,5 +1059,34 @@ def spawn_agent(
         goal=goal or task,
         scope=normalized_scope,
     )
+    payload["subRunId"] = sub_run_id
     payload["depth"] = depth + 1
+    final_status = str(payload.get("status") or "").strip().lower() or "unknown"
+    success_statuses = {"completed", "success", "ok", "partial"}
+    _record_subagent_scene_event(
+        sub_run_id=sub_run_id,
+        event_code="subagent.run.finished",
+        status=final_status,
+        task_type=effective_task_type,
+        goal=goal or task,
+        scope=normalized_scope,
+        parent_session_id=parent_session_id,
+        parent_turn=parent_turn,
+        pid=getattr(process, "pid", None),
+        outcome="succeeded" if final_status in success_statuses else final_status,
+        level="info" if final_status in success_statuses else "warning",
+        fields={
+            "exitCode": returncode,
+            "confidence": str(payload.get("confidence") or "").strip(),
+            "evidenceCount": len(payload.get("evidence") or []),
+            "findingCount": len(payload.get("findings") or []),
+        },
+        child_payload={
+            "exitCode": returncode,
+            "summary": _truncate_scene_text(payload.get("summary"), 600),
+            "confidence": str(payload.get("confidence") or "").strip(),
+            "processOutputPreview": _truncate_scene_text(payload.get("process_output")),
+            "rawOutputPreview": _truncate_scene_text(payload.get("raw_output")),
+        },
+    )
     return json.dumps(payload, ensure_ascii=False)
