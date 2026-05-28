@@ -66,6 +66,8 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("writeCustomResearchTemplates");
     expect(routeSource).toContain("createCustomResearchModuleTemplate");
     expect(routeSource).toContain("createCustomResearchEdgeTemplate");
+    expect(routeSource).toContain("research_ceo_entry");
+    expect(routeSource).toContain("organization_advisor_entry");
     expect(routeSource).toContain("broad_search");
     expect(routeSource).toContain("deep_search");
     expect(routeSource).toContain("evidence_review");
@@ -76,8 +78,6 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).not.toContain("semantic_cluster");
     expect(routeSource).not.toContain("novelty_reverse_check");
     expect(routeSource).not.toContain("human_choice");
-    expect(routeSource).not.toContain("research_ceo_agent");
-    expect(routeSource).not.toContain("organization_advisor_agent");
     expect(routeSource).not.toContain("collaboration_chat");
     expect(routeSource).toContain("edgeGeometry");
     expect(routeSource).toContain("EDGE_TYPE_OPTIONS");

@@ -238,6 +238,8 @@ const FLOW_CONDITION_EDGE_TYPES: Record<string, string[]> = {
 const FLOW_CANVAS_KIND = "research_flow_canvas";
 
 const FLOW_NODE_ACTION_ALIASES: Record<string, string> = {
+  research_ceo_entry: "research_ceo",
+  organization_advisor_entry: "organization_advisor",
   broad_search: "broad",
   deep_search: "deep",
   evidence_review: "review",
@@ -253,6 +255,20 @@ type FlowContract = {
 };
 
 const RESEARCH_FLOW_NODE_CONTRACTS: Record<string, FlowContract> = {
+  research_ceo: {
+    inputs: [],
+    outputs: {
+      completed: ["research_goal", "organization_task", "proposal_request"],
+    },
+    terminal: false,
+  },
+  organization_advisor: {
+    inputs: [["research_goal"], ["organization_task"], ["proposal_request"]],
+    outputs: {
+      completed: ["organization_proposal", "staffing_plan"],
+    },
+    terminal: true,
+  },
   broad: {
     inputs: [],
     outputs: {
@@ -324,6 +340,30 @@ const RESEARCH_MODULE_TEMPLATE_GROUPS: ResearchModuleTemplate["group"][] = ["Age
 const RESEARCH_EDGE_TEMPLATE_GROUPS: ResearchEdgeTemplate["group"][] = ["主流程", "人工/异常", "自定义模板"];
 
 const RESEARCH_MODULE_TEMPLATE_CANDIDATES = [
+  {
+    key: "research_ceo_entry",
+    baseId: "research_ceo_entry",
+    group: "Agent模块",
+    label: "CEO Agent",
+    type: "agent",
+    status: "ready",
+    agentKey: "research_ceo",
+    promptKey: "research_ceo",
+    description: "默认科研团队入口。CEO 接收用户研究目标，拆成组织任务，并决定是否让顾问提出新增研究员方案。",
+    routeCondition: "用户提出科研目标后由 CEO 统筹。",
+  },
+  {
+    key: "organization_advisor_entry",
+    baseId: "organization_advisor_entry",
+    group: "Agent模块",
+    label: "组织顾问 Agent",
+    type: "agent",
+    status: "idle",
+    agentKey: "organization_advisor",
+    promptKey: "organization_advisor",
+    description: "顾问根据 CEO 的组织任务设计临时科研组织，形成新增研究员、权限和通信边的提案。",
+    routeCondition: "CEO 需要扩充科研团队时委托顾问。",
+  },
   {
     key: "broad_search",
     baseId: "broad_search",
