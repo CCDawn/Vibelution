@@ -1317,6 +1317,36 @@ def consume_agent_inbox_message(
     raise AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
 
 
+def revoke_agent_inbox_message(
+    agent_id: str,
+    message_id: str,
+    *,
+    revoked_by: str = "user",
+    reason: str = "",
+) -> dict[str, Any]:
+    agent = get_agent(agent_id, include_archived=True)
+    if not agent:
+        raise AgentNotFoundError(f"Agent not found: {agent_id}")
+    normalized_message_id = str(message_id or "").strip()
+    if not normalized_message_id:
+        raise AgentMessageNotFoundError("Agent inbox message id is required.")
+    path = _agent_workspace_event_path(agent, "agent_inbox_messages.jsonl")
+    messages = _read_jsonl(path)
+    for item in messages:
+        if str(item.get("messageId") or item.get("eventId") or "").strip() != normalized_message_id:
+            continue
+        if str(item.get("status") or "pending").strip().lower() != "revoked":
+            item["status"] = "revoked"
+            item["promptEligible"] = False
+            item["revokedAt"] = utc_now_iso()
+            item["revokedBy"] = str(revoked_by or "user").strip() or "user"
+            item["revokeReason"] = trim_lines(str(reason or ""), max_lines=2)
+            _write_jsonl(path, messages)
+            _record_memory_event("agent_inbox.message_revoked", item, agent_id=str(agent.get("agentId") or ""), lifecycle=True)
+        return item
+    raise AgentMessageNotFoundError(f"Agent inbox message not found: {message_id}")
+
+
 def write_current_tool_observation(
     *,
     tool_name: str,
