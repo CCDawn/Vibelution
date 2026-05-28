@@ -27,6 +27,15 @@ from core.web.services.research_service import (
     save_research_flow_canvas,
     save_research_prompt,
 )
+from core.web.services.research_organization_service import (
+    ResearchOrganizationError,
+    apply_research_org_proposal,
+    create_research_org_proposal,
+    get_research_organization,
+    retry_research_org_message_wake,
+    save_research_organization,
+    send_research_org_message,
+)
 
 
 router = APIRouter(tags=["research"])
@@ -49,6 +58,7 @@ class ResearchAgentTemplateUpdatePayload(BaseModel):
     label: str = Field("", max_length=120)
     promptFilename: str = Field("", max_length=160)
     templateId: str = Field("", max_length=128)
+    profileId: str = Field("", max_length=128)
     llmConfigId: str = Field("", max_length=128)
     enabled: bool | None = None
 
@@ -59,6 +69,7 @@ class ResearchDeepSearchPayload(BaseModel):
 
 class ResearchFlowCanvasPayload(BaseModel):
     schemaVersion: int = 1
+    canvasKind: str = Field("", max_length=80)
     viewport: dict = Field(default_factory=dict)
     nodes: list[dict] = Field(default_factory=list, max_length=80)
     edges: list[dict] = Field(default_factory=list, max_length=160)
@@ -67,6 +78,47 @@ class ResearchFlowCanvasPayload(BaseModel):
 class ResearchFlowCanvasExecutionPayload(BaseModel):
     sessionId: str = Field("", max_length=128)
     nodeId: str | None = Field(default=None, max_length=128)
+
+
+class ResearchOrganizationPayload(BaseModel):
+    schemaVersion: int = 1
+    agents: list[dict] = Field(default_factory=list, max_length=200)
+    edges: list[dict] = Field(default_factory=list, max_length=400)
+    zones: list[dict] = Field(default_factory=list, max_length=80)
+    proposals: list[dict] = Field(default_factory=list, max_length=200)
+    auditEvents: list[dict] = Field(default_factory=list, max_length=600)
+    messages: list[dict] = Field(default_factory=list, max_length=300)
+
+
+class ResearchOrgMessagePayload(BaseModel):
+    sourceType: str = Field("", max_length=32)
+    sourceAgentId: str = Field("", max_length=128)
+    sourceSessionId: str = Field("", max_length=128)
+    sourceRoomId: str = Field("", max_length=128)
+    sourceRoundId: str = Field("", max_length=128)
+    targetAgentId: str = Field("", max_length=128)
+    targetAgentIds: list[str] = Field(default_factory=list, max_length=80)
+    deliveryMode: str = Field("private", max_length=32)
+    zoneId: str = Field("", max_length=128)
+    messageType: str = Field("notice", max_length=32)
+    intent: str = Field("", max_length=128)
+    content: str = Field("", max_length=12000)
+    summary: str = Field("", max_length=1000)
+    threadId: str = Field("", max_length=128)
+    wakeTarget: bool = True
+    mailboxOnly: bool = False
+    humanOverride: bool | None = None
+    createdBy: str = Field("", max_length=64)
+
+
+class ResearchOrgProposalPayload(BaseModel):
+    title: str = Field("", max_length=160)
+    description: str = Field("", max_length=4000)
+    proposedByAgentId: str = Field("", max_length=128)
+    recommendedByAgentId: str = Field("", max_length=128)
+    riskLevel: str = Field("", max_length=32)
+    action: dict | None = None
+    actions: list[dict] = Field(default_factory=list, max_length=40)
 
 
 @router.get("/research/knowledge-base")
@@ -172,7 +224,7 @@ def research_theme_discovery_agent_templates_update(payload: ResearchAgentTempla
         return save_research_agent_binding(
             payload.key,
             payload.templateId,
-            payload.llmConfigId,
+            payload.profileId or payload.llmConfigId,
             label=payload.label,
             prompt_filename=payload.promptFilename,
             enabled=payload.enabled,
@@ -210,10 +262,43 @@ def research_flow_canvas_execute(payload: ResearchFlowCanvasExecutionPayload) ->
     return _run_research_action(lambda: execute_research_flow_canvas_node(payload.sessionId, payload.nodeId))
 
 
+@router.get("/research/organization")
+def research_organization() -> dict:
+    return _run_research_action(get_research_organization)
+
+
+@router.put("/research/organization")
+def research_organization_update(payload: ResearchOrganizationPayload) -> dict:
+    return _run_research_action(lambda: save_research_organization(payload.model_dump()))
+
+
+@router.post("/research/organization/messages", status_code=status.HTTP_201_CREATED)
+def research_organization_message_create(payload: ResearchOrgMessagePayload) -> dict:
+    data = payload.model_dump()
+    if payload.humanOverride is None:
+        data.pop("humanOverride", None)
+    return _run_research_action(lambda: send_research_org_message(data))
+
+
+@router.post("/research/organization/proposals", status_code=status.HTTP_201_CREATED)
+def research_organization_proposal_create(payload: ResearchOrgProposalPayload) -> dict:
+    return _run_research_action(lambda: create_research_org_proposal(payload.model_dump()))
+
+
+@router.post("/research/organization/proposals/{proposal_id}/apply")
+def research_organization_proposal_apply(proposal_id: str) -> dict:
+    return _run_research_action(lambda: apply_research_org_proposal(proposal_id))
+
+
+@router.post("/research/organization/messages/{message_id}/retry-wake")
+def research_organization_message_retry_wake(message_id: str) -> dict:
+    return _run_research_action(lambda: retry_research_org_message_wake(message_id))
+
+
 def _run_research_action(action):
     try:
         return action()
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
+    except (ResearchOrganizationError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

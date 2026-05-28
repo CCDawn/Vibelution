@@ -32,14 +32,48 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("toolsQuery.data?.agentScopes");
     expect(routeSource).toContain("styles.agentScopeBar");
     expect(routeSource).toContain("scopeStateForTool(tool, activeAgentScopeId)");
-    expect(routeSource).toContain("JSON.stringify({ args: {}, agentScope: payload.agentScopeId })");
-    expect(routeSource).toContain("testMutation.mutate({ toolId: activeTool.id, agentScopeId: activeAgentScope.id })");
+    expect(routeSource).toContain("JSON.stringify({ args: {}, agentScope: payload.agentScopeId, agentId: payload.agentId })");
+    expect(routeSource).toContain("agentId: activePolicyAgent.agentId");
+  });
+
+  it("exposes Agent ToolPolicy controls from the tool bench", () => {
+    expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents\")");
+    expect(routeSource).toContain("toolPolicyMutation");
+    expect(routeSource).toContain("setPolicyDraft((current) => nextToolPolicy(current ?? activePolicy, activeTool.name, mode))");
+    expect(routeSource).toContain("styles.agentPolicyPanel");
+    expect(routeSource).toContain("styles.policyStatePill");
+    expect(routeSource).toContain("styles.policyModeButtonActive");
+  });
+
+  it("supports Agent-scoped bulk ToolPolicy draft assignment", () => {
+    expect(routeSource).toContain("policyDraft");
+    expect(routeSource).toContain("permissionTools");
+    expect(routeSource).toContain("styles.agentBulkPolicyPanel");
+    expect(routeSource).toContain("setSelectedToolsPolicyMode(\"allowed\")");
+    expect(routeSource).toContain("setSelectedToolsPolicyMode(\"blocked\")");
+    expect(routeSource).toContain("setSelectedToolsPolicyMode(\"inherited\")");
+    expect(routeSource).toContain("applyPolicyDraft");
+    expect(routeSource).toContain("body: JSON.stringify({ toolPolicy: payload.policy })");
+  });
+
+  it("lets the image2 tool choose a configured model without exposing provider secrets", () => {
+    expect(routeSource).toContain("IMAGE2_TOOL_NAME = \"image2_generate_tool\"");
+    expect(routeSource).toContain("fetchJson<ToolImage2ModelConfig>(\"/api/tools/image2/models\")");
+    expect(routeSource).toContain("fetchJson<ToolImage2ModelConfig>(\"/api/tools/image2/default-model\"");
+    expect(routeSource).toContain("activeIsImage2Tool ? (");
+    expect(routeSource).toContain("styles.image2ModelPanel");
+    expect(routeSource).toContain("API Key、base_url 和 provider 仍在设置页维护");
+    expect(routeSource).not.toContain("apiKeyValue");
+    expect(routeSource).not.toContain("baseUrlInput");
   });
 
   it("keeps test controls and result panels in normal document flow", () => {
     expect(routeSource).toContain("styles.policyPanel");
+    expect(routeSource).toContain("styles.agentPolicyPanel");
+    expect(routeSource).toContain("styles.image2ModelPanel");
     expect(routeSource).toContain("styles.detailActions");
     expect(routeSource.indexOf("styles.detailActions")).toBeGreaterThan(routeSource.indexOf("styles.policyPanel"));
+    expect(routeSource.indexOf("styles.agentBulkPolicyPanel")).toBeLessThan(routeSource.indexOf("styles.detailHeader"));
     expect(routeSource.indexOf("styles.testPanel")).toBeGreaterThan(routeSource.indexOf("styles.detailActions"));
   });
 

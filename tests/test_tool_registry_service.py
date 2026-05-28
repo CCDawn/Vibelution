@@ -1,6 +1,7 @@
 import pytest
 import time
 
+from core.web.services import agent_directory_service
 from core.web.services import tool_registry_service as registry
 
 
@@ -219,6 +220,65 @@ def test_builtin_tool_test_uses_fixed_args_for_allowlisted_tool(tmp_path, monkey
     assert captured == {
         "tool_name": "get_git_status_summary_tool",
         "tool_args": {"limit": 3},
+    }
+
+
+def test_tool_test_honors_selected_agent_blocked_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(registry, "_record_registry_event", lambda *args, **kwargs: None)
+    agent = agent_directory_service.create_agent_instance(display_name="Blocked Tool Agent", profile_id="primary")
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={"blockedTools": ["get_current_goal_tool"]},
+    )
+
+    def fail_execute(self, tool_name, tool_args):
+        raise AssertionError("blocked Agent ToolPolicy should stop before runtime execution")
+
+    monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fail_execute)
+
+    result = registry.test_tool("get_current_goal_tool", agent_id=agent["agentId"])
+
+    assert result["status"] == "blocked"
+    assert result["called"] is False
+    assert result["callable"] is False
+    assert result["agent"]["agentId"] == agent["agentId"]
+    assert result["agentCompatibility"]["status"] == "blocked"
+    assert "ToolPolicy" in result["message"] or "工具策略" in result["message"]
+
+
+def test_tool_test_runs_safe_builtin_inside_selected_agent_runtime(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(registry, "_record_registry_event", lambda *args, **kwargs: None)
+    agent = agent_directory_service.create_agent_instance(display_name="Allowed Tool Agent", profile_id="primary")
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={"allowedTools": ["get_current_goal_tool"]},
+    )
+    captured = {}
+
+    def fake_execute(self, tool_name, tool_args):
+        captured["tool_name"] = tool_name
+        captured["tool_args"] = dict(tool_args)
+        captured["agent_id"] = agent_directory_service.current_agent_runtime().get("agentId")
+        return ("ok", None)
+
+    monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fake_execute)
+
+    result = registry.test_tool("get_current_goal_tool", agent_id=agent["agentId"])
+
+    assert result["status"] == "succeeded"
+    assert result["called"] is True
+    assert result["agent"]["agentId"] == agent["agentId"]
+    assert result["agentCompatibility"]["status"] == "succeeded"
+    assert captured == {
+        "tool_name": "get_current_goal_tool",
+        "tool_args": {},
+        "agent_id": agent["agentId"],
     }
 
 

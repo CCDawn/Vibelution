@@ -16,13 +16,13 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).toContain("pauseAutoDraft");
     expect(routeSource).toContain("autoDraftPauseRequested");
     expect(routeSource).toContain("workflowMode");
-    expect(routeSource).toContain("showLegacyWorkflowModeControl");
+    expect(routeSource).toContain("showFallbackWorkflowModeControl");
     expect(routeSource).toContain("workflowControlsDisabled");
     expect(routeSource).not.toContain("enabled: activeView === \"discovery\"");
     expect(routeSource).toContain("activeView === \"discovery\"");
     expect(routeSource).toContain("initialPayload");
     expect(routeSource).toContain("autoDraftStepIndex");
-    expect(routeSource).toContain("LEGACY_DEFAULT_INPUT");
+    expect(routeSource).toContain("PREVIOUS_DEFAULT_INPUT");
     expect(routeSource).toContain("Qwen/千问");
     expect(routeSource).toContain("阿里云百炼平台");
     expect(routeSource).toContain("Problem Statement");

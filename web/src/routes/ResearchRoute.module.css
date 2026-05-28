@@ -1950,15 +1950,6 @@
   background: color-mix(in srgb, var(--state-success) 10%, transparent);
 }
 
-.agentModeCard_legacy {
-  border-color: color-mix(in srgb, var(--state-warning) 34%, var(--border-soft));
-}
-
-.agentModeCard_legacy > span {
-  color: var(--state-warning);
-  background: color-mix(in srgb, var(--state-warning) 13%, transparent);
-}
-
 .agentModeCard div {
   display: grid;
   gap: 4px;

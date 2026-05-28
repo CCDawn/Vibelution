@@ -1338,7 +1338,7 @@ def _research_agent_execution_summary(profile: dict[str, Any]) -> dict[str, Any]
     return {
         "agentKey": profile.get("agentKey") or "",
         "templateId": profile.get("templateId") or "",
-        "llmConfigId": profile.get("llmConfigId") or "",
+        "profileId": profile.get("profileId") or profile.get("llmConfigId") or "",
         "executionMode": profile.get("executionMode") or "",
         "toolCallCount": profile.get("toolCallCount") or 0,
         "knowledgeContextDecision": profile.get("knowledgeContextDecision") or "",

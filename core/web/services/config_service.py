@@ -76,6 +76,20 @@ _HWND_NOTOPMOST = -2
 _SWP_NOSIZE = 0x0001
 _SWP_NOMOVE = 0x0002
 _SWP_SHOWWINDOW = 0x0040
+_IMAGE_INPUT_PROBE_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+_IMAGE_INPUT_UNSUPPORTED_PATTERNS = (
+    "no endpoints found that support image input",
+    "does not support image input",
+    "doesn't support image input",
+    "unsupported image",
+    "unsupported content type",
+    "input_image",
+    "image_url",
+    "vision",
+)
 
 
 def _record_config_scene_event(
@@ -101,6 +115,15 @@ def _record_config_scene_event(
         )
     except Exception:
         return
+
+
+def _normalize_llm_test_capability(capability: str | None) -> str:
+    normalized = str(capability or "text").strip().lower()
+    if normalized in {"", "text", "connection", "llm", "chat"}:
+        return "text"
+    if normalized in {"image", "image_input", "vision", "multimodal"}:
+        return "image_input"
+    raise ValueError(f"Unsupported LLM test capability: {capability}")
 
 
 def _resolve_workspace_language(public_config: dict[str, Any]) -> str:
@@ -500,6 +523,7 @@ def _run_draft_test_llm_connection(
     public_config: dict[str, Any],
     profile_id: str | None = None,
     draft_meta: dict | None = None,
+    capability: str | None = None,
 ) -> dict[str, Any]:
     validate_llm_public_config(public_config)
     effective = build_effective_config(public_config)
@@ -539,6 +563,16 @@ def _run_draft_test_llm_connection(
                     api_key = pending_secret
                     api_key_source = f"pending-env:{env_name}"
                     break
+    normalized_capability = _normalize_llm_test_capability(capability)
+    if normalized_capability == "image_input":
+        return _run_draft_test_llm_image_input(
+            public_config,
+            profile,
+            provider,
+            api_key,
+            api_key_source,
+            draft_meta,
+        )
     try:
         try:
             result = public_config_module._probe_llm_runtime(provider, profile, api_key)
@@ -587,6 +621,214 @@ def _run_draft_test_llm_connection(
             "ok": success,
             "status": str(result.get("status") if isinstance(result, dict) else "").strip(),
             "error": str(result.get("error") if isinstance(result, dict) else "").strip(),
+        },
+        lifecycle=True,
+    )
+    return {
+        **result,
+        "profile_id": profile.profile_id,
+        "provider_id": provider.provider_id,
+        "provider_kind": provider.kind,
+        "base_url": provider.base_url,
+        "model": profile.model,
+        "transport": profile.transport,
+        "contract": profile.contract,
+        "api_key_source": api_key_source,
+        "config_scope": _llm_test_config_scope(public_config, draft_meta),
+        "requires_api_key": bool(provider.requires_api_key),
+        "capability": "text",
+        "capability_status": "supported" if success else "unknown",
+        "supports_image_input": None,
+    }
+
+
+def _build_image_input_probe_profile(profile: Any) -> Any:
+    probe_timeout = (
+        public_config_module.coerce_llm_probe_timeout(profile.connect_timeout, profile.timeout)
+        if hasattr(public_config_module, "coerce_llm_probe_timeout")
+        else 20
+    )
+    retry_policy = (
+        public_config_module.RetryPolicyConfig(max_attempts=1, backoff_base_seconds=0.1)
+        if hasattr(public_config_module, "RetryPolicyConfig")
+        else getattr(profile, "retry_policy", None)
+    )
+    try:
+        return profile.model_copy(
+            update={
+                "max_output_tokens": 8,
+                "timeout": probe_timeout,
+                "connect_timeout": min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout),
+                "streaming": False,
+                "retry_policy": retry_policy,
+            }
+        )
+    except Exception:
+        probe_profile = copy.deepcopy(profile)
+        probe_profile.max_output_tokens = 8
+        probe_profile.timeout = probe_timeout
+        probe_profile.connect_timeout = min(int(getattr(profile, "connect_timeout", probe_timeout) or probe_timeout), probe_timeout)
+        probe_profile.streaming = False
+        if retry_policy is not None:
+            probe_profile.retry_policy = retry_policy
+        return probe_profile
+
+
+def _image_input_probe_status(error_text: str) -> tuple[bool | None, str]:
+    lowered = str(error_text or "").lower()
+    if any(pattern in lowered for pattern in _IMAGE_INPUT_UNSUPPORTED_PATTERNS):
+        return False, "unsupported"
+    return None, "unknown"
+
+
+def _run_draft_test_llm_image_input(
+    public_config: dict[str, Any],
+    profile: Any,
+    provider: Any,
+    api_key: str | None,
+    api_key_source: str,
+    draft_meta: dict | None,
+) -> dict[str, Any]:
+    if provider.requires_api_key and not api_key:
+        result: dict[str, Any] = {
+            "ok": False,
+            "message": f"missing API key for provider `{provider.provider_id}`",
+            "capability": "image_input",
+            "capability_status": "unknown",
+            "supports_image_input": None,
+            "capability_reason": "missing_api_key",
+        }
+    elif not provider.base_url:
+        result = {
+            "ok": False,
+            "message": f"missing base_url for provider `{provider.provider_id}`",
+            "capability": "image_input",
+            "capability_status": "unknown",
+            "supports_image_input": None,
+            "capability_reason": "missing_base_url",
+        }
+    else:
+        if not provider.requires_api_key:
+            api_key = None
+        try:
+            validate_llm_provider_target(provider, context="probe", resolve_dns=True)
+        except ValueError as exc:
+            result = {
+                "ok": False,
+                "message": str(exc),
+                "capability": "image_input",
+                "capability_status": "unknown",
+                "supports_image_input": None,
+                "capability_reason": "invalid_provider_target",
+            }
+            _record_config_scene_event(
+                "llm_capability_test",
+                "config.llm_capability_test.completed",
+                message="Draft LLM image input capability test blocked by provider target validation.",
+                level="error",
+                outcome="failed",
+                fields={
+                    "profileId": profile.profile_id,
+                    "providerId": provider.provider_id,
+                    "providerKind": provider.kind,
+                    "model": profile.model,
+                    "transport": profile.transport,
+                    "contract": profile.contract,
+                    "configScope": _llm_test_config_scope(public_config, draft_meta),
+                    "capability": "image_input",
+                    "capabilityStatus": "unknown",
+                    "supportsImageInput": None,
+                    "reason": "invalid_provider_target",
+                },
+                lifecycle=True,
+            )
+            return {
+                **result,
+                "profile_id": profile.profile_id,
+                "provider_id": provider.provider_id,
+                "provider_kind": provider.kind,
+                "base_url": provider.base_url,
+                "model": profile.model,
+                "transport": profile.transport,
+                "contract": profile.contract,
+                "api_key_source": api_key_source,
+                "config_scope": _llm_test_config_scope(public_config, draft_meta),
+                "requires_api_key": bool(provider.requires_api_key),
+            }
+        probe_profile = _build_image_input_probe_profile(profile)
+
+        class _ProbeConfig:
+            llm = type(
+                "_ProbeLlm",
+                (),
+                {
+                    "get_role_profile_id": lambda self, role="primary": profile.profile_id,
+                    "get_profile": lambda self, profile_id=None, role="primary": probe_profile,
+                    "get_provider": lambda self, provider_id=None, role="primary": provider,
+                },
+            )()
+
+            def get_api_key_for_profile(self, profile_id=None, role="primary"):
+                return api_key
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Reply with ok if you can inspect this image."},
+                    {"type": "image_url", "image_url": {"url": _IMAGE_INPUT_PROBE_DATA_URL}},
+                ],
+            }
+        ]
+        try:
+            from core.llm import LLMClient
+
+            client = LLMClient(config=_ProbeConfig(), profile_id=profile.profile_id)
+            client.invoke(messages, tools=[], metadata={"probeCapability": "image_input"})
+            result = {
+                "ok": True,
+                "message": "image input is supported",
+                "capability": "image_input",
+                "capability_status": "supported",
+                "supports_image_input": True,
+                "capability_reason": "runtime_probe_succeeded",
+            }
+        except Exception as exc:
+            error_text = public_config_module.redact_llm_probe_error(str(exc), api_key=api_key)
+            supports_image_input, capability_status = _image_input_probe_status(error_text)
+            result = {
+                "ok": False,
+                "message": (
+                    "image input is not supported by this model route"
+                    if capability_status == "unsupported"
+                    else error_text
+                ),
+                "capability": "image_input",
+                "capability_status": capability_status,
+                "supports_image_input": supports_image_input,
+                "capability_reason": type(exc).__name__,
+                "error": error_text,
+            }
+    _record_config_scene_event(
+        "llm_capability_test",
+        "config.llm_capability_test.completed",
+        message="Draft LLM image input capability test completed.",
+        level="info" if result.get("supports_image_input") is True else "warning",
+        outcome="succeeded" if result.get("supports_image_input") is True else "failed",
+        fields={
+            "profileId": profile.profile_id,
+            "providerId": provider.provider_id,
+            "providerKind": provider.kind,
+            "model": profile.model,
+            "apiKeySource": api_key_source,
+            "requiresApiKey": bool(provider.requires_api_key),
+            "transport": profile.transport,
+            "contract": profile.contract,
+            "configScope": _llm_test_config_scope(public_config, draft_meta),
+            "capability": "image_input",
+            "capabilityStatus": result.get("capability_status"),
+            "supportsImageInput": result.get("supports_image_input"),
+            "reason": result.get("capability_reason"),
         },
         lifecycle=True,
     )
@@ -963,11 +1205,17 @@ def run_draft_llm_test(
     *,
     draft_meta: dict | None = None,
     profile_id: str | None = None,
+    capability: str | None = None,
 ) -> dict[str, Any]:
     old_public = with_git_config_defaults(load_public_config())
     submitted = _prepare_submitted_public_config(public_config, old_public)
     validate_llm_public_config(submitted)
-    return _run_draft_test_llm_connection(submitted, profile_id, _normalize_draft_meta(draft_meta))
+    return _run_draft_test_llm_connection(
+        submitted,
+        profile_id,
+        _normalize_draft_meta(draft_meta),
+        capability,
+    )
 
 
 def _normalize_discovered_models(data: Any) -> list[dict[str, Any]]:

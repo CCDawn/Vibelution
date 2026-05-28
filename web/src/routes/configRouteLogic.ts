@@ -35,6 +35,10 @@ export type ConfigEditorSyncState = {
   canRestoreEditorText: boolean;
 };
 
+export type ConfigSectionExpansionState = {
+  expanded: boolean;
+};
+
 export type ConfigLeaveGuardInput = {
   hasPendingApply: boolean;
   busy: boolean;
@@ -69,8 +73,62 @@ export type ModelEditability = {
   deletable: boolean;
 };
 
+export type ModelScenarioId = "chat" | "relay" | "image" | "local" | "manual";
+
+export const MODEL_SCENARIOS: ModelScenarioId[] = ["chat", "relay", "image", "local", "manual"];
+
+export type ModelCenterLabels = ConfigProfileModeGroupLabels & {
+  image2Tool: string;
+};
+
+export type ModelCenterAccount = {
+  id: string;
+  providerKind: string;
+  baseUrl: string;
+  keyEnv: string;
+  modelIds: string[];
+  modelCount: number;
+  configuredCount: number;
+  missingCount: number;
+  pendingCount: number;
+  clearPendingCount: number;
+  apiKeyState: string;
+};
+
+export type ModelCenterUsage = {
+  id: string;
+  kind: "profile" | "tool";
+  modelId: string;
+  label: string;
+  groupLabel: string;
+  detail: string;
+};
+
+export type ModelCenterSummary = {
+  accounts: ModelCenterAccount[];
+  usages: ModelCenterUsage[];
+  usagesByModelId: Record<string, ModelCenterUsage[]>;
+  usageCountsByModelId: Record<string, number>;
+  unresolvedUsageCount: number;
+};
+
+export type ModelCenterInventoryRow = {
+  modelId: string;
+  label: string;
+  providerKind: string;
+  baseUrl: string;
+  model: string;
+  apiKeyEnv: string;
+  apiKeyState: string;
+  source: ConfigModelOption["source"];
+  usages: ModelCenterUsage[];
+  usageCount: number;
+  editable: boolean;
+  deletable: boolean;
+};
+
 export function resolveResearchAgentInstance(
-  researchAgent: Pick<ResearchAgentConfig, "key" | "agentId" | "agentInstanceId">,
+  researchAgent: Pick<ResearchAgentConfig, "key" | "agentId" | "agentInstanceId" | "roleKey">,
   agentInstances: AgentInstance[],
 ): AgentInstance | null {
   const linkedAgentId = researchAgent.agentId || researchAgent.agentInstanceId || "";
@@ -78,10 +136,19 @@ export function resolveResearchAgentInstance(
   if (byId) {
     return byId;
   }
+  const roleKey = researchAgent.roleKey || `research_${researchAgent.key}`;
+  const byRoleKey = agentInstances.find((agent) => agent.roleKey === roleKey);
+  if (byRoleKey) {
+    return byRoleKey;
+  }
   return agentInstances.find((agent) => agent.metadata?.researchAgentKey === researchAgent.key) ?? null;
 }
 
 export function supervisedAgentRole(agent: Pick<AgentInstance, "metadata">): string {
+  const roleKey = "roleKey" in agent ? (agent as Pick<AgentInstance, "roleKey">).roleKey : "";
+  if (typeof roleKey === "string" && ["baseline", "candidate", "reviewer", "auditor", "judge"].includes(roleKey)) {
+    return roleKey;
+  }
   const value = agent.metadata?.supervisedRole;
   return typeof value === "string" ? value.trim() : "";
 }
@@ -205,6 +272,13 @@ export function deriveConfigEditorSyncState(input: ConfigEditorSyncStateInput): 
   };
 }
 
+export function resolveConfigSectionUiStateOnSelect<T extends ConfigSectionExpansionState>(
+  existingState: T | undefined,
+  defaultState: T,
+): T {
+  return existingState ?? defaultState;
+}
+
 export function shouldBlockConfigLeave(input: ConfigLeaveGuardInput): boolean {
   return input.hasPendingApply && !input.busy && input.currentPathname === "/config" && input.nextPathname !== "/config";
 }
@@ -320,6 +394,36 @@ export function groupModelPresets(
   return groups.filter((group) => group.presets.length);
 }
 
+export function selectModelScenarioPresetId(
+  scenario: ModelScenarioId,
+  presets: ConfigModelPresetOption[],
+): string {
+  if (scenario === "manual") {
+    return "";
+  }
+  const byId = (presetId: string) => presets.find((preset) => preset.preset_id === presetId)?.preset_id ?? "";
+  if (scenario === "image") {
+    const image2Preset = byId("relay_image2");
+    if (image2Preset) {
+      return image2Preset;
+    }
+    return (
+      presets.find((preset) => {
+        const model = getString(asRecord(preset.model).model).toLowerCase();
+        const label = preset.label.toLowerCase();
+        return model.includes("image") || model === "image2" || label.includes("image");
+      })?.preset_id ?? ""
+    );
+  }
+  if (scenario === "relay") {
+    return byId("relay_openai_gpt_5_5") || (presets.find((preset) => presetCategory(preset) === "relay")?.preset_id ?? "");
+  }
+  if (scenario === "local") {
+    return presets.find((preset) => presetCategory(preset) === "local")?.preset_id ?? "";
+  }
+  return byId("relay_openai_gpt_5_5") || byId("openai_gpt_5_5") || (presets.find((preset) => presetCategory(preset) === "official")?.preset_id ?? "");
+}
+
 export function defaultModelApiKeyEnv(modelId: string): string {
   const token = modelId
     .toUpperCase()
@@ -400,4 +504,151 @@ export function applyModelOptionToProfileDraft(
   for (const [key, value] of Object.entries(asRecord(option.details))) {
     profile[key] = clonePublicConfig(value);
   }
+}
+
+function accountIdForModelOption(option: ConfigModelOption): string {
+  const provider = asRecord(option.provider);
+  const providerKind = option.provider_kind || getString(provider.kind) || "unknown";
+  const baseUrl = getString(provider.base_url) || providerKind;
+  const keyEnv = option.api_key_env || getString(provider.api_key_env);
+  return [providerKind, baseUrl, keyEnv].map((part) => part.trim().toLowerCase()).join("::");
+}
+
+function summarizeAccountState(account: Omit<ModelCenterAccount, "modelCount" | "apiKeyState">): string {
+  if (account.missingCount > 0) {
+    return "missing";
+  }
+  if (account.pendingCount > 0) {
+    return "pending";
+  }
+  if (account.clearPendingCount > 0) {
+    return "clear_pending";
+  }
+  if (account.configuredCount > 0) {
+    return "configured";
+  }
+  return "unknown";
+}
+
+export function deriveModelCenterSummary(input: {
+  modelOptions: ConfigModelOption[];
+  profiles: ConfigProfileCard[];
+  publicConfig: PublicConfigShape;
+  labels: ModelCenterLabels;
+}): ModelCenterSummary {
+  const accountsById = new Map<string, Omit<ModelCenterAccount, "modelCount" | "apiKeyState">>();
+  for (const option of input.modelOptions) {
+    const provider = asRecord(option.provider);
+    const id = accountIdForModelOption(option);
+    const current =
+      accountsById.get(id) ?? {
+        id,
+        providerKind: option.provider_kind || getString(provider.kind) || "unknown",
+        baseUrl: getString(provider.base_url),
+        keyEnv: option.api_key_env || getString(provider.api_key_env),
+        modelIds: [],
+        configuredCount: 0,
+        missingCount: 0,
+        pendingCount: 0,
+        clearPendingCount: 0,
+      };
+    current.modelIds.push(option.model_id);
+    const state = option.api_key_state;
+    if (state === "configured" || option.api_key_configured) {
+      current.configuredCount += 1;
+    } else if (state === "pending") {
+      current.pendingCount += 1;
+    } else if (state === "clear_pending") {
+      current.clearPendingCount += 1;
+    } else if (state === "missing") {
+      current.missingCount += 1;
+    }
+    accountsById.set(id, current);
+  }
+
+  const usages: ModelCenterUsage[] = [];
+  for (const profile of input.profiles) {
+    const modelId = profile.selectedModelId || profile.modelRef;
+    if (!modelId || profile.requiredModelMissing) {
+      continue;
+    }
+    const groupId = profileModeGroupId(profile.profileId);
+    usages.push({
+      id: `profile:${profile.profileId}`,
+      kind: "profile",
+      modelId,
+      label: profile.label || profile.profileId,
+      groupLabel: input.labels[groupId],
+      detail: profile.profileId,
+    });
+  }
+
+  const tools = asRecord(input.publicConfig.tools);
+  const image2 = asRecord(tools.image2);
+  const image2ModelRef = getString(image2.default_model_ref);
+  if (image2ModelRef) {
+    usages.push({
+      id: "tool:image2_generate_tool",
+      kind: "tool",
+      modelId: image2ModelRef,
+      label: input.labels.image2Tool,
+      groupLabel: input.labels.image2Tool,
+      detail: "image2_generate_tool",
+    });
+  }
+
+  const modelIds = new Set(input.modelOptions.map((option) => option.model_id));
+  const usagesByModelId: Record<string, ModelCenterUsage[]> = {};
+  let unresolvedUsageCount = 0;
+  for (const usage of usages) {
+    if (!modelIds.has(usage.modelId)) {
+      unresolvedUsageCount += 1;
+      continue;
+    }
+    usagesByModelId[usage.modelId] = [...(usagesByModelId[usage.modelId] ?? []), usage];
+  }
+
+  const usageCountsByModelId = Object.fromEntries(
+    Object.entries(usagesByModelId).map(([modelId, modelUsages]) => [modelId, modelUsages.length]),
+  );
+
+  const accounts = Array.from(accountsById.values())
+    .map((account) => ({
+      ...account,
+      modelCount: account.modelIds.length,
+      apiKeyState: summarizeAccountState(account),
+    }))
+    .sort((left, right) => `${left.providerKind}:${left.baseUrl}`.localeCompare(`${right.providerKind}:${right.baseUrl}`));
+
+  return {
+    accounts,
+    usages,
+    usagesByModelId,
+    usageCountsByModelId,
+    unresolvedUsageCount,
+  };
+}
+
+export function deriveModelCenterInventoryRows(
+  modelOptions: ConfigModelOption[],
+  summary: Pick<ModelCenterSummary, "usagesByModelId" | "usageCountsByModelId">,
+): ModelCenterInventoryRow[] {
+  return modelOptions.map((option) => {
+    const provider = asRecord(option.provider);
+    const editability = resolveModelEditability(option);
+    return {
+      modelId: option.model_id,
+      label: option.label,
+      providerKind: option.provider_kind || getString(provider.kind) || "unknown",
+      baseUrl: getString(provider.base_url),
+      model: option.model,
+      apiKeyEnv: option.api_key_env || getString(provider.api_key_env),
+      apiKeyState: option.api_key_state,
+      source: option.source,
+      usages: summary.usagesByModelId[option.model_id] ?? [],
+      usageCount: summary.usageCountsByModelId[option.model_id] ?? 0,
+      editable: editability.editable,
+      deletable: editability.deletable,
+    };
+  });
 }

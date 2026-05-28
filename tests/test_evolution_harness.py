@@ -48,6 +48,7 @@ from scripts.evolution_harness import (
     summarize_agent_state_file,
     summarize_latest_matching_file,
     summarize_conversation_file,
+    supervised_agent_binding_env,
     run_harness,
     SUPERVISED_FINAL_STATE_MARKER,
     SUPERVISED_INFEASIBLE_OUTCOME_MARKER,
@@ -89,6 +90,67 @@ def test_build_agent_command_for_single_turn_prompt():
     assert "--prompt" in cmd
     assert "--config" in cmd
     assert "hello" in cmd
+
+
+def test_supervised_agent_binding_env_exports_safe_runtime_context_only():
+    env = supervised_agent_binding_env(
+        {
+            "agentId": "agent-supervised-baseline",
+            "profileId": "supervised_baseline",
+            "directSessionId": "session-baseline",
+            "workspacePath": "workspace/agents/agent-supervised-baseline",
+            "role": "baseline",
+            "displayName": "监督基线 Agent",
+            "apiKey": "should-not-leak",
+        }
+    )
+
+    assert env == {
+        "VIBELUTION_AGENT_ID": "agent-supervised-baseline",
+        "VIBELUTION_AGENT_PROFILE_ID": "supervised_baseline",
+        "VIBELUTION_AGENT_DIRECT_SESSION_ID": "session-baseline",
+        "VIBELUTION_AGENT_WORKSPACE_PATH": "workspace/agents/agent-supervised-baseline",
+        "VIBELUTION_SUPERVISED_ROLE": "baseline",
+    }
+    assert "apiKey" not in "".join(env)
+
+
+def test_supervised_agent_binding_env_accepts_supervised_role_alias():
+    env = supervised_agent_binding_env(
+        {
+            "agentId": "agent-supervised-candidate",
+            "profileId": "supervised_candidate",
+            "supervisedRole": "candidate",
+        }
+    )
+
+    assert env["VIBELUTION_SUPERVISED_ROLE"] == "candidate"
+
+
+def test_create_harness_config_forces_supervised_agent_mode(tmp_path: Path):
+    source_config = tmp_path / "config.toml"
+    source_config.write_text(
+        """
+[agent]
+default_mode = "self_evolution"
+
+[runtime]
+profile = "dev"
+preflight_doctor = true
+require_venv = true
+        """.strip(),
+        encoding="utf-8",
+    )
+
+    harness_config = create_harness_config(tmp_path)
+
+    assert harness_config is not None
+    text = harness_config.read_text(encoding="utf-8")
+    assert 'default_mode = "supervised_evolution"' in text
+    assert 'default_mode = "self_evolution"' not in text
+    assert 'profile = ""' in text
+    assert "preflight_doctor = false" in text
+    assert "require_venv = false" in text
 
 
 def test_resolve_run_options_preserves_restart_defaults():
@@ -335,13 +397,27 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
         post_restart_observe_seconds=1,
         keep_worktree=False,
         scenario="transaction",
+        agent_binding={
+            "agentId": "agent-supervised-baseline",
+            "profileId": "supervised_baseline",
+            "directSessionId": "session-baseline",
+            "workspacePath": "workspace/agents/agent-supervised-baseline",
+            "role": "baseline",
+        },
         cancel_checker=lambda: "operator stop",
     )
 
     assert result.status == "cancelled"
     assert result.reason == "operator stop"
+    assert result.agent_binding["profileId"] == "supervised_baseline"
     assert process.terminated is True
     assert popen_calls[0][1]["creationflags"] & 0x08000000
+    env = popen_calls[0][1]["env"]
+    assert env["VIBELUTION_AGENT_ID"] == "agent-supervised-baseline"
+    assert env["VIBELUTION_AGENT_PROFILE_ID"] == "supervised_baseline"
+    assert env["VIBELUTION_AGENT_DIRECT_SESSION_ID"] == "session-baseline"
+    assert env["VIBELUTION_AGENT_WORKSPACE_PATH"] == "workspace/agents/agent-supervised-baseline"
+    assert env["VIBELUTION_SUPERVISED_ROLE"] == "baseline"
 
 
 def test_should_finish_post_restart_observation_waits_for_meaningful_child_event():

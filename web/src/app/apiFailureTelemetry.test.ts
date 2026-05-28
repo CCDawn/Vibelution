@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  apiFailureTelemetryEventCode,
+  apiFailureTelemetryLevel,
   buildRestartRequestUnconfirmedTelemetry,
   buildRestartRequestedTelemetry,
   buildShutdownLocallyCompleteTelemetry,
@@ -108,6 +110,57 @@ describe("api failure telemetry", () => {
     expect(shouldThrottleApiFailureTelemetry(failure, state, 1_000)).toBe(false);
     expect(shouldThrottleApiFailureTelemetry(failure, state, 2_000)).toBe(true);
     expect(shouldThrottleApiFailureTelemetry(failure, state, 17_000)).toBe(false);
+  });
+
+  it("names config model discovery failures as domain-specific telemetry", () => {
+    expect(
+      apiFailureTelemetryEventCode({
+        endpoint: "/api/config/discover-models",
+        method: "POST",
+        status: 422,
+        message: "认证失败",
+        failureKind: "http",
+      }),
+    ).toBe("config.model_discovery.failed");
+    expect(
+      apiFailureTelemetryEventCode({
+        endpoint: "/api/config/discover-models?retry=1",
+        method: "POST",
+        status: null,
+        message: "Failed to fetch",
+        failureKind: "network",
+      }),
+    ).toBe("config.model_discovery.network_error");
+    expect(
+      apiFailureTelemetryEventCode({
+        endpoint: "/api/evolution/runs",
+        method: "POST",
+        status: 409,
+        message: "active run",
+        failureKind: "http",
+      }),
+    ).toBe("browser.api.request_failed");
+  });
+
+  it("keeps model discovery validation failures below system-error severity", () => {
+    expect(
+      apiFailureTelemetryLevel({
+        endpoint: "/api/config/discover-models",
+        method: "POST",
+        status: 422,
+        message: "未找到环境变量 OPENAI_API_KEY",
+        failureKind: "http",
+      }),
+    ).toBe("warning");
+    expect(
+      apiFailureTelemetryLevel({
+        endpoint: "/api/config/discover-models",
+        method: "POST",
+        status: null,
+        message: "Failed to fetch",
+        failureKind: "network",
+      }),
+    ).toBe("error");
   });
 
   it("builds an explicit user-action telemetry event for shutdown requests", () => {

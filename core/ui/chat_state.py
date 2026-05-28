@@ -23,8 +23,8 @@ def chat_state_path(project_root: Path) -> Path:
     return project_root / "workspace" / "chat" / "chat_state.json"
 
 
-def normalize_chat_tool_calls(value: Any) -> list[str]:
-    tool_calls: list[str] = []
+def normalize_chat_tool_calls(value: Any) -> list[str | dict[str, Any]]:
+    tool_calls: list[str | dict[str, Any]] = []
     for item in list(value or []):
         name = ""
         if isinstance(item, dict):
@@ -37,11 +37,63 @@ def normalize_chat_tool_calls(value: Any) -> list[str]:
                 or function_block.get("name")
                 or ""
             ).strip()
+            if name:
+                normalized: dict[str, Any] = {"name": name}
+                for key in (
+                    "status",
+                    "summary",
+                    "arguments",
+                    "args",
+                    "argKeys",
+                    "result",
+                    "resultPreview",
+                    "resultType",
+                    "resultLength",
+                    "error",
+                    "durationMs",
+                    "durationSeconds",
+                    "elapsedSeconds",
+                    "timeoutSeconds",
+                    "tracePath",
+                    "trace_path",
+                ):
+                    if key in item:
+                        normalized[key] = item[key]
+                tool_calls.append(normalized)
+                continue
         else:
             name = str(item or "").strip()
         if name:
             tool_calls.append(name)
     return tool_calls
+
+
+def normalize_chat_attachments(value: Any) -> list[dict[str, Any]]:
+    attachments: list[dict[str, Any]] = []
+    for item in list(value or []):
+        if not isinstance(item, dict):
+            continue
+        artifact_id = str(item.get("artifactId") or item.get("artifact_id") or "").strip()
+        url = str(item.get("url") or item.get("imageUrl") or item.get("image_url") or "").strip()
+        content_type = str(item.get("contentType") or item.get("content_type") or "").strip()
+        if not artifact_id and not url:
+            continue
+        normalized: dict[str, Any] = {
+            "artifactId": artifact_id,
+            "filename": str(item.get("filename") or artifact_id or "").strip(),
+            "url": url,
+            "imageUrl": str(item.get("imageUrl") or url).strip(),
+            "downloadUrl": str(item.get("downloadUrl") or item.get("download_url") or url).strip(),
+            "contentType": content_type,
+            "sizeBytes": int(item.get("sizeBytes") or item.get("size_bytes") or 0),
+            "kind": str(item.get("kind") or "user_image").strip() or "user_image",
+            "status": str(item.get("status") or "ready").strip() or "ready",
+        }
+        artifact_path = str(item.get("artifactPath") or item.get("artifact_path") or "").strip()
+        if artifact_path:
+            normalized["artifactPath"] = artifact_path
+        attachments.append(normalized)
+    return attachments
 
 
 def normalize_chat_message(item: Any) -> dict[str, Any] | None:
@@ -62,7 +114,8 @@ def normalize_chat_message(item: Any) -> dict[str, Any] | None:
     if mental_snapshot is None:
         mental_snapshot = item.get("mentalSnapshot")
     tool_calls = normalize_chat_tool_calls(item.get("tool_calls") or item.get("tools") or [])
-    if role == "user" and not content:
+    attachments = normalize_chat_attachments(item.get("attachments") or item.get("imageAttachments") or [])
+    if role == "user" and not content and not attachments:
         return None
     if role == "assistant" and not content and not thought and not isinstance(mental_snapshot, dict) and not tool_calls:
         return None
@@ -78,6 +131,8 @@ def normalize_chat_message(item: Any) -> dict[str, Any] | None:
         normalized["mental_snapshot"] = dict(mental_snapshot)
     if tool_calls:
         normalized["tool_calls"] = tool_calls
+    if attachments:
+        normalized["attachments"] = attachments
     metadata = item.get("metadata")
     if isinstance(metadata, dict) and metadata:
         normalized["metadata"] = dict(metadata)

@@ -24,7 +24,7 @@ from core.pet_system.pet_system import reset_pet_system
 from core.infrastructure import evolution_governor as governor_module
 from core.infrastructure.tool_executor import ToolExecutor, get_tool_executor
 from core.infrastructure.agent_session import get_session_state, reset_session_state
-from tools.Key_Tools import create_key_tools
+from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
 
 LEGACY_AGENT_TOOL_NAMES = {
@@ -72,7 +72,7 @@ class TestToolExecutorInit:
             "apply_patch_tool", "plan_update_tool",
             "trigger_self_restart_tool", "grep_search_tool",
             "task_create_tool", "task_update_tool", "task_list_tool",
-            "cli_tool",
+            "cli_tool", "agent_message_tool",
         ]
         
         for tool_name in expected_tools:
@@ -85,6 +85,12 @@ class TestToolExecutorInit:
 
         assert set(executor._tool_map) == canonical_names | {"spawn_agent_tool"}
         assert not (LEGACY_AGENT_TOOL_NAMES & set(executor._tool_map))
+
+    def test_agent_message_tool_is_llm_facing(self):
+        """Agent 私信工具应出现在默认 LLM 工具目录里。"""
+        names = {tool.name for tool in create_llm_facing_tools()}
+
+        assert "agent_message_tool" in names
 
     def test_tools_package_does_not_reexport_compat_aliases(self):
         """tools 包入口不再把底层 helper 伪装成 agent 工具别名。"""
@@ -345,6 +351,30 @@ class TestToolExecutorTimeout:
         assert action is None
         assert str(result) == "delegated:分析重复调用"
 
+    def test_spawn_agent_tool_respects_current_agent_delegation_policy(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-policy",
+            "delegationPolicy": {
+                "allowSubagents": False,
+                "maxDepth": 0,
+                "maxConcurrent": 0,
+                "allowWakeMessages": True,
+                "allowedContextModes": ["isolated"],
+            },
+        })
+        executor.register_tool("spawn_agent_tool", lambda **kwargs: "should-not-run", timeout=5)
+
+        result, action = executor.execute(
+            "spawn_agent_tool",
+            {"goal": "分析重复调用", "_internal_delegate": True},
+        )
+
+        assert action is None
+        assert "DelegationPolicy" in str(result) or "委托策略" in str(result)
+        assert "禁止派发子 Agent" in str(result)
+
     def test_spawn_agent_tool_internal_flag_is_not_forwarded_to_tool(self, executor):
         captured = {}
 
@@ -399,6 +429,55 @@ class TestToolExecutorTimeout:
 
         executor.set_cancel_checker(None, owner=owner_b)
         assert executor._current_cancel_reason() == ""
+
+    def test_parallel_cancel_checkers_are_isolated_per_call_context(self, executor):
+        started = {"a": threading.Event(), "b": threading.Event()}
+        release_b = threading.Event()
+        cancel_a = threading.Event()
+        results = {}
+
+        def slow_tool(label):
+            started[label].set()
+            if label == "a":
+                while not cancel_a.is_set():
+                    time.sleep(0.01)
+                time.sleep(0.1)
+                return "late a"
+            assert release_b.wait(2.0)
+            return "ok b"
+
+        executor.register_tool("slow_tool", slow_tool, timeout=5)
+
+        def run_a():
+            owner = object()
+            executor.set_cancel_checker(lambda: "stop a" if cancel_a.is_set() else "", owner=owner)
+            try:
+                results["a"] = executor.execute("slow_tool", {"label": "a"})[0]
+            finally:
+                executor.set_cancel_checker(None, owner=owner)
+
+        def run_b():
+            owner = object()
+            executor.set_cancel_checker(lambda: "", owner=owner)
+            try:
+                results["b"] = executor.execute("slow_tool", {"label": "b"})[0]
+            finally:
+                executor.set_cancel_checker(None, owner=owner)
+
+        thread_a = threading.Thread(target=run_a, daemon=True)
+        thread_b = threading.Thread(target=run_b, daemon=True)
+        thread_a.start()
+        thread_b.start()
+        assert started["a"].wait(1.0)
+        assert started["b"].wait(1.0)
+
+        cancel_a.set()
+        thread_a.join(timeout=2.0)
+        release_b.set()
+        thread_b.join(timeout=2.0)
+
+        assert "[取消] slow_tool 已因停止请求中断" in str(results["a"])
+        assert results["b"] == "ok b"
 
 
 class TestToolExecutorEvents:
@@ -1033,6 +1112,17 @@ class TestToolExecutorErrorHandling:
 
         assert action is None
         assert "禁止继续派发子 agent" in str(result)
+
+    def test_readonly_subagent_blocks_agent_message_tool(self, executor, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_SUBAGENT_MODE", "readonly")
+
+        result, action = executor.execute(
+            "agent_message_tool",
+            {"target_agent": "A002", "content": "请接力分析这个问题。"},
+        )
+
+        assert action is None
+        assert "[只读子代理]" in str(result)
 
     def test_active_evolution_transaction_blocks_writes_outside_allowed_dirs(self, executor, monkeypatch, tmp_path):
         project_root = tmp_path / "project"

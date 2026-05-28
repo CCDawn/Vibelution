@@ -46,6 +46,30 @@ class RuntimeProcess:
         }
 
 
+@dataclass(frozen=True)
+class BrowserProcessSnapshot:
+    pid: int
+    parent_pid: int
+    name: str
+    process_type: str
+    subtype: str
+    working_set_mb: float
+    private_mb: float
+    command_line_preview: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pid": self.pid,
+            "parentPid": self.parent_pid,
+            "name": self.name,
+            "type": self.process_type,
+            "subtype": self.subtype,
+            "workingSetMB": self.working_set_mb,
+            "privateMB": self.private_mb,
+            "commandLinePreview": self.command_line_preview,
+        }
+
+
 def list_repo_runtime_processes(
     *,
     project_root: Path | str = PROJECT_ROOT,
@@ -99,6 +123,86 @@ def list_repo_runtime_processes(
     return sorted(processes, key=lambda item: (item.kind, item.pid))
 
 
+def managed_browser_process_payload(
+    *,
+    profile_dir: Path | str,
+    command_preview_chars: int = 220,
+) -> dict[str, Any]:
+    """Return memory grouped by Edge processes that belong to the managed app profile."""
+
+    if psutil is None:
+        return {
+            "supported": False,
+            "profileDir": str(profile_dir),
+            "count": 0,
+            "totalWorkingSetMB": 0.0,
+            "totalPrivateMB": 0.0,
+            "items": [],
+        }
+
+    profile_marker = _profile_marker_text(profile_dir)
+    raw_processes: list[dict[str, Any]] = []
+    for proc in psutil.process_iter(["pid", "ppid", "name", "cmdline", "memory_info"]):
+        try:
+            raw_processes.append(dict(proc.info))
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    children_by_parent: dict[int, list[int]] = {}
+    by_pid: dict[int, dict[str, Any]] = {}
+    managed_seed_pids: set[int] = set()
+    for info in raw_processes:
+        pid = int(info.get("pid") or 0)
+        parent_pid = int(info.get("ppid") or 0)
+        if pid <= 0:
+            continue
+        by_pid[pid] = info
+        if parent_pid > 0:
+            children_by_parent.setdefault(parent_pid, []).append(pid)
+        command_line = _command_line_text(info.get("cmdline"))
+        if _looks_like_edge_process(info) and _command_line_has_profile_marker(command_line, profile_marker):
+            managed_seed_pids.add(pid)
+
+    managed_pids = set(managed_seed_pids)
+    queue = list(managed_seed_pids)
+    while queue:
+        parent_pid = queue.pop()
+        for child_pid in children_by_parent.get(parent_pid, []):
+            if child_pid in managed_pids:
+                continue
+            managed_pids.add(child_pid)
+            queue.append(child_pid)
+
+    items: list[BrowserProcessSnapshot] = []
+    for pid in sorted(managed_pids):
+        info = by_pid.get(pid)
+        if not info or not _looks_like_edge_process(info):
+            continue
+        command_line = _command_line_text(info.get("cmdline"))
+        working_set_mb, private_mb = _memory_info_mb(info.get("memory_info"))
+        items.append(
+            BrowserProcessSnapshot(
+                pid=pid,
+                parent_pid=int(info.get("ppid") or 0),
+                name=str(info.get("name") or ""),
+                process_type=_edge_process_type(command_line),
+                subtype=_edge_process_subtype(command_line),
+                working_set_mb=working_set_mb,
+                private_mb=private_mb,
+                command_line_preview=_truncate_text(command_line, max(40, int(command_preview_chars or 220))),
+            )
+        )
+
+    return {
+        "supported": True,
+        "profileDir": str(profile_dir),
+        "count": len(items),
+        "totalWorkingSetMB": round(sum(item.working_set_mb for item in items), 1),
+        "totalPrivateMB": round(sum(item.private_mb for item in items), 1),
+        "items": [item.to_dict() for item in sorted(items, key=lambda item: item.private_mb, reverse=True)],
+    }
+
+
 def _expand_excluded_process_tree(processes: list[dict[str, Any]], excluded: set[int]) -> set[int]:
     expanded = set(excluded)
     children_by_parent: dict[int, list[int]] = {}
@@ -129,6 +233,18 @@ def list_unmanaged_workbench_processes(
         for item in list_repo_runtime_processes(project_root=project_root, exclude_pids=exclude_pids)
         if item.kind == "unmanaged_workbench"
     ]
+
+
+def unmanaged_workbench_process_payload(
+    *,
+    project_root: Path | str = PROJECT_ROOT,
+    exclude_pids: Iterable[int] | None = None,
+) -> dict[str, Any]:
+    items = list_unmanaged_workbench_processes(project_root=project_root, exclude_pids=exclude_pids)
+    return {
+        "count": len(items),
+        "items": [item.to_dict() for item in items],
+    }
 
 
 def list_residual_runtime_processes(
@@ -200,6 +316,60 @@ def terminate_unmanaged_workbench_processes(
 
     time.sleep(0.05)
     remaining = list_residual_runtime_processes(project_root=project_root, exclude_pids=excluded)
+    remaining_pids = {item.pid for item in remaining}
+    return {
+        "supported": True,
+        "requested": sorted(target_pids),
+        "terminated": sorted(pid for pid in target_pids if pid not in remaining_pids),
+        "remaining": [item.to_dict() for item in remaining],
+    }
+
+
+def terminate_unmanaged_workbench_backends(
+    *,
+    project_root: Path | str = PROJECT_ROOT,
+    exclude_pids: Iterable[int] | None = None,
+    timeout_seconds: float = 5.0,
+) -> dict[str, Any]:
+    """Terminate repo-local unmanaged backend workbench processes, leaving dev servers alone."""
+
+    if psutil is None:
+        return {
+            "supported": False,
+            "requested": [],
+            "terminated": [],
+            "remaining": [],
+        }
+
+    excluded = {int(pid) for pid in (exclude_pids or []) if int(pid) > 0}
+    candidates = list_unmanaged_workbench_processes(project_root=project_root, exclude_pids=excluded)
+    target_pids = _target_process_tree_pids(candidates, excluded=excluded)
+    if not target_pids:
+        return {
+            "supported": True,
+            "requested": [],
+            "terminated": [],
+            "remaining": [],
+        }
+
+    target_processes = _live_processes(target_pids)
+    for proc in sorted(target_processes, key=lambda item: _process_depth(item), reverse=True):
+        try:
+            proc.terminate()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    _, alive = psutil.wait_procs(target_processes, timeout=max(0.1, float(timeout_seconds)))
+    for proc in alive:
+        try:
+            proc.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    if alive:
+        psutil.wait_procs(alive, timeout=1.0)
+
+    time.sleep(0.05)
+    remaining = list_unmanaged_workbench_processes(project_root=project_root, exclude_pids=excluded)
     remaining_pids = {item.pid for item in remaining}
     return {
         "supported": True,
@@ -391,6 +561,53 @@ def _contains_path_segment(text: str, path_text: str) -> bool:
         start = index + 1
 
 
+def _profile_marker_text(profile_dir: Path | str) -> str:
+    try:
+        return os.path.normcase(str(Path(profile_dir).resolve())).replace("\\", "/").rstrip("/")
+    except OSError:
+        return os.path.normcase(str(profile_dir)).replace("\\", "/").rstrip("/")
+
+
+def _looks_like_edge_process(info: dict[str, Any]) -> bool:
+    return str(info.get("name") or "").strip().lower() == "msedge.exe"
+
+
+def _command_line_has_profile_marker(command_line: str, profile_marker: str) -> bool:
+    if not command_line or not profile_marker:
+        return False
+    normalized = os.path.normcase(command_line).replace("\\", "/")
+    return _contains_path_segment(normalized, profile_marker)
+
+
+def _memory_info_mb(memory_info: object) -> tuple[float, float]:
+    rss = getattr(memory_info, "rss", 0) or 0
+    private = getattr(memory_info, "private", 0) or getattr(memory_info, "private_bytes", 0) or rss
+    return round(float(rss) / 1024 / 1024, 1), round(float(private) / 1024 / 1024, 1)
+
+
+def _edge_process_type(command_line: str) -> str:
+    return _extract_switch_value(command_line, "--type") or "browser"
+
+
+def _edge_process_subtype(command_line: str) -> str:
+    return _extract_switch_value(command_line, "--utility-sub-type") or _extract_switch_value(command_line, "--renderer-sub-type")
+
+
+def _extract_switch_value(command_line: str, switch_name: str) -> str:
+    prefix = f"{switch_name}="
+    for part in str(command_line or "").split():
+        if part.startswith(prefix):
+            return part[len(prefix) :].strip().strip('"')
+    return ""
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
+
+
 def _has_token(text: str, token: str) -> bool:
     return any(part == token for part in text.replace("\\", "/").split())
 
@@ -465,11 +682,25 @@ def _main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Terminate repo-local unmanaged workbench residual processes.",
     )
+    parser.add_argument(
+        "--cleanup-unmanaged-workbench-backends",
+        action="store_true",
+        help="Terminate repo-local unmanaged workbench backend residual processes without touching frontend dev servers.",
+    )
     parser.add_argument("--exclude-pid", action="append", type=int, default=[], help="PID to exclude from cleanup.")
     parser.add_argument("--timeout-seconds", type=float, default=5.0)
+    parser.add_argument("--managed-browser-profile", default="", help="Edge profile directory for managed browser memory snapshot.")
     args = parser.parse_args(argv)
 
-    if args.cleanup_residual_workbench:
+    if args.managed_browser_profile:
+        payload = managed_browser_process_payload(profile_dir=args.managed_browser_profile)
+    elif args.cleanup_unmanaged_workbench_backends:
+        payload = terminate_unmanaged_workbench_backends(
+            project_root=PROJECT_ROOT,
+            exclude_pids=args.exclude_pid,
+            timeout_seconds=args.timeout_seconds,
+        )
+    elif args.cleanup_residual_workbench:
         payload = terminate_unmanaged_workbench_processes(
             project_root=PROJECT_ROOT,
             exclude_pids=args.exclude_pid,

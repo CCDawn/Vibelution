@@ -175,6 +175,9 @@ class ProviderAdapter:
             return False
         return True
 
+    def supports_stream_usage_options(self) -> bool:
+        return False
+
 
 class OpenAICompatibleAdapter(ProviderAdapter):
     """Adapter for OpenAI-compatible HTTP endpoints."""
@@ -186,6 +189,9 @@ class OpenAICompatibleAdapter(ProviderAdapter):
 
     def messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return _convert_system_messages_after_first_to_user(messages)
+
+    def supports_stream_usage_options(self) -> bool:
+        return True
 
 
 class MiniMaxAdapter(ProviderAdapter):

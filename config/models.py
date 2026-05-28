@@ -186,6 +186,10 @@ class LLMProfile(BaseModel):
     tool_calling_mode: str = Field(default="auto")
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
     discovery_enabled: bool = Field(default=True)
+    supports_image_input: Optional[bool] = Field(
+        default=None,
+        description="Whether this profile is confirmed to accept image inputs in chat turns.",
+    )
 
     @field_validator("transport")
     @classmethod

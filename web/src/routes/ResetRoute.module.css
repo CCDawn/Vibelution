@@ -35,8 +35,9 @@
 
 .title {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
   font-size: var(--route-topbar-title-size);
+  font-weight: 760;
   line-height: 1.1;
   white-space: nowrap;
 }
@@ -66,7 +67,7 @@
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
   font-size: 0.8rem;
@@ -187,8 +188,8 @@
 .panelHeader h2,
 .card h2 {
   margin: 0;
-  font-family: var(--font-display);
   font-size: 1rem;
+  font-weight: 760;
 }
 
 .toolbar {

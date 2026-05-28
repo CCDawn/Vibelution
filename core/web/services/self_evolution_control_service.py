@@ -25,6 +25,7 @@ from core.evaluation.self_evolution_reflection import (
     record_bounded_self_evolution_reflection,
 )
 from core.infrastructure.agent_session import get_session_state
+from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
     load_active_run_snapshot as load_manager_active_run_snapshot,
@@ -42,6 +43,7 @@ from core.runtime_manager.work_run_leases import (
 )
 
 from .i18n import get_web_language, text_for
+from . import agent_directory_service, agent_mode_binding_service, session_service
 from .runtime_scene_service import record_runtime_scene_event
 from .session_service import (
     SessionBusyError,
@@ -77,6 +79,26 @@ _RUN_EXECUTING_STATUSES = {"queued", "running", "stopping"}
 _RUN_LOCKED_STATUSES = {"queued", "running", "stopping", "paused"}
 _RUN_FINAL_STATUSES = {"done", "failed", "cancelled"}
 _MANAGER_CONTROL_KEY = "runtimeManagerControl"
+SELF_EVOLUTION_AGENT_ROLES: tuple[dict[str, str], ...] = (
+    {
+        "role": "executor",
+        "label": "自进化执行 Agent",
+        "profileId": "primary",
+        "promptTemplateId": "prompt-self-executor",
+    },
+    {
+        "role": "reviewer",
+        "label": "自进化评审 Agent",
+        "profileId": "primary",
+        "promptTemplateId": "prompt-self-reviewer",
+    },
+    {
+        "role": "summarizer",
+        "label": "自进化总结 Agent",
+        "profileId": "primary",
+        "promptTemplateId": "prompt-self-summarizer",
+    },
+)
 _SELF_EVOLUTION_RISKY_WRITE_TEXT_MARKERS = (
     "修改",
     "修复",
@@ -322,8 +344,6 @@ def start_self_evolution_worktree_run(payload: dict[str, Any]) -> dict[str, Any]
         lifecycle=True,
     )
     return snapshot
-
-
 def _record_self_scene_event(
     phase: str,
     event_code: str,
@@ -362,6 +382,239 @@ def _self_child_log_path(run_id: str) -> str:
         for char in str(run_id or "").strip()
     ).strip("._-")
     return f"agent/self_evolution_runs/{normalized or 'run'}.jsonl"
+
+
+def ensure_self_evolution_agent_instances() -> list[dict[str, Any]]:
+    """Ensure self-evolution fixed roles are persistent AgentInstances."""
+
+    project_root = Path(PROJECT_ROOT).resolve()
+    previous_session_root = session_service.PROJECT_ROOT
+    previous_agent_root = agent_directory_service.PROJECT_ROOT
+    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
+    session_service.PROJECT_ROOT = project_root
+    agent_directory_service.PROJECT_ROOT = project_root
+    agent_mode_binding_service.PROJECT_ROOT = project_root
+    ensured: list[dict[str, Any]] = []
+    try:
+        for role in SELF_EVOLUTION_AGENT_ROLES:
+            ensured.append(_ensure_self_evolution_role(role))
+        _sync_self_evolution_mode_binding(ensured, preserve_existing_slots=True)
+        return ensured
+    finally:
+        session_service.PROJECT_ROOT = previous_session_root
+        agent_directory_service.PROJECT_ROOT = previous_agent_root
+        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
+
+
+def self_evolution_agent_bindings() -> dict[str, dict[str, Any]]:
+    raw_slots = _raw_self_evolution_mode_slots()
+    for role in [item["role"] for item in SELF_EVOLUTION_AGENT_ROLES]:
+        raw_agent_id = str(raw_slots.get(role) or "").strip()
+        if raw_agent_id and not agent_directory_service.get_agent(raw_agent_id, include_archived=False):
+            _record_self_evolution_binding_failure(role, agent_id=raw_agent_id, reason="missing_or_archived_slot_agent")
+            raise SelfEvolutionRunValidationError(
+                f"Self-evolution role slot points to an archived or missing Agent: {role} ({raw_agent_id})"
+            )
+    ensure_self_evolution_agent_instances()
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+    mode = (payload.get("modes") or {}).get("self_evolution")
+    slots = mode.get("slots") if isinstance(mode, dict) else {}
+    bindings: dict[str, dict[str, Any]] = {}
+    for role in [item["role"] for item in SELF_EVOLUTION_AGENT_ROLES]:
+        stale_warning = _self_evolution_slot_warning(payload, role)
+        if stale_warning:
+            agent_id = str(stale_warning.get("agentId") or "").strip()
+            _record_self_evolution_binding_failure(role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
+            raise SelfEvolutionRunValidationError(
+                f"Self-evolution role slot points to an archived or missing Agent: {role} ({agent_id or 'unknown'})"
+            )
+        agent_id = str((slots or {}).get(role) or "").strip()
+        if not agent_id:
+            _record_self_evolution_binding_failure(role, agent_id="", reason="missing_slot_agent")
+            raise SelfEvolutionRunValidationError(f"Self-evolution role slot is not configured: {role}")
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+        if not agent:
+            _record_self_evolution_binding_failure(role, agent_id=agent_id, reason="missing_or_archived_slot_agent")
+            raise SelfEvolutionRunValidationError(f"Self-evolution role slot points to an archived or missing Agent: {role}")
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        bindings[role] = {
+            "agentId": str(agent.get("agentId") or "").strip(),
+            "displayName": str(agent.get("displayName") or "").strip(),
+            "profileId": str(agent.get("profileId") or "").strip(),
+            "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+            "directSessionId": str(agent.get("directSessionId") or "").strip(),
+            "workspacePath": str(agent.get("workspacePath") or "").strip(),
+            "role": role,
+            "roleLabel": str(metadata.get("selfEvolutionRoleLabel") or role).strip(),
+        }
+    return bindings
+
+
+def _raw_self_evolution_mode_slots() -> dict[str, str]:
+    path = agent_mode_binding_service.mode_binding_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    for item in payload.get("bindings") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("mode") or "").strip() != "self_evolution":
+            continue
+        slots = item.get("slots") if isinstance(item.get("slots"), dict) else {}
+        return {str(key): str(value or "").strip() for key, value in slots.items()}
+    return {}
+
+
+def _self_evolution_slot_warning(mode_payload: dict[str, Any], role: str) -> dict[str, str] | None:
+    expected_field = f"slots.{role}"
+    for warning in mode_payload.get("repairWarnings") or []:
+        if not isinstance(warning, dict):
+            continue
+        if str(warning.get("mode") or "").strip() != "self_evolution":
+            continue
+        if str(warning.get("field") or "").strip() == expected_field:
+            return {str(key): str(value or "") for key, value in warning.items()}
+    return None
+
+
+def _record_self_evolution_binding_failure(role: str, *, agent_id: str, reason: str) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_runtime",
+            "self_evolution",
+            "agent_runtime.resolve_failed",
+            message="Self-evolution role Agent resolution failed",
+            level="error",
+            outcome="failed",
+            fields={
+                "mode": "self_evolution",
+                "slot": str(role or "").strip(),
+                "roleKey": str(role or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "source": "ModeBinding.slots",
+                "reason": str(reason or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any]:
+    role_key = str(role.get("role") or "").strip()
+    label = str(role.get("label") or role_key).strip() or role_key
+    profile_id = str(role.get("profileId") or "primary").strip() or "primary"
+    prompt_template_id = str(role.get("promptTemplateId") or "").strip()
+    existing = _find_agent_by_self_evolution_role(role_key)
+    if not existing:
+        session_detail = session_service.create_chat_session(
+            title=label,
+            profile_id=profile_id,
+            created_by="self_evolution",
+        )
+        agent_id = str(session_detail.get("agentId") or "").strip()
+        existing = agent_directory_service.get_agent(agent_id) if agent_id else None
+        if not existing:
+            raise RuntimeError(f"Self-evolution agent was not created for role: {role_key}")
+    metadata = dict(existing.get("metadata") or {})
+    expected_metadata = {
+        "agentMode": "self_evolution",
+        "configSurface": "model_config",
+        "fixedRole": True,
+        "selfEvolutionRole": role_key,
+        "selfEvolutionRoleLabel": label,
+    }
+    if (
+        str(existing.get("displayName") or "").strip() != label
+        or str(existing.get("primaryMode") or "").strip() != "self_evolution"
+        or str(existing.get("roleKey") or "").strip() != role_key
+        or str(existing.get("profileId") or "").strip() != profile_id
+        or str(existing.get("promptTemplateId") or "").strip() != prompt_template_id
+        or str(existing.get("status") or "active").strip() == "archived"
+        or any(metadata.get(key) != value for key, value in expected_metadata.items())
+    ):
+        existing = agent_directory_service.update_agent_instance(
+            str(existing.get("agentId") or ""),
+            display_name=label,
+            profile_id=profile_id,
+            primary_mode="self_evolution",
+            role_key=role_key,
+            prompt_template_id=prompt_template_id,
+            metadata=expected_metadata,
+            status="active",
+        )
+    return existing
+
+
+def _find_agent_by_self_evolution_role(role: str) -> dict[str, Any] | None:
+    normalized = str(role or "").strip()
+    if not normalized:
+        return None
+    for agent in agent_directory_service.list_agents(include_archived=True):
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        if str(metadata.get("selfEvolutionRole") or "").strip() == normalized:
+            return agent
+        if str(agent.get("primaryMode") or "").strip() == "self_evolution" and str(agent.get("roleKey") or "").strip() == normalized:
+            return agent
+    return None
+
+
+def _sync_self_evolution_mode_binding(agents: list[dict[str, Any]], *, preserve_existing_slots: bool = False) -> None:
+    active_agent_ids = [str(agent.get("agentId") or "").strip() for agent in agents if str(agent.get("agentId") or "").strip()]
+    slots: dict[str, str] = {}
+    if preserve_existing_slots:
+        try:
+            payload = agent_mode_binding_service.get_mode_bindings_payload()
+            existing = ((payload.get("modes") or {}).get("self_evolution") or {}).get("slots")
+            if isinstance(existing, dict):
+                slots.update({str(key): str(value or "").strip() for key, value in existing.items()})
+        except Exception:
+            slots = {}
+    for agent in agents:
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        role = str(metadata.get("selfEvolutionRole") or agent.get("roleKey") or "").strip()
+        agent_id = str(agent.get("agentId") or "").strip()
+        if role and agent_id and not slots.get(role):
+            slots[role] = agent_id
+    if not active_agent_ids:
+        return
+    agent_mode_binding_service.update_mode_binding(
+        "self_evolution",
+        default_agent_id=active_agent_ids[0],
+        available_agent_ids=active_agent_ids,
+        slots=slots,
+    )
+
+
+def _compact_agent_bindings(bindings: dict[str, Any]) -> dict[str, dict[str, str]]:
+    compact: dict[str, dict[str, str]] = {}
+    for role, binding in (bindings or {}).items():
+        if not isinstance(binding, dict):
+            continue
+        compact[str(role)] = {
+            "agentId": str(binding.get("agentId") or "").strip(),
+            "profileId": str(binding.get("profileId") or "").strip(),
+            "promptTemplateId": str(binding.get("promptTemplateId") or "").strip(),
+        }
+    return compact
+
+
+def _self_role_binding(bindings: dict[str, Any], role: str) -> dict[str, Any]:
+    binding = bindings.get(role) if isinstance(bindings, dict) else {}
+    return dict(binding or {}) if isinstance(binding, dict) else {}
+
+
+def _self_evolution_agent_config(binding: dict[str, Any]) -> Any | None:
+    profile_id = str((binding or {}).get("profileId") or "").strip()
+    if not profile_id:
+        return None
+    try:
+        return session_service._session_agent_config_for_profile(profile_id)
+    except Exception:
+        return None
 
 
 def _optional_scene_int(value: Any) -> int | None:
@@ -562,9 +815,10 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
                     lang,
                     zh="当前已经有一轮网页自进化在运行或暂停中，请先继续或终止这一轮。",
                     en="A web self-evolution pass is already active or paused. Resume or terminate it before starting another one.",
-                )
             )
+        )
 
+    agent_bindings = self_evolution_agent_bindings()
     run_id = f"web-self-{uuid4().hex[:12]}"
     started_at = _now_timestamp()
     preflight = _capture_preflight_state(run_id)
@@ -602,6 +856,7 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
                 timestamp=started_at,
             )
         ],
+        "agentBindings": agent_bindings,
         "turnCount": 0,
         "resumeCount": 0,
         "rollback": _initial_rollback_state(lang, base_rev=str(preflight.get("baseRev") or "")),
@@ -618,6 +873,7 @@ def start_self_evolution_run(payload: dict[str, Any]) -> dict[str, Any]:
         "goal": goal,
         "startedAt": started_at,
         "preflight": preflight,
+        "agentBindings": agent_bindings,
     }
 
     with _RUN_STATE_LOCK:
@@ -1111,6 +1367,7 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
     run_id = str(context.get("runId") or "").strip()
     goal = str(context.get("goal") or DEFAULT_SELF_EVOLUTION_GOAL).strip() or DEFAULT_SELF_EVOLUTION_GOAL
     initial = get_self_evolution_run_snapshot(run_id) or {}
+    agent_bindings = dict(context.get("agentBindings") or initial.get("agentBindings") or {})
     initial_status = str(initial.get("status") or "").strip().lower()
     if initial_status in {"cancelled", "paused"}:
         return
@@ -1147,12 +1404,14 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
             "hadCarryover": bool(carryover),
             "previousToolCallCount": total_tool_call_count,
             "turnCount": max(0, int(initial.get("turnCount") or 0)) + 1,
+            "agentBindings": _compact_agent_bindings(agent_bindings),
         },
         child_log_payload={
             "goalPreview": goal[:320],
             "hadCarryover": bool(carryover),
             "previousToolCallCount": total_tool_call_count,
             "turnCount": max(0, int(initial.get("turnCount") or 0)) + 1,
+            "agentBindings": _compact_agent_bindings(agent_bindings),
         },
         lifecycle=True,
     )
@@ -1171,15 +1430,41 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
     try:
         from agent import SelfEvolvingAgent
 
-        agent = SelfEvolvingAgent(mode="self_evolution")
-        seed_turn_carryover = getattr(agent, "seed_turn_carryover", None)
-        if callable(seed_turn_carryover) and carryover:
-            seed_turn_carryover(carryover)
-        stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
-        if callable(stop_configurer):
-            stop_configurer(lambda: _current_run_control_reason(run_id))
-        prompt = goal if carryover else _build_web_run_prompt(goal)
-        result = agent.run_single_turn(initial_prompt=prompt)
+        executor_binding = _self_role_binding(agent_bindings, "executor")
+        executor_context = build_agent_context(
+            str(executor_binding.get("agentId") or ""),
+            session_id=str(executor_binding.get("directSessionId") or ""),
+            run_id=run_id,
+        )
+        runtime_context = agent_directory_service.active_agent_runtime(
+            str(executor_binding.get("agentId") or ""),
+            session_id=str(executor_binding.get("directSessionId") or ""),
+            turn_id=run_id,
+        )
+        with runtime_context:
+            agent = SelfEvolvingAgent(
+                mode="self_evolution",
+                workspace_path=str(executor_binding.get("workspacePath") or "") or None,
+                config=_self_evolution_agent_config(executor_binding),
+            )
+            seed_turn_carryover = getattr(agent, "seed_turn_carryover", None)
+            if callable(seed_turn_carryover) and carryover:
+                seed_turn_carryover(carryover)
+            seed_runtime_context = getattr(agent, "seed_runtime_context", None)
+            if callable(seed_runtime_context) and executor_context.context_block:
+                seed_runtime_context(executor_context.context_block)
+            stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
+            if callable(stop_configurer):
+                stop_configurer(lambda: _current_run_control_reason(run_id))
+            prompt = goal if carryover else _build_web_run_prompt(goal)
+            result = agent.run_single_turn(initial_prompt=prompt)
+        if executor_context.agent_id:
+            record_agent_turn_result(
+                executor_context.agent_id,
+                executor_context.session_id,
+                result if isinstance(result, dict) else {},
+                run_id=run_id,
+            )
         result_status = str(result.get("status") or "").strip().lower()
         summary = str(result.get("summary") or "").strip()
         tool_call_count = max(0, int(result.get("tool_call_count") or 0))

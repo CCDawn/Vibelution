@@ -71,7 +71,7 @@ type ResearchPromptDraft = {
   defaultContent: string;
 };
 
-const LEGACY_DEFAULT_INPUT = {
+const PREVIOUS_DEFAULT_INPUT = {
   zh: {
     openGoal: "找一个计算机相关、适合 AI Scientist 赛题的新颖交叉学科研究主题。",
     constraints: "学生团队可做；能基于公开论文、GitHub、数据集或网页资料进行初步验证；适合比赛 MVP 展示。",
@@ -162,7 +162,6 @@ const COPY = {
     agentReport: "Agent 调研报告",
     agentMode: "真实网络状态",
     liveNetwork: "真实联网",
-    mixedLegacy: "含历史/测试数据",
     noFailures: "暂无失败调用",
     latestQueries: "最近查询",
     observations: "观察结论",
@@ -274,7 +273,6 @@ const COPY = {
     agentReport: "Agent research report",
     agentMode: "Live-search state",
     liveNetwork: "Live network",
-    mixedLegacy: "Mixed or legacy data",
     noFailures: "No failed provider calls",
     latestQueries: "Latest queries",
     observations: "Observations",
@@ -440,7 +438,10 @@ export function ResearchRoute() {
     flowStageItems.find((item) => item.stage === activeStage) ??
     flowStageItems[0];
   const effectiveStage = activeFlowItem?.stage ?? activeStage;
-  const nextFlowNode = useMemo(() => nextRunnableFlowNode(flowCanvasQuery.data?.nodes ?? []), [flowCanvasQuery.data?.nodes]);
+  const nextFlowNode = useMemo(
+    () => nextRunnableFlowNode(flowCanvasQuery.data?.nodes ?? []),
+    [flowCanvasQuery.data?.nodes],
+  );
 
   useEffect(() => {
     if (!flowStageItems.length) {
@@ -721,7 +722,8 @@ export function ResearchRoute() {
   const activePromptAgent = activePromptItem ? agentByKey.get(activePromptItem.key) : undefined;
   const activePromptTemplate =
     agentTemplates.find((template) => template.templateId === activePromptAgent?.templateId) ?? agentTemplates[0];
-  const activePromptLlmConfig = llmConfigs.find((config) => config.configId === activePromptAgent?.llmConfigId);
+  const activePromptProfileId = activePromptAgent?.profileId || "";
+  const activePromptLlmConfig = llmConfigs.find((config) => config.configId === activePromptProfileId);
   const activePromptIsDirty = Boolean(
     activePromptItem &&
       promptsQuery.data &&
@@ -732,7 +734,7 @@ export function ResearchRoute() {
   const activeStageStatus = activeFlowItem
     ? displayedFlowNodeStatus(activeFlowItem.node, runningFlowNodeId)
     : displayedStageStatus(effectiveStage, active, runningStage);
-  const showLegacyWorkflowModeControl = !flowStageItems.length;
+  const showFallbackWorkflowModeControl = !flowStageItems.length;
   const workflowControlsDisabled = busy || !activeSessionId || !nextFlowNode;
 
   const savePromptMutation = useMutation({
@@ -760,7 +762,7 @@ export function ResearchRoute() {
     },
   });
   const saveAgentTemplateMutation = useMutation({
-    mutationFn: (payload: { key: string; templateId: string; llmConfigId: string }) =>
+    mutationFn: (payload: { key: string; templateId: string; profileId: string }) =>
       fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/agent-templates", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -799,7 +801,7 @@ export function ResearchRoute() {
               流程画布
             </Link>
           </nav>
-          {showLegacyWorkflowModeControl ? (
+          {showFallbackWorkflowModeControl ? (
             <div className={styles.workflowModeControl} aria-label={copy.workflowMode}>
               <span>{copy.workflowMode}</span>
               <button
@@ -889,7 +891,8 @@ export function ResearchRoute() {
                   <div className={styles.promptAgentList}>
                     {promptItems.map((item) => {
                       const agent = agentByKey.get(item.key);
-                      const llmConfig = llmConfigs.find((config) => config.configId === agent?.llmConfigId);
+                      const agentProfileId = agent?.profileId || "";
+                      const llmConfig = llmConfigs.find((config) => config.configId === agentProfileId);
                       const originalContent = promptsQuery.data?.prompts.find((prompt) => prompt.key === item.key)?.content;
                       const isDirty = Boolean(originalContent !== undefined && originalContent !== item.content);
                       return (
@@ -966,7 +969,7 @@ export function ResearchRoute() {
                         saveAgentTemplateMutation.mutate({
                           key: activePromptItem.key,
                           templateId: event.target.value,
-                          llmConfigId: activePromptAgent?.llmConfigId ?? llmConfigs[0]?.configId ?? "",
+                          profileId: activePromptProfileId || llmConfigs[0]?.configId || "",
                         })
                       }
                     >
@@ -981,13 +984,13 @@ export function ResearchRoute() {
                   <label className={styles.agentTemplateField}>
                     <span>{copy.llmConfig}</span>
                     <select
-                      value={activePromptAgent?.llmConfigId ?? ""}
+                      value={activePromptProfileId}
                       disabled={!llmConfigs.length || saveAgentTemplateMutation.isPending}
                       onChange={(event) =>
                         saveAgentTemplateMutation.mutate({
                           key: activePromptItem.key,
                           templateId: activePromptAgent?.templateId ?? activePromptTemplate?.templateId ?? "",
-                          llmConfigId: event.target.value,
+                          profileId: event.target.value,
                         })
                       }
                     >
@@ -2366,7 +2369,7 @@ function traceLabel(kind: string) {
 
 function shouldRefreshDefaultDraft(value: string, field: keyof DraftInput, lang: "zh" | "en") {
   const normalized = String(value || "").trim();
-  return !normalized || normalized === LEGACY_DEFAULT_INPUT[lang][field];
+  return !normalized || normalized === PREVIOUS_DEFAULT_INPUT[lang][field];
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

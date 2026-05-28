@@ -659,10 +659,19 @@ class ConversationLogger:
                 content_raw = msg.get("content", "")
                 # content 可能是 content_blocks 列表
                 if isinstance(content_raw, list):
-                    text = "\n\n".join(
-                        block.get("text", "") for block in content_raw
-                        if isinstance(block, dict)
-                    )
+                    parts = []
+                    image_count = 0
+                    for block in content_raw:
+                        if not isinstance(block, dict):
+                            continue
+                        block_type = str(block.get("type") or "").strip().lower()
+                        if block_type in {"image_url", "input_image"} or block.get("image_url") or block.get("imageUrl"):
+                            image_count += 1
+                            continue
+                        parts.append(str(block.get("text") or ""))
+                    text = "\n\n".join(part for part in parts if part)
+                    if image_count:
+                        text = f"{text}\n\n[image attachments: {image_count}]".strip()
                 else:
                     text = str(content_raw)
             else:

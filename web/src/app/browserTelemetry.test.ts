@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getControlToken, resetControlTokenForTests } from "../api/client";
-import { collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
+import { collectBrowserMemorySnapshot, collectBrowserPageSnapshot, postBrowserTelemetry } from "./browserTelemetry";
 
 describe("browser telemetry", () => {
   afterEach(() => {
@@ -86,5 +86,31 @@ describe("browser telemetry", () => {
     });
     expect(snapshot).not.toHaveProperty("mainTextPreview");
     expect(JSON.stringify(snapshot)).not.toContain("用户对话正文");
+  });
+
+  it("summarizes JS heap memory as bounded numeric telemetry fields", () => {
+    vi.stubGlobal("performance", {
+      memory: {
+        usedJSHeapSize: 15 * 1024 * 1024,
+        totalJSHeapSize: 24 * 1024 * 1024,
+        jsHeapSizeLimit: 128 * 1024 * 1024,
+      },
+    });
+
+    expect(collectBrowserMemorySnapshot()).toMatchObject({
+      available: true,
+      usedJSHeapMB: 15,
+      totalJSHeapMB: 24,
+      jsHeapLimitMB: 128,
+      usedJSHeapBytes: 15 * 1024 * 1024,
+    });
+  });
+
+  it("marks browser memory unavailable when the runtime does not expose heap metrics", () => {
+    vi.stubGlobal("performance", {});
+
+    expect(collectBrowserMemorySnapshot()).toEqual({
+      available: false,
+    });
   });
 });

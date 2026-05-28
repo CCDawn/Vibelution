@@ -1,4 +1,5 @@
 import os
+import copy
 import json
 import sys
 import time
@@ -56,6 +57,7 @@ from langchain_core.messages import AIMessage, AIMessageChunk, SystemMessage, To
 
 from core.infrastructure.runtime_input import (
     build_chat_user_message,
+    build_chat_user_multimodal_message,
     build_external_request_message,
     build_runtime_notice_message,
 )
@@ -102,6 +104,7 @@ from core.orchestration.response_processor import ResponseProcessor, ResponsePro
 from core.orchestration.response_surface import ResponseSurfaceController
 from core.orchestration.turn_outcome import TurnOutcomeController
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
+from core.orchestration.context_engine import build_agent_context
 from core.orchestration.subagent_roles import extract_subagent_primary_goal
 from core.infrastructure.mental_model import get_mental_model
 from core.mental_model_flags import is_mental_model_enabled
@@ -133,6 +136,21 @@ def _record_agent_scene_event(phase: str, event_code: str, *, message: str, fiel
 SUBAGENT_RESULT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
 
 
+def _runtime_agent_binding_from_env() -> Dict[str, str]:
+    key_map = {
+        "agentId": "VIBELUTION_AGENT_ID",
+        "profileId": "VIBELUTION_AGENT_PROFILE_ID",
+        "directSessionId": "VIBELUTION_AGENT_DIRECT_SESSION_ID",
+        "workspacePath": "VIBELUTION_AGENT_WORKSPACE_PATH",
+        "supervisedRole": "VIBELUTION_SUPERVISED_ROLE",
+    }
+    return {
+        target_key: value
+        for target_key, env_key in key_map.items()
+        if (value := str(os.environ.get(env_key) or "").strip())
+    }
+
+
 class TurnStopRequested(Exception):
     """Raised when the active single turn received a web stop request."""
 
@@ -156,6 +174,8 @@ class SelfEvolvingAgent:
     ) -> None:
         """初始化 Agent 实例"""
         self.config = config or get_config()
+        self.runtime_agent_binding = _runtime_agent_binding_from_env()
+        self._apply_runtime_agent_profile_binding()
         self.name = self.config.agent.name
         self.mode = normalize_agent_mode(mode or getattr(self.config.agent, "default_mode", None))
         self.mode_policy = resolve_mode_policy(self.mode, self.config)
@@ -263,6 +283,7 @@ class SelfEvolvingAgent:
         self._active_goal: str = ""
         self._active_turn_messages: Optional[List[Any]] = None
         self._active_turn_goal: str = ""
+        self._pending_runtime_context_blocks: List[str] = []
         self._single_turn_mode_active: bool = False
         self._last_turn_metadata: Dict[str, Any] = {}
         self._turn_interrupt_checker = None
@@ -275,6 +296,39 @@ class SelfEvolvingAgent:
             config=self.config,
         )
         self._load_previous_session_constraints()
+
+    def _apply_runtime_agent_profile_binding(self) -> None:
+        profile_id = str(self.runtime_agent_binding.get("profileId") or "").strip()
+        if not profile_id or profile_id == "primary":
+            return
+        if profile_id not in self.config.llm.profiles:
+            _record_agent_scene_event(
+                "startup",
+                "agent.runtime_profile_binding_missing",
+                message="运行时 Agent profile 绑定未找到，继续使用 primary profile。",
+                fields={
+                    "agentId": self.runtime_agent_binding.get("agentId", ""),
+                    "agentProfileId": profile_id,
+                    "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
+                    "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
+                },
+            )
+            return
+        self.config = copy.deepcopy(self.config)
+        selected = copy.deepcopy(self.config.llm.profiles[profile_id])
+        selected.profile_id = "primary"
+        self.config.llm.profiles["primary"] = selected
+        _record_agent_scene_event(
+            "startup",
+            "agent.runtime_profile_bound",
+            message="运行时 Agent profile 已映射为本次 primary profile。",
+            fields={
+                "agentId": self.runtime_agent_binding.get("agentId", ""),
+                "agentProfileId": profile_id,
+                "supervisedRole": self.runtime_agent_binding.get("supervisedRole", ""),
+                "agentWorkspacePath": self.runtime_agent_binding.get("workspacePath", ""),
+            },
+        )
 
     def set_mental_model_enabled_override(self, enabled: Optional[bool]) -> None:
         """Override mental-model activity for this agent instance."""
@@ -778,15 +832,19 @@ class SelfEvolvingAgent:
             if not isinstance(item, dict):
                 continue
             role = str(item.get("role") or "").strip().lower()
-            content = str(item.get("content") or "").strip()
+            raw_content = item.get("content")
+            content = raw_content if isinstance(raw_content, list) else str(raw_content or "").strip()
             if not content:
                 continue
             if role in {"runtime_context", "runtime", "system"}:
-                restored.append(SystemMessage(content=content))
+                restored.append(SystemMessage(content=str(content)))
             elif role == "user":
-                restored.append(build_chat_user_message(content))
+                if isinstance(content, list):
+                    restored.append({"role": "user", "content": content})
+                else:
+                    restored.append(build_chat_user_message(content))
             elif role == "assistant":
-                restored.append(AIMessage(content=content))
+                restored.append(AIMessage(content=str(content)))
         if len(restored) <= 1:
             self._active_turn_messages = None
             self._active_turn_goal = ""
@@ -797,12 +855,58 @@ class SelfEvolvingAgent:
     def seed_runtime_context(self, content: str) -> None:
         """Add non-chat runtime context without making it a user/assistant message."""
         text = str(content or "").strip()
-        if not text or self._get_mode_policy().mode != AgentMode.CHAT:
+        if not text:
+            return
+        if self._get_mode_policy().mode != AgentMode.CHAT:
+            self._pending_runtime_context_blocks.append(text)
             return
         if not self._active_turn_messages:
             self._active_turn_messages = [SystemMessage(content="")]
         self._active_turn_messages.insert(1, SystemMessage(content=text))
         self._active_turn_goal = "__chat_session__"
+
+    def _seed_runtime_agent_context_for_turn(self, *, run_id: str = "") -> None:
+        """Seed ContextEngine output when this process is bound to an AgentInstance."""
+
+        runtime_binding = getattr(self, "runtime_agent_binding", {}) or {}
+        agent_id = str(runtime_binding.get("agentId") or "").strip()
+        if not agent_id:
+            return
+        session_id = str(runtime_binding.get("directSessionId") or "").strip()
+        try:
+            packet = build_agent_context(agent_id, session_id=session_id, run_id=run_id)
+        except Exception as exc:
+            _record_agent_scene_event(
+                "startup",
+                "agent.runtime_context_seed_failed",
+                message="运行时 Agent ContextEngine 上下文注入失败。",
+                fields={
+                    "agentId": agent_id,
+                    "sessionId": session_id,
+                    "supervisedRole": runtime_binding.get("supervisedRole", ""),
+                    "errorType": type(exc).__name__,
+                },
+            )
+            return
+        context_block = str(getattr(packet, "context_block", "") or "").strip()
+        if not context_block:
+            return
+        self.seed_runtime_context(context_block)
+        _record_agent_scene_event(
+            "startup",
+            "agent.runtime_context_seeded",
+            message="运行时 Agent ContextEngine 上下文已注入本轮。",
+            fields={
+                "agentId": agent_id,
+                "agentCode": str(getattr(packet, "agent_code", "") or "").strip(),
+                "sessionId": session_id,
+                "runId": str(run_id or "").strip(),
+                "profileId": str(getattr(packet, "profile_id", "") or "").strip(),
+                "promptTemplateId": str(getattr(packet, "prompt_template_id", "") or "").strip(),
+                "roleKey": str(getattr(packet, "role_key", "") or "").strip(),
+                "supervisedRole": runtime_binding.get("supervisedRole", ""),
+            },
+        )
 
     def export_turn_carryover(self) -> Dict[str, Any]:
         messages = self._serialize_turn_messages(self._active_turn_messages)
@@ -986,20 +1090,43 @@ class SelfEvolvingAgent:
         except Exception as exc:
             _debug_logger.warning(f"chat candidate capture skipped: {type(exc).__name__}: {exc}", tag="CHAT")
 
-    def _run_chat_turn(self, user_prompt: str = None, goal_override: str = None) -> bool:
-        return self._run_orchestrated_turn(user_prompt=user_prompt, goal_override=goal_override)
+    def _run_chat_turn(
+        self,
+        user_prompt: str = None,
+        goal_override: str = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
+        return self._run_orchestrated_turn(
+            user_prompt=user_prompt,
+            goal_override=goal_override,
+            attachments=attachments,
+        )
 
     def _run_evolution_turn(self, user_prompt: str = None, goal_override: str = None) -> bool:
         self._maybe_reset_supervised_case_context()
         return self._run_orchestrated_turn(user_prompt=user_prompt, goal_override=goal_override)
 
-    def think_and_act(self, user_prompt: str = None, goal_override: str = None) -> bool:
+    def think_and_act(
+        self,
+        user_prompt: str = None,
+        goal_override: str = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
         policy = self._get_mode_policy()
         if policy.orchestrator_kind == "chat":
-            return self._run_chat_turn(user_prompt=user_prompt, goal_override=goal_override)
+            return self._run_chat_turn(
+                user_prompt=user_prompt,
+                goal_override=goal_override,
+                attachments=attachments,
+            )
         return self._run_evolution_turn(user_prompt=user_prompt, goal_override=goal_override)
 
-    def _run_orchestrated_turn(self, user_prompt: str = None, goal_override: str = None) -> bool:
+    def _run_orchestrated_turn(
+        self,
+        user_prompt: str = None,
+        goal_override: str = None,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
         """苏醒时执行一次思考和行动。
 
         Returns:
@@ -1051,6 +1178,9 @@ class SelfEvolvingAgent:
             "_context_window_limit",
             getattr(self, "_effective_max_token_limit", 16000),
         )
+        self._seed_runtime_agent_context_for_turn(
+            run_id=getattr(self, "_pending_supervised_case_id", None) or effective_goal
+        )
         get_session_state().reset_runtime_constraints()
         self._last_runtime_state_memory = ""
         self._last_runtime_state_memory_key = ""
@@ -1059,6 +1189,12 @@ class SelfEvolvingAgent:
         self._sync_runtime_state_memory()
         sp = self.prompt_manager.build()
         self._cached_system_prompt = to_string(sp)
+        runtime_input_builder_for_turn = policy.runtime_input_builder
+        if policy.mode == AgentMode.CHAT and attachments:
+            runtime_input_builder_for_turn = lambda content: self._build_chat_user_message_for_turn(
+                content,
+                attachments,
+            )
         messages, resumed_messages = TurnOutcomeController.prepare_turn_messages(
             system_prompt=sp,
             user_prompt=user_prompt,
@@ -1066,9 +1202,15 @@ class SelfEvolvingAgent:
             active_turn_messages=self._active_turn_messages,
             active_turn_goal=self._active_turn_goal,
             build_system_message=build_system_message,
-            build_external_request_message=policy.runtime_input_builder,
+            build_external_request_message=runtime_input_builder_for_turn,
             allow_append_user_message=policy.mode == AgentMode.CHAT and policy.keep_multi_turn_context,
         )
+        pending_runtime_context_blocks = list(getattr(self, "_pending_runtime_context_blocks", []) or [])
+        self._pending_runtime_context_blocks = []
+        if pending_runtime_context_blocks:
+            insert_at = 1 if messages else 0
+            for block in reversed(pending_runtime_context_blocks):
+                messages.insert(insert_at, SystemMessage(content=block))
         try:
             get_ui().note_context_window(
                 estimate_messages_tokens(messages),
@@ -1440,6 +1582,22 @@ class SelfEvolvingAgent:
             _debug_logger.turn_end(current_turn, tool_count=round_state.total_tool_calls)
 
         return True
+
+    def _build_chat_user_message_for_turn(
+        self,
+        content: str,
+        attachments: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        image_urls: List[str] = []
+        for item in list(attachments or []):
+            if not isinstance(item, dict):
+                continue
+            data_url = str(item.get("dataUrl") or item.get("data_url") or "").strip()
+            if data_url:
+                image_urls.append(data_url)
+        if image_urls:
+            return build_chat_user_multimodal_message(content, image_urls)
+        return build_chat_user_message(content)
 
     def _invoke_llm(self, messages: list) -> Optional[Any]:
         """调用 LLM（带错误分类、自动重试）"""
@@ -1829,6 +1987,7 @@ class SelfEvolvingAgent:
         goal_override: str = None,
         case_id: str = None,
         disable_tools: bool = False,
+        attachments: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """执行单轮思考并返回结构化摘要。"""
         policy = self._get_mode_policy()
@@ -1866,7 +2025,11 @@ class SelfEvolvingAgent:
             self._single_turn_mode_active = True
             self._force_disable_tools_for_turn = bool(disable_tools)
             self._pending_supervised_case_id = case_id
-            ok = self.think_and_act(user_prompt=initial_prompt, goal_override=goal_override)
+            ok = self.think_and_act(
+                user_prompt=initial_prompt,
+                goal_override=goal_override,
+                attachments=attachments,
+            )
             snapshot = session.get_attention_snapshot()
             latest_delegation = None
             if snapshot.get("delegation_findings"):

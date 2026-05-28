@@ -9,6 +9,15 @@ export type BrowserTelemetryEventInput = {
 };
 
 const TELEMETRY_ENDPOINT = "/api/runtime/browser-telemetry";
+const BYTES_PER_MEBIBYTE = 1024 * 1024;
+
+type BrowserPerformanceWithMemory = Performance & {
+  memory?: {
+    usedJSHeapSize?: number;
+    totalJSHeapSize?: number;
+    jsHeapSizeLimit?: number;
+  };
+};
 
 function truncateText(value: string, limit: number): string {
   const text = String(value ?? "");
@@ -69,6 +78,34 @@ export function collectBrowserPageSnapshot(): Record<string, unknown> {
   };
 }
 
+export function collectBrowserMemorySnapshot(): Record<string, unknown> {
+  if (typeof performance === "undefined") {
+    return {
+      available: false,
+    };
+  }
+
+  const memory = (performance as BrowserPerformanceWithMemory).memory;
+  if (!memory) {
+    return {
+      available: false,
+    };
+  }
+
+  const usedJSHeapSize = finiteNumber(memory.usedJSHeapSize);
+  const totalJSHeapSize = finiteNumber(memory.totalJSHeapSize);
+  const jsHeapSizeLimit = finiteNumber(memory.jsHeapSizeLimit);
+  return {
+    available: true,
+    usedJSHeapMB: toMegabytes(usedJSHeapSize),
+    totalJSHeapMB: toMegabytes(totalJSHeapSize),
+    jsHeapLimitMB: toMegabytes(jsHeapSizeLimit),
+    usedJSHeapBytes: usedJSHeapSize,
+    totalJSHeapBytes: totalJSHeapSize,
+    jsHeapLimitBytes: jsHeapSizeLimit,
+  };
+}
+
 export function postBrowserTelemetry(
   payload: BrowserTelemetryEventInput,
   _options?: { preferBeacon?: boolean },
@@ -98,4 +135,12 @@ export function postBrowserTelemetry(
       }
     })
     .catch(() => {});
+}
+
+function finiteNumber(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+}
+
+function toMegabytes(value: number): number {
+  return Math.round((value / BYTES_PER_MEBIBYTE) * 10) / 10;
 }

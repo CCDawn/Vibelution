@@ -22,6 +22,7 @@ import {
   RuntimeSceneDeleteResponse,
   RuntimeSceneDetail,
   RuntimeSceneListItem,
+  RuntimeSceneWorkRunItem,
 } from "../api/types";
 import { FilePreview } from "../components/preview/FilePreview";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
@@ -221,6 +222,21 @@ function renderPackageDiagnosisPanel(
   const recommendedOrder = diagnosis.recommendedOrder ?? [];
   const startupSteps = diagnosis.startupTrace?.steps ?? [];
   const issueState = diagnosis.issueState;
+  const workRunSummary = diagnosis.workRunSummary;
+  const activeRuns = workRunSummary?.activeRuns ?? [];
+  const highFrequencyRuns = workRunSummary?.highFrequencyRuns ?? [];
+  const latestRuns = workRunSummary?.latestRuns ?? [];
+  const visibleWorkRuns = [...activeRuns, ...highFrequencyRuns, ...latestRuns].filter(
+    (run, index, runs) =>
+      index === runs.findIndex((item) => `${item.runKind}:${item.runId}` === `${run.runKind}:${run.runId}`),
+  );
+  const showWorkRunSummary = Boolean(
+    workRunSummary &&
+      (workRunSummary.snapshotEventCount > 0 ||
+        workRunSummary.runCount > 0 ||
+        workRunSummary.activeRunCount > 0 ||
+        workRunSummary.highFrequencyRunCount > 0),
+  );
   const activeSignalCount = issueState ? issueState.activeErrorCount + issueState.activeWarningCount : 0;
   const historicalSignalCount = issueState ? issueState.historicalErrorCount + issueState.historicalWarningCount : 0;
   const activeIssueCount = issueState ? issueState.activeClusterCount ?? activeSignalCount : 0;
@@ -304,6 +320,55 @@ function renderPackageDiagnosisPanel(
             <strong>{issueState.controlSignalCount}</strong>
             {lang === "zh" ? " 控制信号" : " control"}
           </span>
+        </div>
+      ) : null}
+      {showWorkRunSummary && workRunSummary ? (
+        <div className={styles.packageWorkRunPanel}>
+          <div className={styles.packageWorkRunHeader}>
+            <span>{lang === "zh" ? "运行任务摘要" : "Work Run Summary"}</span>
+            {workRunSummary.eventsPath ? (
+              <button
+                type="button"
+                className={styles.packageWorkRunPathButton}
+                onClick={() => handleOpenRawLog(scene.runtimeSceneId, workRunSummary.eventsPath)}
+                title={
+                  lang === "zh"
+                    ? `打开 Work Run 事件源：${workRunSummary.eventsPath}`
+                    : `Open work run event source: ${workRunSummary.eventsPath}`
+                }
+              >
+                {workRunSummary.eventsPath}
+              </button>
+            ) : null}
+          </div>
+          <div className={styles.packageWorkRunMetricStrip}>
+            <span>
+              <strong>{workRunSummary.activeRunCount}</strong>
+              {lang === "zh" ? " 活跃" : " active"}
+            </span>
+            <span>
+              <strong>{workRunSummary.highFrequencyRunCount}</strong>
+              {lang === "zh" ? " 高频" : " high-frequency"}
+            </span>
+            <span>
+              <strong>{workRunSummary.snapshotEventCount}</strong>
+              {lang === "zh" ? " 快照" : " snapshots"}
+            </span>
+            <span>
+              <strong>{workRunSummary.runCount}</strong>
+              {lang === "zh" ? " 运行项" : " runs"}
+            </span>
+          </div>
+          {visibleWorkRuns.length > 0 ? (
+            <div className={styles.packageWorkRunList}>
+              {visibleWorkRuns.slice(0, 4).map((run) => (
+                <div key={`${run.runKind}-${run.runId}`} className={styles.packageWorkRunItem}>
+                  <strong>{runtimeSceneWorkRunLabel(run, lang)}</strong>
+                  <span>{runtimeSceneWorkRunMeta(run, lang)}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {evidencePaths.length > 0 ? (
@@ -476,6 +541,24 @@ function runtimeSceneIssueClusterMeta(cluster: RuntimeSceneIssueCluster, lang: "
   return parts.join(lang === "zh" ? " · " : " · ");
 }
 
+function runtimeSceneWorkRunLabel(run: RuntimeSceneWorkRunItem, lang: "zh" | "en") {
+  const kind = localizeRuntimeSceneText(run.runKind || "work_run", lang) || (lang === "zh" ? "运行任务" : "Work run");
+  const runId = run.runId || (lang === "zh" ? "未知 ID" : "unknown id");
+  return `${kind} · ${runId}`;
+}
+
+function runtimeSceneWorkRunMeta(run: RuntimeSceneWorkRunItem, lang: "zh" | "en") {
+  const status = localizeRuntimeSceneText(run.latestStatus || "unknown", lang);
+  const phase = run.latestPhase ? localizeRuntimeSceneText(run.latestPhase, lang) : "";
+  const parts = [
+    lang === "zh" ? `${run.snapshotCount} 次快照` : `${run.snapshotCount} snapshots`,
+    status ? (lang === "zh" ? `状态 ${status}` : `status ${status}`) : "",
+    phase ? (lang === "zh" ? `阶段 ${phase}` : `phase ${phase}`) : "",
+    run.latestAt ? formatTimestamp(run.latestAt, lang) : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
+}
+
 function formatTimestamp(value: string, lang: "zh" | "en") {
   const text = String(value || "").trim();
   if (!text) {
@@ -616,6 +699,16 @@ const runtimeSceneTokenZhMap: Record<string, string> = {
   browser: "浏览器",
   research: "科研",
   supervisor: "监督器",
+  work_run: "运行任务",
+  chat_turn: "对话轮次",
+  chat_room_round: "群聊轮次",
+  self: "自进化",
+  self_evolution_run: "自进化运行",
+  supervised_evolution_run: "监督进化运行",
+  supervised_worktree_evolution_run: "监督工作树运行",
+  completed: "已完成",
+  queued: "排队中",
+  stopping: "停止中",
   session: "会话",
   startup: "启动",
   shutdown: "关闭",

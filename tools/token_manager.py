@@ -369,6 +369,8 @@ def estimate_messages_tokens(messages: list) -> int:
             for block in content:
                 if isinstance(block, dict) and "text" in block:
                     total += estimate_tokens_precise(block["text"])
+                elif isinstance(block, dict) and str(block.get("type") or "").lower() in {"image_url", "input_image"}:
+                    total += 256
                 elif isinstance(block, str):
                     total += estimate_tokens_precise(block)
         else:

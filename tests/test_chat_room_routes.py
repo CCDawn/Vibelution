@@ -1,3 +1,5 @@
+import time
+
 from fastapi.testclient import TestClient
 
 from core.ui.chat_state import save_chat_state
@@ -7,6 +9,29 @@ from core.web.services import agent_directory_service, chat_room_service, sessio
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
+
+
+def test_chat_room_modes_api_exposes_opportunistic_as_ready():
+    response = client.get("/api/chat-rooms/modes")
+
+    assert response.status_code == 200
+    modes = {item["id"]: item for item in response.json()}
+    assert modes["round_robin"]["status"] == "ready"
+    assert modes["opportunistic"]["status"] == "ready"
+
+
+def _wait_for_completed_room_round(room_id: str, *, timeout: float = 2.0) -> dict:
+    deadline = time.monotonic() + timeout
+    detail: dict = {}
+    while time.monotonic() < deadline:
+        response = client.get(f"/api/chat-rooms/{room_id}")
+        assert response.status_code == 200
+        detail = response.json()
+        latest_round = detail["rounds"][-1]
+        if latest_round["status"] == "completed":
+            return detail
+        time.sleep(0.02)
+    raise AssertionError(f"chat room round did not complete: {detail}")
 
 
 def _seed_chat_sessions(root):
@@ -65,8 +90,12 @@ def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
         json={"topic": "确认第一版群聊行为"},
     )
 
-    assert round_response.status_code == 200
-    detail = round_response.json()
+    assert round_response.status_code == 202
+    started = round_response.json()
+    assert started["status"] in {"running", "ready"}
+    assert started["rounds"][-1]["status"] in {"running", "completed"}
+
+    detail = _wait_for_completed_room_round(room["roomId"])
     latest_round = detail["rounds"][-1]
     assert latest_round["topic"] == "确认第一版群聊行为"
     assert latest_round["status"] == "completed"

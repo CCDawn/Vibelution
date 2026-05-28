@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from time import monotonic
 from typing import Any, Callable, Iterable
 
@@ -11,6 +12,7 @@ from langchain_core.messages import ToolMessage
 
 from core.infrastructure.workspace_manager import get_workspace
 from core.llm import get_llm_client
+from core.web.services import agent_directory_service, agent_mode_binding_service, prompt_template_service
 
 from .agent_templates import normalize_research_agent_config
 from .models import (
@@ -125,9 +127,10 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         collected: list[SearchResult] = []
         attempts: list[dict[str, Any]] = []
         trace: list[dict[str, Any]] = []
+        profile_id = _research_agent_profile_id(profile)
         _append_trace(
             trace,
-            _trace("agent", f"{profile.get('label') or agent_key} 启动", f"使用 LLM 配置 `{profile['llmConfigId']}`，准备围绕 {len(suggested_queries)} 个建议查询进行工具检索。"),
+            _trace("agent", f"{profile.get('label') or agent_key} 启动", f"使用 LLM 配置 `{profile_id}`，准备围绕 {len(suggested_queries)} 个建议查询进行工具检索。"),
             trace_sink,
         )
         _append_trace(
@@ -155,7 +158,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
                 ),
             },
         ]
-        client = get_llm_client(profile_id=profile["llmConfigId"])
+        client = get_llm_client(profile_id=profile_id)
         final_payload: dict[str, Any] | None = None
         tool_call_count = 0
         for _turn in range(6):
@@ -202,7 +205,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
             profile={
                 "agentKey": agent_key,
                 "templateId": profile["templateId"],
-                "llmConfigId": profile["llmConfigId"],
+                "profileId": profile_id,
                 "toolCallCount": tool_call_count,
                 "final": final_payload or {},
                 "executionMode": "llm_agent_with_search_tools",
@@ -402,11 +405,12 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         trace_sink: TraceSink | None = None,
     ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
         profile = self._agent_profile(agent_key)
+        profile_id = _research_agent_profile_id(profile)
         trace: list[dict[str, Any]] = []
-        _append_trace(trace, _trace("agent", f"{profile.get('label') or agent_key} 启动", f"使用 LLM 配置 `{profile['llmConfigId']}`。"), trace_sink)
+        _append_trace(trace, _trace("agent", f"{profile.get('label') or agent_key} 启动", f"使用 LLM 配置 `{profile_id}`。"), trace_sink)
         _append_trace(trace, _trace("prompt", "读取阶段提示词", f"载入 `{profile.get('promptFilename') or ''}`，并附加结构化 JSON 输出契约。"), trace_sink)
         _append_trace(trace, _trace("input", "整理阶段输入", _payload_summary(payload)), trace_sink)
-        client = get_llm_client(profile_id=profile["llmConfigId"])
+        client = get_llm_client(profile_id=profile_id)
         response = client.invoke(
             [
                 {"role": "system", "content": self._system_prompt(agent_key, contract)},
@@ -419,7 +423,7 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
         return result, trace, {
             "agentKey": agent_key,
             "templateId": profile["templateId"],
-            "llmConfigId": profile["llmConfigId"],
+            "profileId": profile_id,
             "executionMode": "llm_agent_structured_json",
             "trace": trace,
         }
@@ -462,20 +466,143 @@ class LLMResearchAgentRunner(ResearchAgentRunner):
 
     def _agent_profile(self, agent_key: str) -> dict[str, Any]:
         workspace = get_workspace()
+        mode_bound_agent = self._mode_bound_agent_profile(agent_key, workspace)
         config = normalize_research_agent_config(workspace.read_research_agent_config())
+        if mode_bound_agent:
+            for item in config["agents"]:
+                if item["key"] == agent_key:
+                    merged = dict(item)
+                    merged.update(mode_bound_agent)
+                    return merged
+            return mode_bound_agent
         for item in config["agents"]:
             if item["key"] == agent_key:
-                return item
+                return self._resolve_agent_instance_profile(item)
         raise ValueError(f"Unknown research agent: {agent_key}")
+
+    def _mode_bound_agent_profile(self, agent_key: str, workspace: Any) -> dict[str, Any] | None:
+        project_root = _workspace_project_root(workspace)
+        if project_root is None:
+            return None
+        previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
+        previous_agent_root = agent_directory_service.PROJECT_ROOT
+        agent_mode_binding_service.PROJECT_ROOT = project_root
+        agent_directory_service.PROJECT_ROOT = project_root
+        try:
+            payload = agent_mode_binding_service.get_mode_bindings_payload()
+            research_mode = (payload.get("modes") or {}).get("research") or {}
+            agent_id = str((research_mode.get("flowBindings") or {}).get(agent_key) or "").strip()
+            if not agent_id and agent_key in {"broad", "deep", "review", "themes", "card"}:
+                role_key = f"research_{agent_key}"
+                for candidate_id in list(research_mode.get("pool") or []):
+                    candidate = agent_directory_service.get_agent(str(candidate_id or ""), include_archived=False)
+                    if candidate and str(candidate.get("roleKey") or "").strip() == role_key:
+                        agent_id = str(candidate.get("agentId") or "").strip()
+                        break
+            if not agent_id:
+                return None
+            agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+            if not agent:
+                return None
+            return _profile_from_agent_instance(agent_key, agent)
+        finally:
+            agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
+            agent_directory_service.PROJECT_ROOT = previous_agent_root
 
     def _system_prompt(self, agent_key: str, contract: str) -> str:
         workspace = get_workspace()
         profile = self._agent_profile(agent_key)
+        prompt_template_id = str(profile.get("promptTemplateId") or "").strip()
+        if prompt_template_id:
+            previous_prompt_root = prompt_template_service.PROJECT_ROOT
+            project_root = _workspace_project_root(workspace)
+            if project_root is not None:
+                prompt_template_service.PROJECT_ROOT = project_root
+            try:
+                template = prompt_template_service.get_prompt_template(prompt_template_id)
+            finally:
+                prompt_template_service.PROJECT_ROOT = previous_prompt_root
+            if not template:
+                raise ValueError(f"Research agent {agent_key} prompt template not found: {prompt_template_id}")
+            prompt = str(template.get("content") or "")
+            if not prompt.strip():
+                raise ValueError(f"Research agent {agent_key} prompt template is empty: {prompt_template_id}")
+            return f"{prompt.strip()}\n\n{contract.strip()}\n\nReturn valid JSON only. Do not wrap it in Markdown."
         filename = str(profile.get("promptFilename") or "").strip()
         if not filename:
             raise ValueError(f"Research agent {agent_key} has no prompt file configured.")
         prompt = workspace.read_research_prompt(filename)
         return f"{prompt.strip()}\n\n{contract.strip()}\n\nReturn valid JSON only. Do not wrap it in Markdown."
+
+    def _resolve_agent_instance_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
+        agent_id = str(profile.get("agentId") or profile.get("agentInstanceId") or "").strip()
+        if not agent_id:
+            return profile
+        previous_root = agent_directory_service.PROJECT_ROOT
+        previous_prompt_root = prompt_template_service.PROJECT_ROOT
+        project_root = _workspace_project_root(get_workspace())
+        if project_root is not None:
+            agent_directory_service.PROJECT_ROOT = project_root
+            prompt_template_service.PROJECT_ROOT = project_root
+        try:
+            agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+        finally:
+            agent_directory_service.PROJECT_ROOT = previous_root
+            prompt_template_service.PROJECT_ROOT = previous_prompt_root
+        if not agent:
+            return profile
+        resolved = dict(profile)
+        resolved.update(_profile_from_agent_instance(str(profile.get("key") or ""), agent))
+        return resolved
+
+
+def _research_agent_profile_id(profile: dict[str, Any]) -> str:
+    """Resolve the runtime LLM profile from the unified Agent profile shape."""
+
+    return str(profile.get("profileId") or profile.get("llmConfigId") or "primary").strip() or "primary"
+
+
+def _profile_from_agent_instance(agent_key: str, agent: dict[str, Any]) -> dict[str, Any]:
+    normalized_agent_key = str(agent_key or "").strip()
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    template_id = str(agent.get("templateId") or metadata.get("researchTemplateId") or "").strip()
+    prompt_filename = str(metadata.get("researchPromptFilename") or "").strip()
+    profile_id = str(agent.get("profileId") or "").strip()
+    return {
+        "key": normalized_agent_key or str(metadata.get("researchAgentKey") or "").strip(),
+        "label": str(agent.get("displayName") or normalized_agent_key or "").strip(),
+        "promptFilename": prompt_filename,
+        "templateId": template_id,
+        "profileId": profile_id or "primary",
+        "enabled": str(agent.get("status") or "active").strip() != "archived",
+        "agentId": str(agent.get("agentId") or "").strip(),
+        "agentInstanceId": str(agent.get("agentId") or "").strip(),
+        "agentCode": str(agent.get("agentCode") or "").strip(),
+        "roleKey": str(agent.get("roleKey") or "").strip(),
+        "primaryMode": str(agent.get("primaryMode") or "").strip(),
+        "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+        "agentDisplayName": str(agent.get("displayName") or "").strip(),
+    }
+
+
+def _workspace_project_root(workspace: Any) -> Path | None:
+    for attr in ("project_root",):
+        value = getattr(workspace, attr, None)
+        if value:
+            try:
+                return Path(value).resolve()
+            except OSError:
+                return None
+    root = getattr(workspace, "root", None)
+    if root:
+        try:
+            root_path = Path(root).resolve()
+        except OSError:
+            return None
+        if root_path.name == "workspace":
+            return root_path.parent
+        return root_path
+    return None
 
 
 class DeterministicResearchAgentRunner(ResearchAgentRunner):

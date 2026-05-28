@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,7 +11,13 @@ from fastapi.testclient import TestClient
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.routes import evolution as evolution_routes
-from core.web.services import self_evolution_control_service as service
+from core.web.services import (
+    agent_directory_service,
+    agent_mode_binding_service,
+    prompt_template_service,
+    self_evolution_control_service as service,
+    session_service,
+)
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -573,6 +580,170 @@ def test_runtime_manager_start_self_evolution_allows_readonly_chat_session(monke
             "web_ui",
         ),
     ]
+
+
+def test_self_evolution_agent_bindings_create_fixed_role_slots(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    bindings = service.self_evolution_agent_bindings()
+
+    assert set(bindings) == {"executor", "reviewer", "summarizer"}
+    assert bindings["executor"]["promptTemplateId"] == "prompt-self-executor"
+    assert bindings["reviewer"]["promptTemplateId"] == "prompt-self-reviewer"
+    payload = agent_mode_binding_service.get_mode_bindings_payload()
+    assert payload["modes"]["self_evolution"]["slots"]["executor"] == bindings["executor"]["agentId"]
+
+
+def test_self_evolution_agent_repair_preserves_all_fixed_roles(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+
+    service.ensure_self_evolution_agent_instances()
+    session_service.list_sessions()
+    agents = [
+        agent
+        for agent in agent_directory_service.list_agents()
+        if agent["primaryMode"] == "self_evolution"
+    ]
+
+    assert {agent["roleKey"] for agent in agents} == {"executor", "reviewer", "summarizer"}
+    assert {agent["promptTemplateId"] for agent in agents} == {
+        "prompt-self-executor",
+        "prompt-self-reviewer",
+        "prompt-self-summarizer",
+    }
+
+
+def test_self_evolution_agent_bindings_block_archived_slot_replacement(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    events = []
+    monkeypatch.setattr(service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    service.ensure_self_evolution_agent_instances()
+    replacement = agent_directory_service.create_agent_instance(
+        display_name="将被归档的自进化执行 Agent",
+        profile_id="primary",
+        primary_mode="self_evolution",
+        role_key="executor",
+        prompt_template_id="prompt-self-executor",
+    )
+    current = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["self_evolution"]
+    slots = dict(current["slots"])
+    slots["executor"] = replacement["agentId"]
+    agent_mode_binding_service.update_mode_binding("self_evolution", slots=slots)
+    agent_directory_service.archive_agent_instance(replacement["agentId"])
+
+    with pytest.raises(service.SelfEvolutionRunValidationError, match="executor"):
+        service.self_evolution_agent_bindings()
+    assert events[-1][0][2] == "agent_runtime.resolve_failed"
+    assert events[-1][1]["fields"]["mode"] == "self_evolution"
+    assert events[-1][1]["fields"]["slot"] == "executor"
+    assert events[-1][1]["fields"]["agentId"] == replacement["agentId"]
+
+
+def test_start_self_evolution_run_snapshot_includes_agent_bindings(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(service, "get_active_supervised_worktree_run", lambda: None)
+    monkeypatch.setattr(service, "_capture_preflight_state", lambda run_id: {"runDir": "", "backupDir": "", "manifestPath": "", "baseRev": ""})
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda *args, **kwargs: None)
+
+    snapshot = service.start_self_evolution_run({"goal": "只读观察"})
+
+    assert snapshot["agentBindings"]["executor"]["agentId"]
+    assert snapshot["agentBindings"]["reviewer"]["role"] == "reviewer"
+
+
+def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(service, "get_workbench_contract", lambda: {"modeAvailability": {"self_evolution": True}})
+    monkeypatch.setattr(service, "active_session_has_write_leases", lambda: False)
+    monkeypatch.setattr(service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(service, "get_active_supervised_run", lambda: None)
+    monkeypatch.setattr(service, "get_active_supervised_worktree_run", lambda: None)
+    monkeypatch.setattr(service, "_capture_preflight_state", lambda run_id: {"runDir": "", "backupDir": "", "manifestPath": "", "baseRev": ""})
+    monkeypatch.setattr(service, "_finalize_rollback_manifest", lambda run_id, preflight: None)
+    prompt_template_service.update_prompt_template(
+        "prompt-self-executor",
+        name="自进化执行提示词",
+        category="self_evolution",
+        source_path="workspace/prompts/self/executor.md",
+        content="你是自进化执行 Agent，只根据当前有界目标行动。",
+    )
+    captured: dict[str, str] = {}
+
+    class FakeSelfEvolvingAgent:
+        def __init__(self, *, mode=None, workspace_path=None, config=None):
+            captured["mode"] = str(mode or "")
+            captured["workspace_path"] = str(workspace_path or "")
+            captured["profile_id"] = config.llm.get_profile(role="primary").profile_id if config else ""
+
+        def seed_runtime_context(self, content):
+            captured["runtime_context"] = str(content or "")
+
+        def set_turn_interrupt_checker(self, checker):
+            self.checker = checker
+
+        def run_single_turn(self, initial_prompt=None):
+            captured["initial_prompt"] = str(initial_prompt or "")
+            return {
+                "status": "completed",
+                "summary": "self done",
+                "raw_output": "self done",
+                "tool_call_count": 1,
+                "tool_trace": [],
+            }
+
+        def export_turn_carryover(self):
+            return {}
+
+    monkeypatch.setitem(sys.modules, "agent", SimpleNamespace(SelfEvolvingAgent=FakeSelfEvolvingAgent))
+    monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: fn(context))
+
+    snapshot = service.start_self_evolution_run({"goal": "只读观察"})
+    executor = snapshot["agentBindings"]["executor"]
+    event_path = tmp_path / executor["workspacePath"] / "events" / "agent_turn_results.jsonl"
+    records = [
+        json.loads(line)
+        for line in event_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert snapshot["status"] == "done"
+    assert captured["mode"] == "self_evolution"
+    assert captured["workspace_path"] == executor["workspacePath"]
+    assert "Agent Runtime Context" in captured["runtime_context"]
+    assert "Agent Prompt Template" in captured["runtime_context"]
+    assert "自进化执行 Agent" in captured["runtime_context"]
+    assert records[-1]["agentId"] == executor["agentId"]
+    assert records[-1]["sessionId"] == executor["directSessionId"]
+    assert records[-1]["status"] == "completed"
+    assert records[-1]["toolCallCount"] == 1
 
 
 def test_local_start_self_evolution_rejects_risky_write_goal_before_main_worktree(monkeypatch):

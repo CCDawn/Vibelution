@@ -5,18 +5,20 @@
   min-height: 100dvh;
   overflow: hidden;
   isolation: isolate;
-  --shell-topbar-height: 64px;
-  --shell-page-end: #121416;
+  --shell-topbar-height: 58px;
+  --shell-page-end: #0b0d11;
   --shell-surface: var(--surface-panel);
-  --shell-surface-muted: rgba(22, 25, 28, 0.82);
+  --shell-surface-muted: rgba(15, 18, 24, 0.88);
   --shell-surface-hover: var(--surface-panel-hover);
-  --shell-panel: rgba(24, 28, 32, 0.98);
-  --shell-panel-soft: rgba(34, 39, 44, 0.98);
-  --shell-card: rgba(18, 22, 25, 0.7);
-  --shell-shadow: rgba(8, 10, 12, 0.32);
+  --shell-panel: rgba(19, 23, 30, 0.98);
+  --shell-panel-soft: rgba(27, 32, 41, 0.98);
+  --shell-card: rgba(18, 22, 29, 0.82);
+  --shell-shadow: rgba(0, 0, 0, 0.28);
   background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent 32%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
     linear-gradient(180deg, var(--bg-canvas) 0%, var(--shell-page-end) 100%);
+  background-size: 36px 36px, 36px 36px, auto;
   color: var(--fg-primary);
 }
 
@@ -152,9 +154,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-height: var(--shell-topbar-height);
-  padding: 10px 16px;
+  padding: 8px 14px;
   pointer-events: none;
 }
 
@@ -164,7 +166,8 @@
   inset: 0;
   z-index: 0;
   background: var(--shell-surface-muted);
-  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--border-hairline);
+  backdrop-filter: blur(16px);
   pointer-events: none;
 }
 
@@ -413,7 +416,7 @@
   gap: 4px;
   padding: 3px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-panel);
   background: var(--shell-surface);
   -webkit-app-region: no-drag;
   app-region: no-drag;
@@ -425,9 +428,9 @@
   justify-content: center;
   color: var(--fg-secondary);
   text-decoration: none;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: 6px;
   cursor: pointer;
   pointer-events: auto;
   -webkit-app-region: no-drag;
@@ -445,7 +448,7 @@
 }
 
 .navLinkActive {
-  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 18%, transparent);
   color: var(--accent-warm-2);
 }
 
@@ -512,7 +515,9 @@
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: min(420px, calc(100vw - 40px));
+  width: min(520px, calc(100vw - 40px));
+  max-height: min(78vh, 760px);
+  overflow: auto;
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -573,6 +578,8 @@
   color: var(--fg-secondary);
   background: var(--shell-card);
   text-decoration: none;
+  cursor: pointer;
+  font: inherit;
   transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
 }
 
@@ -590,6 +597,145 @@
   white-space: nowrap;
   font-size: 0.82rem;
   font-weight: 650;
+}
+
+.utilityFilePanel {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--shell-card) 74%, transparent);
+}
+
+.utilityFileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.utilityFileHeader div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.utilityFileHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.utilityFileHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.utilityFileSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--shell-surface);
+  color: var(--fg-tertiary);
+}
+
+.utilityFileSearch input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.utilityFileTree {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.utilityFileDir {
+  display: grid;
+  gap: 4px;
+}
+
+.utilityFileDir summary {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.utilityFileChildren {
+  display: grid;
+  gap: 4px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+}
+
+.utilityFileButton {
+  display: grid;
+  grid-template-columns: minmax(0, 0.45fr) minmax(0, 0.55fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 5px 7px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.utilityFileButton:hover,
+.utilityFileButton:focus-visible,
+.utilityFileButtonActive {
+  border-color: var(--border-soft);
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--shell-card));
+  color: var(--fg-primary);
+  outline: none;
+}
+
+.utilityFileButton span,
+.utilityFileButton small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.utilityFileButton span {
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.utilityFileButton small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.utilityFileState {
+  margin: 0;
+  padding: 9px;
+  border: 1px dashed var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
 }
 
 .gitMiniPanel {

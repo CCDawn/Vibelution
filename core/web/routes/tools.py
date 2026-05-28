@@ -13,7 +13,9 @@ from core.web.services.tool_registry_service import (
     ToolRegistryPermissionError,
     create_generated_tool,
     delete_tool,
+    get_image2_model_config,
     get_tool_registry,
+    set_image2_default_model,
     set_generated_tool_enabled,
     test_tool,
     validate_generated_tool,
@@ -37,6 +39,11 @@ class GeneratedToolEnabledPayload(BaseModel):
 class ToolTestPayload(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     agentScope: str = ""
+    agentId: str = ""
+
+
+class Image2DefaultModelPayload(BaseModel):
+    modelRef: str = ""
 
 
 def _raise_tool_registry_error(exc: Exception) -> None:
@@ -54,6 +61,22 @@ def _raise_tool_registry_error(exc: Exception) -> None:
 @router.get("/tools")
 def tools_registry() -> dict:
     return get_tool_registry()
+
+
+@router.get("/tools/image2/models")
+def tools_image2_models() -> dict:
+    try:
+        return get_image2_model_config()
+    except Exception as exc:  # pragma: no cover - routed by helper
+        _raise_tool_registry_error(exc)
+
+
+@router.put("/tools/image2/default-model")
+def tools_image2_default_model(payload: Image2DefaultModelPayload) -> dict:
+    try:
+        return set_image2_default_model(payload.modelRef)
+    except Exception as exc:  # pragma: no cover - routed by helper
+        _raise_tool_registry_error(exc)
 
 
 @router.post("/tools/generated")
@@ -95,6 +118,7 @@ def tools_test(tool_id: str, payload: ToolTestPayload | None = None) -> dict:
             tool_id,
             args=(payload.args if payload else {}),
             agent_scope=(payload.agentScope if payload else ""),
+            agent_id=(payload.agentId if payload else ""),
         )
     except Exception as exc:  # pragma: no cover - routed by helper
         _raise_tool_registry_error(exc)

@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.services import agent_directory_service
 from core.web.services import tool_registry_service as registry
 
 
@@ -19,6 +20,120 @@ def test_tools_api_lists_builtin_tools(tmp_path, monkeypatch):
     assert payload["counts"]["builtIn"] > 0
     builtin = next(item for item in payload["tools"] if item["name"] == "grep_search_tool")
     assert builtin["deleteAllowed"] is False
+
+
+def test_tools_api_exposes_image2_model_selector(monkeypatch):
+    public_config = {
+        "llm": {
+            "model_library": {
+                "image_model": {
+                    "provider": {
+                        "kind": "openai",
+                        "api_key_env": "OPENAI_API_KEY",
+                        "base_url": "https://api.openai.com/v1",
+                        "compat_mode": "openai",
+                        "requires_api_key": True,
+                        "context_window": 128000,
+                    },
+                    "model": "gpt-image-1.5",
+                    "label": "Image Model",
+                    "api_key_env": "IMAGE_TOOL_KEY",
+                    "transport": "chat_completions",
+                    "contract": "tool_chat",
+                    "tool_calling_mode": "disabled",
+                    "streaming": False,
+                    "strict_compatibility": False,
+                }
+            }
+        },
+        "tools": {"image2": {"default_model_ref": "image_model"}},
+    }
+    monkeypatch.setattr(registry, "load_public_config", lambda: public_config)
+
+    response = _client().get("/api/tools/image2/models")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["toolId"] == "image2_generate_tool"
+    assert payload["defaultModelRef"] == "image_model"
+    assert payload["selectedModel"]["modelRef"] == "image_model"
+    assert payload["selectedModel"]["model"] == "gpt-image-1.5"
+    assert "apiKey" not in payload["selectedModel"]
+
+
+def test_tools_api_updates_image2_default_model(monkeypatch):
+    saved = {}
+    reloaded = {}
+    public_config = {
+        "llm": {
+            "model_library": {
+                "image_model": {
+                    "provider": {
+                        "kind": "openai",
+                        "api_key_env": "OPENAI_API_KEY",
+                        "base_url": "https://api.openai.com/v1",
+                        "compat_mode": "openai",
+                        "requires_api_key": True,
+                        "context_window": 128000,
+                    },
+                    "model": "gpt-image-1.5",
+                    "label": "Image Model",
+                    "transport": "chat_completions",
+                    "contract": "tool_chat",
+                    "tool_calling_mode": "disabled",
+                    "streaming": False,
+                    "strict_compatibility": False,
+                }
+            },
+            "profiles": {
+                "primary": {
+                    "provider": {
+                        "kind": "openai",
+                        "api_key_env": "OPENAI_API_KEY",
+                        "base_url": "https://api.openai.com/v1",
+                        "compat_mode": "openai",
+                        "requires_api_key": True,
+                        "context_window": 128000,
+                    },
+                    "model": "gpt-5.5",
+                    "transport": "chat_completions",
+                    "contract": "tool_chat",
+                    "tool_calling_mode": "auto",
+                    "strict_compatibility": False,
+                }
+            },
+        },
+        "tools": {"image2": {"default_model_ref": ""}},
+    }
+
+    def fake_load_public_config():
+        return saved.get("config", public_config)
+
+    def fake_save_public_config(updated):
+        saved["config"] = updated
+
+    monkeypatch.setattr(registry, "load_public_config", fake_load_public_config)
+    monkeypatch.setattr(registry, "save_public_config", fake_save_public_config)
+    monkeypatch.setattr(registry, "reload_config", lambda path: reloaded.setdefault("path", path))
+    monkeypatch.setattr(registry, "_record_registry_event", lambda *args, **kwargs: None)
+
+    response = _client().put("/api/tools/image2/default-model", json={"modelRef": "image_model"})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["defaultModelRef"] == "image_model"
+    assert saved["config"]["tools"]["image2"]["default_model_ref"] == "image_model"
+    assert reloaded["path"]
+
+
+def test_tools_api_rejects_unknown_image2_model(monkeypatch):
+    public_config = {"llm": {"model_library": {}}, "tools": {"image2": {"default_model_ref": ""}}}
+    monkeypatch.setattr(registry, "load_public_config", lambda: public_config)
+
+    response = _client().put("/api/tools/image2/default-model", json={"modelRef": "missing_model"})
+
+    assert response.status_code == 422
+    assert "Unknown image2 model reference" in response.json()["detail"]
 
 
 def test_tools_api_lists_agent_scopes(tmp_path, monkeypatch):
@@ -121,6 +236,36 @@ def test_tools_api_runs_safe_builtin_test_with_fixed_args(tmp_path, monkeypatch)
         "tool_name": "get_recent_changes_tool",
         "tool_args": {"limit": 3},
     }
+
+
+def test_tools_api_tests_safe_builtin_for_selected_agent_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "record_runtime_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(registry, "_record_registry_event", lambda *args, **kwargs: None)
+    agent = agent_directory_service.create_agent_instance(display_name="Route Policy Agent", profile_id="primary")
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={"blockedTools": ["get_current_goal_tool"]},
+    )
+
+    def fail_execute(self, tool_name, tool_args):
+        raise AssertionError("route-level Agent ToolPolicy should stop before runtime execution")
+
+    monkeypatch.setattr("core.infrastructure.tool_executor.ToolExecutor.execute", fail_execute)
+
+    response = _client().post(
+        "/api/tools/get_current_goal_tool/test",
+        json={"args": {}, "agentId": agent["agentId"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "blocked"
+    assert payload["called"] is False
+    assert payload["agent"]["agentId"] == agent["agentId"]
+    assert payload["agentCompatibility"]["status"] == "blocked"
+    assert "ToolPolicy" in payload["message"] or "工具策略" in payload["message"]
 
 
 def test_tools_api_generated_tool_test(tmp_path, monkeypatch):

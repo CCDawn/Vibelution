@@ -51,6 +51,13 @@ type RuntimeWorkSnapshot = {
       supervised_evolution_run?: ActiveWorkRunSnapshot | null;
       supervised_worktree_evolution_run?: ActiveWorkRunSnapshot | null;
     } | null;
+    activeItems?: {
+      chat_turn?: ActiveWorkRunSnapshot[] | null;
+      chat_room_round?: ActiveWorkRunSnapshot[] | null;
+      self_evolution_run?: ActiveWorkRunSnapshot[] | null;
+      supervised_evolution_run?: ActiveWorkRunSnapshot[] | null;
+      supervised_worktree_evolution_run?: ActiveWorkRunSnapshot[] | null;
+    } | null;
   } | null;
   taskSummary?: string | null;
   sessionTitle?: string | null;
@@ -317,12 +324,13 @@ export function deriveActiveWorkIndicator(
   if (!active) {
     return null;
   }
+  const activeItems = runtime?.workRuns?.activeItems;
 
   const candidates = [
     buildActiveWorkCandidate("supervised", active.supervised_evolution_run, runtime, lang),
     buildActiveWorkCandidate("self", active.self_evolution_run, runtime, lang),
-    buildActiveWorkCandidate("chat_room", active.chat_room_round, runtime, lang),
-    buildActiveWorkCandidate("chat", active.chat_turn, runtime, lang),
+    ...activeWorkCandidatesFromItems("chat_room", activeItems?.chat_room_round, runtime, lang, active.chat_room_round),
+    ...activeWorkCandidatesFromItems("chat", activeItems?.chat_turn, runtime, lang, active.chat_turn),
   ].filter((item): item is ActiveWorkIndicatorItem => Boolean(item));
 
   if (!candidates.length) {
@@ -335,6 +343,22 @@ export function deriveActiveWorkIndicator(
     overflowCount: Math.max(0, candidates.length - 1),
     items: candidates,
   };
+}
+
+function activeWorkCandidatesFromItems(
+  kind: ActiveWorkKind,
+  items: ActiveWorkRunSnapshot[] | null | undefined,
+  runtime: RuntimeWorkSnapshot,
+  lang: "zh" | "en",
+  fallback?: ActiveWorkRunSnapshot | null,
+): ActiveWorkIndicatorItem[] {
+  if (Array.isArray(items) && items.length) {
+    return items
+      .map((item) => buildActiveWorkCandidate(kind, item, runtime, lang))
+      .filter((item): item is ActiveWorkIndicatorItem => Boolean(item));
+  }
+  const candidate = buildActiveWorkCandidate(kind, fallback, runtime, lang);
+  return candidate ? [candidate] : [];
 }
 
 export function frontendSystemTone(state: FrontendSystemState): SystemStatusTone {

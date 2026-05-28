@@ -5,40 +5,51 @@ import routeSource from "./ResearchFlowCanvasRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 
 describe("ResearchFlowCanvasRoute layout contract", () => {
-  it("exposes a dedicated API-backed research flow canvas page", () => {
+  it("exposes a dedicated API-backed research flow canvas page with an organization side panel", () => {
     expect(routerSource).toContain("ResearchFlowCanvasRoute");
     expect(routerSource).toContain("research/flow-canvas");
     expect(routeSource).toContain("/api/research/flow-canvas");
-    expect(routeSource).toContain("/api/research/flow-canvas/execute");
+    expect(routeSource).not.toContain("/api/research/flow-canvas/execute");
+    expect(routeSource).toContain("/api/research/organization");
+    expect(routeSource).toContain("/api/research/organization/messages");
+    expect(routeSource).toContain("workspace/prompts/research/flow_canvas.json");
+    expect(routeSource).toContain("workspace/research/organization_graph.json");
     expect(routeSource).toContain("Research Flow Canvas");
     expect(routeSource).toContain("科研流程画布");
-    expect(routeSource).toContain("workspace/prompts/research/flow_canvas.json");
-    expect(routeSource).toContain("执行下一节点");
-    expect(routeSource).toContain("执行选中节点");
-    expect(routeSource).toContain("契约校验");
-    expect(routeSource).toContain("输入契约");
-    expect(routeSource).toContain("输出契约");
+    expect(routeSource).toContain("research_flow_canvas");
+    expect(routeSource).not.toContain("research_agent_organization");
+    expect(routeSource).toContain("模块模板库");
+    expect(routeSource).toContain("添加模块");
+    expect(routeSource).toContain("路由");
+    expect(routeSource).toContain("结构校验");
+    expect(routeSource).toContain("组织通信");
+    expect(routeSource).toContain("科研组织通信");
+    expect(routeSource).toContain("提案面板");
+    expect(routeSource).toContain("审计流");
+    expect(routeSource).toContain("human_override");
     expect(routeSource).toContain("inspectorView");
     expect(routeSource).toContain("错误警告");
     expect(routeSource).toContain("错误与警告");
     expect(routeSource).toContain("focusValidationIssue");
-    expect(routeSource).toContain("先修复契约");
+    expect(routeSource).toContain("先修复结构");
     expect(routeSource).toContain("无法连接");
-    expect(routeSource).toContain("activeExecutionSessionId");
+    expect(routeSource).not.toContain("activeExecutionSessionId");
     expect(routeSource).toContain("researchFlowExecutionBlockReason");
-    expect(routeSource).toContain("先选择一个科研会话后再执行");
     expect(routeSource).toContain("researchFlowLockBlockReason");
     expect(routeSource).toContain("锁定观察");
+    expect(routeSource).toContain("取消锁定");
+    expect(routeSource).toContain("useState(true)");
     expect(routeSource).toContain("实时观察");
     expect(routeSource).toContain("先锁定画布进入观察模式");
-    expect(routeSource).toContain("执行前检查");
-    expect(routeSource).toContain("handleExecutionGuideAction");
+    expect(routeSource).not.toContain("执行下一节点");
+    expect(routeSource).not.toContain("执行选中节点");
+    expect(routeSource).not.toContain("执行前检查");
     expect(routeSource).toContain("readableResearchFlowIssueMessage");
     expect(routeSource).toContain("researchFlowIssueAdvice");
-    expect(routeSource).toContain("refetchInterval: canvasLocked || flowRunActive ? 1000 : false");
+    expect(routeSource).toContain("refetchInterval: canvasLocked ? 2000 : false");
   });
 
-  it("keeps the canvas editable as a graph instead of a fixed stage rail", () => {
+  it("keeps the canvas editable as a flow contract board instead of an organization graph", () => {
     expect(routeSource).toContain("addNode");
     expect(routeSource).toContain("deleteSelected");
     expect(routeSource).toContain("handleNodePointerDown");
@@ -47,9 +58,6 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("RESEARCH_MODULE_TEMPLATES");
     expect(routeSource).toContain("createResearchNodeFromTemplate");
     expect(routeSource).toContain("nextTemplateNodeId");
-    expect(routeSource).toContain("模块库");
-    expect(routeSource).toContain("添加模块");
-    expect(routeSource).toContain("新连线模板");
     expect(routeSource).toContain("当前模块模板");
     expect(routeSource).toContain("线模板");
     expect(routeSource).toContain("保存为模块模板");
@@ -62,6 +70,9 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("literature_project_parse");
     expect(routeSource).toContain("semantic_cluster");
     expect(routeSource).toContain("novelty_reverse_check");
+    expect(routeSource).not.toContain("research_ceo_agent");
+    expect(routeSource).not.toContain("organization_advisor_agent");
+    expect(routeSource).not.toContain("collaboration_chat");
     expect(routeSource).toContain("edgeGeometry");
     expect(routeSource).toContain("EDGE_TYPE_OPTIONS");
     expect(routeSource).toContain("EDGE_CONDITION_OPTIONS");
@@ -72,7 +83,6 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("detectEdgeOverlap");
     expect(routeSource).toContain("arrowHeadPoints");
     expect(routeSource).toContain("edgeArrowHead");
-    expect(routeSource).toContain("evidence_loop");
     expect(routeSource).toContain("edgeTypeDescription");
     expect(routeSource).toContain("boundaryAnchor");
     expect(routeSource).toContain("EDGE_NODE_GAP");
@@ -107,12 +117,9 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("保存后${workbenchExitLabel}");
     expect(routeSource).toContain("起点模块");
     expect(routeSource).toContain("终点模块");
-    expect(routeSource).toContain("节点完成");
-    expect(routeSource).toContain("证据不足");
-    expect(routeSource).toContain("人工已选");
-    expect(routeSource).toContain("流程阻塞");
     expect(routeSource).toContain("模板说明");
     expect(routeSource).toContain("headers: { \"Content-Type\": \"application/json\" }");
+    expect(routeSource).toContain("canvasKind: payload.canvasKind || FLOW_CANVAS_KIND");
     expect(routeSource).toContain("saveMessage");
     expect(routeSource).toContain("handleCanvasWheel");
     expect(routeSource).toContain("preventDefault");
@@ -120,16 +127,21 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).not.toContain("!event.ctrlKey && !event.metaKey");
     expect(routeSource).toContain("translate(${canvasOffset.x}px, ${canvasOffset.y}px) scale(${canvasZoom})");
     expect(routeSource).toContain("STATUS_OPTIONS");
-    expect(routeSource).toContain("needs_evidence");
     expect(routeSource).toContain("blocked");
+    expect(routeSource).toContain("agentId");
     expect(routeSource).toContain("agentKey");
     expect(routeSource).toContain("llmConfigId");
+    expect(routeSource).toContain("绑定 Agent");
+    expect(routeSource).toContain("模型配置来自 Agent");
+    expect(routeSource).toContain("normalizeResearchFlowNodesForSave");
+    expect(routeSource).toContain("styles.nodeTitleInput");
+    expect(routeSource).toContain("模块模板");
+    expect(routeSource).not.toContain("旧节点级 LLM");
     expect(routeSource).toContain("routeCondition");
     expect(routeSource).toContain("触发条件");
     expect(routeSource).toContain("condition: \"completed\"");
-    expect(routeSource).not.toContain("condition: \"填写触发条件\"");
-    expect(routeSource).toContain("executeMutation");
-    expect(routeSource).toContain("researchThemeDiscoverySessions");
+    expect(routeSource).not.toContain("executeMutation");
+    expect(routeSource).not.toContain("researchThemeDiscoverySessions");
   });
 
   it("uses a full canvas plus inspector layout", () => {
@@ -142,6 +154,7 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.zoomControl).toBeTypeOf("string");
     expect(styles.iconButton).toBeTypeOf("string");
     expect(styles.node).toBeTypeOf("string");
+    expect(styles.nodeTitleInput).toBeTypeOf("string");
     expect(styles.nodeStatusCluster).toBeTypeOf("string");
     expect(styles.nodeWithIssue).toBeTypeOf("string");
     expect(styles.nodeIssueBadgeWarning).toBeTypeOf("string");
@@ -152,13 +165,6 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.edgeTrack).toBeTypeOf("string");
     expect(styles.edgePath).toBeTypeOf("string");
     expect(styles.edgeArrowHead).toBeTypeOf("string");
-    expect(styles.edgeType_success).toBeTypeOf("string");
-    expect(styles.edgeType_evidence_loop).toBeTypeOf("string");
-    expect(styles.edgeType_approval_gate).toBeTypeOf("string");
-    expect(styles.edgeType_human_handoff).toBeTypeOf("string");
-    expect(styles.edgeType_selection).toBeTypeOf("string");
-    expect(styles.edgeType_failure).toBeTypeOf("string");
-    expect(styles.edgeType_blocked).toBeTypeOf("string");
     expect(styles.edgeTypeHint).toBeTypeOf("string");
     expect(styles.saveStatusSuccess).toBeTypeOf("string");
     expect(styles.saveStatusWarning).toBeTypeOf("string");
@@ -177,13 +183,16 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.issueSummary).toBeTypeOf("string");
     expect(styles.issueCard).toBeTypeOf("string");
     expect(styles.issueCardBody).toBeTypeOf("string");
+    expect(styles.organizationPanel).toBeTypeOf("string");
+    expect(styles.organizationSummaryGrid).toBeTypeOf("string");
+    expect(styles.organizationAgentCard).toBeTypeOf("string");
+    expect(styles.organizationForm).toBeTypeOf("string");
+    expect(styles.organizationProposalCard).toBeTypeOf("string");
+    expect(styles.organizationAuditCard).toBeTypeOf("string");
     expect(styles.selectionSummary).toBeTypeOf("string");
     expect(styles.issueFocusButton).toBeTypeOf("string");
     expect(styles.issueEmpty).toBeTypeOf("string");
     expect(styles.executionBar).toBeTypeOf("string");
-    expect(styles.executionGuide).toBeTypeOf("string");
-    expect(styles.executionGuideActions).toBeTypeOf("string");
-    expect(styles.sessionSelect).toBeTypeOf("string");
     expect(styles.observerStatus).toBeTypeOf("string");
     expect(styles.observerStatusActive).toBeTypeOf("string");
     expect(styles.lockButtonActive).toBeTypeOf("string");
@@ -192,7 +201,6 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(styles.templateActions).toBeTypeOf("string");
     expect(styles.executionHint).toBeTypeOf("string");
     expect(styles.editorStack).toBeTypeOf("string");
-    expect(styles.status_needs_evidence).toBeTypeOf("string");
     expect(styles.status_blocked).toBeTypeOf("string");
   });
 });

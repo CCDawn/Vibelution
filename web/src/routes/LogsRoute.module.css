@@ -3,7 +3,7 @@
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  background: var(--surface-page);
+  background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
 }
 
 .header {
@@ -37,7 +37,8 @@
 .title,
 .sidebarTitle {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
+  font-weight: 760;
 }
 
 .title {
@@ -70,7 +71,7 @@
   align-items: center;
   min-height: 28px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--border-soft);
   background: var(--surface-panel);
   color: var(--fg-secondary);
@@ -84,9 +85,9 @@
   width: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 12px 14px;
+  padding: 10px 11px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--surface-panel);
   color: var(--fg-primary);
   text-align: left;
@@ -109,7 +110,8 @@
 
 .rootButtonLabel {
   min-width: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
+  font-weight: 760;
   font-size: 0.98rem;
   white-space: nowrap;
   overflow: hidden;
@@ -1113,6 +1115,108 @@
   font-size: 0.9rem;
 }
 
+.packageWorkRunPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 6%, var(--surface-card-subtle));
+}
+
+.packageWorkRunHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.packageWorkRunHeader > span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+}
+
+.packageWorkRunPathButton {
+  max-width: min(320px, 100%);
+  padding: 5px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface-panel);
+  color: var(--accent-cool);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.packageWorkRunPathButton:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+}
+
+.packageWorkRunMetricStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.packageWorkRunMetricStrip span {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid rgba(236, 230, 220, 0.08);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.packageWorkRunMetricStrip strong {
+  margin-right: 4px;
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.packageWorkRunList {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.packageWorkRunItem {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+.packageWorkRunItem strong,
+.packageWorkRunItem span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.packageWorkRunItem strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.packageWorkRunItem span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
 .packagePrimaryCluster {
   display: grid;
   gap: 6px;
@@ -1872,6 +1976,15 @@
   }
 
   .sceneMetricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .packageWorkRunHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .packageWorkRunMetricStrip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

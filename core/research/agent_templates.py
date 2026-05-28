@@ -300,19 +300,23 @@ def normalize_research_agent_config(raw: dict[str, Any] | None) -> dict[str, Any
         template_id = str(existing.get("templateId") or "").strip()
         if template_id not in known_templates:
             template_id = RESEARCH_AGENT_DEFAULT_TEMPLATE[key]
-        llm_config_id = str(existing.get("llmConfigId") or existing.get("profileId") or "").strip()
-        if not llm_config_id:
-            llm_config_id = RESEARCH_AGENT_DEFAULT_LLM_CONFIG[key]
-        agents.append(
-            {
-                "key": key,
-                "label": str(existing.get("label") or RESEARCH_AGENT_LABELS[key]),
-                "promptFilename": filename,
-                "templateId": template_id,
-                "llmConfigId": llm_config_id,
-                "enabled": bool(existing.get("enabled", True)),
-            }
+        profile_id = str(existing.get("profileId") or existing.get("llmConfigId") or "").strip()
+        if not profile_id:
+            profile_id = RESEARCH_AGENT_DEFAULT_LLM_CONFIG[key]
+        prompt_filename = normalize_research_prompt_filename(
+            str(existing.get("promptFilename") or filename),
+            key,
         )
+        agent = {
+            "key": key,
+            "label": str(existing.get("label") or RESEARCH_AGENT_LABELS[key]),
+            "promptFilename": prompt_filename,
+            "templateId": template_id,
+            "profileId": profile_id,
+            "enabled": bool(existing.get("enabled", True)),
+        }
+        _copy_unified_agent_fields(agent, existing)
+        agents.append(agent)
         seen.add(key)
     for key, existing in raw_by_key.items():
         if key in seen:
@@ -324,19 +328,35 @@ def normalize_research_agent_config(raw: dict[str, Any] | None) -> dict[str, Any
         template_id = str(existing.get("templateId") or "").strip()
         if template_id not in known_templates:
             template_id = RESEARCH_AGENT_TEMPLATES[0]["templateId"]
-        llm_config_id = str(existing.get("llmConfigId") or existing.get("profileId") or "").strip()
-        agents.append(
-            {
-                "key": normalized_key,
-                "label": str(existing.get("label") or normalized_key.replace("_", " ").title()),
-                "promptFilename": normalize_research_prompt_filename(str(existing.get("promptFilename") or ""), normalized_key),
-                "templateId": template_id,
-                "llmConfigId": llm_config_id,
-                "enabled": bool(existing.get("enabled", True)),
-            }
-        )
+        profile_id = str(existing.get("profileId") or existing.get("llmConfigId") or "").strip()
+        agent = {
+            "key": normalized_key,
+            "label": str(existing.get("label") or normalized_key.replace("_", " ").title()),
+            "promptFilename": normalize_research_prompt_filename(str(existing.get("promptFilename") or ""), normalized_key),
+            "templateId": template_id,
+            "profileId": profile_id,
+            "enabled": bool(existing.get("enabled", True)),
+        }
+        _copy_unified_agent_fields(agent, existing)
+        agents.append(agent)
     return {
         "schemaVersion": 1,
         "deletedDefaultAgents": sorted(deleted_default_agents),
         "agents": agents,
     }
+
+
+def _copy_unified_agent_fields(target: dict[str, Any], source: dict[str, Any]) -> None:
+    """Preserve AgentInstance migration fields while normalizing legacy research config."""
+
+    for key in (
+        "agentId",
+        "agentInstanceId",
+        "directSessionId",
+        "primaryMode",
+        "roleKey",
+        "promptTemplateId",
+    ):
+        value = str(source.get(key) or "").strip()
+        if value:
+            target[key] = value

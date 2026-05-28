@@ -3,7 +3,7 @@
   grid-template-rows: auto auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  background: var(--surface-page, rgba(18, 20, 22, 0.74));
+  background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
 }
 
 .header {
@@ -36,7 +36,8 @@
 
 .title {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
+  font-weight: 760;
   font-size: var(--route-topbar-title-size);
   line-height: 1.1;
   white-space: nowrap;
@@ -56,6 +57,7 @@
 .refreshButton,
 .filterButton,
 .filterButtonActive,
+.primaryButton,
 .secondaryButton,
 .dangerButton {
   display: inline-flex;
@@ -64,7 +66,7 @@
   gap: 7px;
   min-height: 34px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface-card, rgba(20, 23, 26, 0.72));
   color: var(--fg-secondary);
 }
@@ -76,6 +78,7 @@
 
 .refreshButton:hover,
 .filterButton:hover,
+.primaryButton:hover,
 .secondaryButton:hover {
   border-color: var(--border-strong);
   color: var(--fg-primary);
@@ -83,6 +86,7 @@
 }
 
 .refreshButton:disabled,
+.primaryButton:disabled,
 .secondaryButton:disabled,
 .dangerButton:disabled {
   opacity: 0.56;
@@ -102,10 +106,10 @@
   align-items: center;
   gap: 12px;
   min-width: 0;
-  margin: 10px 14px 0;
-  padding: 10px 12px;
+  margin: 8px 12px 0;
+  padding: 9px 10px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-panel);
   background: var(--surface-panel, rgba(27, 31, 35, 0.78));
 }
 
@@ -119,7 +123,8 @@
 
 .scopeCopy strong {
   color: var(--fg-primary);
-  font-family: var(--font-display);
+  font-family: var(--font-body);
+  font-weight: 760;
   font-size: 0.95rem;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -320,7 +325,8 @@
 
 .countPill,
 .sourcePill,
-.stateBadge {
+.stateBadge,
+.unsavedPill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -387,7 +393,7 @@
 .toolButton,
 .toolButtonActive {
   display: grid;
-  grid-template-columns: 12px minmax(0, 1fr) auto;
+  grid-template-columns: 12px minmax(0, 1fr) minmax(82px, 112px);
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -440,6 +446,49 @@
   white-space: nowrap;
 }
 
+.toolBadges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+  min-width: 0;
+}
+
+.policyStatePill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 112px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 56%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.policy_inherited {
+  border-color: var(--border-soft);
+}
+
+.policy_allowed {
+  border-color: color-mix(in srgb, var(--state-success) 28%, transparent);
+  background: color-mix(in srgb, var(--state-success) 9%, transparent);
+  color: var(--state-success);
+}
+
+.policy_blocked,
+.policy_excluded {
+  border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 9%, transparent);
+  color: var(--accent-warm-2);
+}
+
 .statusDot {
   width: 8px;
   height: 8px;
@@ -473,6 +522,12 @@
 
 .stateBadge {
   background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.unsavedPill {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
 }
 
 .metaGrid {
@@ -515,6 +570,16 @@
   font-size: 0.82rem;
 }
 
+.primaryButton {
+  min-height: 34px;
+  padding: 7px 12px;
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  font-weight: 720;
+}
+
 .dangerButton {
   border-color: color-mix(in srgb, var(--state-error) 30%, transparent);
   background: color-mix(in srgb, var(--state-error) 10%, transparent);
@@ -523,7 +588,10 @@
 
 .schemaDisclosure,
 .testPanel,
-.policyPanel {
+.policyPanel,
+.agentBulkPolicyPanel,
+.agentPolicyPanel,
+.image2ModelPanel {
   display: grid;
   gap: 12px;
   min-height: 0;
@@ -533,8 +601,21 @@
   background: var(--surface-panel-muted, rgba(21, 24, 27, 0.82));
 }
 
+.testPanel,
+.agentCompatibility,
+.testArgs {
+  overflow: hidden;
+}
+
+.testPanel .panelHeader,
+.agentCompatibility .panelHeader {
+  flex-wrap: wrap;
+}
+
 .testPanel h3,
-.policyPanel h3 {
+.policyPanel h3,
+.agentPolicyPanel h3,
+.image2ModelPanel h3 {
   margin: 0;
   font-family: var(--font-display);
   font-size: 0.96rem;
@@ -545,6 +626,7 @@
 .schemaDisclosure pre,
 .testPanel pre,
 .policyPanel pre {
+  max-width: 100%;
   min-height: 0;
   max-height: 46vh;
   margin: 0;
@@ -556,6 +638,8 @@
   color: var(--fg-secondary);
   font-size: 0.78rem;
   line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .schemaDisclosure summary {
@@ -593,11 +677,245 @@
 }
 
 .testPanel p,
-.policyPanel p {
+.policyPanel p,
+.agentPolicyPanel p,
+.image2ModelPanel p {
   margin: 0;
   color: var(--fg-secondary);
   font-size: 0.82rem;
   line-height: 1.45;
+}
+
+.image2ModelControls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 0.7fr);
+  gap: 10px;
+  min-width: 0;
+  align-items: end;
+}
+
+.image2ModelSelect {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.image2ModelSelect select {
+  min-width: 0;
+  width: 100%;
+}
+
+.image2ModelSummary {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong, rgba(14, 17, 20, 0.72));
+}
+
+.image2ModelSummary strong,
+.image2ModelSummary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.image2ModelSummary strong {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+}
+
+.image2ModelSummary span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+}
+
+.agentPolicyControls {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.agentPolicySelect {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.agentPolicySelect select {
+  min-width: 0;
+  width: 100%;
+}
+
+.agentPolicyButtonGroup {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+  align-self: end;
+}
+
+.bulkPolicyTopRow {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
+  gap: 10px;
+  min-width: 0;
+  align-items: end;
+}
+
+.bulkPolicyToolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  min-width: 0;
+  align-items: start;
+}
+
+.bulkPolicySearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
+  color: var(--fg-tertiary);
+}
+
+.bulkPolicySearch input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg-primary);
+}
+
+.bulkPolicyFilters,
+.bulkPolicyActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bulkPolicyList {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-height: 0;
+  max-height: 34vh;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.bulkPolicyToolRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) minmax(116px, 0.3fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong, rgba(14, 17, 20, 0.68));
+  cursor: pointer;
+}
+
+.bulkPolicyToolRow:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-strong, rgba(34, 39, 44, 0.86));
+}
+
+.bulkPolicyToolRowSelected {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-input-strong));
+}
+
+.bulkPolicyToolRow input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-cool);
+}
+
+.bulkPolicyToolCopy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.bulkPolicyToolCopy strong,
+.bulkPolicyToolCopy span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bulkPolicyToolCopy strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.bulkPolicyToolCopy span {
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+}
+
+.bulkPolicyFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 2px;
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+}
+
+.bulkPolicyFooter strong {
+  color: var(--fg-primary);
+}
+
+.policyModeButton,
+.policyModeButtonActive {
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.policyModeButtonActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
+  color: var(--fg-primary);
+}
+
+.policyModeButton:disabled,
+.policyModeButtonActive:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
 }
 
 .readinessPanel,
@@ -767,8 +1085,18 @@
   .workspace,
   .readinessPanel,
   .resultSummaryGrid,
-  .metaGrid {
+  .metaGrid,
+  .bulkPolicyTopRow,
+  .bulkPolicyToolbar,
+  .bulkPolicyToolRow,
+  .agentPolicyControls,
+  .agentPolicyButtonGroup,
+  .image2ModelControls {
     grid-template-columns: 1fr;
+  }
+
+  .bulkPolicyToolRow .toolBadges {
+    justify-content: flex-start;
   }
 
   .scopeSelect {

@@ -1,0 +1,495 @@
+"""Prompt template index service for AgentInstance configuration."""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import re
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from .runtime_scene_service import record_runtime_scene_event
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROMPT_TEMPLATE_INDEX_VERSION = 1
+PROMPT_TEMPLATE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,95}$")
+PROMPT_TEMPLATE_PATH = PROJECT_ROOT / "workspace" / "agent_config" / "prompt_templates.json"
+
+
+class PromptTemplateError(ValueError):
+    """Raised when a prompt template update is invalid."""
+
+
+DEFAULT_PROMPT_TEMPLATES: tuple[dict[str, Any], ...] = (
+    {
+        "templateId": "prompt-chat-default",
+        "name": "Chat default",
+        "category": "chat",
+        "sourcePath": "workspace/prompts/DYNAMIC.md",
+        "metadata": {"builtin": True},
+    },
+    {
+        "templateId": "prompt-research-broad",
+        "name": "Research broad search",
+        "category": "research",
+        "sourcePath": "workspace/prompts/research/broad.md",
+        "content": "# 广撒网探索 agent\n\n用于快速展开研究空间、收集候选线索和发现后续深挖方向。",
+        "metadata": {"builtin": True, "roleKey": "research_broad"},
+    },
+    {
+        "templateId": "prompt-research-deep",
+        "name": "Research deep search",
+        "category": "research",
+        "sourcePath": "workspace/prompts/research/deep.md",
+        "content": "# 深度研究 agent\n\n用于围绕已选线索做细读、证据归纳和风险核查。",
+        "metadata": {"builtin": True, "roleKey": "research_deep"},
+    },
+    {
+        "templateId": "prompt-research-review",
+        "name": "Research review",
+        "category": "research",
+        "sourcePath": "workspace/prompts/research/review.md",
+        "content": "# 研究审查 agent\n\n用于复核研究结论、寻找证据缺口和提出反例。",
+        "metadata": {"builtin": True, "roleKey": "research_review"},
+    },
+    {
+        "templateId": "prompt-research-themes",
+        "name": "Research themes",
+        "category": "research",
+        "sourcePath": "workspace/prompts/research/themes.md",
+        "content": "# 主题生成 agent\n\n用于把候选资料聚类成可执行研究主题。",
+        "metadata": {"builtin": True, "roleKey": "research_themes"},
+    },
+    {
+        "templateId": "prompt-research-card",
+        "name": "Research card",
+        "category": "research",
+        "sourcePath": "workspace/prompts/research/card.md",
+        "content": "# 主题卡 agent\n\n用于把研究主题整理成结构化卡片。",
+        "metadata": {"builtin": True, "roleKey": "research_card"},
+    },
+    {
+        "templateId": "prompt-supervised-baseline",
+        "name": "Supervised baseline",
+        "category": "supervised_evolution",
+        "sourcePath": "",
+        "metadata": {"builtin": True, "roleKey": "baseline"},
+    },
+    {
+        "templateId": "prompt-supervised-candidate",
+        "name": "Supervised candidate",
+        "category": "supervised_evolution",
+        "sourcePath": "",
+        "metadata": {"builtin": True, "roleKey": "candidate"},
+    },
+    {
+        "templateId": "prompt-supervised-reviewer",
+        "name": "Supervised reviewer",
+        "category": "supervised_evolution",
+        "sourcePath": "",
+        "metadata": {"builtin": True, "roleKey": "reviewer"},
+    },
+    {
+        "templateId": "prompt-supervised-auditor",
+        "name": "Supervised auditor",
+        "category": "supervised_evolution",
+        "sourcePath": "",
+        "metadata": {"builtin": True, "roleKey": "auditor"},
+    },
+    {
+        "templateId": "prompt-supervised-judge",
+        "name": "Supervised judge",
+        "category": "supervised_evolution",
+        "sourcePath": "",
+        "metadata": {"builtin": True, "roleKey": "judge"},
+    },
+    {
+        "templateId": "prompt-self-executor",
+        "name": "Self-evolution executor",
+        "category": "self_evolution",
+        "sourcePath": "",
+        "metadata": {"builtin": True, "roleKey": "executor"},
+    },
+    {
+        "templateId": "prompt-self-reviewer",
+        "name": "Self-evolution reviewer",
+        "category": "self_evolution",
+        "sourcePath": "",
+        "metadata": {"builtin": True, "roleKey": "reviewer"},
+    },
+    {
+        "templateId": "prompt-self-summarizer",
+        "name": "Self-evolution summarizer",
+        "category": "self_evolution",
+        "sourcePath": "",
+        "metadata": {"builtin": True, "roleKey": "summarizer"},
+    },
+)
+
+
+def list_prompt_templates(*, include_inactive: bool = False) -> dict[str, Any]:
+    """Return the prompt template index with lightweight content metadata."""
+
+    payload = repair_prompt_templates()
+    templates = [
+        _template_to_api(item, include_content=False)
+        for item in payload.get("templates") or []
+        if include_inactive or str(item.get("status") or "active").strip() != "inactive"
+    ]
+    templates.sort(key=lambda item: (str(item.get("category") or ""), str(item.get("templateId") or "")))
+    return {
+        "schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION,
+        "path": str(prompt_template_path()),
+        "storagePath": _relative_project_path(prompt_template_path()),
+        "templates": templates,
+        "repairWarnings": list(payload.get("repairWarnings") or []),
+    }
+
+
+def get_prompt_template(template_id: str) -> dict[str, Any] | None:
+    """Return one prompt template with resolved content."""
+
+    normalized = _normalize_template_id(template_id)
+    for item in repair_prompt_templates().get("templates") or []:
+        if str(item.get("templateId") or "").strip() == normalized:
+            return _template_to_api(item, include_content=True)
+    return None
+
+
+def update_prompt_template(
+    template_id: str,
+    *,
+    name: str | None = None,
+    category: str | None = None,
+    source_path: str | None = None,
+    content: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    status: str | None = None,
+) -> dict[str, Any]:
+    """Create or update one prompt template record."""
+
+    normalized = _normalize_template_id(template_id)
+    payload = repair_prompt_templates()
+    templates = list(payload.get("templates") or [])
+    index = next((idx for idx, item in enumerate(templates) if item.get("templateId") == normalized), -1)
+    if index < 0:
+        templates.append(_normalize_template_record({"templateId": normalized, "name": normalized}))
+        index = len(templates) - 1
+    record = dict(templates[index])
+    if name is not None:
+        record["name"] = _trim_text(name, max_chars=120) or normalized
+    if category is not None:
+        record["category"] = _safe_token(category, fallback="general")
+    if source_path is not None:
+        record["sourcePath"] = _normalize_source_path(source_path)
+    if content is not None:
+        record["content"] = _trim_content(content, max_chars=80_000)
+        _write_template_source_if_configured(record)
+    if metadata is not None:
+        record["metadata"] = dict(metadata) if isinstance(metadata, dict) else {}
+    if status is not None:
+        record["status"] = _normalize_status(status)
+    record["updatedAt"] = _now()
+    templates[index] = _normalize_template_record(record)
+    payload["templates"] = templates
+    _save_prompt_templates(payload)
+    _record_prompt_template_event("prompt_template.updated", normalized, outcome="updated")
+    return _template_to_api(templates[index], include_content=True)
+
+
+def reset_prompt_template(template_id: str) -> dict[str, Any]:
+    """Reset a template to its built-in default record when one exists."""
+
+    normalized = _normalize_template_id(template_id)
+    default = _default_template_map().get(normalized)
+    if not default:
+        raise PromptTemplateError(f"Prompt template has no built-in default: {normalized}")
+    payload = repair_prompt_templates()
+    templates = [item for item in payload.get("templates") or [] if item.get("templateId") != normalized]
+    reset_record = _normalize_template_record(copy.deepcopy(default))
+    reset_record["updatedAt"] = _now()
+    _write_template_source_if_configured(reset_record)
+    templates.append(reset_record)
+    payload["templates"] = templates
+    _save_prompt_templates(payload)
+    _record_prompt_template_event("prompt_template.reset", normalized, outcome="reset")
+    return _template_to_api(reset_record, include_content=True)
+
+
+def repair_prompt_templates() -> dict[str, Any]:
+    """Load and repair the prompt template index."""
+
+    payload = _load_prompt_templates()
+    templates_by_id = _default_template_map()
+    changed = False
+    for raw in payload.get("templates") or []:
+        if not isinstance(raw, dict):
+            changed = True
+            continue
+        try:
+            record = _normalize_template_record(raw)
+        except PromptTemplateError:
+            changed = True
+            continue
+        existing = templates_by_id.get(record["templateId"])
+        if existing:
+            merged = copy.deepcopy(existing)
+            merged.update(record)
+            merged["metadata"] = {
+                **dict(existing.get("metadata") or {}),
+                **dict(record.get("metadata") or {}),
+            }
+            templates_by_id[record["templateId"]] = _normalize_template_record(merged)
+        else:
+            templates_by_id[record["templateId"]] = record
+    next_payload = {
+        "schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION,
+        "updatedAt": str(payload.get("updatedAt") or _now()),
+        "templates": list(templates_by_id.values()),
+        "repairWarnings": list(payload.get("repairWarnings") or [])[-50:],
+    }
+    if payload.get("schemaVersion") != PROMPT_TEMPLATE_INDEX_VERSION:
+        changed = True
+    if _template_signature(payload.get("templates") or []) != _template_signature(next_payload["templates"]):
+        changed = True
+    if changed or not prompt_template_path().exists():
+        next_payload["updatedAt"] = _now()
+        for record in next_payload["templates"]:
+            _write_template_source_if_missing(record)
+        _save_prompt_templates(next_payload)
+        _record_prompt_template_event(
+            "prompt_template.repaired",
+            "",
+            outcome="repaired",
+            fields={"templateCount": len(next_payload["templates"])},
+        )
+    return next_payload
+
+
+def prompt_template_path() -> Path:
+    return PROJECT_ROOT / "workspace" / "agent_config" / "prompt_templates.json"
+
+
+def _load_prompt_templates() -> dict[str, Any]:
+    path = prompt_template_path()
+    if not path.exists():
+        return {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
+    return payload if isinstance(payload, dict) else {"schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION, "templates": []}
+
+
+def _save_prompt_templates(payload: dict[str, Any]) -> None:
+    data = {
+        "schemaVersion": PROMPT_TEMPLATE_INDEX_VERSION,
+        "updatedAt": _now(),
+        "templates": [_normalize_template_record(item) for item in payload.get("templates") or [] if isinstance(item, dict)],
+        "repairWarnings": list(payload.get("repairWarnings") or [])[-50:],
+    }
+    _atomic_write_json(prompt_template_path(), data)
+
+
+def _template_to_api(record: dict[str, Any], *, include_content: bool) -> dict[str, Any]:
+    content = _resolve_template_content(record)
+    source_path = str(record.get("sourcePath") or "").strip()
+    source_exists = _source_exists(source_path)
+    payload = {
+        "templateId": str(record.get("templateId") or "").strip(),
+        "promptTemplateId": str(record.get("templateId") or "").strip(),
+        "name": str(record.get("name") or "").strip(),
+        "category": str(record.get("category") or "general").strip(),
+        "sourcePath": source_path,
+        "sourceExists": source_exists,
+        "status": str(record.get("status") or "active").strip(),
+        "metadata": dict(record.get("metadata") or {}),
+        "contentLength": len(content),
+        "contentHash": _content_hash(content),
+        "contentPreview": _trim_text(content.replace("\r\n", "\n"), max_chars=240),
+        "content": content if include_content else "",
+        "createdAt": str(record.get("createdAt") or "").strip(),
+        "updatedAt": str(record.get("updatedAt") or "").strip(),
+    }
+    return payload
+
+
+def _resolve_template_content(record: dict[str, Any]) -> str:
+    if "content" in record:
+        return str(record.get("content") or "")
+    source_path = str(record.get("sourcePath") or "").strip()
+    if not source_path:
+        return ""
+    try:
+        path = _resolve_project_path(source_path)
+        if path.exists() and path.is_file():
+            return path.read_text(encoding="utf-8")
+    except Exception:
+        _record_prompt_template_event(
+            "prompt_template.missing_source",
+            str(record.get("templateId") or ""),
+            level="warning",
+            outcome="missing_source",
+            fields={"sourcePath": source_path},
+        )
+    return ""
+
+
+def _normalize_template_record(raw: dict[str, Any]) -> dict[str, Any]:
+    template_id = _normalize_template_id(raw.get("templateId") or raw.get("id"))
+    now = _now()
+    record = {
+        "templateId": template_id,
+        "name": _trim_text(raw.get("name") or template_id, max_chars=120) or template_id,
+        "category": _safe_token(raw.get("category") or "general", fallback="general"),
+        "sourcePath": _normalize_source_path(raw.get("sourcePath") or ""),
+        "status": _normalize_status(raw.get("status") or "active"),
+        "metadata": dict(raw.get("metadata") or {}) if isinstance(raw.get("metadata"), dict) else {},
+        "createdAt": str(raw.get("createdAt") or now).strip(),
+        "updatedAt": str(raw.get("updatedAt") or now).strip(),
+    }
+    if "content" in raw:
+        record["content"] = _trim_content(raw.get("content") or "", max_chars=80_000)
+    return record
+
+
+def _write_template_source_if_configured(record: dict[str, Any]) -> None:
+    source_path = str(record.get("sourcePath") or "").strip()
+    if not source_path:
+        return
+    path = _resolve_project_path(source_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(record.get("content") or ""), encoding="utf-8", newline="\n")
+
+
+def _write_template_source_if_missing(record: dict[str, Any]) -> None:
+    source_path = str(record.get("sourcePath") or "").strip()
+    if not source_path or "content" not in record:
+        return
+    path = _resolve_project_path(source_path)
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(record.get("content") or ""), encoding="utf-8", newline="\n")
+
+
+def _source_exists(source_path: str) -> bool:
+    if not source_path:
+        return False
+    try:
+        return _resolve_project_path(source_path).is_file()
+    except PromptTemplateError:
+        return False
+
+
+def _content_hash(content: str) -> str:
+    return "sha256:" + hashlib.sha256(str(content or "").encode("utf-8")).hexdigest()
+
+
+def _normalize_template_id(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if not normalized or not PROMPT_TEMPLATE_ID_PATTERN.fullmatch(normalized):
+        raise PromptTemplateError("Invalid prompt template id.")
+    return normalized
+
+
+def _normalize_source_path(value: Any) -> str:
+    raw = str(value or "").strip().replace("\\", "/")
+    if not raw:
+        return ""
+    _resolve_project_path(raw)
+    return raw
+
+
+def _resolve_project_path(value: str) -> Path:
+    root = Path(PROJECT_ROOT).resolve()
+    candidate = (root / value).resolve()
+    if candidate != root and root not in candidate.parents:
+        raise PromptTemplateError("Prompt template source path must stay inside the project.")
+    return candidate
+
+
+def _default_template_map() -> dict[str, dict[str, Any]]:
+    return {
+        str(item["templateId"]): _normalize_template_record(copy.deepcopy(item))
+        for item in DEFAULT_PROMPT_TEMPLATES
+    }
+
+
+def _template_signature(templates: list[Any]) -> list[tuple[str, str, str, str]]:
+    signature: list[tuple[str, str, str, str]] = []
+    for item in templates:
+        if isinstance(item, dict):
+            signature.append(
+                (
+                    str(item.get("templateId") or ""),
+                    str(item.get("name") or ""),
+                    str(item.get("category") or ""),
+                    str(item.get("sourcePath") or ""),
+                )
+            )
+    return sorted(signature)
+
+
+def _safe_token(value: Any, *, fallback: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip().lower()).strip("._-")
+    return token or fallback
+
+
+def _normalize_status(value: Any) -> str:
+    normalized = str(value or "active").strip().lower()
+    return normalized if normalized in {"active", "inactive"} else "active"
+
+
+def _trim_text(value: Any, *, max_chars: int) -> str:
+    text = str(value or "").strip()
+    return text[:max(0, int(max_chars))]
+
+
+def _trim_content(value: Any, *, max_chars: int) -> str:
+    text = str(value or "")
+    return text[:max(0, int(max_chars))]
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _relative_project_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _record_prompt_template_event(
+    event_code: str,
+    template_id: str,
+    *,
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_configuration",
+            "prompt_template",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome,
+            fields={"templateId": str(template_id or "").strip(), **dict(fields or {})},
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()

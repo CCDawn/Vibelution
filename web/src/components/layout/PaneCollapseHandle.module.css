@@ -14,7 +14,7 @@
   height: 40px;
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--border-strong) 76%, transparent);
-  border-radius: 999px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--surface-panel-strong) 94%, transparent);
   color: var(--fg-secondary);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);

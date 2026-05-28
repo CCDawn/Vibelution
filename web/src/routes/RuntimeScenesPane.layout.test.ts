@@ -42,6 +42,18 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("issueState.controlSignalCount");
   });
 
+  it("surfaces compact work run focus without duplicating raw work run events", () => {
+    expect(paneSource).toContain("const workRunSummary = diagnosis.workRunSummary");
+    expect(paneSource).toContain("const activeRuns = workRunSummary?.activeRuns ?? []");
+    expect(paneSource).toContain("const highFrequencyRuns = workRunSummary?.highFrequencyRuns ?? []");
+    expect(paneSource).toContain("styles.packageWorkRunPanel");
+    expect(paneSource).toContain("\"运行任务摘要\"");
+    expect(paneSource).toContain("workRunSummary.eventsPath");
+    expect(paneSource).toContain("handleOpenRawLog(scene.runtimeSceneId, workRunSummary.eventsPath)");
+    expect(paneSource).toContain("runtimeSceneWorkRunLabel(run, lang)");
+    expect(paneSource).toContain("runtimeSceneWorkRunMeta(run, lang)");
+  });
+
   it("shows a primary issue cluster before folded diagnostic details", () => {
     expect(paneSource).toContain("const primaryCluster");
     expect(paneSource).toContain("styles.packagePrimaryCluster");

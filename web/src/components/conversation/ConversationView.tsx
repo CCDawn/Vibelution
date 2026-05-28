@@ -5,9 +5,13 @@ import {
   ChevronDown,
   ChevronRight,
   CircleDot,
+  Download,
   ExternalLink,
+  ImagePlus,
   LoaderCircle,
+  MessageSquarePlus,
   Pencil,
+  X,
   Search,
   Sparkles,
   TerminalSquare,
@@ -66,14 +70,36 @@ export function buildTimelineScrollSignal(messages: ConversationMessage[]) {
           ].join(":")
         : "";
       const toolSignal = (message.toolCalls ?? [])
-        .map((toolCall) => [toolCall.name, toolCall.status, toolCall.summary ?? ""].join(":"))
+        .map((toolCall) =>
+          [
+            toolCall.name,
+            toolCall.status,
+            toolCall.summary ?? "",
+            JSON.stringify(toolCall.arguments ?? {}),
+            toolCall.resultPreview ?? "",
+            toolCall.error ?? "",
+            toolCall.durationMs ?? "",
+            toolCall.timeoutSeconds ?? "",
+            toolCall.tracePath ?? "",
+          ].join(":"),
+        )
         .join("|");
+      const metadataSignal = message.metadata
+        ? [
+            String(message.metadata.kind ?? ""),
+            String(message.metadata.status ?? ""),
+            String(message.metadata.artifactId ?? ""),
+            String(message.metadata.imageUrl ?? ""),
+            String(message.metadata.downloadUrl ?? ""),
+          ].join(":")
+        : "";
       return [
         message.id,
         message.content.length,
         message.thought?.length ?? 0,
         toolSignal,
         mentalSignal,
+        metadataSignal,
         message.streaming ? 1 : 0,
       ].join(":");
     })
@@ -96,6 +122,52 @@ function userAvatarSymbol(preset: string | undefined, label: string) {
     return ".";
   }
   return label.trim().slice(0, 1).toUpperCase() || "U";
+}
+
+type ImageArtifactMessage = {
+  imageUrl: string;
+  downloadUrl: string;
+  prompt: string;
+  artifactId: string;
+  size: string;
+  quality: string;
+  model: string;
+};
+
+type ComposerAttachment = {
+  id: string;
+  filename: string;
+  previewUrl: string;
+  sizeBytes: number;
+  contentType: string;
+};
+
+function metadataString(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function imageArtifactForMessage(message: ConversationMessage): ImageArtifactMessage | null {
+  const metadata = message.metadata;
+  if (!metadata || metadataString(metadata, "kind") !== "image2_generation") {
+    return null;
+  }
+  if (metadataString(metadata, "status") !== "succeeded") {
+    return null;
+  }
+  const imageUrl = metadataString(metadata, "imageUrl") || metadataString(metadata, "url");
+  if (!imageUrl) {
+    return null;
+  }
+  return {
+    imageUrl,
+    downloadUrl: metadataString(metadata, "downloadUrl") || imageUrl,
+    prompt: metadataString(metadata, "prompt"),
+    artifactId: metadataString(metadata, "artifactId"),
+    size: metadataString(metadata, "size"),
+    quality: metadataString(metadata, "quality"),
+    model: metadataString(metadata, "model"),
+  };
 }
 
 export function shouldShowNextStateSignalInConversation(
@@ -142,6 +214,9 @@ type ConversationViewProps = {
   composerActionMode?: "send" | "stop";
   composerPending: boolean;
   composerError?: string;
+  composerGuidance?: string;
+  composerAttachments?: ComposerAttachment[];
+  composerAttachmentInputDisabled?: boolean;
   turnError?: SessionTurnError | null;
   nextStateSignals?: ChatNextStateSignalSummary[];
   submitLabel?: string;
@@ -154,6 +229,8 @@ type ConversationViewProps = {
   composerModeNotice?: string;
   cancelComposerModeLabel?: string;
   onComposerChange: (value: string) => void;
+  onAddComposerAttachments?: (files: FileList | File[]) => void;
+  onRemoveComposerAttachment?: (attachmentId: string) => void;
   onEditUserMessage?: (message: ConversationMessage) => void;
   onCancelComposerMode?: () => void;
   onSubmit: () => void;
@@ -188,6 +265,9 @@ export function ConversationView({
   composerActionMode,
   composerPending,
   composerError,
+  composerGuidance,
+  composerAttachments = [],
+  composerAttachmentInputDisabled,
   turnError,
   nextStateSignals = [],
   submitLabel,
@@ -200,6 +280,8 @@ export function ConversationView({
   composerModeNotice,
   cancelComposerModeLabel,
   onComposerChange,
+  onAddComposerAttachments,
+  onRemoveComposerAttachment,
   onEditUserMessage,
   onCancelComposerMode,
   onSubmit,
@@ -208,6 +290,7 @@ export function ConversationView({
   const { lang, t, statusLabel } = useAppI18n();
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const initializedSessionRef = useRef("");
   const atBottomRef = useRef(true);
   const lastComposerFocusSignalRef = useRef("");
@@ -215,9 +298,11 @@ export function ConversationView({
   const [isAtBottom, setIsAtBottom] = useState(true);
   const previousStreamingRef = useRef<Record<string, boolean>>({});
   const resolvedActionMode = composerActionMode ?? "send";
+  const hasComposerAttachments = composerAttachments.length > 0;
+  const attachmentInputDisabled = composerAttachmentInputDisabled ?? composerDisabled;
   const resolvedActionDisabled =
     composerActionDisabled
-    ?? (resolvedActionMode === "stop" ? composerDisabled : composerDisabled || !composerValue.trim());
+    ?? (resolvedActionMode === "stop" ? composerDisabled : composerDisabled || (!composerValue.trim() && !hasComposerAttachments));
   const resolvedActionLabel =
     resolvedActionMode === "stop" ? (stopLabel ?? t("stop")) : (submitLabel ?? t("send"));
   const resolvedPendingLabel =
@@ -534,28 +619,95 @@ export function ConversationView({
     return `${t("toolProcess")} ${count}`;
   }
 
+  function hasOperationDetails(operation: ConversationOperation) {
+    return Boolean(
+      Object.keys(operation.arguments ?? {}).length
+      || operation.resultPreview
+      || operation.error
+      || operation.resultType
+      || operation.resultLength !== undefined
+      || operation.timeoutSeconds !== undefined
+      || operation.tracePath,
+    );
+  }
+
+  function operationDetailRows(operation: ConversationOperation) {
+    const rows: Array<{ label: string; value: string }> = [];
+    const args = operation.arguments ?? {};
+    if (Object.keys(args).length > 0) {
+      rows.push({ label: t("toolCallArguments"), value: JSON.stringify(args, null, 2) });
+    }
+    if (operation.resultPreview) {
+      rows.push({ label: t("toolCallResult"), value: operation.resultPreview });
+    }
+    if (operation.error) {
+      rows.push({ label: t("toolCallError"), value: operation.error });
+    }
+    const meta = [
+      operation.resultType ? `${t("toolCallResultType")}: ${operation.resultType}` : "",
+      operation.resultLength !== undefined ? `${t("toolCallResultLength")}: ${operation.resultLength}` : "",
+      operation.timeoutSeconds !== undefined ? `${t("toolCallTimeout")}: ${formatDuration(operation.timeoutSeconds)}` : "",
+      operation.tracePath ? `${t("toolCallTrace")}: ${operation.tracePath}` : "",
+    ].filter(Boolean);
+    if (meta.length > 0) {
+      rows.push({ label: t("toolCallMetadata"), value: meta.join("\n") });
+    }
+    return rows;
+  }
+
   function renderOperationTimeline(operations: ConversationOperation[]) {
     return (
       <div className={styles.operationTimeline}>
         {operations.map((operation) => {
           const duration = formatDuration(operation.durationSeconds);
+          const detailsId = `operation-detail-${operation.id}`;
+          const detailsExpanded = getExpansionState(operation.id, "details", false);
+          const detailRows = operationDetailRows(operation);
+          const canExpandDetails = operation.kind === "tool" && detailRows.length > 0;
           return (
-            <div key={operation.id} className={styles.operationItem}>
-              <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
-                {operationIcon(operation.kind, operation.label)}
-              </span>
-              <div className={styles.operationText}>
-                <span className={styles.operationName}>{operationLabel(operation)}</span>
-                {operation.summary ? (
-                  <span className={styles.operationSummaryText}>{operation.summary}</span>
-                ) : null}
+            <div key={operation.id} className={styles.operationItemWrap}>
+              <div className={styles.operationItem}>
+                <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
+                  {operationIcon(operation.kind, operation.label)}
+                </span>
+                <div className={styles.operationText}>
+                  <span className={styles.operationName}>{operationLabel(operation)}</span>
+                  {operation.summary ? (
+                    <span className={styles.operationSummaryText}>{operation.summary}</span>
+                  ) : null}
+                </div>
+                <span className={styles.operationStatus}>
+                  {operationStatusIcon(operation)}
+                  <span>{statusLabel(operation.status)}</span>
+                </span>
+                {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
+                {canExpandDetails ? (
+                  <button
+                    type="button"
+                    className={styles.operationDetailToggle}
+                    aria-expanded={detailsExpanded}
+                    aria-controls={detailsId}
+                    onClick={() => toggleSection(operation.id, "details", false)}
+                    title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
+                  >
+                    {detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </button>
+                ) : (
+                  <span className={styles.operationChevron} aria-hidden="true">
+                    {hasOperationDetails(operation) ? <ChevronRight size={16} /> : null}
+                  </span>
+                )}
               </div>
-              <span className={styles.operationStatus}>
-                {operationStatusIcon(operation)}
-                <span>{statusLabel(operation.status)}</span>
-              </span>
-              {duration ? <span className={styles.operationDuration}>{duration}</span> : null}
-              <ChevronRight className={styles.operationChevron} size={16} />
+              {canExpandDetails && detailsExpanded ? (
+                <div id={detailsId} className={styles.operationDetails}>
+                  {detailRows.map((row) => (
+                    <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
+                      <span className={styles.operationDetailLabel}>{row.label}</span>
+                      <pre className={styles.operationDetailValue}>{row.value}</pre>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           );
         })}
@@ -720,6 +872,74 @@ export function ConversationView({
       }
       return part;
     });
+  }
+
+  function renderImageArtifact(message: ConversationMessage) {
+    const artifact = imageArtifactForMessage(message);
+    if (!artifact) {
+      return null;
+    }
+    const downloadLabel = lang === "zh" ? "下载图片" : "Download image";
+    const imageAlt = artifact.prompt || (lang === "zh" ? "生成图片" : "Generated image");
+    const metaItems = [artifact.size, artifact.quality, artifact.model].filter(Boolean);
+    return (
+      <figure className={styles.imageArtifact}>
+        <div className={styles.imageArtifactFrame}>
+          <img className={styles.imagePreview} src={artifact.imageUrl} alt={imageAlt} loading="lazy" />
+        </div>
+        <figcaption className={styles.imageArtifactFooter}>
+          <span className={styles.imageArtifactMeta}>
+            {artifact.prompt ? <span className={styles.imageArtifactPrompt}>{artifact.prompt}</span> : null}
+            {metaItems.length ? <span>{metaItems.join(" · ")}</span> : null}
+          </span>
+          <a
+            className={styles.imageDownloadButton}
+            href={artifact.downloadUrl}
+            download={artifact.artifactId || true}
+            title={downloadLabel}
+            aria-label={downloadLabel}
+          >
+            <Download size={15} />
+          </a>
+        </figcaption>
+      </figure>
+    );
+  }
+
+  function renderUserAttachments(message: ConversationMessage) {
+    const attachments = message.attachments ?? [];
+    if (!attachments.length) {
+      return null;
+    }
+    const downloadLabel = lang === "zh" ? "下载图片" : "Download image";
+    return (
+      <div className={styles.userAttachmentGrid}>
+        {attachments.map((attachment) => {
+          const imageUrl = attachment.imageUrl || attachment.url;
+          if (!imageUrl) {
+            return null;
+          }
+          const filename = attachment.filename || attachment.artifactId || (lang === "zh" ? "图片" : "Image");
+          return (
+            <figure key={attachment.artifactId || imageUrl} className={styles.userAttachment}>
+              <img className={styles.userAttachmentImage} src={imageUrl} alt={filename} loading="lazy" />
+              <figcaption className={styles.userAttachmentMeta}>
+                <span>{filename}</span>
+                <a
+                  className={styles.imageDownloadButton}
+                  href={attachment.downloadUrl || imageUrl}
+                  download={attachment.artifactId || true}
+                  title={downloadLabel}
+                  aria-label={downloadLabel}
+                >
+                  <Download size={14} />
+                </a>
+              </figcaption>
+            </figure>
+          );
+        })}
+      </div>
+    );
   }
 
   function parseMarkdownBlocks(content: string): MarkdownBlock[] {
@@ -932,10 +1152,12 @@ export function ConversationView({
                   {hasUserContent(message) ? (
                     <div className={styles.userMessageBody}>{renderResponseText(message.content)}</div>
                   ) : null}
+                  {renderUserAttachments(message)}
 
                   {renderOperationGroup(message.id, "thought", operationGroups.thoughts, Boolean(message.streaming))}
                   {renderOperationGroup(message.id, "mental", operationGroups.mental, Boolean(message.streaming))}
                   {renderOperationGroup(message.id, "tools", operationGroups.tools, Boolean(message.streaming))}
+                  {renderImageArtifact(message)}
 
                   {hasResponseBlock(message) ? (
                     <section className={styles.responseSection}>
@@ -1027,6 +1249,14 @@ export function ConversationView({
       <div className={styles.composer}>
         <div className={styles.composerField}>
           {composerError ? <p className={styles.composerError}>{composerError}</p> : null}
+          {composerGuidance ? (
+            <div className={styles.composerGuidance} role="status">
+              <span className={styles.composerGuidanceIcon} aria-hidden="true">
+                <MessageSquarePlus size={14} />
+              </span>
+              <span>{composerGuidance}</span>
+            </div>
+          ) : null}
           {composerModeNotice ? (
             <div className={styles.composerModeNotice} role="status">
               <span className={styles.composerModeNoticeIcon} aria-hidden="true">
@@ -1040,13 +1270,44 @@ export function ConversationView({
               ) : null}
             </div>
           ) : null}
+          {composerAttachments.length ? (
+            <div className={styles.composerAttachmentTray} aria-label={lang === "zh" ? "待发送图片" : "Images to send"}>
+              {composerAttachments.map((attachment) => (
+                <div key={attachment.id} className={styles.composerAttachmentChip}>
+                  <img src={attachment.previewUrl} alt={attachment.filename} />
+                  <span title={attachment.filename}>{attachment.filename}</span>
+                  {onRemoveComposerAttachment ? (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveComposerAttachment(attachment.id)}
+                      title={lang === "zh" ? "移除图片" : "Remove image"}
+                      aria-label={lang === "zh" ? "移除图片" : "Remove image"}
+                    >
+                      <X size={13} />
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
           <textarea
             ref={composerInputRef}
             className={styles.input}
             value={composerValue}
-            disabled={composerDisabled}
+            disabled={composerDisabled && resolvedActionMode !== "stop"}
             placeholder={composerPlaceholder}
             onChange={(event) => onComposerChange(event.target.value)}
+            onPaste={(event) => {
+              if (!onAddComposerAttachments || attachmentInputDisabled) {
+                return;
+              }
+              const files = Array.from(event.clipboardData.files || []).filter((file) => file.type.startsWith("image/"));
+              if (!files.length) {
+                return;
+              }
+              event.preventDefault();
+              onAddComposerAttachments(files);
+            }}
             onKeyDown={(event) => {
               if (
                 shouldSubmitComposerOnKeydown({
@@ -1062,7 +1323,7 @@ export function ConversationView({
                 if (
                   resolvedActionMode === "send"
                   && !resolvedActionDisabled
-                  && composerValue.trim()
+                  && (composerValue.trim() || hasComposerAttachments)
                 ) {
                   onSubmit();
                 }
@@ -1070,6 +1331,30 @@ export function ConversationView({
             }}
           />
         </div>
+        <input
+          ref={attachmentInputRef}
+          className={styles.hiddenAttachmentInput}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+          disabled={attachmentInputDisabled}
+          onChange={(event) => {
+            if (event.currentTarget.files && onAddComposerAttachments) {
+              onAddComposerAttachments(event.currentTarget.files);
+            }
+            event.currentTarget.value = "";
+          }}
+        />
+        <button
+          className={styles.attachButton}
+          disabled={attachmentInputDisabled || !onAddComposerAttachments}
+          type="button"
+          onClick={() => attachmentInputRef.current?.click()}
+          title={lang === "zh" ? "添加图片" : "Attach image"}
+          aria-label={lang === "zh" ? "添加图片" : "Attach image"}
+        >
+          <ImagePlus size={16} />
+        </button>
         <button
           className={
             resolvedActionMode === "stop" ? `${styles.sendButton} ${styles.stopButton}` : styles.sendButton

@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
+from starlette.responses import StreamingResponse
 
 from core.web.services.chat_room_service import (
     ChatRoomBusyError,
@@ -17,6 +18,7 @@ from core.web.services.chat_room_service import (
     list_chat_room_modes,
     list_chat_rooms,
     start_chat_room_round,
+    stream_chat_room_events,
     update_chat_room,
 )
 
@@ -77,6 +79,21 @@ def chat_room_detail(room_id: str) -> dict:
     return detail
 
 
+@router.get("/chat-rooms/{room_id}/events")
+def chat_room_events(room_id: str) -> StreamingResponse:
+    detail = get_chat_room_detail(room_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Chat room not found")
+    return StreamingResponse(
+        stream_chat_room_events(room_id, initial_detail=detail),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @router.patch("/chat-rooms/{room_id}")
 def chat_room_update(room_id: str, payload: ChatRoomUpdatePayload) -> dict:
     try:
@@ -105,7 +122,7 @@ def chat_room_delete(room_id: str) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.post("/chat-rooms/{room_id}/rounds")
+@router.post("/chat-rooms/{room_id}/rounds", status_code=status.HTTP_202_ACCEPTED)
 def chat_room_start_round(room_id: str, payload: ChatRoomRoundPayload) -> dict:
     try:
         return start_chat_room_round(
@@ -113,6 +130,7 @@ def chat_room_start_round(room_id: str, payload: ChatRoomRoundPayload) -> dict:
             payload.topic,
             mode=payload.mode,
             config=payload.config,
+            background=True,
         )
     except ChatRoomNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

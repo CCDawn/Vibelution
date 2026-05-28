@@ -18,7 +18,7 @@ import threading
 import time
 import json
 from typing import Dict, Callable, Any, Optional
-from contextvars import copy_context
+from contextvars import ContextVar, copy_context
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 # 核心模块导入
@@ -285,6 +285,10 @@ class ToolExecutor:
         self._cancel_checker: Optional[Callable[[], str]] = None
         self._cancel_checker_owner: Any = None
         self._cancel_checker_lock = threading.Lock()
+        self._cancel_checker_context: ContextVar[tuple[Optional[Callable[[], str]], Any] | None] = ContextVar(
+            f"vibelution_tool_cancel_checker_{id(self)}",
+            default=None,
+        )
         self._register_default_tools()
 
     _READ_ONLY_BLOCKED_TOOLS = {
@@ -304,6 +308,8 @@ class ToolExecutor:
         "task_start_tool",
         "task_stop_tool",
         "clean_workspace_debris_tool",
+        "agent_message_tool",
+        "image2_generate_tool",
         "update_diagnosis_rules_tool",
         "update_self_model_tool",
         "record_evolution_tool",
@@ -331,6 +337,7 @@ class ToolExecutor:
             "code_symbol_tool": 30,
             "python_lint_tool": 60,
             "spawn_agent_tool": 150,
+            "image2_generate_tool": 180,
         }
         self._retryable_tools = {"grep_search_tool"}
 
@@ -348,17 +355,26 @@ class ToolExecutor:
         """Attach the current turn cancellation checker to tool execution."""
 
         with self._cancel_checker_lock:
+            current_context = self._cancel_checker_context.get(None)
             if checker is None:
+                current_owner = current_context[1] if current_context else None
+                if owner is None or current_owner is owner:
+                    self._cancel_checker_context.set(None)
                 if owner is None or self._cancel_checker_owner is owner:
                     self._cancel_checker = None
                     self._cancel_checker_owner = None
                 return
+            context_owner = owner if owner is not None else checker
+            self._cancel_checker_context.set((checker, context_owner))
             self._cancel_checker = checker
-            self._cancel_checker_owner = owner if owner is not None else checker
+            self._cancel_checker_owner = context_owner
 
     def _snapshot_cancel_checker(self) -> Optional[Callable[[], str]]:
+        current_context = self._cancel_checker_context.get(None)
+        if current_context and callable(current_context[0]):
+            return current_context[0]
         with self._cancel_checker_lock:
-            return self._cancel_checker
+            return None
 
     def _current_cancel_reason(self, checker: Optional[Callable[[], str]] = None) -> str:
         if checker is None:
@@ -442,7 +458,12 @@ class ToolExecutor:
         self._track_tool_decision_alignment(tool_name)
 
         if tool_name not in self._tool_map:
-            available_tools = ", ".join(sorted(self._tool_map)[:24])
+            available_tool_names = sorted(self._tool_map)
+            preview_tool_names = available_tool_names[:24]
+            for recovery_tool in ("read_file_tool", "grep_search_tool", "glob_tool", "cli_tool"):
+                if recovery_tool in self._tool_map and recovery_tool not in preview_tool_names:
+                    preview_tool_names.append(recovery_tool)
+            available_tools = ", ".join(preview_tool_names)
             error_msg = (
                 "[错误] 未知工具：该工具名不在当前工具目录中。"
                 f"当前可用工具包括：{available_tools}。"
@@ -485,6 +506,8 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": argument_error,
+                "args": tool_args,
+                "durationMs": int((time.monotonic() - started_at) * 1000),
             })
             self._record_runtime_signals(tool_name, tool_args, argument_error)
             _record_current_agent_tool_observation(tool_name, "invalid_args", tool_args, argument_error)
@@ -517,6 +540,9 @@ class ToolExecutor:
                 self._event_bus.publish(EventNames.TOOL_ERROR, {
                     "name": tool_name,
                     "error": error_msg,
+                    "args": tool_args,
+                    "durationMs": int((time.monotonic() - started_at) * 1000),
+                    "timeoutSeconds": timeout,
                 })
                 _record_tool_scene_event(
                     "execute",
@@ -545,6 +571,9 @@ class ToolExecutor:
                     self._event_bus.publish(EventNames.TOOL_ERROR, {
                         "name": tool_name,
                         "error": error_msg,
+                        "args": tool_args,
+                        "durationMs": int((time.monotonic() - started_at) * 1000),
+                        "timeoutSeconds": timeout,
                     })
                     self._record_runtime_signals(tool_name, tool_args, error_msg)
                     _record_tool_scene_event(
@@ -573,6 +602,9 @@ class ToolExecutor:
                         self._event_bus.publish(EventNames.TOOL_ERROR, {
                             "name": tool_name,
                             "error": error_msg,
+                            "args": tool_args,
+                            "durationMs": int((time.monotonic() - started_at) * 1000),
+                            "timeoutSeconds": timeout,
                         })
                         self._record_runtime_signals(tool_name, tool_args, error_msg)
                         _record_tool_scene_event(
@@ -597,7 +629,10 @@ class ToolExecutor:
             # 发布工具成功事件
             self._event_bus.publish(EventNames.TOOL_SUCCESS, {
                 "name": tool_name,
-                "result": str(result)[:200],
+                "args": tool_args,
+                "result": result,
+                "durationMs": int((time.monotonic() - started_at) * 1000),
+                "timeoutSeconds": timeout,
             })
 
             self._record_runtime_signals(tool_name, tool_args, result)
@@ -639,6 +674,9 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
+                "args": tool_args,
+                "durationMs": int((time.monotonic() - started_at) * 1000),
+                "timeoutSeconds": timeout,
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
             _record_current_agent_tool_observation(tool_name, "timeout", tool_args, error_msg)
@@ -665,6 +703,9 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
+                "args": tool_args,
+                "durationMs": int((time.monotonic() - started_at) * 1000),
+                "timeoutSeconds": timeout,
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
             _record_current_agent_tool_observation(tool_name, "invalid_args", tool_args, error_msg)
@@ -691,6 +732,9 @@ class ToolExecutor:
             self._event_bus.publish(EventNames.TOOL_ERROR, {
                 "name": tool_name,
                 "error": error_msg,
+                "args": tool_args,
+                "durationMs": int((time.monotonic() - started_at) * 1000),
+                "timeoutSeconds": timeout,
             })
             self._record_runtime_signals(tool_name, tool_args, error_msg)
             _record_current_agent_tool_observation(tool_name, "failed", tool_args, error_msg)
@@ -747,6 +791,9 @@ class ToolExecutor:
         spawn_block = self._check_spawn_agent_permission(tool_name, tool_args)
         if spawn_block:
             return spawn_block
+        delegation_block = self._check_delegation_policy_block(tool_name, tool_args)
+        if delegation_block:
+            return delegation_block
         evolution_block = self._check_evolution_mutation_guard(session, tool_name, tool_args)
         if evolution_block:
             return evolution_block
@@ -763,6 +810,27 @@ class ToolExecutor:
         if getattr(decision, "allowed", True):
             return None
         return str(getattr(decision, "message", "") or "[工具策略提示] 当前工具调用被该 Agent 的 ToolPolicy 拦截。")
+
+    @staticmethod
+    def _check_delegation_policy_block(tool_name: str, tool_args: dict) -> Optional[str]:
+        if tool_name != "spawn_agent_tool":
+            return None
+        if os.environ.get("VIBELUTION_SUBAGENT_MODE", "").strip().lower() == "readonly":
+            return None
+        if (tool_args or {}).get("_internal_delegate") is not True:
+            return None
+        try:
+            from core.web.services.agent_directory_service import evaluate_current_delegation_policy
+
+            decision = evaluate_current_delegation_policy(
+                context_mode=str((tool_args or {}).get("context_mode") or (tool_args or {}).get("contextMode") or "isolated"),
+                requested_depth=None,
+            )
+        except Exception:
+            return None
+        if getattr(decision, "allowed", True):
+            return None
+        return str(getattr(decision, "message", "") or "[委托策略提示] 当前 Agent 的 DelegationPolicy 拦截了子 Agent 派发。")
 
     @staticmethod
     def _check_evolution_mutation_guard(session, tool_name: str, tool_args: dict) -> Optional[str]:

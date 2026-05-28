@@ -23,7 +23,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 10px;
-  background: var(--surface-panel-muted);
+  background: color-mix(in srgb, var(--surface-panel-muted) 86%, transparent);
   overflow: auto;
 }
 
@@ -500,6 +500,115 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
   overflow: hidden;
+}
+
+.groupProfileBlock,
+.agentIndexRoster {
+  gap: 8px;
+}
+
+.agentIndexList {
+  display: grid;
+  gap: 7px;
+}
+
+.agentIndexCard {
+  display: grid;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 68%, transparent);
+  overflow: hidden;
+}
+
+.agentIndexHeader {
+  display: grid;
+  grid-template-columns: auto 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 7px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.agentIndexHeader:hover,
+.agentIndexHeader:focus-visible {
+  background: color-mix(in srgb, var(--surface-panel) 74%, transparent);
+  outline: none;
+}
+
+.agentIndexHeader > svg {
+  color: var(--fg-tertiary);
+  transition: transform 140ms ease;
+}
+
+.agentIndexHeader[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+
+.agentIndexAvatar {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: var(--fg-primary);
+  background:
+    radial-gradient(circle at 34% 24%, color-mix(in srgb, var(--accent-warm) 38%, white), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--accent-warm) 34%, var(--surface-panel)), color-mix(in srgb, var(--surface-card) 90%, black));
+  font-family: var(--font-display);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.agentIndexCopy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.agentIndexCopy strong,
+.agentIndexCopy span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentIndexCopy strong {
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.agentIndexCopy span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.agentIndexStatus {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.agentIndexDetails {
+  display: grid;
+  gap: 7px;
+  padding: 0 8px 8px 45px;
+}
+
+.agentIndexMentalBlock {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 58%, transparent);
 }
 
 .resourceBlock,
@@ -1124,14 +1233,14 @@
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
-  background: var(--surface-page);
+  background: color-mix(in srgb, var(--surface-page) 92%, var(--bg-canvas));
   overflow: hidden;
 }
 
 .tabStrip {
   display: flex;
-  gap: 8px;
-  padding: 14px 16px 0;
+  gap: 6px;
+  padding: 10px 12px 0;
   overflow-x: auto;
   align-items: flex-end;
 }
@@ -1139,8 +1248,8 @@
 .tab {
   flex: 0 0 auto;
   border: 1px solid transparent;
-  border-radius: 10px 10px 0 0;
-  padding: 10px 14px;
+  border-radius: 7px 7px 0 0;
+  padding: 8px 12px;
   background: transparent;
   color: var(--fg-secondary);
   white-space: nowrap;
@@ -1158,7 +1267,7 @@
   gap: 4px;
   flex: 0 0 auto;
   border: 1px solid transparent;
-  border-radius: 10px 10px 0 0;
+  border-radius: 7px 7px 0 0;
   background: transparent;
 }
 
@@ -1239,9 +1348,9 @@
 .rightPane {
   display: grid;
   grid-template-rows: auto auto 1fr;
-  padding: 18px;
-  gap: 14px;
-  background: var(--surface-panel-muted);
+  padding: 10px;
+  gap: 10px;
+  background: color-mix(in srgb, var(--surface-panel-muted) 90%, transparent);
   overflow: hidden;
 }
 
@@ -1263,7 +1372,7 @@
   width: 2px;
   transform: translateX(-50%);
   border-radius: 999px;
-  background: rgba(236, 230, 220, 0.08);
+  background: var(--surface-resize-track);
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
@@ -1271,61 +1380,123 @@
 .resizeHandle:focus-visible::before,
 .resizeHandleActive::before {
   background: color-mix(in srgb, var(--accent-warm) 52%, transparent);
-  box-shadow: 0 0 12px color-mix(in srgb, var(--accent-warm) 18%, transparent);
+  box-shadow: none;
 }
 
-.segmented {
+.rightIndexTabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  padding: 4px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-height: 34px;
+  padding: 3px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
-  background: var(--surface-panel);
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface-card) 76%, transparent);
 }
 
-.segmentButton {
-  padding: 8px 10px;
-  border-radius: 999px;
-  border: 0;
+.rightIndexTabsSingle {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rightIndexTab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
-  color: var(--fg-secondary);
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 760;
 }
 
-.segmentButtonActive {
-  color: var(--accent-warm-2);
-  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
+.rightIndexTab:hover,
+.rightIndexTab:focus-visible {
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--surface-panel) 76%, transparent);
+  outline: none;
+}
+
+.rightIndexTabActive {
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-panel));
+}
+
+.rightIndexTab span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memberIndexSummary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, var(--border-soft));
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+}
+
+.memberIndexSummary strong,
+.memberIndexSummary span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memberIndexSummary strong {
+  color: var(--accent-cool-2);
+  font-size: 0.72rem;
 }
 
 .panelSearch {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 2px;
+  gap: 9px;
+  min-height: 36px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface-card) 86%, transparent);
   color: var(--fg-tertiary);
 }
 
 .panelSearchInput {
   width: 100%;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-input);
+  min-width: 0;
+  border: 0;
+  background: transparent;
   color: var(--fg-primary);
-  padding: 9px 12px;
+  padding: 0;
   font: inherit;
+  outline: none;
 }
 
 .panelBody {
   overflow: auto;
   display: grid;
   align-content: start;
-  gap: 10px;
-  padding-right: 4px;
+  gap: 8px;
+  padding-right: 2px;
 }
 
 .sessionActionRow {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
 }
 
@@ -1334,14 +1505,15 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 38px;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--accent-warm) 22%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
-  color: var(--accent-warm-2);
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--fg-primary) 10%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-primary);
   font: inherit;
   cursor: pointer;
+  box-shadow: none;
 }
 
 .newSessionButton:disabled {
@@ -1354,10 +1526,10 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 38px;
+  min-height: 34px;
   padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool-2);
   font: inherit;
@@ -1563,7 +1735,7 @@
 .panelState {
   padding: 16px;
   border: 1px dashed var(--border-soft);
-  border-radius: 10px;
+  border-radius: var(--radius-panel);
   color: var(--fg-secondary);
   background: var(--surface-card);
   line-height: 1.5;
@@ -1580,33 +1752,130 @@
   overflow-wrap: anywhere;
 }
 
+.conversationGroup {
+  display: grid;
+  gap: 5px;
+}
+
+.conversationGroup + .conversationGroup {
+  margin-top: 4px;
+}
+
+.conversationGroupHeader {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 760;
+  text-align: left;
+}
+
+.conversationGroupHeader:hover,
+.conversationGroupHeader:focus-visible {
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  color: var(--fg-primary);
+  outline: none;
+}
+
+.conversationGroupHeader svg {
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+.conversationGroupHeader[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.conversationGroupHeader span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversationGroupHeader strong {
+  min-width: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--surface-card) 84%, transparent);
+  font-size: 0.68rem;
+  font-weight: 760;
+  text-align: center;
+}
+
+.conversationGroupList {
+  display: grid;
+  gap: 3px;
+}
+
 .sessionItem {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
   text-align: left;
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border-soft);
-  background: var(--surface-panel);
+  padding: 4px;
+  border-radius: var(--radius-panel);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--fg-primary);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .sessionItemActive {
-  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent-warm);
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .sessionItem[aria-current="true"] {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent 36%),
-    var(--surface-panel);
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+}
+
+.directSessionItem {
+  padding-right: 104px;
+  box-shadow: none;
+}
+
+.groupSessionItem {
+  padding-right: 4px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.groupSessionItem.sessionItemActive,
+.groupSessionItem[aria-current="true"] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
+  box-shadow: none;
+}
+
+.sessionItem:hover,
+.sessionItem:focus-within {
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
 }
 
 .sessionItemMain {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
   min-width: 0;
-  padding: 0;
+  min-height: 66px;
+  padding: 5px 0;
   border: 0;
   background: transparent;
   color: inherit;
@@ -1634,9 +1903,78 @@
 }
 
 .sessionItemTitle {
-  font-family: var(--font-display);
+  font-family: var(--font-body);
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.95rem;
+  font-weight: 760;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversationAvatar {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  color: var(--fg-primary);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 12%, transparent);
+}
+
+.conversationAvatarDirect {
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 18%, var(--surface-card));
+}
+
+.conversationAvatarGroup {
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
+}
+
+.conversationCopy {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.conversationTitleRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+}
+
+.conversationKindBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 19px;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.conversationKindBadgeDirect {
+  color: var(--accent-warm-2);
+  border-color: color-mix(in srgb, var(--accent-warm) 30%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
+.conversationKindBadgeGroup {
+  color: var(--accent-cool-2);
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 14%, transparent);
 }
 
 .sessionCurrentBadge {
@@ -1664,23 +2002,25 @@
 }
 
 .sessionState {
-  color: var(--accent-warm-2);
-  font-size: 0.78rem;
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
 }
 
 .sessionItemSummary,
 .sessionItemMeta {
-  margin: 8px 0 0;
+  margin: 0;
   color: var(--fg-secondary);
 }
 
 .sessionItemSummary {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  display: block;
   overflow: hidden;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.28;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sessionItemMeta {
@@ -1697,10 +2037,42 @@
   white-space: nowrap;
 }
 
+.conversationMetaRow {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.conversationMetaRow span:not(.conversationKindBadge),
+.conversationMetaRow time {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sessionActionStack {
-  display: grid;
-  gap: 6px;
-  align-self: start;
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.sessionItem:hover .sessionActionStack,
+.sessionItem:focus-within .sessionActionStack,
+.sessionItem[aria-current="true"] .sessionActionStack {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .sessionIconButton,
@@ -1708,11 +2080,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-card);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-card) 90%, transparent);
   color: var(--fg-tertiary);
   cursor: pointer;
 }
@@ -1754,7 +2126,7 @@
 
 .groupConversationFrame {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   height: 100%;
   background: var(--surface-panel);
@@ -1835,19 +2207,18 @@
 
 .groupManagementPanel {
   display: grid;
-  gap: 10px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border-soft);
+  gap: 11px;
+  padding: 11px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 68%),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 70%),
     var(--surface-panel);
 }
 
 .groupManagementHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  gap: 9px;
 }
 
 .groupManagementHeader div:first-child {
@@ -1868,10 +2239,16 @@
   line-height: 1.35;
 }
 
+.groupManagementHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .groupManagementActions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.86fr);
   gap: 7px;
 }
 
@@ -1891,6 +2268,13 @@
   cursor: pointer;
 }
 
+.groupManagementActions button span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .groupApplyButton {
   color: var(--accent-cool-2) !important;
   border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft)) !important;
@@ -1903,8 +2287,8 @@
 
 .groupManagementControls {
   display: grid;
-  grid-template-columns: minmax(150px, 0.28fr) minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
   align-items: start;
 }
 
@@ -1920,6 +2304,7 @@
 }
 
 .groupModeSelect select {
+  width: 100%;
   min-width: 0;
   min-height: 32px;
   border: 1px solid var(--border-soft);
@@ -1931,24 +2316,49 @@
   font-size: 0.82rem;
 }
 
+.groupManagementCount {
+  display: grid;
+  place-items: center;
+  min-width: 58px;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+.groupManagementCount span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1;
+}
+
+.groupManagementCount strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+  line-height: 1.15;
+}
+
 .groupMemberPicker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
   min-width: 0;
-  max-height: 84px;
+  max-height: min(34vh, 260px);
   overflow: auto;
+  padding-right: 2px;
 }
 
 .groupMemberChip {
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 6px;
-  max-width: 180px;
-  min-height: 30px;
-  padding: 0 8px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0 9px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
   color: var(--fg-secondary);
   cursor: pointer;
@@ -1981,58 +2391,212 @@
   overflow: auto;
   display: grid;
   align-content: start;
-  gap: 12px;
-  padding: 14px 16px;
+  gap: 18px;
+  padding: 18px 22px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel) 86%, transparent), transparent 34%),
+    var(--surface-panel);
 }
 
 .groupRoundBlock {
   display: grid;
-  gap: 9px;
-  padding: 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
-}
-
-.groupRoundBlock > header,
-.groupMessageCard header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.groupRoundBlock > header div {
-  display: grid;
+  gap: 12px;
   min-width: 0;
-  gap: 3px;
 }
 
-.groupRoundBlock strong,
-.groupMessageCard strong {
-  color: var(--fg-primary);
-  overflow-wrap: anywhere;
-}
-
-.groupRoundBlock span,
-.groupRoundBlock time,
-.groupMessageCard span {
+.groupRoundDivider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   color: var(--fg-tertiary);
-  font-size: 0.76rem;
+  font-size: 0.72rem;
+}
+
+.groupRoundDivider::before,
+.groupRoundDivider::after {
+  content: "";
+  height: 1px;
+  min-width: 22px;
+  flex: 1;
+  background: color-mix(in srgb, var(--border-soft) 72%, transparent);
+}
+
+.groupRoundDivider span,
+.groupRoundDivider time {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .groupRoundSummary {
+  justify-self: center;
+  max-width: min(720px, 88%);
+  margin: 2px 0 0;
+  padding: 7px 11px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-tertiary);
+  background: color-mix(in srgb, var(--surface-card) 66%, transparent);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.groupTopicMessage {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.groupTopicBubble {
+  display: grid;
+  gap: 5px;
+  max-width: min(680px, 72%);
+  padding: 10px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--accent-warm) 18%, var(--surface-card));
+  color: var(--fg-primary);
+}
+
+.groupTopicBubble span {
+  color: var(--accent-warm-2);
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+.groupTopicBubble p {
   margin: 0;
-  color: var(--fg-secondary);
-  font-size: 0.84rem;
+  font-size: 0.92rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .groupMessageList {
   display: grid;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.groupBubbleRow {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: end;
+  gap: 9px;
+  max-width: min(820px, 86%);
+  min-width: 0;
+}
+
+.groupBubbleAvatar {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
+  font-family: var(--font-body);
+  font-size: 0.68rem;
+  font-weight: 820;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 10%, transparent);
+}
+
+.groupBubble {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 11px 13px 9px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 84%, transparent);
+  border-radius: var(--radius-panel);
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  box-shadow: none;
+}
+
+.groupBubbleHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.groupBubbleHeader strong {
+  min-width: 0;
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupBubbleHeader span,
+.groupBubbleMeta {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.groupBubbleBody {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.92rem;
+  line-height: 1.58;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.groupBubbleMeta {
+  justify-self: end;
+}
+
+.groupBubbleRowFailed .groupBubble {
+  border-color: color-mix(in srgb, var(--state-error) 36%, var(--border-soft));
+}
+
+.groupBubbleRowPending .groupBubble {
+  width: fit-content;
+  min-width: 148px;
+  border-style: dashed;
+}
+
+.groupTypingDots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 18px;
+}
+
+.groupTypingDots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-cool-2);
+  opacity: 0.46;
+  animation: groupTypingPulse 1s ease-in-out infinite;
+}
+
+.groupTypingDots span:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.groupTypingDots span:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+@keyframes groupTypingPulse {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.36;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 0.86;
+  }
 }
 
 .groupMessageCard {
@@ -2096,49 +2660,6 @@
   color: var(--accent-cool-2);
   border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
-}
-
-.treeDir {
-  border: 1px solid var(--border-soft);
-  border-radius: 10px;
-  background: var(--surface-panel);
-  padding: 8px 10px;
-}
-
-.treeDir summary {
-  cursor: pointer;
-  color: var(--fg-primary);
-}
-
-.treeChildren {
-  display: grid;
-  gap: 8px;
-  margin-top: 8px;
-  margin-left: 10px;
-}
-
-.treeFile {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: var(--surface-panel-strong);
-  color: var(--fg-secondary);
-  text-align: left;
-}
-
-.treeFileActive {
-  color: var(--fg-primary);
-  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
-}
-
-.treeChanged {
-  font-size: 0.74rem;
-  color: var(--accent-warm-2);
 }
 
 @media (max-width: 1180px) {

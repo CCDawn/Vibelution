@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Iterable, Iterator, List
 
-from .types import StreamChunk, ToolCall
+from .types import StreamChunk, ToolCall, UsageStats
 
 
 def extract_text_content(content: Any) -> str:
@@ -124,9 +124,13 @@ class LiteLLMStreamNormalizer:
 
     def __init__(self) -> None:
         self._tool_calls = ToolCallAccumulator()
+        self._usage: UsageStats | None = None
 
     def events(self, raw_chunks: Iterable[Any]) -> Iterator[StreamChunk]:
         for raw_chunk in raw_chunks:
+            usage = self._extract_usage(raw_chunk)
+            if usage is not None:
+                self._usage = usage
             delta = self._extract_delta(raw_chunk)
             if not delta:
                 continue
@@ -142,7 +146,7 @@ class LiteLLMStreamNormalizer:
         final_calls = self._tool_calls.final_calls()
         if final_calls:
             yield StreamChunk(type="tool_call_final", tool_calls=final_calls)
-        yield StreamChunk(type="done")
+        yield StreamChunk(type="done", usage=self._usage)
 
     @staticmethod
     def _extract_delta(raw_chunk: Any) -> Dict[str, Any]:
@@ -156,6 +160,35 @@ class LiteLLMStreamNormalizer:
         delta = _as_dict(delta)
         return delta if isinstance(delta, dict) else {}
 
+    @staticmethod
+    def _extract_usage(raw_chunk: Any) -> UsageStats | None:
+        chunk = _as_dict(raw_chunk)
+        if not isinstance(chunk, dict):
+            return None
+        usage = chunk.get("usage") or chunk.get("usage_metadata")
+        if usage is None:
+            return None
+        usage_dict = _usage_to_dict(usage)
+        if not usage_dict:
+            return None
+        input_tokens = _read_usage_int(usage_dict, "prompt_tokens", "input_tokens", "input_token_count")
+        output_tokens = _read_usage_int(usage_dict, "completion_tokens", "output_tokens", "output_token_count")
+        total_tokens = _read_usage_int(usage_dict, "total_tokens") or (input_tokens + output_tokens)
+        prompt_details = usage_dict.get("prompt_tokens_details")
+        input_details = usage_dict.get("input_token_details")
+        cached_tokens = max(
+            _read_usage_int(usage_dict, "cached_tokens", "cached_input_tokens"),
+            _read_usage_int(prompt_details, "cached_tokens", "cached_input_tokens"),
+            _read_usage_int(input_details, "cached_tokens", "cached_input_tokens"),
+        )
+        return UsageStats(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cached_input_tokens=min(cached_tokens, input_tokens) if input_tokens else cached_tokens,
+            provider_raw_usage=usage_dict,
+        )
+
 
 def _as_dict(value: Any) -> Any:
     if hasattr(value, "model_dump"):
@@ -168,6 +201,49 @@ def _safe_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _read_usage_int(container: Any, *keys: str) -> int:
+    if not isinstance(container, dict):
+        return 0
+    for key in keys:
+        value = container.get(key)
+        if value not in (None, ""):
+            try:
+                return max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+def _usage_to_dict(usage: Any) -> Dict[str, Any]:
+    if isinstance(usage, dict):
+        return usage
+    if usage is None:
+        return {}
+    if hasattr(usage, "model_dump"):
+        try:
+            payload = usage.model_dump()
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+    payload: Dict[str, Any] = {}
+    for key in (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "input_tokens",
+        "output_tokens",
+        "input_token_count",
+        "output_token_count",
+        "cached_tokens",
+        "cached_input_tokens",
+        "prompt_tokens_details",
+        "input_token_details",
+    ):
+        if hasattr(usage, key):
+            payload[key] = getattr(usage, key)
+    return payload
 
 
 __all__ = [

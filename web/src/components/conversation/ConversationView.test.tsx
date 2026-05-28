@@ -20,6 +20,17 @@ function renderConversation(
     userAvatarPreset?: string;
     userAvatarImageUrl?: string;
     userDisplayName?: string;
+    composerAttachments?: Array<{
+      id: string;
+      filename: string;
+      previewUrl: string;
+      sizeBytes: number;
+      contentType: string;
+    }>;
+    composerDisabled?: boolean;
+    composerActionMode?: "send" | "stop";
+    composerActionDisabled?: boolean;
+    composerGuidance?: string;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -41,8 +52,12 @@ function renderConversation(
         showSessionOverview={false}
         composerValue={options.composerValue ?? ""}
         composerPlaceholder="Type"
-        composerDisabled={false}
+        composerDisabled={options.composerDisabled ?? false}
+        composerActionMode={options.composerActionMode}
+        composerActionDisabled={options.composerActionDisabled}
         composerPending={false}
+        composerGuidance={options.composerGuidance}
+        composerAttachments={options.composerAttachments}
         nextStateSignals={options.nextStateSignals}
         userAvatarPreset={options.userAvatarPreset}
         userAvatarImageUrl={options.userAvatarImageUrl}
@@ -125,6 +140,22 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Answer");
   });
 
+  it("keeps the composer writable while a running turn uses the stop action", () => {
+    const html = renderConversation([], {
+      composerValue: "下一句先写在这里",
+      composerDisabled: true,
+      composerActionMode: "stop",
+      composerActionDisabled: false,
+      composerGuidance: "当前轮仍在运行。你可以先把下一句写在这里，它会作为草稿保留；要打断当前轮请点“终止”。",
+    });
+
+    expect(html).toContain("下一句先写在这里");
+    expect(html).toContain("当前轮仍在运行");
+    expect(html).toContain("stopButton");
+    const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? "";
+    expect(textarea).not.toContain("disabled");
+  });
+
   it("renders edit controls only for the latest user message", () => {
     const html = renderConversation([
       {
@@ -165,6 +196,76 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('aria-expanded="true"');
     expect(html).toContain("回答");
     expect(html).toContain("Answer");
+  });
+
+  it("renders image2 artifact messages with a message-local download action", () => {
+    const html = renderConversation([
+      {
+        id: "message-image",
+        role: "assistant",
+        content: "已生成图片。",
+        timestamp: "2026-05-22T00:01:00Z",
+        metadata: {
+          kind: "image2_generation",
+          status: "succeeded",
+          prompt: "一间雨夜里的工作室",
+          artifactId: "image2-test.png",
+          imageUrl: "/api/sessions/session-1/artifacts/image2-test.png",
+          downloadUrl: "/api/sessions/session-1/artifacts/image2-test.png?download=1",
+          size: "1024x1024",
+          quality: "auto",
+          model: "gpt-image-1.5",
+        },
+      },
+    ]);
+
+    expect(html).toContain('src="/api/sessions/session-1/artifacts/image2-test.png"');
+    expect(html).toContain('href="/api/sessions/session-1/artifacts/image2-test.png?download=1"');
+    expect(html).toContain('download="image2-test.png"');
+    expect(html).toContain("下载图片");
+    expect(html).toContain("一间雨夜里的工作室");
+  });
+
+  it("renders user image attachments and composer image chips", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "message-user",
+          role: "user",
+          content: "看看这张图",
+          timestamp: "2026-05-22T00:00:00Z",
+          attachments: [
+            {
+              artifactId: "user-image-test.png",
+              filename: "sketch.png",
+              url: "/api/sessions/session-1/artifacts/user-image-test.png",
+              imageUrl: "/api/sessions/session-1/artifacts/user-image-test.png",
+              downloadUrl: "/api/sessions/session-1/artifacts/user-image-test.png?download=1",
+              contentType: "image/png",
+              sizeBytes: 128,
+              kind: "user_image",
+              status: "ready",
+            },
+          ],
+        },
+      ],
+      {
+        composerAttachments: [
+          {
+            id: "pending-image",
+            filename: "pending.png",
+            previewUrl: "blob:pending-image",
+            sizeBytes: 256,
+            contentType: "image/png",
+          },
+        ],
+      },
+    );
+
+    expect(html).toContain('src="/api/sessions/session-1/artifacts/user-image-test.png"');
+    expect(html).toContain("sketch.png");
+    expect(html).toContain("pending.png");
+    expect(html).toContain("blob:pending-image");
   });
 
   it("renders assistant responses as semantic labeled blocks", () => {
@@ -471,6 +572,39 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("read_file");
     expect(html).toContain("opened session_service.py");
     expect(html).not.toContain("执行了 1 个操作");
+  });
+
+  it("renders expandable tool call details when the backend provides them", () => {
+    const html = renderConversation([
+      {
+        id: "message-tool-details",
+        role: "assistant",
+        content: "已调用图片工具。",
+        timestamp: "2026-05-26T00:01:00Z",
+        streaming: true,
+        toolCalls: [
+          {
+            name: "image2_generate_tool",
+            status: "failed",
+            summary: "Read timed out.",
+            arguments: {
+              prompt: "生成美女图片",
+              size: "1024x1024",
+            },
+            error: "HTTPSConnectionPool read timed out",
+            durationMs: 180452,
+            timeoutSeconds: 180,
+            resultType: "str",
+            resultLength: 755,
+            tracePath: "conversations/session/tool_calls.jsonl",
+          },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("image2_generate_tool");
+    expect(html).toContain('title="展开工具详情"');
+    expect(html).not.toContain("生成美女图片");
   });
 
   it("shows spinners only for active conversation sections", () => {

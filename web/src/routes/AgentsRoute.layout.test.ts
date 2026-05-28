@@ -1,0 +1,150 @@
+import { describe, expect, it } from "vitest";
+
+import routeSource from "./AgentsRoute.tsx?raw";
+import routerSource from "../app/router.tsx?raw";
+import shellSource from "../app/AppShell.tsx?raw";
+
+describe("AgentsRoute layout contract", () => {
+  it("loads the read-only Agent config workspace endpoint", () => {
+    expect(routeSource).toContain("fetchJson<AgentConfigWorkspace>(\"/api/agents/config-workspace\")");
+    expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
+  });
+
+  it("keeps Agent Center as a first-class route and utility entry", () => {
+    expect(routerSource).toContain('path: "agents"');
+    expect(routerSource).toContain("<AgentsRoute />");
+    expect(shellSource).toContain('to="/agents"');
+    expect(shellSource).toContain('t("navAgents")');
+  });
+
+  it("uses filter, table, and detail panels instead of a card wall", () => {
+    expect(routeSource).toContain("styles.filterPanel");
+    expect(routeSource).toContain("styles.agentPanel");
+    expect(routeSource).toContain("styles.detailPanel");
+    expect(routeSource).toContain("styles.agentTable");
+    expect(routeSource).not.toContain("agentCardGrid");
+  });
+
+  it("shows the unified Agent card sections needed by later editing phases", () => {
+    expect(routeSource).toContain("copy.model");
+    expect(routeSource).toContain("copy.prompt");
+    expect(routeSource).toContain("copy.tools");
+    expect(routeSource).toContain("copy.memory");
+    expect(routeSource).toContain("copy.context");
+    expect(routeSource).toContain("copy.communication");
+    expect(routeSource).toContain("copy.delegation");
+    expect(routeSource).toContain("copy.modeMembership");
+    expect(routeSource).toContain("copy.references");
+  });
+
+  it("edits the minimal Agent card fields through the Agent PATCH endpoint", () => {
+    expect(routeSource).toContain("AgentConfigDraft");
+    expect(routeSource).toContain("useMutation");
+    expect(routeSource).toContain("copy.configTitle");
+    expect(routeSource).toContain("displayName: payload.draft.displayName");
+    expect(routeSource).toContain("profileId: payload.draft.profileId");
+    expect(routeSource).toContain("promptTemplateId: payload.draft.promptTemplateId");
+    expect(routeSource).toContain("toolPolicyId: payload.draft.toolPolicyId");
+    expect(routeSource).toContain("memoryPolicyId: payload.draft.memoryPolicyId");
+    expect(routeSource).toContain("status: payload.draft.status");
+    expect(routeSource).toContain("method: \"PATCH\"");
+    expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
+  });
+
+  it("edits Agent mode membership from the same detail card", () => {
+    expect(routeSource).toContain("AgentModeMembershipDraft");
+    expect(routeSource).toContain("membershipDraftFromWorkspace");
+    expect(routeSource).toContain("/mode-membership");
+    expect(routeSource).toContain("chatDefault: event.target.checked");
+    expect(routeSource).toContain("copy.researchPool");
+    expect(routeSource).toContain("copy.supervisedSlot");
+    expect(routeSource).toContain("copy.selfEvolutionSlot");
+    expect(routeSource).toContain("queryKeys.agentModeBindings()");
+    expect(routeSource).toContain("styles.toggleGrid");
+  });
+
+  it("edits Agent group room membership from the same detail card", () => {
+    expect(routeSource).toContain("AgentChatRoomMembershipDraft");
+    expect(routeSource).toContain("chatRoomDraftFromWorkspace");
+    expect(routeSource).toContain("/chat-rooms");
+    expect(routeSource).toContain("copy.chatRoomMembership");
+    expect(routeSource).toContain("copy.saveChatRooms");
+    expect(routeSource).toContain("queryKeys.chatRooms()");
+    expect(routeSource).toContain("styles.roomMembershipList");
+    expect(routeSource).toContain("styles.roomCheckField");
+  });
+
+  it("edits Agent tool permissions from the same detail card", () => {
+    expect(routeSource).toContain("AgentToolPolicyDraft");
+    expect(routeSource).toContain("fetchJson<ToolRegistryPayload>(\"/api/tools\")");
+    expect(routeSource).toContain("copy.toolPolicyTitle");
+    expect(routeSource).toContain("allowedTools: sortedIds(payload.draft.allowedTools)");
+    expect(routeSource).toContain("blockedTools: sortedIds(payload.draft.blockedTools)");
+    expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"allowed\")");
+    expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"blocked\")");
+    expect(routeSource).toContain("queryKeys.tools()");
+    expect(routeSource).toContain("styles.toolPermissionList");
+    expect(routeSource).toContain("styles.segmentedControl");
+  });
+
+  it("edits Agent memory policy from the same detail card", () => {
+    expect(routeSource).toContain("AgentMemoryPolicyDraft");
+    expect(routeSource).toContain("copy.memoryPolicyTitle");
+    expect(routeSource).toContain("memoryPolicy: {");
+    expect(routeSource).toContain("readSharedGroups: sortedIds(payload.draft.readSharedGroups)");
+    expect(routeSource).toContain("writeSharedGroups: sortedIds(payload.draft.writeSharedGroups)");
+    expect(routeSource).toContain("styles.memoryPolicyGrid");
+    expect(routeSource).toContain("styles.tagList");
+    expect(routeSource).toContain("styles.inlineAdd");
+  });
+
+  it("organizes the Agent card into switchable panes with run history", () => {
+    expect(routeSource).toContain("AgentConfigPaneId");
+    expect(routeSource).toContain("agentConfigPanes(copy, selectedAgent)");
+    expect(routeSource).toContain("styles.detailTabs");
+    expect(routeSource).toContain("activePane === \"overview\"");
+    expect(routeSource).toContain("activePane === \"config\"");
+    expect(routeSource).toContain("activePane === \"policies\"");
+    expect(routeSource).toContain("activePane === \"membership\"");
+    expect(routeSource).toContain("activePane === \"activity\"");
+    expect(routeSource).toContain("fetchJson<AgentRunHistory>");
+    expect(routeSource).toContain("queryKeys.agentRuns");
+    expect(routeSource).toContain("styles.runHistoryList");
+  });
+
+  it("edits Agent runtime delegation and supervision policies from the activity pane", () => {
+    expect(routeSource).toContain("AgentDelegationPolicyDraft");
+    expect(routeSource).toContain("AgentSupervisionPolicyDraft");
+    expect(routeSource).toContain("delegationPolicy: {");
+    expect(routeSource).toContain("supervisionPolicy: {");
+    expect(routeSource).toContain("copy.delegationPolicyTitle");
+    expect(routeSource).toContain("copy.supervisionPolicyTitle");
+    expect(routeSource).toContain("copy.saveRuntimePolicy");
+    expect(routeSource).toContain("updateRuntimePolicyMutation");
+    expect(routeSource).toContain("styles.runtimePolicyGrid");
+    expect(routeSource).toContain("styles.contextModeGrid");
+  });
+
+  it("creates and safely archives Agents from the unified Agent card", () => {
+    expect(routeSource).toContain("AgentCreateDraft");
+    expect(routeSource).toContain("fetchJson<AgentConfigWorkspaceAgent>(\"/api/agents\"");
+    expect(routeSource).toContain("method: \"POST\"");
+    expect(routeSource).toContain("createAgentMutation");
+    expect(routeSource).toContain("copy.createAgent");
+    expect(routeSource).toContain("styles.createAgentPanel");
+    expect(routeSource).toContain("styles.createAgentGrid");
+    expect(routeSource).toContain("archiveAgentMutation");
+    expect(routeSource).toContain("method: \"DELETE\"");
+    expect(routeSource).toContain("window.confirm");
+    expect(routeSource).toContain("copy.archiveAgent");
+    expect(routeSource).toContain("styles.dangerZone");
+    expect(routeSource).toContain("styles.dangerButton");
+  });
+
+  it("keeps the desktop workspace as three scan-friendly columns", () => {
+    expect(routeSource).toContain("styles.workspace");
+    expect(routeSource).toContain("styles.agentTableHead");
+    expect(routeSource).toContain("styles.agentRow");
+    expect(routeSource).toContain("styles.detailPanel");
+  });
+});

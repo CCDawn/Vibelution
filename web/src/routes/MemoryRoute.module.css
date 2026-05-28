@@ -3,7 +3,7 @@
   grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  background: var(--surface-page);
+  background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
 }
 
 .header {
@@ -37,7 +37,8 @@
 
 .title {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
+  font-weight: 760;
   font-size: var(--route-topbar-title-size);
   line-height: 1.1;
   white-space: nowrap;
@@ -63,7 +64,7 @@
   min-height: 34px;
   padding: 7px 12px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   background: var(--surface-card);
   color: var(--fg-secondary);
 }
@@ -81,7 +82,7 @@
   min-width: 0;
   padding: 3px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-panel);
   background: var(--surface-panel-muted);
 }
 
@@ -92,7 +93,7 @@
   min-height: 30px;
   min-width: 74px;
   padding: 0 11px;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   color: var(--fg-secondary);
   font-size: 0.75rem;
   font-weight: 700;

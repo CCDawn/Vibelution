@@ -174,6 +174,29 @@ class HarnessResult:
     last_observation: Dict[str, Any]
     post_restart_observation: Dict[str, Any]
     evolution_summary: Dict[str, Any]
+    agent_binding: Dict[str, Any] = field(default_factory=dict)
+
+
+def supervised_agent_binding_env(agent_binding: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    """Return safe child-process env values for a supervised AgentInstance binding."""
+
+    if not isinstance(agent_binding, dict):
+        return {}
+    key_map = {
+        "agentId": "VIBELUTION_AGENT_ID",
+        "profileId": "VIBELUTION_AGENT_PROFILE_ID",
+        "directSessionId": "VIBELUTION_AGENT_DIRECT_SESSION_ID",
+        "workspacePath": "VIBELUTION_AGENT_WORKSPACE_PATH",
+        "role": "VIBELUTION_SUPERVISED_ROLE",
+    }
+    env: Dict[str, str] = {}
+    for source_key, env_key in key_map.items():
+        value = str(agent_binding.get(source_key) or "").strip()
+        if source_key == "role" and not value:
+            value = str(agent_binding.get("supervisedRole") or "").strip()
+        if value:
+            env[env_key] = value
+    return env
 
 
 def run_git(repo_root: Path, *args: str) -> str:
@@ -366,7 +389,9 @@ def create_harness_config(worktree_path: Path) -> Optional[Path]:
     out_lines: List[str] = []
     current_section: Optional[str] = None
     runtime_keys_seen = set()
+    agent_keys_seen = set()
     saw_runtime_section = False
+    saw_agent_section = False
 
     for line in lines:
         stripped = line.strip()
@@ -378,10 +403,16 @@ def create_harness_config(worktree_path: Path) -> Optional[Path]:
                     out_lines.append("preflight_doctor = false")
                 if "require_venv" not in runtime_keys_seen:
                     out_lines.append("require_venv = false")
+            elif current_section == "agent":
+                if "default_mode" not in agent_keys_seen:
+                    out_lines.append('default_mode = "supervised_evolution"')
             current_section = stripped.strip("[]").strip()
             if current_section == "runtime":
                 saw_runtime_section = True
+            elif current_section == "agent":
+                saw_agent_section = True
             runtime_keys_seen = set()
+            agent_keys_seen = set()
             out_lines.append(line)
             continue
 
@@ -397,6 +428,12 @@ def create_harness_config(worktree_path: Path) -> Optional[Path]:
             if key == "require_venv":
                 out_lines.append("require_venv = false")
                 continue
+        elif current_section == "agent" and "=" in line:
+            key = line.split("=", 1)[0].strip()
+            agent_keys_seen.add(key)
+            if key == "default_mode":
+                out_lines.append('default_mode = "supervised_evolution"')
+                continue
 
         out_lines.append(line)
 
@@ -407,6 +444,9 @@ def create_harness_config(worktree_path: Path) -> Optional[Path]:
             out_lines.append("preflight_doctor = false")
         if "require_venv" not in runtime_keys_seen:
             out_lines.append("require_venv = false")
+    elif current_section == "agent":
+        if "default_mode" not in agent_keys_seen:
+            out_lines.append('default_mode = "supervised_evolution"')
     elif not saw_runtime_section:
         out_lines.extend(
             [
@@ -415,6 +455,14 @@ def create_harness_config(worktree_path: Path) -> Optional[Path]:
                 'profile = ""',
                 "preflight_doctor = false",
                 "require_venv = false",
+            ]
+        )
+    if not saw_agent_section:
+        out_lines.extend(
+            [
+                "",
+                "[agent]",
+                'default_mode = "supervised_evolution"',
             ]
         )
 
@@ -1897,6 +1945,7 @@ def run_harness(
     post_restart_observe_seconds: int,
     keep_worktree: bool,
     scenario: str = "restart",
+    agent_binding: Optional[Dict[str, Any]] = None,
     progress_callback: Callable[[Dict[str, Any]], None] | None = None,
     cancel_checker: Callable[[], object] | None = None,
 ) -> HarnessResult:
@@ -1930,6 +1979,8 @@ def run_harness(
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     env["VIBELUTION_HARNESS_ID"] = harness_id
+    normalized_agent_binding = dict(agent_binding) if isinstance(agent_binding, dict) else {}
+    env.update(supervised_agent_binding_env(normalized_agent_binding))
 
     process = subprocess.Popen(
         command,
@@ -2201,6 +2252,7 @@ def run_harness(
         tracked_dirty=snapshot.tracked_dirty,
         untracked_files=snapshot.untracked_files,
         command=command,
+        agent_binding=normalized_agent_binding,
         timeout_seconds=timeout_seconds,
         restarts_observed=restarts_observed,
         normalized_restarts_observed=process_summary["normalized_reentered_agent_count"],

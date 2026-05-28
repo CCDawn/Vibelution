@@ -28,8 +28,9 @@
 
 .fileName {
   margin: 0;
-  font-family: var(--font-display);
-  font-size: 1.28rem;
+  font-family: var(--font-body);
+  font-size: 1.02rem;
+  font-weight: 760;
 }
 
 .filePath {
@@ -50,7 +51,7 @@
   display: inline-flex;
   align-items: center;
   padding: 6px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   font-size: 0.8rem;
 }
 

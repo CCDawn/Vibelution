@@ -8,15 +8,20 @@ import copy
 import json
 import queue
 import re
+import secrets
 import threading
 import hashlib
 import inspect
+import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from config.settings import get_config
 from config.settings import get_web_chat_config
@@ -39,6 +44,7 @@ from core.orchestration.output_boundary import (
     sanitize_assistant_thought_text,
     sanitize_assistant_visible_text,
 )
+from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.runtime_manager.evolution_store import load_active_run_snapshot as load_evolution_active_run_snapshot
 from core.runtime_manager.work_run_leases import (
     MEMORY_WRITE_LEASE,
@@ -54,6 +60,7 @@ from core.ui.chat_state import (
     DEFAULT_CHAT_CONVERSATION_ID,
     DEFAULT_CHAT_CONVERSATION_TITLE,
     load_chat_state,
+    normalize_chat_attachments,
     normalize_chat_messages,
     normalize_chat_tool_calls,
     save_chat_state,
@@ -62,13 +69,17 @@ from core.ui.chat_state import (
 from . import agent_directory_service
 from .i18n import get_web_language, text_for
 from .agent_directory_service import (
+    AgentNotFoundError,
     active_agent_runtime,
     archive_agent_instance,
-    build_agent_runtime_context_block,
+    consume_agent_inbox_message,
     ensure_agent_for_session,
+    evaluate_delegation_wake_policy,
     get_agent,
+    list_agent_inbox_messages_for_agent,
     list_group_context_events_for_agent,
     resolve_memory_policy_for_agent,
+    update_agent_instance,
 )
 from .runtime_scene_service import record_runtime_scene_conversation_event, record_runtime_scene_event
 
@@ -79,7 +90,11 @@ _RUNNING_SESSIONS_LOCK = threading.Lock()
 _RUNNING_SESSION_IDS: set[str] = set()
 _SESSION_ACTIVE_TURN_IDS: dict[str, str] = {}
 _SESSION_ACTIVE_TURN_LEASES: dict[str, list[str]] = {}
-_SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="web-chat-turn")
+_SESSION_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="web-chat-turn")
+_SESSION_AGENT_SCHEDULER_LOCK = threading.Lock()
+_SESSION_AGENT_SCHEDULER_CONDITION = threading.Condition(_SESSION_AGENT_SCHEDULER_LOCK)
+_SESSION_AGENT_ACTIVE_TURN_IDS: dict[str, str] = {}
+_SESSION_AGENT_QUEUES: dict[str, deque[dict[str, Any]]] = {}
 _SESSION_STREAM_SUBSCRIBERS_LOCK = threading.Lock()
 _SESSION_STREAM_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _SESSION_STREAM_HEARTBEAT_SECONDS = 15.0
@@ -89,6 +104,10 @@ _SESSION_TURN_CONTROLS: dict[str, "SessionTurnControl"] = {}
 _SESSION_LIVE_OUTPUTS_LOCK = threading.Lock()
 _SESSION_LIVE_OUTPUTS: dict[str, "SessionLiveOutputState"] = {}
 _SESSION_UI_CAPTURE_LOCK = threading.Lock()
+_SESSION_UI_CAPTURE_CONTEXT: ContextVar[dict[str, Any]] = ContextVar(
+    "vibelution_session_ui_capture_context",
+    default={},
+)
 _UNSET = object()
 _WORK_RUN_STORE = WorkRunStore()
 _NO_VISIBLE_REPLY_ZH = "本轮没有产生可见回复。"
@@ -101,7 +120,95 @@ _PROVIDER_ERROR_PATTERN = re.compile(
 _REPLACEMENT_ONLY_PREFIX_PATTERN = re.compile(r"^\?{3,}(?=[:：\s]|$)")
 _REPLACEMENT_ONLY_TEXT_PATTERN = re.compile(r"^\?{3,}$")
 _SESSION_WORKSPACE_SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
+_SESSION_IMAGE_ARTIFACT_SAFE_CHARS = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
+_SESSION_IMAGE_ARTIFACT_CONTENT_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
+_SESSION_USER_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+_IMAGE_ATTACHMENT_VISION_PATTERNS = (
+    "分析",
+    "识别",
+    "看看",
+    "看一下",
+    "看下",
+    "看图",
+    "这是什么",
+    "是什么",
+    "有什么",
+    "描述",
+    "解释",
+    "读图",
+    "提取",
+    "文字",
+    "ocr",
+    "identify",
+    "analyze",
+    "analyse",
+    "describe",
+    "what is",
+    "what's",
+    "read",
+    "extract",
+)
+_IMAGE_ATTACHMENT_IMAGE2_PATTERNS = (
+    "生成",
+    "画一张",
+    "帮我画",
+    "画成",
+    "绘制",
+    "重绘",
+    "改成",
+    "改为",
+    "修改",
+    "调整",
+    "优化",
+    "美化",
+    "更好看",
+    "换风格",
+    "风格",
+    "做头像",
+    "头像",
+    "海报",
+    "参考",
+    "基于",
+    "照着",
+    "2d",
+    "卡通",
+    "动画",
+    "二次元",
+    "create",
+    "generate",
+    "draw",
+    "redraw",
+    "edit",
+    "style",
+    "restyle",
+    "make",
+    "poster",
+    "avatar",
+    "reference",
+)
+_VISION_MODEL_NAME_HINTS = (
+    "gpt-4o",
+    "gpt-4.1",
+    "gpt-5.5",
+    "gpt-5o",
+    "vision",
+    "vl",
+    "qwen-vl",
+    "qvq",
+    "gemini",
+    "claude-3",
+    "claude-4",
+    "glm-4v",
+    "multimodal",
+    "omni",
+)
+_SESSION_USER_IMAGE_MAX_ATTACHMENTS_PER_TURN = 4
 DEFAULT_SESSION_AGENT_PROFILE_ID = "primary"
 
 
@@ -147,6 +254,319 @@ def _ensure_session_workspace(session_id: str) -> Path:
     return workspace_path
 
 
+def store_session_image_artifact(
+    session_id: str,
+    image_bytes: bytes,
+    *,
+    output_format: str = "png",
+    source: str = "image2",
+) -> dict[str, Any]:
+    """Persist a generated image under the current session workspace."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise SessionValidationError("Session id is required for image artifact storage.")
+    normalized_format = str(output_format or "png").strip().lower().lstrip(".") or "png"
+    if normalized_format not in _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES:
+        raise SessionValidationError("Unsupported image artifact format.")
+    payload = bytes(image_bytes or b"")
+    if not payload:
+        raise SessionValidationError("Image artifact payload is empty.")
+
+    workspace_path = _ensure_session_workspace(normalized_session_id)
+    images_dir = (workspace_path / "artifacts" / "images").resolve()
+    artifacts_root = (workspace_path / "artifacts").resolve()
+    images_dir.mkdir(parents=True, exist_ok=True)
+    if not images_dir.is_relative_to(artifacts_root):
+        raise SessionValidationError(f"Invalid session image artifact path: {images_dir}")
+
+    artifact_id = f"{source}-{int(time.time() * 1000)}-{secrets.token_hex(4)}.{normalized_format}"
+    output_path = (images_dir / artifact_id).resolve()
+    if output_path.parent != images_dir:
+        raise SessionValidationError("Invalid session image artifact filename.")
+    output_path.write_bytes(payload)
+
+    url = (
+        f"/api/sessions/{quote(normalized_session_id, safe='')}"
+        f"/artifacts/{quote(artifact_id, safe='')}"
+    )
+    relative_path = f"{_session_workspace_relative_path(normalized_session_id)}/artifacts/images/{artifact_id}"
+    return {
+        "artifactId": artifact_id,
+        "filename": artifact_id,
+        "artifactPath": relative_path,
+        "path": str(output_path),
+        "url": url,
+        "imageUrl": url,
+        "downloadUrl": f"{url}?download=1",
+        "contentType": _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES[normalized_format],
+        "sizeBytes": len(payload),
+        "outputFormat": normalized_format,
+    }
+
+
+def store_session_user_image_attachment(
+    session_id: str,
+    image_bytes: bytes,
+    *,
+    filename: str = "",
+    content_type: str = "",
+) -> dict[str, Any]:
+    """Persist a user-uploaded image attachment under the current session workspace."""
+
+    normalized_content_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    original_filename = _decode_attachment_filename(filename)
+    extension = _session_image_extension_for_upload(original_filename, normalized_content_type)
+    if extension not in _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES:
+        raise SessionValidationError("Unsupported image attachment format.")
+    payload = bytes(image_bytes or b"")
+    if not payload:
+        raise SessionValidationError("Image attachment payload is empty.")
+    if len(payload) > _SESSION_USER_IMAGE_MAX_BYTES:
+        raise SessionValidationError("Image attachment is too large.")
+    sniffed_extension = _sniff_image_extension(payload)
+    if not sniffed_extension:
+        raise SessionValidationError("Unsupported image attachment format.")
+    extension = sniffed_extension
+    normalized_content_type = _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES[extension]
+
+    artifact = store_session_image_artifact(
+        session_id,
+        payload,
+        output_format=extension,
+        source="user-image",
+    )
+    attachment = {
+        **artifact,
+        "kind": "user_image",
+        "status": "ready",
+        "filename": original_filename or artifact["filename"],
+    }
+    _remember_session_uploaded_attachment(session_id, attachment)
+    _record_session_attachment_event(
+        session_id,
+        "stored",
+        attachment,
+        outcome="stored",
+    )
+    return attachment
+
+
+def _remember_session_uploaded_attachment(session_id: str, attachment: dict[str, Any]) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        uploaded = list(conversation.get("uploaded_attachments") or [])
+        artifact_id = str(attachment.get("artifactId") or "").strip()
+        uploaded = [
+            item for item in uploaded
+            if not isinstance(item, dict) or str(item.get("artifactId") or "").strip() != artifact_id
+        ]
+        uploaded.append({key: value for key, value in attachment.items() if key != "path"})
+        conversation["uploaded_attachments"] = uploaded[-24:]
+        conversation["updated_at"] = _now_timestamp()
+        payload["updated_at"] = conversation["updated_at"]
+        save_chat_state(PROJECT_ROOT, payload)
+
+
+def _decode_attachment_filename(filename: str) -> str:
+    raw = str(filename or "").strip()
+    if "%" not in raw:
+        return Path(raw).name
+    try:
+        from urllib.parse import unquote
+
+        return Path(unquote(raw)).name
+    except Exception:
+        return Path(raw).name
+
+
+def _session_image_extension_for_upload(filename: str, content_type: str) -> str:
+    extension = Path(str(filename or "")).suffix.lower().lstrip(".")
+    if extension == "jpeg":
+        extension = "jpg"
+    if extension in _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES:
+        return extension
+    for known_extension, known_type in _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES.items():
+        if str(content_type or "").lower() == known_type:
+            return "jpg" if known_extension == "jpeg" else known_extension
+    return extension
+
+
+def _sniff_image_extension(payload: bytes) -> str:
+    data = bytes(payload or b"")
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return ""
+
+
+def resolve_session_image_artifact(session_id: str, artifact_id: str) -> tuple[Path, str]:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_artifact_id = str(artifact_id or "").strip()
+    if not normalized_session_id or not normalized_artifact_id:
+        raise FileNotFoundError("missing session artifact")
+    artifact_name = Path(normalized_artifact_id).name
+    if artifact_name != normalized_artifact_id or not _SESSION_IMAGE_ARTIFACT_SAFE_CHARS.fullmatch(artifact_name):
+        raise FileNotFoundError("invalid session artifact")
+    extension = Path(artifact_name).suffix.lower().lstrip(".")
+    content_type = _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES.get(extension)
+    if not content_type:
+        raise FileNotFoundError("unsupported session artifact")
+
+    sessions_root = (PROJECT_ROOT / "workspace" / "sessions").resolve()
+    workspace_path = (PROJECT_ROOT / _session_workspace_relative_path(normalized_session_id)).resolve()
+    if not workspace_path.is_relative_to(sessions_root):
+        raise FileNotFoundError("invalid session artifact path")
+    images_dir = (workspace_path / "artifacts" / "images").resolve()
+    target_path = (images_dir / artifact_name).resolve()
+    if not target_path.is_relative_to(images_dir) or not target_path.exists() or not target_path.is_file():
+        raise FileNotFoundError("session artifact not found")
+    return target_path, content_type
+
+
+def _resolve_session_image_attachment(session_id: str, artifact_id: str) -> dict[str, Any]:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_artifact_id = str(artifact_id or "").strip()
+    path, content_type = resolve_session_image_artifact(normalized_session_id, normalized_artifact_id)
+    url = (
+        f"/api/sessions/{quote(normalized_session_id, safe='')}"
+        f"/artifacts/{quote(Path(normalized_artifact_id).name, safe='')}"
+    )
+    relative_path = (
+        f"{_session_workspace_relative_path(normalized_session_id)}"
+        f"/artifacts/images/{Path(normalized_artifact_id).name}"
+    )
+    return {
+        "artifactId": Path(normalized_artifact_id).name,
+        "filename": Path(normalized_artifact_id).name,
+        "artifactPath": relative_path,
+        "path": str(path),
+        "url": url,
+        "imageUrl": url,
+        "downloadUrl": f"{url}?download=1",
+        "contentType": content_type,
+        "sizeBytes": path.stat().st_size,
+        "kind": "user_image",
+        "status": "ready",
+    }
+
+
+def resolve_session_image_attachment_data_url(session_id: str, artifact_id: str) -> dict[str, Any]:
+    """Read a session image artifact as a transient data URL for model input."""
+
+    attachment = _resolve_session_image_attachment(session_id, artifact_id)
+    path = Path(str(attachment.get("path") or ""))
+    payload = path.read_bytes()
+    if len(payload) > _SESSION_USER_IMAGE_MAX_BYTES:
+        raise SessionValidationError("Image attachment is too large for model input.")
+    content_type = str(attachment.get("contentType") or "").strip() or "image/png"
+    data_url = f"data:{content_type};base64,{base64.b64encode(payload).decode('ascii')}"
+    return {
+        **{key: value for key, value in attachment.items() if key != "path"},
+        "dataUrl": data_url,
+    }
+
+
+def _resolve_session_image_attachments(
+    session_id: str,
+    attachment_ids: Any,
+    *,
+    conversation: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    normalized_ids: list[str] = []
+    seen: set[str] = set()
+    for raw_id in list(attachment_ids or []):
+        artifact_id = str(raw_id or "").strip()
+        if not artifact_id or artifact_id in seen:
+            continue
+        seen.add(artifact_id)
+        normalized_ids.append(artifact_id)
+    if len(normalized_ids) > _SESSION_USER_IMAGE_MAX_ATTACHMENTS_PER_TURN:
+        raise SessionValidationError("Too many image attachments for one turn.")
+    attachments: list[dict[str, Any]] = []
+    for artifact_id in normalized_ids:
+        existing = _find_session_attachment_metadata(conversation, artifact_id)
+        if existing:
+            attachments.append(existing)
+            continue
+        try:
+            attachments.append(_resolve_session_image_attachment(session_id, artifact_id))
+        except FileNotFoundError as exc:
+            raise SessionValidationError(f"Image attachment not found: {artifact_id}") from exc
+    return attachments
+
+
+def _find_session_attachment_metadata(conversation: dict[str, Any] | None, artifact_id: str) -> dict[str, Any]:
+    if not isinstance(conversation, dict):
+        return {}
+    normalized_artifact_id = str(artifact_id or "").strip()
+    if not normalized_artifact_id:
+        return {}
+    for message in reversed(list(conversation.get("messages") or [])):
+        if not isinstance(message, dict):
+            continue
+        for attachment in _normalize_message_attachments(message.get("attachments") or []):
+            if str(attachment.get("artifactId") or "").strip() == normalized_artifact_id:
+                return dict(attachment)
+    for attachment in reversed(list(conversation.get("uploaded_attachments") or [])):
+        if not isinstance(attachment, dict):
+            continue
+        normalized = _normalize_message_attachments([attachment])
+        if normalized and str(normalized[0].get("artifactId") or "").strip() == normalized_artifact_id:
+            return dict(normalized[0])
+    return {}
+
+
+def append_session_assistant_artifact_message(
+    session_id: str,
+    content: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+    tool_calls: list[Any] | None = None,
+) -> dict[str, Any]:
+    """Append an assistant artifact message and notify session subscribers."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        raise SessionValidationError("Session id is required for artifact messages.")
+    status = str((metadata or {}).get("status") or "observed").strip() or "observed"
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, normalized_session_id)
+        if conversation is None:
+            raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
+        messages = normalize_chat_messages(conversation.get("messages") or [])
+        assistant_entry = _make_chat_message(
+            "assistant",
+            content,
+            tool_calls or [],
+            metadata=metadata,
+        )
+        conversation["messages"] = messages + [assistant_entry]
+        conversation["updated_at"] = assistant_entry["timestamp"]
+        payload["updated_at"] = assistant_entry["timestamp"]
+        save_chat_state(PROJECT_ROOT, payload)
+
+    _record_session_cycle_message(
+        normalized_session_id,
+        assistant_entry,
+        event="assistant_artifact",
+        status=status,
+    )
+    _publish_session_detail_snapshot(normalized_session_id)
+    normalized = _normalize_messages(normalized_session_id, [assistant_entry])
+    return normalized[0] if normalized else assistant_entry
+
+
 def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> bool:
     conversation_id = str(conversation.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
     if not conversation_id:
@@ -159,24 +579,90 @@ def _ensure_conversation_workspace_metadata(conversation: dict[str, Any]) -> boo
     return changed
 
 
-def _ensure_conversation_agent_metadata(conversation: dict[str, Any]) -> bool:
+def _repair_conversation_agent_profile_from_instance(
+    conversation: dict[str, Any],
+    *,
+    conversation_id: str,
+    agent_id: str,
+    agent: dict[str, Any],
+    agent_profile_id: str,
+) -> bool:
+    previous_profile_id = _normalize_session_agent_profile_id(
+        conversation.get("agent_profile_id")
+        or conversation.get("agentProfileId")
+        or DEFAULT_SESSION_AGENT_PROFILE_ID
+    )
+    changed = False
+    if "agent_profile_id" in conversation:
+        conversation.pop("agent_profile_id", None)
+        changed = True
+    if "agentProfileId" in conversation:
+        conversation.pop("agentProfileId", None)
+        changed = True
+    if changed:
+        _record_session_agent_profile_repaired_event(
+            conversation_id,
+            agent_id=agent_id,
+            previous_profile_id=previous_profile_id,
+            profile_id=agent_profile_id,
+            prompt_template_id=str(agent.get("promptTemplateId") or "").strip(),
+            role_key=str(agent.get("roleKey") or "").strip(),
+        )
+    return changed
+
+
+def _ensure_conversation_agent_metadata(
+    conversation: dict[str, Any],
+    *,
+    agent_by_id: dict[str, dict[str, Any]] | None = None,
+) -> bool:
     _sync_agent_directory_project_root()
     conversation_id = str(conversation.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
     if not conversation_id:
         return False
     title = str(conversation.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE).strip() or DEFAULT_CHAT_CONVERSATION_TITLE
-    agent_profile_id = _normalize_session_agent_profile_id(
-        conversation.get("agent_profile_id") or conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
-    )
     session_workspace = str(conversation.get("workspace_path") or _session_workspace_relative_path(conversation_id))
+    existing_agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+    existing_agent = _agent_from_lookup(agent_by_id, existing_agent_id) if existing_agent_id else None
+    agent_profile_id = _normalize_session_agent_profile_id(
+        (existing_agent or {}).get("profileId")
+        or conversation.get("agent_profile_id")
+        or conversation.get("agentProfileId")
+        or DEFAULT_SESSION_AGENT_PROFILE_ID
+    )
+    default_primary_mode = agent_directory_service.DEFAULT_AGENT_PRIMARY_MODE
+    primary_mode = str((existing_agent or {}).get("primaryMode") or default_primary_mode).strip() or default_primary_mode
+    role_key = str((existing_agent or {}).get("roleKey") or "").strip()
+    prompt_template_id = str((existing_agent or {}).get("promptTemplateId") or "").strip()
+    if existing_agent and str(existing_agent.get("directSessionId") or "").strip() == conversation_id:
+        changed = False
+        if conversation.get("agent_id") != existing_agent_id:
+            conversation["agent_id"] = existing_agent_id
+            changed = True
+        if conversation.get("agentId") != existing_agent_id:
+            conversation["agentId"] = existing_agent_id
+            changed = True
+        changed = _repair_conversation_agent_profile_from_instance(
+            conversation,
+            conversation_id=conversation_id,
+            agent_id=existing_agent_id,
+            agent=existing_agent,
+            agent_profile_id=agent_profile_id,
+        ) or changed
+        return changed
     agent = ensure_agent_for_session(
         conversation_id,
         display_name=title,
         profile_id=agent_profile_id,
-        existing_agent_id=str(conversation.get("agent_id") or conversation.get("agentId") or "").strip(),
+        primary_mode=primary_mode,
+        role_key=role_key,
+        prompt_template_id=prompt_template_id,
+        existing_agent_id=existing_agent_id,
         session_workspace_path=session_workspace,
     )
     agent_id = str(agent.get("agentId") or "").strip()
+    if agent_by_id is not None and agent_id:
+        agent_by_id[agent_id] = agent
     changed = False
     if agent_id and conversation.get("agent_id") != agent_id:
         conversation["agent_id"] = agent_id
@@ -184,12 +670,43 @@ def _ensure_conversation_agent_metadata(conversation: dict[str, Any]) -> bool:
     if agent_id and conversation.get("agentId") != agent_id:
         conversation["agentId"] = agent_id
         changed = True
+    agent_profile_id = _normalize_session_agent_profile_id(agent.get("profileId") or agent_profile_id)
+    changed = _repair_conversation_agent_profile_from_instance(
+        conversation,
+        conversation_id=conversation_id,
+        agent_id=agent_id,
+        agent=agent,
+        agent_profile_id=agent_profile_id,
+    ) or changed
     return changed
 
 
 def _sync_agent_directory_project_root() -> None:
     if agent_directory_service.PROJECT_ROOT != PROJECT_ROOT:
         agent_directory_service.PROJECT_ROOT = PROJECT_ROOT
+
+
+def _agent_lookup_for_conversations() -> dict[str, dict[str, Any]]:
+    _sync_agent_directory_project_root()
+    state = agent_directory_service.repair_agent_directory()
+    return {
+        str(item.get("agentId") or "").strip(): item
+        for item in state.get("agents") or []
+        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
+    }
+
+
+def _agent_from_lookup(
+    agent_by_id: dict[str, dict[str, Any]] | None,
+    agent_id: str,
+) -> dict[str, Any] | None:
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        return None
+    if agent_by_id is not None:
+        agent = agent_by_id.get(normalized)
+        return agent if isinstance(agent, dict) else None
+    return get_agent(normalized)
 
 
 @contextmanager
@@ -291,7 +808,18 @@ class SessionTurnCapture:
             "whisper": str(whisper or "").strip(),
         }
 
-    def note_tool_event(self, name: str, status: str, summary: str = "") -> None:
+    def note_tool_event(
+        self,
+        name: str,
+        status: str,
+        summary: str = "",
+        *,
+        arguments: dict[str, Any] | None = None,
+        result: Any = "",
+        error: Any = "",
+        duration_ms: Any = None,
+        timeout_seconds: Any = None,
+    ) -> None:
         tool_name = str(name or "").strip()
         if not tool_name:
             return
@@ -302,6 +830,23 @@ class SessionTurnCapture:
         cleaned_summary = trim_lines(summary or "", max_lines=2)
         if cleaned_summary:
             entry["summary"] = cleaned_summary
+        safe_arguments = _safe_tool_argument_details(arguments or {})
+        if safe_arguments:
+            entry["arguments"] = safe_arguments
+        result_preview = _trim_tool_detail_text(result, max_chars=1200, max_lines=10)
+        if result_preview:
+            entry["resultPreview"] = result_preview
+            entry["resultType"] = type(result).__name__
+            entry["resultLength"] = len(str(result or ""))
+        error_preview = _trim_tool_detail_text(error, max_chars=1200, max_lines=10)
+        if error_preview:
+            entry["error"] = error_preview
+        numeric_duration = _coerce_tool_number(duration_ms)
+        if numeric_duration is not None:
+            entry["durationMs"] = numeric_duration
+        numeric_timeout = _coerce_tool_number(timeout_seconds)
+        if numeric_timeout is not None:
+            entry["timeoutSeconds"] = numeric_timeout
         for index in range(len(self.tool_calls) - 1, -1, -1):
             existing = self.tool_calls[index]
             if existing.get("name") == tool_name and existing.get("status") == "running":
@@ -352,13 +897,13 @@ def get_active_session_detail() -> dict | None:
 def create_chat_session(
     *,
     title: str = "",
-    agent_profile_id: str | None = None,
+    profile_id: str | None = None,
     created_by: str = "user",
 ) -> dict:
     """Create a new empty chat session and make it active."""
 
     lang = get_web_language()
-    normalized_agent_profile_id = _normalize_session_agent_profile_id(agent_profile_id or DEFAULT_SESSION_AGENT_PROFILE_ID)
+    normalized_agent_profile_id = _normalize_session_agent_profile_id(profile_id or DEFAULT_SESSION_AGENT_PROFILE_ID)
     _validate_session_agent_profile_id(normalized_agent_profile_id, lang=lang)
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -378,7 +923,6 @@ def create_chat_session(
             title=normalized_title,
             timestamp=now,
         )
-        conversation["agent_profile_id"] = normalized_agent_profile_id
         _ensure_conversation_workspace_metadata(conversation)
         _sync_agent_directory_project_root()
         agent = ensure_agent_for_session(
@@ -431,7 +975,8 @@ def update_chat_session(
     session_id: str,
     *,
     title: str | None = None,
-    agent_profile_id: str | None = None,
+    agent_id: str | None = None,
+    profile_id: str | None = None,
 ) -> dict:
     """Persist user-facing chat session settings."""
 
@@ -449,9 +994,22 @@ def update_chat_session(
             normalized_title = normalized_title[:120].rstrip()
 
     normalized_agent_profile_id: str | None = None
-    if agent_profile_id is not None:
-        normalized_agent_profile_id = _normalize_session_agent_profile_id(agent_profile_id)
+    if profile_id is not None:
+        normalized_agent_profile_id = _normalize_session_agent_profile_id(profile_id)
         _validate_session_agent_profile_id(normalized_agent_profile_id, lang=lang)
+    normalized_agent_id: str | None = None
+    selected_agent: dict[str, Any] | None = None
+    if agent_id is not None:
+        normalized_agent_id = str(agent_id or "").strip()
+        if not normalized_agent_id:
+            raise SessionValidationError(text_for(lang, zh="请选择会话 Agent。", en="Choose a session Agent."))
+        selected_agent = get_agent(normalized_agent_id, include_archived=False)
+        if not selected_agent:
+            raise SessionValidationError(text_for(lang, zh=f"未找到会话 Agent：{normalized_agent_id}", en=f"Session Agent not found: {normalized_agent_id}"))
+        _validate_session_agent_profile_id(
+            _normalize_session_agent_profile_id(selected_agent.get("profileId") or DEFAULT_SESSION_AGENT_PROFILE_ID),
+            lang=lang,
+        )
 
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -463,8 +1021,19 @@ def update_chat_session(
 
         if normalized_title is not None:
             conversation["title"] = normalized_title
-        if normalized_agent_profile_id is not None:
-            conversation["agent_profile_id"] = normalized_agent_profile_id
+        if selected_agent is not None and normalized_agent_id is not None:
+            _bind_conversation_to_agent_instance(
+                conversation,
+                selected_agent,
+                session_id=conversation_id,
+                source="agent_id",
+            )
+        elif normalized_agent_profile_id is not None:
+            _update_conversation_agent_profile(
+                conversation,
+                normalized_agent_profile_id,
+                session_id=conversation_id,
+            )
         _ensure_conversation_agent_metadata(conversation)
         payload["updated_at"] = _now_timestamp()
         save_chat_state(PROJECT_ROOT, payload)
@@ -477,6 +1046,75 @@ def update_chat_session_title(session_id: str, title: str) -> dict:
     """Persist a user-facing chat session title."""
 
     return update_chat_session(session_id, title=title)
+
+
+def _bind_conversation_to_agent_instance(
+    conversation: dict[str, Any],
+    agent: dict[str, Any],
+    *,
+    session_id: str,
+    source: str,
+) -> None:
+    agent_id = str(agent.get("agentId") or "").strip()
+    if not agent_id:
+        return
+    agent_profile_id = _normalize_session_agent_profile_id(agent.get("profileId") or DEFAULT_SESSION_AGENT_PROFILE_ID)
+    conversation["agent_id"] = agent_id
+    conversation["agentId"] = agent_id
+    _repair_conversation_agent_profile_from_instance(
+        conversation,
+        conversation_id=session_id,
+        agent_id=agent_id,
+        agent=agent,
+        agent_profile_id=agent_profile_id,
+    )
+    try:
+        if str(agent.get("directSessionId") or "").strip() != str(session_id or "").strip():
+            update_agent_instance(agent_id, status="active", metadata={"previousDirectSessionId": str(agent.get("directSessionId") or "").strip()})
+            agent_directory_service.ensure_agent_for_session(
+                session_id,
+                display_name=str(agent.get("displayName") or conversation.get("title") or DEFAULT_CHAT_CONVERSATION_TITLE),
+                profile_id=agent_profile_id,
+                primary_mode=str(agent.get("primaryMode") or "chat"),
+                role_key=str(agent.get("roleKey") or ""),
+                prompt_template_id=str(agent.get("promptTemplateId") or ""),
+                existing_agent_id=agent_id,
+                session_workspace_path=str(conversation.get("workspace_path") or conversation.get("workspacePath") or _session_workspace_relative_path(session_id)),
+                created_by="session_agent_binding",
+            )
+    except AgentNotFoundError:
+        raise SessionValidationError(f"Session Agent not found: {agent_id}") from None
+    _record_session_agent_binding_updated_event(
+        session_id,
+        agent_id=agent_id,
+        profile_id=agent_profile_id,
+        source=source,
+        prompt_template_id=str(agent.get("promptTemplateId") or "").strip(),
+        role_key=str(agent.get("roleKey") or "").strip(),
+    )
+
+
+def _update_conversation_agent_profile(
+    conversation: dict[str, Any],
+    profile_id: str,
+    *,
+    session_id: str,
+) -> None:
+    normalized_profile_id = _normalize_session_agent_profile_id(profile_id)
+    existing_agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+    existing_agent = get_agent(existing_agent_id) if existing_agent_id else None
+    if existing_agent:
+        update_agent_instance(existing_agent_id, profile_id=normalized_profile_id)
+    conversation.pop("agent_profile_id", None)
+    conversation.pop("agentProfileId", None)
+    _record_session_agent_binding_updated_event(
+        session_id,
+        agent_id=existing_agent_id,
+        profile_id=normalized_profile_id,
+        source="profile_id_request",
+        prompt_template_id=str((existing_agent or {}).get("promptTemplateId") or "").strip(),
+        role_key=str((existing_agent or {}).get("roleKey") or "").strip(),
+    )
 
 
 def delete_chat_session(session_id: str) -> dict:
@@ -725,6 +1363,7 @@ def request_stop_session_turn(session_id: str) -> dict:
         )
     )
     stop_snapshot = controller.snapshot()
+    _cancel_queued_session_turn(conversation_id, str(stop_snapshot.get("turnId") or controller.turn_id))
     _record_chat_next_state_signal(
         session_id=conversation_id,
         turn_id=str(stop_snapshot.get("turnId") or controller.turn_id),
@@ -844,8 +1483,12 @@ def submit_session_message(
     content_utf8_base64: str = "",
     mental_model_enabled: bool | None = None,
     *,
+    attachment_ids: list[str] | None = None,
     turn_mode: str = "",
     write_intent: bool | None = None,
+    message_metadata: dict[str, Any] | None = None,
+    message_source: str = "raw",
+    include_started_turn_id: bool = False,
 ) -> dict:
     """Persist a user message and start a single web chat turn."""
 
@@ -854,10 +1497,6 @@ def submit_session_message(
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
         raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
-    if not message:
-        raise SessionValidationError(
-            text_for(lang, zh="请输入本轮消息后再发送。", en="Enter a message before sending.")
-        )
     _validate_user_message_not_encoding_replacement(message, lang=lang)
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -865,6 +1504,15 @@ def submit_session_message(
         if conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
         _ensure_conversation_workspace_metadata(conversation)
+        attachments = _resolve_session_image_attachments(
+            conversation_id,
+            attachment_ids or [],
+            conversation=conversation,
+        )
+        if not message and not attachments:
+            raise SessionValidationError(
+                text_for(lang, zh="请输入本轮消息或添加图片后再发送。", en="Enter a message or attach an image before sending.")
+            )
 
         if _is_session_running(conversation_id):
             raise SessionBusyError(
@@ -888,13 +1536,26 @@ def submit_session_message(
         if not lease_decision.allowed:
             raise SessionBusyError(_localize_lease_conflict(lease_decision.reason, lang=lang))
 
-        agent_profile_id = _normalize_session_agent_profile_id(
-            conversation.get("agent_profile_id") or conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
-        )
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        agent = get_agent(agent_id) if agent_id else None
+        agent_profile_id = _normalize_session_agent_profile_id(
+            (agent or {}).get("profileId")
+            or conversation.get("agent_profile_id")
+            or conversation.get("agentProfileId")
+            or DEFAULT_SESSION_AGENT_PROFILE_ID
+        )
         previous_messages = normalize_chat_messages(conversation.get("messages") or [])
-        user_entry = _make_chat_message("user", message)
+        turn_control = _create_session_turn_control(conversation_id)
+        persisted_message_metadata = dict(message_metadata or {}) if isinstance(message_metadata, dict) else {}
+        if persisted_message_metadata:
+            persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
+        user_entry = _make_chat_message(
+            "user",
+            message,
+            metadata=persisted_message_metadata,
+            attachments=attachments,
+        )
         conversation["messages"] = previous_messages + [user_entry]
         conversation.pop("last_turn_error", None)
         conversation.pop("lastTurnError", None)
@@ -903,12 +1564,12 @@ def submit_session_message(
         payload["active_conversation_id"] = conversation_id
         payload["updated_at"] = user_entry["timestamp"]
         save_chat_state(PROJECT_ROOT, payload)
-        turn_control = _create_session_turn_control(conversation_id)
         _set_session_running(conversation_id, True, turn_id=turn_control.turn_id, leases=requested_leases)
         _persist_chat_turn_work_run(
             session_id=conversation_id,
             turn_id=turn_control.turn_id,
             status="running",
+            agent_id=agent_id,
             leases=requested_leases,
             user_message=message,
             started_at=user_entry["timestamp"],
@@ -927,16 +1588,138 @@ def submit_session_message(
         leases=requested_leases,
         user_message=message,
         raw_user_message=message,
-        user_message_source="raw",
+        user_message_source=str(message_source or "raw").strip() or "raw",
+        attachments=attachments,
     )
     _publish_session_detail_snapshot(conversation_id)
 
-    effective_user_message, user_message_source = _resolve_session_user_prompt(
-        conversation_id,
-        message,
-        previous_messages,
-        existing_task=active_task,
-    )
+    normalized_message_source = str(message_source or "").strip() or "raw"
+    if attachments and normalized_message_source != "agent_inbox":
+        image_route = _resolve_image_attachment_turn_route(message, agent_profile_id=agent_profile_id)
+        if image_route["route"] == "clarify":
+            _finish_image_attachment_routed_turn(
+                conversation_id,
+                turn_control.turn_id,
+                {
+                    "status": "completed",
+                    "summary": _image_attachment_clarification_message(lang),
+                    "raw_output": _image_attachment_clarification_message(lang),
+                    "outcome": "needs_input",
+                    "metadata": {
+                        "imageAttachmentRoute": "clarify",
+                        "imageAttachmentIntent": image_route["intent"],
+                    },
+                },
+                route="clarify",
+                intent=image_route["intent"],
+                agent_profile_id=agent_profile_id,
+                agent_id=agent_id,
+                attachments=attachments,
+                leases=requested_leases,
+                raw_user_message=message,
+            )
+            detail = get_session_detail(conversation_id) or {}
+            if include_started_turn_id:
+                detail["startedTurnId"] = turn_control.turn_id
+            return detail
+        if image_route["route"] == "block_vision":
+            visible = _image_input_unsupported_message(lang, profile_id=agent_profile_id)
+            _finish_image_attachment_routed_turn(
+                conversation_id,
+                turn_control.turn_id,
+                {
+                    "status": "failed_runtime",
+                    "summary": visible,
+                    "raw_output": visible,
+                    "error": visible,
+                    "outcome": "blocked",
+                    "metadata": {
+                        "imageAttachmentRoute": "block_vision",
+                        "imageAttachmentIntent": image_route["intent"],
+                        "supportsImageInput": image_route["supports_image_input"],
+                    },
+                },
+                route="block_vision",
+                intent=image_route["intent"],
+                agent_profile_id=agent_profile_id,
+                agent_id=agent_id,
+                attachments=attachments,
+                leases=requested_leases,
+                raw_user_message=message,
+                outcome="blocked",
+                level="warning",
+            )
+            detail = get_session_detail(conversation_id) or {}
+            if include_started_turn_id:
+                detail["startedTurnId"] = turn_control.turn_id
+            return detail
+        if image_route["route"] == "image2":
+            context = {
+                "session_id": conversation_id,
+                "turn_id": turn_control.turn_id,
+                "turn_control": turn_control,
+                "user_message": message or _image2_prompt_from_attachments(lang),
+                "raw_user_message": message,
+                "user_message_source": "image_attachment_image2",
+                "attachments": attachments,
+                "history_messages": previous_messages,
+                "mental_model_enabled": mental_model_enabled,
+                "active_task": active_task,
+                "profile_id": agent_profile_id,
+                "agent_id": agent_id,
+                "leases": requested_leases,
+            }
+            _record_image_attachment_router_event(
+                conversation_id,
+                turn_id=turn_control.turn_id,
+                route="image2",
+                intent=image_route["intent"],
+                outcome="scheduled",
+                agent_profile_id=agent_profile_id,
+                agent_id=agent_id,
+                attachments=attachments,
+                fields={"supportsImageInput": image_route.get("supports_image_input")},
+            )
+            _record_session_turn_scheduled_event(context)
+            try:
+                _schedule_image2_attachment_turn(context)
+            except Exception as exc:
+                _persist_chat_turn_work_run(
+                    session_id=conversation_id,
+                    turn_id=turn_control.turn_id,
+                    status="failed",
+                    leases=requested_leases,
+                    user_message=message,
+                    summary=f"{type(exc).__name__}: {exc}",
+                )
+                _set_session_running(conversation_id, False)
+                _clear_session_turn_control(conversation_id)
+                _persist_session_turn_failure(conversation_id, context, exc)
+                _publish_session_detail_snapshot(conversation_id)
+                raise
+            detail = get_session_detail(conversation_id) or {}
+            if include_started_turn_id:
+                detail["startedTurnId"] = turn_control.turn_id
+            return detail
+
+    if normalized_message_source == "agent_inbox":
+        effective_user_message, user_message_source = message, normalized_message_source
+    elif attachments:
+        effective_user_message = message or text_for(
+            lang,
+            zh="请查看本轮图片附件并回答。",
+            en="Please inspect the image attachment(s) from this turn and respond.",
+        )
+        user_message_source = "raw_with_attachments" if message else "attachments_only"
+    else:
+        effective_user_message, user_message_source = _resolve_session_user_prompt(
+            conversation_id,
+            message,
+            previous_messages,
+            existing_task=active_task,
+        )
+        if effective_user_message == message and normalized_message_source != "raw":
+            user_message_source = normalized_message_source
     if effective_user_message != message:
         _record_session_user_message_filtered_event(
             conversation_id,
@@ -972,10 +1755,11 @@ def submit_session_message(
         "user_message": effective_user_message,
         "raw_user_message": message,
         "user_message_source": user_message_source,
+        "attachments": attachments,
         "history_messages": previous_messages,
         "mental_model_enabled": mental_model_enabled,
         "active_task": active_task,
-        "agent_profile_id": agent_profile_id,
+        "profile_id": agent_profile_id,
         "agent_id": agent_id,
     }
     _record_session_turn_scheduled_event(context)
@@ -995,7 +1779,100 @@ def submit_session_message(
         _persist_session_turn_failure(conversation_id, context, exc)
         _publish_session_detail_snapshot(conversation_id)
         raise
-    return get_session_detail(conversation_id) or {}
+    detail = get_session_detail(conversation_id) or {}
+    if include_started_turn_id:
+        detail["startedTurnId"] = turn_control.turn_id
+    return detail
+
+
+def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Start the target Agent's direct session so it can answer an inbox message."""
+
+    message_id = str(message.get("messageId") or message.get("eventId") or "").strip()
+    target_agent_id = str(message.get("targetAgentId") or "").strip()
+    target_agent = get_agent(target_agent_id) if target_agent_id else None
+    target_session_id = str(message.get("targetSessionId") or (target_agent or {}).get("directSessionId") or "").strip()
+    delivery = {
+        "wakeRequested": True,
+        "wakeStatus": "skipped",
+        "messageId": message_id,
+        "targetAgentId": target_agent_id,
+        "targetSessionId": target_session_id,
+        "turnId": "",
+        "reason": "",
+    }
+    if not target_agent:
+        delivery["wakeStatus"] = "skipped_missing_agent"
+        delivery["reason"] = "target_agent_not_found"
+        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
+        return delivery
+    target_metadata = target_agent.get("metadata") if isinstance(target_agent.get("metadata"), dict) else {}
+    delegation_decision = evaluate_delegation_wake_policy(target_metadata.get("delegationPolicy"), agent_id=target_agent_id)
+    if not delegation_decision.allowed:
+        delivery["wakeStatus"] = "skipped_policy_blocked"
+        delivery["reason"] = delegation_decision.reason
+        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
+        return delivery
+    if not target_session_id:
+        delivery["wakeStatus"] = "skipped_no_direct_session"
+        delivery["reason"] = "target_agent_has_no_direct_session"
+        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
+        return delivery
+    if _is_session_running(target_session_id):
+        delivery["wakeStatus"] = "skipped_busy"
+        delivery["reason"] = "target_session_busy"
+        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
+        return delivery
+
+    prompt = _format_agent_inbox_wake_prompt(message)
+    try:
+        detail = submit_session_message(
+            target_session_id,
+            prompt,
+            turn_mode="agent_inbox",
+            write_intent=False,
+            message_metadata={
+                "kind": "agent_inbox_message",
+                "messageId": message_id,
+                "sourceAgentId": str(message.get("sourceAgentId") or "").strip(),
+                "sourceAgentCode": str(message.get("sourceAgentCode") or "").strip(),
+                "sourceSessionId": str(message.get("sourceSessionId") or "").strip(),
+                "targetAgentId": target_agent_id,
+                "targetSessionId": target_session_id,
+            },
+            message_source="agent_inbox",
+            include_started_turn_id=True,
+        )
+    except SessionBusyError:
+        delivery["wakeStatus"] = "skipped_busy"
+        delivery["reason"] = "target_session_busy"
+        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="info")
+        return delivery
+    except (SessionNotFoundError, SessionValidationError) as exc:
+        delivery["wakeStatus"] = "skipped_invalid_session"
+        delivery["reason"] = type(exc).__name__
+        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
+        return delivery
+
+    turn_id = str(detail.get("startedTurnId") or "").strip()
+    try:
+        consume_agent_inbox_message(
+            target_agent_id,
+            message_id,
+            consumed_by_session_id=target_session_id,
+            consumed_by_turn_id=turn_id,
+        )
+    except Exception as exc:
+        delivery["wakeStatus"] = "started_consume_failed"
+        delivery["reason"] = type(exc).__name__
+        delivery["turnId"] = turn_id
+        _record_agent_inbox_wake_event("agent_inbox.wake_started_consume_failed", message, delivery, level="warning")
+        return delivery
+
+    delivery["wakeStatus"] = "started"
+    delivery["turnId"] = turn_id
+    _record_agent_inbox_wake_event("agent_inbox.wake_started", message, delivery, level="info")
+    return delivery
 
 
 def edit_and_resubmit_session_message(
@@ -1075,11 +1952,15 @@ def edit_and_resubmit_session_message(
         if not lease_decision.allowed:
             raise SessionBusyError(_localize_lease_conflict(lease_decision.reason, lang=lang))
 
-        agent_profile_id = _normalize_session_agent_profile_id(
-            conversation.get("agent_profile_id") or conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
-        )
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
+        agent = get_agent(agent_id) if agent_id else None
+        agent_profile_id = _normalize_session_agent_profile_id(
+            (agent or {}).get("profileId")
+            or conversation.get("agent_profile_id")
+            or conversation.get("agentProfileId")
+            or DEFAULT_SESSION_AGENT_PROFILE_ID
+        )
         original_entry = dict(previous_messages[target_index])
         user_entry = _make_chat_message("user", message)
         edited_messages = previous_messages[:target_index] + [user_entry]
@@ -1097,6 +1978,7 @@ def edit_and_resubmit_session_message(
             session_id=conversation_id,
             turn_id=turn_control.turn_id,
             status="running",
+            agent_id=agent_id,
             leases=requested_leases,
             user_message=message,
             started_at=user_entry["timestamp"],
@@ -1173,7 +2055,7 @@ def edit_and_resubmit_session_message(
         "history_messages": edited_messages[:target_index],
         "mental_model_enabled": mental_model_enabled,
         "active_task": active_task,
-        "agent_profile_id": agent_profile_id,
+        "profile_id": agent_profile_id,
         "agent_id": agent_id,
     }
     _record_session_turn_scheduled_event(context)
@@ -1261,11 +2143,12 @@ def _load_conversations() -> tuple[str, list[dict[str, Any]]]:
     active_id = str(payload.get("active_conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
     conversations: list[dict[str, Any]] = []
     changed = False
+    agent_by_id = _agent_lookup_for_conversations()
     for raw in list(payload.get("conversations") or []):
         if isinstance(raw, dict):
             changed = _ensure_conversation_workspace_metadata(raw) or changed
-            changed = _ensure_conversation_agent_metadata(raw) or changed
-        conversation = _normalize_conversation(raw)
+            changed = _ensure_conversation_agent_metadata(raw, agent_by_id=agent_by_id) or changed
+        conversation = _normalize_conversation(raw, agent_by_id=agent_by_id)
         if conversation is not None:
             conversations.append(conversation)
     if changed:
@@ -1288,7 +2171,7 @@ def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, An
             continue
         conversation_id = str(conversation.get("conversation_id") or "").strip()
         persisted_status = str(conversation.get("last_turn_status") or "").strip().lower()
-        if persisted_status not in {"running", "stopping"}:
+        if persisted_status not in {"queued", "running", "stopping"}:
             continue
         if conversation_id and _is_session_running(conversation_id):
             continue
@@ -1360,7 +2243,11 @@ def _release_stale_chat_turn_work_run(*, session_id: str, finished_at: str, summ
         return
 
 
-def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
+def _normalize_conversation(
+    raw: Any,
+    *,
+    agent_by_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
     conversation_id = str(raw.get("conversation_id") or DEFAULT_CHAT_CONVERSATION_ID).strip()
@@ -1373,6 +2260,9 @@ def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
         raw.get("agent_profile_id") or raw.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
     )
     agent_id = str(raw.get("agent_id") or raw.get("agentId") or "").strip()
+    agent = _agent_from_lookup(agent_by_id, agent_id) if agent_id else None
+    if agent:
+        agent_profile_id = _normalize_session_agent_profile_id(agent.get("profileId") or agent_profile_id)
     messages = _normalize_messages(conversation_id, raw.get("messages") or [])
     last_turn_status = str(raw.get("last_turn_status") or "").strip().lower()
     last_turn_error = _normalize_session_turn_error(raw.get("last_turn_error") or raw.get("lastTurnError"))
@@ -1396,6 +2286,7 @@ def _normalize_conversation(raw: Any) -> dict[str, Any] | None:
         "lastTurnError": last_turn_error,
         "updatedAt": updated_at,
         "activeTask": dict(active_task or {}) if isinstance(active_task, dict) else None,
+        "_agent": dict(agent) if isinstance(agent, dict) else None,
     }
 
 
@@ -1411,7 +2302,8 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
         thought = _normalize_message_thought(raw, role=role)
         mental_snapshot = _normalize_mental_snapshot(raw.get("mental_snapshot") or raw.get("mentalSnapshot"))
         tool_calls = _normalize_message_tool_calls(raw.get("tool_calls") or raw.get("toolCalls") or raw.get("tools") or [])
-        if not content and not thought and mental_snapshot is None and not tool_calls:
+        attachments = _normalize_message_attachments(raw.get("attachments") or raw.get("imageAttachments") or [])
+        if not content and not thought and mental_snapshot is None and not tool_calls and not attachments:
             continue
         entry: dict[str, Any] = {
             "id": f"{conversation_id}-message-{index}",
@@ -1425,6 +2317,8 @@ def _normalize_messages(conversation_id: str, items: Any) -> list[dict[str, Any]
             entry["mentalSnapshot"] = mental_snapshot
         if tool_calls:
             entry["toolCalls"] = tool_calls
+        if attachments:
+            entry["attachments"] = attachments
         metadata = raw.get("metadata")
         if isinstance(metadata, dict) and metadata:
             entry["metadata"] = dict(metadata)
@@ -1447,6 +2341,11 @@ def _history_messages_for_agent_seed(items: Any) -> list[dict[str, Any]]:
             continue
         if role == "assistant" and drop_assistant_until_next_user:
             continue
+        item = dict(item)
+        attachments = _normalize_message_attachments(item.get("attachments") or item.get("imageAttachments") or [])
+        if attachments:
+            item["content"] = _message_content_with_attachment_summary(item.get("content") or "", attachments)
+            item.pop("attachments", None)
         filtered.append(item)
     return filtered
 
@@ -1454,6 +2353,7 @@ def _history_messages_for_agent_seed(items: Any) -> list[dict[str, Any]]:
 def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
     role = str(message.get("role") or "").strip().lower()
     content = str(message.get("content") or "").strip()
+    attachments = _normalize_message_attachments(message.get("attachments") or message.get("imageAttachments") or [])
     if role != "user":
         return role == "assistant" and (
             not content
@@ -1461,7 +2361,7 @@ def _should_omit_message_from_agent_history(message: dict[str, Any]) -> bool:
             or _looks_like_provider_error_text(content)
             or _looks_like_runtime_failure_notice(content)
         )
-    return not _is_meaningful_task_goal(content)
+    return not attachments and not _is_meaningful_task_goal(content)
 
 
 def _is_protocol_only_assistant_message(content: Any) -> bool:
@@ -1581,6 +2481,26 @@ def _sanitize_message_content(role: str, content: Any) -> str:
     return sanitize_assistant_visible_text(text)
 
 
+def _normalize_message_attachments(value: Any) -> list[dict[str, Any]]:
+    return normalize_chat_attachments(value)
+
+
+def _message_content_with_attachment_summary(content: Any, attachments: list[dict[str, Any]]) -> str:
+    text = str(content or "").strip()
+    normalized = _normalize_message_attachments(attachments)
+    if not normalized:
+        return text
+    lines = [text] if text else []
+    lines.append("")
+    lines.append("[图片附件摘要]")
+    for index, attachment in enumerate(normalized, start=1):
+        filename = str(attachment.get("filename") or attachment.get("artifactId") or f"image-{index}").strip()
+        content_type = str(attachment.get("contentType") or "").strip()
+        size_bytes = _coerce_nonnegative_int(attachment.get("sizeBytes") or 0)
+        lines.append(f"- {filename} · {content_type or 'image'} · {size_bytes} bytes")
+    return "\n".join(lines).strip()
+
+
 def _active_task_to_api(value: dict[str, Any] | None) -> dict[str, Any] | None:
     task = _normalize_session_active_task(value)
     if not task:
@@ -1614,16 +2534,19 @@ def _build_session_summary(conversation: dict[str, Any]) -> dict[str, Any]:
     status = _conversation_phase(conversation["id"], conversation)
     summary = _latest_message_summary(conversation.get("messages") or [])
     updated_at = str(conversation.get("updatedAt") or "").strip()
-    agent_profile_id = _normalize_session_agent_profile_id(
-        conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
-    )
     agent_id = str(conversation.get("agentId") or "").strip()
-    agent = get_agent(agent_id) if agent_id else None
+    cached_agent = conversation.get("_agent")
+    agent = cached_agent if isinstance(cached_agent, dict) else (get_agent(agent_id) if agent_id else None)
+    agent_profile_id = _normalize_session_agent_profile_id(
+        (agent or {}).get("profileId") or conversation.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+    )
     agent_workspace_path = str((agent or {}).get("workspacePath") or "").strip()
+    agent_code = str((agent or {}).get("agentCode") or "").strip()
     return {
         "id": conversation["id"],
         "title": conversation["title"],
         "agentId": agent_id,
+        "agentCode": agent_code,
         "agentDisplayName": str((agent or {}).get("displayName") or conversation["title"]).strip(),
         "agentProfileId": agent_profile_id,
         "agentTemplateId": agent_profile_id,
@@ -1673,6 +2596,9 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
         "lastTurnError": _session_turn_error_to_api(conversation.get("lastTurnError")),
         "nextStateSignals": _recent_chat_next_state_signal_summaries(conversation["id"], limit=5),
         "groupContextEvents": list_group_context_events_for_agent(summary.get("agentId") or "", limit=8)
+        if summary.get("agentId")
+        else [],
+        "agentInboxMessages": list_agent_inbox_messages_for_agent(summary.get("agentId") or "", limit=8, status="pending")
         if summary.get("agentId")
         else [],
         "toolPolicy": (get_agent(summary.get("agentId") or "") or {}).get("toolPolicy") if summary.get("agentId") else None,
@@ -1771,13 +2697,41 @@ def _estimate_session_context_tokens(character_count: int, tool_call_count: int)
 def _session_context_limit() -> int:
     try:
         cfg = get_config()
-        compression_limit = int(getattr(cfg.context_compression, "max_token_limit", 0) or 0)
+        runtime_limit = _runtime_context_window_limit()
         profile = cfg.llm.get_profile(role="primary")
         provider = cfg.llm.get_provider(profile.provider_id)
+        resolved_limit = _resolved_model_context_window(cfg, profile.profile_id)
         provider_limit = int(getattr(provider, "context_window", 0) or 0)
-        return _first_positive_int(compression_limit, provider_limit, 128000)
+        compression_limit = int(getattr(cfg.context_compression, "max_token_limit", 0) or 0)
+        return _first_positive_int(runtime_limit, resolved_limit, provider_limit, compression_limit, 128000)
     except Exception:
         return 128000
+
+
+def _runtime_context_window_limit() -> int:
+    runtime_state_path = PROJECT_ROOT / "workspace" / "ui_runtime_state.json"
+    try:
+        payload = json.loads(runtime_state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    compression = payload.get("context_compression")
+    compression = compression if isinstance(compression, dict) else {}
+    return _first_positive_int(
+        compression.get("contextWindowLimit"),
+        payload.get("context_token_limit"),
+    )
+
+
+def _resolved_model_context_window(cfg: Any, profile_id: str) -> int:
+    try:
+        from core.llm.discovery import discover_model
+
+        spec = discover_model(cfg, profile_id)
+        return int(getattr(spec, "context_window", 0) or 0)
+    except Exception:
+        return 0
 
 
 def _first_positive_int(*values: Any) -> int:
@@ -2018,7 +2972,6 @@ def _make_empty_conversation(session_id: str, *, title: str, timestamp: str) -> 
     return {
         "conversation_id": str(session_id or "").strip(),
         "title": str(title or "").strip() or DEFAULT_CHAT_CONVERSATION_TITLE,
-        "agent_profile_id": DEFAULT_SESSION_AGENT_PROFILE_ID,
         "workspace_path": _session_workspace_relative_path(session_id),
         "updated_at": str(timestamp or "").strip() or _now_timestamp(),
         "last_turn_status": "ready",
@@ -2085,10 +3038,13 @@ def _is_session_busy_for_delete(conversation_id: str, conversation: dict[str, An
 def _conversation_phase(conversation_id: str, conversation: dict[str, Any]) -> str:
     if _is_session_stop_requested(conversation_id):
         return "stopping"
+    normalized = str(conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or "").strip().lower()
     if _is_session_running(conversation_id):
+        if normalized == "queued":
+            return "queued"
         return "running"
-    normalized = str(conversation.get("lastTurnStatus") or "").strip().lower()
     if normalized in {
+        "queued",
         "failed",
         "ready",
         "completed",
@@ -2124,16 +3080,43 @@ def list_active_session_work_runs() -> list[dict[str, Any]]:
         session_ids = sorted(_RUNNING_SESSION_IDS)
         active_turn_ids = dict(_SESSION_ACTIVE_TURN_IDS)
         active_leases = {key: list(value) for key, value in _SESSION_ACTIVE_TURN_LEASES.items()}
+    active_statuses = _active_session_work_run_statuses(session_ids)
     return [
         {
             "runId": active_turn_ids.get(session_id) or f"chat-turn-{session_id}",
             "runKind": "chat_turn",
             "sessionId": session_id,
-            "status": "running",
+            "status": active_statuses.get(session_id) or "running",
+            "currentPhase": active_statuses.get(session_id) or "running",
             "leases": active_leases.get(session_id) or ["readonly_chat"],
         }
         for session_id in session_ids
     ]
+
+
+def _active_session_work_run_statuses(session_ids: list[str]) -> dict[str, str]:
+    if not session_ids:
+        return {}
+    session_id_set = set(session_ids)
+    statuses: dict[str, str] = {}
+    try:
+        with _CHAT_STATE_LOCK:
+            payload = load_chat_state(PROJECT_ROOT)
+            conversations = payload.get("conversations") if isinstance(payload, dict) else []
+            for conversation in conversations if isinstance(conversations, list) else []:
+                if not isinstance(conversation, dict):
+                    continue
+                session_id = str(conversation.get("conversation_id") or "").strip()
+                if session_id not in session_id_set:
+                    continue
+                status = str(
+                    conversation.get("last_turn_status") or conversation.get("lastTurnStatus") or ""
+                ).strip().lower()
+                if status in {"queued", "running", "stopping"}:
+                    statuses[session_id] = status
+    except Exception:
+        return {}
+    return statuses
 
 
 def active_session_has_write_leases() -> bool:
@@ -2145,8 +3128,13 @@ def active_session_has_write_leases() -> bool:
 
 
 def load_chat_turn_work_run_summary() -> dict[str, Any]:
+    active_items = list_active_session_work_runs()
+    active = _WORK_RUN_STORE.load_active_snapshot("chat_turn")
+    if not active and active_items:
+        active = active_items[0]
     return {
-        "active": _WORK_RUN_STORE.load_active_snapshot("chat_turn"),
+        "active": active,
+        "activeItems": active_items,
         "latest": _WORK_RUN_STORE.load_latest_snapshot("chat_turn"),
     }
 
@@ -2175,11 +3163,185 @@ def _localize_lease_conflict(reason: str, *, lang: str) -> str:
     ).strip()
 
 
+def _classify_image_attachment_intent(message: str) -> str:
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return "clarify"
+    if any(pattern in normalized for pattern in _IMAGE_ATTACHMENT_IMAGE2_PATTERNS):
+        return "image2_edit"
+    if any(pattern in normalized for pattern in _IMAGE_ATTACHMENT_VISION_PATTERNS):
+        return "vision_analysis"
+    return "clarify"
+
+
+def _resolve_image_attachment_turn_route(message: str, *, agent_profile_id: str) -> dict[str, Any]:
+    intent = _classify_image_attachment_intent(message)
+    supports_image_input = _session_profile_supports_image_input(agent_profile_id)
+    if intent == "image2_edit":
+        route = "image2"
+    elif intent == "vision_analysis" and supports_image_input is True:
+        route = "vision"
+    elif intent == "vision_analysis":
+        route = "block_vision"
+    else:
+        route = "clarify"
+    return {
+        "intent": intent,
+        "route": route,
+        "supports_image_input": supports_image_input,
+    }
+
+
+def _session_profile_supports_image_input(profile_id: str) -> bool | None:
+    normalized_profile_id = _normalize_session_agent_profile_id(profile_id or DEFAULT_SESSION_AGENT_PROFILE_ID)
+    try:
+        config = get_config()
+        profile = config.llm.get_profile(profile_id=normalized_profile_id)
+    except Exception:
+        return None
+
+    explicit = getattr(profile, "supports_image_input", None)
+    if explicit is not None:
+        return bool(explicit)
+
+    lowered_model = str(getattr(profile, "model", "") or "").strip().lower()
+    lowered_contract = str(getattr(profile, "contract", "") or "").strip().lower()
+    lowered_transport = str(getattr(profile, "transport", "") or "").strip().lower()
+    haystack = " ".join((lowered_model, lowered_contract, lowered_transport))
+    if any(hint in haystack for hint in _VISION_MODEL_NAME_HINTS):
+        return True
+    return False
+
+
+def _image_attachment_clarification_message(lang: str) -> str:
+    return text_for(
+        lang,
+        zh="我看到你发送了图片。你想让我分析这张图片，还是基于它生成/调整图片？请补一句你的目标。",
+        en="I received your image. Do you want me to analyze it, or generate/edit an image based on it? Please add your goal.",
+    )
+
+
+def _image_input_unsupported_message(lang: str, *, profile_id: str) -> str:
+    return text_for(
+        lang,
+        zh=f"当前 Agent 使用的模型档案 `{profile_id}` 未确认支持图像输入，所以我没有把图片发送给模型。请切换到支持图像输入的模型，或说明要基于这张图生成/调整图片，我会交给 image2 工具处理。",
+        en=f"The current Agent profile `{profile_id}` is not confirmed to support image input, so I did not send the image to the model. Switch to a vision-capable model, or ask to generate/edit an image based on it so image2 can handle it.",
+    )
+
+
+def _image2_prompt_from_attachments(lang: str) -> str:
+    return text_for(
+        lang,
+        zh="请基于本轮图片附件生成或调整图片。",
+        en="Generate or edit an image based on this turn's image attachment.",
+    )
+
+
+def _finish_image_attachment_routed_turn(
+    session_id: str,
+    turn_id: str,
+    result: dict[str, Any],
+    *,
+    route: str,
+    intent: str,
+    agent_profile_id: str,
+    agent_id: str,
+    attachments: list[dict[str, Any]],
+    leases: list[str] | None,
+    raw_user_message: str,
+    outcome: str = "completed",
+    level: str = "info",
+) -> None:
+    _record_image_attachment_router_event(
+        session_id,
+        turn_id=turn_id,
+        route=route,
+        intent=intent,
+        outcome=outcome,
+        level=level,
+        agent_profile_id=agent_profile_id,
+        agent_id=agent_id,
+        attachments=attachments,
+        fields={
+            "resultStatus": str(result.get("status") or "").strip(),
+            "assistantTextLength": len(str(result.get("summary") or result.get("raw_output") or "")),
+        },
+    )
+    _persist_session_turn_result(session_id, result, turn_id=turn_id)
+    _persist_chat_turn_work_run(
+        session_id=session_id,
+        turn_id=turn_id,
+        status=_chat_turn_result_status(str(result.get("status") or "completed"), result, stop_requested=False),
+        agent_id=agent_id,
+        leases=leases,
+        user_message=raw_user_message,
+        summary=str(result.get("summary") or result.get("raw_output") or "").strip(),
+        finished_at=_now_timestamp(),
+    )
+    _set_session_running(session_id, False, turn_id=turn_id)
+    _clear_session_turn_control(session_id, turn_id=turn_id)
+    _publish_session_detail_snapshot(session_id)
+
+
+def _record_image_attachment_router_event(
+    session_id: str,
+    *,
+    turn_id: str,
+    route: str,
+    intent: str,
+    outcome: str,
+    agent_profile_id: str,
+    agent_id: str,
+    attachments: list[dict[str, Any]],
+    level: str = "info",
+    fields: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "image_attachment_router",
+            "conversation.image_attachment_router.routed",
+            level=level,
+            outcome=outcome,
+            message="Conversation image attachment routed before LLM execution.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "route": str(route or "").strip(),
+                "intent": str(intent or "").strip(),
+                "agentProfileId": str(agent_profile_id or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "attachmentCount": len(_normalize_message_attachments(attachments or [])),
+                "attachments": _safe_attachment_log_summary(attachments or []),
+                **(fields or {}),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-image-router.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "turn_id": str(turn_id or "").strip(),
+                "route": str(route or "").strip(),
+                "intent": str(intent or "").strip(),
+                "agent_profile_id": str(agent_profile_id or "").strip(),
+                "agent_id": str(agent_id or "").strip(),
+                "attachment_count": len(_normalize_message_attachments(attachments or [])),
+                "attachments": _safe_attachment_log_summary(attachments or []),
+                **(fields or {}),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene image attachment router log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
 def _persist_chat_turn_work_run(
     *,
     session_id: str,
     turn_id: str,
     status: str,
+    agent_id: str = "",
     leases: list[str] | None = None,
     user_message: str = "",
     summary: str = "",
@@ -2197,13 +3359,19 @@ def _persist_chat_turn_work_run(
     started = str(started_at or previous.get("startedAt") or now).strip()
     finished = str(finished_at or previous.get("finishedAt") or "").strip()
     normalized_status = str(status or previous.get("status") or "running").strip().lower() or "running"
-    active_run_id = normalized_turn_id if normalized_status in {"queued", "running", "stopping"} else ""
+    if normalized_status in {"running", "stopping"}:
+        active_run_id = normalized_turn_id
+    elif normalized_status == "queued":
+        active_run_id = _replacement_active_chat_turn_id(exclude_turn_id=normalized_turn_id) or normalized_turn_id
+    else:
+        active_run_id = _replacement_active_chat_turn_id(exclude_turn_id=normalized_turn_id)
     payload = {
         **previous,
         "runId": normalized_turn_id,
         "runKind": "chat_turn",
         "track": "dialogue",
         "sessionId": str(session_id or previous.get("sessionId") or "").strip(),
+        "agentId": str(agent_id or previous.get("agentId") or "").strip(),
         "status": normalized_status,
         "currentPhase": normalized_status,
         "leases": list(leases or previous.get("leases") or ["readonly_chat"]),
@@ -2219,6 +3387,16 @@ def _persist_chat_turn_work_run(
         else "",
     }
     _WORK_RUN_STORE.persist_snapshot("chat_turn", payload, active_run_id=active_run_id)
+
+
+def _replacement_active_chat_turn_id(*, exclude_turn_id: str = "") -> str:
+    excluded = str(exclude_turn_id or "").strip()
+    with _RUNNING_SESSIONS_LOCK:
+        for turn_id in _SESSION_ACTIVE_TURN_IDS.values():
+            normalized = str(turn_id or "").strip()
+            if normalized and normalized != excluded:
+                return normalized
+    return ""
 
 
 def _set_session_running(
@@ -2254,8 +3432,537 @@ def _is_session_turn_current(session_id: str, turn_id: str) -> bool:
         return _SESSION_ACTIVE_TURN_IDS.get(session_id) == turn_id
 
 
+def _session_scheduler_agent_key(context: dict[str, Any]) -> str:
+    agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
+    if agent_id:
+        return f"agent:{agent_id}"
+    session_id = str(context.get("session_id") or "").strip()
+    return f"session:{session_id or 'unknown'}"
+
+
+@contextmanager
+def reserve_agent_execution_slot(
+    *,
+    agent_id: str,
+    run_id: str,
+    session_id: str = "",
+    owner: str = "external",
+    wait_timeout_seconds: float | None = None,
+):
+    """Reserve the per-agent execution slot for non-session work such as group chat speakers."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_agent_id or not normalized_run_id:
+        yield
+        return
+
+    agent_key = f"agent:{normalized_agent_id}"
+    acquired = False
+    ready_event = threading.Event()
+    timeout_seconds = float(wait_timeout_seconds or 0.0)
+    deadline = time.monotonic() + max(0.1, timeout_seconds) if timeout_seconds > 0 else None
+    context = {
+        "session_id": str(session_id or "").strip(),
+        "turn_id": normalized_run_id,
+        "agent_id": normalized_agent_id,
+        "_scheduler_agent_key": agent_key,
+        "_scheduler_external": True,
+        "_scheduler_ready_event": ready_event,
+        "_scheduler_cancelled": False,
+    }
+    _record_session_scheduler_event(
+        context,
+        "external_waiting",
+        outcome="waiting",
+        fields={"owner": str(owner or "external").strip() or "external"},
+    )
+    with _SESSION_AGENT_SCHEDULER_CONDITION:
+        active_turn_id = str(_SESSION_AGENT_ACTIVE_TURN_IDS.get(agent_key) or "").strip()
+        queued = _SESSION_AGENT_QUEUES.get(agent_key)
+        if not active_turn_id and not queued:
+            _SESSION_AGENT_ACTIVE_TURN_IDS[agent_key] = normalized_run_id
+            acquired = True
+        else:
+            queue_bucket = _SESSION_AGENT_QUEUES.setdefault(agent_key, deque())
+            queue_bucket.append(context)
+            _record_session_scheduler_event(
+                context,
+                "external_queued",
+                outcome="queued",
+                fields={
+                    "owner": str(owner or "external").strip() or "external",
+                    "queuePosition": len(queue_bucket),
+                },
+            )
+    while not acquired:
+        if bool(context.get("_scheduler_cancelled")):
+            raise RuntimeError(f"Agent execution slot reservation was cancelled: {normalized_agent_id}")
+        if ready_event.is_set():
+            if bool(context.get("_scheduler_cancelled")):
+                raise RuntimeError(f"Agent execution slot reservation was cancelled: {normalized_agent_id}")
+            acquired = True
+            break
+        if deadline is None:
+            ready_event.wait(timeout=0.25)
+        else:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _cancel_queued_scheduler_context(agent_key, normalized_run_id)
+                raise TimeoutError(f"Timed out waiting for agent execution slot: {normalized_agent_id}")
+            ready_event.wait(timeout=min(0.25, remaining))
+        if ready_event.is_set():
+            if bool(context.get("_scheduler_cancelled")):
+                raise RuntimeError(f"Agent execution slot reservation was cancelled: {normalized_agent_id}")
+            acquired = True
+    _record_session_scheduler_event(
+        context,
+        "external_started",
+        outcome="running",
+        fields={"owner": str(owner or "external").strip() or "external"},
+    )
+    try:
+        yield
+    finally:
+        if acquired:
+            _record_session_scheduler_event(
+                context,
+                "external_finished",
+                outcome="finished",
+                fields={"owner": str(owner or "external").strip() or "external"},
+            )
+            _release_scheduled_session_turn(context)
+
+
+def _scheduler_context_is_external(context: dict[str, Any]) -> bool:
+    return bool(context.get("_scheduler_external"))
+
+
+def _cancel_queued_scheduler_context(agent_key: str, turn_id: str) -> bool:
+    normalized_agent_key = str(agent_key or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    if not normalized_agent_key or not normalized_turn_id:
+        return False
+    removed = False
+    with _SESSION_AGENT_SCHEDULER_CONDITION:
+        queue_bucket = _SESSION_AGENT_QUEUES.get(normalized_agent_key)
+        if not queue_bucket:
+            return False
+        kept: deque[dict[str, Any]] = deque()
+        while queue_bucket:
+            queued_context = queue_bucket.popleft()
+            if str(queued_context.get("turn_id") or "").strip() == normalized_turn_id:
+                removed = True
+                queued_context["_scheduler_cancelled"] = True
+                ready_event = queued_context.get("_scheduler_ready_event")
+                if isinstance(ready_event, threading.Event):
+                    ready_event.set()
+                continue
+            kept.append(queued_context)
+        if kept:
+            _SESSION_AGENT_QUEUES[normalized_agent_key] = kept
+        else:
+            _SESSION_AGENT_QUEUES.pop(normalized_agent_key, None)
+        if removed:
+            _SESSION_AGENT_SCHEDULER_CONDITION.notify_all()
+    return removed
+
+
+def cancel_agent_execution_reservation(run_id: str) -> bool:
+    """Cancel queued external work that is waiting for an agent execution slot."""
+
+    normalized_run_id = str(run_id or "").strip()
+    if not normalized_run_id:
+        return False
+    removed = False
+    with _SESSION_AGENT_SCHEDULER_CONDITION:
+        for agent_key in list(_SESSION_AGENT_QUEUES):
+            queue_bucket = _SESSION_AGENT_QUEUES.get(agent_key)
+            if not queue_bucket:
+                _SESSION_AGENT_QUEUES.pop(agent_key, None)
+                continue
+            kept: deque[dict[str, Any]] = deque()
+            while queue_bucket:
+                queued_context = queue_bucket.popleft()
+                queued_turn_id = str(queued_context.get("turn_id") or "").strip()
+                if _scheduler_context_is_external(queued_context) and queued_turn_id == normalized_run_id:
+                    removed = True
+                    queued_context["_scheduler_cancelled"] = True
+                    ready_event = queued_context.get("_scheduler_ready_event")
+                    if isinstance(ready_event, threading.Event):
+                        ready_event.set()
+                    _record_session_scheduler_event(
+                        queued_context,
+                        "external_cancelled",
+                        outcome="cancelled",
+                        fields={"reason": "external_run_cancelled"},
+                    )
+                    continue
+                kept.append(queued_context)
+            if kept:
+                _SESSION_AGENT_QUEUES[agent_key] = kept
+            else:
+                _SESSION_AGENT_QUEUES.pop(agent_key, None)
+        if removed:
+            _SESSION_AGENT_SCHEDULER_CONDITION.notify_all()
+    return removed
+
+
 def _schedule_session_turn(context: dict[str, Any]) -> None:
-    _SESSION_EXECUTOR.submit(_run_session_turn, context)
+    job_context = dict(context)
+    agent_key = _session_scheduler_agent_key(job_context)
+    job_context["_scheduler_agent_key"] = agent_key
+    context["_scheduler_agent_key"] = agent_key
+    turn_id = str(job_context.get("turn_id") or "").strip()
+    queued_position = 0
+    should_start = False
+    with _SESSION_AGENT_SCHEDULER_LOCK:
+        if _SESSION_AGENT_ACTIVE_TURN_IDS.get(agent_key):
+            queue_bucket = _SESSION_AGENT_QUEUES.setdefault(agent_key, deque())
+            queue_bucket.append(job_context)
+            queued_position = len(queue_bucket)
+        else:
+            _SESSION_AGENT_ACTIVE_TURN_IDS[agent_key] = turn_id
+            should_start = True
+
+    if not should_start:
+        _mark_session_turn_queued(job_context, queue_position=queued_position)
+        return
+
+    _record_session_scheduler_event(job_context, "started", outcome="running")
+    try:
+        _submit_scheduled_session_turn(job_context)
+    except Exception:
+        _release_scheduled_session_turn(job_context)
+        raise
+
+
+def _submit_scheduled_session_turn(context: dict[str, Any]) -> None:
+    _SESSION_EXECUTOR.submit(_execute_scheduled_session_turn, context)
+
+
+def _schedule_image2_attachment_turn(context: dict[str, Any]) -> None:
+    _SESSION_EXECUTOR.submit(_execute_image2_attachment_turn, dict(context))
+
+
+def _execute_image2_attachment_turn(context: dict[str, Any]) -> None:
+    session_id = str(context.get("session_id") or "").strip()
+    turn_id = str(context.get("turn_id") or "").strip()
+    agent_id = str(context.get("agent_id") or "").strip()
+    agent_profile_id = _normalize_session_agent_profile_id(context.get("profile_id") or DEFAULT_SESSION_AGENT_PROFILE_ID)
+    attachments = _normalize_message_attachments(context.get("attachments") or [])
+    try:
+        if turn_id and not _is_session_turn_current(session_id, turn_id):
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "image2_router_skipped_stale",
+                turn_id=turn_id,
+                outcome="skipped",
+                fields={"reason": "turn_id_not_current"},
+            )
+            return
+        _record_image_attachment_router_event(
+            session_id,
+            turn_id=turn_id,
+            route="image2",
+            intent="image2_edit",
+            outcome="running",
+            agent_profile_id=agent_profile_id,
+            agent_id=agent_id,
+            attachments=attachments,
+        )
+        prompt = str(context.get("user_message") or "").strip() or _image2_prompt_from_attachments(get_web_language())
+        artifact_ids = [
+            str(item.get("artifactId") or "").strip()
+            for item in attachments
+            if str(item.get("artifactId") or "").strip()
+        ]
+        if not artifact_ids:
+            raise SessionValidationError("No image attachment artifact is available for image2.")
+
+        from tools.image2_tools import image2_generate_tool
+
+        with active_agent_runtime(agent_id, session_id=session_id, turn_id=turn_id):
+            tool_result_text = image2_generate_tool(
+                prompt=prompt,
+                input_artifact_id=artifact_ids[0],
+            )
+        try:
+            tool_result = json.loads(tool_result_text)
+        except (TypeError, ValueError):
+            tool_result = {"ok": False, "status": "failed", "message": str(tool_result_text or "")}
+        ok = bool(tool_result.get("ok")) if isinstance(tool_result, dict) else False
+        summary = (
+            text_for(get_web_language(), zh="已基于图片生成新图片。", en="Generated a new image based on the attachment.")
+            if ok
+            else str((tool_result or {}).get("message") or "image2 failed")
+        )
+        _record_image_attachment_router_event(
+            session_id,
+            turn_id=turn_id,
+            route="image2",
+            intent="image2_edit",
+            outcome="succeeded" if ok else "failed",
+            level="info" if ok else "warning",
+            agent_profile_id=agent_profile_id,
+            agent_id=agent_id,
+            attachments=attachments,
+            fields={
+                "toolStatus": str((tool_result or {}).get("status") or "").strip(),
+                "artifactId": str((tool_result or {}).get("artifactId") or "").strip(),
+                "inputArtifactId": artifact_ids[0],
+            },
+        )
+        _persist_chat_turn_work_run(
+            session_id=session_id,
+            turn_id=turn_id,
+            status="completed" if ok else "failed",
+            agent_id=agent_id,
+            leases=list(context.get("leases") or ["readonly_chat"]),
+            user_message=str(context.get("raw_user_message") or prompt).strip(),
+            summary=summary,
+            error_type="" if ok else str((tool_result or {}).get("errorType") or "image2_failed"),
+            error="" if ok else str((tool_result or {}).get("message") or ""),
+            finished_at=_now_timestamp(),
+        )
+        if ok:
+            with _CHAT_STATE_LOCK:
+                payload = load_chat_state(PROJECT_ROOT)
+                conversation = _find_conversation_entry(payload, session_id)
+                if conversation is not None:
+                    conversation["last_turn_status"] = "ready"
+                    conversation.pop("last_turn_error", None)
+                    conversation.pop("lastTurnError", None)
+                    conversation["updated_at"] = _now_timestamp()
+                    payload["updated_at"] = conversation["updated_at"]
+                    save_chat_state(PROJECT_ROOT, payload)
+        else:
+            _persist_session_turn_result(
+                session_id,
+                {
+                    "status": "failed_runtime",
+                    "summary": f"图片生成失败：{summary}",
+                    "raw_output": f"图片生成失败：{summary}",
+                    "error": summary,
+                    "outcome": "failed",
+                },
+                turn_id=turn_id,
+            )
+    except Exception as exc:
+        _record_session_turn_lifecycle_event(
+            session_id,
+            "image2_router_exception",
+            turn_id=turn_id,
+            level="error",
+            outcome="failed",
+            fields={
+                "exceptionType": type(exc).__name__,
+                "errorPreview": trim_lines(str(exc), max_lines=2),
+            },
+        )
+        if _is_session_turn_current(session_id, turn_id):
+            _persist_session_turn_failure(session_id, context, exc)
+    finally:
+        _set_session_running(session_id, False, turn_id=turn_id)
+        _clear_session_turn_control(session_id, turn_id=turn_id)
+        _publish_session_detail_snapshot(session_id)
+
+
+def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:
+    try:
+        _run_session_turn(context)
+    finally:
+        _release_scheduled_session_turn(context)
+
+
+def _release_scheduled_session_turn(context: dict[str, Any]) -> None:
+    agent_key = str(context.get("_scheduler_agent_key") or _session_scheduler_agent_key(context)).strip()
+    turn_id = str(context.get("turn_id") or "").strip()
+    next_context: dict[str, Any] | None = None
+    dropped_contexts: list[dict[str, Any]] = []
+    with _SESSION_AGENT_SCHEDULER_LOCK:
+        if _SESSION_AGENT_ACTIVE_TURN_IDS.get(agent_key) == turn_id:
+            _SESSION_AGENT_ACTIVE_TURN_IDS.pop(agent_key, None)
+        queue_bucket = _SESSION_AGENT_QUEUES.get(agent_key)
+        while queue_bucket:
+            candidate = queue_bucket.popleft()
+            candidate_session_id = str(candidate.get("session_id") or "").strip()
+            candidate_turn_id = str(candidate.get("turn_id") or "").strip()
+            if bool(candidate.get("_scheduler_cancelled")):
+                dropped_contexts.append(candidate)
+                continue
+            if _scheduler_context_is_external(candidate):
+                ready_event = candidate.get("_scheduler_ready_event")
+                next_context = candidate
+                _SESSION_AGENT_ACTIVE_TURN_IDS[agent_key] = candidate_turn_id
+                if isinstance(ready_event, threading.Event):
+                    ready_event.set()
+                break
+            if _is_session_running(candidate_session_id) and _is_session_turn_current(candidate_session_id, candidate_turn_id):
+                next_context = candidate
+                _SESSION_AGENT_ACTIVE_TURN_IDS[agent_key] = candidate_turn_id
+                break
+            dropped_contexts.append(candidate)
+        if queue_bucket is not None and not queue_bucket:
+            _SESSION_AGENT_QUEUES.pop(agent_key, None)
+        _SESSION_AGENT_SCHEDULER_CONDITION.notify_all()
+
+    for dropped in dropped_contexts:
+        _record_session_scheduler_event(dropped, "dropped_stale", outcome="skipped")
+
+    if next_context is None:
+        return
+    if _scheduler_context_is_external(next_context):
+        _record_session_scheduler_event(next_context, "external_dequeued", outcome="running")
+        return
+
+    _mark_session_turn_dequeued(next_context)
+    try:
+        _submit_scheduled_session_turn(next_context)
+    except Exception as exc:
+        _record_session_turn_lifecycle_event(
+            str(next_context.get("session_id") or "").strip(),
+            "scheduler_submit_failed",
+            turn_id=str(next_context.get("turn_id") or "").strip(),
+            level="error",
+            outcome="failed",
+            fields={
+                "exceptionType": type(exc).__name__,
+                "errorPreview": trim_lines(str(exc), max_lines=2),
+                "agentId": str(next_context.get("agent_id") or "").strip(),
+            },
+        )
+        _persist_session_turn_failure(str(next_context.get("session_id") or "").strip(), next_context, exc)
+        _set_session_running(
+            str(next_context.get("session_id") or "").strip(),
+            False,
+            turn_id=str(next_context.get("turn_id") or "").strip(),
+        )
+        _clear_session_turn_control(
+            str(next_context.get("session_id") or "").strip(),
+            turn_id=str(next_context.get("turn_id") or "").strip(),
+        )
+        _publish_session_detail_snapshot(str(next_context.get("session_id") or "").strip())
+        _release_scheduled_session_turn(next_context)
+
+
+def _cancel_queued_session_turn(session_id: str, turn_id: str) -> bool:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_turn_id = str(turn_id or "").strip()
+    removed = False
+    with _SESSION_AGENT_SCHEDULER_LOCK:
+        for agent_key in list(_SESSION_AGENT_QUEUES):
+            queue_bucket = _SESSION_AGENT_QUEUES.get(agent_key)
+            if not queue_bucket:
+                _SESSION_AGENT_QUEUES.pop(agent_key, None)
+                continue
+            kept: deque[dict[str, Any]] = deque()
+            while queue_bucket:
+                queued_context = queue_bucket.popleft()
+                queued_session_id = str(queued_context.get("session_id") or "").strip()
+                queued_turn_id = str(queued_context.get("turn_id") or "").strip()
+                if queued_session_id == normalized_session_id and (
+                    not normalized_turn_id or queued_turn_id == normalized_turn_id
+                ):
+                    removed = True
+                    continue
+                kept.append(queued_context)
+            if kept:
+                _SESSION_AGENT_QUEUES[agent_key] = kept
+            else:
+                _SESSION_AGENT_QUEUES.pop(agent_key, None)
+        if removed:
+            _SESSION_AGENT_SCHEDULER_CONDITION.notify_all()
+    if removed:
+        _record_session_turn_lifecycle_event(
+            normalized_session_id,
+            "scheduler_cancelled_queued",
+            turn_id=normalized_turn_id,
+            outcome="cancelled",
+            fields={"reason": "stop_requested_before_worker_start"},
+        )
+    return removed
+
+
+def _mark_session_turn_queued(context: dict[str, Any], *, queue_position: int) -> None:
+    session_id = str(context.get("session_id") or "").strip()
+    turn_id = str(context.get("turn_id") or "").strip()
+    if not session_id or not _is_session_turn_current(session_id, turn_id):
+        return
+    now = _now_timestamp()
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, session_id)
+        if conversation is not None and _is_session_turn_current(session_id, turn_id):
+            conversation["last_turn_status"] = "queued"
+            conversation["updated_at"] = now
+            payload["updated_at"] = now
+            save_chat_state(PROJECT_ROOT, payload)
+    _set_session_turn_progress_live_output(session_id, "queued", turn_id=turn_id)
+    _persist_chat_turn_work_run(
+        session_id=session_id,
+        turn_id=turn_id,
+        status="queued",
+        agent_id=str(context.get("agent_id") or "").strip(),
+        user_message=str(context.get("raw_user_message") or context.get("user_message") or "").strip(),
+        updated_at=now,
+    )
+    _record_session_scheduler_event(
+        context,
+        "queued",
+        outcome="queued",
+        fields={"queuePosition": max(1, int(queue_position or 1))},
+    )
+    _publish_session_detail_snapshot(session_id)
+
+
+def _mark_session_turn_dequeued(context: dict[str, Any]) -> None:
+    session_id = str(context.get("session_id") or "").strip()
+    turn_id = str(context.get("turn_id") or "").strip()
+    if not session_id or not _is_session_turn_current(session_id, turn_id):
+        return
+    now = _now_timestamp()
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversation = _find_conversation_entry(payload, session_id)
+        if conversation is not None and _is_session_turn_current(session_id, turn_id):
+            conversation["last_turn_status"] = "running"
+            conversation["updated_at"] = now
+            payload["updated_at"] = now
+            save_chat_state(PROJECT_ROOT, payload)
+    _persist_chat_turn_work_run(
+        session_id=session_id,
+        turn_id=turn_id,
+        status="running",
+        agent_id=str(context.get("agent_id") or "").strip(),
+        user_message=str(context.get("raw_user_message") or context.get("user_message") or "").strip(),
+        updated_at=now,
+    )
+    _record_session_scheduler_event(context, "dequeued", outcome="running")
+    _publish_session_detail_snapshot(session_id)
+
+
+def _record_session_scheduler_event(
+    context: dict[str, Any],
+    phase: str,
+    *,
+    outcome: str,
+    fields: dict[str, Any] | None = None,
+) -> None:
+    session_id = str(context.get("session_id") or "").strip()
+    turn_id = str(context.get("turn_id") or "").strip()
+    agent_key = str(context.get("_scheduler_agent_key") or _session_scheduler_agent_key(context)).strip()
+    _record_session_turn_lifecycle_event(
+        session_id,
+        f"scheduler_{phase}",
+        turn_id=turn_id,
+        outcome=outcome,
+        fields={
+            "agentId": str(context.get("agent_id") or context.get("agentId") or "").strip(),
+            "schedulerAgentKey": agent_key,
+            **(fields or {}),
+        },
+    )
 
 
 def _run_session_turn(context: dict[str, Any]) -> None:
@@ -2281,8 +3988,17 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     _sync_agent_directory_project_root()
     agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
     agent = get_agent(agent_id) if agent_id else None
+    agent_context_packet = (
+        build_agent_context(agent_id, session_id=session_id, run_id=turn_id)
+        if agent_id
+        else None
+    )
     agent_workspace = str((agent or {}).get("workspacePath") or "").strip()
-    memory_policy = resolve_memory_policy_for_agent(agent_id) if agent_id else {}
+    memory_policy = (
+        agent_context_packet.memory_policy
+        if agent_context_packet is not None
+        else (resolve_memory_policy_for_agent(agent_id) if agent_id else {})
+    )
     memory_root = str(memory_policy.get("privateMemoryRoot") or "").strip()
     _record_session_turn_lifecycle_event(
         session_id,
@@ -2294,11 +4010,31 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "hasTurnControl": isinstance(turn_control, SessionTurnControl),
             "mentalModelEnabled": mental_model_enabled,
             "agentProfileId": _normalize_session_agent_profile_id(
-                context.get("agent_profile_id") or context.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
+                context.get("profile_id") or DEFAULT_SESSION_AGENT_PROFILE_ID
             ),
             "agentId": agent_id,
             "agentWorkspacePath": agent_workspace,
             "agentMemoryRoot": memory_root,
+        },
+    )
+    effective_agent_profile_id = _normalize_session_agent_profile_id(
+        (agent or {}).get("profileId")
+        or context.get("profile_id")
+        or DEFAULT_SESSION_AGENT_PROFILE_ID
+    )
+    _record_session_turn_lifecycle_event(
+        session_id,
+        "agent_runtime_resolved",
+        turn_id=turn_id,
+        outcome="resolved" if agent else "fallback",
+        fields={
+            "mode": "chat",
+            "agentId": agent_id,
+            "agentCode": str((agent or {}).get("agentCode") or "").strip(),
+            "profileId": effective_agent_profile_id,
+            "promptTemplateId": str((agent or {}).get("promptTemplateId") or "").strip(),
+            "roleKey": str((agent or {}).get("roleKey") or "").strip(),
+            "source": "AgentInstance" if agent else "profile_id",
         },
     )
     _record_session_execution_registry_event(
@@ -2361,10 +4097,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "mentalModelEnabled": mental_model_enabled,
                     },
                 )
-                agent_profile_id = _normalize_session_agent_profile_id(
-                    context.get("agent_profile_id") or context.get("agentProfileId") or DEFAULT_SESSION_AGENT_PROFILE_ID
-                )
+                agent_profile_id = effective_agent_profile_id
                 agent = _create_chat_agent_for_session(session_workspace, agent_profile_id=agent_profile_id)
+                attachments = _normalize_message_attachments(context.get("attachments") or [])
                 _record_session_turn_lifecycle_event(
                     session_id,
                     "agent_created",
@@ -2374,6 +4109,9 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "agentType": type(agent).__name__,
                         "workspacePath": _session_workspace_relative_path(session_id),
                         "agentProfileId": agent_profile_id,
+                        "agentId": agent_id,
+                        "promptTemplateId": str((get_agent(agent_id) or {}).get("promptTemplateId") or "").strip() if agent_id else "",
+                        "attachmentCount": len(attachments),
                     },
                 )
                 mental_override_configurer = getattr(agent, "set_mental_model_enabled_override", None)
@@ -2385,7 +4123,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 if callable(stop_configurer):
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 history_messages = _history_messages_for_agent_seed(context.get("history_messages") or [])
-                runtime_context_block = build_agent_runtime_context_block(agent_id) if agent_id else ""
+                runtime_context_block = agent_context_packet.context_block if agent_context_packet is not None else ""
                 if callable(restore) and history_messages:
                     restore(history_messages)
                 if callable(runtime_context_seed) and runtime_context_block:
@@ -2425,12 +4163,27 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     return
 
                 user_message = str(context.get("user_message") or "").strip()
+                llm_attachments = _build_llm_image_attachments(session_id, attachments)
+                if attachments:
+                    _record_session_turn_trace_event(
+                        session_id,
+                        turn_id,
+                        "attachments",
+                        {
+                            "attachmentCount": len(attachments),
+                            "llmAttachmentCount": len(llm_attachments),
+                            "attachments": _safe_attachment_log_summary(attachments),
+                        },
+                        status="running",
+                        summary="User image attachments prepared for this turn.",
+                    )
                 result = _run_session_continuation_loop(
                     agent,
                     session_id=session_id,
                     turn_control=turn_control,
                     initial_prompt=user_message,
                     history_messages=history_messages,
+                    attachments=llm_attachments,
                 )
             result = _attach_turn_capture_to_result(
                 result,
@@ -2457,6 +4210,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                 active_task_hint=context.get("active_task"),
                 turn_id=turn_id,
             )
+            if agent_id and _is_session_turn_current(session_id, turn_id):
+                record_agent_turn_result(agent_id, session_id, result if isinstance(result, dict) else {}, run_id=turn_id)
     except Exception as exc:
         _record_session_turn_lifecycle_event(
             session_id,
@@ -2535,9 +4290,11 @@ def _run_session_continuation_loop(
     turn_control: SessionTurnControl | None = None,
     initial_prompt: str,
     history_messages: list[dict[str, Any]],
+    attachments: list[dict[str, Any]] | None = None,
 ) -> Any:
     prompt = str(initial_prompt or "").strip()
-    if not _is_continue_request(prompt) and not _is_effective_user_message(prompt):
+    has_initial_attachments = bool(list(attachments or []))
+    if not has_initial_attachments and not _is_continue_request(prompt) and not _is_effective_user_message(prompt):
         history_goal = _latest_effective_user_message(history_messages)
         if history_goal:
             _record_session_turn_lifecycle_event(
@@ -2641,7 +4398,8 @@ def _run_session_continuation_loop(
             "model_request",
             turn_id=getattr(turn_control, "turn_id", ""),
         )
-        result = _run_agent_single_turn(agent, initial_prompt=prompt)
+        turn_attachments = list(attachments or []) if turn_index == 1 else []
+        result = _run_agent_single_turn(agent, initial_prompt=prompt, attachments=turn_attachments)
         return_stop_reason = _get_turn_control_stop_reason(turn_control) or _get_session_stop_reason(session_id)
         if return_stop_reason:
             _record_session_turn_lifecycle_event(
@@ -2743,16 +4501,54 @@ def _run_session_continuation_loop(
         )
 
 
-def _run_agent_single_turn(agent: Any, *, initial_prompt: str, disable_tools: bool = False) -> Any:
+def _run_agent_single_turn(
+    agent: Any,
+    *,
+    initial_prompt: str,
+    disable_tools: bool = False,
+    attachments: list[dict[str, Any]] | None = None,
+) -> Any:
     runner = getattr(agent, "run_single_turn")
+    kwargs: dict[str, Any] = {"initial_prompt": initial_prompt}
+    normalized_attachments = list(attachments or [])
+    if normalized_attachments:
+        try:
+            signature = inspect.signature(runner)
+        except (TypeError, ValueError):
+            signature = None
+        if signature is not None and (
+            "attachments" in signature.parameters
+            or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
+        ):
+            kwargs["attachments"] = normalized_attachments
     if disable_tools:
         try:
             signature = inspect.signature(runner)
         except (TypeError, ValueError):
             signature = None
         if signature is not None and "disable_tools" in signature.parameters:
-            return runner(initial_prompt=initial_prompt, disable_tools=True)
-    return runner(initial_prompt=initial_prompt)
+            kwargs["disable_tools"] = True
+            return runner(**kwargs)
+    return runner(**kwargs)
+
+
+def _build_llm_image_attachments(session_id: str, attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    prepared: list[dict[str, Any]] = []
+    for attachment in _normalize_message_attachments(attachments):
+        artifact_id = str(attachment.get("artifactId") or "").strip()
+        if not artifact_id:
+            continue
+        try:
+            prepared.append(resolve_session_image_attachment_data_url(session_id, artifact_id))
+        except (FileNotFoundError, OSError, SessionValidationError) as exc:
+            _record_session_attachment_event(
+                session_id,
+                "prepare_failed",
+                attachment,
+                outcome=type(exc).__name__,
+            )
+            raise SessionValidationError(f"Image attachment could not be prepared: {artifact_id}") from exc
+    return prepared
 
 
 def _persist_session_turn_result(
@@ -3198,6 +4994,8 @@ def _make_chat_message(
     *,
     thought: str = "",
     mental_snapshot: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     message: dict[str, Any] = {
         "role": str(role or "").strip().lower(),
@@ -3213,7 +5011,70 @@ def _make_chat_message(
     normalized_tool_calls = _normalize_persisted_tool_calls(tool_calls or [])
     if normalized_tool_calls:
         message["tool_calls"] = normalized_tool_calls
+    normalized_attachments = _normalize_message_attachments(attachments or [])
+    if normalized_attachments:
+        message["attachments"] = normalized_attachments
+    if isinstance(metadata, dict) and metadata:
+        message["metadata"] = dict(metadata)
     return message
+
+
+def _format_agent_inbox_wake_prompt(message: dict[str, Any]) -> str:
+    source_code = str(message.get("sourceAgentCode") or "").strip()
+    source_name = str(message.get("sourceAgentName") or "").strip()
+    source_agent_id = str(message.get("sourceAgentId") or "").strip()
+    source_label = " · ".join(item for item in (source_code, source_name) if item) or source_agent_id or "外部来源"
+    content = trim_lines(str(message.get("content") or ""), max_lines=20)
+    summary = trim_lines(str(message.get("summary") or ""), max_lines=4)
+    lines = [
+        "[Agent 私信]",
+        f"来源 Agent: {source_label}",
+        f"消息ID: {message.get('messageId') or message.get('eventId') or ''}",
+    ]
+    if message.get("sourceRoomId") or message.get("sourceRoundId"):
+        lines.append(f"来源群聊: {message.get('sourceRoomId') or ''} / {message.get('sourceRoundId') or ''}")
+    if summary and summary != content:
+        lines.extend(["", "摘要:", summary])
+    lines.extend(
+        [
+            "",
+            "消息内容:",
+            content,
+            "",
+            "请基于你的身份、当前会话上下文和可用信息回复这条来自其他 Agent 的消息。",
+        ]
+    )
+    return "\n".join(str(line) for line in lines if str(line).strip() or line == "").strip()
+
+
+def _record_agent_inbox_wake_event(
+    event_code: str,
+    message: dict[str, Any],
+    delivery: dict[str, Any],
+    *,
+    level: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_inbox",
+            "wake",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=str(delivery.get("wakeStatus") or "").strip() or "observed",
+            fields={
+                "messageId": str(message.get("messageId") or message.get("eventId") or "").strip(),
+                "sourceAgentId": str(message.get("sourceAgentId") or "").strip(),
+                "targetAgentId": str(message.get("targetAgentId") or "").strip(),
+                "targetSessionId": str(delivery.get("targetSessionId") or "").strip(),
+                "turnId": str(delivery.get("turnId") or "").strip(),
+                "wakeStatus": str(delivery.get("wakeStatus") or "").strip(),
+                "reason": str(delivery.get("reason") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _record_session_cycle_message(
@@ -3261,7 +5122,9 @@ def _record_session_turn_started_event(
     user_message: str = "",
     raw_user_message: str = "",
     user_message_source: str = "",
+    attachments: list[dict[str, Any]] | None = None,
 ) -> None:
+    attachment_summary = _safe_attachment_log_summary(attachments or [])
     try:
         record_runtime_scene_event(
             "conversation",
@@ -3277,6 +5140,8 @@ def _record_session_turn_started_event(
                 "userMessageChars": len(str(user_message or "")),
                 "rawUserMessageChars": len(str(raw_user_message or "")),
                 "userMessageSource": str(user_message_source or "").strip(),
+                "attachmentCount": len(attachment_summary),
+                "attachments": attachment_summary,
             },
             lifecycle=True,
         )
@@ -3285,6 +5150,46 @@ def _record_session_turn_started_event(
             f"runtime scene chat turn start log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
+
+
+def _record_session_attachment_event(
+    session_id: str,
+    phase: str,
+    attachment: dict[str, Any],
+    *,
+    outcome: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            f"attachment_{phase}",
+            f"conversation.attachment.{phase}",
+            level="info",
+            outcome=outcome,
+            message=f"Conversation image attachment {phase}.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "attachment": _safe_attachment_log_summary([attachment])[0] if attachment else {},
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _safe_attachment_log_summary(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summary: list[dict[str, Any]] = []
+    for item in _normalize_message_attachments(attachments):
+        summary.append(
+            {
+                "artifactId": str(item.get("artifactId") or "").strip(),
+                "filename": str(item.get("filename") or "").strip(),
+                "contentType": str(item.get("contentType") or "").strip(),
+                "sizeBytes": _coerce_nonnegative_int(item.get("sizeBytes") or 0),
+                "kind": str(item.get("kind") or "").strip(),
+            }
+        )
+    return summary
 
 
 def _record_session_turn_scheduled_event(context: dict[str, Any]) -> None:
@@ -3296,10 +5201,12 @@ def _record_session_turn_scheduled_event(context: dict[str, Any]) -> None:
         turn_id=turn_id,
         outcome="queued",
         fields={
+            "agentId": str(context.get("agent_id") or context.get("agentId") or "").strip(),
             "historyMessageCount": len(list(context.get("history_messages") or [])),
             "mentalModelEnabled": _normalize_optional_bool(context.get("mental_model_enabled")),
             "userMessageLength": len(str(context.get("user_message") or "")),
             "userMessageSource": str(context.get("user_message_source") or "").strip(),
+            "attachmentCount": len(_normalize_message_attachments(context.get("attachments") or [])),
         },
     )
 
@@ -3376,6 +5283,91 @@ def _record_session_turn_lifecycle_event(
             f"runtime scene turn lifecycle log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
+
+
+def _record_session_agent_binding_updated_event(
+    session_id: str,
+    *,
+    agent_id: str,
+    profile_id: str,
+    source: str,
+    prompt_template_id: str = "",
+    role_key: str = "",
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "session_agent_binding_updated",
+            "session.agent_binding_updated",
+            level="info",
+            outcome="updated",
+            message="Session Agent binding updated.",
+            fields={
+                "sessionId": normalized_session_id,
+                "agentId": str(agent_id or "").strip(),
+                "profileId": _normalize_session_agent_profile_id(profile_id),
+                "promptTemplateId": str(prompt_template_id or "").strip(),
+                "roleKey": str(role_key or "").strip(),
+                "source": str(source or "").strip(),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(normalized_session_id)}-agent-bindings.jsonl",
+            child_log_payload={
+                "session_id": normalized_session_id,
+                "agent_id": str(agent_id or "").strip(),
+                "profile_id": _normalize_session_agent_profile_id(profile_id),
+                "prompt_template_id": str(prompt_template_id or "").strip(),
+                "role_key": str(role_key or "").strip(),
+                "source": str(source or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_session_agent_profile_repaired_event(
+    session_id: str,
+    *,
+    agent_id: str,
+    previous_profile_id: str,
+    profile_id: str,
+    prompt_template_id: str = "",
+    role_key: str = "",
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "session_agent_profile_repaired",
+            "session.agent_profile_repaired",
+            level="info",
+            outcome="repaired",
+            message="Session legacy Agent profile repaired from AgentInstance.",
+            fields={
+                "sessionId": normalized_session_id,
+                "agentId": str(agent_id or "").strip(),
+                "previousProfileId": _normalize_session_agent_profile_id(previous_profile_id),
+                "profileId": _normalize_session_agent_profile_id(profile_id),
+                "promptTemplateId": str(prompt_template_id or "").strip(),
+                "roleKey": str(role_key or "").strip(),
+                "source": "AgentInstance",
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(normalized_session_id)}-agent-bindings.jsonl",
+            child_log_payload={
+                "session_id": normalized_session_id,
+                "agent_id": str(agent_id or "").strip(),
+                "previous_profile_id": _normalize_session_agent_profile_id(previous_profile_id),
+                "profile_id": _normalize_session_agent_profile_id(profile_id),
+                "prompt_template_id": str(prompt_template_id or "").strip(),
+                "role_key": str(role_key or "").strip(),
+                "source": "AgentInstance",
+                "action": "profile_repaired",
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _conversation_turn_log_path(session_id: str, turn_id: str, file_name: str) -> str:
@@ -3776,6 +5768,9 @@ def _append_session_workspace_log(
             "content": _sanitize_message_content(role, message.get("content") or ""),
             "thought": _sanitize_thought_text(message.get("thought") or ""),
             "mental_snapshot": _normalize_mental_snapshot(message.get("mental_snapshot") or message.get("mentalSnapshot")),
+            "attachments": _safe_attachment_log_summary(
+                message.get("attachments") or message.get("imageAttachments") or []
+            ),
             "tool_calls": _normalize_persisted_tool_calls(
                 message.get("tool_calls") or message.get("toolCalls") or []
             ),
@@ -3823,6 +5818,66 @@ def _normalize_tool_call_status(value: Any, *, default: str = "done") -> str:
             return "failed"
         return status
     return default
+
+
+def _trim_tool_detail_text(value: Any, *, max_chars: int = 1200, max_lines: int = 12) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    lines = [line.rstrip() for line in text.splitlines()]
+    if len(lines) > max_lines:
+        text = "\n".join(lines[:max_lines]).strip()
+    else:
+        text = "\n".join(lines).strip()
+    if len(text) > max_chars:
+        return text[: max_chars - 1].rstrip() + "…"
+    return text
+
+
+def _safe_tool_argument_details(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    details: dict[str, Any] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key or "").strip()
+        if not key or key.startswith("_") or key.lower() in {"api_key", "apikey", "token", "secret", "password"}:
+            continue
+        if raw_value is None or isinstance(raw_value, (bool, int, float)):
+            details[key] = raw_value
+            continue
+        if isinstance(raw_value, str):
+            details[key] = _trim_tool_detail_text(raw_value, max_chars=420, max_lines=4)
+            continue
+        if isinstance(raw_value, (list, tuple)):
+            details[key] = [_trim_tool_detail_text(item, max_chars=220, max_lines=2) for item in list(raw_value)[:8]]
+            continue
+        if isinstance(raw_value, dict):
+            nested: dict[str, Any] = {}
+            for nested_key, nested_value in list(raw_value.items())[:16]:
+                nested_name = str(nested_key or "").strip()
+                if not nested_name or nested_name.startswith("_") or nested_name.lower() in {"api_key", "apikey", "token", "secret", "password"}:
+                    continue
+                nested[nested_name] = _trim_tool_detail_text(nested_value, max_chars=220, max_lines=2)
+            details[key] = nested
+            continue
+        details[key] = _trim_tool_detail_text(raw_value, max_chars=220, max_lines=2)
+    return details
+
+
+def _coerce_tool_number(value: Any) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value == value and value not in {float("inf"), float("-inf")}:
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = float(value)
+        except ValueError:
+            return None
+        if parsed != parsed or parsed in {float("inf"), float("-inf")}:
+            return None
+        return int(parsed) if parsed.is_integer() else parsed
+    return None
 
 
 def _looks_like_tool_call_failure_summary(value: Any) -> bool:
@@ -3878,6 +5933,39 @@ def _normalize_persisted_tool_calls(value: Any) -> list[dict[str, Any]]:
                 entry["summary"] = summary
             if _looks_like_tool_call_failure_summary(summary or item.get("error") or ""):
                 entry["status"] = "failed"
+            arguments = _safe_tool_argument_details(
+                item.get("arguments") if isinstance(item.get("arguments"), dict) else item.get("args")
+            )
+            if arguments:
+                entry["arguments"] = arguments
+            result_preview = _trim_tool_detail_text(
+                item.get("resultPreview") or item.get("result_preview") or item.get("result"),
+                max_chars=1200,
+                max_lines=10,
+            )
+            if result_preview:
+                entry["resultPreview"] = result_preview
+            result_type = str(item.get("resultType") or item.get("result_type") or "").strip()
+            if result_type:
+                entry["resultType"] = result_type
+            result_length = _coerce_tool_number(item.get("resultLength") or item.get("result_length"))
+            if result_length is not None:
+                entry["resultLength"] = result_length
+            error = _trim_tool_detail_text(item.get("error"), max_chars=1200, max_lines=10)
+            if error:
+                entry["error"] = error
+            duration_ms = _coerce_tool_number(item.get("durationMs") or item.get("duration_ms"))
+            if duration_ms is not None:
+                entry["durationMs"] = duration_ms
+            duration_seconds = _coerce_tool_number(item.get("durationSeconds") or item.get("duration_seconds") or item.get("elapsedSeconds"))
+            if duration_seconds is not None:
+                entry["durationSeconds"] = duration_seconds
+            timeout_seconds = _coerce_tool_number(item.get("timeoutSeconds") or item.get("timeout_seconds"))
+            if timeout_seconds is not None:
+                entry["timeoutSeconds"] = timeout_seconds
+            trace_path = str(item.get("tracePath") or item.get("trace_path") or "").strip()
+            if trace_path:
+                entry["tracePath"] = trace_path
         tool_calls.append(entry)
     return tool_calls
 
@@ -3892,6 +5980,19 @@ def _normalize_message_tool_calls(value: Any) -> list[dict[str, Any]]:
         summary = trim_lines(item.get("summary") or "", max_lines=2)
         if summary:
             entry["summary"] = summary
+        for key in (
+            "arguments",
+            "resultPreview",
+            "resultType",
+            "resultLength",
+            "error",
+            "durationMs",
+            "durationSeconds",
+            "timeoutSeconds",
+            "tracePath",
+        ):
+            if key in item:
+                entry[key] = item[key]
         if entry["name"]:
             tool_calls.append(entry)
     return tool_calls
@@ -4539,6 +6640,11 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
             zh="正在准备对话上下文...",
             en="Preparing the conversation context...",
         ),
+        "queued": text_for(
+            language,
+            zh="当前 Agent 正在处理上一项任务，本轮已进入队列...",
+            en="The agent is handling another task. This turn is queued...",
+        ),
         "agent_prepare": text_for(
             language,
             zh="正在唤起对话 agent...",
@@ -4749,108 +6855,173 @@ def _capture_session_ui_stream(
 ):
     from core.ui import get_ui
 
+    ui = get_ui()
+    _ensure_session_ui_capture_hooks(ui)
+    event_bus = get_event_bus()
+    callback_ids: list[str] = []
+
+    def tool_event_proxy(event):
+        context = _SESSION_UI_CAPTURE_CONTEXT.get({})
+        if not isinstance(context, dict) or context.get("capture") is not capture:
+            return
+        data = event.data or {}
+        name = str(data.get("name") or "").strip()
+        if not name:
+            return
+        status = {
+            EventNames.TOOL_START: "running",
+            EventNames.TOOL_SUCCESS: "done",
+            EventNames.TOOL_ERROR: "failed",
+        }.get(event.name, "running")
+        result = data.get("result") if event.name == EventNames.TOOL_SUCCESS else ""
+        error = data.get("error") if event.name == EventNames.TOOL_ERROR else ""
+        summary = str(data.get("summary") or result or error or "").strip()
+        capture.note_tool_event(
+            name,
+            status,
+            summary,
+            arguments=data.get("args") if isinstance(data.get("args"), dict) else None,
+            result=result,
+            error=error,
+            duration_ms=data.get("durationMs") or data.get("duration_ms"),
+            timeout_seconds=data.get("timeoutSeconds") or data.get("timeout_seconds"),
+        )
+        _set_session_live_output(session_id, turn_id=capture.turn_id, tool_calls=capture.tool_calls)
+        if event.name == EventNames.TOOL_ERROR:
+            _record_chat_next_state_signal(
+                session_id=session_id,
+                turn_id=capture.turn_id,
+                source="tool",
+                kind="tool_error",
+                polarity="negative",
+                mode="evaluative",
+                related_event_code="conversation.tool_error",
+                summary=f"Tool failed: {name}",
+                metadata={
+                    "toolName": name,
+                    "errorPreview": summary,
+                },
+            )
+
+    for event_name in (EventNames.TOOL_START, EventNames.TOOL_SUCCESS, EventNames.TOOL_ERROR):
+        callback_ids.append(
+            event_bus.subscribe(
+                event_name,
+                tool_event_proxy,
+                callback_id=f"web_chat_{session_id}_{event_name}_{id(capture)}",
+            )
+        )
+    token = _SESSION_UI_CAPTURE_CONTEXT.set(
+        {
+            "ui": ui,
+            "sessionId": session_id,
+            "capture": capture,
+            "mentalModelEnabled": mental_model_enabled,
+        }
+    )
+    try:
+        yield
+    finally:
+        _SESSION_UI_CAPTURE_CONTEXT.reset(token)
+        for callback_id in callback_ids:
+            event_bus.unsubscribe_by_id(callback_id)
+
+
+def _ensure_session_ui_capture_hooks(ui: Any) -> None:
+    if bool(getattr(ui, "_vibelution_session_capture_wrapped", False)):
+        return
     with _SESSION_UI_CAPTURE_LOCK:
-        ui = get_ui()
-        original_stream_thought = getattr(ui, "stream_thought", None)
-        original_clear_thought_stream = getattr(ui, "clear_thought_stream", None)
-        original_stream_response = getattr(ui, "stream_response", None)
-        original_clear_response_stream = getattr(ui, "clear_response_stream", None)
-        original_set_pet_mental_state = getattr(ui, "set_pet_mental_state", None)
-        event_bus = get_event_bus()
-        callback_ids: list[str] = []
+        if bool(getattr(ui, "_vibelution_session_capture_wrapped", False)):
+            return
+        originals = {
+            "stream_thought": getattr(ui, "stream_thought", None),
+            "clear_thought_stream": getattr(ui, "clear_thought_stream", None),
+            "stream_response": getattr(ui, "stream_response", None),
+            "clear_response_stream": getattr(ui, "clear_response_stream", None),
+            "set_pet_mental_state": getattr(ui, "set_pet_mental_state", None),
+        }
+
+        def active_context() -> dict[str, Any]:
+            context = _SESSION_UI_CAPTURE_CONTEXT.get({})
+            if not isinstance(context, dict) or context.get("ui") is not ui:
+                return {}
+            return context
 
         def stream_thought_proxy(text: str, done: bool = False):
-            if callable(original_stream_thought):
-                original_stream_thought(text, done=done)
+            original = originals.get("stream_thought")
+            if callable(original):
+                original(text, done=done)
+            context = active_context()
+            capture = context.get("capture")
+            session_id = str(context.get("sessionId") or "").strip()
+            if not isinstance(capture, SessionTurnCapture) or not session_id:
+                return
             cleaned = _sanitize_thought_text(text)
             if cleaned and not done:
                 capture.note_thought(cleaned)
                 _set_session_live_output(session_id, turn_id=capture.turn_id, thought=cleaned)
 
         def clear_thought_stream_proxy():
-            if callable(original_clear_thought_stream):
-                original_clear_thought_stream()
+            original = originals.get("clear_thought_stream")
+            if callable(original):
+                original()
+            context = active_context()
+            capture = context.get("capture")
+            session_id = str(context.get("sessionId") or "").strip()
+            if not isinstance(capture, SessionTurnCapture) or not session_id:
+                return
             capture.clear_thought()
             _set_session_live_output(session_id, turn_id=capture.turn_id, thought="")
 
         def stream_response_proxy(text: str, done: bool = False):
-            if callable(original_stream_response):
-                original_stream_response(text, done=done)
+            original = originals.get("stream_response")
+            if callable(original):
+                original(text, done=done)
+            context = active_context()
+            capture = context.get("capture")
+            session_id = str(context.get("sessionId") or "").strip()
+            if not isinstance(capture, SessionTurnCapture) or not session_id:
+                return
             cleaned = _sanitize_message_content("assistant", text)
             if cleaned:
                 capture.note_content(cleaned)
                 _set_session_live_output(session_id, turn_id=capture.turn_id, content=cleaned)
-            elif done:
-                return
 
         def clear_response_stream_proxy():
-            if callable(original_clear_response_stream):
-                original_clear_response_stream()
+            original = originals.get("clear_response_stream")
+            if callable(original):
+                original()
+            context = active_context()
+            capture = context.get("capture")
+            session_id = str(context.get("sessionId") or "").strip()
+            if not isinstance(capture, SessionTurnCapture) or not session_id:
+                return
             capture.clear_content()
             _set_session_live_output(session_id, turn_id=capture.turn_id, content="")
 
         def set_pet_mental_state_proxy(mood: str = "", feeling: str = "", whisper: str = ""):
-            if callable(original_set_pet_mental_state):
-                original_set_pet_mental_state(mood=mood, feeling=feeling, whisper=whisper)
-            if not _is_mental_model_enabled_for_turn(mental_model_enabled):
+            original = originals.get("set_pet_mental_state")
+            if callable(original):
+                original(mood=mood, feeling=feeling, whisper=whisper)
+            context = active_context()
+            capture = context.get("capture")
+            session_id = str(context.get("sessionId") or "").strip()
+            if not isinstance(capture, SessionTurnCapture) or not session_id:
+                return
+            if not _is_mental_model_enabled_for_turn(context.get("mentalModelEnabled")):
                 return
             capture.note_mental_state(mood=mood, feeling=feeling, whisper=whisper)
             snapshot = _live_mental_snapshot(capture.mental_state, get_web_language())
             if snapshot is not None:
                 _set_session_live_output(session_id, turn_id=capture.turn_id, mental_snapshot=snapshot)
 
-        def tool_event_proxy(event):
-            data = event.data or {}
-            name = str(data.get("name") or "").strip()
-            if not name:
-                return
-            status = {
-                EventNames.TOOL_START: "running",
-                EventNames.TOOL_SUCCESS: "done",
-                EventNames.TOOL_ERROR: "failed",
-            }.get(event.name, "running")
-            summary = str(data.get("result") or data.get("error") or "").strip()
-            capture.note_tool_event(name, status, summary)
-            _set_session_live_output(session_id, turn_id=capture.turn_id, tool_calls=capture.tool_calls)
-            if event.name == EventNames.TOOL_ERROR:
-                _record_chat_next_state_signal(
-                    session_id=session_id,
-                    turn_id=capture.turn_id,
-                    source="tool",
-                    kind="tool_error",
-                    polarity="negative",
-                    mode="evaluative",
-                    related_event_code="conversation.tool_error",
-                    summary=f"Tool failed: {name}",
-                    metadata={
-                        "toolName": name,
-                        "errorPreview": summary,
-                    },
-                )
-
+        setattr(ui, "_vibelution_session_capture_originals", originals)
         setattr(ui, "stream_thought", stream_thought_proxy)
         setattr(ui, "clear_thought_stream", clear_thought_stream_proxy)
         setattr(ui, "stream_response", stream_response_proxy)
         setattr(ui, "clear_response_stream", clear_response_stream_proxy)
         setattr(ui, "set_pet_mental_state", set_pet_mental_state_proxy)
-        for event_name in (EventNames.TOOL_START, EventNames.TOOL_SUCCESS, EventNames.TOOL_ERROR):
-            callback_ids.append(
-                event_bus.subscribe(
-                    event_name,
-                    tool_event_proxy,
-                    callback_id=f"web_chat_{session_id}_{event_name}_{id(capture)}",
-                )
-            )
-        try:
-            yield
-        finally:
-            for callback_id in callback_ids:
-                event_bus.unsubscribe_by_id(callback_id)
-            setattr(ui, "stream_thought", original_stream_thought)
-            setattr(ui, "clear_thought_stream", original_clear_thought_stream)
-            setattr(ui, "stream_response", original_stream_response)
-            setattr(ui, "clear_response_stream", original_clear_response_stream)
-            setattr(ui, "set_pet_mental_state", original_set_pet_mental_state)
+        setattr(ui, "_vibelution_session_capture_wrapped", True)
 
 
 def _capture_session_chat_candidate(session_id: str, messages: list[dict[str, Any]]) -> None:
@@ -4989,7 +7160,11 @@ def _build_chat_turn_records_from_messages(messages: list[dict[str, Any]]) -> li
             continue
         if role != "assistant" or not pending_user_message:
             continue
-        tool_calls = normalize_chat_tool_calls(item.get("tool_calls") or item.get("toolCalls") or item.get("tools") or [])
+        tool_calls = [
+            str(tool_call.get("name") if isinstance(tool_call, dict) else tool_call or "").strip()
+            for tool_call in normalize_chat_tool_calls(item.get("tool_calls") or item.get("toolCalls") or item.get("tools") or [])
+        ]
+        tool_calls = [tool_name for tool_name in tool_calls if tool_name]
         turns.append(
             ChatTurnRecord(
                 turn_number=len(turns) + 1,
