@@ -31,6 +31,12 @@ import {
 import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
+import {
+  isProjectAgentBusEventRevoked,
+  listProjectAgentBusTimeline,
+  revokeProjectAgentBusMessage,
+  sendProjectAgentBusMessage,
+} from "../api/projectAgentBus";
 import { queryKeys } from "../api/queryKeys";
 import {
   AgentInstance,
@@ -44,8 +50,6 @@ import {
   MentalStateSnapshot,
   PetActionResponse,
   PetSummary,
-  ProjectAgentBusEvent,
-  ProjectAgentBusTimeline,
   RuntimeSummary,
   SessionChatReviewCandidateResponse,
   ConversationSummary,
@@ -677,7 +681,7 @@ export function ChatCodingRoute() {
   });
   const projectAgentBusQuery = useQuery({
     queryKey: queryKeys.projectAgentBus(),
-    queryFn: () => fetchJson<ProjectAgentBusTimeline>("/api/project-agent-bus"),
+    queryFn: () => listProjectAgentBusTimeline(),
     enabled: projectBusActive,
     refetchInterval: projectBusActive ? resolvePollingInterval(pageVisible, 3_000) : false,
     refetchIntervalInBackground: false,
@@ -1019,19 +1023,7 @@ export function ChatCodingRoute() {
         interruptTargets: boolean;
       },
     ) =>
-      fetchJson<ProjectAgentBusEvent>("/api/project-agent-bus/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          content,
-          targetScope: "",
-          targetAgentIds: [],
-          interruptMode: interruptTargets ? "interrupt_targets" : "none",
-          wakeTarget: true,
-        }),
-      }),
+      sendProjectAgentBusMessage({ content, interruptTargets }),
     onSuccess: () => {
       setProjectBusDraft("");
       setGroupRoomActionError("");
@@ -1048,15 +1040,9 @@ export function ChatCodingRoute() {
 
   const revokeProjectBusMessageMutation = useMutation({
     mutationFn: async ({ eventId }: { eventId: string }) =>
-      fetchJson<ProjectAgentBusEvent>(`/api/project-agent-bus/messages/${eventId}/revoke`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          reason: "user_recalled_project_bus_message",
-          stopTargets: true,
-        }),
+      revokeProjectAgentBusMessage({
+        eventId,
+        reason: "user_recalled_project_bus_message",
       }),
     onSuccess: () => {
       setGroupRoomActionError("");
@@ -3107,7 +3093,7 @@ export function ChatCodingRoute() {
               <div className={styles.groupMessageTimeline} aria-live={sendProjectBusMessageMutation.isPending ? "polite" : undefined}>
                 {projectBusEvents.length ? (
                   projectBusEvents.map((event) => {
-                    const revoked = String(event.status ?? "").trim().toLowerCase() === "revoked";
+                    const revoked = isProjectAgentBusEventRevoked(event);
                     const targetLabel = event.targetScope === "all"
                       ? (lang === "zh" ? "全体成员" : "All agents")
                       : event.targetAgentNames.length

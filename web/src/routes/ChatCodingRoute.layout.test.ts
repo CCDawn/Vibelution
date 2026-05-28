@@ -185,12 +185,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleOpenProjectAgentBus");
     expect(routeSource).toContain("setActiveGroupRoomId(\"__project_agent_bus__\")");
     expect(routeSource).toContain("queryKeys.projectAgentBus()");
-    expect(routeSource).toContain("fetchJson<ProjectAgentBusTimeline>(\"/api/project-agent-bus\")");
-    expect(routeSource).toContain("fetchJson<ProjectAgentBusEvent>(\"/api/project-agent-bus/messages\"");
-    expect(routeSource).toContain("fetchJson<ProjectAgentBusEvent>(`/api/project-agent-bus/messages/${eventId}/revoke`");
-    expect(routeSource).toContain("targetScope: \"\"");
-    expect(routeSource).toContain("interruptMode: interruptTargets ? \"interrupt_targets\" : \"none\"");
-    expect(routeSource).toContain("stopTargets: true");
+    expect(routeSource).toContain("listProjectAgentBusTimeline()");
+    expect(routeSource).toContain("sendProjectAgentBusMessage({ content, interruptTargets })");
+    expect(routeSource).toContain("revokeProjectAgentBusMessage({");
+    expect(routeSource).toContain("isProjectAgentBusEventRevoked(event)");
     expect(routeSource).toContain("handleRevokeProjectBusMessage(event.eventId)");
     expect(routeSource).toContain("projectBusInterruptTargets");
     expect(routeSource).toContain("@全体成员");
