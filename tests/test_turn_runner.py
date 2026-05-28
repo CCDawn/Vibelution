@@ -1,4 +1,9 @@
-from core.orchestration.turn_runner import AgentSingleTurnRequest, create_agent_runtime, run_agent_single_turn
+from core.orchestration.turn_runner import (
+    AgentSingleTurnRequest,
+    create_agent_runtime,
+    run_agent_single_turn,
+    run_existing_agent_single_turn,
+)
 
 
 def test_create_agent_runtime_uses_shared_agent_factory():
@@ -74,3 +79,47 @@ def test_run_agent_single_turn_seeds_context_and_exports_carryover():
     }
     assert result.result == {"status": "completed", "summary": "done"}
     assert result.carryover == {"next": "state"}
+
+
+def test_run_existing_agent_single_turn_passes_supported_optional_kwargs():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None, disable_tools=False, attachments=None):
+            captured["initial_prompt"] = initial_prompt
+            captured["disable_tools"] = disable_tools
+            captured["attachments"] = attachments
+            return {"status": "completed"}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="probe",
+        disable_tools=True,
+        attachments=[{"kind": "image"}],
+    )
+
+    assert result == {"status": "completed"}
+    assert captured == {
+        "initial_prompt": "probe",
+        "disable_tools": True,
+        "attachments": [{"kind": "image"}],
+    }
+
+
+def test_run_existing_agent_single_turn_omits_unsupported_optional_kwargs():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def run_single_turn(self, initial_prompt=None):
+            captured["initial_prompt"] = initial_prompt
+            return {"status": "completed"}
+
+    result = run_existing_agent_single_turn(
+        FakeAgent(),
+        initial_prompt="probe",
+        disable_tools=True,
+        attachments=[{"kind": "image"}],
+    )
+
+    assert result == {"status": "completed"}
+    assert captured == {"initial_prompt": "probe"}

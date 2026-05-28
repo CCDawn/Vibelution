@@ -6,6 +6,7 @@ running one Agent Turn without importing the top-level ``agent.py`` entrypoint.
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -51,6 +52,36 @@ def create_agent_runtime(
     return agent_factory(mode=mode, workspace_path=workspace_path, config=config)
 
 
+def run_existing_agent_single_turn(
+    agent: Any,
+    *,
+    initial_prompt: str,
+    disable_tools: bool = False,
+    attachments: list[dict[str, Any]] | None = None,
+) -> Any:
+    """Run one Turn on an already-created Agent with optional feature probing."""
+
+    runner = getattr(agent, "run_single_turn")
+    kwargs: dict[str, Any] = {"initial_prompt": initial_prompt}
+    try:
+        signature = inspect.signature(runner)
+    except (TypeError, ValueError):
+        signature = None
+
+    supports_var_kwargs = bool(
+        signature is not None
+        and any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
+    )
+    normalized_attachments = list(attachments or [])
+    if normalized_attachments and signature is not None and (
+        "attachments" in signature.parameters or supports_var_kwargs
+    ):
+        kwargs["attachments"] = normalized_attachments
+    if disable_tools and signature is not None and "disable_tools" in signature.parameters:
+        kwargs["disable_tools"] = True
+    return runner(**kwargs)
+
+
 def run_agent_single_turn(
     request: AgentSingleTurnRequest,
     *,
@@ -76,7 +107,7 @@ def run_agent_single_turn(
     if callable(stop_configurer) and request.interrupt_checker:
         stop_configurer(request.interrupt_checker)
 
-    raw_result = agent.run_single_turn(initial_prompt=request.initial_prompt)
+    raw_result = run_existing_agent_single_turn(agent, initial_prompt=request.initial_prompt)
     result = raw_result if isinstance(raw_result, dict) else {}
 
     carryover_payload: dict[str, Any] = {}
@@ -94,5 +125,6 @@ __all__ = [
     "AgentSingleTurnRequest",
     "AgentSingleTurnResult",
     "create_agent_runtime",
+    "run_existing_agent_single_turn",
     "run_agent_single_turn",
 ]

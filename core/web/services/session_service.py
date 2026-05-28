@@ -47,7 +47,7 @@ from core.orchestration.output_boundary import (
     sanitize_assistant_visible_text,
 )
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
-from core.orchestration.turn_runner import create_agent_runtime
+from core.orchestration.turn_runner import create_agent_runtime, run_existing_agent_single_turn
 from core.runtime_manager.evolution_store import load_active_run_snapshot as load_evolution_active_run_snapshot
 from core.runtime_manager.work_run_leases import (
     MEMORY_WRITE_LEASE,
@@ -4728,28 +4728,12 @@ def _run_agent_single_turn(
     disable_tools: bool = False,
     attachments: list[dict[str, Any]] | None = None,
 ) -> Any:
-    runner = getattr(agent, "run_single_turn")
-    kwargs: dict[str, Any] = {"initial_prompt": initial_prompt}
-    normalized_attachments = list(attachments or [])
-    if normalized_attachments:
-        try:
-            signature = inspect.signature(runner)
-        except (TypeError, ValueError):
-            signature = None
-        if signature is not None and (
-            "attachments" in signature.parameters
-            or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
-        ):
-            kwargs["attachments"] = normalized_attachments
-    if disable_tools:
-        try:
-            signature = inspect.signature(runner)
-        except (TypeError, ValueError):
-            signature = None
-        if signature is not None and "disable_tools" in signature.parameters:
-            kwargs["disable_tools"] = True
-            return runner(**kwargs)
-    return runner(**kwargs)
+    return run_existing_agent_single_turn(
+        agent,
+        initial_prompt=initial_prompt,
+        disable_tools=disable_tools,
+        attachments=attachments,
+    )
 
 
 def _build_llm_image_attachments(session_id: str, attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import queue
 import re
@@ -18,6 +17,7 @@ from core.chatroom.scheduler import get_scheduler_registry
 from core.chatroom.store import ChatRoomStore, utc_now_iso
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
+from core.orchestration.turn_runner import run_existing_agent_single_turn
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import READONLY_CHAT_LEASE
 from core.ui.chat_state import load_chat_state, normalize_chat_messages, save_chat_state
@@ -1019,15 +1019,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         seed_runtime_context = getattr(agent, "seed_runtime_context", None)
         if callable(seed_runtime_context) and agent_context is not None and agent_context.context_block:
             seed_runtime_context(agent_context.context_block)
-        runner = getattr(agent, "run_single_turn")
-        try:
-            signature = inspect.signature(runner)
-        except (TypeError, ValueError):
-            signature = None
-        if signature is not None and "disable_tools" in signature.parameters:
-            result = runner(initial_prompt=prompt, disable_tools=True)
-        else:
-            result = runner(initial_prompt=prompt)
+        result = run_existing_agent_single_turn(agent, initial_prompt=prompt, disable_tools=True)
     if agent_context is not None and agent_context.agent_id:
         record_agent_turn_result(
             agent_context.agent_id,
