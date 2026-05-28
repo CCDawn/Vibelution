@@ -71,6 +71,7 @@ from core.evaluation.supervised_workbench import (
     select_decision_record,
 )
 from core.evaluation.supervised_dashboard import generate_supervised_dashboard
+from core.orchestration.turn_runner import run_existing_agent_single_turn
 from core.ui.cli_ui import get_ui
 
 
@@ -287,7 +288,7 @@ class AgentWorkbenchShell:
             self._save_chat_session(session)
             self.ui.start_live(transient=True)
             try:
-                result = agent.run_single_turn(initial_prompt=task)
+                result = run_existing_agent_single_turn(agent, initial_prompt=task)
             finally:
                 self.ui.stop_live()
             reply = self._chat_reply_text(result)
