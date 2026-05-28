@@ -138,6 +138,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleStartGroupRound");
     expect(routeSource).toContain("updateGroupRoomMutation");
     expect(routeSource).toContain("deleteGroupRoomMutation");
+    expect(routeSource).toContain("groupManageTitleDraft");
+    expect(routeSource).toContain("title: groupManageTitleDraft.trim()");
     expect(routeSource).toContain("participantSessionIds: sessionIds");
     expect(routeSource).toContain("groupManageSessionIds.length < 2");
     expect(routeSource).toContain("setGroupManageSessionIds((current) => current.filter((sessionId) => sessionId !== variables.sessionId))");
@@ -150,6 +152,7 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.groupConversationFrame).toBeTypeOf("string");
     expect(routeStyles.groupManagementPanel).toBeTypeOf("string");
+    expect(routeStyles.groupTitleField).toBeTypeOf("string");
     expect(routeStyles.groupManagementCount).toBeTypeOf("string");
     expect(routeStyles.groupMemberPicker).toBeTypeOf("string");
     expect(routeStyles.groupMemberChip).toBeTypeOf("string");
@@ -193,6 +196,18 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.conversationKindBadgeGroup).toBeTypeOf("string");
   });
 
+  it("shows each visible agent with a functional role label, not only a person name", () => {
+    expect(routeSource).toContain("metadataString(agent, \"functionalDisplayName\")");
+    expect(routeSource).toContain("formatAgentFunctionFromInstance");
+    expect(routeSource).toContain("formatAgentIdentityWithFunction");
+    expect(routeSource).toContain("const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined");
+    expect(routeSource).toContain("const sessionAgentMeta = formatAgentMeta(session.agentCode, sessionAgentFunction, session.agentProfileId)");
+    expect(routeSource).toContain("const participantFunction = formatAgentFunction(");
+    expect(routeSource).toContain("styles.groupMemberCopy");
+
+    expect(routeStyles.groupMemberCopy).toBeTypeOf("string");
+  });
+
   it("groups the unified conversation list like expandable contact folders", () => {
     expect(routeSource).toContain("DEFAULT_COLLAPSED_CONVERSATION_GROUPS");
     expect(routeSource).toContain("CONVERSATION_GROUP_ORDER");
@@ -211,6 +226,7 @@ describe("ChatCodingRoute layout contract", () => {
 
   it("asks for confirmation before deleting conversations", () => {
     expect(routeSource).toContain("t(\"deleteSessionConfirm\").replace(\"{title}\"");
+    expect(routeSource).toContain("t(\"deleteGroupConfirm\").replace(\"{title}\"");
     expect(routeSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeSource).toContain("if (!window.confirm(groupConfirmMessage))");
     expect(routeSource.indexOf("window.confirm(sessionConfirmMessage)")).toBeLessThan(
@@ -218,6 +234,22 @@ describe("ChatCodingRoute layout contract", () => {
     );
     expect(routeSource.indexOf("window.confirm(groupConfirmMessage)")).toBeLessThan(
       routeSource.indexOf("deleteGroupRoomMutation.mutate({ roomId: activeGroupRoomId })"),
+    );
+  });
+
+  it("removes deleted direct sessions from cached lists before refetch", () => {
+    const deleteMutationSource = routeSource.slice(routeSource.indexOf("const deleteSessionMutation"));
+    expect(routeSource).toContain("removeDeletedSessionFromSummaries");
+    expect(routeSource).toContain("removeDeletedSessionFromConversations");
+    expect(deleteMutationSource).toContain("queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions()");
+    expect(deleteMutationSource).toContain("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()");
+    expect(routeSource).toContain("conversation.type !== \"direct_agent\"");
+    expect(routeSource).toContain("conversation.directSessionId !== deletedSessionId && conversation.conversationId !== deletedSessionId");
+    expect(deleteMutationSource.indexOf("queryClient.setQueryData<SessionSummary[]>(queryKeys.sessions()")).toBeLessThan(
+      deleteMutationSource.indexOf("void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() })"),
+    );
+    expect(deleteMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
+      deleteMutationSource.indexOf("void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() })"),
     );
   });
 });
