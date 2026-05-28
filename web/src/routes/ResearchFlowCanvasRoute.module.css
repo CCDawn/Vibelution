@@ -451,24 +451,24 @@
 
 .edgeTrack {
   stroke: color-mix(in srgb, var(--surface-page) 78%, transparent);
-  stroke-width: 7px;
+  stroke-width: 5px;
 }
 
 .edgePath {
-  stroke: color-mix(in srgb, var(--fg-tertiary) 68%, transparent);
-  stroke-width: 2.7px;
+  stroke: color-mix(in srgb, var(--fg-tertiary) 50%, transparent);
+  stroke-width: 1.45px;
 }
 
 .edgeArrowHead {
   fill: color-mix(in srgb, var(--fg-tertiary) 76%, transparent);
   stroke: color-mix(in srgb, var(--surface-page) 78%, transparent);
   stroke-linejoin: round;
-  stroke-width: 2px;
+  stroke-width: 1.4px;
   pointer-events: none;
 }
 
 .edgeType_success .edgePath {
-  stroke: color-mix(in srgb, var(--accent-cool) 62%, var(--fg-tertiary));
+  stroke: color-mix(in srgb, var(--accent-cool) 48%, var(--fg-tertiary));
 }
 
 .edgeType_success .edgeArrowHead {
@@ -486,7 +486,7 @@
 
 .edgeType_approval_gate .edgePath {
   stroke: color-mix(in srgb, var(--success) 72%, var(--fg-tertiary));
-  stroke-width: 2.7px;
+  stroke-width: 1.9px;
 }
 
 .edgeType_approval_gate .edgeArrowHead {
@@ -504,7 +504,7 @@
 
 .edgeType_selection .edgePath {
   stroke: color-mix(in srgb, var(--accent-cool) 82%, var(--success));
-  stroke-width: 2.7px;
+  stroke-width: 1.9px;
 }
 
 .edgeType_selection .edgeArrowHead {
@@ -524,7 +524,7 @@
 
 .edgeActive .edgePath {
   stroke: var(--accent-cool);
-  stroke-width: 3.2px;
+  stroke-width: 2.6px;
 }
 
 .edgeActive .edgeArrowHead {
@@ -538,33 +538,48 @@
 .edgeHotspot {
   position: absolute;
   z-index: 3;
-  width: 116px;
-  min-height: 34px;
-  padding: 3px 8px;
+  width: 72px;
+  min-height: 22px;
+  padding: 2px 6px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 999px;
   color: var(--fg-secondary);
-  background: color-mix(in srgb, var(--surface-panel) 92%, transparent);
-  box-shadow: var(--shadow-soft);
+  background: color-mix(in srgb, var(--surface-panel) 52%, transparent);
+  box-shadow: none;
   cursor: pointer;
   font: inherit;
-  font-size: 0.68rem;
+  font-size: 0;
   font-weight: 760;
+  opacity: 0.28;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   pointer-events: auto;
+  transition: width 0.16s ease, min-height 0.16s ease, opacity 0.16s ease, background 0.16s ease;
 }
 
 .edgeHotspot span {
   display: block;
   overflow: hidden;
   color: var(--fg-tertiary);
-  font-size: 0.56rem;
+  font-size: 0.5rem;
   font-weight: 780;
   line-height: 1.1;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.edgeHotspot::after {
+  content: "";
+  display: block;
+  width: 18px;
+  height: 3px;
+  margin: 7px auto 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 70%, transparent);
+  font-size: 0;
+  font-weight: 850;
+  line-height: 1.1;
 }
 
 .edgeHotspotOffset {
@@ -572,8 +587,18 @@
 }
 
 .edgeHotspot:hover {
+  z-index: 8;
+  width: 132px;
+  min-height: 34px;
+  font-size: 0.66rem;
+  opacity: 1;
   color: var(--fg-primary);
   border-color: var(--accent-cool);
+  background: color-mix(in srgb, var(--surface-panel) 94%, transparent);
+}
+
+.edgeHotspot:hover::after {
+  content: none;
 }
 
 .edgeHotspotActive {
@@ -859,6 +884,108 @@
 .status_skipped {
   color: var(--fg-secondary);
   background: color-mix(in srgb, var(--fg-secondary) 13%, transparent);
+}
+
+.agentRoleTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 22px;
+  max-width: 100%;
+  padding: 0 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  overflow: hidden;
+  font-size: 0.64rem;
+  font-weight: 780;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentRoleTag_chat {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  color: var(--accent-warm-2);
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+}
+
+.agentRoleTag_research {
+  border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft));
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 13%, transparent);
+}
+
+.agentRoleTag_self {
+  border-color: color-mix(in srgb, var(--success) 34%, var(--border-soft));
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.agentRoleTag_supervised {
+  border-color: color-mix(in srgb, var(--warning) 36%, var(--border-soft));
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.agentRoleTag_tool,
+.agentRoleTag_memory,
+.agentRoleTag_general {
+  border-color: color-mix(in srgb, var(--fg-tertiary) 28%, var(--border-soft));
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--fg-tertiary) 9%, transparent);
+}
+
+.readonlyDetailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.readonlyDetailHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readonlySpecGrid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-page);
+}
+
+.readonlySpecGrid span {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  font-weight: 780;
+  text-transform: uppercase;
+}
+
+.readonlySpecGrid strong,
+.readonlySpecGrid code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readonlyDescription {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.45;
 }
 
 .emptyState {
