@@ -1,11 +1,11 @@
 .layout {
   display: grid;
   grid-template-columns:
-    var(--chat-left-pane-width, 264px)
-    10px
+    var(--chat-left-pane-width, 248px)
+    8px
     minmax(0, 1fr)
-    10px
-    var(--chat-right-pane-width, 340px);
+    8px
+    var(--chat-right-pane-width, 320px);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -21,8 +21,8 @@
 .leftRail {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   background: color-mix(in srgb, var(--surface-panel-muted) 86%, transparent);
   overflow: auto;
 }
@@ -35,7 +35,7 @@
 }
 
 .leftBlock {
-  padding: 9px 10px;
+  padding: 7px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -53,7 +53,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .sectionIdentity {
@@ -65,7 +65,7 @@
 .sectionTitle {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 0.88rem;
+  font-size: 0.84rem;
   line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -83,10 +83,10 @@
 }
 
 .contextLineCompact {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--fg-secondary);
-  font-size: 0.8rem;
-  line-height: 1.32;
+  font-size: 0.74rem;
+  line-height: 1.24;
   -webkit-line-clamp: 1;
 }
 
@@ -99,10 +99,10 @@
 }
 
 .oneLineValue {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--fg-primary);
-  font-size: 0.78rem;
-  line-height: 1.36;
+  font-size: 0.74rem;
+  line-height: 1.24;
   -webkit-line-clamp: 1;
 }
 
@@ -135,8 +135,8 @@
 .backendPill {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 10px;
+  gap: 5px;
+  padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: 999px;
   font-size: 0.76rem;
@@ -147,8 +147,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 24px;
-  padding: 0 9px;
+  min-height: 21px;
+  padding: 0 7px;
   border: 1px solid transparent;
   border-radius: 999px;
   font-size: 0.76rem;
@@ -159,8 +159,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 24px;
-  padding: 0 9px;
+  min-height: 21px;
+  padding: 0 7px;
   border: 1px solid transparent;
   border-radius: 999px;
   font-size: 0.76rem;
@@ -247,17 +247,17 @@
 }
 
 .backendNote {
-  margin: 10px 0 0;
+  margin: 6px 0 0;
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
-  line-height: 1.45;
+  font-size: 0.74rem;
+  line-height: 1.32;
   overflow-wrap: anywhere;
 }
 
 .inlineMetaList {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
   margin-top: 6px;
   max-height: 32px;
   min-width: 0;
@@ -267,10 +267,10 @@
 .inlineMetaPill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   max-width: 100%;
   min-width: 0;
-  padding: 4px 7px;
+  padding: 3px 6px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 76%, transparent);
@@ -301,7 +301,7 @@
 
 .featurePresetScope {
   flex: 0 0 auto;
-  padding: 4px 7px;
+  padding: 3px 6px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
@@ -326,11 +326,11 @@
 .featureToggle {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 7px;
+  gap: 5px;
   align-items: center;
   min-width: 0;
-  min-height: 32px;
-  padding: 5px 7px;
+  min-height: 28px;
+  padding: 4px 6px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 74%, transparent);
@@ -414,7 +414,7 @@
   gap: 4px;
   min-width: 0;
   max-width: 100%;
-  min-height: 23px;
+  min-height: 21px;
   padding: 0 5px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
@@ -783,25 +783,29 @@
 
 .inlineStatGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 5px;
   margin-top: 6px;
 }
 
 .inlineStat {
   display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: baseline;
   gap: 2px;
   min-width: 0;
-  padding: 6px 7px;
+  padding: 5px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+  font-size: 0.72rem;
 }
 
 .inlineStat strong {
   min-width: 0;
   color: var(--fg-primary);
   font-weight: 650;
+  text-align: right;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1364,8 +1368,8 @@
 .rightPane {
   display: grid;
   grid-template-rows: auto auto 1fr;
-  padding: 10px;
-  gap: 10px;
+  padding: 8px;
+  gap: 7px;
   background: color-mix(in srgb, var(--surface-panel-muted) 90%, transparent);
   overflow: hidden;
 }
@@ -1402,8 +1406,8 @@
 .rightIndexTabs {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  min-height: 34px;
+  gap: 4px;
+  min-height: 30px;
   padding: 3px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);
@@ -1420,8 +1424,8 @@
   justify-content: center;
   gap: 6px;
   min-width: 0;
-  min-height: 28px;
-  padding: 0 8px;
+  min-height: 24px;
+  padding: 0 7px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
@@ -1456,9 +1460,9 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 0 11px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, var(--border-soft));
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--surface-card) 82%, transparent);
@@ -1482,9 +1486,9 @@
 .panelSearch {
   display: flex;
   align-items: center;
-  gap: 9px;
-  min-height: 36px;
-  padding: 0 13px;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 9px;
   border: 1px solid transparent;
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--surface-card) 86%, transparent);
@@ -1506,28 +1510,29 @@
   overflow: auto;
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: 6px;
   padding-right: 2px;
 }
 
 .sessionActionRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(92px, auto);
+  gap: 6px;
 }
 
 .newSessionButton {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 7px 12px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 9px;
   border: 1px solid color-mix(in srgb, var(--fg-primary) 10%, var(--border-soft));
   border-radius: var(--radius-control);
   background: var(--surface-panel);
   color: var(--fg-primary);
   font: inherit;
+  font-size: 0.78rem;
   cursor: pointer;
   box-shadow: none;
 }
@@ -1541,14 +1546,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 8px 12px;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 9px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool-2);
   font: inherit;
+  font-size: 0.78rem;
   cursor: pointer;
 }
 
@@ -1564,8 +1570,8 @@
 
 .groupComposerPanel {
   display: grid;
-  gap: 10px;
-  padding: 11px;
+  gap: 8px;
+  padding: 9px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
   border-radius: 8px;
   background:
@@ -1585,7 +1591,7 @@
 
 .groupComposerInput {
   width: 100%;
-  min-height: 34px;
+  min-height: 30px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: var(--surface-input);
@@ -1602,8 +1608,8 @@
 
 .groupAgentPicker {
   display: grid;
-  gap: 7px;
-  max-height: 210px;
+  gap: 5px;
+  max-height: 190px;
   overflow: auto;
   padding-right: 2px;
 }
@@ -1612,8 +1618,8 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
-  padding: 8px 9px;
+  gap: 6px;
+  padding: 6px 8px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: color-mix(in srgb, var(--surface-card) 86%, transparent);
@@ -1654,7 +1660,7 @@
 
 .groupComposerEmpty {
   margin: 0;
-  padding: 10px;
+  padding: 8px;
   border: 1px dashed var(--border-soft);
   border-radius: 7px;
   color: var(--fg-tertiary);
@@ -1666,8 +1672,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  min-height: 36px;
+  gap: 6px;
+  min-height: 32px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 34%, var(--border-soft));
   border-radius: 8px;
   background: color-mix(in srgb, var(--accent-cool) 18%, transparent);
@@ -1684,8 +1690,8 @@
 
 .agentTemplatePanel {
   display: grid;
-  gap: 9px;
-  padding: 11px;
+  gap: 7px;
+  padding: 9px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
   border-radius: 8px;
   background:
@@ -1725,7 +1731,7 @@
 
 .agentTemplateSelect {
   width: 100%;
-  min-height: 34px;
+  min-height: 30px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: var(--surface-input);
@@ -1749,7 +1755,7 @@
 }
 
 .panelState {
-  padding: 16px;
+  padding: 12px;
   border: 1px dashed var(--border-soft);
   border-radius: var(--radius-panel);
   color: var(--fg-secondary);
@@ -1758,7 +1764,7 @@
 }
 
 .panelNotice {
-  padding: 9px 10px;
+  padding: 7px 8px;
   border: 1px solid color-mix(in srgb, var(--state-error) 24%, var(--border-soft));
   border-radius: 7px;
   color: var(--state-error);
@@ -1831,7 +1837,7 @@
 
 .conversationGroupList {
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 
 .sessionItem {
@@ -1840,7 +1846,7 @@
   grid-template-columns: minmax(0, 1fr);
   gap: 0;
   text-align: left;
-  padding: 4px;
+  padding: 3px;
   border-radius: var(--radius-panel);
   border: 1px solid transparent;
   background: transparent;
@@ -1861,7 +1867,7 @@
 }
 
 .directSessionItem {
-  padding-right: 104px;
+  padding-right: 92px;
   box-shadow: none;
 }
 
@@ -1886,12 +1892,12 @@
 
 .sessionItemMain {
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 38px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 9px;
   min-width: 0;
-  min-height: 66px;
-  padding: 5px 0;
+  min-height: 54px;
+  padding: 3px 0;
   border: 0;
   background: transparent;
   color: inherit;
@@ -1907,7 +1913,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 7px;
 }
 
 .sessionItemIdentity {
@@ -1923,7 +1929,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.95rem;
+  font-size: 0.86rem;
   font-weight: 760;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -1933,8 +1939,8 @@
 .conversationAvatar {
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 38px;
+  height: 38px;
   border-radius: 50%;
   color: var(--fg-primary);
   font-family: var(--font-body);
@@ -1957,22 +1963,22 @@
 .conversationCopy {
   display: grid;
   min-width: 0;
-  gap: 5px;
+  gap: 3px;
 }
 
 .conversationTitleRow {
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 7px;
+  gap: 5px;
 }
 
 .conversationKindBadge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 19px;
-  padding: 0 6px;
+  min-height: 18px;
+  padding: 0 5px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   font-size: 0.64rem;
@@ -1997,9 +2003,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 20px;
+  min-height: 18px;
   max-width: 100%;
-  padding: 0 7px;
+  padding: 0 6px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   font-size: 0.66rem;
@@ -2045,7 +2051,7 @@
 .sessionCurrentBadge {
   display: inline-flex;
   align-items: center;
-  padding: 3px 7px;
+  padding: 2px 6px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
@@ -2082,19 +2088,19 @@
   display: block;
   overflow: hidden;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
-  line-height: 1.28;
+  font-size: 0.76rem;
+  line-height: 1.22;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sessionItemMeta {
   color: var(--fg-tertiary);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
 }
 
 .sessionAgentLine {
-  margin: 5px 0 0;
+  margin: 3px 0 0;
   color: var(--accent-cool-2);
   font-size: 0.76rem;
   overflow: hidden;
@@ -2106,7 +2112,7 @@
   display: flex;
   align-items: center;
   min-width: 0;
-  gap: 7px;
+  gap: 5px;
   color: var(--fg-tertiary);
   font-size: 0.72rem;
   line-height: 1.2;
@@ -2123,7 +2129,7 @@
 .sessionActionStack {
   position: absolute;
   top: 50%;
-  right: 8px;
+  right: 6px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -2145,8 +2151,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-card) 90%, transparent);
@@ -2504,8 +2510,8 @@
   overflow: auto;
   display: grid;
   align-content: start;
-  gap: 18px;
-  padding: 18px 22px;
+  gap: 12px;
+  padding: 12px 16px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--surface-panel) 86%, transparent), transparent 34%),
     var(--surface-panel);
@@ -2513,9 +2519,9 @@
 
 .projectBusEvent {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 11px 13px;
+  padding: 9px 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
@@ -2530,7 +2536,7 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
   color: var(--fg-tertiary);
   font-size: 0.74rem;
@@ -2540,7 +2546,7 @@
   display: inline-flex !important;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 5px;
   flex: 0 0 auto;
 }
 
@@ -2579,8 +2585,8 @@
 .projectBusEventBody {
   margin: 0;
   color: var(--fg-primary);
-  font-size: 0.92rem;
-  line-height: 1.5;
+  font-size: 0.84rem;
+  line-height: 1.38;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
@@ -2602,7 +2608,7 @@
 
 .groupRoundBlock {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -2656,9 +2662,9 @@
 
 .groupTopicBubble {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   max-width: min(680px, 72%);
-  padding: 10px 13px;
+  padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--accent-warm) 18%, var(--surface-card));
@@ -2673,23 +2679,23 @@
 
 .groupTopicBubble p {
   margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.45;
+  font-size: 0.84rem;
+  line-height: 1.34;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .groupMessageList {
   display: grid;
-  gap: 10px;
+  gap: 7px;
   min-width: 0;
 }
 
 .groupBubbleRow {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-columns: 30px minmax(0, 1fr);
   align-items: end;
-  gap: 9px;
+  gap: 7px;
   max-width: min(820px, 86%);
   min-width: 0;
 }
@@ -2697,8 +2703,8 @@
 .groupBubbleAvatar {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   color: var(--accent-cool-2);
   background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
@@ -2710,9 +2716,9 @@
 
 .groupBubble {
   display: grid;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
-  padding: 11px 13px 9px;
+  padding: 9px 10px 8px;
   border: 1px solid color-mix(in srgb, var(--border-soft) 84%, transparent);
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--surface-card) 78%, transparent);
@@ -2885,9 +2891,9 @@
   .layout {
     grid-template-columns:
       minmax(220px, var(--chat-left-pane-width, 240px))
-      10px
+      8px
       minmax(0, 1fr)
-      10px
+      8px
       minmax(260px, var(--chat-right-pane-width, 300px));
   }
 
@@ -2896,8 +2902,8 @@
   }
 
   .rightPane {
-    padding: 12px;
-    gap: 10px;
+    padding: 8px;
+    gap: 7px;
   }
 
   .companionCompact {
@@ -2913,9 +2919,9 @@
   .layoutCenterFirst {
     grid-template-columns:
       var(--chat-left-pane-width, 0)
-      10px
+      8px
       minmax(0, 1fr)
-      10px
+      8px
       var(--chat-right-pane-width, 0);
   }
 
@@ -2925,12 +2931,12 @@
   }
 
   .layoutCenterFirst .rightPane:not(.paneCollapsed) {
-    padding: 10px;
+    padding: 8px;
     visibility: visible;
   }
 
   .resizeHandle {
-    min-width: 10px;
+    min-width: 8px;
   }
 
   .tabStrip {
