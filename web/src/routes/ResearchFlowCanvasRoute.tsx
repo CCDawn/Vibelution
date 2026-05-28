@@ -2,34 +2,25 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   CheckCircle2,
-  CirclePlus,
   GitBranchPlus,
   Link2,
   Lock,
   MessageSquareText,
   MousePointer2,
   RefreshCw,
-  Redo2,
-  Save,
   Send,
   ShieldCheck,
-  Trash2,
-  Undo2,
-  Unlock,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent, WheelEvent } from "react";
-import { Link, type BlockerFunction, useBlocker } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
-  type WorkbenchExitGuardDetail,
-  WORKBENCH_EXIT_GUARD_EVENT,
-} from "../app/workbenchExitGuard";
-import {
+  AgentInstance,
   ResearchAgentConfig,
   ResearchFlowCanvas,
   ResearchFlowEdge,
@@ -39,8 +30,8 @@ import {
   ResearchOrganization,
   ResearchOrgMessageResponse,
   ResearchOrgProposalResponse,
-  ResearchPromptWorkspace,
 } from "../api/types";
+import { agentDisplayInfo } from "./agentDisplay";
 import styles from "./ResearchFlowCanvasRoute.module.css";
 
 export type CanvasSelection =
@@ -92,11 +83,11 @@ type ReconnectState = {
 
 type InspectorView = "properties" | "issues" | "organization";
 
-const NODE_WIDTH = 220;
-const NODE_HEIGHT = 112;
+const NODE_WIDTH = 260;
+const NODE_HEIGHT = 124;
 const EDGE_NODE_GAP = 12;
-const EDGE_CONTROL_MIN = 72;
-const EDGE_CONTROL_MAX = 220;
+const EDGE_CONTROL_MIN = 140;
+const EDGE_CONTROL_MAX = 340;
 const CANVAS_ZOOM_MIN = 0.5;
 const CANVAS_ZOOM_MAX = 1.8;
 const CANVAS_ZOOM_STEP = 0.1;
@@ -807,7 +798,9 @@ function edgeGeometry(source: ResearchFlowNode, target: ResearchFlowNode, lane: 
   const directionY = dy >= 0 ? 1 : -1;
   const length = Math.hypot(dx, dy) || 1;
   const normal = { x: -dy / length, y: dx / length };
-  const laneOffset = lane.laneIndex * 30 + lane.overlapCount * 16 * (lane.laneIndex >= 0 ? 1 : -1);
+  const laneSign = lane.laneIndex < 0 ? -1 : 1;
+  const laneMagnitude = Math.abs(lane.laneIndex);
+  const laneOffset = lane.laneIndex === 0 ? 0 : laneSign * (44 + laneMagnitude * 64 + lane.overlapCount * 34);
   const startBase = boundaryAnchor(source, target, 1);
   const endBase = boundaryAnchor(target, source, 1);
   const start = { x: startBase.x + normal.x * laneOffset, y: startBase.y + normal.y * laneOffset };
@@ -816,19 +809,20 @@ function edgeGeometry(source: ResearchFlowNode, target: ResearchFlowNode, lane: 
     EDGE_CONTROL_MAX,
     Math.max(EDGE_CONTROL_MIN, horizontal ? Math.abs(end.x - start.x) / 2 : Math.abs(end.y - start.y) / 2),
   );
-  const arcOffset = Math.abs(laneOffset) + (lane.overlapCount ? 28 : 0);
+  const arcOffset = Math.abs(laneOffset) + (lane.laneIndex === 0 ? 18 : 54) + (lane.overlapCount ? 48 : 0);
+  const verticalBias = horizontal ? laneSign * (lane.laneIndex === 0 ? 0 : 96 + laneMagnitude * 42) : 0;
   const controlStart = horizontal
-    ? { x: start.x + directionX * spread, y: start.y + normal.y * arcOffset }
+    ? { x: start.x + directionX * spread, y: start.y + normal.y * arcOffset + verticalBias }
     : { x: start.x + normal.x * arcOffset, y: start.y + directionY * spread };
   const controlEnd = horizontal
-    ? { x: end.x - directionX * spread, y: end.y + normal.y * arcOffset }
+    ? { x: end.x - directionX * spread, y: end.y + normal.y * arcOffset + verticalBias }
     : { x: end.x + normal.x * arcOffset, y: end.y - directionY * spread };
   const labelCenter = {
     x: (start.x + controlStart.x + controlEnd.x + end.x) / 4,
     y: (start.y + controlStart.y + controlEnd.y + end.y) / 4,
   };
   const labelDirection = lane.laneIndex < 0 ? -1 : 1;
-  const labelOffset = 42 + Math.min(30, Math.abs(laneOffset));
+  const labelOffset = 22 + Math.min(24, Math.abs(laneOffset) / 2);
   const label = {
     x: labelCenter.x + normal.x * labelOffset * labelDirection,
     y: labelCenter.y + normal.y * labelOffset * labelDirection,
@@ -924,6 +918,27 @@ function statusClass(status: string) {
 
 function nodeStatusToneClass(status: string) {
   return styles[`nodeStatus_${status}` as keyof typeof styles] ?? styles.nodeStatus_idle;
+}
+
+function agentRoleClass(tone: string) {
+  return `agentRoleTag_${tone}`;
+}
+
+function agentDisplayForFlowNode(node: ResearchFlowNode, organization?: ResearchOrganization) {
+  const orgNode = organization?.agents.find((agent) => agent.agentId === node.agentId || agent.nodeId === node.id);
+  const agent = orgNode?.agent as AgentInstance | null | undefined;
+  return agentDisplayInfo(
+    agent ?? {
+      agentId: node.agentId || node.id,
+      displayName: node.label,
+      primaryMode: "research",
+      roleKey: node.agentKey,
+      promptTemplateId: node.promptKey,
+      metadata: { functionalDisplayName: node.routeCondition },
+    },
+    "zh",
+    { name: node.label, templateId: node.promptKey },
+  );
 }
 
 function edgeTypeLabel(type: string) {
@@ -1648,7 +1663,6 @@ export function ResearchFlowCanvasRoute() {
   const [savedSignature, setSavedSignature] = useState("");
   const [history, setHistory] = useState<CanvasHistory>({ past: [], future: [] });
   const [selection, setSelection] = useState<CanvasSelection>(null);
-  const [pendingWorkbenchExit, setPendingWorkbenchExit] = useState<WorkbenchExitGuardDetail | null>(null);
   const [connect, setConnect] = useState<ConnectState>({ active: false, sourceId: null });
   const [drag, setDrag] = useState<DragState | null>(null);
   const [pan, setPan] = useState<PanState | null>(null);
@@ -1659,10 +1673,7 @@ export function ResearchFlowCanvasRoute() {
   const [connectionMessage, setConnectionMessage] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "warning" | "error">("idle");
-  const [customTemplates, setCustomTemplates] = useState<ResearchCustomTemplates>(() => readCustomResearchTemplates());
   const [canvasLocked, setCanvasLocked] = useState(true);
-  const [selectedModuleTemplateKey, setSelectedModuleTemplateKey] = useState(DEFAULT_RESEARCH_MODULE_TEMPLATE_KEY);
-  const [newEdgeTemplateKey, setNewEdgeTemplateKey] = useState("main_flow");
   const [inspectorView, setInspectorView] = useState<InspectorView>("properties");
   const [orgDeliveryMode, setOrgDeliveryMode] = useState("private");
   const [orgTargetAgentId, setOrgTargetAgentId] = useState("");
@@ -1677,11 +1688,6 @@ export function ResearchFlowCanvasRoute() {
     queryFn: () => fetchJson<ResearchFlowCanvas>("/api/research/flow-canvas"),
     refetchInterval: canvasLocked ? 2000 : false,
     refetchIntervalInBackground: false,
-  });
-
-  const promptsQuery = useQuery({
-    queryKey: queryKeys.researchThemeDiscoveryPrompts(),
-    queryFn: () => fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/prompts"),
   });
 
   const organizationQuery = useQuery({
@@ -1813,56 +1819,14 @@ export function ResearchFlowCanvasRoute() {
   const dirty = useMemo(() => canvasSignature(draft) !== savedSignature, [draft, savedSignature]);
   const selectedNode = draft && selection?.kind === "node" ? draft.nodes.find((node) => node.id === selection.id) ?? null : null;
   const selectedEdge = draft && selection?.kind === "edge" ? draft.edges.find((edge) => edge.id === selection.id) ?? null : null;
-  const agentOptions = promptsQuery.data?.agents ?? [];
-  const llmOptions = promptsQuery.data?.llmConfigs ?? [];
-  const selectedNodeAgent = selectedNode
-    ? agentOptions.find((agent) => researchAgentInstanceId(agent) && researchAgentInstanceId(agent) === selectedNode.agentId)
-        ?? agentOptions.find((agent) => agent.key === selectedNode.agentKey)
-    : undefined;
-  const moduleTemplates = useMemo(
-    () => [...RESEARCH_MODULE_TEMPLATES, ...customTemplates.moduleTemplates],
-    [customTemplates.moduleTemplates],
-  );
-  const edgeTemplates = useMemo(
-    () => [...RESEARCH_EDGE_TEMPLATES, ...customTemplates.edgeTemplates],
-    [customTemplates.edgeTemplates],
-  );
-  const moduleTemplateGroups = useMemo(() => researchModuleTemplateGroups(moduleTemplates), [moduleTemplates]);
-  const edgeTemplateGroups = useMemo(() => researchEdgeTemplateGroups(edgeTemplates), [edgeTemplates]);
   const edgeLanes = useMemo(() => (draft ? resolveEdgeLanes(draft.edges, draft.nodes) : new Map<string, EdgeLane>()), [draft]);
   const draftValidation = useMemo(() => (draft ? validateResearchFlowCanvasContract(draft) : null), [draft]);
   const reconnectEdge = draft && reconnect ? draft.edges.find((edge) => edge.id === reconnect.edgeId) ?? null : null;
-  const deleteImpact = useMemo(() => summarizeDeleteImpact(draft, selection), [draft, selection]);
-  const canUndo = history.past.length > 0;
-  const canRedo = history.future.length > 0;
   const canvasObservationActive = canvasLocked;
-  const selectedModuleTemplate = useMemo(
-    () => findResearchModuleTemplate(selectedModuleTemplateKey, moduleTemplates),
-    [moduleTemplates, selectedModuleTemplateKey],
-  );
-  const selectedNodeTemplateKey = useMemo(
-    () => (selectedNode ? researchFlowModuleTemplateKey(selectedNode, moduleTemplates) : "__custom__"),
-    [moduleTemplates, selectedNode],
-  );
-  const selectedNodeTemplate = useMemo(
-    () =>
-      selectedNodeTemplateKey === "__custom__"
-        ? null
-        : findResearchModuleTemplate(selectedNodeTemplateKey, moduleTemplates),
-    [moduleTemplates, selectedNodeTemplateKey],
-  );
-  const selectedEdgeTemplateKey = useMemo(
-    () => (selectedEdge ? researchFlowEdgeTemplateKey(selectedEdge, edgeTemplates) : "__custom__"),
-    [edgeTemplates, selectedEdge],
-  );
-  const selectedEdgeTemplate = useMemo(
-    () =>
-      selectedEdgeTemplateKey === "__custom__"
-        ? null
-        : findResearchEdgeTemplate(selectedEdgeTemplateKey, edgeTemplates),
-    [edgeTemplates, selectedEdgeTemplateKey],
-  );
-  const newEdgeTemplate = useMemo(() => findResearchEdgeTemplate(newEdgeTemplateKey, edgeTemplates), [edgeTemplates, newEdgeTemplateKey]);
+  const organization = organizationQuery.data;
+  const projectBinding = draft?.projectBinding;
+  const canvasProjectLabel = projectBinding?.projectId === "research-team" ? "科研团队" : String(projectBinding?.projectId || "科研项目");
+  const organizationSourcePath = draft?.organizationPath || organization?.path || "workspace/research/organization_graph.json";
   const validationIssues = draftValidation?.issues ?? [];
   const validationErrors = validationIssues.filter((issue) => issue.severity === "error");
   const validationWarnings = validationIssues.filter((issue) => issue.severity === "warning");
@@ -1875,7 +1839,6 @@ export function ResearchFlowCanvasRoute() {
         : [],
     [selectedEdge, validationIssues],
   );
-  const organization = organizationQuery.data;
   const organizationAgents = organization?.agents ?? [];
   const activeOrganizationAgents = organizationAgents.filter((agent) => agent.status !== "archived");
   const pendingOrganizationProposals = (organization?.proposals ?? []).filter((proposal) => proposal.status !== "applied");
@@ -1951,7 +1914,12 @@ export function ResearchFlowCanvasRoute() {
           return;
         }
         setConnectionMessage("");
-        updateEdge(edge.id, { [reconnect.endpoint]: node.id } as Partial<ResearchFlowEdge>);
+        commitDraftEdit((canvas) => ({
+          ...canvas,
+          edges: canvas.edges.map((item) =>
+            item.id === edge.id ? { ...item, [reconnect.endpoint]: node.id } : item,
+          ),
+        }));
         setSelection({ kind: "edge", id: edge.id });
       }
       setReconnect(null);
@@ -1963,117 +1931,6 @@ export function ResearchFlowCanvasRoute() {
       window.removeEventListener("pointerup", handleUp);
     };
   }, [canvasOffset, canvasZoom, draft, reconnect?.edgeId, reconnect?.endpoint]);
-
-  const saveAgentMutation = useMutation({
-    mutationFn: async (payload: ResearchAgentConfig) => {
-      const body: Partial<ResearchAgentConfig> = { ...payload };
-      delete body.llmConfigId;
-      return fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/agent-templates", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoveryPrompts() });
-      setSaveMessage("科研 Agent 配置已更新，所有画布统一生效。");
-      setSaveStatus("success");
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : "保存失败";
-      setSaveMessage(`科研 Agent 配置保存失败: ${message}`);
-      setSaveStatus("error");
-    },
-  });
-
-  const saveMutation = useMutation({
-    mutationFn: async (payload: ResearchFlowCanvas) =>
-      fetchJson<ResearchFlowCanvas>("/api/research/flow-canvas", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          schemaVersion: payload.schemaVersion,
-          canvasKind: payload.canvasKind || FLOW_CANVAS_KIND,
-          viewport: payload.viewport,
-          nodes: normalizeResearchFlowNodesForSave(payload.nodes, agentOptions),
-          edges: payload.edges,
-        }),
-      }),
-    onSuccess: async (saved) => {
-      const next = cloneCanvas(saved);
-      const nextSignature = canvasSignature(next);
-      draftSignatureRef.current = nextSignature;
-      savedSignatureRef.current = nextSignature;
-      setDraft(next);
-      setSavedSignature(nextSignature);
-      setCanvasOffset(viewportOffset(next.viewport));
-      setCanvasZoom(clampCanvasZoom(next.viewport?.zoom ?? 1));
-      setSaveMessage(`已保存 ${saved.updatedAt}`);
-      setSaveStatus("success");
-      await queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
-    },
-    onError: (error) => {
-      const message = error instanceof Error ? error.message : "保存失败";
-      setSaveMessage(`保存失败: ${message}`);
-      setSaveStatus("error");
-    },
-  });
-  const shouldBlockLeave = useCallback<BlockerFunction>(
-    ({ currentLocation, nextLocation }) =>
-      shouldBlockCanvasLeave({
-        dirty,
-        saving: saveMutation.isPending,
-        currentPathname: currentLocation.pathname,
-        nextPathname: nextLocation.pathname,
-      }),
-    [dirty, saveMutation.isPending],
-  );
-  const leaveBlocker = useBlocker(shouldBlockLeave);
-  const routeLeaveGuardOpen = leaveBlocker.state === "blocked";
-  const leaveGuardOpen = routeLeaveGuardOpen || Boolean(pendingWorkbenchExit);
-  const leaveGuardSaving = leaveGuardOpen && saveMutation.isPending;
-  const workbenchExitLabel = pendingWorkbenchExit?.action === "restart" ? "重启工作台" : "关闭工作台";
-  const leaveGuardTitle = pendingWorkbenchExit
-    ? `${workbenchExitLabel}前要保存科研流程画布吗？`
-    : "离开前要保存科研流程画布吗？";
-  const leaveGuardBody = pendingWorkbenchExit
-    ? `当前模块、路由或视图状态还没有写回唯一事实来源。保存后会继续${workbenchExitLabel}；不保存会丢弃本次修改。`
-    : "当前模块、路由或视图状态还没有写回唯一事实来源。保存后离开会先提交流程画布；不保存离开会丢弃本次修改。";
-  const leaveGuardSaveLabel = leaveGuardSaving
-    ? "保存中"
-    : pendingWorkbenchExit
-      ? `保存后${workbenchExitLabel}`
-      : "保存后离开";
-  const leaveGuardDiscardLabel = pendingWorkbenchExit ? `不保存${workbenchExitLabel}` : "不保存离开";
-
-  useEffect(() => {
-    const handleWorkbenchExitGuard = (event: Event) => {
-      if (!dirty && !saveMutation.isPending) {
-        return;
-      }
-      const detail = (event as CustomEvent<WorkbenchExitGuardDetail>).detail;
-      if (!detail?.proceed) {
-        return;
-      }
-      event.preventDefault();
-      setPendingWorkbenchExit(detail);
-    };
-    window.addEventListener(WORKBENCH_EXIT_GUARD_EVENT, handleWorkbenchExitGuard);
-    return () => window.removeEventListener(WORKBENCH_EXIT_GUARD_EVENT, handleWorkbenchExitGuard);
-  }, [dirty, saveMutation.isPending]);
-
-  useEffect(() => {
-    if (!dirty && !saveMutation.isPending) {
-      return undefined;
-    }
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-      return "";
-    };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [dirty, saveMutation.isPending]);
 
   useEffect(() => {
     if (!canvasLocked) {
@@ -2151,113 +2008,22 @@ export function ResearchFlowCanvasRoute() {
     },
   });
 
-  const executionBlockReason = researchFlowExecutionBlockReason({
-    canvasLocked,
-    dirty,
-    validationErrorCount: validationErrors.length,
-  });
-  const lockBlockReason = researchFlowLockBlockReason({
-    draftReady: Boolean(draft),
-    dirty,
-    saving: saveMutation.isPending,
-    executing: false,
-    validationErrorCount: validationErrors.length,
-  });
-  const unlockBlockReason = researchFlowUnlockBlockReason({
-    saving: saveMutation.isPending,
-    executing: false,
-  });
-  const canvasEditable = !canvasLocked;
+  const canvasEditable = false;
 
   const toggleCanvasLock = () => {
-    if (canvasLocked) {
-      if (unlockBlockReason) {
-        setObservationMessage(unlockBlockReason);
-        return;
-      }
-      setCanvasLocked(false);
-      setObservationMessage("已取消锁定，可以编辑组织结构；保存后再锁定观察。");
-      setSaveMessage("");
-      setSaveStatus("idle");
-      return;
-    }
-    if (lockBlockReason) {
-      setSaveMessage(lockBlockReason);
-      setSaveStatus("warning");
-      return;
-    }
     setCanvasLocked(true);
     setConnectionMessage("");
-    setSaveMessage("流程画布已锁定，正在实时观察模块和路由状态。");
+    setSaveMessage("画布持续锁定，正在从科研组织图实时同步。");
     setSaveStatus("success");
-    setObservationMessage("观察模式已开启，顶部科研执行会读取这份稳定流程。");
-  };
-
-  const handleSaveAndLeave = async () => {
-    const routeProceed = leaveBlocker.state === "blocked" ? leaveBlocker.proceed : null;
-    const workbenchExitProceed = pendingWorkbenchExit?.proceed ?? null;
-    if ((!routeProceed && !workbenchExitProceed) || !draft || saveMutation.isPending) {
-      return;
-    }
-    if (validationErrors.length > 0) {
-      setSaveMessage("当前流程画布存在结构错误，先修复后再保存离开。");
-      setSaveStatus("error");
-      return;
-    }
-    try {
-      await saveMutation.mutateAsync(draft);
-      setPendingWorkbenchExit(null);
-      if (workbenchExitProceed) {
-        workbenchExitProceed();
-      } else {
-        routeProceed?.();
-      }
-    } catch {
-      // saveMutation.onError already surfaces the failure in the inspector and keeps the blocker active.
-    }
-  };
-
-  const handleDiscardAndLeave = () => {
-    if (pendingWorkbenchExit) {
-      const proceed = pendingWorkbenchExit.proceed;
-      setPendingWorkbenchExit(null);
-      proceed();
-      return;
-    }
-    if (leaveBlocker.state === "blocked") {
-      leaveBlocker.proceed();
-    }
-  };
-
-  const handleCancelLeave = () => {
-    setPendingWorkbenchExit(null);
-    if (leaveBlocker.state === "blocked") {
-      leaveBlocker.reset();
-    }
+    setObservationMessage("拓扑由项目组织架构决定；流程线与组织通信线保持同源。");
   };
 
   const commitDraftEdit = useCallback((updater: (current: ResearchFlowCanvas) => ResearchFlowCanvas, options: CommitDraftOptions = {}) => {
-    if (canvasLocked) {
-      setSaveMessage("画布已锁定为观察模式，解除锁定后才能修改结构。");
-      setSaveStatus("warning");
-      return;
-    }
-    const current = draftRef.current;
-    if (!current) {
-      return;
-    }
-    const next = updater(current);
-    if (canvasSignature(next) === canvasSignature(current)) {
-      return;
-    }
-    setHistory((currentHistory) => pushCanvasHistory(currentHistory, current));
-    setSaveMessage("");
-    setSaveStatus("idle");
-    setDraft(next);
-    if ("selection" in options) {
-      setSelection(options.selection ?? null);
-    }
-  }, [canvasLocked]);
+    void updater;
+    void options;
+    setSaveMessage("画布持续锁定，拓扑请通过科研组织架构调整。");
+    setSaveStatus("warning");
+  }, []);
 
   const restoreCanvasFromHistory = useCallback(
     (direction: "undo" | "redo") => {
@@ -2314,112 +2080,6 @@ export function ResearchFlowCanvasRoute() {
     const viewport = canvasViewportFromView(offset, zoom);
     setCanvasOffset({ x: viewport.x, y: viewport.y });
     setCanvasZoom(viewport.zoom);
-    if (!canvasEditable) {
-      return;
-    }
-    setSaveMessage("");
-    setSaveStatus("idle");
-    setDraft((current) => (current ? { ...current, viewport } : current));
-  };
-
-  const updateNode = (nodeId: string, patch: Partial<ResearchFlowNode>) => {
-    commitDraftEdit((current) => ({
-      ...current,
-      nodes: current.nodes.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
-    }));
-  };
-
-  const updateEdge = (edgeId: string, patch: Partial<ResearchFlowEdge>) => {
-    commitDraftEdit((current) => ({
-      ...current,
-      edges: current.edges.map((edge) => (edge.id === edgeId ? { ...edge, ...patch } : edge)),
-    }));
-  };
-
-  const persistCustomTemplates = (nextTemplates: ResearchCustomTemplates, successMessage: string) => {
-    if (!canvasEditable) {
-      setSaveMessage("画布锁定观察中，解除锁定后才能保存模板。");
-      setSaveStatus("warning");
-      return;
-    }
-    setCustomTemplates(nextTemplates);
-    const persisted = writeCustomResearchTemplates(nextTemplates);
-    setSaveMessage(persisted ? successMessage : `${successMessage}（浏览器未允许本地持久化，刷新后可能丢失。）`);
-    setSaveStatus(persisted ? "success" : "warning");
-  };
-
-  const addNode = () => {
-    if (!canvasEditable) {
-      return;
-    }
-    const current = draftRef.current;
-    if (!current) {
-      return;
-    }
-    const node = createResearchNodeFromTemplate(selectedModuleTemplate, current.nodes);
-    commitDraftEdit((canvas) => ({ ...canvas, nodes: [...canvas.nodes, node] }), { selection: { kind: "node", id: node.id } });
-  };
-
-  const saveSelectedNodeAsTemplate = () => {
-    if (!selectedNode) {
-      return;
-    }
-    const template = createCustomResearchModuleTemplate(selectedNode, moduleTemplates);
-    persistCustomTemplates(
-      {
-        moduleTemplates: [...customTemplates.moduleTemplates, template],
-        edgeTemplates: customTemplates.edgeTemplates,
-      },
-      `已保存模块模板：${template.label}`,
-    );
-    setSelectedModuleTemplateKey(template.key);
-  };
-
-  const saveSelectedEdgeAsTemplate = () => {
-    if (!selectedEdge) {
-      return;
-    }
-    const edgeType = selectedEdge.type || defaultEdgeTypeForCondition(selectedEdge.condition);
-    if (!edgeTypeMatchesCondition(selectedEdge.condition, edgeType)) {
-      setSaveMessage("当前路由的触发条件和箭头类型不一致，先修正后再保存模板。");
-      setSaveStatus("error");
-      return;
-    }
-    const sourceNode = draft?.nodes.find((node) => node.id === selectedEdge.source);
-    const targetNode = draft?.nodes.find((node) => node.id === selectedEdge.target);
-    const template = createCustomResearchEdgeTemplate(
-      selectedEdge,
-      sourceNode?.label ?? selectedEdge.source,
-      targetNode?.label ?? selectedEdge.target,
-      edgeTemplates,
-    );
-    persistCustomTemplates(
-      {
-        moduleTemplates: customTemplates.moduleTemplates,
-        edgeTemplates: [...customTemplates.edgeTemplates, template],
-      },
-      `已保存线模板：${template.label}`,
-    );
-    setNewEdgeTemplateKey(template.key);
-  };
-
-  const deleteSelected = () => {
-    if (!canvasEditable) {
-      return;
-    }
-    if (!selection || !deleteImpact.canDelete) {
-      return;
-    }
-    const removedSubject = deleteImpact.subject;
-    const removedDetail =
-      selection.kind === "node" && deleteImpact.connectedEdgeCount
-        ? `同时删除 ${deleteImpact.connectedEdgeCount} 条关联路由。`
-        : selection.kind === "edge"
-          ? "只删除这条路由。"
-          : "没有关联路由需要删除。";
-    commitDraftEdit((current) => deleteCanvasSelection(current, selection), { selection: null });
-    setSaveMessage(`已删除 ${removedSubject}，${removedDetail}保存后生效，可撤销。`);
-    setSaveStatus("warning");
   };
 
   const handleCanvasPointerDown = (event: PointerEvent<HTMLDivElement>) => {
@@ -2494,22 +2154,7 @@ export function ResearchFlowCanvasRoute() {
     if (connect.sourceId === node.id || !current) {
       return;
     }
-    const template = newEdgeTemplate;
-    const edge: ResearchFlowEdge = {
-      id: nextEdgeId(current.edges),
-      source: connect.sourceId,
-      target: node.id,
-      label: template.edgeLabel,
-      condition: template.condition,
-      type: template.type,
-    };
-    if (!isValidResearchFlowConnection(current, edge.source, edge.target, edge.condition, edge.id, edge.type)) {
-      setConnectionMessage(`无法连接 ${current.nodes.find((item) => item.id === edge.source)?.label || edge.source} → ${node.label}，路由契约不匹配。`);
-      return;
-    }
-    setConnectionMessage("");
-    commitDraftEdit((canvas) => ({ ...canvas, edges: [...canvas.edges, edge] }), { selection: { kind: "edge", id: edge.id } });
-    setConnect({ active: false, sourceId: null });
+    setConnectionMessage("画布持续锁定，通信线请通过科研组织图调整。");
   };
 
   const applyCanvasZoom = (nextZoom: number, anchor?: { clientX: number; clientY: number }) => {
@@ -2557,13 +2202,6 @@ export function ResearchFlowCanvasRoute() {
     });
   };
 
-  const applyAgentBinding = (agent: ResearchAgentConfig | undefined) => {
-    if (!selectedNode || !agent) {
-      return;
-    }
-    updateNode(selectedNode.id, applyResearchAgentBindingToNode(agent));
-  };
-
   const focusValidationIssue = (issue: ResearchFlowValidationIssue) => {
     if (!draft) {
       return;
@@ -2591,149 +2229,65 @@ export function ResearchFlowCanvasRoute() {
     <section className={styles.route}>
       <header className={styles.header}>
         <div className={styles.heading}>
-          <p>Research Flow Canvas</p>
-          <h1>科研流程画布</h1>
-          <span>编排科研模块、路由契约和执行状态；组织通信保留在右侧专用面板。</span>
+          <p>Project Organization Canvas</p>
+          <h1>科研组织画布</h1>
+          <span>持续锁定到项目组织架构；Agent 节点和通信线实时来自科研团队事实源。</span>
         </div>
         <div className={styles.headerActions}>
           <Link className={styles.secondaryButton} to="/research">
             <ArrowLeft size={16} />
             返回科研页
           </Link>
-          <button
-            className={styles.iconButton}
-            type="button"
-            onClick={() => restoreCanvasFromHistory("undo")}
-            disabled={!canUndo || !canvasEditable}
-            title="撤销编辑 (Ctrl+Z)"
-            aria-label="撤销编辑"
-          >
-            <Undo2 size={16} />
-          </button>
-          <button
-            className={styles.iconButton}
-            type="button"
-            onClick={() => restoreCanvasFromHistory("redo")}
-            disabled={!canRedo || !canvasEditable}
-            title="重做编辑 (Ctrl+Y)"
-            aria-label="重做编辑"
-          >
-            <Redo2 size={16} />
-          </button>
           <button className={styles.secondaryButton} type="button" onClick={fitView} disabled={!draft}>
             <MousePointer2 size={16} />
             复位视图
           </button>
           <button
-            className={connect.active ? styles.primaryButton : styles.secondaryButton}
+            className={styles.secondaryButton}
             type="button"
-            onClick={() => setConnect((current) => ({ active: !current.active, sourceId: null }))}
-            disabled={!canvasEditable}
+            onClick={() => {
+              canvasQuery.refetch();
+              organizationQuery.refetch();
+              setObservationMessage("已请求刷新科研组织图。");
+            }}
+            disabled={canvasQuery.isFetching || organizationQuery.isFetching}
           >
-            <Link2 size={16} />
-            {connect.active ? (connect.sourceId ? "选择目标" : "选择起点") : "连线"}
-          </button>
-          <select
-            className={styles.moduleTemplateSelect}
-            value={newEdgeTemplateKey}
-            onChange={(event) => setNewEdgeTemplateKey(event.target.value)}
-            disabled={!canvasEditable}
-            aria-label="新连线模板"
-            title="新连线模板"
-          >
-            {edgeTemplateGroups.map((group) => (
-              <optgroup key={group} label={group}>
-                {edgeTemplates.filter((template) => template.group === group).map((template) => (
-                  <option key={template.key} value={template.key}>
-                    {template.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          <select
-            className={styles.moduleTemplateSelect}
-            value={selectedModuleTemplateKey}
-            onChange={(event) => setSelectedModuleTemplateKey(event.target.value)}
-            disabled={!draft || !canvasEditable}
-            aria-label="模块模板库"
-            title="模块模板库"
-          >
-            {moduleTemplateGroups.map((group) => (
-              <optgroup key={group} label={group}>
-                {moduleTemplates.filter((template) => template.group === group).map((template) => (
-                  <option key={template.key} value={template.key}>
-                    {template.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          <button className={styles.secondaryButton} type="button" onClick={addNode} disabled={!draft || !canvasEditable}>
-            <CirclePlus size={16} />
-            添加模块
+            <RefreshCw size={16} />
+            刷新组织图
           </button>
           <button
-            className={styles.dangerButton}
-            type="button"
-            onClick={deleteSelected}
-            disabled={!deleteImpact.canDelete || !canvasEditable}
-            title={deleteImpact.canDelete ? `${deleteImpact.subject}：${deleteImpact.detail}` : deleteImpact.detail}
-          >
-            <Trash2 size={16} />
-            删除
-          </button>
-          <button
-            className={styles.primaryButton}
-            type="button"
-            onClick={() => draft && saveMutation.mutate(draft)}
-            disabled={!draft || !dirty || saveMutation.isPending || validationErrors.length > 0 || !canvasEditable}
-          >
-            <Save size={16} />
-            {saveMutation.isPending
-              ? "保存中"
-              : validationErrors.length > 0
-                ? "先修复结构"
-                : saveStatus === "error" && dirty
-                  ? "重试保存"
-                  : dirty
-                    ? "保存画布"
-                    : "已保存"}
-          </button>
-          <button
-            className={canvasLocked ? `${styles.primaryButton} ${styles.lockButtonActive}` : styles.secondaryButton}
+            className={`${styles.primaryButton} ${styles.lockButtonActive}`}
             type="button"
             onClick={toggleCanvasLock}
-            disabled={canvasLocked ? Boolean(unlockBlockReason) : Boolean(lockBlockReason)}
-            title={canvasLocked ? unlockBlockReason || "取消锁定后可以编辑画布。" : lockBlockReason || "锁定后进入观察模式，科研执行才会读取稳定流程。"}
-            aria-pressed={canvasLocked}
+            title="画布持续锁定，拓扑来自项目组织架构。"
+            aria-pressed="true"
           >
-            {canvasLocked ? <Unlock size={16} /> : <Lock size={16} />}
-            {canvasLocked ? "取消锁定" : "锁定观察"}
+            <Lock size={16} />
+            持续锁定
           </button>
         </div>
       </header>
 
-      <section className={styles.executionBar} aria-label="科研流程画布观察状态">
+      <section className={styles.executionBar} aria-label="科研组织画布观察状态">
         <div className={styles.executionGroup}>
-          <span>事实来源</span>
-          <strong>{draft?.path || "workspace/prompts/research/flow_canvas.json"}</strong>
+          <span>绑定项目</span>
+          <strong>{canvasProjectLabel}</strong>
         </div>
         <div className={canvasObservationActive ? `${styles.observerStatus} ${styles.observerStatusActive}` : styles.observerStatus}>
-          <span>实时观察</span>
-          <strong>{canvasLocked ? "已锁定同步" : "编辑模式"}</strong>
+          <span>事实来源</span>
+          <strong>{organizationSourcePath}</strong>
         </div>
         <div className={styles.observerStatus}>
-          <span>结构检查</span>
-          <strong>{validationErrors.length ? `${validationErrors.length} 错误` : `${draft?.nodes.length ?? 0} 模块 / ${draft?.edges.length ?? 0} 路由`}</strong>
+          <span>组织结构</span>
+          <strong>{`${draft?.nodes.length ?? 0} Agent / ${draft?.edges.length ?? 0} 通信线`}</strong>
         </div>
         <p className={styles.executionHint}>
-          {executionBlockReason || observationMessage || "流程画布锁定后保持只读同步；科研执行会读取这份稳定流程。"}
+          {observationMessage || "画布持续只读同步；流程线与组织通信线使用同一份项目组织数据。"}
         </p>
       </section>
 
       <div className={styles.body}>
-        <main className={styles.canvasShell} aria-label="科研流程画布">
+        <main className={styles.canvasShell} aria-label="科研组织画布">
           <div className={styles.zoomControl} aria-label="画布缩放控制">
             <button
               className={styles.iconButton}
@@ -2760,10 +2314,12 @@ export function ResearchFlowCanvasRoute() {
               正在重连{reconnect.endpoint === "source" ? "起点" : "终点"}：拖到目标模块上松开
             </div>
           ) : null}
-          {canvasQuery.isLoading || !draft ? (
-            <div className={styles.emptyState}>正在读取 workspace 科研流程画布...</div>
-          ) : canvasQuery.isError ? (
-            <div className={styles.emptyState}>画布读取失败，请检查后端科研配置接口。</div>
+          {!draft && canvasQuery.isLoading ? (
+            <div className={styles.emptyState}>正在读取科研团队组织架构...</div>
+          ) : !draft && canvasQuery.isError ? (
+            <div className={styles.emptyState}>组织画布读取失败，请检查后端科研组织接口。</div>
+          ) : !draft ? (
+            <div className={styles.emptyState}>暂无可展示的科研团队组织架构。</div>
           ) : (
             <div
               ref={canvasScrollerRef}
@@ -2879,6 +2435,7 @@ export function ResearchFlowCanvasRoute() {
                 })}
                 {draft.nodes.map((node) => {
                   const active = selection?.kind === "node" && selection.id === node.id;
+                  const display = agentDisplayForFlowNode(node, organization);
                   const canInlineEditNodeTitle = active && canvasEditable && !connect.active && !reconnect;
                   const pendingSource = connect.sourceId === node.id;
                   const reconnectTarget =
@@ -2924,7 +2481,9 @@ export function ResearchFlowCanvasRoute() {
                           <span className={styles.nodeStatusDot} aria-hidden="true" />
                           <span className={`${styles.statusPill} ${statusClass(node.status)}`}>{statusLabel(node.status)}</span>
                         </span>
-                        <span>{node.type}</span>
+                        <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
+                          {display.functionLabel}
+                        </span>
                       </span>
                       {canInlineEditNodeTitle ? (
                         <input
@@ -2934,21 +2493,28 @@ export function ResearchFlowCanvasRoute() {
                           placeholder="模块名称"
                           onPointerDown={(event) => event.stopPropagation()}
                           onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => updateNode(node.id, { label: event.target.value })}
+                          onChange={(event) =>
+                            commitDraftEdit((canvas) => ({
+                              ...canvas,
+                              nodes: canvas.nodes.map((item) =>
+                                item.id === node.id ? { ...item, label: event.target.value } : item,
+                              ),
+                            }))
+                          }
                         />
                       ) : (
                         <strong>{node.label || node.id}</strong>
                       )}
                       <span className={styles.nodeMeta}>
                         <GitBranchPlus size={14} />
-                        {node.agentKey || "未绑定 agent"}
+                        {display.meta || node.agentKey || "科研 Agent"}
                       </span>
                       {nodeIssues.length ? (
                         <span className={nodeErrorCount ? styles.nodeIssueBadgeError : styles.nodeIssueBadgeWarning}>
                           {nodeErrorCount ? `错误 ${nodeErrorCount}` : `警告 ${nodeWarningCount}`}
                         </span>
                       ) : null}
-                      <small>{node.routeCondition || "未设置触发说明"}</small>
+                      <small>{node.description || node.routeCondition || "由科研组织架构同步"}</small>
                     </div>
                   );
                 })}
@@ -2958,21 +2524,21 @@ export function ResearchFlowCanvasRoute() {
           )}
         </main>
 
-        <aside className={styles.inspector} aria-label="科研流程配置">
+        <aside className={styles.inspector} aria-label="科研组织配置">
           <div className={styles.inspectorHeader}>
             <p>
               {inspectorView === "organization"
                 ? "科研组织通信"
                 : selectedNode
-                ? "当前选中模块"
+                ? "当前选中 Agent"
                 : selectedEdge
-                  ? "当前选中路由"
+                  ? "当前通信线"
                   : "唯一事实来源"}
             </p>
             <strong>
               {inspectorView === "organization"
                 ? organization?.path || "workspace/research/organization_graph.json"
-                : draft?.path || "workspace/prompts/research/flow_canvas.json"}
+                : organizationSourcePath}
             </strong>
             {selectedNode ? <span className={styles.selectionSummary}>{selectedNode.label} / {selectedNode.agentKey || selectedNode.id}</span> : null}
             {selectedEdge ? (
@@ -2983,7 +2549,7 @@ export function ResearchFlowCanvasRoute() {
               </span>
             ) : null}
             <span className={saveStatusClass}>
-              {saveMessage || (validationErrors.length ? `结构错误 ${validationErrors.length} 项` : dirty ? "有未保存修改" : `已同步 ${draft?.updatedAt ?? ""}`)}
+              {saveMessage || `组织图已同步 ${draft?.updatedAt ?? ""}`}
             </span>
           </div>
 
@@ -2995,7 +2561,7 @@ export function ResearchFlowCanvasRoute() {
                 onClick={() => setInspectorView("properties")}
                 aria-pressed={inspectorView === "properties"}
               >
-                属性
+                详情
               </button>
               <button
                 type="button"
@@ -3003,7 +2569,7 @@ export function ResearchFlowCanvasRoute() {
                 onClick={() => setInspectorView("issues")}
                 aria-pressed={inspectorView === "issues"}
               >
-                错误警告
+                同步检查
                 <span className={styles.inspectorTabBadge}>
                   {validationErrors.length}/{validationWarnings.length}
                 </span>
@@ -3333,319 +2899,52 @@ export function ResearchFlowCanvasRoute() {
               )}
             </section>
           ) : selectedNode ? (
-            <fieldset className={styles.editorStack} disabled={!canvasEditable}>
-              <label>
-                模块名称
-                <input value={selectedNode.label} onChange={(event) => updateNode(selectedNode.id, { label: event.target.value })} />
-              </label>
-              <div className={styles.twoColumns}>
-                <label>
-                  类型
-                  <select
-                    value={selectedNode.type}
-                    onChange={(event) => updateNode(selectedNode.id, { type: event.target.value })}
-                  >
-                    {NODE_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  状态
-                  <select
-                    value={selectedNode.status}
-                    onChange={(event) => updateNode(selectedNode.id, { status: event.target.value })}
-                  >
-                    {STATUS_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label>
-                绑定 Agent
-                <select value={selectedNodeAgent?.key ?? selectedNode.agentKey} onChange={(event) => applyAgentBinding(agentOptions.find((agent) => agent.key === event.target.value))}>
-                  <option value="">不绑定</option>
-                  {agentOptions.map((agent) => (
-                    <option key={agent.key} value={agent.key}>
-                      {agent.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                模型配置来自 Agent
-                <select
-                  value={researchAgentProfileId(selectedNodeAgent)}
-                  disabled={!selectedNodeAgent || saveAgentMutation.isPending}
-                  onChange={(event) => {
-                    if (!selectedNodeAgent) {
-                      return;
-                    }
-                    saveAgentMutation.mutate({ ...selectedNodeAgent, profileId: event.target.value });
-                  }}
-                >
-                  <option value="">未绑定</option>
-                  {llmOptions.map((option) => (
-                    <option key={option.configId} value={option.configId}>
-                      {option.label} / {option.model}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {selectedNode.llmConfigId ? (
-                <p className={styles.fieldHint}>模型以绑定 Agent 的配置为准，保存后会同步到使用该 Agent 的科研节点。</p>
-              ) : null}
-              <div className={styles.twoColumns}>
-                <label>
-                  动作键
-                  <input
-                    value={selectedNode.promptKey}
-                    onChange={(event) => updateNode(selectedNode.id, { promptKey: event.target.value })}
-                  />
-                </label>
-                <label>
-                  Agent 键
-                  <input
-                    value={selectedNode.agentKey}
-                    onChange={(event) => updateNode(selectedNode.id, { agentKey: event.target.value })}
-                  />
-                </label>
-              </div>
-              <label>
-                触发说明
-                <textarea
-                  value={selectedNode.routeCondition}
-                  onChange={(event) => updateNode(selectedNode.id, { routeCondition: event.target.value })}
-                />
-              </label>
-              <label>
-                模块说明
-                <textarea
-                  value={selectedNode.description}
-                  onChange={(event) => updateNode(selectedNode.id, { description: event.target.value })}
-                />
-              </label>
-              <div className={styles.templatePanel}>
-                <div className={styles.templateBlock}>
-                  <span>当前模块模板</span>
-                  <select
-                    value={selectedNodeTemplateKey}
-                    onChange={(event) => {
-                      const template = event.target.value === "__custom__" ? null : findResearchModuleTemplate(event.target.value, moduleTemplates);
-                      if (!template) {
-                        setSaveMessage("当前模块使用自定义模板。");
-                        setSaveStatus("idle");
-                        return;
-                      }
-                      updateNode(selectedNode.id, applyResearchModuleTemplateToNode(template));
-                      setSaveMessage(`已套用模块模板：${template.label}`);
-                    }}
-                  >
-                    <option value="__custom__">自定义</option>
-                    {moduleTemplateGroups.map((group) => (
-                      <optgroup key={group} label={group}>
-                        {moduleTemplates.filter((template) => template.group === group).map((template) => (
-                          <option key={template.key} value={template.key}>
-                            {template.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </div>
-                <div className={styles.templateHint} aria-label="模板说明">
-                  <strong>{selectedNodeTemplate?.label || selectedNode.label}</strong>
-                  <span>
-                    {selectedNodeTemplate
-                      ? `${selectedNodeTemplate.routeCondition} · ${selectedNodeTemplate.description}`
-                      : "当前模块没有完全匹配的预设模板，保留手动编辑。"}
-                  </span>
-                </div>
-                <div className={styles.templateActions}>
-                  <button className={styles.secondaryButton} type="button" onClick={saveSelectedNodeAsTemplate}>
-                    保存为模块模板
-                  </button>
-                </div>
-              </div>
-            </fieldset>
+            <section className={styles.editorStack} aria-label="Agent 详情">
+              {(() => {
+                const display = agentDisplayForFlowNode(selectedNode, organization);
+                const orgNode = organization?.agents.find((agent) => agent.agentId === selectedNode.agentId || agent.nodeId === selectedNode.id);
+                return (
+                  <>
+                    <div className={styles.readonlyDetailHeader}>
+                      <strong>{display.name}</strong>
+                      <span className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>{display.functionLabel}</span>
+                    </div>
+                    <div className={styles.readonlySpecGrid}>
+                      <span>Agent ID</span>
+                      <code>{selectedNode.agentId || selectedNode.id}</code>
+                      <span>组织角色</span>
+                      <strong>{orgNode?.role || selectedNode.agentKey || "research_agent"}</strong>
+                      <span>职级</span>
+                      <strong>{orgNode?.employeeRank || "member"}</strong>
+                      <span>状态</span>
+                      <strong>{statusLabel(selectedNode.status)}</strong>
+                      <span>工具权限</span>
+                      <strong>{orgNode?.allowedTools.length ? `${orgNode.allowedTools.length} tools` : "未显式授权"}</strong>
+                    </div>
+                    <p className={styles.readonlyDescription}>{selectedNode.description || "该 Agent 来自科研团队组织架构。"}</p>
+                    <p className={styles.fieldHint}>画布持续锁定；修改成员、职能、通信线请通过科研组织提案或 Agent 管理完成。</p>
+                  </>
+                );
+              })()}
+            </section>
           ) : selectedEdge ? (
-            <fieldset className={styles.editorStack} disabled={!canvasEditable}>
-              <label>
-                路由名称
-                <input value={selectedEdge.label} onChange={(event) => updateEdge(selectedEdge.id, { label: event.target.value })} />
-              </label>
-              <div className={styles.twoColumns}>
-                <label>
-                  起点模块
-                  <select
-                    value={selectedEdge.source}
-                    onChange={(event) => {
-                      const nextSource = event.target.value;
-                      if (!draft || !selectedEdge) {
-                        return;
-                      }
-                      if (!isValidResearchFlowConnection(draft, nextSource, selectedEdge.target, selectedEdge.condition, selectedEdge.id, selectedEdge.type)) {
-                        setConnectionMessage(`无法把起点切换到 ${draft.nodes.find((node) => node.id === nextSource)?.label || nextSource}。`);
-                        return;
-                      }
-                      setConnectionMessage("");
-                      updateEdge(selectedEdge.id, { source: nextSource });
-                    }}
-                  >
-                    {draft?.nodes.map((node) => (
-                      <option
-                        key={node.id}
-                        value={node.id}
-                        disabled={node.id === selectedEdge.target || !isValidResearchFlowConnection(draft ?? { nodes: [], edges: [] }, node.id, selectedEdge.target, selectedEdge.condition, selectedEdge.id, selectedEdge.type)}
-                      >
-                        {node.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  终点模块
-                  <select
-                    value={selectedEdge.target}
-                    onChange={(event) => {
-                      const nextTarget = event.target.value;
-                      if (!draft || !selectedEdge) {
-                        return;
-                      }
-                      if (!isValidResearchFlowConnection(draft, selectedEdge.source, nextTarget, selectedEdge.condition, selectedEdge.id, selectedEdge.type)) {
-                        setConnectionMessage(`无法把终点切换到 ${draft.nodes.find((node) => node.id === nextTarget)?.label || nextTarget}。`);
-                        return;
-                      }
-                      setConnectionMessage("");
-                      updateEdge(selectedEdge.id, { target: nextTarget });
-                    }}
-                  >
-                    {draft?.nodes.map((node) => (
-                      <option
-                        key={node.id}
-                        value={node.id}
-                        disabled={node.id === selectedEdge.source || !isValidResearchFlowConnection(draft ?? { nodes: [], edges: [] }, selectedEdge.source, node.id, selectedEdge.condition, selectedEdge.id, selectedEdge.type)}
-                      >
-                        {node.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <label>
-                箭头类型
-                <select
-                  value={selectedEdge.type || defaultEdgeTypeForCondition(selectedEdge.condition)}
-                  onChange={(event) => {
-                    const option = EDGE_TYPE_OPTIONS.find((item) => item.value === event.target.value);
-                    updateEdge(selectedEdge.id, {
-                      type: event.target.value,
-                      condition: option?.condition ?? selectedEdge.condition,
-                    });
-                  }}
-                >
-                  {EDGE_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                触发条件
-                <select
-                  value={normalizeEdgeCondition(selectedEdge.condition)}
-                  onChange={(event) => {
-                    const condition = normalizeEdgeCondition(event.target.value);
-                    updateEdge(selectedEdge.id, {
-                      condition,
-                      type: defaultEdgeTypeForCondition(condition),
-                    });
-                  }}
-                >
-                  {EDGE_CONDITION_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className={styles.templatePanel}>
-                <div className={styles.templateBlock}>
-                  <span>线模板</span>
-                  <select
-                    value={selectedEdgeTemplateKey}
-                    onChange={(event) => {
-                      const template = event.target.value === "__custom__" ? null : findResearchEdgeTemplate(event.target.value, edgeTemplates);
-                      if (!template) {
-                        setSaveMessage("当前连线使用自定义模板。");
-                        setSaveStatus("idle");
-                        return;
-                      }
-                      if (
-                        draft &&
-                        !isValidResearchFlowConnection(
-                          draft,
-                          selectedEdge.source,
-                          selectedEdge.target,
-                          template.condition,
-                          selectedEdge.id,
-                          template.type,
-                        )
-                      ) {
-                        setConnectionMessage(`无法套用线模板「${template.label}」，当前两端模块或路由契约不匹配。`);
-                        setSaveMessage("线模板未套用。请先切换起点/终点，或选择匹配当前流程语义的模板。");
-                        setSaveStatus("error");
-                        return;
-                      }
-                      setConnectionMessage("");
-                      updateEdge(selectedEdge.id, applyResearchEdgeTemplateToEdge(template));
-                      setSaveMessage(`已套用线模板：${template.label}`);
-                    }}
-                  >
-                    <option value="__custom__">自定义</option>
-                    {edgeTemplateGroups.map((group) => (
-                      <optgroup key={group} label={group}>
-                        {edgeTemplates.filter((template) => template.group === group).map((template) => (
-                          <option key={template.key} value={template.key}>
-                            {template.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </div>
-                <div className={styles.templateHint} aria-label="模板说明">
-                  <strong>{selectedEdgeTemplate?.label || edgeTypeLabel(selectedEdge.type || defaultEdgeTypeForCondition(selectedEdge.condition))}</strong>
-                  <span>
-                    {selectedEdgeTemplate
-                      ? `${edgeConditionLabel(selectedEdgeTemplate.condition)} · ${selectedEdgeTemplate.description}`
-                      : "当前连线没有完全匹配的模板，可继续手工编辑条件与箭头类型。"}
-                  </span>
-                </div>
-                <div className={styles.templateActions}>
-                  <button className={styles.secondaryButton} type="button" onClick={saveSelectedEdgeAsTemplate}>
-                    保存为线模板
-                  </button>
-                </div>
-              </div>
+            <section className={styles.editorStack} aria-label="通信线详情">
               <div className={styles.edgeTypeHint}>
-                <strong>{edgeTypeLabel(selectedEdge.type || defaultEdgeTypeForCondition(selectedEdge.condition))}</strong>
-                <span>{edgeTypeDescription(selectedEdge.type || defaultEdgeTypeForCondition(selectedEdge.condition))}</span>
-              </div>
-              <div className={styles.edgeConditionHint}>
-                <strong>{edgeConditionLabel(selectedEdge.condition)}</strong>
-                <span>{edgeConditionDescription(selectedEdge.condition)}</span>
+                <strong>{selectedEdge.label || "组织通信线"}</strong>
+                <span>流程线与通讯线相同，均由科研组织图 edge 派生。</span>
               </div>
               <div className={styles.edgePair}>
                 <span>{draft?.nodes.find((node) => node.id === selectedEdge.source)?.label ?? selectedEdge.source}</span>
                 <strong>→</strong>
                 <span>{draft?.nodes.find((node) => node.id === selectedEdge.target)?.label ?? selectedEdge.target}</span>
+              </div>
+              <div className={styles.readonlySpecGrid}>
+                <span>Edge ID</span>
+                <code>{selectedEdge.id}</code>
+                <span>来源</span>
+                <strong>organization_graph.json</strong>
+                <span>线语义</span>
+                <strong>通信线 / 流程线</strong>
               </div>
               {selectedEdgeIssues.length ? (
                 <div className={styles.edgeIssueList} aria-label="路由结构问题">
@@ -3659,50 +2958,17 @@ export function ResearchFlowCanvasRoute() {
                   ))}
                 </div>
               ) : null}
-            </fieldset>
+            </section>
           ) : (
             <div className={styles.emptyInspector}>
-              <strong>选择一个模块或路由</strong>
-              <span>点击画布模块可编辑状态、绑定 Agent、动作键和触发说明；开启连线后先点起点再点目标。</span>
+              <strong>选择一个 Agent 或通信线</strong>
+              <span>画布持续锁定到科研团队组织架构，只展示项目当前的 Agent 成员和通信关系。</span>
               </div>
             )}
             </div>
           </div>
         </aside>
       </div>
-      {leaveGuardOpen ? (
-        <div className={styles.leaveGuardOverlay}>
-          <div
-            className={styles.leaveGuardPanel}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="research-flow-leave-guard-title"
-          >
-            <div className={styles.leaveGuardCopy}>
-              <p>未保存修改</p>
-              <h2 id="research-flow-leave-guard-title">{leaveGuardTitle}</h2>
-              <span>{leaveGuardBody}</span>
-            </div>
-            <div className={styles.leaveGuardActions}>
-              <button
-                className={styles.primaryButton}
-                type="button"
-                onClick={handleSaveAndLeave}
-                disabled={!draft || leaveGuardSaving || validationErrors.length > 0}
-              >
-                <Save size={16} />
-                  {validationErrors.length > 0 ? "先修复结构" : leaveGuardSaveLabel}
-              </button>
-              <button className={styles.dangerButton} type="button" onClick={handleDiscardAndLeave} disabled={leaveGuardSaving}>
-                {leaveGuardDiscardLabel}
-              </button>
-              <button className={styles.secondaryButton} type="button" onClick={handleCancelLeave} disabled={leaveGuardSaving}>
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </section>
   );
 }
