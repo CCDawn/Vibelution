@@ -11,8 +11,18 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     _use_tmp_project_root(tmp_path, monkeypatch)
 
     payload = prompt_template_service.list_prompt_templates()
+    research_template_ids = {item["promptTemplateId"] for item in payload["templates"] if item["category"] == "research"}
 
     broad = next(item for item in payload["templates"] if item["promptTemplateId"] == "prompt-research-broad")
+    assert {
+        "prompt-research-ceo",
+        "prompt-research-organization-advisor",
+        "prompt-research-broad",
+        "prompt-research-deep",
+        "prompt-research-review",
+        "prompt-research-themes",
+        "prompt-research-card",
+    } <= research_template_ids
     assert broad["category"] == "research"
     assert broad["sourcePath"] == "workspace/prompts/research/broad.md"
     assert broad["sourceExists"] is True
@@ -22,7 +32,17 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     detail = prompt_template_service.get_prompt_template("prompt-research-broad")
     assert detail is not None
     assert "广撒网探索 agent" in detail["content"]
+    ceo_detail = prompt_template_service.get_prompt_template("prompt-research-ceo")
+    assert ceo_detail is not None
+    assert ceo_detail["metadata"]["roleKey"] == "research_ceo"
+    assert "科研 CEO agent" in ceo_detail["content"]
+    advisor_detail = prompt_template_service.get_prompt_template("prompt-research-organization-advisor")
+    assert advisor_detail is not None
+    assert advisor_detail["metadata"]["roleKey"] == "research_organization_advisor"
+    assert "组织顾问 agent" in advisor_detail["content"]
     assert (tmp_path / "workspace" / "agent_config" / "prompt_templates.json").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "ceo.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "organization_advisor.md").exists()
 
 
 def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monkeypatch):
