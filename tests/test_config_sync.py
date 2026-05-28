@@ -75,8 +75,8 @@ def test_main_config_exposes_all_public_model_blocks():
     assert "model_library" in raw["llm"]
     assert "primary" in raw["llm"]["profiles"]
     assert "provider" in raw["llm"]["profiles"]["primary"]
-    assert "share_ai" in raw["llm"]["model_library"]
-    assert "provider" in raw["llm"]["model_library"]["share_ai"]
+    assert "relay_openai_gpt_5_5" in raw["llm"]["model_library"]
+    assert "provider" in raw["llm"]["model_library"]["relay_openai_gpt_5_5"]
 
 
 def test_config_loader_normalizes_nested_public_blocks():
