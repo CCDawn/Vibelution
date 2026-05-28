@@ -47,7 +47,11 @@ from core.orchestration.output_boundary import (
     sanitize_assistant_visible_text,
 )
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
-from core.orchestration.turn_runner import create_agent_runtime, run_existing_agent_single_turn
+from core.orchestration.turn_runner import (
+    call_agent_factory_with_supported_kwargs,
+    create_agent_runtime,
+    run_existing_agent_single_turn,
+)
 from core.runtime_manager.evolution_store import load_active_run_snapshot as load_evolution_active_run_snapshot
 from core.runtime_manager.work_run_leases import (
     MEMORY_WRITE_LEASE,
@@ -4398,28 +4402,11 @@ def _create_chat_agent_for_session(
     agent_profile_id: str = DEFAULT_SESSION_AGENT_PROFILE_ID,
 ) -> Any:
     agent_config = _session_agent_config_for_profile(agent_profile_id)
-    factory = create_chat_agent
-    try:
-        signature = inspect.signature(factory)
-        accepts_workspace = (
-            "workspace_path" in signature.parameters
-            or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
-        )
-        accepts_config = (
-            "config" in signature.parameters
-            or any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
-        )
-    except (TypeError, ValueError):
-        accepts_workspace = True
-        accepts_config = True
-    kwargs: dict[str, Any] = {}
-    if accepts_workspace:
-        kwargs["workspace_path"] = session_workspace
-    if accepts_config:
-        kwargs["config"] = agent_config
-    if kwargs:
-        return factory(**kwargs)
-    return factory()
+    return call_agent_factory_with_supported_kwargs(
+        create_chat_agent,
+        workspace_path=session_workspace,
+        config=agent_config,
+    )
 
 
 def create_chat_agent(workspace_path: str | Path | None = None, config: Any | None = None) -> Any:

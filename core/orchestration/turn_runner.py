@@ -52,6 +52,25 @@ def create_agent_runtime(
     return agent_factory(mode=mode, workspace_path=workspace_path, config=config)
 
 
+def call_agent_factory_with_supported_kwargs(factory: Callable[..., Any], **kwargs: Any) -> Any:
+    """Call a test/runtime Agent factory with only supported keyword arguments."""
+
+    try:
+        signature = inspect.signature(factory)
+    except (TypeError, ValueError):
+        return factory(**kwargs)
+
+    supports_var_kwargs = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values())
+    accepted_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key in signature.parameters or supports_var_kwargs
+    }
+    if accepted_kwargs:
+        return factory(**accepted_kwargs)
+    return factory()
+
+
 def prepare_agent_turn(
     agent: Any,
     *,
@@ -146,6 +165,7 @@ __all__ = [
     "AgentFactory",
     "AgentSingleTurnRequest",
     "AgentSingleTurnResult",
+    "call_agent_factory_with_supported_kwargs",
     "create_agent_runtime",
     "prepare_agent_turn",
     "run_existing_agent_single_turn",
