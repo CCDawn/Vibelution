@@ -644,7 +644,7 @@ def test_workbench_chat_coding_task_consumes_explicit_result_contract(monkeypatc
     assert state["conversations"][0].get("active_task") is None
 
 
-def test_build_chat_state_normalizes_tool_call_names():
+def test_build_chat_state_preserves_structured_tool_calls():
     state = build_chat_state(
         [
             {
@@ -657,7 +657,7 @@ def test_build_chat_state_normalizes_tool_call_names():
     )
 
     message = state["conversations"][0]["messages"][0]
-    assert message["tool_calls"] == ["read_file_tool", "run_test_for_tool"]
+    assert message["tool_calls"] == [{"name": "read_file_tool"}, "run_test_for_tool"]
 
 
 def test_build_chat_state_keeps_tool_only_assistant_messages():
@@ -675,7 +675,7 @@ def test_build_chat_state_keeps_tool_only_assistant_messages():
     message = state["conversations"][0]["messages"][0]
     assert message["role"] == "assistant"
     assert message["content"] == ""
-    assert message["tool_calls"] == ["read_file_tool", "run_test_for_tool"]
+    assert message["tool_calls"] == [{"name": "read_file_tool"}, "run_test_for_tool"]
 
 
 def test_workbench_chat_falls_back_to_structured_reply_when_visible_text_is_missing(monkeypatch, tmp_path: Path):
