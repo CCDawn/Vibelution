@@ -509,9 +509,24 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                 continue
             label = str(agent.get("label") or key).strip() or key
             agent_instance_id = str(agent.get("agentInstanceId") or agent.get("agentId") or "").strip()
-            instance = agent_directory_service.get_agent(agent_instance_id) if agent_instance_id else None
+            archived_or_missing_agent_id = ""
+            instance = agent_directory_service.get_agent(agent_instance_id, include_archived=False) if agent_instance_id else None
+            if agent_instance_id and not instance:
+                archived_or_missing_agent_id = agent_instance_id
             profile_id = str((instance or {}).get("profileId") or agent.get("profileId") or agent.get("llmConfigId") or "").strip() or "primary"
             if not instance:
+                if archived_or_missing_agent_id:
+                    _record_research_config_event(
+                        "research.agent_instance.stale_replaced",
+                        phase="agent_template_config",
+                        message="Research agent config referenced a missing or archived AgentInstance; creating a replacement.",
+                        fields={
+                            "agentKey": key,
+                            "staleAgentId": archived_or_missing_agent_id,
+                            "profileId": profile_id,
+                        },
+                        agent_key=key,
+                    )
                 try:
                     session_detail = session_service.create_chat_session(
                         title=label,
@@ -541,7 +556,7 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                 changed = True
             if agent_instance_id:
                 try:
-                    instance = agent_directory_service.get_agent(agent_instance_id) or instance
+                    instance = agent_directory_service.get_agent(agent_instance_id, include_archived=False) or instance
                     profile_id = str((instance or {}).get("profileId") or profile_id).strip() or "primary"
                     if str(agent.get("profileId") or "").strip() != profile_id:
                         agent["profileId"] = profile_id

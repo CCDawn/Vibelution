@@ -608,6 +608,92 @@ def test_research_agent_instance_sync_skips_current_direct_session_update(tmp_pa
     assert workspace.writes == 0
 
 
+def test_research_agent_instance_sync_replaces_archived_mode_binding_ref(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.root = root / "workspace"
+            self.written = None
+
+        def get_research_agent_config_path(self):
+            return self.root / "prompts" / "research" / "agents.json"
+
+        def read_research_agent_config(self):
+            return {}
+
+        def write_research_agent_config(self, data):
+            self.written = data
+            path = self.get_research_agent_config_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return True
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+
+    old_agent = agent_directory_service.create_agent_instance(
+        display_name="旧广搜 Agent",
+        profile_id="research_broad",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+        direct_session_id="session-old-broad",
+        metadata={
+            "researchAgentKey": "broad",
+            "researchTemplateId": "research_broad_explorer",
+            "researchPromptFilename": "broad.md",
+        },
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "research",
+        default_agent_id=old_agent["agentId"],
+        available_agent_ids=[old_agent["agentId"]],
+        pool=[old_agent["agentId"]],
+        flow_bindings={"broad": old_agent["agentId"]},
+    )
+    agent_directory_service.archive_agent_instance(old_agent["agentId"])
+    events = []
+    monkeypatch.setattr(research_service, "_record_research_config_event", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    result = research_service._ensure_research_agent_instances(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "key": "broad",
+                    "label": "广撒网探索 Agent",
+                    "enabled": True,
+                    "templateId": "research_broad_explorer",
+                    "profileId": "research_broad",
+                    "promptFilename": "broad.md",
+                    "agentInstanceId": old_agent["agentId"],
+                    "agentId": old_agent["agentId"],
+                    "directSessionId": "session-old-broad",
+                    "roleKey": "research_broad",
+                    "promptTemplateId": "prompt-research-broad",
+                }
+            ],
+        }
+    )
+
+    next_agent_id = result["agents"][0]["agentId"]
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
+
+    assert next_agent_id
+    assert next_agent_id != old_agent["agentId"]
+    assert bindings["defaultAgentId"] == next_agent_id
+    assert bindings["pool"] == [next_agent_id]
+    assert bindings["flowBindings"] == {"broad": next_agent_id}
+    assert workspace.written is not None
+    stale_events = [item for item in events if item[0][0] == "research.agent_instance.stale_replaced"]
+    assert stale_events[-1][1]["fields"]["staleAgentId"] == old_agent["agentId"]
+    assert not [item for item in events if item[0][0] == "research.mode_binding.sync_failed"]
+
+
 def test_delete_research_agent_binding_blocks_agent_id_canvas_reference(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
