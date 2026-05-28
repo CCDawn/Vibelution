@@ -885,6 +885,21 @@ class ToolsWebConfig(BaseModel):
     )
 
 
+class ToolsImage2Config(BaseModel):
+    """image2 生图工具配置"""
+    model_config = ConfigDict(extra="ignore")
+
+    default_model_ref: str = Field(
+        default="",
+        description="全局默认 image2 模型库引用，留空时回退到环境变量或内置模型名。"
+    )
+
+    @field_validator("default_model_ref")
+    @classmethod
+    def normalize_default_model_ref(cls, v: str) -> str:
+        return (v or "").strip()
+
+
 # ============================================================================
 # 工具配置
 # ============================================================================
@@ -923,6 +938,10 @@ class ToolConfig(BaseModel):
     web: ToolsWebConfig = Field(
         default_factory=ToolsWebConfig,
         description="网络工具配置"
+    )
+    image2: ToolsImage2Config = Field(
+        default_factory=ToolsImage2Config,
+        description="image2 生图工具配置"
     )
 
     @model_validator(mode="after")

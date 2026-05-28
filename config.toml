@@ -375,25 +375,6 @@ compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
 
-[llm.model_library.share_ai]
-model = "gpt-5.3-codex"
-label = "gpt-5.3-codex"
-api_key_env = "VIBELUTION_LLM_SHARE_AI_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = true
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
-
-[llm.model_library.share_ai.provider]
-kind = "minimax"
-api_key_env = "MINIMAX_API_KEY"
-base_url = "https://api.minimaxi.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 204800
-
 [llm.model_library.relay_openai_gpt_5_5]
 model = "gpt-5.5"
 label = "GPT-5.5 via relay"
@@ -416,6 +397,51 @@ base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
+
+[llm.model_library.relay_image2]
+model = "image2"
+label = "Image2 via relay"
+transport = "responses"
+contract = "tool_chat"
+strict_compatibility = false
+temperature = 0.7
+max_output_tokens = 4096
+timeout = 180
+connect_timeout = 20
+streaming = false
+tool_calling_mode = "disabled"
+discovery_enabled = false
+api_key_env = "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY"
+
+[llm.model_library.relay_image2.provider]
+kind = "relay"
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://ai-pixel.online"
+compat_mode = "openai"
+requires_api_key = true
+context_window = 128000
+
+[llm.model_library.openai_gpt_image_1_5]
+model = "gpt-image-1.5"
+label = "OpenAI GPT Image 1.5"
+api_key_env = "VIBELUTION_LLM_OPENAI_GPT_IMAGE_1_5_API_KEY"
+transport = "chat_completions"
+contract = "tool_chat"
+temperature = 0.7
+max_output_tokens = 4096
+timeout = 180
+connect_timeout = 20
+streaming = false
+tool_calling_mode = "disabled"
+discovery_enabled = false
+
+[llm.model_library.openai_gpt_image_1_5.provider]
+kind = "openai"
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://api.openai.com/v1"
+compat_mode = "openai"
+requires_api_key = true
+context_window = 128000
 
 [llm.model_library.mimo_v2_5_pro_mimo_v2_5_pro]
 model = "mimo-v2.5-pro"
@@ -625,6 +651,9 @@ include_extensions = [
 search_enabled = true
 max_search_results = 10
 search_timeout = 30
+
+[tools.image2]
+default_model_ref = "relay_image2"
 
 [security]
 enabled = true

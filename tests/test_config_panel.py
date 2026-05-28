@@ -572,6 +572,19 @@ def test_model_preset_options_include_codex_preset():
     assert "openai_gpt_5_5" in presets
     assert presets["openai_gpt_5_5"]["model"]["model"] == "gpt-5.5"
     assert presets["openai_gpt_5_5"]["provider"]["context_window"] == 1050000
+    assert "openai_gpt_image_1_5" in presets
+    assert presets["openai_gpt_image_1_5"]["model"]["model"] == "gpt-image-1.5"
+    assert presets["openai_gpt_image_1_5"]["model"]["streaming"] is False
+    assert presets["openai_gpt_image_1_5"]["model"]["tool_calling_mode"] == "disabled"
+    assert presets["openai_gpt_image_1_5"]["provider"]["kind"] == "openai"
+    assert "relay_image2" in presets
+    assert presets["relay_image2"]["category"] == "relay"
+    assert presets["relay_image2"]["model"]["model"] == "image2"
+    assert presets["relay_image2"]["model"]["streaming"] is False
+    assert presets["relay_image2"]["model"]["tool_calling_mode"] == "disabled"
+    assert presets["relay_image2"]["provider"]["kind"] == "relay"
+    assert presets["relay_image2"]["provider"]["base_url"] == "https://ai-pixel.online"
+    assert not presets["relay_image2"]["provider"]["base_url"].endswith("/v1")
     assert "relay_openai_gpt_5_5" in presets
     assert presets["relay_openai_gpt_5_5"]["category"] == "relay"
     assert presets["relay_openai_gpt_5_5"]["model"]["model"] == "gpt-5.5"
@@ -638,6 +651,28 @@ def test_apply_relay_model_preset_materializes_openai_compatible_provider():
     assert model["transport"] == "responses"
     assert model["contract"] == "tool_chat"
     assert model["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+    build_effective_config(updated)
+
+
+def test_apply_relay_image2_model_preset_materializes_root_base_url_provider():
+    public_config = load_public_config()
+    public_config["llm"]["model_library"].pop("relay_image2", None)
+
+    updated = apply_llm_model_preset(public_config, "relay_image2")
+    model = updated["llm"]["model_library"]["relay_image2"]
+
+    assert model["provider"]["kind"] == "relay"
+    assert model["provider"]["api_key_env"] == "OPENAI_API_KEY"
+    assert model["provider"]["base_url"] == "https://ai-pixel.online"
+    assert not model["provider"]["base_url"].endswith("/v1")
+    assert model["provider"]["compat_mode"] == "openai"
+    assert model["provider"]["requires_api_key"] is True
+    assert model["provider"]["context_window"] == 128000
+    assert model["model"] == "image2"
+    assert model["transport"] == "responses"
+    assert model["streaming"] is False
+    assert model["tool_calling_mode"] == "disabled"
+    assert model["api_key_env"] == "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY"
     build_effective_config(updated)
 
 
@@ -721,6 +756,7 @@ def test_apply_custom_relay_responses_preset_accepts_approved_relay_host():
 def test_default_public_config_includes_new_official_model_templates():
     public_config = load_public_config()
     relay_model = public_config["llm"]["model_library"]["relay_openai_gpt_5_5"]
+    image_model = public_config["llm"]["model_library"]["relay_image2"]
 
     assert relay_model["provider"]["kind"] == "relay"
     assert relay_model["provider"]["context_window"] == 1000000
@@ -732,6 +768,14 @@ def test_default_public_config_includes_new_official_model_templates():
     assert relay_model["contract"] == "tool_chat"
     assert relay_model["max_output_tokens"] == 128000
     assert relay_model["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+    assert image_model["provider"]["kind"] == "relay"
+    assert image_model["provider"]["base_url"] == "https://ai-pixel.online"
+    assert not image_model["provider"]["base_url"].endswith("/v1")
+    assert image_model["model"] == "image2"
+    assert image_model["streaming"] is False
+    assert image_model["tool_calling_mode"] == "disabled"
+    assert image_model["api_key_env"] == "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY"
+    assert public_config["tools"]["image2"]["default_model_ref"] == "relay_image2"
     assert "custom_relay_responses" not in public_config["llm"]["model_library"]
 
     deepseek_model = public_config["llm"]["model_library"]["deepseek_v4_flash"]
@@ -849,26 +893,26 @@ def test_delete_generated_profile_model_clears_matching_profiles():
 
 def test_add_llm_profile_from_model_library_copies_provider_independently():
     public_config = load_public_config()
-    updated = add_llm_profile(public_config, "codex_clone", source_profile_id="primary", model_id="share_ai")
+    updated = add_llm_profile(public_config, "codex_clone", source_profile_id="primary", model_id="relay_openai_gpt_5_5")
 
     clone = updated["llm"]["profiles"]["codex_clone"]
-    assert clone["model"] == "gpt-5.3-codex"
-    assert clone["provider"] == updated["llm"]["model_library"]["share_ai"]["provider"]
-    assert clone["api_key_env"] == "VIBELUTION_LLM_SHARE_AI_API_KEY"
+    assert clone["model"] == "gpt-5.5"
+    assert clone["provider"] == updated["llm"]["model_library"]["relay_openai_gpt_5_5"]["provider"]
+    assert clone["api_key_env"] == "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
 
     edited = update_llm_model(
         updated,
-        "share_ai",
+        "relay_openai_gpt_5_5",
         _provider("deepseek", "https://api.deepseek.com", "DEEPSEEK_API_KEY", context_window=131072),
         "deepseek-v4-pro",
         "DeepSeek Changed",
     )
-    assert edited["llm"]["profiles"]["codex_clone"]["model"] == "gpt-5.3-codex"
-    assert edited["llm"]["profiles"]["codex_clone"]["provider"]["kind"] == "minimax"
+    assert edited["llm"]["profiles"]["codex_clone"]["model"] == "gpt-5.5"
+    assert edited["llm"]["profiles"]["codex_clone"]["provider"]["kind"] == "relay"
 
-    deleted = delete_llm_model(updated, "share_ai")
-    assert deleted["llm"]["profiles"]["codex_clone"]["model"] == "gpt-5.3-codex"
-    assert deleted["llm"]["profiles"]["codex_clone"]["provider"]["kind"] == "minimax"
+    deleted = delete_llm_model(updated, "relay_openai_gpt_5_5")
+    assert deleted["llm"]["profiles"]["codex_clone"]["model"] == "gpt-5.5"
+    assert deleted["llm"]["profiles"]["codex_clone"]["provider"]["kind"] == "relay"
 
 
 def test_build_effective_config_rejects_reasoning_chat_without_supported_state_field():
@@ -1231,7 +1275,7 @@ def test_toml_writer_round_trip_for_public_config_uses_inline_provider_blocks():
 
     assert "[llm.providers]" not in dumped
     assert "[llm.profiles.primary.provider]" in dumped
-    assert "[llm.model_library.share_ai.provider]" in dumped
+    assert "[llm.model_library.relay_openai_gpt_5_5.provider]" in dumped
     assert loaded["llm"]["profiles"]["primary"]["provider"]["kind"] == public_config["llm"]["profiles"]["primary"]["provider"]["kind"]
     assert loaded["prompt"]["sections"][0]["name"] == public_config["prompt"]["sections"][0]["name"]
     assert loaded["pet"]["heart"]["enabled"] is True
