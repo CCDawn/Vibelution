@@ -5,7 +5,7 @@ import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
-import { AgentInstance, ChatRoomDetail, ChatRoomMode, SessionDetail, SessionSummary } from "../api/types";
+import { AgentInstance, ChatRoomDetail, ChatRoomMode, ChatRoomPurpose, SessionDetail, SessionSummary } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { sessionAgentDisplayInfo } from "./agentDisplay";
 import styles from "./ChatRoomsRoute.module.css";
@@ -32,6 +32,19 @@ function modeLabel(mode: ChatRoomMode, lang: string) {
     return lang === "en" ? "Opportunistic" : "抢占式讨论";
   }
   return mode.label || mode.id;
+}
+
+function purposeLabel(purpose: ChatRoomPurpose, lang: string) {
+  if (purpose.id === "chat") {
+    return lang === "en" ? "Chat" : "聊天";
+  }
+  if (purpose.id === "discussion") {
+    return lang === "en" ? "Discussion" : "讨论";
+  }
+  if (purpose.id === "meeting") {
+    return lang === "en" ? "Meeting" : "会议";
+  }
+  return purpose.label || purpose.id;
 }
 
 function latestRound(room: ChatRoomDetail | null | undefined) {
@@ -64,6 +77,7 @@ export function ChatRoomsRoute() {
   const [topic, setTopic] = useState("");
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [selectedModeId, setSelectedModeId] = useState("");
+  const [selectedPurposeId, setSelectedPurposeId] = useState("discussion");
   const [editingSessionId, setEditingSessionId] = useState("");
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [sessionActionError, setSessionActionError] = useState("");
@@ -77,6 +91,10 @@ export function ChatRoomsRoute() {
   const modesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
     queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
+  });
+  const purposesQuery = useQuery({
+    queryKey: queryKeys.chatRoomPurposes(),
+    queryFn: () => fetchJson<ChatRoomPurpose[]>("/api/chat-rooms/purposes"),
   });
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
@@ -99,9 +117,21 @@ export function ChatRoomsRoute() {
     [agentsQuery.data],
   );
   const modes = modesQuery.data ?? [];
+  const purposes = purposesQuery.data ?? [];
   const activeRoom = detailQuery.data ?? rooms.find((room) => room.roomId === selectedRoomId) ?? rooms[0] ?? null;
   const readyModes = useMemo(() => modes.filter((mode) => mode.status === "ready"), [modes]);
   const selectedMode = modes.find((mode) => mode.id === selectedModeId) ?? readyModes[0] ?? modes[0] ?? null;
+  const fallbackPurposes = useMemo<ChatRoomPurpose[]>(
+    () => [
+      { id: "chat", label: "Chat" },
+      { id: "discussion", label: "Discussion" },
+      { id: "meeting", label: "Meeting" },
+    ],
+    [],
+  );
+  const availablePurposes = purposes.length ? purposes : fallbackPurposes;
+  const selectedPurpose = availablePurposes.find((purpose) => purpose.id === selectedPurposeId) ?? availablePurposes[1] ?? availablePurposes[0] ?? null;
+  const runnablePurposeId = selectedPurpose?.id ?? "discussion";
   const selectedModeReady = selectedMode?.status === "ready";
   const runnableModeId = selectedModeReady ? selectedMode.id : readyModes[0]?.id ?? "round_robin";
   const currentRound = latestRound(activeRoom);
@@ -120,6 +150,7 @@ export function ChatRoomsRoute() {
       if (room) {
         setSelectedSessionIds(room.participants.map((participant) => participant.sessionId));
         setActiveRoomTitleDraft(room.title);
+        setSelectedPurposeId(room.purpose || "discussion");
       }
       return;
     }
@@ -127,6 +158,7 @@ export function ChatRoomsRoute() {
       setSelectedRoomId(rooms[0].roomId);
       setSelectedSessionIds(rooms[0].participants.map((participant) => participant.sessionId));
       setActiveRoomTitleDraft(rooms[0].title);
+      setSelectedPurposeId(rooms[0].purpose || "discussion");
     }
   }, [requestedRoomId, rooms, selectedRoomId]);
 
@@ -145,6 +177,7 @@ export function ChatRoomsRoute() {
   useEffect(() => {
     if (activeRoom) {
       setActiveRoomTitleDraft(activeRoom.title);
+      setSelectedPurposeId(activeRoom.purpose || "discussion");
     }
   }, [activeRoom]);
 
@@ -159,6 +192,7 @@ export function ChatRoomsRoute() {
           title: roomTitle.trim(),
           participantSessionIds: selectedSessionIds,
           mode: runnableModeId,
+          purpose: runnablePurposeId,
         }),
       }),
     onSuccess: (room) => {
@@ -184,6 +218,7 @@ export function ChatRoomsRoute() {
           title: activeRoomTitleDraft.trim(),
           participantSessionIds: selectedSessionIds,
           mode: runnableModeId,
+          purpose: runnablePurposeId,
         }),
       }),
     onSuccess: (room) => {
@@ -224,6 +259,7 @@ export function ChatRoomsRoute() {
         body: JSON.stringify({
           topic: topic.trim(),
           mode: runnableModeId,
+          purpose: runnablePurposeId,
         }),
       }),
     onSuccess: (room) => {
@@ -321,13 +357,13 @@ export function ChatRoomsRoute() {
     });
   };
 
-  const createDisabled = createRoomMutation.isPending || selectedSessionIds.length === 0 || !selectedModeReady;
-  const updateDisabled = updateRoomMutation.isPending || !activeRoom || !activeRoomTitleDraft.trim() || selectedSessionIds.length === 0 || !selectedModeReady;
+  const createDisabled = createRoomMutation.isPending || selectedSessionIds.length === 0 || !selectedModeReady || !runnablePurposeId;
+  const updateDisabled = updateRoomMutation.isPending || !activeRoom || !activeRoomTitleDraft.trim() || selectedSessionIds.length === 0 || !selectedModeReady || !runnablePurposeId;
   const activeRoomStatus = String(activeRoom?.status ?? "").trim().toLowerCase();
   const roomRunning = activeRoomStatus === "running";
   const roomStopping = activeRoomStatus === "stopping";
   const roomActive = roomRunning || roomStopping;
-  const roundDisabled = startRoundMutation.isPending || !activeRoom || !topic.trim() || roomActive || !selectedModeReady;
+  const roundDisabled = startRoundMutation.isPending || !activeRoom || !topic.trim() || roomActive || !selectedModeReady || !runnablePurposeId;
   const stopRoundDisabled = stopRoundMutation.isPending || !activeRoom || !roomRunning;
   const selectedMembersDifferFromRoom = Boolean(
     activeRoom
@@ -341,6 +377,7 @@ export function ChatRoomsRoute() {
     && (
       activeRoomTitleDraft.trim() !== activeRoom.title.trim()
       || runnableModeId !== (activeRoom.mode || "round_robin")
+      || runnablePurposeId !== (activeRoom.purpose || "discussion")
       || selectedMembersDifferFromRoom
     ),
   );
@@ -389,6 +426,10 @@ export function ChatRoomsRoute() {
           <strong>{selectedMode ? modeLabel(selectedMode, lang) : "-"}</strong>
         </div>
         <div className={styles.summaryCard}>
+          <span>{lang === "en" ? "Purpose" : "对话目的"}</span>
+          <strong>{selectedPurpose ? purposeLabel(selectedPurpose, lang) : "-"}</strong>
+        </div>
+        <div className={styles.summaryCard}>
           <span>{lang === "en" ? "Status" : "状态"}</span>
           <strong>{activeRoom ? roomStatusLabel(activeRoom.status, lang) : "-"}</strong>
         </div>
@@ -413,6 +454,7 @@ export function ChatRoomsRoute() {
                   setSelectedRoomId(room.roomId);
                   setSelectedSessionIds(room.participants.map((participant) => participant.sessionId));
                   setActiveRoomTitleDraft(room.title);
+                  setSelectedPurposeId(room.purpose || "discussion");
                 }}
               >
                 <strong>{room.title}</strong>
@@ -432,7 +474,9 @@ export function ChatRoomsRoute() {
         <section className={styles.discussion}>
           <div className={styles.discussionHeader}>
             <div>
-              <p className={styles.panelEyebrow}>{activeRoom?.mode ?? "round_robin"}</p>
+              <p className={styles.panelEyebrow}>
+                {activeRoom?.mode ?? "round_robin"} · {activeRoom?.purpose ?? "discussion"}
+              </p>
               <h2>{activeRoom?.title ?? (lang === "en" ? "No room selected" : "未选择房间")}</h2>
               <p>
                 {currentRound?.summary
@@ -552,7 +596,7 @@ export function ChatRoomsRoute() {
             </button>
             {createDisabled && !createRoomMutation.isPending ? (
               <p className={styles.actionHint}>
-                {lang === "en" ? "Select at least one ready session and a ready mode." : "至少选择一个会话，并使用 ready 模式。"}
+                {lang === "en" ? "Select at least one ready session, a ready mode, and a purpose." : "至少选择一个会话，并使用 ready 模式和对话目的。"}
               </p>
             ) : null}
             {activeRoom ? (
@@ -708,6 +752,23 @@ export function ChatRoomsRoute() {
                   : (lang === "en" ? "Planned mode" : "规划中的模式")}
               >
                 {modeLabel(mode, lang)} · {mode.status}
+              </button>
+            ))}
+          </div>
+          <div className={styles.modeList}>
+            {availablePurposes.map((purpose) => (
+              <button
+                key={purpose.id}
+                type="button"
+                className={[
+                  styles.modeButton,
+                  styles.modeReady,
+                  purpose.id === runnablePurposeId ? styles.modeSelected : "",
+                ].filter(Boolean).join(" ")}
+                onClick={() => setSelectedPurposeId(purpose.id)}
+                title={purpose.description || purposeLabel(purpose, lang)}
+              >
+                {purposeLabel(purpose, lang)}
               </button>
             ))}
           </div>
