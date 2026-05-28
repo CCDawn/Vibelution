@@ -199,6 +199,35 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("```text");
   });
 
+  it("keeps historical assistant responses collapsed while preserving latest and streaming responses", () => {
+    const html = renderConversation([
+      {
+        id: "message-old-assistant",
+        role: "assistant",
+        content: "OLD_HEAVY_ASSISTANT_RESPONSE_SHOULD_NOT_RENDER_BY_DEFAULT",
+        timestamp: "2026-05-22T00:01:00Z",
+      },
+      {
+        id: "message-streaming-assistant",
+        role: "assistant",
+        content: "STREAMING_ASSISTANT_RESPONSE_STAYS_VISIBLE",
+        timestamp: "2026-05-22T00:02:00Z",
+        streaming: true,
+      },
+      {
+        id: "message-latest-assistant",
+        role: "assistant",
+        content: "LATEST_ASSISTANT_RESPONSE_STAYS_VISIBLE",
+        timestamp: "2026-05-22T00:03:00Z",
+      },
+    ]);
+
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("OLD_HEAVY_ASSISTANT_RESPONSE_SHOULD_NOT_RENDER_BY_DEFAULT");
+    expect(html).toContain("STREAMING_ASSISTANT_RESPONSE_STAYS_VISIBLE");
+    expect(html).toContain("LATEST_ASSISTANT_RESPONSE_STAYS_VISIBLE");
+  });
+
   it("renders inline code and simple lists inside semantic response blocks", () => {
     const html = renderConversation([
       {

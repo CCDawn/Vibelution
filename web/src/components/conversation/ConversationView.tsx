@@ -36,6 +36,7 @@ import { parseResponseSegments, ResponseSegment } from "./messageResponseSegment
 import styles from "./ConversationView.module.css";
 
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
+const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 1;
 
 type MarkdownBlock =
   | { type: "heading"; level: 1 | 2 | 3 | 4; content: string }
@@ -283,6 +284,20 @@ export function ConversationView({
         .find((message) => (message.toolCalls?.length ?? 0) > 0)?.toolCalls ?? [],
     [messages],
   );
+  const defaultExpandedResponseIds = useMemo(() => {
+    const ids: string[] = [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (!hasResponseBlock(message)) {
+        continue;
+      }
+      ids.push(message.id);
+      if (ids.length >= DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT) {
+        break;
+      }
+    }
+    return new Set(ids);
+  }, [messages]);
   const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(messages), [messages]);
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
@@ -416,7 +431,7 @@ export function ConversationView({
 
   function getExpansionState(messageId: string, section: string, defaultExpanded: boolean) {
     if (section === "response") {
-      return sectionExpansion[messageId]?.[section] ?? true;
+      return sectionExpansion[messageId]?.[section] ?? defaultExpanded;
     }
     return sectionExpansion[messageId]?.[section] ?? defaultExpanded;
   }
@@ -861,8 +876,9 @@ export function ConversationView({
         ) : (
           messages.map((message) => {
             const operationGroups = buildConversationOperationGroups(message, operationLabels);
-            const responseSegments = parseResponseSegments(message.content);
-            const responseExpanded = getExpansionState(message.id, "response", true);
+            const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
+            const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
+            const responseSegments = responseExpanded ? parseResponseSegments(message.content) : [];
             const isEditingMessage = message.role === "user" && message.id === editingMessageId;
             const turnClassName = [
               message.role === "assistant" ? styles.assistantTurn : styles.userTurn,
@@ -927,7 +943,7 @@ export function ConversationView({
                         type="button"
                         className={styles.responseToggle}
                         aria-expanded={responseExpanded}
-                        onClick={() => toggleSection(message.id, "response", true)}
+                        onClick={() => toggleSection(message.id, "response", defaultResponseExpanded)}
                         title={responseExpanded ? t("responseHidden") : t("responseVisible")}
                       >
                         {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
