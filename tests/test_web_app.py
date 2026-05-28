@@ -2435,15 +2435,13 @@ def test_session_detail_surfaces_missing_agent_placeholder(tmp_path, monkeypatch
     detail_response = client.get("/api/sessions/session-live")
 
     assert sessions_response.status_code == 200
-    session_summary = sessions_response.json()[0]
-    assert session_summary["agentId"] == "agent-missing"
-    assert session_summary["agentMissing"] is True
-    assert session_summary["agentStatusCode"] == "missing_agent"
-    assert session_summary["agentDisplayName"] == "缺少有效 Agent"
-    assert "缺少有效 Agent" in session_summary["agentStatusMessage"]
+    assert sessions_response.json() == []
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["agentMissing"] is True
+    assert detail["agentStatusCode"] == "missing_agent"
+    assert detail["agentDisplayName"] == "缺少有效 Agent"
+    assert "缺少有效 Agent" in detail["agentStatusMessage"]
     assert detail["groupContextEvents"] == []
     assert detail["agentInboxMessages"] == []
     assert detail["toolPolicy"] is None

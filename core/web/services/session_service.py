@@ -364,6 +364,7 @@ def _remember_session_uploaded_attachment(session_id: str, attachment: dict[str,
         return
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
+        _materialize_agent_directory_conversation_locked(payload, normalized_session_id, source="store_session_user_image_attachment")
         conversation = _find_conversation_entry(payload, normalized_session_id)
         if conversation is None:
             raise SessionNotFoundError(f"Session not found: {normalized_session_id}")
@@ -782,6 +783,12 @@ def _session_agent_is_available(summary: dict[str, Any]) -> bool:
     return bool(str(summary.get("agentId") or "").strip()) and not bool(summary.get("agentMissing"))
 
 
+def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
+    if not bool(str(summary.get("agentId") or "").strip()):
+        return True
+    return not bool(summary.get("agentMissing"))
+
+
 @contextmanager
 def _session_tool_workspace_override(session_workspace: str | Path, memory_workspace: str | Path | None = None):
     try:
@@ -934,7 +941,14 @@ def list_sessions() -> list[dict]:
     """Return summarized sessions sourced from persisted chat state."""
 
     active_id, conversations = _load_conversations()
-    sessions = [_build_session_summary(item) for item in conversations]
+    conversations = _append_agent_directory_conversations(conversations)
+    sessions = []
+    for item in conversations:
+        summary = _build_session_summary(item)
+        if _session_agent_visible_in_indexes(summary):
+            sessions.append(summary)
+        else:
+            _record_session_agent_missing_index_event(summary, source="list_sessions")
     sessions.sort(
         key=lambda item: (
             0 if item["id"] == active_id else 1,
@@ -947,7 +961,9 @@ def list_sessions() -> list[dict]:
 def get_session_detail(session_id: str) -> dict | None:
     """Return a session detail payload by persisted conversation id."""
 
+    _ensure_agent_directory_conversation_materialized(session_id, source="get_session_detail")
     _, conversations = _load_conversations()
+    conversations = _append_agent_directory_conversations(conversations)
     for item in conversations:
         if item["id"] == session_id:
             return _build_session_detail(item)
@@ -1201,6 +1217,7 @@ def delete_chat_session(session_id: str) -> dict:
     next_active_id = ""
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
+        _materialize_agent_directory_conversation_locked(payload, conversation_id, source="delete_chat_session")
         payload = _repair_stale_running_conversations(payload)
         conversations = payload.get("conversations")
         if not isinstance(conversations, list):
@@ -1568,6 +1585,7 @@ def submit_session_message(
     _validate_user_message_not_encoding_replacement(message, lang=lang)
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
+        _materialize_agent_directory_conversation_locked(payload, conversation_id, source="submit_session_message")
         conversation = _find_conversation_entry(payload, conversation_id)
         if conversation is None:
             raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
@@ -2245,6 +2263,107 @@ def _load_conversations() -> tuple[str, list[dict[str, Any]]]:
     return active_id or DEFAULT_CHAT_CONVERSATION_ID, conversations
 
 
+def _append_agent_directory_conversations(conversations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_session_id = {
+        str(item.get("id") or "").strip(): item
+        for item in conversations
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+    result = list(conversations)
+    try:
+        agents = agent_directory_service.list_agents(include_archived=False)
+    except Exception:
+        return result
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        session_id = str(agent.get("directSessionId") or "").strip()
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not session_id or not agent_id or session_id in by_session_id:
+            continue
+        conversation = _agent_directory_conversation_stub(agent, session_id=session_id)
+        result.append(conversation)
+        by_session_id[session_id] = conversation
+        _record_agent_directory_conversation_index_event(agent, session_id=session_id)
+    return result
+
+
+def _ensure_agent_directory_conversation_materialized(session_id: str, *, source: str) -> bool:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    with _CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        changed = _materialize_agent_directory_conversation_locked(payload, normalized_session_id, source=source)
+        if changed:
+            save_chat_state(PROJECT_ROOT, payload)
+        return changed
+
+
+def _materialize_agent_directory_conversation_locked(payload: dict[str, Any], session_id: str, *, source: str) -> bool:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id or _find_conversation_entry(payload, normalized_session_id) is not None:
+        return False
+    agent = _agent_for_direct_session(normalized_session_id)
+    if not agent:
+        return False
+    conversation = _agent_directory_conversation_record(agent, session_id=normalized_session_id)
+    conversations = payload.get("conversations")
+    if not isinstance(conversations, list):
+        conversations = []
+        payload["conversations"] = conversations
+    conversations.append(conversation)
+    payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
+    payload["active_conversation_id"] = normalized_session_id
+    payload["updated_at"] = str(conversation.get("updated_at") or _now_timestamp())
+    _record_agent_directory_conversation_materialized_event(agent, session_id=normalized_session_id, source=source)
+    return True
+
+
+def _agent_for_direct_session(session_id: str) -> dict[str, Any] | None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    try:
+        agents = agent_directory_service.list_agents(include_archived=False)
+    except Exception:
+        return None
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("directSessionId") or "").strip() == normalized_session_id:
+            return dict(agent)
+    return None
+
+
+def _agent_directory_conversation_record(agent: dict[str, Any], *, session_id: str) -> dict[str, Any]:
+    timestamp = str(agent.get("updatedAt") or agent.get("createdAt") or "").strip() or _now_timestamp()
+    display_name = str(agent.get("displayName") or agent.get("agentCode") or session_id).strip() or session_id
+    conversation = _make_empty_conversation(session_id, title=display_name, timestamp=timestamp)
+    conversation["agent_id"] = str(agent.get("agentId") or "").strip()
+    conversation["agentId"] = str(agent.get("agentId") or "").strip()
+    _ensure_conversation_workspace_metadata(conversation)
+    return conversation
+
+
+def _agent_directory_conversation_stub(agent: dict[str, Any], *, session_id: str) -> dict[str, Any]:
+    display_name = str(agent.get("displayName") or agent.get("agentCode") or session_id).strip() or session_id
+    return {
+        "id": session_id,
+        "title": display_name,
+        "agentId": str(agent.get("agentId") or "").strip(),
+        "agentProfileId": _normalize_session_agent_profile_id(agent.get("profileId") or DEFAULT_SESSION_AGENT_PROFILE_ID),
+        "workspacePath": _session_workspace_relative_path(session_id),
+        "messages": [],
+        "lastTurnStatus": "",
+        "lastTurnError": {},
+        "updatedAt": str(agent.get("updatedAt") or agent.get("createdAt") or "").strip(),
+        "activeTask": None,
+        "_agent": dict(agent),
+        "agentDirectoryOnly": True,
+    }
+
+
 def _repair_stale_running_conversations(payload: dict[str, Any]) -> dict[str, Any]:
     """Clear persisted running state when no in-memory worker owns it."""
 
@@ -2657,6 +2776,9 @@ def _build_session_summary(conversation: dict[str, Any]) -> dict[str, Any]:
     )
     agent_workspace_path = str((agent or {}).get("workspacePath") or "").strip()
     agent_code = str((agent or {}).get("agentCode") or "").strip()
+    agent_primary_mode = str((agent or {}).get("primaryMode") or "").strip()
+    agent_role_key = str((agent or {}).get("roleKey") or "").strip()
+    agent_prompt_template_id = str((agent or {}).get("promptTemplateId") or "").strip()
     agent_status = _session_agent_status_payload(agent_id, agent)
     agent_display_name = str((agent or {}).get("displayName") or "").strip()
     if agent_status["agentMissing"] and not agent_display_name:
@@ -2670,6 +2792,9 @@ def _build_session_summary(conversation: dict[str, Any]) -> dict[str, Any]:
         "agentProfileId": agent_profile_id,
         "agentTemplateId": agent_profile_id,
         "agentTemplateLabel": _session_agent_profile_label(agent_profile_id, get_web_language()),
+        "agentPrimaryMode": agent_primary_mode,
+        "agentRoleKey": agent_role_key,
+        "agentPromptTemplateId": agent_prompt_template_id,
         "workspacePath": str(conversation.get("workspacePath") or _session_workspace_relative_path(conversation["id"])),
         "agentWorkspacePath": agent_workspace_path,
         **agent_status,
@@ -5494,6 +5619,108 @@ def _record_session_agent_binding_updated_event(
                 "prompt_template_id": str(prompt_template_id or "").strip(),
                 "role_key": str(role_key or "").strip(),
                 "source": str(source or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_session_agent_missing_index_event(
+    summary: dict[str, Any],
+    *,
+    source: str,
+) -> None:
+    session_id = str(summary.get("id") or "").strip()
+    if not session_id:
+        return
+    agent_status_code = str(summary.get("agentStatusCode") or "").strip()
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "session_agent_missing",
+            "session.agent_missing.hidden_from_index",
+            level="warning",
+            outcome="hidden",
+            message="Session hidden from indexes because its bound Agent is missing or archived.",
+            fields={
+                "sessionId": session_id,
+                "agentId": str(summary.get("agentId") or "").strip(),
+                "agentStatusCode": agent_status_code,
+                "source": str(source or "").strip(),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-agent-bindings.jsonl",
+            child_log_payload={
+                "session_id": session_id,
+                "agent_id": str(summary.get("agentId") or "").strip(),
+                "agent_status_code": agent_status_code,
+                "agent_status_message": trim_lines(str(summary.get("agentStatusMessage") or ""), max_lines=2),
+                "source": str(source or "").strip(),
+                "hidden_from_index": True,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_directory_conversation_index_event(
+    agent: dict[str, Any],
+    *,
+    session_id: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "agent_directory_index",
+            "session.agent_directory_index_added",
+            level="info",
+            outcome="indexed",
+            message="Agent Directory direct session added to the conversation index.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": str(agent.get("agentCode") or "").strip(),
+                "primaryMode": str(agent.get("primaryMode") or "").strip(),
+                "roleKey": str(agent.get("roleKey") or "").strip(),
+                "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_directory_conversation_materialized_event(
+    agent: dict[str, Any],
+    *,
+    session_id: str,
+    source: str,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "agent_directory_materialize",
+            "session.agent_directory_conversation_materialized",
+            level="info",
+            outcome="materialized",
+            message="Agent Directory direct session materialized into chat state.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": str(agent.get("agentCode") or "").strip(),
+                "primaryMode": str(agent.get("primaryMode") or "").strip(),
+                "roleKey": str(agent.get("roleKey") or "").strip(),
+                "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+                "source": str(source or "").strip(),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-agent-bindings.jsonl",
+            child_log_payload={
+                "session_id": str(session_id or "").strip(),
+                "agent_id": str(agent.get("agentId") or "").strip(),
+                "agent_code": str(agent.get("agentCode") or "").strip(),
+                "source": str(source or "").strip(),
+                "action": "materialized_from_agent_directory",
             },
             lifecycle=True,
         )
