@@ -17,4 +17,14 @@ describe("ChatRoomsRoute layout contract", () => {
     expect(routeStyles.agentRoleTag_self).toBeTypeOf("string");
     expect(routeStyles.agentRoleTag_supervised).toBeTypeOf("string");
   });
+
+  it("keeps scheduler mode separate from conversation purpose", () => {
+    expect(routeSource).toContain("fetchJson<ChatRoomPurpose[]>(\"/api/chat-rooms/purposes\")");
+    expect(routeSource).toContain("queryKeys.chatRoomPurposes()");
+    expect(routeSource).toContain("purpose: runnablePurposeId");
+    expect(routeSource).toContain("runnableModeId !== (activeRoom.mode || \"round_robin\")");
+    expect(routeSource).toContain("runnablePurposeId !== (activeRoom.purpose || \"discussion\")");
+    expect(routeSource).toContain("purposeLabel(purpose, lang)");
+    expect(routeSource).toContain("对话目的");
+  });
 });
