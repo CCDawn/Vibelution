@@ -23,6 +23,7 @@ from core.web.services import (
     agent_directory_service,
     agent_mode_binding_service,
     prompt_template_service,
+    research_organization_service,
     research_service,
     runtime_scene_service,
     session_service,
@@ -978,16 +979,27 @@ def test_delete_research_agent_binding_cleans_mode_binding_refs(tmp_path, monkey
     assert all(agent["key"] != "paper_reader" for agent in result["agents"])
 
 
-def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path, monkeypatch):
+def test_research_flow_canvas_is_locked_to_research_organization_graph(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
-            self.root = root
+            self.root = root / "workspace"
 
         def get_research_flow_canvas_path(self):
             return self.root / "prompts" / "research" / "flow_canvas.json"
 
+        def get_research_organization_path(self):
+            return self.root / "research" / "organization_graph.json"
+
         def read_research_flow_canvas(self):
             path = self.get_research_flow_canvas_path()
+            if path.exists():
+                import json
+
+                return json.loads(path.read_text(encoding="utf-8"))
+            return {}
+
+        def read_research_organization(self):
+            path = self.get_research_organization_path()
             if path.exists():
                 import json
 
@@ -1002,30 +1014,65 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return True
 
+        def write_research_organization(self, data):
+            path = self.get_research_organization_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            import json
+
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return True
+
     events = []
-    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace(tmp_path))
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "get_workspace", lambda: workspace)
     monkeypatch.setattr(research_service, "_record_research_config_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(research_organization_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
 
     default_canvas = research_service.get_research_flow_canvas()
     assert default_canvas["path"].endswith("flow_canvas.json")
+    assert default_canvas["organizationPath"].replace("\\", "/").endswith("workspace/research/organization_graph.json")
+    assert default_canvas["projectBinding"] == {
+        "projectKind": "research",
+        "projectId": "research-team",
+        "source": "research_organization",
+        "locked": True,
+    }
     assert default_canvas["canvasKind"] == "research_flow_canvas"
     assert default_canvas["validation"]["valid"] is True
     assert default_canvas["validation"]["summary"]["errorCount"] == 0
-    assert [node["id"] for node in default_canvas["nodes"]] == [
-        "research_ceo_entry",
-        "organization_advisor_entry",
-    ]
     assert {node["type"] for node in default_canvas["nodes"]} == {"agent"}
-    assert {edge["id"] for edge in default_canvas["edges"]} == {
-        "edge_ceo_advisor",
+    organization = research_organization_service.get_research_organization()
+    canvas_graph = research_organization_service.get_research_organization_canvas_graph()
+    active_org_agent_ids = {node["agentId"] for node in organization["agents"] if node["status"] != "archived"}
+    assert {node["agentId"] for node in default_canvas["nodes"]} == active_org_agent_ids
+    assert {node["agentId"] for node in canvas_graph["agents"]} == active_org_agent_ids
+    assert all(node["displayName"] != "CEO Agent" for node in canvas_graph["agents"])
+    assert all("agentInboxMessages" not in (node.get("agent") or {}) for node in canvas_graph["agents"])
+    assert all("workspaceTerritory" not in (node.get("agent") or {}) for node in canvas_graph["agents"])
+    assert {
+        (edge["source"], edge["target"], edge["label"])
+        for edge in default_canvas["edges"]
+    } == {
+        (edge["fromAgentId"], edge["toAgentId"], edge["label"])
+        for edge in organization["edges"]
+        if edge["fromAgentId"] in active_org_agent_ids and edge["toAgentId"] in active_org_agent_ids
     }
     assert {edge["condition"] for edge in default_canvas["edges"]} == {"completed"}
+    assert {edge["type"] for edge in default_canvas["edges"]} == {"success"}
+    sync_events = [event for event in events if event[0][0] == "research.flow_canvas.organization_synced"]
+    assert sync_events[-1][1]["fields"]["locked"] is True
+    assert sync_events[-1][1]["fields"]["edgeCount"] == len(default_canvas["edges"])
 
     default_payload = {
         **default_canvas,
         "viewport": {"x": 42, "y": -16, "zoom": 1.42},
         "nodes": [
-            {**node, "x": 240.5, "y": 180.25} if node["id"] == "research_ceo_entry" else node
+            {**node, "x": 240.5, "y": 180.25} if node["agentKey"] == "ceo" else node
             for node in default_canvas["nodes"]
         ],
     }
@@ -1033,13 +1080,23 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
     reloaded_default = research_service.get_research_flow_canvas()
     assert saved_default["canvasKind"] == "research_flow_canvas"
     assert saved_default["viewport"] == {"x": 42, "y": -16, "zoom": 1.42}
-    assert next(node for node in reloaded_default["nodes"] if node["id"] == "research_ceo_entry")["x"] == 240.5
-    assert next(node for node in reloaded_default["nodes"] if node["id"] == "research_ceo_entry")["y"] == 180.25
-    assert {edge["id"] for edge in reloaded_default["edges"]} == {
-        "edge_ceo_advisor",
+    assert next(node for node in reloaded_default["nodes"] if node["agentKey"] == "ceo")["x"] != 240.5
+    assert {
+        (edge["source"], edge["target"], edge["label"])
+        for edge in reloaded_default["edges"]
+    } == {
+        (edge["source"], edge["target"], edge["label"])
+        for edge in default_canvas["edges"]
     }
     flow_events = [event for event in events if event[0][0] == "research.flow_canvas.updated"]
     assert flow_events[-1][1]["fields"]["nodeCount"] >= 2
+    assert flow_events[-1][1]["fields"]["locked"] is True
+    assert flow_events[-1][1]["fields"]["source"] == "research_organization"
+    assert flow_events[-1][1]["fields"]["organizationPath"].replace("\\", "/").endswith(
+        "workspace/research/organization_graph.json"
+    )
+    assert flow_events[-1][1]["fields"]["lockedSaveReceived"] is True
+    assert flow_events[-1][1]["fields"]["layoutOverriddenByOrganization"] is True
 
     with pytest.raises(ValueError, match="/api/research/organization"):
         research_service.save_research_flow_canvas(
@@ -1308,16 +1365,25 @@ def test_research_flow_canvas_rejects_question_mark_encoding_loss(tmp_path, monk
         research_service.save_research_flow_canvas(payload)
 
 
-def test_research_flow_canvas_preserves_saved_default_node_positions(tmp_path, monkeypatch):
+def test_research_flow_canvas_saved_default_positions_do_not_override_locked_organization_canvas(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
-            self.root = root
+            self.root = root / "workspace"
 
         def get_research_flow_canvas_path(self):
             return self.root / "prompts" / "research" / "flow_canvas.json"
 
+        def get_research_organization_path(self):
+            return self.root / "research" / "organization_graph.json"
+
         def read_research_flow_canvas(self):
             path = self.get_research_flow_canvas_path()
+            if path.exists():
+                return json.loads(path.read_text(encoding="utf-8"))
+            return {}
+
+        def read_research_organization(self):
+            path = self.get_research_organization_path()
             if path.exists():
                 return json.loads(path.read_text(encoding="utf-8"))
             return {}
@@ -1328,8 +1394,21 @@ def test_research_flow_canvas_preserves_saved_default_node_positions(tmp_path, m
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return True
 
-    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace(tmp_path))
+        def write_research_organization(self, data):
+            path = self.get_research_organization_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return True
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "get_workspace", lambda: workspace)
     monkeypatch.setattr(research_service, "_record_research_config_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(research_organization_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
 
     payload = research_service._default_research_flow_canvas()
     expected_positions = {
@@ -1355,16 +1434,20 @@ def test_research_flow_canvas_preserves_saved_default_node_positions(tmp_path, m
     }
 
     assert saved_positions == expected_positions
-    assert reloaded_positions == expected_positions
+    assert reloaded["projectBinding"]["source"] == "research_organization"
+    assert reloaded_positions == {}
 
 
-def test_research_flow_canvas_legacy_untyped_process_migrates_to_flow_canvas(tmp_path, monkeypatch):
+def test_research_flow_canvas_legacy_untyped_process_does_not_pollute_locked_organization_canvas(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
-            self.root = root
+            self.root = root / "workspace"
 
         def get_research_flow_canvas_path(self):
             return self.root / "prompts" / "research" / "flow_canvas.json"
+
+        def get_research_organization_path(self):
+            return self.root / "research" / "organization_graph.json"
 
         def read_research_flow_canvas(self):
             return {
@@ -1409,27 +1492,45 @@ def test_research_flow_canvas_legacy_untyped_process_migrates_to_flow_canvas(tmp
                 "viewport": {"x": 0, "y": 0, "zoom": 1},
             }
 
+        def read_research_organization(self):
+            return {}
+
         def write_research_flow_canvas(self, data):
             return True
 
-    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace(tmp_path))
+        def write_research_organization(self, data):
+            return True
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
 
     canvas = research_service.get_research_flow_canvas()
 
     assert canvas["canvasKind"] == "research_flow_canvas"
-    assert {node["id"] for node in canvas["nodes"]} == {"nslb_context_snapshot", "nslb_harness_doctor"}
-    assert {node["type"] for node in canvas["nodes"]} == {"tool", "evaluation"}
-    assert canvas["edges"][0]["condition"] == "completed"
+    assert canvas["projectBinding"]["source"] == "research_organization"
+    assert {node["type"] for node in canvas["nodes"]} == {"agent"}
+    assert "nslb_context_snapshot" not in {node["id"] for node in canvas["nodes"]}
+    assert "nslb_harness_doctor" not in {node["id"] for node in canvas["nodes"]}
+    assert {edge["condition"] for edge in canvas["edges"]} == {"completed"}
     assert research_service._flow_contract_for_node({"agentKey": "huawei_doctor"})["outputs"]["blocked"] == {"harness_blocker"}
 
 
-def test_research_flow_canvas_legacy_agent_graph_does_not_pollute_flow_canvas(tmp_path, monkeypatch):
+def test_research_flow_canvas_legacy_agent_graph_does_not_pollute_locked_organization_canvas(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
-            self.root = root
+            self.root = root / "workspace"
 
         def get_research_flow_canvas_path(self):
             return self.root / "prompts" / "research" / "flow_canvas.json"
+
+        def get_research_organization_path(self):
+            return self.root / "research" / "organization_graph.json"
 
         def read_research_flow_canvas(self):
             return {
@@ -1468,19 +1569,31 @@ def test_research_flow_canvas_legacy_agent_graph_does_not_pollute_flow_canvas(tm
                 "viewport": {"x": 0, "y": 0, "zoom": 1},
             }
 
+        def read_research_organization(self):
+            return {}
+
         def write_research_flow_canvas(self, data):
             return True
 
-    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace(tmp_path))
+        def write_research_organization(self, data):
+            return True
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
 
     canvas = research_service.get_research_flow_canvas()
 
     assert canvas["canvasKind"] == "research_flow_canvas"
-    assert [node["id"] for node in canvas["nodes"]] == [
-        "research_ceo_entry",
-        "organization_advisor_entry",
-    ]
+    assert canvas["projectBinding"]["source"] == "research_organization"
     assert {node["type"] for node in canvas["nodes"]} == {"agent"}
+    assert "ceo_agent" not in {node["id"] for node in canvas["nodes"]}
+    assert "research_worker" not in {node["id"] for node in canvas["nodes"]}
     assert all(edge["condition"] != "delegate" for edge in canvas["edges"])
 
 
@@ -1747,14 +1860,14 @@ def test_theme_discovery_actions_sync_flow_canvas_statuses(tmp_path, monkeypatch
         }
     )
     session_id = created["session"]["sessionId"]
-    canvas_after_create = research_service.get_research_flow_canvas()
+    canvas_after_create = research_service._get_saved_research_flow_canvas(sync_agent_instances=False)
 
     assert next(node for node in canvas_after_create["nodes"] if node["id"] == "broad_search")["status"] == "ready"
     assert next(node for node in canvas_after_create["nodes"] if node["id"] == "evidence_review")["status"] == "idle"
     assert next(node for node in canvas_after_create["nodes"] if node["id"] == "theme_card")["status"] == "idle"
 
     research_service.run_broad_theme_search(session_id)
-    canvas_after_broad = research_service.get_research_flow_canvas()
+    canvas_after_broad = research_service._get_saved_research_flow_canvas(sync_agent_instances=False)
 
     assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "broad_search")["status"] == "done"
     assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "deep_search")["status"] == "idle"
@@ -2416,15 +2529,35 @@ def test_research_theme_discovery_routes_are_mounted(tmp_path, monkeypatch):
 def test_research_flow_canvas_api_declares_utf8_json(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
-            self.root = root
+            self.root = root / "workspace"
 
         def get_research_flow_canvas_path(self):
             return self.root / "prompts" / "research" / "flow_canvas.json"
 
+        def get_research_organization_path(self):
+            return self.root / "research" / "organization_graph.json"
+
         def read_research_flow_canvas(self):
             return {}
 
-    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace(tmp_path))
+        def read_research_organization(self):
+            path = self.get_research_organization_path()
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+        def write_research_organization(self, data):
+            path = self.get_research_organization_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return True
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
     client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
     response = client.get("/api/research/flow-canvas")
@@ -2433,7 +2566,9 @@ def test_research_flow_canvas_api_declares_utf8_json(tmp_path, monkeypatch):
     assert response.headers["content-type"].lower().startswith("application/json")
     assert "charset=utf-8" in response.headers["content-type"].lower()
     assert response.json()["canvasKind"] == "research_flow_canvas"
-    assert response.json()["nodes"][0]["label"] == "CEO Agent"
+    assert response.json()["projectBinding"]["source"] == "research_organization"
+    assert response.json()["nodes"][0]["label"]
+    assert response.json()["nodes"][0]["label"] != "CEO Agent"
 
 
 def test_public_search_provider_uses_configured_proxy(monkeypatch):

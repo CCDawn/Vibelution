@@ -25,7 +25,7 @@ from core.infrastructure.workspace_manager import get_workspace
 from core.chat.chat_task_types import trim_lines
 from core.ui.chat_state import load_chat_state
 from config.public_config import build_effective_config, load_public_config
-from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, session_service
+from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, research_organization_service, session_service
 from .config_service import _profile_label
 from .runtime_scene_service import record_research_scene_event
 
@@ -404,6 +404,153 @@ def _legacy_research_flow_canvas() -> dict[str, Any]:
             },
         ],
     }
+
+
+def _research_organization_flow_canvas() -> dict[str, Any]:
+    organization = research_organization_service.get_research_organization_canvas_graph()
+    agents = [
+        item
+        for item in organization.get("agents") or []
+        if isinstance(item, dict) and str(item.get("status") or "active").strip() != "archived"
+    ]
+    node_ids = {_safe_token(item.get("agentId") or item.get("nodeId"), default="") for item in agents}
+    nodes = _layout_research_org_flow_nodes([
+        _research_org_agent_to_flow_node(item, index) for index, item in enumerate(agents)
+    ])
+    edges = [
+        _research_org_edge_to_flow_edge(item, index)
+        for index, item in enumerate(organization.get("edges") or [])
+        if isinstance(item, dict)
+        and str(item.get("status") or "active").strip() != "archived"
+        and _safe_token(item.get("fromAgentId"), default="") in node_ids
+        and _safe_token(item.get("toAgentId"), default="") in node_ids
+    ]
+    return _normalize_research_flow_canvas(
+        {
+            "schemaVersion": 1,
+            "canvasKind": _FLOW_CANVAS_KIND,
+            "updatedAt": str(organization.get("updatedAt") or _utc_now()),
+            "organizationPath": str(organization.get("path") or ""),
+            "projectBinding": {
+                "projectKind": "research",
+                "projectId": "research-team",
+                "source": "research_organization",
+                "locked": True,
+            },
+            "viewport": {"x": 40, "y": 80, "zoom": 1},
+            "nodes": nodes,
+            "edges": edges,
+        }
+    )
+
+
+def _research_org_agent_to_flow_node(agent_node: dict[str, Any], index: int) -> dict[str, Any]:
+    agent = agent_node.get("agent") if isinstance(agent_node.get("agent"), dict) else {}
+    agent_id = _safe_token(agent_node.get("agentId") or agent_node.get("nodeId"), default=f"research_agent_{index + 1}")
+    role = _safe_token(agent_node.get("role") or agent.get("roleKey"), default="research_agent")
+    display_name = _safe_text(
+        agent_node.get("displayName") or agent.get("displayName"),
+        default=f"科研 Agent {index + 1}",
+        max_length=80,
+    )
+    function_label = _research_org_function_label(agent_node, agent)
+    responsibilities = []
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    if isinstance(metadata.get("responsibilities"), list):
+        responsibilities = [str(item).strip() for item in metadata.get("responsibilities") if str(item).strip()]
+    description = trim_lines(
+        str(agent_node.get("description") or "; ".join(responsibilities) or function_label),
+        max_lines=6,
+    )
+    return {
+        "id": agent_id,
+        "label": display_name,
+        "type": "agent",
+        "status": "ready" if str(agent_node.get("status") or "active").strip() == "active" else str(agent_node.get("status") or "idle"),
+        "x": _safe_number(agent_node.get("x"), 160 + index * 420),
+        "y": _safe_number(agent_node.get("y"), 220 + (index % 2) * 220),
+        "agentId": agent_id,
+        "agentKey": role,
+        "promptKey": _safe_text(agent.get("promptTemplateId") or agent.get("templateId") or role, max_length=64),
+        "llmConfigId": "",
+        "description": description,
+        "routeCondition": function_label,
+    }
+
+
+def _layout_research_org_flow_nodes(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not nodes:
+        return nodes
+    role_order = {
+        "ceo": 0,
+        "organization_advisor": 1,
+        "capability_steward": 2,
+    }
+    ordered = sorted(
+        enumerate(nodes),
+        key=lambda item: (
+            role_order.get(str(item[1].get("agentKey") or ""), 20 + item[0]),
+            str(item[1].get("label") or ""),
+        ),
+    )
+    layout: dict[str, tuple[float, float]] = {}
+    if len(ordered) == 1:
+        layout[str(ordered[0][1]["id"])] = (260.0, 260.0)
+    elif len(ordered) == 2:
+        for item, position in zip(ordered, [(220.0, 280.0), (760.0, 280.0)]):
+            layout[str(item[1]["id"])] = position
+    else:
+        base_positions = [(240.0, 440.0), (780.0, 260.0), (1320.0, 440.0)]
+        for index, item in enumerate(ordered[:3]):
+            layout[str(item[1]["id"])] = base_positions[index]
+        for index, item in enumerate(ordered[3:]):
+            column = index % 4
+            row = index // 4
+            layout[str(item[1]["id"])] = (240.0 + column * 460.0, 760.0 + row * 240.0)
+    return [
+        {
+            **node,
+            "x": layout.get(str(node.get("id") or ""), (float(node.get("x") or 0), float(node.get("y") or 0)))[0],
+            "y": layout.get(str(node.get("id") or ""), (float(node.get("x") or 0), float(node.get("y") or 0)))[1],
+        }
+        for node in nodes
+    ]
+
+
+def _research_org_edge_to_flow_edge(edge: dict[str, Any], index: int) -> dict[str, Any]:
+    return {
+        "id": _safe_token(edge.get("edgeId") or edge.get("id"), default=f"communication_edge_{index + 1}"),
+        "source": _safe_token(edge.get("fromAgentId"), default=""),
+        "target": _safe_token(edge.get("toAgentId"), default=""),
+        "label": _safe_text(edge.get("label"), default="组织通信", max_length=80),
+        "condition": "completed",
+        "type": "success",
+    }
+
+
+def _research_org_function_label(agent_node: dict[str, Any], agent: dict[str, Any]) -> str:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    explicit = _safe_text(metadata.get("functionalDisplayName"), max_length=80)
+    if explicit and explicit.lower() not in {"new session", "new chat", "agent", "main agent", "primary"} and explicit not in {"新会话", "主 Agent", "主代理"}:
+        return explicit
+    key = f"{agent_node.get('role') or ''} {agent.get('roleKey') or ''} {agent.get('promptTemplateId') or ''}".lower()
+    if "capability" in key:
+        return "能力策略 Agent"
+    if "organization" in key or "advisor" in key:
+        return "科研组织顾问"
+    if "ceo" in key:
+        return "科研负责人"
+    if "broad" in key:
+        return "广搜 Agent"
+    if "deep" in key:
+        return "深搜 Agent"
+    if "review" in key:
+        return "证据审查 Agent"
+    if "theme" in key:
+        return "主题生成 Agent"
+    if "card" in key:
+        return "主题卡 Agent"
+    return "科研 Agent"
 
 
 def list_theme_discovery_sessions() -> dict[str, Any]:
@@ -1142,7 +1289,7 @@ def delete_research_agent_binding(key: str) -> dict[str, Any]:
     if len(remaining) == len(agents):
         raise ValueError(f"Unknown research agent key: {key}")
     agent_instance_id = str((removed_agent or {}).get("agentInstanceId") or (removed_agent or {}).get("agentId") or "").strip()
-    canvas = get_research_flow_canvas()
+    canvas = _load_saved_research_flow_canvas_for_binding_guard()
     referencing_nodes = [
         str(node.get("id") or "")
         for node in canvas.get("nodes", [])
@@ -1194,7 +1341,21 @@ def delete_research_agent_binding(key: str) -> dict[str, Any]:
     return list_research_prompts()
 
 
-def get_research_flow_canvas(*, sync_agent_instances: bool = True) -> dict[str, Any]:
+def _load_saved_research_flow_canvas_for_binding_guard() -> dict[str, Any]:
+    workspace = get_workspace()
+    try:
+        raw = workspace.read_research_flow_canvas()
+    except Exception:
+        raw = {}
+    if not isinstance(raw, dict):
+        return {"nodes": []}
+    nodes = raw.get("nodes")
+    if not isinstance(nodes, list):
+        return {"nodes": []}
+    return {"nodes": [node for node in nodes if isinstance(node, dict)]}
+
+
+def _get_saved_research_flow_canvas(*, sync_agent_instances: bool = True) -> dict[str, Any]:
     workspace = get_workspace()
     raw = workspace.read_research_flow_canvas()
     raw_agent_config = _load_research_agent_config()
@@ -1204,6 +1365,28 @@ def get_research_flow_canvas(*, sync_agent_instances: bool = True) -> dict[str, 
             _with_default_research_flow_canvas_migrations(raw or _default_research_flow_canvas()),
             agent_config,
         )
+    )
+    return _with_flow_canvas_validation({
+        **canvas,
+        "path": str(workspace.get_research_flow_canvas_path()),
+    })
+
+
+def get_research_flow_canvas(*, sync_agent_instances: bool = True) -> dict[str, Any]:
+    workspace = get_workspace()
+    canvas = _research_organization_flow_canvas()
+    _record_research_config_event(
+        "research.flow_canvas.organization_synced",
+        phase="flow_canvas",
+        message="Research flow canvas synced from organization graph",
+        fields={
+            "path": str(workspace.get_research_flow_canvas_path()),
+            "organizationPath": str(canvas.get("organizationPath") or ""),
+            "nodeCount": len(canvas.get("nodes") or []),
+            "edgeCount": len(canvas.get("edges") or []),
+            "canvasKind": canvas.get("canvasKind"),
+            "locked": True,
+        },
     )
     return _with_flow_canvas_validation({
         **canvas,
@@ -1280,10 +1463,15 @@ def save_research_flow_canvas(
             message="Research flow canvas updated",
             fields={
                 "path": str(workspace.get_research_flow_canvas_path()),
+                "organizationPath": str(research_organization_service.get_workspace().get_research_organization_path()),
                 "nodeCount": len(canvas["nodes"]),
                 "edgeCount": len(canvas["edges"]),
                 "agentBindingResolvedCount": int(agent_binding_stats.get("resolvedCount") or 0),
                 "flowBindingSyncCount": int(mode_binding_stats.get("updatedCount") or 0),
+                "locked": True,
+                "source": "research_organization",
+                "lockedSaveReceived": True,
+                "layoutOverriddenByOrganization": True,
                 **_flow_canvas_mojibake_log_fields(mojibake_report),
             },
         )
@@ -1297,7 +1485,7 @@ def execute_research_flow_canvas_node(session_id: str, node_id: str | None = Non
     normalized_session_id = _safe_text(session_id, max_length=128)
     if not normalized_session_id:
         raise ValueError("Research flow execution requires a session id.")
-    canvas = get_research_flow_canvas(sync_agent_instances=False)
+    canvas = _get_saved_research_flow_canvas(sync_agent_instances=False)
     validation = canvas.get("validation") if isinstance(canvas.get("validation"), dict) else _validate_research_flow_canvas(canvas)
     if not validation.get("valid", False):
         _record_research_config_event(
@@ -1372,7 +1560,7 @@ def execute_research_flow_canvas_node(session_id: str, node_id: str | None = Non
             raise
         raise ValueError(f"Research flow node execution failed: {type(exc).__name__}: {exc}") from exc
 
-    latest_canvas = get_research_flow_canvas(sync_agent_instances=False)
+    latest_canvas = _get_saved_research_flow_canvas(sync_agent_instances=False)
     nodes = [dict(node) for node in latest_canvas["nodes"]]
     edges = [dict(edge) for edge in latest_canvas["edges"]]
     node_index = next(index for index, node in enumerate(nodes) if node["id"] == selected["id"])
@@ -1420,7 +1608,7 @@ def _sync_research_flow_canvas_with_session_payload(payload: dict[str, Any]) -> 
     if not isinstance(payload, dict):
         return payload
     try:
-        canvas = get_research_flow_canvas(sync_agent_instances=False)
+        canvas = _get_saved_research_flow_canvas(sync_agent_instances=False)
         nodes = [dict(node) for node in canvas["nodes"]]
         edges = [dict(edge) for edge in canvas["edges"]]
         changed: list[dict[str, Any]] = []
@@ -2244,6 +2432,8 @@ def _normalize_research_flow_canvas(raw: dict[str, Any]) -> dict[str, Any]:
         "schemaVersion": 1,
         "canvasKind": canvas_kind,
         "updatedAt": str(raw.get("updatedAt") or _utc_now()),
+        **({"organizationPath": str(raw.get("organizationPath") or "")} if raw.get("organizationPath") else {}),
+        **({"projectBinding": raw.get("projectBinding")} if isinstance(raw.get("projectBinding"), dict) else {}),
         "viewport": {
             "x": _safe_number(viewport.get("x"), 0),
             "y": _safe_number(viewport.get("y"), 0),
@@ -2330,6 +2520,7 @@ def _validate_research_flow_canvas(canvas: dict[str, Any]) -> dict[str, Any]:
     nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
     edges = canvas.get("edges") if isinstance(canvas.get("edges"), list) else []
     issues: list[dict[str, Any]] = []
+    organization_locked = isinstance(canvas.get("projectBinding"), dict) and canvas["projectBinding"].get("source") == "research_organization"
     node_by_id = {str(node.get("id") or ""): node for node in nodes if isinstance(node, dict)}
     incoming: dict[str, list[dict[str, Any]]] = {node_id: [] for node_id in node_by_id}
     outgoing: dict[str, list[dict[str, Any]]] = {node_id: [] for node_id in node_by_id}
@@ -2400,6 +2591,8 @@ def _validate_research_flow_canvas(canvas: dict[str, Any]) -> dict[str, Any]:
             incoming.setdefault(target_id, []).append(edge)
         if source is None or target is None:
             continue
+        if organization_locked:
+            continue
 
         source_contract = _flow_contract_for_node(source)
         target_contract = _flow_contract_for_node(target)
@@ -2456,6 +2649,19 @@ def _validate_research_flow_canvas(canvas: dict[str, Any]) -> dict[str, Any]:
                     target_id=target_id,
                 )
             )
+
+    if organization_locked:
+        error_count = sum(1 for issue in issues if issue["severity"] == "error")
+        warning_count = sum(1 for issue in issues if issue["severity"] == "warning")
+        return {
+            "valid": error_count == 0,
+            "summary": {
+                "errorCount": error_count,
+                "warningCount": warning_count,
+                "issueCount": len(issues),
+            },
+            "issues": issues,
+        }
 
     start_node_ids = {node_id for node_id, inbound in incoming.items() if not inbound}
     if nodes and not start_node_ids:
