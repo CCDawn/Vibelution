@@ -3,11 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from scripts.api_contract_audit import (
+    build_type_report,
     build_report,
     find_backend_routes,
     find_frontend_calls,
     normalize_api_path,
     report_to_text,
+    type_report_to_text,
 )
 
 
@@ -271,3 +273,63 @@ def validate_tool(tool_id: str):
         "research_org_agent_proposal_api",
         "generated_tool_validation_api",
     }
+
+
+def test_type_contract_audit_separates_same_path_by_method(tmp_path):
+    write_text(
+        tmp_path / "web" / "src" / "Route.tsx",
+        """
+fetchJson<SessionSummary[]>("/api/sessions");
+fetchJson<SessionDetail>("/api/sessions", { method: "POST" });
+""",
+    )
+
+    report = build_type_report(tmp_path)
+
+    assert report.conflict_count == 0
+    assert report.endpoint_count == 2
+
+
+def test_type_contract_audit_reports_same_method_path_type_conflicts(tmp_path):
+    write_text(
+        tmp_path / "web" / "src" / "Route.tsx",
+        """
+fetchJson<AgentInstance[]>("/api/agents");
+fetchJson<AgentConfigWorkspaceAgent[]>("/api/agents");
+requestJson<AgentInstance[]>("/api/agents");
+""",
+    )
+
+    report = build_type_report(tmp_path)
+    text = type_report_to_text(report)
+
+    assert report.conflict_count == 1
+    assert "GET /api/agents" in text
+    assert "AgentConfigWorkspaceAgent[]" in text
+    assert "AgentInstance[]" in text
+
+
+def test_type_contract_audit_ignores_frontend_test_files_and_dynamic_suffixes(tmp_path):
+    write_text(
+        tmp_path / "web" / "src" / "Route.tsx",
+        """
+const suffix = "run-broad-search";
+fetchJson<ResearchDiscoverySessionPayload>(
+  `/api/research/theme-discovery/sessions/${encodeURIComponent(sessionId)}/${suffix}`,
+  { method: "POST" },
+);
+""",
+    )
+    write_text(
+        tmp_path / "web" / "src" / "Route.test.ts",
+        """
+fetchJson<TestOnlyType>("/api/agents");
+fetchJson<AnotherTestOnlyType>("/api/agents");
+""",
+    )
+
+    report = build_type_report(tmp_path)
+
+    assert report.conflict_count == 0
+    assert report.typed_call_count == 0
+    assert len(report.dynamic_frontend_calls) == 1

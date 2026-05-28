@@ -125,6 +125,7 @@ Each should eventually be labeled as one of:
 ```powershell
 .\.venv\Scripts\python.exe scripts\api_contract_audit.py
 .\.venv\Scripts\python.exe scripts\api_contract_audit.py --json
+.\.venv\Scripts\python.exe scripts\api_contract_audit.py --types
 ```
 
 The scanner reports potential drift without failing by default. It supports
@@ -137,6 +138,19 @@ ownership categories, including direct-fetch control/telemetry, binary URL
 resources, dynamic research/config/memory helpers, agent inbox APIs, legacy chat
 review actions, self-evolution auxiliary APIs, research organization proposal
 APIs, generated tool validation, and worktree run detail/SSE APIs.
+
+The `--types` mode adds a frontend-only type contract pass. It groups
+`fetchJson<T>` and `requestJson<T>` by inferred HTTP method plus normalized API
+path, ignoring frontend test files and dynamic suffix calls. Current output
+finds one type conflict:
+
+```text
+PATCH /api/agents/{param}: AgentConfigWorkspaceAgent, AgentInstance
+```
+
+`AgentsRoute.tsx` consumes the route as `AgentConfigWorkspaceAgent`, while
+`ToolsRoute.tsx` consumes the same PATCH route as `AgentInstance`. This should be
+reviewed before enabling `--fail-on-drift` for type contracts.
 
 ## Validation
 

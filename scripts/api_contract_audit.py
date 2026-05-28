@@ -53,6 +53,28 @@ class ApiContractReport:
         return len(self.frontend_without_backend) + len(self.backend_without_frontend)
 
 
+@dataclass(frozen=True)
+class FrontendTypeConflict:
+    method: str
+    path: str
+    types: list[str]
+    calls: list[ApiEndpoint]
+
+
+@dataclass(frozen=True)
+class FrontendTypeContractReport:
+    frontend_call_count: int
+    typed_call_count: int
+    endpoint_count: int
+    conflict_count: int
+    conflicts: list[FrontendTypeConflict]
+    dynamic_frontend_calls: list[ApiEndpoint]
+
+    @property
+    def potential_drift_count(self) -> int:
+        return self.conflict_count
+
+
 def normalize_api_path(raw_path: str) -> str:
     path = str(raw_path or "").strip()
     path = INTERPOLATION_RE.sub("{param}", path)
@@ -88,6 +110,11 @@ def iter_frontend_source_files(project_root: Path) -> Iterable[Path]:
     if not src_dir.exists():
         return
     yield from sorted(path for path in src_dir.rglob("*") if path.suffix in {".ts", ".tsx"})
+
+
+def is_frontend_test_file(path: Path) -> bool:
+    name = path.name
+    return name.endswith(".test.ts") or name.endswith(".test.tsx")
 
 
 def find_backend_routes(project_root: Path) -> list[ApiEndpoint]:
@@ -132,6 +159,8 @@ def _is_unresolved_dynamic_call(raw_path: str) -> bool:
 def find_frontend_calls(project_root: Path) -> list[ApiEndpoint]:
     calls: list[ApiEndpoint] = []
     for path in iter_frontend_source_files(project_root):
+        if is_frontend_test_file(path):
+            continue
         text = path.read_text(encoding="utf-8")
         for kind, pattern in FRONTEND_CALL_PATTERNS:
             for match in pattern.finditer(text):
@@ -141,6 +170,74 @@ def find_frontend_calls(project_root: Path) -> list[ApiEndpoint]:
                 calls.append(
                     ApiEndpoint(
                         method="",
+                        path=normalize_api_path(raw_path),
+                        raw_path=raw_path,
+                        file=relative_path(path, project_root),
+                        line=line_number(text, match.start()),
+                        kind=kind,
+                        value_type=value_type,
+                        dynamic=_is_unresolved_dynamic_call(raw_path),
+                    )
+                )
+    return calls
+
+
+def _call_argument_tail(text: str, match_end: int) -> str:
+    depth = 1
+    quote = ""
+    escaped = False
+    chars: list[str] = []
+    for char in text[match_end:]:
+        chars.append(char)
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+            continue
+        if char == "(":
+            depth += 1
+            continue
+        if char == ")":
+            depth -= 1
+            if depth <= 0:
+                break
+    return "".join(chars)
+
+
+def _infer_frontend_call_method(text: str, match_end: int, kind: str) -> str:
+    if kind == "EventSource":
+        return "GET"
+    window = _call_argument_tail(text, match_end)
+    method_match = re.search(r"method\s*:\s*['\"]([A-Za-z]+)['\"]", window)
+    if method_match:
+        return method_match.group(1).upper()
+    return "GET"
+
+
+def find_frontend_typed_calls(project_root: Path) -> list[ApiEndpoint]:
+    calls: list[ApiEndpoint] = []
+    for path in iter_frontend_source_files(project_root):
+        if is_frontend_test_file(path):
+            continue
+        text = path.read_text(encoding="utf-8")
+        for kind, pattern in FRONTEND_CALL_PATTERNS:
+            if kind == "EventSource":
+                continue
+            for match in pattern.finditer(text):
+                value_type, raw_path = _frontend_match_path(match, kind)
+                if not raw_path.startswith("/api/"):
+                    continue
+                calls.append(
+                    ApiEndpoint(
+                        method=_infer_frontend_call_method(text, match.end(), kind),
                         path=normalize_api_path(raw_path),
                         raw_path=raw_path,
                         file=relative_path(path, project_root),
@@ -258,7 +355,44 @@ def build_report(project_root: Path) -> ApiContractReport:
     )
 
 
+def build_type_report(project_root: Path) -> FrontendTypeContractReport:
+    calls = find_frontend_typed_calls(project_root)
+    typed_calls = [call for call in calls if call.value_type and not call.dynamic]
+    dynamic_frontend_calls = [call for call in calls if call.dynamic]
+    by_endpoint: dict[tuple[str, str], list[ApiEndpoint]] = {}
+    for call in typed_calls:
+        by_endpoint.setdefault((call.method or "GET", call.path), []).append(call)
+
+    conflicts: list[FrontendTypeConflict] = []
+    for (method, path), endpoint_calls in by_endpoint.items():
+        types = sorted({call.value_type for call in endpoint_calls if call.value_type})
+        if len(types) <= 1:
+            continue
+        conflicts.append(
+            FrontendTypeConflict(
+                method=method,
+                path=path,
+                types=types,
+                calls=sorted(endpoint_calls, key=lambda item: (item.value_type, item.file, item.line)),
+            )
+        )
+
+    conflicts.sort(key=lambda item: (item.path, item.method))
+    return FrontendTypeContractReport(
+        frontend_call_count=len(calls),
+        typed_call_count=len(typed_calls),
+        endpoint_count=len(by_endpoint),
+        conflict_count=len(conflicts),
+        conflicts=conflicts,
+        dynamic_frontend_calls=sorted(dynamic_frontend_calls, key=lambda item: (item.path, item.file, item.line)),
+    )
+
+
 def report_to_json(report: ApiContractReport) -> str:
+    return json.dumps(asdict(report), ensure_ascii=False, indent=2)
+
+
+def type_report_to_json(report: FrontendTypeContractReport) -> str:
     return json.dumps(asdict(report), ensure_ascii=False, indent=2)
 
 
@@ -287,10 +421,32 @@ def report_to_text(report: ApiContractReport) -> str:
     return "\n".join(lines)
 
 
+def type_report_to_text(report: FrontendTypeContractReport) -> str:
+    lines = [
+        "Frontend Type Contract Audit",
+        f"- frontend JSON calls: {report.frontend_call_count}",
+        f"- typed non-dynamic calls: {report.typed_call_count}",
+        f"- typed method+path endpoints: {report.endpoint_count}",
+        f"- type conflicts: {report.conflict_count}",
+        f"- dynamic frontend calls skipped from type drift: {len(report.dynamic_frontend_calls)}",
+    ]
+    if report.conflicts:
+        lines.append("\nMethod+path endpoints with multiple frontend types:")
+        for conflict in report.conflicts:
+            lines.append(f"- {conflict.method} {conflict.path}: {', '.join(conflict.types)}")
+            for call in conflict.calls:
+                lines.append(f"  - {call.value_type} ({call.kind}, {call.file}:{call.line})")
+    if report.dynamic_frontend_calls:
+        lines.append("\nDynamic frontend calls skipped from type drift:")
+        lines.extend(f"- {item.raw_path} ({item.file}:{item.line})" for item in report.dynamic_frontend_calls)
+    return "\n".join(lines)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Scan advisory frontend/backend API contract drift.")
     parser.add_argument("--project-root", default=str(PROJECT_ROOT), help="Project root to scan.")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
+    parser.add_argument("--types", action="store_true", help="Scan frontend generic type consistency by method+path.")
     parser.add_argument(
         "--fail-on-drift",
         action="store_true",
@@ -301,6 +457,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.types:
+        report = build_type_report(Path(args.project_root).resolve())
+        print(type_report_to_json(report) if args.json else type_report_to_text(report))
+        return 1 if args.fail_on_drift and report.potential_drift_count else 0
     report = build_report(Path(args.project_root).resolve())
     print(report_to_json(report) if args.json else report_to_text(report))
     return 1 if args.fail_on_drift and report.potential_drift_count else 0
