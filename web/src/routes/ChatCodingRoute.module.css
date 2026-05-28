@@ -2511,6 +2511,95 @@
     var(--surface-panel);
 }
 
+.projectBusEvent {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+}
+
+.projectBusEventRevoked {
+  border-color: color-mix(in srgb, var(--state-warning) 35%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 8%, var(--surface-card));
+}
+
+.projectBusEventHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.74rem;
+}
+
+.projectBusEventActions {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.projectBusEventActions button {
+  min-height: 24px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--state-warning) 10%, var(--surface-card));
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.projectBusEventActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.projectBusEventHeader div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.projectBusEventHeader strong {
+  color: var(--fg-primary);
+}
+
+.projectBusEventHeader time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.projectBusEventBody {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.projectBusEventMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.projectBusEventMeta span {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
 .groupRoundBlock {
   display: grid;
   gap: 12px;
@@ -2773,6 +2862,23 @@
   color: var(--accent-cool-2);
   border-color: color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
   background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
+}
+
+.projectBusInterruptToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.projectBusInterruptToggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent-cool);
 }
 
 @media (max-width: 1180px) {

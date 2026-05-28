@@ -964,6 +964,9 @@ export type SessionSummary = {
   agentProfileId?: string;
   agentTemplateId?: string;
   agentTemplateLabel?: string;
+  agentPrimaryMode?: string;
+  agentRoleKey?: string;
+  agentPromptTemplateId?: string;
   workspacePath?: string;
   agentWorkspacePath?: string;
   agentMissing?: boolean;
@@ -1070,6 +1073,74 @@ export type AgentInboxMessage = {
     turnId: string;
     reason: string;
   };
+};
+
+export type ProjectAgentBusDelivery = {
+  targetAgentId: string;
+  targetAgentCode: string;
+  targetAgentName: string;
+  targetSessionId: string;
+  inboxMessageId: string;
+  status: string;
+  reason: string;
+  revoked?: boolean;
+  revokedAt?: string;
+  wake: {
+    wakeRequested: boolean;
+    wakeStatus: string;
+    messageId: string;
+    targetAgentId: string;
+    targetSessionId: string;
+    turnId: string;
+    reason: string;
+  };
+};
+
+export type ProjectAgentBusInterruption = {
+  targetAgentId: string;
+  targetAgentCode: string;
+  targetAgentName: string;
+  targetSessionId: string;
+  status: string;
+  reason: string;
+  sourceEventId?: string;
+};
+
+export type ProjectAgentBusEvent = {
+  eventId: string;
+  messageType: "project_observation" | "user_guidance" | "agent_private" | "agent_broadcast" | string;
+  targetScope: "observe" | "agents" | "all" | string;
+  targetAgentIds: string[];
+  targetAgentCodes: string[];
+  targetAgentNames: string[];
+  mentionedTokens: string[];
+  unresolvedMentions: string[];
+  content: string;
+  summary: string;
+  status?: string;
+  revokedAt?: string;
+  revokedBy?: string;
+  revokeReason?: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  metadata: Record<string, unknown>;
+  deliveries: ProjectAgentBusDelivery[];
+  interruptions: ProjectAgentBusInterruption[];
+  revocations?: Array<{
+    targetAgentId: string;
+    targetSessionId: string;
+    inboxMessageId: string;
+    inboxStatus: string;
+    stopStatus: string;
+    reason: string;
+  }>;
+};
+
+export type ProjectAgentBusTimeline = {
+  events: ProjectAgentBusEvent[];
+  activeAgentCount: number;
+  updatedAt: string;
 };
 
 export type AgentDelegationPolicy = {
@@ -1394,6 +1465,7 @@ export type AgentConfigWorkspace = {
     blockingIssueCount: number;
     warningIssueCount: number;
     inboxPendingCount: number;
+    teamCount?: number;
   };
   groups: AgentConfigWorkspaceGroup[];
   agents: AgentConfigWorkspaceAgent[];
@@ -1413,6 +1485,15 @@ export type AgentConfigWorkspace = {
     roundCount: number;
     updatedAt: string;
   }>;
+  teams?: Array<{
+    teamId: string;
+    name: string;
+    purpose: string;
+    status: string;
+    agentIds: string[];
+    memberCount: number;
+    updatedAt: string;
+  }>;
   references: Record<string, AgentConfigReference[]>;
   health: {
     status: "ok" | "warning" | "blocked" | string;
@@ -1427,6 +1508,109 @@ export type AgentConfigWorkspace = {
   repairWarnings: {
     modeBindings: AgentModeBindingWarning[];
     promptTemplates: Array<Record<string, unknown>>;
+  };
+};
+
+export type TeamMember = {
+  memberId: string;
+  agentId: string;
+  agentCode: string;
+  agentName: string;
+  role: string;
+  purpose: string;
+  agentStatus: "active" | "stale" | string;
+};
+
+export type TeamCanvasNode = {
+  id: string;
+  label: string;
+  type: "role" | "agent" | "group" | "user" | "external" | string;
+  status: "bound" | "unbound" | "stale" | string;
+  x: number;
+  y: number;
+  agentId: string;
+  agentCode: string;
+  agentName: string;
+  role: string;
+  purpose: string;
+};
+
+export type TeamCanvasEdge = {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  type: "reports_to" | "collaborates_with" | "delegates_to" | "observes" | "supports" | string;
+};
+
+export type TeamCanvasValidationIssue = {
+  severity: "error" | "warning" | string;
+  code: string;
+  message: string;
+  nodeId?: string;
+  edgeId?: string;
+  source?: string;
+  target?: string;
+};
+
+export type TeamCanvasValidation = {
+  valid: boolean;
+  summary: {
+    errorCount: number;
+    warningCount: number;
+    issueCount?: number;
+  };
+  issues: TeamCanvasValidationIssue[];
+};
+
+export type TeamOrganizationCanvas = {
+  schemaVersion: number;
+  canvasKind: "team_organization_canvas" | string;
+  teamId: string;
+  updatedAt: string;
+  path: string;
+  viewport: {
+    x: number;
+    y: number;
+    zoom: number;
+  };
+  nodes: TeamCanvasNode[];
+  edges: TeamCanvasEdge[];
+  validation?: TeamCanvasValidation;
+};
+
+export type Team = {
+  teamId: string;
+  name: string;
+  description: string;
+  purpose: string;
+  status: "active" | "archived" | string;
+  members: TeamMember[];
+  memberCount: number;
+  canvasPath: string;
+  createdAt: string;
+  updatedAt: string;
+  canvas: TeamOrganizationCanvas | {
+    path: string;
+    nodeCount: number;
+    edgeCount: number;
+    validation?: TeamCanvasValidation;
+  };
+};
+
+export type TeamListPayload = {
+  schemaVersion: number;
+  teams: Team[];
+  summary: {
+    teamCount: number;
+    activeTeamCount: number;
+    memberCount: number;
+    staleMemberCount: number;
+  };
+  updatedAt: string;
+  storage: {
+    teamsPath: string;
+    teamRoot: string;
   };
 };
 
@@ -1447,6 +1631,12 @@ export type ConversationSummary = {
   mode?: string;
   agentProfileId?: string;
   agentTemplateLabel?: string;
+  agentPrimaryMode?: string;
+  agentRoleKey?: string;
+  agentPromptTemplateId?: string;
+  agentMissing?: boolean;
+  agentStatusCode?: string;
+  agentStatusMessage?: string;
 };
 
 export type SessionAgentTemplate = {
@@ -3007,6 +3197,14 @@ export type ResearchFlowCanvas = {
   canvasKind?: string;
   updatedAt: string;
   path: string;
+  organizationPath?: string;
+  projectBinding?: {
+    projectKind?: string;
+    projectId?: string;
+    source?: string;
+    locked?: boolean;
+    [key: string]: unknown;
+  };
   viewport: {
     x: number;
     y: number;
