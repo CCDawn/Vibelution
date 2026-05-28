@@ -355,6 +355,8 @@ def _copy_unified_agent_fields(target: dict[str, Any], source: dict[str, Any]) -
         "primaryMode",
         "roleKey",
         "promptTemplateId",
+        "agentStatus",
+        "staleAgentId",
     ):
         value = str(source.get(key) or "").strip()
         if value:

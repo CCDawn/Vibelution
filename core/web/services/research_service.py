@@ -655,7 +655,7 @@ def list_research_prompts() -> dict[str, Any]:
 
 
 def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, Any]:
-    """Ensure enabled research agents have persistent AgentInstances and direct sessions."""
+    """Ensure enabled research agents point at active Agent Center instances."""
 
     workspace = get_workspace()
     project_root = _project_root_for_workspace(workspace)
@@ -681,19 +681,25 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
             if agent_instance_id and not instance:
                 archived_or_missing_agent_id = agent_instance_id
             profile_id = str((instance or {}).get("profileId") or agent.get("profileId") or agent.get("llmConfigId") or "").strip() or "primary"
+            if archived_or_missing_agent_id:
+                if agent.get("enabled") is not False:
+                    agent["enabled"] = False
+                agent["agentStatus"] = "stale"
+                agent["staleAgentId"] = archived_or_missing_agent_id
+                changed = True
+                _record_research_config_event(
+                    "research.agent_instance.stale_disabled",
+                    phase="agent_template_config",
+                    message="Research agent config referenced a missing or archived AgentInstance; disabling the stale binding.",
+                    fields={
+                        "agentKey": key,
+                        "staleAgentId": archived_or_missing_agent_id,
+                        "profileId": profile_id,
+                    },
+                    agent_key=key,
+                )
+                continue
             if not instance:
-                if archived_or_missing_agent_id:
-                    _record_research_config_event(
-                        "research.agent_instance.stale_replaced",
-                        phase="agent_template_config",
-                        message="Research agent config referenced a missing or archived AgentInstance; creating a replacement.",
-                        fields={
-                            "agentKey": key,
-                            "staleAgentId": archived_or_missing_agent_id,
-                            "profileId": profile_id,
-                        },
-                        agent_key=key,
-                    )
                 try:
                     session_detail = session_service.create_chat_session(
                         title=label,
@@ -863,6 +869,25 @@ def _sync_research_mode_binding(agents: list[dict[str, Any]]) -> None:
     ]
     active_agent_ids = [agent_id for agent_id in active_agent_ids if agent_id]
     if not active_agent_ids:
+        try:
+            if _research_mode_binding_is_current(default_agent_id="", active_agent_ids=[], flow_bindings={}):
+                return
+            agent_mode_binding_service.update_mode_binding(
+                "research",
+                default_agent_id="",
+                available_agent_ids=[],
+                pool=[],
+                flow_bindings={},
+            )
+        except Exception as exc:
+            _record_research_config_event(
+                "research.mode_binding.sync_failed",
+                phase="agent_template_config",
+                message="Research mode binding sync failed",
+                outcome="failed",
+                level="warning",
+                fields={"agentCount": 0, "errorType": type(exc).__name__, "message": str(exc)},
+            )
         return
     flow_bindings = {
         str(agent.get("key") or "").strip(): str(agent.get("agentId") or agent.get("agentInstanceId") or "").strip()
