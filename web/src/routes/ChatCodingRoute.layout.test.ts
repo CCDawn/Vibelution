@@ -283,6 +283,7 @@ describe("ChatCodingRoute layout contract", () => {
   it("asks for confirmation before deleting conversations", () => {
     expect(routeSource).toContain("t(\"deleteSessionConfirm\").replace(\"{title}\"");
     expect(routeSource).toContain("t(\"deleteGroupConfirm\").replace(\"{title}\"");
+    expect(routeSource).toContain("title={deleteDisabled ? t(\"deleteSessionBusy\") : t(\"deleteSession\")}");
     expect(routeSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeSource).toContain("if (!window.confirm(groupConfirmMessage))");
     expect(routeSource.indexOf("window.confirm(sessionConfirmMessage)")).toBeLessThan(
