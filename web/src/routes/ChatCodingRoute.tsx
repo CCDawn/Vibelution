@@ -44,6 +44,8 @@ import {
   MentalStateSnapshot,
   PetActionResponse,
   PetSummary,
+  ProjectAgentBusEvent,
+  ProjectAgentBusTimeline,
   RuntimeSummary,
   SessionChatReviewCandidateResponse,
   ConversationSummary,
@@ -397,7 +399,38 @@ function sessionToConversationSummary(session: SessionSummary): ConversationSumm
     workspacePath: session.agentWorkspacePath || session.workspacePath || "",
     agentProfileId: session.agentProfileId,
     agentTemplateLabel: session.agentTemplateLabel,
+    agentPrimaryMode: session.agentPrimaryMode,
+    agentRoleKey: session.agentRoleKey,
+    agentPromptTemplateId: session.agentPromptTemplateId,
   };
+}
+
+function isVisibleDirectSession(session: SessionSummary | undefined | null) {
+  if (!session) {
+    return false;
+  }
+  if (!String(session.agentId ?? "").trim()) {
+    return true;
+  }
+  return !session.agentMissing;
+}
+
+function isVisibleConversation(
+  conversation: ConversationSummary,
+  sessionsById?: Map<string, SessionSummary>,
+) {
+  if (conversation.type !== "direct_agent") {
+    return true;
+  }
+  const sessionId = conversation.directSessionId || conversation.conversationId;
+  const session = sessionId && sessionsById ? sessionsById.get(sessionId) : undefined;
+  if (session) {
+    return isVisibleDirectSession(session);
+  }
+  if (!String(conversation.agentId ?? "").trim()) {
+    return true;
+  }
+  return !conversation.agentMissing;
 }
 
 function removeDeletedSessionFromConversations(
@@ -465,10 +498,16 @@ function classifyConversation(conversation: ConversationSummary): ConversationGr
   }
   const profile = String(conversation.agentProfileId ?? "").trim().toLowerCase();
   const template = String(conversation.agentTemplateLabel ?? "").trim().toLowerCase();
+  const primaryMode = String(conversation.agentPrimaryMode ?? "").trim().toLowerCase();
+  const roleKey = String(conversation.agentRoleKey ?? "").trim().toLowerCase();
+  const promptTemplateId = String(conversation.agentPromptTemplateId ?? "").trim().toLowerCase();
   const title = String(conversation.title ?? "").trim().toLowerCase();
-  const combined = `${profile} ${template} ${title}`;
+  const combined = `${primaryMode} ${roleKey} ${promptTemplateId} ${profile} ${template} ${title}`;
   if (
-    profile.startsWith("research_")
+    primaryMode === "research"
+    || roleKey.startsWith("research_")
+    || promptTemplateId.startsWith("prompt-research-")
+    || profile.startsWith("research_")
     || combined.includes("research")
     || combined.includes("广撒网 agent")
     || combined.includes("定向深搜 agent")
@@ -562,6 +601,8 @@ export function ChatCodingRoute() {
   const [activeGroupRoomId, setActiveGroupRoomId] = useState("");
   const [expandedGroupAgentSessionId, setExpandedGroupAgentSessionId] = useState("");
   const [groupTopicDraft, setGroupTopicDraft] = useState("");
+  const [projectBusDraft, setProjectBusDraft] = useState("");
+  const [projectBusInterruptTargets, setProjectBusInterruptTargets] = useState(false);
   const [groupRoomActionError, setGroupRoomActionError] = useState("");
   const [groupManageTitleDraft, setGroupManageTitleDraft] = useState("");
   const [groupManageSessionIds, setGroupManageSessionIds] = useState<string[]>([]);
@@ -576,12 +617,14 @@ export function ChatCodingRoute() {
     return new URLSearchParams(location.search).get("session") ?? "";
   }, [location.search]);
   const pageVisible = usePageVisibility();
+  const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
   const groupPanelActive = Boolean(activeGroupRoomId);
+  const legacyGroupRoomActive = groupPanelActive && !projectBusActive;
   useEffect(() => {
-    if (!groupPanelActive && rightIndexPanel === "members") {
+    if (!legacyGroupRoomActive && rightIndexPanel === "members") {
       setRightIndexPanel("conversations");
     }
-  }, [groupPanelActive, rightIndexPanel]);
+  }, [legacyGroupRoomActive, rightIndexPanel]);
 
   const runtimeQuery = useQuery({
     queryKey: queryKeys.runtimeSummary(),
@@ -597,7 +640,10 @@ export function ChatCodingRoute() {
   });
   const sessionsQuery = useQuery({
     queryKey: queryKeys.sessions(),
-    queryFn: () => fetchJson<SessionSummary[]>("/api/sessions"),
+    queryFn: async () => {
+      const sessions = await fetchJson<SessionSummary[]>("/api/sessions");
+      return sessions.filter(isVisibleDirectSession);
+    },
     refetchInterval: resolvePollingInterval(pageVisible, 3_000),
     refetchIntervalInBackground: false,
   });
@@ -615,25 +661,32 @@ export function ChatCodingRoute() {
   const chatRoomModesQuery = useQuery({
     queryKey: queryKeys.chatRoomModes(),
     queryFn: () => fetchJson<ChatRoomMode[]>("/api/chat-rooms/modes"),
-    enabled: groupComposerOpen || Boolean(activeGroupRoomId),
+    enabled: groupComposerOpen || legacyGroupRoomActive,
   });
   const chatRoomPurposesQuery = useQuery({
     queryKey: queryKeys.chatRoomPurposes(),
     queryFn: () => fetchJson<ChatRoomPurpose[]>("/api/chat-rooms/purposes"),
-    enabled: groupComposerOpen || Boolean(activeGroupRoomId),
+    enabled: groupComposerOpen || legacyGroupRoomActive,
   });
   const activeGroupRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(activeGroupRoomId || "none"),
     queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeGroupRoomId}`),
-    enabled: Boolean(activeGroupRoomId),
-    refetchInterval: activeGroupRoomId ? resolvePollingInterval(pageVisible, groupStreamConnected ? false : 3_000) : false,
+    enabled: legacyGroupRoomActive,
+    refetchInterval: legacyGroupRoomActive ? resolvePollingInterval(pageVisible, groupStreamConnected ? false : 3_000) : false,
+    refetchIntervalInBackground: false,
+  });
+  const projectAgentBusQuery = useQuery({
+    queryKey: queryKeys.projectAgentBus(),
+    queryFn: () => fetchJson<ProjectAgentBusTimeline>("/api/project-agent-bus"),
+    enabled: projectBusActive,
+    refetchInterval: projectBusActive ? resolvePollingInterval(pageVisible, 3_000) : false,
     refetchIntervalInBackground: false,
   });
   const expandedGroupAgentDetailQuery = useQuery({
     queryKey: queryKeys.session(expandedGroupAgentSessionId || "none"),
     queryFn: () => fetchJson<SessionDetail>(`/api/sessions/${expandedGroupAgentSessionId}`),
-    enabled: groupPanelActive && Boolean(expandedGroupAgentSessionId),
-    refetchInterval: groupPanelActive && expandedGroupAgentSessionId ? resolvePollingInterval(pageVisible, 3_000) : false,
+    enabled: legacyGroupRoomActive && Boolean(expandedGroupAgentSessionId),
+    refetchInterval: legacyGroupRoomActive && expandedGroupAgentSessionId ? resolvePollingInterval(pageVisible, 3_000) : false,
     refetchIntervalInBackground: false,
   });
   const syncSessionDetail = useCallback(
@@ -953,6 +1006,68 @@ export function ChatCodingRoute() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(variables.roomId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+  });
+
+  const sendProjectBusMessageMutation = useMutation({
+    mutationFn: async (
+      {
+        content,
+        interruptTargets,
+      }: {
+        content: string;
+        interruptTargets: boolean;
+      },
+    ) =>
+      fetchJson<ProjectAgentBusEvent>("/api/project-agent-bus/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          content,
+          targetScope: "",
+          targetAgentIds: [],
+          interruptMode: interruptTargets ? "interrupt_targets" : "none",
+          wakeTarget: true,
+        }),
+      }),
+    onSuccess: () => {
+      setProjectBusDraft("");
+      setGroupRoomActionError("");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+    onError: (error) => {
+      setGroupRoomActionError(describeError(error, lang === "zh" ? "发送总群引导失败" : "Send project bus guidance failed"));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
+    },
+  });
+
+  const revokeProjectBusMessageMutation = useMutation({
+    mutationFn: async ({ eventId }: { eventId: string }) =>
+      fetchJson<ProjectAgentBusEvent>(`/api/project-agent-bus/messages/${eventId}/revoke`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          reason: "user_recalled_project_bus_message",
+          stopTargets: true,
+        }),
+      }),
+    onSuccess: () => {
+      setGroupRoomActionError("");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+    onError: (error) => {
+      setGroupRoomActionError(describeError(error, lang === "zh" ? "撤回总群消息失败" : "Recall project bus message failed"));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
     },
   });
 
@@ -1300,7 +1415,7 @@ export function ChatCodingRoute() {
   }, [activeSessionId, pageVisible, syncSessionDetail]);
 
   useEffect(() => {
-    if (!activeGroupRoomId || !pageVisible || typeof EventSource === "undefined") {
+    if (!legacyGroupRoomActive || !activeGroupRoomId || !pageVisible || typeof EventSource === "undefined") {
       setGroupStreamConnected(false);
       return;
     }
@@ -1389,7 +1504,7 @@ export function ChatCodingRoute() {
         },
       });
     };
-  }, [activeGroupRoomId, pageVisible, syncChatRoomDetail]);
+  }, [activeGroupRoomId, legacyGroupRoomActive, pageVisible, syncChatRoomDetail]);
 
   const workspace = activeSessionId
     ? sessionWorkspaces[activeSessionId] ?? {
@@ -1536,6 +1651,8 @@ export function ChatCodingRoute() {
   const runtime = runtimeQuery.data;
   const pet = petQuery.data;
   const detail = sessionDetailQuery.data;
+  const projectBusTimeline = projectAgentBusQuery.data;
+  const projectBusEvents = projectBusTimeline?.events ?? [];
   const activeGroupRound = latestChatRoomRound(activeGroupRoom);
   const activeGroupRoomStatus = String(activeGroupRoom?.status ?? "").trim().toLowerCase();
   const groupRoundRunning = activeGroupRoomStatus === "running";
@@ -1565,6 +1682,8 @@ export function ChatCodingRoute() {
     }
   }, [activeGroupParticipantSessionSet, expandedGroupAgentSessionId, groupPanelActive]);
   const groupManageChanged = Boolean(
+    legacyGroupRoomActive
+    &&
     activeGroupRoom
     && (
       groupManageTitleDraft.trim() !== (activeGroupRoom.title || "").trim()
@@ -1575,6 +1694,8 @@ export function ChatCodingRoute() {
     ),
   );
   const groupManageDisabled =
+    !legacyGroupRoomActive
+    ||
     !activeGroupRoom
     || groupRoundActive
     || updateGroupRoomMutation.isPending
@@ -1583,23 +1704,38 @@ export function ChatCodingRoute() {
     || !groupManageModeDraft
     || !groupManagePurposeDraft;
   const groupDeleteDisabled =
+    !legacyGroupRoomActive
+    ||
     !activeGroupRoom
     || groupRoundActive
     || deleteGroupRoomMutation.isPending;
   const groupStopDisabled =
-    !activeGroupRoom
+    !legacyGroupRoomActive
+    || !activeGroupRoom
     || !groupRoundRunning
     || stopGroupRoundMutation.isPending;
   const activeSurfaceTitle = groupPanelActive
-    ? activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
+    ? (
+      projectBusActive
+        ? (lang === "zh" ? "项目总群" : "Project bus")
+        : activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
+    )
     : detail?.title ?? runtime?.sessionTitle ?? t("loadingSession");
   const activeSurfaceStatus = groupPanelActive
-    ? statusLabel(activeGroupRoom?.status ?? "ready")
+    ? (
+      projectBusActive
+        ? (lang === "zh" ? "观察与投递" : "observe and deliver")
+        : statusLabel(activeGroupRoom?.status ?? "ready")
+    )
     : statusLabel(detail?.status || detail?.currentPhase || "idle");
   const activeSurfaceLine = groupPanelActive
     ? (
-      activeGroupRound?.summary
-      || `${activeGroupRoom?.participants?.length ?? 0} ${lang === "zh" ? "位 Agent" : "agents"} · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`
+      projectBusActive
+        ? `${projectBusTimeline?.activeAgentCount ?? 0} ${lang === "zh" ? "位 active Agent" : "active agents"} · @全体成员 / @AgentCode`
+        : (
+          activeGroupRound?.summary
+          || `${activeGroupRoom?.participants?.length ?? 0} ${lang === "zh" ? "位 Agent" : "agents"} · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`
+        )
     )
     : "";
   const sessionDetailErrorState = deriveSessionDetailQueryErrorState(detail, sessionDetailQuery.isError, {
@@ -1778,7 +1914,7 @@ export function ChatCodingRoute() {
         ? sessionDetailErrorMessage
         : activeAgentStatusMessage || detail?.taskSummary || t("preparingShell"));
   const activeTask = detail?.activeTask ?? null;
-  const sessionStateValue = String(groupPanelActive ? activeGroupRoom?.status ?? "ready" : runtime?.sessionState ?? detail?.currentPhase ?? "idle")
+  const sessionStateValue = String(groupPanelActive ? (projectBusActive ? "ready" : activeGroupRoom?.status ?? "ready") : runtime?.sessionState ?? detail?.currentPhase ?? "idle")
     .trim()
     .toLowerCase();
   const currentTaskSummary =
@@ -1880,9 +2016,13 @@ export function ChatCodingRoute() {
     return new Map((agentsQuery.data ?? []).map((agent) => [agent.agentId, agent]));
   }, [agentsQuery.data]);
 
-  const sessionsById = useMemo(() => {
-    return new Map((sessionsQuery.data ?? []).map((session) => [session.id, session]));
+  const visibleSessions = useMemo(() => {
+    return (sessionsQuery.data ?? []).filter(isVisibleDirectSession);
   }, [sessionsQuery.data]);
+
+  const sessionsById = useMemo(() => {
+    return new Map(visibleSessions.map((session) => [session.id, session]));
+  }, [visibleSessions]);
 
   const groupCandidateAgents = useMemo(() => {
     return (agentsQuery.data ?? []).filter((agent) => {
@@ -1911,16 +2051,17 @@ export function ChatCodingRoute() {
 
   const filteredConversations = useMemo(() => {
     const term = sessionFilter.trim().toLowerCase();
-    const conversations = conversationsQuery.data ?? (sessionsQuery.data ?? []).map(sessionToConversationSummary);
+    const conversations = conversationsQuery.data ?? visibleSessions.map(sessionToConversationSummary);
+    const visibleConversations = conversations.filter((conversation) => isVisibleConversation(conversation, sessionsById));
     if (!term) {
-      return conversations;
+      return visibleConversations;
     }
-    return conversations.filter((conversation) =>
+    return visibleConversations.filter((conversation) =>
       [conversation.title, conversation.summary, conversation.status, conversation.type, conversation.agentCode ?? "", conversation.agentDisplayName ?? "", conversation.agentTemplateLabel ?? ""].some((value) =>
         String(value ?? "").toLowerCase().includes(term),
       ),
     );
-  }, [conversationsQuery.data, sessionFilter, sessionsQuery.data]);
+  }, [conversationsQuery.data, sessionFilter, sessionsById, visibleSessions]);
   const groupedConversations = useMemo(() => {
     const buckets = new Map<ConversationGroupKey, ConversationSummary[]>(
       CONVERSATION_GROUP_ORDER.map((groupKey) => [groupKey, []]),
@@ -2162,6 +2303,14 @@ export function ChatCodingRoute() {
     createSessionMutation.mutate();
   }
 
+  function handleOpenProjectAgentBus() {
+    setActiveGroupRoomId("__project_agent_bus__");
+    setRightIndexPanel("conversations");
+    setRightPaneCollapsed(false);
+    setGroupRoomActionError("");
+    void queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
+  }
+
   function handleOpenDirectSession(sessionId: string) {
     setActiveGroupRoomId("");
     setRightIndexPanel("conversations");
@@ -2236,7 +2385,7 @@ export function ChatCodingRoute() {
 
   function handleStartGroupRound() {
     const topic = groupTopicDraft.trim();
-    if (!activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
+    if (!legacyGroupRoomActive || !activeGroupRoomId || !topic || startGroupRoundMutation.isPending || groupRoundActive) {
       return;
     }
     startGroupRoundMutation.mutate({
@@ -2248,7 +2397,7 @@ export function ChatCodingRoute() {
   }
 
   function handleStopGroupRound() {
-    if (!activeGroupRoomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
+    if (!legacyGroupRoomActive || !activeGroupRoomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
       return;
     }
     stopGroupRoundMutation.mutate({
@@ -2256,8 +2405,26 @@ export function ChatCodingRoute() {
     });
   }
 
+  function handleSendProjectBusMessage() {
+    const content = projectBusDraft.trim();
+    if (!content || sendProjectBusMessageMutation.isPending) {
+      return;
+    }
+    sendProjectBusMessageMutation.mutate({
+      content,
+      interruptTargets: projectBusInterruptTargets,
+    });
+  }
+
+  function handleRevokeProjectBusMessage(eventId: string) {
+    if (!eventId || revokeProjectBusMessageMutation.isPending) {
+      return;
+    }
+    revokeProjectBusMessageMutation.mutate({ eventId });
+  }
+
   function handleApplyGroupRoomManagement() {
-    if (!activeGroupRoomId || groupManageDisabled) {
+    if (!legacyGroupRoomActive || !activeGroupRoomId || groupManageDisabled) {
       return;
     }
     updateGroupRoomMutation.mutate({
@@ -2270,7 +2437,7 @@ export function ChatCodingRoute() {
   }
 
   function handleDeleteActiveGroupRoom() {
-    if (!activeGroupRoomId || groupDeleteDisabled) {
+    if (!legacyGroupRoomActive || !activeGroupRoomId || groupDeleteDisabled) {
       return;
     }
     const roomTitle = (activeGroupRoom?.title || activeGroupRoomId).trim();
@@ -2437,7 +2604,7 @@ export function ChatCodingRoute() {
       style={layoutStyle}
     >
       <aside className={leftRailCollapsed ? `${styles.leftRail} ${styles.paneCollapsed}` : styles.leftRail} aria-hidden={leftRailCollapsed}>
-        {groupPanelActive ? (
+        {legacyGroupRoomActive ? (
           <section className={`${styles.leftBlock} ${styles.groupProfileBlock}`}>
             <div className={styles.sectionHeader}>
               <div className={styles.sectionIdentity}>
@@ -2872,7 +3039,7 @@ export function ChatCodingRoute() {
               activeSessionId && setActiveTab(activeSessionId, "agent");
             }}
           >
-            {groupPanelActive ? (lang === "zh" ? "群聊" : "Group") : t("agentSession")}
+            {groupPanelActive ? (projectBusActive ? (lang === "zh" ? "项目总群" : "Project bus") : (lang === "zh" ? "群聊" : "Group")) : t("agentSession")}
           </button>
           {!groupPanelActive && workspace.openTabs.map((tabPath) => (
             <div
@@ -2904,7 +3071,212 @@ export function ChatCodingRoute() {
         </div>
 
         <div className={styles.centerSurface}>
-          {groupPanelActive ? (
+          {projectBusActive ? (
+            <div className={styles.groupConversationFrame}>
+              <header className={styles.groupConversationHeader}>
+                <div>
+                  <p>
+                    {activeGroupRoom?.mode ?? "round_robin"}
+                    {" · "}
+                    {activeGroupRoom?.purpose ?? "discussion"}
+                  </p>
+                  <h2>{lang === "zh" ? "项目总群" : "Project bus"}</h2>
+                  <span>
+                    {projectBusTimeline?.activeAgentCount ?? (activeGroupRoom?.participants ?? []).length} {lang === "zh" ? "位 active Agent" : "active agents"}
+                    {" · "}
+                    {lang === "zh" ? "观察与投递" : "observe and deliver"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className={styles.groupRefreshButton}
+                  onClick={() => void projectAgentBusQuery.refetch()}
+                  disabled={projectAgentBusQuery.isFetching}
+                >
+                  {lang === "zh" ? "刷新" : "Refresh"}
+                </button>
+              </header>
+              {projectAgentBusQuery.isError ? (
+                <div className={styles.inlineNotice}>
+                  {describeError(projectAgentBusQuery.error, t("loadFailed"))}
+                </div>
+              ) : null}
+              {groupRoomActionError ? (
+                <div className={styles.inlineNotice}>{groupRoomActionError}</div>
+              ) : null}
+              <div className={styles.groupMessageTimeline} aria-live={sendProjectBusMessageMutation.isPending ? "polite" : undefined}>
+                {projectBusEvents.length ? (
+                  projectBusEvents.map((event) => {
+                    const revoked = String(event.status ?? "").trim().toLowerCase() === "revoked";
+                    const targetLabel = event.targetScope === "all"
+                      ? (lang === "zh" ? "全体成员" : "All agents")
+                      : event.targetAgentNames.length
+                        ? event.targetAgentNames.join(", ")
+                        : (lang === "zh" ? "仅观察" : "Observe only");
+                    const deliveryLabel = event.deliveries.length
+                      ? `${event.deliveries.length} ${lang === "zh" ? "次投递" : "deliveries"}`
+                      : (lang === "zh" ? "未投递" : "no delivery");
+                    const interruptionLabel = event.interruptions.length
+                      ? `${event.interruptions.filter((item) => item.status === "interrupted").length}/${event.interruptions.length} ${lang === "zh" ? "已打断" : "interrupted"}`
+                      : "";
+                    return (
+                      <article key={event.eventId} className={revoked ? `${styles.projectBusEvent} ${styles.projectBusEventRevoked}` : styles.projectBusEvent}>
+                        <header className={styles.projectBusEventHeader}>
+                          <div>
+                            <strong>{event.createdBy === "user" ? runtime?.userName || (lang === "zh" ? "我" : "Me") : event.createdBy}</strong>
+                            <span>{targetLabel}</span>
+                          </div>
+                          <div className={styles.projectBusEventActions}>
+                            <time>{formatTime(event.createdAt)}</time>
+                            {event.createdBy === "user" && !revoked ? (
+                              <button
+                                type="button"
+                                onClick={() => handleRevokeProjectBusMessage(event.eventId)}
+                                disabled={revokeProjectBusMessageMutation.isPending}
+                              >
+                                {lang === "zh" ? "撤回" : "Recall"}
+                              </button>
+                            ) : null}
+                          </div>
+                        </header>
+                        <p className={styles.projectBusEventBody}>
+                          {revoked ? (lang === "zh" ? "这条消息已撤回，相关 Agent 已请求停止。" : "This message was recalled. Target agents were asked to stop.") : event.content}
+                        </p>
+                        <div className={styles.projectBusEventMeta}>
+                          <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
+                          <span>{deliveryLabel}</span>
+                          {interruptionLabel ? <span>{interruptionLabel}</span> : null}
+                          {event.unresolvedMentions.length ? (
+                            <span>{lang === "zh" ? "未识别" : "unresolved"} @{event.unresolvedMentions.join(", @")}</span>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })
+                ) : (activeGroupRoom?.rounds ?? []).length ? (
+                  (activeGroupRoom?.rounds ?? []).map((round, roundIndex) => {
+                    const roundRunning = String(round.status ?? "").trim().toLowerCase() === "running";
+                    const deliveredParticipantIds = new Set(
+                      (round.messages ?? []).map((message) => String(message.participantId ?? "").trim()),
+                    );
+                    const nextSpeakerId = (round.speakerOrder ?? []).find(
+                      (participantId) => !deliveredParticipantIds.has(String(participantId ?? "").trim()),
+                    );
+                    const nextParticipant = nextSpeakerId ? activeGroupParticipantById.get(nextSpeakerId) : undefined;
+                    return (
+                    <section key={round.roundId} className={styles.groupRoundBlock}>
+                      <div className={styles.groupRoundDivider}>
+                        <span>
+                          {lang === "zh" ? `第 ${roundIndex + 1} 轮` : `Round ${roundIndex + 1}`}
+                          {" · "}
+                          {round.mode}
+                          {" · "}
+                          {round.purpose ?? activeGroupRoom?.purpose ?? "discussion"}
+                          {" · "}
+                          {statusLabel(round.status)}
+                        </span>
+                        <time>{formatTime(round.updatedAt || round.startedAt)}</time>
+                      </div>
+                      <article className={styles.groupTopicMessage}>
+                        <div className={styles.groupTopicBubble}>
+                          <span>{runtime?.userName || (lang === "zh" ? "我" : "Me")}</span>
+                          <p>{round.topic}</p>
+                        </div>
+                      </article>
+                      <div className={styles.groupMessageList}>
+                        {(round.messages ?? []).map((message: ChatRoomMessage) => (
+                          <article
+                            key={message.messageId}
+                            className={
+                              message.status === "failed"
+                                ? `${styles.groupBubbleRow} ${styles.groupBubbleRowFailed}`
+                                : styles.groupBubbleRow
+                            }
+                          >
+                            <span className={styles.groupBubbleAvatar} aria-hidden="true">
+                              {avatarInitials(undefined, message.speakerTitle, "AI")}
+                            </span>
+                            <div className={styles.groupBubble}>
+                              <header className={styles.groupBubbleHeader}>
+                                <strong>{message.speakerTitle}</strong>
+                                <span>{statusLabel(message.status)}</span>
+                              </header>
+                              <p className={styles.groupBubbleBody}>
+                                {message.content || message.summary || (lang === "zh" ? "暂无内容" : "No content yet")}
+                              </p>
+                              <time className={styles.groupBubbleMeta}>{formatTime(message.timestamp || round.updatedAt)}</time>
+                            </div>
+                          </article>
+                        ))}
+                        {roundRunning && nextParticipant ? (
+                          <article className={`${styles.groupBubbleRow} ${styles.groupBubbleRowPending}`}>
+                            <span className={styles.groupBubbleAvatar} aria-hidden="true">
+                              {avatarInitials(undefined, nextParticipant.title, "AI")}
+                            </span>
+                            <div className={styles.groupBubble}>
+                              <header className={styles.groupBubbleHeader}>
+                                <strong>{formatAgentIdentity(nextParticipant.agentCode, nextParticipant.title, nextParticipant.participantId)}</strong>
+                                <span>{lang === "zh" ? "正在输入" : "typing"}</span>
+                              </header>
+                              <div className={styles.groupTypingDots} aria-label={lang === "zh" ? "正在输入" : "Typing"}>
+                                <span />
+                                <span />
+                                <span />
+                              </div>
+                            </div>
+                          </article>
+                        ) : null}
+                      </div>
+                      {round.summary && !roundRunning ? <p className={styles.groupRoundSummary}>{round.summary}</p> : null}
+                    </section>
+                    );
+                  })
+                ) : (
+                  <div className={styles.groupEmptyState}>
+                    <UsersRound size={28} />
+                    <p>{lang === "zh" ? "项目总群会显示用户引导、Agent 私聊和广播投递结果。" : "The project bus shows guidance, private messages, broadcasts, and delivery results."}</p>
+                  </div>
+                )}
+              </div>
+              <div className={styles.groupComposerBar}>
+                <input
+                  value={projectBusDraft}
+                  onChange={(event) => setProjectBusDraft(event.target.value)}
+                  disabled={sendProjectBusMessageMutation.isPending}
+                  placeholder={lang === "zh" ? "输入总群消息；不带 @ 默认投递全体，可用 @AgentCode 指定" : "Message the project bus; no @ sends to all, @AgentCode targets one"}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleSendProjectBusMessage();
+                    }
+                  }}
+                />
+                <label className={styles.projectBusInterruptToggle}>
+                  <input
+                    type="checkbox"
+                    checked={projectBusInterruptTargets}
+                    onChange={(event) => setProjectBusInterruptTargets(event.target.checked)}
+                  />
+                  <span>{lang === "zh" ? "打断目标 Agent" : "Interrupt targets"}</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={handleSendProjectBusMessage}
+                  disabled={
+                    !projectBusDraft.trim()
+                    || sendProjectBusMessageMutation.isPending
+                  }
+                >
+                  <UsersRound size={15} />
+                  <span>
+                    {sendProjectBusMessageMutation.isPending
+                      ? (lang === "zh" ? "发送中" : "Sending")
+                      : (lang === "zh" ? "发送到总群" : "Send")}
+                  </span>
+                </button>
+              </div>
+            </div>
+          ) : legacyGroupRoomActive ? (
             <div className={styles.groupConversationFrame}>
               <header className={styles.groupConversationHeader}>
                 <div>
@@ -3166,7 +3538,7 @@ export function ChatCodingRoute() {
 
       <aside className={rightPaneCollapsed ? `${styles.rightPane} ${styles.paneCollapsed}` : styles.rightPane} aria-hidden={rightPaneCollapsed}>
         <div
-          className={groupPanelActive ? styles.rightIndexTabs : `${styles.rightIndexTabs} ${styles.rightIndexTabsSingle}`}
+          className={legacyGroupRoomActive ? styles.rightIndexTabs : `${styles.rightIndexTabs} ${styles.rightIndexTabsSingle}`}
           role="tablist"
           aria-label={lang === "zh" ? "右侧索引" : "Right index"}
         >
@@ -3180,7 +3552,7 @@ export function ChatCodingRoute() {
             <MessageCircleHeart size={14} />
             <span>{lang === "zh" ? "会话" : "Chats"}</span>
           </button>
-          {groupPanelActive ? (
+          {legacyGroupRoomActive ? (
             <button
               type="button"
               role="tab"
@@ -3194,7 +3566,7 @@ export function ChatCodingRoute() {
           ) : null}
         </div>
 
-        {rightIndexPanel === "members" && groupPanelActive ? (
+        {rightIndexPanel === "members" && legacyGroupRoomActive ? (
           <div className={styles.memberIndexSummary}>
             <UsersRound size={15} />
             <span>
@@ -3216,7 +3588,7 @@ export function ChatCodingRoute() {
         )}
 
         <div className={styles.panelBody}>
-          {rightIndexPanel === "members" && groupPanelActive ? (
+          {rightIndexPanel === "members" && legacyGroupRoomActive ? (
             <section className={styles.agentIndexRoster} aria-label={lang === "zh" ? "群成员状态索引" : "Group member status index"}>
               <div className={styles.sectionHeader}>
                 <div className={styles.sectionIdentity}>
@@ -3341,6 +3713,15 @@ export function ChatCodingRoute() {
               >
                 <Plus size={15} />
                 <span>{createSessionMutation.isPending ? t("creatingSession") : t("newSession")}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.newGroupButton}
+                onClick={handleOpenProjectAgentBus}
+                aria-current={groupPanelActive ? "true" : undefined}
+              >
+                <UsersRound size={15} />
+                <span>{lang === "zh" ? "项目总群" : "Project bus"}</span>
               </button>
               <button
                 type="button"
@@ -3548,13 +3929,16 @@ export function ChatCodingRoute() {
                   );
                 }
                 const sessionId = conversation.directSessionId || conversation.conversationId;
-                const session: SessionSummary = sessionsById.get(sessionId) ?? {
+  const session: SessionSummary = sessionsById.get(sessionId) ?? {
                   id: sessionId,
                   title: conversation.title,
                   agentId: conversation.agentId,
                   agentCode: conversation.agentCode,
                   agentProfileId: conversation.agentProfileId,
                   agentTemplateLabel: conversation.agentTemplateLabel,
+                  agentPrimaryMode: conversation.agentPrimaryMode,
+                  agentRoleKey: conversation.agentRoleKey,
+                  agentPromptTemplateId: conversation.agentPromptTemplateId,
                   agentDisplayName: conversation.agentDisplayName,
                   workspacePath: conversation.workspacePath,
                   status: conversation.status,

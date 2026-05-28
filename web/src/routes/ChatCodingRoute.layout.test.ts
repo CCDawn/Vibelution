@@ -148,7 +148,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("handleStopGroupRound");
     expect(routeSource).toContain("groupRoundStopping");
     expect(routeSource).toContain("groupRoundActive");
-    expect(routeSource).toContain("disabled={startGroupRoundMutation.isPending}");
+    expect(routeSource).toContain("sendProjectBusMessageMutation");
     expect(routeSource).toContain("updateGroupRoomMutation");
     expect(routeSource).toContain("deleteGroupRoomMutation");
     expect(routeSource).toContain("groupManageTitleDraft");
@@ -179,7 +179,35 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.groupBubble).toBeTypeOf("string");
     expect(routeStyles.groupTypingDots).toBeTypeOf("string");
     expect(routeStyles.groupComposerBar).toBeTypeOf("string");
-    expect(routeStyles.groupStopButton).toBeTypeOf("string");
+  });
+
+  it("uses the group surface as a project Agent bus observation and @ guidance entry", () => {
+    expect(routeSource).toContain("handleOpenProjectAgentBus");
+    expect(routeSource).toContain("setActiveGroupRoomId(\"__project_agent_bus__\")");
+    expect(routeSource).toContain("queryKeys.projectAgentBus()");
+    expect(routeSource).toContain("fetchJson<ProjectAgentBusTimeline>(\"/api/project-agent-bus\")");
+    expect(routeSource).toContain("fetchJson<ProjectAgentBusEvent>(\"/api/project-agent-bus/messages\"");
+    expect(routeSource).toContain("fetchJson<ProjectAgentBusEvent>(`/api/project-agent-bus/messages/${eventId}/revoke`");
+    expect(routeSource).toContain("targetScope: \"\"");
+    expect(routeSource).toContain("interruptMode: interruptTargets ? \"interrupt_targets\" : \"none\"");
+    expect(routeSource).toContain("stopTargets: true");
+    expect(routeSource).toContain("handleRevokeProjectBusMessage(event.eventId)");
+    expect(routeSource).toContain("projectBusInterruptTargets");
+    expect(routeSource).toContain("@全体成员");
+    expect(routeSource).toContain("不带 @ 默认投递全体");
+    expect(routeSource).toContain("打断目标 Agent");
+    expect(routeSource).toContain("styles.projectBusEvent");
+    expect(routeSource).toContain("styles.projectBusEventRevoked");
+    expect(routeSource).toContain("styles.projectBusEventActions");
+    expect(routeSource).toContain("styles.projectBusInterruptToggle");
+
+    expect(routeStyles.projectBusEvent).toBeTypeOf("string");
+    expect(routeStyles.projectBusEventRevoked).toBeTypeOf("string");
+    expect(routeStyles.projectBusEventHeader).toBeTypeOf("string");
+    expect(routeStyles.projectBusEventActions).toBeTypeOf("string");
+    expect(routeStyles.projectBusEventBody).toBeTypeOf("string");
+    expect(routeStyles.projectBusEventMeta).toBeTypeOf("string");
+    expect(routeStyles.projectBusInterruptToggle).toBeTypeOf("string");
   });
 
   it("logs direct session stream close events for lifecycle diagnosis", () => {
@@ -223,6 +251,17 @@ describe("ChatCodingRoute layout contract", () => {
 
     expect(routeStyles.groupMemberCopy).toBeTypeOf("string");
     expect(routeStyles.agentRoleTag).toBeTypeOf("string");
+  });
+
+  it("hides direct sessions whose Agent is no longer active in Agent Center", () => {
+    expect(routeSource).toContain("function isVisibleDirectSession");
+    expect(routeSource).toContain("return !session.agentMissing");
+    expect(routeSource).toContain("function isVisibleConversation");
+    expect(routeSource).toContain("return !conversation.agentMissing");
+    expect(routeSource).toContain("return sessions.filter(isVisibleDirectSession)");
+    expect(routeSource).toContain("const visibleSessions = useMemo");
+    expect(routeSource).toContain("visibleSessions.map(sessionToConversationSummary)");
+    expect(routeSource).toContain("conversations.filter((conversation) => isVisibleConversation(conversation, sessionsById))");
   });
 
   it("groups the unified conversation list like expandable contact folders", () => {
@@ -284,5 +323,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(renameMutationSource.indexOf("queryClient.setQueryData<ConversationSummary[]>(queryKeys.conversations()")).toBeLessThan(
       renameMutationSource.indexOf("void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() })"),
     );
+  });
+
+  it("classifies direct conversations from Agent Center role metadata", () => {
+    expect(routeSource).toContain("agentPrimaryMode: session.agentPrimaryMode");
+    expect(routeSource).toContain("agentRoleKey: session.agentRoleKey");
+    expect(routeSource).toContain("agentPromptTemplateId: session.agentPromptTemplateId");
+    expect(routeSource).toContain("primaryMode === \"research\"");
+    expect(routeSource).toContain("roleKey.startsWith(\"research_\")");
+    expect(routeSource).toContain("promptTemplateId.startsWith(\"prompt-research-\")");
   });
 });
