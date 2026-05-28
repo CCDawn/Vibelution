@@ -125,6 +125,7 @@ class WorkspaceManager:
             self._workspace / "memory",
             self._workspace / "memory" / "archives",
             self._workspace / "prompts",
+            self._workspace / "research",
             self._workspace / "logs",
         ]
         for d in dirs:
@@ -347,6 +348,10 @@ class WorkspaceManager:
         """科研提示词目录"""
         return self.prompts_dir / "research"
 
+    def research_dir(self) -> Path:
+        """科研运行数据目录。"""
+        return self._workspace / "research"
+
     @property
     def logs_dir(self) -> Path:
         """日志目录"""
@@ -369,6 +374,10 @@ class WorkspaceManager:
     def get_research_flow_canvas_path(self) -> Path:
         """获取科研流程画布配置路径。"""
         return self.research_prompts_dir() / "flow_canvas.json"
+
+    def get_research_organization_path(self) -> Path:
+        """获取科研组织图配置路径。"""
+        return self.research_dir() / "organization_graph.json"
 
     def get_archive_path(self, generation: int) -> Path:
         """获取指定世代的档案路径。"""
@@ -687,6 +696,30 @@ class WorkspaceManager:
             from core.logging import debug_logger
 
             debug_logger.error(f"[Workspace] 写入科研流程画布失败: {e}")
+            return False
+
+    def read_research_organization(self) -> Dict[str, Any]:
+        """读取科研组织图配置。"""
+        path = self.get_research_organization_path()
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        return {}
+
+    def write_research_organization(self, data: Dict[str, Any]) -> bool:
+        """写入科研组织图配置。"""
+        try:
+            path = self.get_research_organization_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+            return True
+        except Exception as e:
+            from core.logging import debug_logger
+
+            debug_logger.error(f"[Workspace] 写入科研组织图失败: {e}")
             return False
 
     # ==================== 状态报告 ====================

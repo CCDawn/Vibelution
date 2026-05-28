@@ -300,6 +300,62 @@ def test_runtime_scene_list_sorts_by_package_timestamp_when_started_at_missing(t
     )
 
 
+def test_runtime_scene_list_prunes_old_packages_to_retention_limit(tmp_path, monkeypatch):
+    root = tmp_path / "logs" / "runtime_scenes"
+    other_log = tmp_path / "logs" / "keep.log"
+    other_log.parent.mkdir(parents=True, exist_ok=True)
+    other_log.write_text("outside runtime scene retention\n", encoding="utf-8")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    for index in range(35):
+        _write_runtime_scene_for_retention(root, tmp_path, index, status="stopped")
+
+    scenes = runtime_scene_service.list_runtime_scenes(limit=80)
+
+    remaining_dirs = sorted(path.name for path in root.iterdir() if path.is_dir())
+    assert len(remaining_dirs) == 30
+    assert len(scenes) == 30
+    assert not (root / "20260501T000000Z__scene-00").exists()
+    assert not (root / "20260501T000100Z__scene-01").exists()
+    assert not (root / "20260501T000400Z__scene-04").exists()
+    assert (root / "20260501T000500Z__scene-05").exists()
+    assert (root / "20260501T003400Z__scene-34").exists()
+    assert other_log.exists()
+
+
+def test_runtime_scene_retention_protects_current_package_inside_thirty_total(tmp_path, monkeypatch):
+    root = tmp_path / "logs" / "runtime_scenes"
+    current_dir = _write_runtime_scene_for_retention(root, tmp_path, 0, status="running")
+    for index in range(1, 32):
+        _write_runtime_scene_for_retention(root, tmp_path, index, status="stopped")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps({"runtimeSceneId": "scene-00", "runtimeSceneDir": str(current_dir)}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    scenes = runtime_scene_service.list_runtime_scenes(limit=80)
+
+    remaining_dirs = sorted(path.name for path in root.iterdir() if path.is_dir())
+    assert len(remaining_dirs) == 30
+    assert len(scenes) == 30
+    assert current_dir.exists()
+    assert not (root / "20260501T000100Z__scene-01").exists()
+    assert not (root / "20260501T000200Z__scene-02").exists()
+    assert (root / "20260501T000300Z__scene-03").exists()
+    assert (root / "20260501T003100Z__scene-31").exists()
+    retention_events = (current_dir / "events" / "runtime_manager.jsonl").read_text(encoding="utf-8")
+    assert "runtime_scene.retention.pruned" in retention_events
+    assert "scene-01" in retention_events
+
+
 def test_runtime_scene_status_defaults_to_running_until_ended(tmp_path, monkeypatch):
     scene_id = "statusless-running-scene"
     scene_dir = tmp_path / "logs" / "runtime_scenes" / f"20260524T120001Z__{scene_id}"
@@ -448,3 +504,22 @@ def test_runtime_scene_static_summary_distinguishes_recovered_issue_from_active_
     assert "避免把已恢复错误当成当前阻塞" in summary["diagnosis"]["agentNextStep"]
     assert "diagnosis-recovered-issue" in package_index["tags"]
     assert "recovered_issue" in package_index["search_text"]
+
+
+def _write_runtime_scene_for_retention(root, project_root, index: int, *, status: str):
+    started = datetime(2026, 5, 1, 0, 0, tzinfo=UTC) + timedelta(minutes=index)
+    scene_id = f"scene-{index:02d}"
+    scene_dir = root / f"{started.strftime('%Y%m%dT%H%M%SZ')}__{scene_id}"
+    scene_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 2,
+        "runtime_scene_id": scene_id,
+        "started_at": started.isoformat().replace("+00:00", "Z"),
+        "status": status,
+        "trigger": "internal-start",
+        "project_root": str(project_root),
+    }
+    if status != "running":
+        payload["ended_at"] = (started + timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+    scene_dir.joinpath("manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+    return scene_dir

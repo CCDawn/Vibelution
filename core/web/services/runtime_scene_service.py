@@ -19,6 +19,8 @@ BROWSER_TELEMETRY_RAW_PATH = "raw/browser.telemetry.log"
 BROWSER_TELEMETRY_COMPONENT = "browser_page"
 BACKEND_API_RAW_PATH = "raw/backend.api.log"
 BACKEND_COMPONENT = "backend"
+CONFIG_MODEL_DISCOVERY_ENDPOINT = "/api/config/discover-models"
+OPERATIONAL_CLIENT_ERROR_PATHS = {CONFIG_MODEL_DISCOVERY_ENDPOINT}
 TIMELINE_PATH = "timeline.jsonl"
 LIFECYCLE_PATH = "lifecycle.jsonl"
 PACKAGE_INDEX_PATH = "package_index.json"
@@ -30,12 +32,14 @@ EVENTS_DIR = "events"
 RESEARCH_DIR = "research"
 RESEARCH_EVENTS_PATH = f"{RESEARCH_DIR}/events.jsonl"
 RESEARCH_SUMMARY_PATH = f"{RESEARCH_DIR}/summary.json"
+RUNTIME_SCENE_RETENTION_LIMIT = 30
 MAX_TELEMETRY_TEXT_CHARS = 4_000
 MAX_TELEMETRY_FIELD_TEXT_CHARS = 1_200
 MAX_TELEMETRY_FIELD_ITEMS = 24
 BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS = 60.0
 WORK_RUN_SNAPSHOT_EVENT_CODE = "work_run.snapshot.persisted"
 WORK_RUN_SNAPSHOT_SUMMARY_EVENT_CODE = "work_run.snapshot.summary"
+WORK_RUN_HIGH_FREQUENCY_SNAPSHOT_THRESHOLD = 5
 MAX_CONVERSATION_TEXT_CHARS = 20_000
 REDACTED_FIELD_VALUE = "[redacted]"
 LIFECYCLE_INDEX_PHASES = {
@@ -71,6 +75,21 @@ NON_PROBLEM_NEXT_STATE_KINDS = {
     "user_continues",
     "user_stops",
 }
+EXPECTED_RUNTIME_MANAGER_BLOCK_ERROR_TYPES = {
+    "selfevolutionrunbusyerror",
+    "workrunbusyerror",
+    "runtimecommandbusyerror",
+}
+WORK_RUN_ACTIVE_STATUSES = {
+    "queued",
+    "starting",
+    "running",
+    "reading",
+    "paused",
+    "needs_continue",
+    "needs_review",
+    "pending",
+}
 ISSUE_RESOLUTION_OUTCOMES = {
     "fallback",
     "fallback_activated",
@@ -102,6 +121,7 @@ RAW_LABELS = {
     "raw/supervisor.log": "Supervisor log",
     "raw/supervisor.stderr.log": "Supervisor stderr",
     "raw/browser.log": "Browser log",
+    "raw/browser.process-memory.log": "Managed browser process memory",
     BROWSER_TELEMETRY_RAW_PATH: "Browser telemetry",
     TIMELINE_PATH: "Unified timeline",
     LIFECYCLE_PATH: "Lifecycle events",
@@ -191,6 +211,7 @@ PACKAGE_INDEX_RESULT_TOKENS = {
 def list_runtime_scenes(limit: int = 80) -> list[dict]:
     """Return runtime scene summaries sorted by most recent first."""
 
+    _enforce_runtime_scene_retention()
     scenes: list[dict] = []
     for scene_dir in _scene_dirs():
         manifest = _load_scene_manifest(scene_dir)
@@ -477,8 +498,17 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
     status_code = _coerce_int(payload.get("status_code"), default=0)
     duration_ms = _coerce_float(payload.get("duration_ms"), default=0.0)
     path_template = _truncate_text(str(payload.get("path_template") or path), 240)
-    level = "error" if status_code >= 500 else "warning" if status_code >= 400 else "info"
-    outcome = "failed" if status_code >= 500 else "client_error" if status_code >= 400 else "succeeded"
+    is_operational_client_error = status_code >= 400 and path_template in OPERATIONAL_CLIENT_ERROR_PATHS
+    level = "error" if status_code >= 500 else "info" if is_operational_client_error else "warning" if status_code >= 400 else "info"
+    outcome = (
+        "failed"
+        if status_code >= 500
+        else "operational_client_error"
+        if is_operational_client_error
+        else "client_error"
+        if status_code >= 400
+        else "succeeded"
+    )
     event_code = _sanitize_token(payload.get("event_code"), default="backend.api.request")
     message = _truncate_text(
         str(payload.get("message") or f"{method or 'API'} {path_template or path} -> {status_code or '?'}"),
@@ -495,6 +525,7 @@ def record_backend_api_event(payload: dict[str, Any]) -> dict[str, Any]:
             "client": _truncate_text(str(payload.get("client") or ""), 160),
             "exceptionType": _truncate_text(str(payload.get("exception_type") or ""), 120),
             "exceptionMessage": _truncate_text(str(payload.get("exception_message") or ""), 320),
+            "operationalClientError": is_operational_client_error,
         }
     )
 
@@ -1000,6 +1031,135 @@ def _scene_dirs() -> list[Path]:
     return sorted([path for path in runtime_scene_root.iterdir() if path.is_dir()], reverse=True)
 
 
+def _enforce_runtime_scene_retention(max_packages: int = RUNTIME_SCENE_RETENTION_LIMIT) -> dict[str, Any]:
+    """Keep runtime scene packages bounded while preserving active evidence."""
+
+    try:
+        retention_limit = max(1, int(max_packages or RUNTIME_SCENE_RETENTION_LIMIT))
+    except (TypeError, ValueError):
+        retention_limit = RUNTIME_SCENE_RETENTION_LIMIT
+    scene_dirs = _scene_dirs()
+    if len(scene_dirs) <= retention_limit:
+        return {
+            "retentionLimit": retention_limit,
+            "deletedCount": 0,
+            "keptCount": len(scene_dirs),
+            "protectedCount": 0,
+            "deletedSceneIds": [],
+        }
+
+    current_scene_dir = _safe_current_runtime_scene_dir_for_retention()
+    items: list[dict[str, Any]] = []
+    for scene_dir in scene_dirs:
+        manifest = _load_scene_manifest(scene_dir)
+        items.append(
+            {
+                "path": scene_dir,
+                "manifest": manifest,
+                "sceneId": _scene_id(scene_dir, manifest),
+                "sortKey": _runtime_scene_retention_sort_key(scene_dir, manifest),
+                "protected": _is_runtime_scene_retention_protected(scene_dir, current_scene_dir),
+            }
+        )
+
+    items.sort(key=lambda item: item["sortKey"], reverse=True)
+    protected_items = [item for item in items if item["protected"]]
+    ordinary_items = [item for item in items if not item["protected"]]
+    keep_paths: set[Path] = {item["path"].resolve() for item in protected_items}
+    ordinary_slots = max(0, retention_limit - len(keep_paths))
+    keep_paths.update(item["path"].resolve() for item in ordinary_items[:ordinary_slots])
+    delete_items = [item for item in ordinary_items if item["path"].resolve() not in keep_paths]
+
+    deleted_scene_ids: list[str] = []
+    for item in delete_items:
+        scene_dir = item["path"]
+        if not _can_delete_runtime_scene_for_retention(scene_dir):
+            continue
+        shutil.rmtree(scene_dir)
+        deleted_scene_ids.append(str(item["sceneId"] or scene_dir.name))
+
+    if deleted_scene_ids:
+        _record_runtime_scene_retention_pruned(
+            retention_limit=retention_limit,
+            kept_count=len(items) - len(deleted_scene_ids),
+            protected_count=len(protected_items),
+            deleted_scene_ids=deleted_scene_ids,
+        )
+
+    return {
+        "retentionLimit": retention_limit,
+        "deletedCount": len(deleted_scene_ids),
+        "keptCount": len(items) - len(deleted_scene_ids),
+        "protectedCount": len(protected_items),
+        "deletedSceneIds": deleted_scene_ids,
+    }
+
+
+def _safe_current_runtime_scene_dir_for_retention() -> Path | None:
+    try:
+        return _resolve_current_runtime_scene_dir()
+    except Exception:
+        return None
+
+
+def _runtime_scene_retention_sort_key(scene_dir: Path, manifest: dict[str, Any]) -> tuple[str, str]:
+    package = manifest.get("package") if isinstance(manifest.get("package"), dict) else {}
+    started = _resolve_scene_started_at(str(manifest.get("started_at") or package.get("started_at") or ""), scene_dir)
+    if started is not None:
+        return (started.isoformat(), scene_dir.name)
+    return ("", scene_dir.name)
+
+
+def _is_runtime_scene_retention_protected(
+    scene_dir: Path,
+    current_scene_dir: Path | None,
+) -> bool:
+    return current_scene_dir is not None and _same_path(scene_dir, current_scene_dir)
+
+
+def _can_delete_runtime_scene_for_retention(scene_dir: Path) -> bool:
+    try:
+        resolved = scene_dir.resolve()
+        resolved.relative_to(_runtime_scene_root())
+    except (OSError, ValueError):
+        return False
+    if not resolved.exists() or not resolved.is_dir():
+        return False
+    return not _is_runtime_scene_retention_protected(
+        resolved,
+        _safe_current_runtime_scene_dir_for_retention(),
+    )
+
+
+def _record_runtime_scene_retention_pruned(
+    *,
+    retention_limit: int,
+    kept_count: int,
+    protected_count: int,
+    deleted_scene_ids: list[str],
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "runtime_manager",
+            "retention",
+            "runtime_scene.retention.pruned",
+            message="Runtime scene retention pruned old packages",
+            level="info",
+            outcome="succeeded",
+            fields={
+                "retentionLimit": retention_limit,
+                "keptCount": kept_count,
+                "protectedCount": protected_count,
+                "deletedCount": len(deleted_scene_ids),
+                "deletedSceneIds": deleted_scene_ids[:20],
+            },
+            lifecycle=True,
+            allow_recent_completed=False,
+        )
+    except Exception:
+        pass
+
+
 def _analyze_runtime_scene_content(scene_id: str, relative_path: str, content: str) -> dict[str, Any]:
     return analyze_log_content(
         anchor=f"runtime_scenes/{scene_id}/{relative_path}",
@@ -1157,35 +1317,32 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
     policy_count = int(issue_state.get("policyClusterCount") or 0)
     historical_count = int(issue_state.get("historicalClusterCount") or 0)
     first_signal = diagnosis.get("firstSignal") if isinstance(diagnosis.get("firstSignal"), dict) else {}
-    primary_issue = str(
-        first_signal.get("event")
-        or first_signal.get("type")
-        or first_signal.get("eventCode")
-        or first_signal.get("component")
-        or _runtime_scene_diagnosis_status(issue_state)
-        or "none"
-    )
+    work_run_summary = diagnosis.get("workRunSummary") if isinstance(diagnosis.get("workRunSummary"), dict) else {}
 
     if active_count > 0 or severity in {"error", "critical"}:
         diagnosis_status = "active_issue"
         needs_action = True
         actionability = "fix_required"
         do_not_do = ["do not ignore active clusters without checking their evidence paths"]
+        primary_issue = _runtime_scene_agent_brief_issue(first_signal, fallback=diagnosis_status)
     elif policy_count > 0:
         diagnosis_status = "policy_only"
         needs_action = False
         actionability = "policy_acknowledge_only"
         do_not_do = ["do not treat expected policy blocks as product/runtime bugs"]
+        primary_issue = _runtime_scene_agent_brief_issue(first_signal, fallback=diagnosis_status)
     elif historical_count > 0:
         diagnosis_status = "resolved"
         needs_action = False
         actionability = "no_action_needed"
         do_not_do = ["do not keep chasing historical recovered errors as active blockers"]
+        primary_issue = "none"
     else:
         diagnosis_status = "healthy"
         needs_action = False
         actionability = "no_action_needed"
         do_not_do = ["do not open raw logs unless a new signal appears"]
+        primary_issue = "none"
 
     return {
         "diagnosis_status": diagnosis_status,
@@ -1198,7 +1355,45 @@ def _runtime_scene_agent_brief(diagnosis: dict[str, Any]) -> dict[str, Any]:
         "historical_cluster_count": historical_count,
         "next_minimal_action": str(diagnosis.get("agentNextStep") or "read summary.json first"),
         "evidence_refs": evidence_paths[:5],
+        "work_run_focus": _runtime_scene_agent_work_run_focus(work_run_summary),
         "do_not_do": do_not_do,
+    }
+
+
+def _runtime_scene_agent_brief_issue(first_signal: dict[str, Any], *, fallback: str) -> str:
+    return str(
+        first_signal.get("event")
+        or first_signal.get("type")
+        or first_signal.get("eventCode")
+        or first_signal.get("component")
+        or fallback
+    )
+
+
+def _runtime_scene_agent_work_run_focus(work_run_summary: dict[str, Any]) -> dict[str, Any]:
+    active_runs = work_run_summary.get("activeRuns") if isinstance(work_run_summary.get("activeRuns"), list) else []
+    high_frequency_runs = work_run_summary.get("highFrequencyRuns") if isinstance(work_run_summary.get("highFrequencyRuns"), list) else []
+    first_active = active_runs[0] if active_runs and isinstance(active_runs[0], dict) else {}
+    first_high_frequency = high_frequency_runs[0] if high_frequency_runs and isinstance(high_frequency_runs[0], dict) else {}
+    return {
+        "events_path": str(work_run_summary.get("eventsPath") or ""),
+        "snapshot_event_count": int(work_run_summary.get("snapshotEventCount") or 0),
+        "run_count": int(work_run_summary.get("runCount") or 0),
+        "active_run_count": int(work_run_summary.get("activeRunCount") or 0),
+        "high_frequency_run_count": int(work_run_summary.get("highFrequencyRunCount") or 0),
+        "first_active_run": {
+            "runKind": str(first_active.get("runKind") or ""),
+            "runId": str(first_active.get("runId") or ""),
+            "latestStatus": str(first_active.get("latestStatus") or ""),
+            "latestPhase": str(first_active.get("latestPhase") or ""),
+            "latestAt": str(first_active.get("latestAt") or ""),
+        },
+        "first_high_frequency_run": {
+            "runKind": str(first_high_frequency.get("runKind") or ""),
+            "runId": str(first_high_frequency.get("runId") or ""),
+            "snapshotCount": int(first_high_frequency.get("snapshotCount") or 0),
+            "latestStatus": str(first_high_frequency.get("latestStatus") or ""),
+        },
     }
 
 
@@ -2024,6 +2219,8 @@ def _runtime_scene_primary_cause_token(
     source = primary_cluster if isinstance(primary_cluster, dict) else first_signal if isinstance(first_signal, dict) else {}
     component = str(source.get("component") or "").strip()
     event_code = str(source.get("eventCode") or "").strip()
+    if event_code.startswith("config.model_discovery."):
+        return _slugify_index_token(event_code, default="runtime-signal")
     if component or event_code:
         return _slugify_index_token("_".join(part for part in (component, event_code) if part), default="runtime-signal")
     severity = str(diagnosis.get("severity") or "info").strip()
@@ -2100,6 +2297,7 @@ def _runtime_scene_package_diagnosis(
     if first_signal is None:
         first_signal = _runtime_scene_first_key_event(lifecycle, timeline)
     startup_trace = _runtime_scene_startup_trace(scene_dir=scene_dir, manifest=manifest, timeline=timeline)
+    work_run_summary = _runtime_scene_work_run_summary(scene_dir, timeline)
     recommended_order = _runtime_scene_recommended_reading_order(
         startup_trace=startup_trace,
         raw_files=raw_files,
@@ -2152,9 +2350,122 @@ def _runtime_scene_package_diagnosis(
         "issueState": issue_state,
         "firstSignal": _runtime_scene_diagnosis_signal_payload(first_signal),
         "startupTrace": startup_trace,
+        "workRunSummary": work_run_summary,
         "recommendedOrder": recommended_order,
         "keyEntries": key_entries,
         "evidencePaths": evidence_paths,
+    }
+
+
+def _runtime_scene_work_run_summary(scene_dir: Path, timeline: list[dict]) -> dict[str, Any]:
+    events_path = f"{EVENTS_DIR}/work_run.jsonl"
+    raw_rows = _read_jsonl_file(scene_dir / events_path)
+    if raw_rows:
+        work_run_events = [_event_payload_to_client_item(row, scene_dir, "work_run") for row in raw_rows]
+        source_path = events_path
+    else:
+        timeline_rows = _read_jsonl_file(scene_dir / TIMELINE_PATH)
+        if timeline_rows:
+            work_run_events = [
+                _event_payload_to_client_item(row, scene_dir, "timeline")
+                for row in timeline_rows
+                if str(row.get("component") or "").strip() == "work_run"
+            ]
+            source_path = TIMELINE_PATH
+        else:
+            work_run_events = [
+                event
+                for event in timeline
+                if str(event.get("component") or "").strip() == "work_run"
+            ]
+            source_path = TIMELINE_PATH
+
+    snapshot_events = [
+        event
+        for event in work_run_events
+        if str(event.get("eventCode") or "") == WORK_RUN_SNAPSHOT_EVENT_CODE
+    ]
+    runs: dict[tuple[str, str], dict[str, Any]] = {}
+    for event in snapshot_events:
+        fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+        run_kind = str(fields.get("runKind") or "").strip() or "unknown"
+        run_id = str(fields.get("runId") or "").strip() or "unknown"
+        key = (run_kind, run_id)
+        run = runs.setdefault(
+            key,
+            {
+                "runKind": run_kind,
+                "runId": run_id,
+                "snapshotCount": 0,
+                "latestAt": "",
+                "latestStatus": "",
+                "latestPhase": "",
+                "activeRunId": "",
+                "runtimeStatus": "",
+                "snapshotPath": "",
+                "statusCounts": {},
+            },
+        )
+        status = str(fields.get("status") or "").strip()
+        timestamp = str(event.get("timestamp") or "").strip()
+        run["snapshotCount"] = int(run.get("snapshotCount") or 0) + 1
+        status_counts = run["statusCounts"] if isinstance(run.get("statusCounts"), dict) else {}
+        if status:
+            status_counts[status] = int(status_counts.get(status) or 0) + 1
+        run["statusCounts"] = status_counts
+        if timestamp >= str(run.get("latestAt") or ""):
+            run["latestAt"] = timestamp
+            run["latestStatus"] = status
+            run["latestPhase"] = str(fields.get("phase") or "").strip()
+            run["activeRunId"] = str(fields.get("activeRunId") or "").strip()
+            run["runtimeStatus"] = str(fields.get("runtimeStatus") or "").strip()
+            run["snapshotPath"] = str(fields.get("snapshotPath") or "").strip()
+
+    run_summaries = sorted(
+        runs.values(),
+        key=lambda item: (str(item.get("latestAt") or ""), str(item.get("runKind") or ""), str(item.get("runId") or "")),
+        reverse=True,
+    )
+    active_runs = [item for item in run_summaries if _work_run_status_is_active(str(item.get("latestStatus") or ""))]
+    high_frequency_runs = sorted(
+        [
+            item
+            for item in run_summaries
+            if int(item.get("snapshotCount") or 0) >= WORK_RUN_HIGH_FREQUENCY_SNAPSHOT_THRESHOLD
+        ],
+        key=lambda item: (int(item.get("snapshotCount") or 0), str(item.get("latestAt") or "")),
+        reverse=True,
+    )
+    return {
+        "schemaVersion": 1,
+        "eventsPath": source_path,
+        "workRunEventCount": len(work_run_events),
+        "snapshotEventCount": len(snapshot_events),
+        "runCount": len(run_summaries),
+        "activeRunCount": len(active_runs),
+        "highFrequencyRunCount": len(high_frequency_runs),
+        "latestRuns": [_runtime_scene_work_run_public_summary(item) for item in run_summaries[:8]],
+        "activeRuns": [_runtime_scene_work_run_public_summary(item) for item in active_runs[:8]],
+        "highFrequencyRuns": [_runtime_scene_work_run_public_summary(item) for item in high_frequency_runs[:8]],
+    }
+
+
+def _work_run_status_is_active(status: str) -> bool:
+    return str(status or "").strip().lower() in WORK_RUN_ACTIVE_STATUSES
+
+
+def _runtime_scene_work_run_public_summary(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "runKind": str(item.get("runKind") or ""),
+        "runId": str(item.get("runId") or ""),
+        "snapshotCount": int(item.get("snapshotCount") or 0),
+        "latestAt": str(item.get("latestAt") or ""),
+        "latestStatus": str(item.get("latestStatus") or ""),
+        "latestPhase": str(item.get("latestPhase") or ""),
+        "activeRunId": str(item.get("activeRunId") or ""),
+        "runtimeStatus": str(item.get("runtimeStatus") or ""),
+        "snapshotPath": str(item.get("snapshotPath") or ""),
+        "statusCounts": item.get("statusCounts") if isinstance(item.get("statusCounts"), dict) else {},
     }
 
 
@@ -2187,18 +2498,25 @@ def _runtime_scene_first_key_event(lifecycle: list[dict], timeline: list[dict]) 
 
 
 def _runtime_scene_issue_state(events: list[dict]) -> dict[str, Any]:
+    startup_context = _runtime_scene_startup_failure_context(events)
+    wrapped_failure_context = _runtime_scene_wrapped_failure_context(events)
     signals: list[dict[str, Any]] = []
     for index, event in enumerate(events):
         severity = _runtime_scene_event_severity(event)
         if severity not in {"error", "warning"}:
             continue
-        problem = _runtime_scene_signal_kind(event)
+        problem = _runtime_scene_signal_kind(
+            event,
+            startup_context=startup_context,
+            wrapped_failure_context=wrapped_failure_context,
+        )
+        diagnosis_event = _runtime_scene_diagnosis_event(event, startup_context=startup_context)
         signals.append(
             {
                 "index": index,
                 "severity": severity,
                 "problem": problem,
-                "event": {**event, "diagnosisSeverity": severity},
+                "event": {**diagnosis_event, "diagnosisSeverity": severity},
             }
         )
 
@@ -2327,6 +2645,9 @@ def _runtime_scene_issue_cluster_sort_key(cluster: dict[str, Any]) -> tuple[int,
 def _runtime_scene_issue_cluster_label(event: dict[str, Any] | None) -> str:
     if not isinstance(event, dict):
         return "未命名问题簇"
+    diagnosis_label = _runtime_scene_diagnosis_field(event, "diagnosisLabel")
+    if diagnosis_label:
+        return diagnosis_label
     parts = [
         str(event.get("component") or "").strip(),
         str(event.get("eventCode") or "").strip(),
@@ -2344,6 +2665,123 @@ def _runtime_scene_issue_cluster_display(cluster: dict[str, Any] | None) -> str:
     return label
 
 
+def _runtime_scene_startup_failure_context(events: list[dict]) -> dict[str, Any]:
+    root_event: dict[str, Any] | None = None
+    startup_failed = False
+    open_workbench_command_ids: set[str] = set()
+    for event in events:
+        event_code = str(event.get("eventCode") or "").strip()
+        if event_code == "runtime.scene.startup.failed":
+            startup_failed = True
+            continue
+        fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+        if (
+            str(event.get("component") or "").strip() == "runtime_manager"
+            and event_code == "command.failed"
+            and str(fields.get("type") or "").strip() == "open_workbench"
+        ):
+            command_id = str(fields.get("commandId") or "").strip()
+            if command_id:
+                open_workbench_command_ids.add(command_id)
+        if root_event is None and _runtime_scene_is_specific_startup_root_cause(event):
+            root_event = event
+    return {
+        "startupFailed": startup_failed,
+        "specificRootEventCode": str((root_event or {}).get("eventCode") or ""),
+        "hasSpecificRootCause": root_event is not None,
+        "openWorkbenchCommandIds": open_workbench_command_ids,
+    }
+
+
+def _runtime_scene_is_specific_startup_root_cause(event: dict[str, Any]) -> bool:
+    event_code = str(event.get("eventCode") or "").strip()
+    if event_code in {
+        "frontend.build.failed",
+        "frontend.dependencies.install.failed",
+        "backend.dependencies.install.failed",
+        "backend.start.failed",
+        "backend.health.failed",
+        "browser.window.launch.failed",
+    }:
+        return True
+    component = str(event.get("component") or "").strip()
+    phase = str(event.get("phase") or "").strip()
+    if component in {"frontend", "backend", "browser"} and phase in {"build", "dependencies", "startup", "health", "window"}:
+        return event_code.endswith(".failed")
+    return False
+
+
+def _runtime_scene_is_startup_failure_wrapper(
+    event: dict[str, Any],
+    *,
+    startup_context: dict[str, Any] | None = None,
+) -> bool:
+    context = startup_context if isinstance(startup_context, dict) else {}
+    event_code = str(event.get("eventCode") or "").strip()
+    if event_code == "runtime.scene.startup.failed":
+        return bool(context.get("hasSpecificRootCause"))
+    if not context.get("startupFailed"):
+        return False
+    if str(event.get("component") or "").strip() != "runtime_manager":
+        return False
+    if event_code not in {"command.failed", "command_queue.command_result_written"}:
+        return False
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    command_type = str(fields.get("type") or "").strip()
+    if command_type == "open_workbench":
+        return True
+    command_id = str(fields.get("commandId") or "").strip()
+    open_workbench_command_ids = context.get("openWorkbenchCommandIds")
+    if command_id and isinstance(open_workbench_command_ids, set) and command_id in open_workbench_command_ids:
+        return True
+    message = _runtime_scene_failure_text(event).lower()
+    specific_root = str(context.get("specificRootEventCode") or "").strip().lower()
+    if specific_root and specific_root in message:
+        return True
+    return "launcher exit code" in message or "runtime scene startup" in message
+
+
+def _runtime_scene_wrapped_failure_context(events: list[dict]) -> dict[str, Any]:
+    image2_failed = False
+    for event in events:
+        if str(event.get("eventCode") or "").strip() == "image2.generate.failed":
+            image2_failed = True
+            break
+    return {"image2Failed": image2_failed}
+
+
+def _runtime_scene_is_conversation_failure_wrapper(
+    event: dict[str, Any],
+    *,
+    wrapped_failure_context: dict[str, Any] | None = None,
+) -> bool:
+    context = wrapped_failure_context if isinstance(wrapped_failure_context, dict) else {}
+    if str(event.get("component") or "").strip() != "conversation":
+        return False
+    if str(event.get("eventCode") or "").strip() != "conversation.assistant_artifact":
+        return False
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    if str(fields.get("status") or event.get("outcome") or "").strip().lower() != "failed":
+        return False
+    diagnostic_text = " ".join(
+        str(value or "")
+        for value in (
+            event.get("message"),
+            fields.get("contentPreview"),
+        )
+    ).lower()
+    return bool(context.get("image2Failed")) and "image2" in diagnostic_text
+
+
+def _runtime_scene_issue_cluster_hint(cluster: dict[str, Any] | None) -> str:
+    if not isinstance(cluster, dict):
+        return ""
+    representative = cluster.get("representativeSignal")
+    if isinstance(representative, dict):
+        return _runtime_scene_diagnosis_field(representative, "diagnosisHint")
+    return ""
+
+
 def _runtime_scene_signal_message_signature(message: str) -> str:
     text = " ".join(str(message or "").split())
     if not text:
@@ -2352,12 +2790,25 @@ def _runtime_scene_signal_message_signature(message: str) -> str:
     return _truncate_text(first_line, 160)
 
 
-def _runtime_scene_signal_kind(event: dict[str, Any]) -> str:
+def _runtime_scene_signal_kind(
+    event: dict[str, Any],
+    *,
+    startup_context: dict[str, Any] | None = None,
+    wrapped_failure_context: dict[str, Any] | None = None,
+) -> str:
     fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
     if str(event.get("eventCode") or "") == "conversation.next_state_signal.recorded":
         kind = str(fields.get("kind") or event.get("outcome") or "").strip().lower()
         if kind in NON_PROBLEM_NEXT_STATE_KINDS:
             return "control"
+    if _runtime_scene_is_startup_failure_wrapper(event, startup_context=startup_context):
+        return "control"
+    if _runtime_scene_is_conversation_failure_wrapper(event, wrapped_failure_context=wrapped_failure_context):
+        return "control"
+    if _runtime_scene_is_expected_runtime_manager_block(event):
+        return "policy"
+    if _runtime_scene_is_expected_work_run_manager_block(event):
+        return "policy"
     if str(event.get("component") or "") == "tool_registry":
         if str(event.get("outcome") or "").strip().lower() == "blocked":
             return "policy"
@@ -2367,6 +2818,298 @@ def _runtime_scene_signal_kind(event: dict[str, Any]) -> str:
         if str(fields.get("source") or "").strip().lower() == "built_in":
             return "policy"
     return "problem"
+
+
+def _runtime_scene_diagnosis_event(
+    event: dict[str, Any],
+    *,
+    startup_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    model_discovery = _runtime_scene_config_model_discovery_diagnosis(event)
+    if model_discovery:
+        fields = dict(event.get("fields") if isinstance(event.get("fields"), dict) else {})
+        source_event_code = str(event.get("eventCode") or "").strip()
+        fields.update(
+            {
+                "diagnosisEventCode": model_discovery["eventCode"],
+                "diagnosisLabel": model_discovery["label"],
+                "diagnosisReason": model_discovery["reason"],
+                "diagnosisHint": model_discovery["hint"],
+                "diagnosisEndpoint": CONFIG_MODEL_DISCOVERY_ENDPOINT,
+            }
+        )
+        if source_event_code and source_event_code != model_discovery["eventCode"]:
+            fields["sourceEventCode"] = source_event_code
+
+        return {
+            **event,
+            "eventCode": model_discovery["eventCode"],
+            "fields": fields,
+        }
+
+    startup_failure = _runtime_scene_startup_failure_diagnosis(event, startup_context=startup_context)
+    if not startup_failure:
+        return event
+
+    fields = dict(event.get("fields") if isinstance(event.get("fields"), dict) else {})
+    source_event_code = str(event.get("eventCode") or "").strip()
+    fields.update(
+        {
+            "diagnosisEventCode": startup_failure["eventCode"],
+            "diagnosisLabel": startup_failure["label"],
+            "diagnosisReason": startup_failure["reason"],
+            "diagnosisHint": startup_failure["hint"],
+        }
+    )
+    if source_event_code and source_event_code != startup_failure["eventCode"]:
+        fields["sourceEventCode"] = source_event_code
+    return {
+        **event,
+        "eventCode": startup_failure["eventCode"],
+        "fields": fields,
+    }
+
+
+def _runtime_scene_config_model_discovery_diagnosis(event: dict[str, Any]) -> dict[str, str] | None:
+    event_code = str(event.get("eventCode") or "").strip()
+    endpoint = _runtime_scene_event_endpoint(event)
+    if endpoint != CONFIG_MODEL_DISCOVERY_ENDPOINT and not event_code.startswith("config.model_discovery."):
+        return None
+
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    failure_kind = str(fields.get("failureKind") or "").strip().lower()
+    diagnostic_text = " ".join(
+        str(value or "")
+        for value in (
+            event.get("message"),
+            fields.get("failureMessage"),
+            fields.get("exceptionMessage"),
+            fields.get("error"),
+        )
+    )
+    diagnostic_lower = diagnostic_text.lower()
+    is_network = failure_kind == "network" or event_code.endswith(".network_error")
+    if is_network:
+        return {
+            "eventCode": "config.model_discovery.network_error",
+            "label": "配置模型发现失败：网络不可达",
+            "reason": "network_error",
+            "hint": "先确认模型发现接口、代理和本地网络是否可达。",
+        }
+
+    if "openai_api_key" in diagnostic_lower and (
+        "未找到" in diagnostic_text
+        or "missing" in diagnostic_lower
+        or "not found" in diagnostic_lower
+        or "not set" in diagnostic_lower
+    ):
+        return {
+            "eventCode": "config.model_discovery.failed",
+            "label": "配置模型发现失败：缺少 OPENAI_API_KEY",
+            "reason": "missing_openai_api_key",
+            "hint": "先配置 OPENAI_API_KEY，或把模型库条目切到已有可用密钥来源。",
+        }
+
+    if "认证失败" in diagnostic_text or "unauthorized" in diagnostic_lower or "http 401" in diagnostic_lower:
+        return {
+            "eventCode": "config.model_discovery.failed",
+            "label": "配置模型发现失败：模型服务认证失败",
+            "reason": "auth_failed",
+            "hint": "先检查模型服务 API Key、base URL 和 provider 密钥来源。",
+        }
+
+    status_code = _runtime_scene_event_status_code(event)
+    if status_code:
+        label = f"配置模型发现失败：请求返回 {status_code}"
+        reason = f"http_{status_code}"
+    else:
+        label = "配置模型发现失败"
+        reason = "request_failed"
+    return {
+        "eventCode": "config.model_discovery.failed",
+        "label": label,
+        "reason": reason,
+        "hint": "先检查模型发现接口返回体、provider 配置和密钥来源。",
+    }
+
+
+def _runtime_scene_startup_failure_diagnosis(
+    event: dict[str, Any],
+    *,
+    startup_context: dict[str, Any] | None = None,
+) -> dict[str, str] | None:
+    context = startup_context if isinstance(startup_context, dict) else {}
+    event_code = str(event.get("eventCode") or "").strip()
+    if event_code != "runtime.scene.startup.failed":
+        return None
+    if context.get("hasSpecificRootCause"):
+        return None
+
+    diagnostic_text = _runtime_scene_failure_text(event)
+    diagnostic_lower = diagnostic_text.lower()
+    missing_command = _runtime_scene_missing_powershell_command(diagnostic_text)
+    if missing_command:
+        return {
+            "eventCode": "startup.launcher.command_missing",
+            "label": f"启动失败：PowerShell 函数缺失 {missing_command}",
+            "reason": "powershell_command_missing",
+            "hint": f"先检查 scripts/vibelution_launcher.ps1 中 {missing_command} 的定义、加载顺序和最近脚本改动。",
+        }
+
+    if "npm run build failed" in diagnostic_lower or "frontend.build.failed" in diagnostic_lower:
+        return {
+            "eventCode": "startup.frontend_build.failed",
+            "label": "启动失败：前端构建失败",
+            "reason": "frontend_build_failed",
+            "hint": "先打开 raw/frontend.build.log，定位第一条 TypeScript/Vite 构建错误。",
+        }
+
+    if "backend" in diagnostic_lower and ("failed" in diagnostic_lower or "health" in diagnostic_lower):
+        return {
+            "eventCode": "startup.backend.failed",
+            "label": "启动失败：后端启动或健康检查失败",
+            "reason": "backend_startup_failed",
+            "hint": "先打开 raw/backend.stderr.log、raw/backend.stdout.log 和 events/backend.jsonl。",
+        }
+
+    return {
+        "eventCode": "startup.launcher.failed",
+        "label": "启动失败：启动器执行失败",
+        "reason": "launcher_failed",
+        "hint": "先打开 raw/launcher-control.log，并对照 timeline 中 runtime.scene.startup.failed 的 reason。",
+    }
+
+
+def _runtime_scene_failure_text(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    return " ".join(
+        str(value or "")
+        for value in (
+            event.get("message"),
+            fields.get("reason"),
+            fields.get("message"),
+            fields.get("error"),
+            fields.get("exceptionMessage"),
+            fields.get("failureMessage"),
+        )
+    ).strip()
+
+
+def _runtime_scene_missing_powershell_command(text: str) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+    markers = ("The term '", "term \"")
+    for marker in markers:
+        if marker not in normalized:
+            continue
+        after = normalized.split(marker, 1)[1]
+        quote = "'" if marker.endswith("'") else '"'
+        command = after.split(quote, 1)[0].strip()
+        if command:
+            return command
+    first_line = normalized.splitlines()[0].strip()
+    if ":" in first_line and "not recognized" in first_line.lower():
+        command = first_line.split(":", 1)[0].strip()
+        if command:
+            return command
+    return ""
+
+
+def _runtime_scene_event_endpoint(event: dict[str, Any]) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    for key in ("endpoint", "pathTemplate", "path"):
+        endpoint = _normalize_endpoint_path(fields.get(key))
+        if endpoint:
+            return endpoint
+    message = str(event.get("message") or "")
+    if CONFIG_MODEL_DISCOVERY_ENDPOINT in message:
+        return CONFIG_MODEL_DISCOVERY_ENDPOINT
+    return ""
+
+
+def _normalize_endpoint_path(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.split("?", 1)[0].split("#", 1)[0]
+    if "://" in text:
+        marker = "://"
+        remainder = text.split(marker, 1)[1]
+        slash_index = remainder.find("/")
+        text = remainder[slash_index:] if slash_index >= 0 else ""
+    return text.rstrip("/") or text
+
+
+def _runtime_scene_event_status_code(event: dict[str, Any]) -> int:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    for key in ("status", "statusCode", "httpStatus"):
+        value = _coerce_int(fields.get(key), default=0)
+        if value:
+            return value
+    message = str(event.get("message") or "")
+    for marker in ("HTTP ", "failed (", "-> "):
+        if marker not in message:
+            continue
+        after = message.split(marker, 1)[1]
+        digits = "".join(char for char in after[:4] if char.isdigit())
+        if digits:
+            return _coerce_int(digits, default=0)
+    return 0
+
+
+def _runtime_scene_diagnosis_field(event: dict[str, Any], key: str) -> str:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    value = fields.get(key)
+    return _truncate_text(str(value or "").strip(), 320)
+
+
+def _runtime_scene_is_expected_runtime_manager_block(event: dict[str, Any]) -> bool:
+    if str(event.get("component") or "").strip().lower() != "runtime_manager":
+        return False
+    event_code = str(event.get("eventCode") or "").strip()
+    if event_code not in {"command.failed", "command_queue.command_result_written"}:
+        return False
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    error_type = str(fields.get("errorType") or "").strip().lower()
+    if error_type in EXPECTED_RUNTIME_MANAGER_BLOCK_ERROR_TYPES:
+        return True
+    message = " ".join(
+        [
+            str(event.get("message") or ""),
+            str(fields.get("message") or ""),
+            str(fields.get("error") or ""),
+        ]
+    ).strip().lower()
+    if not message:
+        return False
+    chinese_busy = "已经有一轮" in message and ("运行" in message or "暂停" in message)
+    english_busy = "already" in message and ("running" in message or "paused" in message)
+    return chinese_busy or english_busy
+
+
+def _runtime_scene_is_expected_work_run_manager_block(event: dict[str, Any]) -> bool:
+    if str(event.get("phase") or "").strip().lower() != "runtime_manager":
+        return False
+    event_code = str(event.get("eventCode") or "").strip()
+    if not event_code.endswith(".manager.start_self_evolution_run.failed"):
+        return False
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    error_type = str(fields.get("errorType") or "").strip().lower()
+    if error_type in EXPECTED_RUNTIME_MANAGER_BLOCK_ERROR_TYPES:
+        return True
+    message = " ".join(
+        [
+            str(event.get("message") or ""),
+            str(fields.get("message") or ""),
+            str(fields.get("error") or ""),
+        ]
+    ).strip().lower()
+    if not message:
+        return False
+    chinese_busy = "已经有一轮" in message and ("运行" in message or "暂停" in message)
+    english_busy = "already" in message and ("running" in message or "paused" in message)
+    return chinese_busy or english_busy
 
 
 def _runtime_scene_signal_raw_refs(event: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2483,10 +3226,11 @@ def _runtime_scene_issue_state_severity(
     active_signals: list[dict[str, Any]],
     policy_signals: list[dict[str, Any]] | None = None,
 ) -> str:
-    combined_signals = [*active_signals, *(policy_signals or [])]
-    if any(str(signal.get("severity") or "") == "error" for signal in combined_signals):
+    if any(str(signal.get("severity") or "") == "error" for signal in active_signals):
         return "error"
-    if any(str(signal.get("severity") or "") == "warning" for signal in combined_signals):
+    if any(str(signal.get("severity") or "") == "warning" for signal in active_signals):
+        return "warning"
+    if policy_signals:
         return "warning"
     return "info"
 
@@ -2964,16 +3708,20 @@ def _runtime_scene_diagnosis_next_step(
         )
     if severity == "error" and active_cluster_count and first_signal:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
+        hint = _runtime_scene_issue_cluster_hint(issue_state.get("firstActiveCluster"))
+        hint_sentence = f" 诊断提示：{hint}" if hint else ""
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
             f"再定位主问题簇 {cluster}，优先打开 summary/package_index 里的 evidence_paths 对应文件，"
-            "并沿同一 component/runId/pageInstanceId 向后找恢复或重复崩溃。"
+            f"并沿同一 component/runId/pageInstanceId 向后找恢复或重复崩溃。{hint_sentence}"
         )
     if severity == "warning" and active_cluster_count and first_signal:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
+        hint = _runtime_scene_issue_cluster_hint(issue_state.get("firstActiveCluster"))
+        hint_sentence = f" 诊断提示：{hint}" if hint else ""
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
-            f"再定位主问题簇 {cluster}，判断它是退化、重试还是用户控制信号，必要时打开 evidence_paths 对应文件。"
+            f"再定位主问题簇 {cluster}，判断它是退化、重试还是用户控制信号，必要时打开 evidence_paths 对应文件。{hint_sentence}"
         )
     if policy_signal_count and first_signal:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstPolicyCluster"))
@@ -3000,9 +3748,11 @@ def _runtime_scene_diagnosis_next_step(
         )
     if active_cluster_count:
         cluster = _runtime_scene_issue_cluster_display(issue_state.get("firstActiveCluster"))
+        hint = _runtime_scene_issue_cluster_hint(issue_state.get("firstActiveCluster"))
+        hint_sentence = f" 诊断提示：{hint}" if hint else ""
         return (
             f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，确认 issueState.activeClusterCount；"
-            f"再追踪主问题簇 {cluster}，把它和首个信号、证据路径、timeline 顺序对齐。"
+            f"再追踪主问题簇 {cluster}，把它和首个信号、证据路径、timeline 顺序对齐。{hint_sentence}"
         )
     return (
         f"先读 logs/runtime_scenes/{package_anchor}/{first_path}，再按推荐阅读顺序对照 timeline、lifecycle 和子日志确认周期完整性。"
@@ -3012,7 +3762,7 @@ def _runtime_scene_diagnosis_next_step(
 def _runtime_scene_diagnosis_signal_payload(event: dict[str, Any] | None) -> dict[str, Any] | None:
     if not event:
         return None
-    return {
+    payload = {
         "severity": str(event.get("diagnosisSeverity") or _runtime_scene_event_severity(event)),
         "timestamp": str(event.get("timestamp") or ""),
         "component": str(event.get("component") or ""),
@@ -3021,6 +3771,16 @@ def _runtime_scene_diagnosis_signal_payload(event: dict[str, Any] | None) -> dic
         "message": _truncate_text(str(event.get("message") or ""), 320),
         "rawRefs": _runtime_scene_signal_raw_refs(event),
     }
+    for source_key, payload_key in (
+        ("diagnosisLabel", "diagnosisLabel"),
+        ("diagnosisReason", "diagnosisReason"),
+        ("diagnosisHint", "diagnosisHint"),
+        ("sourceEventCode", "sourceEventCode"),
+    ):
+        value = _runtime_scene_diagnosis_field(event, source_key)
+        if value:
+            payload[payload_key] = value
+    return payload
 
 
 def _runtime_scene_signal_label(event: dict[str, Any] | None) -> str:
@@ -3083,6 +3843,8 @@ def _runtime_scene_event_severity(event: dict) -> str:
     outcome = str(event.get("outcome") or "").strip().lower()
     status = str(event.get("status") or "").strip().lower()
     fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    if _runtime_scene_is_operational_client_error_event(event):
+        return "info"
     field_status = str(fields.get("status") or fields.get("resultStatus") or "").strip().lower()
     field_outcome = str(fields.get("outcome") or "").strip().lower()
     error_markers = (
@@ -3120,6 +3882,21 @@ def _runtime_scene_event_severity(event: dict) -> str:
     }:
         return "warning"
     return "info"
+
+
+def _runtime_scene_is_operational_client_error_event(event: dict) -> bool:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    if fields.get("operationalClientError") is True:
+        return True
+    if str(event.get("component") or "").strip() != BACKEND_COMPONENT:
+        return False
+    if str(event.get("phase") or "").strip() != "api":
+        return False
+    endpoint = _runtime_scene_event_endpoint(event)
+    if endpoint not in OPERATIONAL_CLIENT_ERROR_PATHS:
+        return False
+    status_code = _runtime_scene_event_status_code(event)
+    return 400 <= status_code < 500
 
 
 def _file_timestamp(path: Path) -> str:
@@ -3397,6 +4174,58 @@ def _update_browser_manifest(
         if indexed:
             browser["last_indexed_visibility_event_at"] = timestamp
 
+    if event_code == "browser.memory.sampled":
+        browser["last_memory_sample_at"] = timestamp
+        for field_name in (
+            "available",
+            "usedJSHeapMB",
+            "totalJSHeapMB",
+            "jsHeapLimitMB",
+            "queryCount",
+            "activeQueryCount",
+            "fetchingQueryCount",
+            "staleQueryCount",
+            "sessionQueryCount",
+            "logQueryCount",
+            "reason",
+            "pathname",
+        ):
+            if field_name in fields:
+                browser[f"last_memory_{_camel_to_snake(field_name)}"] = fields.get(field_name)
+
+    if event_code == "browser.process_memory.sampled":
+        browser["last_process_memory_sample_at"] = timestamp
+        for field_name in (
+            "supported",
+            "profileDir",
+            "count",
+            "totalWorkingSetMB",
+            "totalPrivateMB",
+            "topProcesses",
+        ):
+            if field_name in fields:
+                browser[f"last_process_memory_{_camel_to_snake(field_name)}"] = fields.get(field_name)
+
+    if event_code in {"browser.session_stream.opened", "browser.session_stream.closed"}:
+        browser["last_session_stream_event_at"] = timestamp
+        browser["last_session_stream_event_code"] = event_code
+        session_id = fields.get("sessionId")
+        if isinstance(session_id, str) and session_id.strip():
+            browser["last_session_stream_session_id"] = _truncate_text(
+                session_id.strip(),
+                MAX_TELEMETRY_FIELD_TEXT_CHARS,
+            )
+
+    if event_code in {"browser.chat_room_stream.opened", "browser.chat_room_stream.closed"}:
+        browser["last_chat_room_stream_event_at"] = timestamp
+        browser["last_chat_room_stream_event_code"] = event_code
+        room_id = fields.get("roomId")
+        if isinstance(room_id, str) and room_id.strip():
+            browser["last_chat_room_stream_room_id"] = _truncate_text(
+                room_id.strip(),
+                MAX_TELEMETRY_FIELD_TEXT_CHARS,
+            )
+
     manifest["browser"] = browser
     _save_scene_manifest(scene_dir, manifest)
 
@@ -3444,6 +4273,25 @@ def _sanitize_path_token(value: object, *, default: str) -> str:
     normalized = "".join(char if char.isalnum() or char in {"-", "_", "."} else "_" for char in token)
     normalized = normalized.strip("._-")
     return _truncate_text(normalized or default, 120)
+
+
+def _camel_to_snake(value: str) -> str:
+    explicit = {
+        "usedJSHeapMB": "used_js_heap_mb",
+        "totalJSHeapMB": "total_js_heap_mb",
+        "jsHeapLimitMB": "js_heap_limit_mb",
+        "usedJSHeapBytes": "used_js_heap_bytes",
+        "totalJSHeapBytes": "total_js_heap_bytes",
+        "jsHeapLimitBytes": "js_heap_limit_bytes",
+    }
+    if value in explicit:
+        return explicit[value]
+    chars: list[str] = []
+    for index, char in enumerate(str(value or "")):
+        if char.isupper() and index > 0:
+            chars.append("_")
+        chars.append(char.lower())
+    return "".join(chars).strip("_")
 
 
 def _now_utc() -> str:

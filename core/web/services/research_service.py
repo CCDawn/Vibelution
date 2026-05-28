@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from core.research.agent_templates import (
+    RESEARCH_AGENT_DEFAULT_LLM_CONFIG,
     RESEARCH_AGENT_TEMPLATES,
     RESEARCH_PROMPT_FILES,
     ensure_research_prompt_defaults,
@@ -22,7 +23,7 @@ from core.research.agent_templates import (
 from core.research import ResearchThemeDiscoveryService
 from core.infrastructure.workspace_manager import get_workspace
 from config.public_config import build_effective_config, load_public_config
-from . import agent_directory_service, session_service
+from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, session_service
 from .config_service import _profile_label
 from .runtime_scene_service import record_research_scene_event
 
@@ -43,7 +44,9 @@ _FLOW_CANVAS_STATUSES = {
     "skipped",
 }
 
-_FLOW_CANVAS_NODE_TYPES = {"agent", "decision", "artifact", "human", "tool", "evaluation"}
+_FLOW_CANVAS_KIND = "research_flow_canvas"
+_ORGANIZATION_CANVAS_KIND = "research_agent_organization"
+_FLOW_CANVAS_NODE_TYPES = {"agent", "tool", "human", "artifact", "decision", "evaluation"}
 _FLOW_CANVAS_EDGE_TYPES = {
     "success",
     "evidence_loop",
@@ -55,16 +58,16 @@ _FLOW_CANVAS_EDGE_TYPES = {
 }
 _FLOW_CANVAS_EDGE_CONDITIONS = {
     "completed",
-    "needs_evidence",
     "approved",
+    "needs_evidence",
     "selected",
     "failed",
     "blocked",
 }
 _FLOW_CANVAS_CONDITION_EDGE_TYPES = {
     "completed": {"success", "human_handoff"},
-    "needs_evidence": {"evidence_loop"},
     "approved": {"approval_gate"},
+    "needs_evidence": {"evidence_loop"},
     "selected": {"selection"},
     "failed": {"failure"},
     "blocked": {"blocked"},
@@ -136,7 +139,7 @@ _RESEARCH_FLOW_MODULE_CONTRACTS: dict[str, dict[str, Any]] = {
         "inputs": [{"novelty_evidence"}, {"evidence_context"}, {"sources"}, {"parsed_records"}],
         "outputs": {
             "approved": {"approved_evidence"},
-            "needs_evidence": {"evidence_requests"},
+            "needs_evidence": {"sources", "evidence_context", "research_leads", "evidence_requests"},
             "completed": {"approved_evidence"},
         },
         "terminal": False,
@@ -153,12 +156,119 @@ _RESEARCH_FLOW_MODULE_CONTRACTS: dict[str, dict[str, Any]] = {
         "inputs": [{"candidate_themes"}],
         "outputs": {"selected": {"selected_theme"}},
         "terminal": False,
+        "expectedOutcomes": {"selected"},
     },
     "card": {
         "label": "正式主题卡",
         "inputs": [{"selected_theme"}],
         "outputs": {"completed": {"theme_card"}},
         "terminal": True,
+    },
+    "huawei_context_snapshot": {
+        "label": "读取竞赛上下文",
+        "inputs": [],
+        "outputs": {"completed": {"workspace_context", "baseline_snapshot", "source_hash"}},
+        "terminal": False,
+    },
+    "huawei_doctor": {
+        "label": "运行环境体检",
+        "inputs": [{"workspace_context"}, {"baseline_snapshot"}],
+        "outputs": {
+            "completed": {"harness_ok", "baseline_snapshot"},
+            "blocked": {"harness_blocker"},
+        },
+        "terminal": False,
+    },
+    "huawei_baseline_gate": {
+        "label": "基线一致性闸门",
+        "inputs": [{"harness_blocker"}],
+        "outputs": {"completed": {"harness_ok", "baseline_snapshot"}},
+        "terminal": False,
+    },
+    "huawei_idea_board": {
+        "label": "生成策略想法池",
+        "inputs": [{"harness_ok"}, {"evidence_gap"}, {"learning_index"}, {"dataset_candidate"}],
+        "outputs": {"completed": {"idea_board", "lane_plan"}},
+        "terminal": False,
+    },
+    "huawei_prepare_epoch": {
+        "label": "准备实验批次清单",
+        "inputs": [{"idea_board"}, {"lane_plan"}],
+        "outputs": {"completed": {"epoch_manifest", "worker_context"}},
+        "terminal": False,
+    },
+    "huawei_dispatch_phase_a": {
+        "label": "派发诊断阶段",
+        "inputs": [{"epoch_manifest"}, {"worker_context"}],
+        "outputs": {"completed": {"phase_a_results", "child_results"}},
+        "terminal": False,
+    },
+    "huawei_collect_phase_a": {
+        "label": "收集诊断证据",
+        "inputs": [{"phase_a_results"}, {"child_results"}],
+        "outputs": {
+            "approved": {"phase_a_evidence"},
+            "needs_evidence": {"evidence_gap"},
+        },
+        "terminal": False,
+    },
+    "huawei_phase_gate": {
+        "label": "编辑实验放行闸门",
+        "inputs": [{"phase_a_evidence"}],
+        "outputs": {
+            "approved": {"phase_b_ready"},
+            "needs_evidence": {"evidence_gap"},
+        },
+        "terminal": False,
+    },
+    "huawei_dispatch_phase_b": {
+        "label": "派发编辑实验",
+        "inputs": [{"phase_b_ready"}],
+        "outputs": {"completed": {"candidate_patch", "child_results"}},
+        "terminal": False,
+    },
+    "huawei_local_benchmark": {
+        "label": "运行本地基准",
+        "inputs": [{"candidate_patch"}],
+        "outputs": {"completed": {"proxy_evidence", "candidate_patch"}},
+        "terminal": False,
+    },
+    "huawei_gate_child": {
+        "label": "候选方案门控",
+        "inputs": [{"proxy_evidence"}],
+        "outputs": {
+            "approved": {"accepted_candidate"},
+            "needs_evidence": {"evidence_gap"},
+            "failed": {"failed_attempt"},
+        },
+        "terminal": False,
+    },
+    "huawei_package_submission": {
+        "label": "打包与提交映射",
+        "inputs": [{"accepted_candidate"}],
+        "outputs": {"completed": {"registered_submission", "submission_zip"}},
+        "terminal": False,
+    },
+    "huawei_online_feedback": {
+        "label": "线上反馈录入",
+        "inputs": [{"registered_submission"}, {"submission_zip"}],
+        "outputs": {
+            "selected": {"online_score"},
+            "needs_evidence": {"online_contradiction"},
+        },
+        "terminal": False,
+    },
+    "huawei_baseline_promotion": {
+        "label": "基线晋升与冻结",
+        "inputs": [{"online_score"}],
+        "outputs": {"completed": {"baseline_update", "online_calibration"}},
+        "terminal": False,
+    },
+    "huawei_dataset_learning": {
+        "label": "数据集与经验回写",
+        "inputs": [{"online_contradiction"}, {"failed_attempt"}, {"baseline_update"}, {"child_results"}],
+        "outputs": {"completed": {"learning_index", "dataset_candidate"}},
+        "terminal": False,
     },
 }
 _RESEARCH_CAPABILITY_ACTIONS = {
@@ -187,8 +297,13 @@ def _utc_now() -> str:
 
 
 def _default_research_flow_canvas() -> dict[str, Any]:
+    return _legacy_research_flow_canvas()
+
+
+def _legacy_research_flow_canvas() -> dict[str, Any]:
     return {
         "schemaVersion": 1,
+        "canvasKind": _FLOW_CANVAS_KIND,
         "updatedAt": _utc_now(),
         "viewport": {"x": 0, "y": 0, "zoom": 1},
         "nodes": [
@@ -201,7 +316,7 @@ def _default_research_flow_canvas() -> dict[str, Any]:
                 "y": 120,
                 "agentKey": "broad",
                 "promptKey": "broad",
-                "llmConfigId": "research_broad",
+                "llmConfigId": "",
                 "description": "从开放目标出发，让 agent 使用真实网络和工具发现跨学科候选方向。",
                 "routeCondition": "输入开放目标、约束和偏好后启动",
             },
@@ -240,7 +355,7 @@ def _default_research_flow_canvas() -> dict[str, Any]:
                 "y": 120,
                 "agentKey": "deep",
                 "promptKey": "deep",
-                "llmConfigId": "research_deep",
+                "llmConfigId": "",
                 "description": "围绕上一阶段发现的关键缺口、论文、GitHub 项目和数据集补充证据。",
                 "routeCondition": "知识库检索完成并提供已知证据上下文后继续",
             },
@@ -292,7 +407,7 @@ def _default_research_flow_canvas() -> dict[str, Any]:
                 "y": 120,
                 "agentKey": "review",
                 "promptKey": "review",
-                "llmConfigId": "research_review",
+                "llmConfigId": "",
                 "description": "审查来源可靠性、论断可追溯性和缺失证据，决定是否回到补搜。",
                 "routeCondition": "深搜完成后进入；若证据不足则回到定向深搜",
             },
@@ -305,7 +420,7 @@ def _default_research_flow_canvas() -> dict[str, Any]:
                 "y": 120,
                 "agentKey": "themes",
                 "promptKey": "themes",
-                "llmConfigId": "research_themes",
+                "llmConfigId": "",
                 "description": "基于证据链生成可证伪、新颖且扣题的科研主题候选。",
                 "routeCondition": "证据审查通过或用户手动确认继续",
             },
@@ -331,7 +446,7 @@ def _default_research_flow_canvas() -> dict[str, Any]:
                 "y": 220,
                 "agentKey": "card",
                 "promptKey": "card",
-                "llmConfigId": "research_card",
+                "llmConfigId": "",
                 "description": "产出赛题要求的科学假设与研究计划结构，包括数据集、方法、实验、指标和参考文献。",
                 "routeCondition": "用户确认主题后生成",
             },
@@ -457,11 +572,13 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
     """Ensure enabled research agents have persistent AgentInstances and direct sessions."""
 
     workspace = get_workspace()
-    project_root = Path(getattr(workspace, "root", session_service.PROJECT_ROOT)).resolve()
+    project_root = _project_root_for_workspace(workspace)
     previous_session_root = session_service.PROJECT_ROOT
     previous_agent_root = agent_directory_service.PROJECT_ROOT
+    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
     session_service.PROJECT_ROOT = project_root
     agent_directory_service.PROJECT_ROOT = project_root
+    agent_mode_binding_service.PROJECT_ROOT = project_root
     agents = [dict(item) for item in list(agent_config.get("agents") or []) if isinstance(item, dict)]
     changed = False
     try:
@@ -472,14 +589,14 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
             if not key:
                 continue
             label = str(agent.get("label") or key).strip() or key
-            llm_config_id = str(agent.get("llmConfigId") or "").strip() or "primary"
             agent_instance_id = str(agent.get("agentInstanceId") or agent.get("agentId") or "").strip()
             instance = agent_directory_service.get_agent(agent_instance_id) if agent_instance_id else None
+            profile_id = str((instance or {}).get("profileId") or agent.get("profileId") or agent.get("llmConfigId") or "").strip() or "primary"
             if not instance:
                 try:
                     session_detail = session_service.create_chat_session(
                         title=label,
-                        agent_profile_id=llm_config_id,
+                        profile_id=profile_id,
                         created_by="research_agent_pool",
                     )
                 except Exception as exc:
@@ -491,7 +608,7 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                         level="warning",
                         fields={
                             "agentKey": key,
-                            "llmConfigId": llm_config_id,
+                            "profileId": profile_id,
                             "errorType": type(exc).__name__,
                             "message": str(exc),
                         },
@@ -505,23 +622,44 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                 changed = True
             if agent_instance_id:
                 try:
+                    instance = agent_directory_service.get_agent(agent_instance_id) or instance
+                    profile_id = str((instance or {}).get("profileId") or profile_id).strip() or "primary"
+                    if str(agent.get("profileId") or "").strip() != profile_id:
+                        agent["profileId"] = profile_id
+                        changed = True
                     updated_instance = agent_directory_service.update_agent_instance(
                         agent_instance_id,
                         display_name=label,
-                        profile_id=llm_config_id,
+                        template_id=str(agent.get("templateId") or "").strip(),
+                        profile_id=profile_id,
+                        primary_mode="research",
+                        role_key=f"research_{key}",
+                        prompt_template_id=f"prompt-research-{key}",
                         metadata={
                             "researchAgentKey": key,
                             "researchTemplateId": str(agent.get("templateId") or "").strip(),
                             "researchPromptFilename": str(agent.get("promptFilename") or "").strip(),
                         },
                     )
+                    if agent.get("agentInstanceId") != agent_instance_id:
+                        agent["agentInstanceId"] = agent_instance_id
+                        changed = True
+                    if agent.get("agentId") != agent_instance_id:
+                        agent["agentId"] = agent_instance_id
+                        changed = True
+                    if str(agent.get("roleKey") or "").strip() != f"research_{key}":
+                        agent["roleKey"] = f"research_{key}"
+                        changed = True
+                    if str(agent.get("promptTemplateId") or "").strip() != f"prompt-research-{key}":
+                        agent["promptTemplateId"] = f"prompt-research-{key}"
+                        changed = True
                     direct_session_id = str(updated_instance.get("directSessionId") or agent.get("directSessionId") or "").strip()
                     if direct_session_id:
                         try:
                             session_service.update_chat_session(
                                 direct_session_id,
                                 title=label,
-                                agent_profile_id=llm_config_id,
+                                profile_id=profile_id,
                             )
                         except Exception:
                             pass
@@ -536,7 +674,10 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                 "deletedDefaultAgents": list(agent_config.get("deletedDefaultAgents") or []),
                 "agents": agents,
             }
-            workspace.write_research_agent_config(next_config)
+            write_config = getattr(workspace, "write_research_agent_config", None)
+            if callable(write_config):
+                write_config(_research_agent_storage_payload(next_config))
+            _sync_research_mode_binding(agents)
             _record_research_config_event(
                 "research.agent_instance.synced",
                 phase="agent_template_config",
@@ -544,10 +685,66 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                 fields={"agentCount": len(agents)},
             )
             return normalize_research_agent_config(next_config)
+        _sync_research_mode_binding(agents)
         return {**agent_config, "agents": agents}
     finally:
         session_service.PROJECT_ROOT = previous_session_root
         agent_directory_service.PROJECT_ROOT = previous_agent_root
+        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
+
+
+def _sync_research_mode_binding(agents: list[dict[str, Any]]) -> None:
+    active_agent_ids = [
+        str(agent.get("agentId") or agent.get("agentInstanceId") or "").strip()
+        for agent in agents
+        if isinstance(agent, dict) and agent.get("enabled") is not False
+    ]
+    active_agent_ids = [agent_id for agent_id in active_agent_ids if agent_id]
+    if not active_agent_ids:
+        return
+    flow_bindings = {
+        str(agent.get("key") or "").strip(): str(agent.get("agentId") or agent.get("agentInstanceId") or "").strip()
+        for agent in agents
+        if isinstance(agent, dict) and agent.get("enabled") is not False
+    }
+    flow_bindings = {key: value for key, value in flow_bindings.items() if key and value}
+    try:
+        agent_mode_binding_service.update_mode_binding(
+            "research",
+            default_agent_id=active_agent_ids[0],
+            available_agent_ids=active_agent_ids,
+            pool=active_agent_ids,
+            flow_bindings=flow_bindings,
+        )
+    except Exception as exc:
+        _record_research_config_event(
+            "research.mode_binding.sync_failed",
+            phase="agent_template_config",
+            message="Research mode binding sync failed",
+            outcome="failed",
+            level="warning",
+            fields={"agentCount": len(active_agent_ids), "errorType": type(exc).__name__, "message": str(exc)},
+        )
+
+
+def _research_agent_storage_payload(config: dict[str, Any]) -> dict[str, Any]:
+    """Persist the research Agent index without legacy model-binding names."""
+
+    agents: list[dict[str, Any]] = []
+    for item in list(config.get("agents") or []):
+        if not isinstance(item, dict):
+            continue
+        record = dict(item)
+        profile_id = str(record.get("profileId") or record.get("llmConfigId") or "").strip()
+        record.pop("llmConfigId", None)
+        if profile_id:
+            record["profileId"] = profile_id
+        agents.append(record)
+    return {
+        "schemaVersion": 1,
+        "deletedDefaultAgents": sorted(str(item) for item in list(config.get("deletedDefaultAgents") or [])),
+        "agents": agents,
+    }
 
 
 def save_research_prompt(key: str, content: str) -> dict[str, Any]:
@@ -606,12 +803,14 @@ def save_research_prompt(key: str, content: str) -> dict[str, Any]:
 def save_research_agent_binding(
     key: str,
     template_id: str,
-    llm_config_id: str | None = None,
+    profile_id: str | None = None,
     *,
     label: str = "",
     prompt_filename: str = "",
     enabled: bool | None = None,
 ) -> dict[str, Any]:
+    """Update a research Agent through the unified AgentInstance stack."""
+
     raw_key = str(key or "").strip().lower().replace("-", "_")
     try:
         normalized = normalize_research_agent_key(key)
@@ -650,10 +849,25 @@ def save_research_agent_binding(
             agent_key=normalized,
         )
         raise ValueError(f"Unknown research agent template: {template_id}")
-    selected_llm_config = str(llm_config_id or "").strip()
-    if selected_llm_config:
+    config = _load_research_agent_config()
+    agents = config["agents"]
+    deleted_default_agents = set(config.get("deletedDefaultAgents") or [])
+    deleted_default_agents.discard(normalized)
+    existing_agent = next((agent for agent in agents if agent["key"] == normalized), None)
+    existing_agent_id = str((existing_agent or {}).get("agentId") or (existing_agent or {}).get("agentInstanceId") or "").strip()
+    existing_instance = agent_directory_service.get_agent(existing_agent_id) if existing_agent_id else None
+
+    selected_profile_id = str(
+        profile_id
+        or (existing_instance or {}).get("profileId")
+        or (existing_agent or {}).get("profileId")
+        or (existing_agent or {}).get("llmConfigId")
+        or RESEARCH_AGENT_DEFAULT_LLM_CONFIG.get(normalized)
+        or "primary"
+    ).strip()
+    if selected_profile_id:
         known_llm_configs = {item["configId"] for item in _list_llm_config_options()}
-        if selected_llm_config not in known_llm_configs:
+        if selected_profile_id not in known_llm_configs:
             _record_research_config_event(
                 "research.agent_binding.update_failed",
                 phase="agent_template_config",
@@ -663,22 +877,15 @@ def save_research_agent_binding(
                 fields={
                     "agentKey": normalized,
                     "templateId": selected_template,
-                    "llmConfigId": selected_llm_config,
+                    "profileId": selected_profile_id,
                     "reason": "unknown_llm_config",
                     "errorType": "ValueError",
-                    "message": f"Unknown research LLM config: {llm_config_id}",
+                    "message": f"Unknown research LLM config: {profile_id}",
                 },
                 agent_key=normalized,
             )
-            raise ValueError(f"Unknown research LLM config: {llm_config_id}")
-    config = _load_research_agent_config()
-    agents = config["agents"]
-    deleted_default_agents = set(config.get("deletedDefaultAgents") or [])
-    deleted_default_agents.discard(normalized)
-    existing_agent = next((agent for agent in agents if agent["key"] == normalized), None)
-    if not selected_llm_config:
-        selected_llm_config = str((existing_agent or {}).get("llmConfigId") or "").strip()
-    if not selected_llm_config:
+            raise ValueError(f"Unknown research LLM config: {profile_id}")
+    if not selected_profile_id:
         raise ValueError("Research agent requires an LLM config.")
     prompt_file = normalize_research_prompt_filename(
         prompt_filename or str((existing_agent or {}).get("promptFilename") or "") or research_prompt_filename_for_key(normalized),
@@ -687,89 +894,198 @@ def save_research_agent_binding(
     next_label = str(label or (existing_agent or {}).get("label") or normalized.replace("_", " ").title()).strip()
     if not next_label:
         next_label = normalized
-    updated = False
-    for agent in agents:
-        if agent["key"] == normalized:
-            agent["label"] = next_label
-            agent["promptFilename"] = prompt_file
-            agent["templateId"] = selected_template
-            agent["llmConfigId"] = selected_llm_config
-            if enabled is not None:
-                agent["enabled"] = bool(enabled)
-            updated = True
-            break
-    if not updated:
-        agents.append(
-            {
-                "key": normalized,
-                "label": next_label,
-                "promptFilename": prompt_file,
-                "templateId": selected_template,
-                "llmConfigId": selected_llm_config,
-                "enabled": True if enabled is None else bool(enabled),
-            }
-        )
+    next_enabled = bool((existing_agent or {}).get("enabled", True)) if enabled is None else bool(enabled)
     workspace = get_workspace()
     prompt_path = workspace.get_research_prompt_path(prompt_file)
     if not prompt_path.exists():
         workspace.write_research_prompt(prompt_file, research_default_prompt(normalized))
-    if not workspace.write_research_agent_config({"schemaVersion": 1, "deletedDefaultAgents": sorted(deleted_default_agents), "agents": agents}):
+    prompt_template_id = f"prompt-research-{normalized}"
+    prompt_source_path = _relative_project_path(prompt_path)
+    prompt_content = workspace.read_research_prompt(prompt_file)
+    try:
+        prompt_template_service.update_prompt_template(
+            prompt_template_id,
+            name=next_label,
+            category="research",
+            source_path=prompt_source_path,
+            content=prompt_content,
+            metadata={"roleKey": f"research_{normalized}", "researchAgentKey": normalized},
+            status="active",
+        )
+    except Exception as exc:
         _record_research_config_event(
             "research.agent_binding.update_failed",
             phase="agent_template_config",
             message="Research agent template binding update failed",
             outcome="failed",
             level="error",
-            fields={
-                "agentKey": normalized,
-                "templateId": selected_template,
-                "llmConfigId": selected_llm_config,
-                "errorType": "ValueError",
-                "message": "Failed to write research agent template config.",
+                fields={
+                    "agentKey": normalized,
+                    "templateId": selected_template,
+                    "profileId": selected_profile_id,
+                    "errorType": type(exc).__name__,
+                    "message": str(exc),
+                    "reason": "prompt_template_update_failed",
             },
             agent_key=normalized,
         )
-        raise ValueError("Failed to write research agent template config.")
+        raise ValueError(f"Failed to update research prompt template: {exc}") from exc
+
+    if existing_instance:
+        agent_instance = agent_directory_service.update_agent_instance(
+            existing_agent_id,
+            display_name=next_label,
+            template_id=selected_template,
+            profile_id=selected_profile_id,
+            primary_mode="research",
+            role_key=f"research_{normalized}",
+            prompt_template_id=prompt_template_id,
+            metadata={
+                "researchAgentKey": normalized,
+                "researchTemplateId": selected_template,
+                "researchPromptFilename": prompt_file,
+                "agentMode": "research",
+                "configSurface": "agent_config",
+            },
+            status="active" if next_enabled else None,
+        )
+    else:
+        previous_session_root = session_service.PROJECT_ROOT
+        previous_agent_root = agent_directory_service.PROJECT_ROOT
+        project_root = _project_root_for_workspace(workspace)
+        session_service.PROJECT_ROOT = project_root
+        agent_directory_service.PROJECT_ROOT = project_root
+        try:
+            session_detail = session_service.create_chat_session(
+                title=next_label,
+                profile_id=selected_profile_id,
+                created_by="research_agent_pool",
+            )
+            created_agent_id = str(session_detail.get("agentId") or "").strip()
+            agent_instance = agent_directory_service.update_agent_instance(
+                created_agent_id,
+                display_name=next_label,
+                template_id=selected_template,
+                profile_id=selected_profile_id,
+                primary_mode="research",
+                role_key=f"research_{normalized}",
+                prompt_template_id=prompt_template_id,
+                metadata={
+                    "researchAgentKey": normalized,
+                    "researchTemplateId": selected_template,
+                    "researchPromptFilename": prompt_file,
+                    "agentMode": "research",
+                    "configSurface": "agent_config",
+                },
+                status="active" if next_enabled else None,
+            )
+        finally:
+            session_service.PROJECT_ROOT = previous_session_root
+            agent_directory_service.PROJECT_ROOT = previous_agent_root
+
+    updated = existing_agent is not None
+    research_agent_record = {
+        "key": normalized,
+        "label": next_label,
+        "promptFilename": prompt_file,
+        "templateId": selected_template,
+        "profileId": str(agent_instance.get("profileId") or selected_profile_id).strip(),
+        "roleKey": f"research_{normalized}",
+        "promptTemplateId": prompt_template_id,
+        "enabled": next_enabled,
+        "agentId": str(agent_instance.get("agentId") or "").strip(),
+        "agentInstanceId": str(agent_instance.get("agentId") or "").strip(),
+        "directSessionId": str(agent_instance.get("directSessionId") or "").strip(),
+        "primaryMode": "research",
+    }
+    next_agents = [agent for agent in agents if str(agent.get("key") or "").strip() != normalized]
+    next_agents.append(research_agent_record)
+    next_agents.sort(key=lambda agent: str(agent.get("key") or ""))
+    write_config = getattr(workspace, "write_research_agent_config", None)
+    if callable(write_config):
+        if not write_config(_research_agent_storage_payload({"deletedDefaultAgents": deleted_default_agents, "agents": next_agents})):
+            _record_research_config_event(
+                "research.agent_binding.update_failed",
+                phase="agent_template_config",
+                message="Research agent template binding update failed",
+                outcome="failed",
+                level="error",
+                fields={
+                    "agentKey": normalized,
+                    "templateId": selected_template,
+                    "profileId": selected_profile_id,
+                    "errorType": "ValueError",
+                    "message": "Failed to write research agent config.",
+                },
+                agent_key=normalized,
+            )
+            raise ValueError("Failed to write research agent config.")
+    _sync_research_mode_binding(next_agents)
     _record_research_config_event(
-            "research.agent_binding.updated",
-            phase="agent_template_config",
-            message="Research agent template binding updated",
-            fields={
-                "agentKey": normalized,
-                "label": next_label,
-                "promptFilename": prompt_file,
-                "templateId": selected_template,
-                "llmConfigId": selected_llm_config,
-                "created": not updated,
-            },
-            agent_key=normalized,
-        )
+        "research.agent_binding.updated",
+        phase="agent_template_config",
+        message="Research agent binding updated through AgentInstance",
+        fields={
+            "agentKey": normalized,
+            "agentId": research_agent_record["agentId"],
+            "roleKey": research_agent_record["roleKey"],
+            "promptTemplateId": prompt_template_id,
+            "profileId": research_agent_record["profileId"],
+            "templateId": selected_template,
+            "created": not updated,
+            "source": "AgentInstance",
+        },
+        agent_key=normalized,
+    )
     return list_research_prompts()
 
 
 def delete_research_agent_binding(key: str) -> dict[str, Any]:
     normalized = normalize_research_agent_key(key)
-    canvas = get_research_flow_canvas()
-    referencing_nodes = [
-        str(node.get("id") or "")
-        for node in canvas.get("nodes", [])
-        if isinstance(node, dict) and str(node.get("agentKey") or "").strip() == normalized
-    ]
-    if referencing_nodes:
-        raise ValueError(f"Research agent {normalized} is still used by flow nodes: {', '.join(referencing_nodes[:5])}")
     config = _load_research_agent_config()
     agents = config["agents"]
     removed_agent = next((agent for agent in agents if agent["key"] == normalized), None)
     remaining = [agent for agent in agents if agent["key"] != normalized]
     if len(remaining) == len(agents):
         raise ValueError(f"Unknown research agent key: {key}")
+    agent_instance_id = str((removed_agent or {}).get("agentInstanceId") or (removed_agent or {}).get("agentId") or "").strip()
+    canvas = get_research_flow_canvas()
+    referencing_nodes = [
+        str(node.get("id") or "")
+        for node in canvas.get("nodes", [])
+        if isinstance(node, dict)
+        and (
+            str(node.get("agentKey") or "").strip() == normalized
+            or (
+                agent_instance_id
+                and str(node.get("agentId") or node.get("agentInstanceId") or "").strip() == agent_instance_id
+            )
+        )
+    ]
+    if referencing_nodes:
+        _record_research_config_event(
+            "research.agent_binding.delete_failed",
+            phase="agent_template_config",
+            message="Research agent binding delete failed",
+            outcome="failed",
+            level="error",
+            fields={
+                "agentKey": normalized,
+                "agentId": agent_instance_id,
+                "reason": "still_used_by_flow_nodes",
+                "referencingNodeCount": len(referencing_nodes),
+                "referencingNodes": referencing_nodes[:12],
+            },
+            agent_key=normalized,
+        )
+        raise ValueError(f"Research agent {normalized} is still used by flow nodes: {', '.join(referencing_nodes[:5])}")
     deleted_default_agents = set(config.get("deletedDefaultAgents") or [])
     if normalized in RESEARCH_PROMPT_FILES:
         deleted_default_agents.add(normalized)
     workspace = get_workspace()
-    if not workspace.write_research_agent_config({"schemaVersion": 1, "deletedDefaultAgents": sorted(deleted_default_agents), "agents": remaining}):
+    if not workspace.write_research_agent_config(_research_agent_storage_payload({"deletedDefaultAgents": deleted_default_agents, "agents": remaining})):
         raise ValueError("Failed to delete research agent config.")
-    agent_instance_id = str((removed_agent or {}).get("agentInstanceId") or (removed_agent or {}).get("agentId") or "").strip()
+    _remove_research_agent_from_mode_binding(normalized, agent_instance_id)
     if agent_instance_id:
         try:
             agent_directory_service.archive_agent_instance(agent_instance_id)
@@ -785,20 +1101,40 @@ def delete_research_agent_binding(key: str) -> dict[str, Any]:
     return list_research_prompts()
 
 
-def get_research_flow_canvas() -> dict[str, Any]:
+def get_research_flow_canvas(*, sync_agent_instances: bool = True) -> dict[str, Any]:
     workspace = get_workspace()
     raw = workspace.read_research_flow_canvas()
-    canvas = _normalize_research_flow_canvas(_with_default_research_flow_canvas_migrations(raw or _default_research_flow_canvas()))
+    raw_agent_config = _load_research_agent_config()
+    agent_config = _ensure_research_agent_instances(raw_agent_config) if sync_agent_instances else raw_agent_config
+    canvas = _normalize_research_flow_canvas(
+        _with_research_flow_agent_ids(
+            _with_default_research_flow_canvas_migrations(raw or _default_research_flow_canvas()),
+            agent_config,
+        )
+    )
     return _with_flow_canvas_validation({
         **canvas,
         "path": str(workspace.get_research_flow_canvas_path()),
     })
 
 
-def save_research_flow_canvas(payload: dict[str, Any], *, record_event: bool = True) -> dict[str, Any]:
+def save_research_flow_canvas(
+    payload: dict[str, Any],
+    *,
+    record_event: bool = True,
+    sync_agent_instances: bool = True,
+) -> dict[str, Any]:
     workspace = get_workspace()
+    agent_binding_stats: dict[str, int] = {}
+    mode_binding_stats: dict[str, int] = {}
     try:
-        canvas = _normalize_research_flow_canvas(payload)
+        raw_agent_config = _load_research_agent_config()
+        agent_config = _ensure_research_agent_instances(raw_agent_config) if sync_agent_instances else raw_agent_config
+        if isinstance(payload, dict) and str(payload.get("canvasKind") or "").strip() == _ORGANIZATION_CANVAS_KIND:
+            raise ValueError("Research organization graph must be saved through /api/research/organization, not /api/research/flow-canvas.")
+        canvas = _normalize_research_flow_canvas(
+            _with_research_flow_agent_ids(payload, agent_config, stats=agent_binding_stats)
+        )
         mojibake_report = _detect_flow_canvas_mojibake(canvas)
         if mojibake_report["markerCount"] > 0:
             raise ValueError(_format_flow_canvas_mojibake_error(mojibake_report))
@@ -841,8 +1177,9 @@ def save_research_flow_canvas(payload: dict[str, Any], *, record_event: bool = T
                     "errorType": "ValueError",
                     "message": "Failed to write research flow canvas.",
                 },
-            )
+        )
         raise ValueError("Failed to write research flow canvas.")
+    mode_binding_stats = _sync_research_flow_canvas_mode_binding(canvas, agent_config)
     if record_event:
         _record_research_config_event(
             "research.flow_canvas.updated",
@@ -852,6 +1189,8 @@ def save_research_flow_canvas(payload: dict[str, Any], *, record_event: bool = T
                 "path": str(workspace.get_research_flow_canvas_path()),
                 "nodeCount": len(canvas["nodes"]),
                 "edgeCount": len(canvas["edges"]),
+                "agentBindingResolvedCount": int(agent_binding_stats.get("resolvedCount") or 0),
+                "flowBindingSyncCount": int(mode_binding_stats.get("updatedCount") or 0),
                 **_flow_canvas_mojibake_log_fields(mojibake_report),
             },
         )
@@ -865,7 +1204,7 @@ def execute_research_flow_canvas_node(session_id: str, node_id: str | None = Non
     normalized_session_id = _safe_text(session_id, max_length=128)
     if not normalized_session_id:
         raise ValueError("Research flow execution requires a session id.")
-    canvas = get_research_flow_canvas()
+    canvas = get_research_flow_canvas(sync_agent_instances=False)
     validation = canvas.get("validation") if isinstance(canvas.get("validation"), dict) else _validate_research_flow_canvas(canvas)
     if not validation.get("valid", False):
         _record_research_config_event(
@@ -940,7 +1279,7 @@ def execute_research_flow_canvas_node(session_id: str, node_id: str | None = Non
             raise
         raise ValueError(f"Research flow node execution failed: {type(exc).__name__}: {exc}") from exc
 
-    latest_canvas = get_research_flow_canvas()
+    latest_canvas = get_research_flow_canvas(sync_agent_instances=False)
     nodes = [dict(node) for node in latest_canvas["nodes"]]
     edges = [dict(edge) for edge in latest_canvas["edges"]]
     node_index = next(index for index, node in enumerate(nodes) if node["id"] == selected["id"])
@@ -988,7 +1327,7 @@ def _sync_research_flow_canvas_with_session_payload(payload: dict[str, Any]) -> 
     if not isinstance(payload, dict):
         return payload
     try:
-        canvas = get_research_flow_canvas()
+        canvas = get_research_flow_canvas(sync_agent_instances=False)
         nodes = [dict(node) for node in canvas["nodes"]]
         edges = [dict(edge) for edge in canvas["edges"]]
         changed: list[dict[str, Any]] = []
@@ -1107,8 +1446,6 @@ def _record_research_flow_sync_event(payload: dict[str, Any], changed: list[dict
         )
     except Exception:
         pass
-
-
 def _select_flow_execution_node(nodes: list[dict[str, Any]], node_id: str | None) -> dict[str, Any] | None:
     requested = _safe_token(node_id, default="") if node_id else ""
     runnable_statuses = {"ready", "needs_review", "needs_evidence"}
@@ -1166,6 +1503,13 @@ def _mark_flow_downstream_stale(
 def _flow_node_action_key(node: dict[str, Any]) -> str:
     raw = _safe_token(node.get("agentKey") or node.get("promptKey") or node.get("id"), default="")
     return _FLOW_NODE_ACTION_ALIASES.get(raw, raw)
+
+
+def _flow_node_binding_key(node: dict[str, Any]) -> str:
+    node_id = _safe_token(node.get("id"), default="")
+    if node_id and node_id not in _FLOW_NODE_ACTION_ALIASES:
+        return node_id
+    return _flow_node_action_key(node)
 
 
 def _execute_research_flow_action(action_key: str, session_id: str) -> tuple[dict[str, Any], str]:
@@ -1378,11 +1722,13 @@ def _persist_research_flow_canvas_state(
     return save_research_flow_canvas(
         {
             "schemaVersion": base_canvas.get("schemaVersion", 1),
+            "canvasKind": base_canvas.get("canvasKind", _FLOW_CANVAS_KIND),
             "viewport": base_canvas.get("viewport") or {},
             "nodes": nodes,
             "edges": edges,
         },
         record_event=False,
+        sync_agent_instances=False,
     )
 
 
@@ -1469,90 +1815,285 @@ def _with_default_research_flow_canvas_migrations(raw: dict[str, Any]) -> dict[s
     edges = raw.get("edges")
     if not isinstance(nodes, list) or not isinstance(edges, list):
         return raw
+    canvas_kind = str(raw.get("canvasKind") or "").strip()
+    if canvas_kind == _ORGANIZATION_CANVAS_KIND:
+        return _default_research_flow_canvas()
+    if canvas_kind == _FLOW_CANVAS_KIND:
+        return raw
 
-    migrated = {
-        **raw,
-        "nodes": [dict(node) for node in nodes if isinstance(node, dict)],
-        "edges": [dict(edge) for edge in edges if isinstance(edge, dict)],
+    normalized_nodes = [dict(node) for node in nodes if isinstance(node, dict)]
+    normalized_edges = [dict(edge) for edge in edges if isinstance(edge, dict)]
+    if _looks_like_legacy_default_research_flow_canvas(normalized_nodes) or any(
+        str(node.get("type") or "agent").strip() != "agent" for node in normalized_nodes
+    ):
+        return {**raw, "canvasKind": _FLOW_CANVAS_KIND, "nodes": normalized_nodes, "edges": normalized_edges}
+    organization_edge_markers = {"message", "report", "advice", "delegate", "observe"}
+    organization_edge_types = {"reporting", "advisory", "collaboration", "delegation", "observation"}
+    if any(
+        str(edge.get("condition") or "").strip() in organization_edge_markers
+        or str(edge.get("type") or "").strip() in organization_edge_types
+        for edge in normalized_edges
+    ):
+        return _default_research_flow_canvas()
+    if len(normalized_nodes) == 1 or normalized_edges:
+        return {**raw, "canvasKind": _FLOW_CANVAS_KIND, "nodes": normalized_nodes, "edges": normalized_edges}
+    return _default_research_flow_canvas()
+
+
+def _looks_like_legacy_default_research_flow_canvas(nodes: list[dict[str, Any]]) -> bool:
+    node_ids = {str(node.get("id") or "") for node in nodes}
+    return {
+        "broad_search",
+        "knowledge_store",
+        "knowledge_lookup",
+        "deep_search",
+        "literature_project_parse",
+        "semantic_cluster",
+        "novelty_reverse_check",
+        "evidence_review",
+        "theme_generation",
+        "human_choice",
+        "theme_card",
+    }.issubset(node_ids)
+
+
+def _with_research_flow_agent_ids(
+    raw: dict[str, Any],
+    agent_config: dict[str, Any] | None = None,
+    *,
+    stats: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return raw
+    nodes = raw.get("nodes")
+    if not isinstance(nodes, list):
+        return raw
+    config = agent_config if isinstance(agent_config, dict) else _load_research_agent_config()
+    by_key: dict[str, dict[str, Any]] = {}
+    by_agent_id: dict[str, dict[str, Any]] = {}
+    for agent in config.get("agents", []):
+        if not isinstance(agent, dict):
+            continue
+        key = str(agent.get("key") or "").strip()
+        agent_id = str(agent.get("agentId") or agent.get("agentInstanceId") or "").strip()
+        if key and agent_id:
+            by_key[key] = agent
+            by_agent_id[agent_id] = agent
+    research_binding = _read_research_mode_binding_for_workspace()
+    flow_bindings = {
+        str(key or "").strip(): str(value or "").strip()
+        for key, value in dict(research_binding.get("flowBindings") or {}).items()
+        if str(key or "").strip() and str(value or "").strip()
     }
-    default_canvas = _default_research_flow_canvas()
-    template_nodes = {node["id"]: node for node in default_canvas["nodes"]}
-    template_edges = {edge["id"]: edge for edge in default_canvas["edges"]}
-    node_ids = {str(node.get("id") or "") for node in migrated["nodes"]}
-    has_legacy_direct_search_edge = any(
-        str(edge.get("id") or "") == "edge_broad_deep"
-        or (str(edge.get("source") or "") == "broad_search" and str(edge.get("target") or "") == "deep_search")
-        for edge in migrated["edges"]
-    )
-    if "knowledge_store" not in node_ids:
-        previous = next((node for node in migrated["nodes"] if str(node.get("id") or "") == "deep_search"), None)
-        store_node = dict(template_nodes["knowledge_store"])
-        if isinstance(previous, dict) and str(previous.get("status") or "") == "done":
-            store_node["status"] = "done"
-        if has_legacy_direct_search_edge:
-            for node in migrated["nodes"]:
-                if str(node.get("id") or "") == "broad_search":
+    if not by_key and not flow_bindings:
+        return raw
+    migrated_nodes: list[dict[str, Any]] = []
+    changed = False
+    resolved_count = 0
+    for node in nodes:
+        if not isinstance(node, dict):
+            migrated_nodes.append(node)
+            continue
+        next_node = dict(node)
+        agent_key = str(next_node.get("agentKey") or "").strip()
+        prompt_key = str(next_node.get("promptKey") or "").strip()
+        action_key = _flow_node_action_key(next_node)
+        binding_key = _flow_node_binding_key(next_node)
+        agent_id = str(next_node.get("agentId") or next_node.get("agentInstanceId") or "").strip()
+        if not agent_id:
+            for candidate_key in (binding_key, action_key, agent_key, prompt_key):
+                if not candidate_key:
                     continue
-                x = _safe_number(node.get("x"), 0)
-                if x >= 360:
-                    node["x"] = x + 300
-        insert_at = next(
-            (index for index, node in enumerate(migrated["nodes"]) if str(node.get("id") or "") == "deep_search"),
-            len(migrated["nodes"]),
-        )
-        migrated["nodes"].insert(insert_at, store_node)
+                agent_id = flow_bindings.get(candidate_key) or str(
+                    (by_key.get(candidate_key) or {}).get("agentId")
+                    or (by_key.get(candidate_key) or {}).get("agentInstanceId")
+                    or ""
+                ).strip()
+                if agent_id:
+                    next_node["agentId"] = agent_id
+                    changed = True
+                    resolved_count += 1
+                    break
+        agent_record = by_agent_id.get(agent_id)
+        if agent_record:
+            record_key = str(agent_record.get("key") or "").strip()
+            if record_key and not agent_key:
+                next_node["agentKey"] = record_key
+                changed = True
+                resolved_count += 1
+            if record_key and not prompt_key:
+                next_node["promptKey"] = record_key
+                changed = True
+                resolved_count += 1
+        migrated_nodes.append(next_node)
+    if stats is not None:
+        stats["resolvedCount"] = int(stats.get("resolvedCount") or 0) + resolved_count
+    if not changed:
+        return raw
+    return {**raw, "nodes": migrated_nodes}
 
-    node_ids = {str(node.get("id") or "") for node in migrated["nodes"]}
-    capability_insert_after = {
-        "knowledge_lookup": "knowledge_store",
-        "literature_project_parse": "deep_search",
-        "semantic_cluster": "literature_project_parse",
-        "novelty_reverse_check": "semantic_cluster",
-    }
-    for node_id in _RESEARCH_CAPABILITY_NODE_IDS:
-        if node_id in node_ids:
-            continue
-        template = dict(template_nodes[node_id])
-        template["status"] = _migrated_capability_status(node_id, migrated["nodes"])
-        anchor_id = capability_insert_after[node_id]
-        anchor_index = next(
-            (index for index, node in enumerate(migrated["nodes"]) if str(node.get("id") or "") == anchor_id),
-            len(migrated["nodes"]) - 1,
-        )
-        migrated["nodes"].insert(anchor_index + 1, template)
-        node_ids.add(node_id)
 
-    edge_ids = {str(edge.get("id") or "") for edge in migrated["edges"]}
-    legacy_edge_ids = {
-        "edge_broad_deep",
-        "edge_store_deep",
-        "edge_deep_review",
-    }
-    migrated["edges"] = [
-        edge
-        for edge in migrated["edges"]
-        if str(edge.get("id") or "") not in legacy_edge_ids
-        and not (str(edge.get("source") or "") == "broad_search" and str(edge.get("target") or "") == "deep_search")
-        and not (str(edge.get("source") or "") == "knowledge_store" and str(edge.get("target") or "") == "deep_search")
-        and not (str(edge.get("source") or "") == "deep_search" and str(edge.get("target") or "") == "evidence_review")
-    ]
-    edge_ids = {str(edge.get("id") or "") for edge in migrated["edges"]}
-    required_edges = [
-        template_edges["edge_broad_store"],
-        template_edges["edge_store_lookup"],
-        template_edges["edge_lookup_deep"],
-        template_edges["edge_deep_parse"],
-        template_edges["edge_parse_cluster"],
-        template_edges["edge_cluster_novelty"],
-        template_edges["edge_novelty_review"],
-    ]
-    node_ids = {str(node.get("id") or "") for node in migrated["nodes"]}
-    for edge in required_edges:
-        if edge["id"] in edge_ids or edge["source"] not in node_ids or edge["target"] not in node_ids:
+def _sync_research_flow_canvas_mode_binding(canvas: dict[str, Any], agent_config: dict[str, Any]) -> dict[str, int]:
+    research_binding = _read_research_mode_binding_for_workspace()
+    flow_bindings = dict(research_binding.get("flowBindings") or {})
+    active_agent_ids: list[str] = []
+    for agent in agent_config.get("agents", []):
+        if not isinstance(agent, dict) or agent.get("enabled") is False:
             continue
-        migrated["edges"].append(dict(edge))
-        edge_ids.add(edge["id"])
-    return migrated
+        agent_id = str(agent.get("agentId") or agent.get("agentInstanceId") or "").strip()
+        if agent_id:
+            active_agent_ids.append(agent_id)
+    updated_count = 0
+    for node in canvas.get("nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        action_key = _flow_node_binding_key(node)
+        agent_id = str(node.get("agentId") or node.get("agentInstanceId") or "").strip()
+        if not action_key or not agent_id:
+            continue
+        if str(flow_bindings.get(action_key) or "").strip() != agent_id:
+            flow_bindings[action_key] = agent_id
+            updated_count += 1
+        active_agent_ids.append(agent_id)
+    if updated_count <= 0:
+        return {"updatedCount": 0}
+    available_agent_ids = _dedupe_research_agent_ids(
+        [
+            *list(research_binding.get("availableAgentIds") or []),
+            *list(research_binding.get("pool") or []),
+            *active_agent_ids,
+        ]
+    )
+    if not available_agent_ids:
+        return {"updatedCount": updated_count}
+    default_agent_id = str(research_binding.get("defaultAgentId") or "").strip()
+    if default_agent_id not in available_agent_ids:
+        default_agent_id = available_agent_ids[0]
+    try:
+        _update_research_mode_binding_for_workspace(
+            default_agent_id=default_agent_id,
+            available_agent_ids=available_agent_ids,
+            pool=_dedupe_research_agent_ids([*list(research_binding.get("pool") or []), *active_agent_ids]),
+            flow_bindings=flow_bindings,
+        )
+    except Exception as exc:
+        _record_research_config_event(
+            "research.flow_canvas.mode_binding_sync_failed",
+            phase="flow_canvas",
+            message="Research flow canvas mode binding sync failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "updatedCount": updated_count,
+                "errorType": type(exc).__name__,
+                "message": str(exc),
+            },
+        )
+        return {"updatedCount": 0}
+    return {"updatedCount": updated_count}
+
+
+def _read_research_mode_binding_for_workspace() -> dict[str, Any]:
+    workspace = get_workspace()
+    project_root = _project_root_for_workspace(workspace)
+    previous_agent_root = agent_directory_service.PROJECT_ROOT
+    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
+    agent_directory_service.PROJECT_ROOT = project_root
+    agent_mode_binding_service.PROJECT_ROOT = project_root
+    try:
+        payload = agent_mode_binding_service.get_mode_bindings_payload()
+        modes = payload.get("modes") if isinstance(payload.get("modes"), dict) else {}
+        research = modes.get("research") if isinstance(modes.get("research"), dict) else {}
+        return dict(research)
+    except Exception:
+        return {}
+    finally:
+        agent_directory_service.PROJECT_ROOT = previous_agent_root
+        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
+
+
+def _update_research_mode_binding_for_workspace(
+    *,
+    default_agent_id: str,
+    available_agent_ids: list[str],
+    pool: list[str],
+    flow_bindings: dict[str, str],
+) -> None:
+    workspace = get_workspace()
+    project_root = _project_root_for_workspace(workspace)
+    previous_agent_root = agent_directory_service.PROJECT_ROOT
+    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
+    agent_directory_service.PROJECT_ROOT = project_root
+    agent_mode_binding_service.PROJECT_ROOT = project_root
+    try:
+        agent_mode_binding_service.update_mode_binding(
+            "research",
+            default_agent_id=default_agent_id,
+            available_agent_ids=available_agent_ids,
+            pool=pool,
+            flow_bindings=flow_bindings,
+        )
+    finally:
+        agent_directory_service.PROJECT_ROOT = previous_agent_root
+        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
+
+
+def _remove_research_agent_from_mode_binding(agent_key: str, agent_id: str) -> None:
+    research_binding = _read_research_mode_binding_for_workspace()
+    normalized_key = str(agent_key or "").strip()
+    removed_agent_id = str(agent_id or "").strip()
+    if not research_binding or (not normalized_key and not removed_agent_id):
+        return
+    flow_bindings = {
+        key: value
+        for key, value in dict(research_binding.get("flowBindings") or {}).items()
+        if str(key or "").strip() != normalized_key and (not removed_agent_id or str(value or "").strip() != removed_agent_id)
+    }
+    available_agent_ids = [
+        value for value in list(research_binding.get("availableAgentIds") or [])
+        if not removed_agent_id or str(value or "").strip() != removed_agent_id
+    ]
+    pool = [
+        value for value in list(research_binding.get("pool") or [])
+        if not removed_agent_id or str(value or "").strip() != removed_agent_id
+    ]
+    default_agent_id = str(research_binding.get("defaultAgentId") or "").strip()
+    if removed_agent_id and default_agent_id == removed_agent_id:
+        default_agent_id = available_agent_ids[0] if available_agent_ids else ""
+    try:
+        _update_research_mode_binding_for_workspace(
+            default_agent_id=default_agent_id,
+            available_agent_ids=_dedupe_research_agent_ids(available_agent_ids),
+            pool=_dedupe_research_agent_ids(pool),
+            flow_bindings=flow_bindings,
+        )
+    except Exception as exc:
+        _record_research_config_event(
+            "research.mode_binding.delete_sync_failed",
+            phase="agent_template_config",
+            message="Research mode binding delete sync failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "agentKey": normalized_key,
+                "agentId": removed_agent_id,
+                "errorType": type(exc).__name__,
+                "message": str(exc),
+            },
+            agent_key=normalized_key,
+        )
+
+
+def _dedupe_research_agent_ids(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        agent_id = str(value or "").strip()
+        if not agent_id or agent_id in seen:
+            continue
+        seen.add(agent_id)
+        deduped.append(agent_id)
+    return deduped
 
 
 def _migrated_capability_status(node_id: str, nodes: list[dict[str, Any]]) -> str:
@@ -1591,10 +2132,17 @@ def _normalize_research_flow_canvas(raw: dict[str, Any]) -> dict[str, Any]:
     node_ids = {node["id"] for node in normalized_nodes}
     if len(node_ids) != len(normalized_nodes):
         raise ValueError("Research flow canvas node ids must be unique.")
-    normalized_edges = [_normalize_flow_canvas_edge(item, index, node_ids) for index, item in enumerate(edges[:160])]
+    canvas_kind = _safe_text(raw.get("canvasKind"), default=_FLOW_CANVAS_KIND, max_length=80)
+    if canvas_kind != _FLOW_CANVAS_KIND:
+        canvas_kind = _FLOW_CANVAS_KIND
+    normalized_edges = [
+        _normalize_flow_canvas_edge(item, index, node_ids, canvas_kind=canvas_kind)
+        for index, item in enumerate(edges[:160])
+    ]
     viewport = raw.get("viewport") if isinstance(raw.get("viewport"), dict) else {}
     return {
         "schemaVersion": 1,
+        "canvasKind": canvas_kind,
         "updatedAt": str(raw.get("updatedAt") or _utc_now()),
         "viewport": {
             "x": _safe_number(viewport.get("x"), 0),
@@ -1614,29 +2162,37 @@ def _normalize_flow_canvas_node(item: Any, index: int) -> dict[str, Any]:
     node_type = _safe_token(item.get("type"), default="agent")
     return {
         "id": node_id,
-        "label": _safe_text(item.get("label"), default=f"流程节点 {index + 1}", max_length=80),
+        "label": _safe_text(item.get("label"), default=f"Agent {index + 1}", max_length=80),
         "type": node_type if node_type in _FLOW_CANVAS_NODE_TYPES else "agent",
         "status": status if status in _FLOW_CANVAS_STATUSES else "idle",
         "x": _safe_number(item.get("x"), 80 + index * 220),
         "y": _safe_number(item.get("y"), 120),
+        "agentId": _safe_text(item.get("agentId") or item.get("agentInstanceId"), max_length=128),
         "agentKey": _safe_text(item.get("agentKey"), max_length=64),
         "promptKey": _safe_text(item.get("promptKey"), max_length=64),
-        "llmConfigId": _safe_text(item.get("llmConfigId"), max_length=128),
+        "llmConfigId": "",
         "description": _safe_text(item.get("description"), max_length=1200),
         "routeCondition": _safe_text(item.get("routeCondition"), max_length=600),
     }
 
 
-def _normalize_flow_canvas_edge(item: Any, index: int, node_ids: set[str]) -> dict[str, Any]:
+def _normalize_flow_canvas_edge(
+    item: Any,
+    index: int,
+    node_ids: set[str],
+    *,
+    canvas_kind: str = _FLOW_CANVAS_KIND,
+) -> dict[str, Any]:
     if not isinstance(item, dict):
         raise ValueError("Research flow canvas edge must be an object.")
     source = _safe_token(item.get("source"), default="")
     target = _safe_token(item.get("target"), default="")
     if source not in node_ids or target not in node_ids:
         raise ValueError("Research flow canvas edge must reference existing nodes.")
-    condition = _safe_token(item.get("condition"), default="completed")
+    default_condition = "completed"
+    condition = _safe_token(item.get("condition"), default=default_condition)
     if condition not in _FLOW_CANVAS_EDGE_CONDITIONS:
-        condition = "completed"
+        condition = default_condition
     edge_type = _safe_token(item.get("type"), default="")
     return {
         "id": _safe_token(item.get("id"), default=f"edge_{index + 1}"),
@@ -1650,10 +2206,10 @@ def _normalize_flow_canvas_edge(item: Any, index: int, node_ids: set[str]) -> di
 
 def _infer_flow_edge_type(condition: str) -> str:
     normalized = _safe_text(condition, default="completed", max_length=160).strip().lower()
-    if normalized == "needs_evidence":
-        return "evidence_loop"
     if normalized == "approved":
         return "approval_gate"
+    if normalized == "needs_evidence":
+        return "evidence_loop"
     if normalized == "selected":
         return "selection"
     if normalized == "failed":
@@ -1811,6 +2367,7 @@ def _validate_research_flow_canvas(canvas: dict[str, Any]) -> dict[str, Any]:
             )
         )
     reachable = _reachable_flow_node_ids(start_node_ids, outgoing)
+
     for node_id, node in node_by_id.items():
         contract = _flow_contract_for_node(node)
         if contract is None:
@@ -2007,7 +2564,7 @@ def _format_flow_canvas_mojibake_error(report: dict[str, Any]) -> str:
     first = markers[0] if markers and isinstance(markers[0], dict) else {}
     target = ".".join(part for part in [str(first.get("id") or ""), str(first.get("field") or "")] if part)
     suffix = f" at {target}" if target else ""
-    return f"Research flow canvas contains mojibake text{suffix}; reload the canvas from UTF-8 source before saving."
+    return f"Research organization canvas contains mojibake text{suffix}; reload the canvas from UTF-8 source before saving."
 
 
 def _flow_canvas_mojibake_log_fields(report: dict[str, Any] | None) -> dict[str, Any]:
@@ -2051,13 +2608,33 @@ def _safe_number(value: Any, default: float) -> float:
         return default
 
 
+def _relative_project_path(path: Path) -> str:
+    workspace = get_workspace()
+    project_root = _project_root_for_workspace(workspace)
+    try:
+        return Path(path).resolve().relative_to(project_root).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _project_root_for_workspace(workspace: Any) -> Path:
+    explicit = getattr(workspace, "project_root", None)
+    if explicit:
+        return Path(explicit).resolve()
+    root = Path(getattr(workspace, "root", session_service.PROJECT_ROOT)).resolve()
+    return root.parent if root.name == "workspace" else root
+
+
 def _load_research_agent_config() -> dict[str, Any]:
     workspace = get_workspace()
-    raw = workspace.read_research_agent_config()
+    read_config = getattr(workspace, "read_research_agent_config", None)
+    raw = read_config() if callable(read_config) else {}
     config = normalize_research_agent_config(raw)
+    get_config_path = getattr(workspace, "get_research_agent_config_path", None)
+    config_path = get_config_path() if callable(get_config_path) else ""
     return {
         **config,
-        "configPath": str(workspace.get_research_agent_config_path()),
+        "configPath": str(config_path),
     }
 
 

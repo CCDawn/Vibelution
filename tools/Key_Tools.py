@@ -48,6 +48,8 @@ from core.infrastructure.workspace_cleaner import (
     get_session_files_tool as _get_session_files_impl,
 )
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
+from tools.agent_message_tools import agent_message_tool as _agent_message_impl
+from tools.image2_tools import image2_generate_tool as _image2_generate_impl
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
     code_symbol_tool as _code_symbol_impl,
@@ -811,6 +813,76 @@ def create_key_tools() -> List[BaseTool]:
             _cancel_checker=_cancel_checker,
         )
 
+    @tool
+    def agent_message_tool(
+        target_agent: str,
+        content: str,
+        summary: str = "",
+        wake_target: bool = True,
+        thread_id: str = "",
+        metadata_json: str = "",
+    ) -> str:
+        """
+        【Agent 私信】从当前 Agent 向另一个 Agent 发送持久消息。
+
+        适合把发现、请求、审查意见或交接信息发给指定 Agent。目标可用 agentId、A001 这类稳定代号或唯一名称。
+        消息会写入目标 Agent 的 inbox；wake_target=True 时会尝试唤醒目标的空闲直聊会话。
+
+        Args:
+            target_agent: 目标 Agent 的 agentId、稳定代号或唯一名称
+            content: 要发送的消息正文
+            summary: 简短摘要，留空时使用正文摘要
+            wake_target: 是否尝试唤醒目标直聊会话，默认 True
+            thread_id: 可选线程 ID，用于后续串联同一议题
+            metadata_json: 可选 JSON 对象字符串，写入少量结构化元数据
+
+        Returns:
+            JSON 格式的发送结果、messageId 和唤醒状态
+        """
+        return _agent_message_impl(
+            target_agent=target_agent,
+            content=content,
+            summary=summary,
+            wake_target=wake_target,
+            thread_id=thread_id,
+            metadata_json=metadata_json,
+        )
+
+    @tool
+    def image2_generate_tool(
+        prompt: str,
+        size: str = "1024x1024",
+        quality: str = "auto",
+        output_format: str = "png",
+        input_artifact_id: str = "",
+    ) -> str:
+        """
+        【图片生成】根据用户的自然语言需求生成或重新生成真实图片。
+
+        覆盖头像、角色头像、风格改版、2D/卡通/动画风格、海报、场景图等视觉产出请求。
+        当用户要求生成图片、画图、做头像、换风格、重新生成或把上一张图改成某种视觉风格时，使用本工具产出图片 artifact。
+        如果用户提供了图片附件，并要求基于这张图改风格、优化、重绘或生成相似图片，应传入该会话图片的 input_artifact_id。
+        图片会保存到当前会话 workspace 的 artifacts/images/，并自动作为一条包含 artifactId、imageUrl、downloadUrl 的图片消息追加到当前会话。
+        返回结果中出现这些图片 artifact 字段，才表示本轮图片生成有真实可展示产物。
+
+        Args:
+            prompt: 图片生成提示词；应包含主体、用途、风格、构图、颜色、比例等关键视觉要求
+            size: 图片尺寸，可选 1024x1024 / 1536x1024 / 1024x1536，默认 1024x1024
+            quality: 图片质量，可选 auto / low / medium / high，默认 auto
+            output_format: 输出格式，首版仅支持 png
+            input_artifact_id: 可选；当前会话已有图片 artifactId，用作 image2 改图/风格参考输入
+
+        Returns:
+            JSON 格式的生成结果、artifactId、imageUrl、downloadUrl 和生成状态
+        """
+        return _image2_generate_impl(
+            prompt=prompt,
+            size=size,
+            quality=quality,
+            output_format=output_format,
+            input_artifact_id=input_artifact_id,
+        )
+
     # ── 学习卸载工具 (P2) ──────────────────────────────────────────────────
 
     @tool
@@ -926,6 +998,9 @@ def create_key_tools() -> List[BaseTool]:
         list_workspace_debris_tool,
         clean_workspace_debris_tool,
         get_session_files_tool,
+        # Agent 间通信
+        agent_message_tool,
+        image2_generate_tool,
         # 学习卸载 (P2)
         record_learning_tool,
         search_memory_tool,

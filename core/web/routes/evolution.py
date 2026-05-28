@@ -71,6 +71,7 @@ from core.web.services.supervised_control_service import (
     start_supervised_run,
     stream_active_supervised_run_events,
 )
+from core.web.services.supervised_agent_service import SupervisedAgentBindingError
 from core.web.services.supervised_worktree_evolution_service import (
     SupervisedWorktreeRunActionError,
     SupervisedWorktreeRunBusyError,
@@ -402,6 +403,8 @@ def evolution_start_run(payload: SupervisedRunStartPayload) -> dict:
         return start_supervised_run(payload.model_dump())
     except SupervisedRunBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SupervisedAgentBindingError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SupervisedRunValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

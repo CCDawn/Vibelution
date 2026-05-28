@@ -1,0 +1,730 @@
+"""Mode-to-Agent binding store for configurable Agent runtimes."""
+
+from __future__ import annotations
+
+import copy
+import json
+import re
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from .agent_directory_service import get_agent, list_agents
+from .runtime_scene_service import record_runtime_scene_event
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+MODE_BINDING_VERSION = 1
+MODE_BINDING_PATH = PROJECT_ROOT / "workspace" / "agent_config" / "mode_bindings.json"
+MODE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{1,63}$")
+
+
+class AgentModeBindingError(ValueError):
+    """Raised when a mode binding update is invalid."""
+
+
+DEFAULT_MODE_BINDINGS: tuple[dict[str, Any], ...] = (
+    {"mode": "chat", "defaultAgentId": "", "availableAgentIds": [], "pool": [], "flowBindings": {}, "slots": {}, "excludedAgentIds": []},
+    {"mode": "research", "defaultAgentId": "", "availableAgentIds": [], "pool": [], "flowBindings": {}, "slots": {}, "excludedAgentIds": []},
+    {
+        "mode": "supervised_evolution",
+        "defaultAgentId": "",
+        "availableAgentIds": [],
+        "pool": [],
+        "flowBindings": {},
+        "slots": {"baseline": "", "candidate": "", "reviewer": "", "auditor": "", "judge": ""},
+        "excludedAgentIds": [],
+        "excludedSlots": [],
+    },
+    {
+        "mode": "self_evolution",
+        "defaultAgentId": "",
+        "availableAgentIds": [],
+        "pool": [],
+        "flowBindings": {},
+        "slots": {"executor": "", "reviewer": "", "summarizer": ""},
+        "excludedAgentIds": [],
+        "excludedSlots": [],
+    },
+)
+
+
+def get_mode_bindings_payload() -> dict[str, Any]:
+    """Return repaired mode bindings plus the active Agent index."""
+
+    payload = repair_mode_bindings()
+    modes = {
+        str(item.get("mode") or ""): _binding_to_api(item)
+        for item in payload.get("bindings") or []
+        if isinstance(item, dict)
+    }
+    agents = _agent_options()
+    return {
+        "schemaVersion": MODE_BINDING_VERSION,
+        "storagePath": _relative_project_path(mode_binding_path()),
+        "bindings": modes,
+        "modes": modes,
+        "agents": agents,
+        "agentRefs": {str(agent.get("agentId") or ""): agent for agent in agents},
+        "repairWarnings": list(payload.get("repairWarnings") or []),
+    }
+
+
+def update_mode_binding(
+    mode: str,
+    *,
+    default_agent_id: str | None = None,
+    available_agent_ids: list[str] | None = None,
+    pool: list[str] | None = None,
+    flow_bindings: dict[str, str] | None = None,
+    slots: dict[str, str] | None = None,
+    excluded_agent_ids: list[str] | None = None,
+    excluded_slots: list[str] | None = None,
+) -> dict[str, Any]:
+    """Update one mode binding record and return the repaired payload."""
+
+    normalized_mode = _normalize_mode(mode)
+    payload = repair_mode_bindings()
+    bindings = list(payload.get("bindings") or [])
+    index = next((idx for idx, item in enumerate(bindings) if item.get("mode") == normalized_mode), -1)
+    if index < 0:
+        bindings.append(_normalize_binding({"mode": normalized_mode}))
+        index = len(bindings) - 1
+    record = copy.deepcopy(bindings[index])
+    if default_agent_id is not None:
+        record["defaultAgentId"] = _validate_agent_reference(default_agent_id, allow_blank=True)
+    if available_agent_ids is not None:
+        record["availableAgentIds"] = _normalize_agent_list(available_agent_ids)
+    if pool is not None:
+        record["pool"] = _normalize_agent_list(pool)
+    if flow_bindings is not None:
+        record["flowBindings"] = _normalize_agent_map(flow_bindings)
+    if slots is not None:
+        record["slots"] = _normalize_agent_map(slots)
+    if excluded_agent_ids is not None:
+        record["excludedAgentIds"] = _normalize_agent_list(excluded_agent_ids)
+    if excluded_slots is not None:
+        record["excludedSlots"] = _safe_key_list(excluded_slots)
+    record["updatedAt"] = _now()
+    bindings[index] = _normalize_binding(record)
+    payload["bindings"] = bindings
+    _save_mode_bindings(payload)
+    _record_mode_binding_event(
+        "mode_binding.updated",
+        normalized_mode,
+        outcome="updated",
+        fields={
+            "defaultAgentId": record.get("defaultAgentId") or "",
+            "availableAgentCount": len(record.get("availableAgentIds") or []),
+            "poolCount": len(record.get("pool") or []),
+            "slotCount": len(record.get("slots") or {}),
+            "excludedAgentCount": len(record.get("excludedAgentIds") or []),
+            "excludedSlotCount": len(record.get("excludedSlots") or []),
+        },
+    )
+    return get_mode_bindings_payload()
+
+
+def update_agent_mode_membership(
+    agent_id: str,
+    *,
+    chat_default: bool | None = None,
+    chat_available: bool | None = None,
+    research_pool: bool | None = None,
+    supervised_slot: str | None = None,
+    self_evolution_slot: str | None = None,
+) -> dict[str, Any]:
+    """Update the mode binding references for one Agent from the Agent Center card."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id or not get_agent(normalized_agent_id, include_archived=False):
+        raise AgentModeBindingError(f"Agent not found or archived: {normalized_agent_id}")
+    changed_modes: list[str] = []
+    modes = get_mode_bindings_payload().get("modes") or {}
+
+    if chat_default is not None or chat_available is not None:
+        chat = dict(modes.get("chat") or {})
+        available = _dedupe(chat.get("availableAgentIds") or [])
+        excluded = set(_dedupe(chat.get("excludedAgentIds") or []))
+        default_agent_id = str(chat.get("defaultAgentId") or "").strip()
+        if chat_default is True:
+            excluded.discard(normalized_agent_id)
+            available = _dedupe([*available, normalized_agent_id])
+            default_agent_id = normalized_agent_id
+        elif chat_default is False and default_agent_id == normalized_agent_id:
+            default_agent_id = ""
+        if chat_available is True:
+            excluded.discard(normalized_agent_id)
+            available = _dedupe([*available, normalized_agent_id])
+        elif chat_available is False and chat_default is not True:
+            available = [item for item in available if item != normalized_agent_id]
+            excluded.add(normalized_agent_id)
+            if default_agent_id == normalized_agent_id:
+                default_agent_id = ""
+        update_mode_binding(
+            "chat",
+            default_agent_id=default_agent_id,
+            available_agent_ids=available,
+            excluded_agent_ids=sorted(excluded),
+        )
+        changed_modes.append("chat")
+
+    if research_pool is not None:
+        research = dict(modes.get("research") or {})
+        pool = _dedupe(research.get("pool") or [])
+        flow_bindings = dict(research.get("flowBindings") or {})
+        excluded = set(_dedupe(research.get("excludedAgentIds") or []))
+        if research_pool:
+            excluded.discard(normalized_agent_id)
+            pool = _dedupe([*pool, normalized_agent_id])
+        else:
+            pool = [item for item in pool if item != normalized_agent_id]
+            flow_bindings = {key: value for key, value in flow_bindings.items() if value != normalized_agent_id}
+            excluded.add(normalized_agent_id)
+        update_mode_binding(
+            "research",
+            pool=pool,
+            flow_bindings=flow_bindings,
+            excluded_agent_ids=sorted(excluded),
+        )
+        changed_modes.append("research")
+
+    if supervised_slot is not None:
+        supervised = dict(modes.get("supervised_evolution") or {})
+        current_slots = dict(supervised.get("slots") or {})
+        previous_slot = _slot_for_agent(current_slots, normalized_agent_id)
+        slots = _assign_agent_slot(current_slots, normalized_agent_id, supervised_slot)
+        excluded = _slot_exclusions(supervised.get("excludedAgentIds") or [], normalized_agent_id, supervised_slot)
+        excluded_slots = _excluded_slots(supervised.get("excludedSlots") or [], supervised_slot, previous_slot=previous_slot)
+        update_mode_binding("supervised_evolution", slots=slots, excluded_agent_ids=excluded, excluded_slots=excluded_slots)
+        changed_modes.append("supervised_evolution")
+
+    if self_evolution_slot is not None:
+        self_evolution = dict(modes.get("self_evolution") or {})
+        current_slots = dict(self_evolution.get("slots") or {})
+        previous_slot = _slot_for_agent(current_slots, normalized_agent_id)
+        slots = _assign_agent_slot(current_slots, normalized_agent_id, self_evolution_slot)
+        excluded = _slot_exclusions(self_evolution.get("excludedAgentIds") or [], normalized_agent_id, self_evolution_slot)
+        excluded_slots = _excluded_slots(self_evolution.get("excludedSlots") or [], self_evolution_slot, previous_slot=previous_slot)
+        update_mode_binding("self_evolution", slots=slots, excluded_agent_ids=excluded, excluded_slots=excluded_slots)
+        changed_modes.append("self_evolution")
+
+    if changed_modes:
+        _record_mode_binding_event(
+            "mode_binding.agent_membership.updated",
+            "multi",
+            outcome="updated",
+            fields={"agentId": normalized_agent_id, "changedModes": changed_modes},
+        )
+    return get_mode_bindings_payload()
+
+
+def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
+    """Remove one Agent from all mode binding references before safe archival."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise AgentModeBindingError("Agent id is required.")
+    payload = repair_mode_bindings()
+    bindings = list(payload.get("bindings") or [])
+    changed_modes: list[str] = []
+    next_bindings: list[dict[str, Any]] = []
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            continue
+        record = _normalize_binding(binding)
+        changed = False
+        if str(record.get("defaultAgentId") or "").strip() == normalized_agent_id:
+            record["defaultAgentId"] = ""
+            changed = True
+        for field in ("availableAgentIds", "pool", "excludedAgentIds"):
+            values = [item for item in list(record.get(field) or []) if str(item or "").strip() != normalized_agent_id]
+            if values != list(record.get(field) or []):
+                record[field] = values
+                changed = True
+        flow_bindings = {
+            key: value
+            for key, value in dict(record.get("flowBindings") or {}).items()
+            if str(value or "").strip() != normalized_agent_id
+        }
+        if flow_bindings != dict(record.get("flowBindings") or {}):
+            record["flowBindings"] = flow_bindings
+            changed = True
+        slots = {
+            key: "" if str(value or "").strip() == normalized_agent_id else value
+            for key, value in dict(record.get("slots") or {}).items()
+        }
+        if slots != dict(record.get("slots") or {}):
+            record["slots"] = slots
+            changed = True
+        if not record["defaultAgentId"] and record["availableAgentIds"]:
+            record["defaultAgentId"] = record["availableAgentIds"][0]
+        if changed:
+            record["updatedAt"] = _now()
+            changed_modes.append(str(record.get("mode") or ""))
+        next_bindings.append(_normalize_binding(record))
+    if changed_modes:
+        payload["bindings"] = next_bindings
+        _save_mode_bindings(payload)
+        _record_mode_binding_event(
+            "mode_binding.agent_removed",
+            "multi",
+            outcome="updated",
+            fields={"agentId": normalized_agent_id, "changedModes": changed_modes},
+        )
+    return get_mode_bindings_payload()
+
+
+def repair_mode_bindings() -> dict[str, Any]:
+    """Load bindings, seed known modes, and remove stale Agent references."""
+
+    payload = _load_mode_bindings()
+    bindings_by_mode = _default_binding_map()
+    changed = False
+    for raw in payload.get("bindings") or []:
+        if not isinstance(raw, dict):
+            changed = True
+            continue
+        try:
+            record = _normalize_binding(raw)
+        except AgentModeBindingError:
+            changed = True
+            continue
+        existing = bindings_by_mode.get(record["mode"], {})
+        merged = copy.deepcopy(existing)
+        merged.update(record)
+        merged["slots"] = {**dict(existing.get("slots") or {}), **dict(record.get("slots") or {})}
+        merged["flowBindings"] = {
+            **dict(existing.get("flowBindings") or {}),
+            **dict(record.get("flowBindings") or {}),
+        }
+        merged["excludedAgentIds"] = _dedupe([*list(existing.get("excludedAgentIds") or []), *list(record.get("excludedAgentIds") or [])])
+        merged["excludedSlots"] = _safe_key_list([*list(existing.get("excludedSlots") or []), *list(record.get("excludedSlots") or [])])
+        bindings_by_mode[record["mode"]] = _normalize_binding(merged)
+
+    seeded = _seed_bindings_from_agents(bindings_by_mode)
+    repaired: list[dict[str, Any]] = []
+    repair_warnings: list[dict[str, str]] = []
+    for binding in seeded.values():
+        next_binding, warnings = _repair_agent_references(binding)
+        repaired.append(next_binding)
+        repair_warnings.extend(warnings)
+    next_payload = {
+        "schemaVersion": MODE_BINDING_VERSION,
+        "updatedAt": str(payload.get("updatedAt") or _now()),
+        "bindings": sorted(repaired, key=lambda item: str(item.get("mode") or "")),
+        "repairWarnings": repair_warnings[-50:],
+    }
+    if payload.get("schemaVersion") != MODE_BINDING_VERSION:
+        changed = True
+    if _binding_signature(payload.get("bindings") or []) != _binding_signature(next_payload["bindings"]):
+        changed = True
+    if repair_warnings:
+        changed = True
+    if changed or not mode_binding_path().exists():
+        next_payload["updatedAt"] = _now()
+        _save_mode_bindings(next_payload)
+        _record_mode_binding_event(
+            "mode_binding.repaired",
+            "",
+            outcome="repaired",
+            fields={"bindingCount": len(next_payload["bindings"]), "warningCount": len(repair_warnings)},
+        )
+    return next_payload
+
+
+def default_mode_binding_state() -> dict[str, Any]:
+    """Return the legacy dict-shaped state used by early route/tests."""
+
+    modes = {
+        str(item.get("mode") or ""): _binding_to_api(_normalize_binding(copy.deepcopy(item)))
+        for item in DEFAULT_MODE_BINDINGS
+    }
+    return {
+        "schemaVersion": MODE_BINDING_VERSION,
+        "updatedAt": _now(),
+        "modes": modes,
+        "repairWarnings": [],
+    }
+
+
+def save_mode_binding_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Persist a legacy dict-shaped mode binding state."""
+
+    modes = state.get("modes") if isinstance(state, dict) else {}
+    bindings = []
+    if isinstance(modes, dict):
+        for mode, binding in modes.items():
+            raw = dict(binding or {}) if isinstance(binding, dict) else {}
+            raw["mode"] = mode
+            bindings.append(_normalize_binding(raw))
+    else:
+        bindings = [_normalize_binding(item) for item in state.get("bindings") or [] if isinstance(item, dict)]
+    payload = {
+        "schemaVersion": MODE_BINDING_VERSION,
+        "updatedAt": _now(),
+        "bindings": bindings,
+        "repairWarnings": list((state or {}).get("repairWarnings") or [])[-50:] if isinstance(state, dict) else [],
+    }
+    _save_mode_bindings(payload)
+    return payload
+
+
+def mode_binding_path() -> Path:
+    return PROJECT_ROOT / "workspace" / "agent_config" / "mode_bindings.json"
+
+
+def _seed_bindings_from_agents(bindings_by_mode: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    agents = _agent_options()
+    active_ids = [str(agent.get("agentId") or "") for agent in agents]
+    by_mode: dict[str, list[str]] = {}
+    supervised_slots: dict[str, str] = {}
+    self_slots: dict[str, str] = {}
+    for agent in agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        mode = str(agent.get("primaryMode") or "general").strip() or "general"
+        by_mode.setdefault(mode, []).append(agent_id)
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        supervised_role = str(metadata.get("supervisedRole") or agent.get("roleKey") or "").strip()
+        if mode == "supervised_evolution" and supervised_role:
+            supervised_slots[supervised_role] = agent_id
+        if mode == "self_evolution":
+            role_key = str(agent.get("roleKey") or "").strip()
+            if role_key:
+                self_slots[role_key] = agent_id
+
+    chat_ids = [agent_id for mode in ("chat", "general") for agent_id in by_mode.get(mode, [])]
+    _seed_binding(bindings_by_mode, "chat", chat_ids or active_ids)
+    _seed_binding(bindings_by_mode, "research", by_mode.get("research", []))
+    _seed_binding(bindings_by_mode, "supervised_evolution", by_mode.get("supervised_evolution", []), slots=supervised_slots)
+    _seed_binding(bindings_by_mode, "self_evolution", by_mode.get("self_evolution", []), slots=self_slots)
+    return bindings_by_mode
+
+
+def _eligible_seed_ids(binding: dict[str, Any], agent_ids: list[str]) -> list[str]:
+    excluded = set(_dedupe(binding.get("excludedAgentIds") or []))
+    return [agent_id for agent_id in _dedupe(agent_ids) if agent_id not in excluded]
+
+
+def _seed_binding(
+    bindings_by_mode: dict[str, dict[str, Any]],
+    mode: str,
+    agent_ids: list[str],
+    *,
+    slots: dict[str, str] | None = None,
+) -> None:
+    binding = bindings_by_mode.setdefault(mode, _normalize_binding({"mode": mode}))
+    seed_ids = _eligible_seed_ids(binding, agent_ids)
+    merged_ids = _dedupe([*list(binding.get("availableAgentIds") or []), *seed_ids])
+    binding["availableAgentIds"] = merged_ids
+    if not binding.get("pool"):
+        binding["pool"] = list(seed_ids)
+    if not str(binding.get("defaultAgentId") or "").strip() and merged_ids:
+        binding["defaultAgentId"] = merged_ids[0]
+    if slots:
+        excluded = set(_dedupe(binding.get("excludedAgentIds") or []))
+        excluded_slots = set(_safe_key_list(binding.get("excludedSlots") or []))
+        existing_slots = dict(binding.get("slots") or {})
+        for key, value in slots.items():
+            if _safe_key(key) in excluded_slots:
+                continue
+            if value in excluded:
+                continue
+            if not str(existing_slots.get(key) or "").strip():
+                existing_slots[key] = value
+        binding["slots"] = existing_slots
+
+
+def _repair_agent_references(binding: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    mode = str(binding.get("mode") or "").strip()
+    warnings: list[dict[str, str]] = []
+
+    def keep(agent_id: str, field: str) -> str:
+        normalized = str(agent_id or "").strip()
+        if not normalized:
+            return ""
+        if get_agent(normalized, include_archived=False):
+            return normalized
+        warnings.append({"mode": mode, "field": field, "agentId": normalized})
+        return ""
+
+    next_binding = _normalize_binding(binding)
+    next_binding["defaultAgentId"] = keep(next_binding.get("defaultAgentId") or "", "defaultAgentId")
+    next_binding["availableAgentIds"] = [
+        agent_id for agent_id in (keep(item, "availableAgentIds") for item in next_binding.get("availableAgentIds") or [])
+        if agent_id
+    ]
+    next_binding["pool"] = [
+        agent_id for agent_id in (keep(item, "pool") for item in next_binding.get("pool") or [])
+        if agent_id
+    ]
+    next_binding["flowBindings"] = {
+        key: kept
+        for key, kept in (
+            (key, keep(value, f"flowBindings.{key}"))
+            for key, value in dict(next_binding.get("flowBindings") or {}).items()
+        )
+        if kept
+    }
+    next_binding["slots"] = {
+        key: keep(value, f"slots.{key}")
+        for key, value in dict(next_binding.get("slots") or {}).items()
+    }
+    next_binding["excludedAgentIds"] = [
+        agent_id for agent_id in (keep(item, "excludedAgentIds") for item in next_binding.get("excludedAgentIds") or [])
+        if agent_id
+    ]
+    next_binding["excludedSlots"] = _safe_key_list(next_binding.get("excludedSlots") or [])
+    if not next_binding["defaultAgentId"] and next_binding["availableAgentIds"]:
+        next_binding["defaultAgentId"] = next_binding["availableAgentIds"][0]
+    if warnings:
+        _record_mode_binding_event(
+            "mode_binding.missing_agent",
+            mode,
+            level="warning",
+            outcome="repaired",
+            fields={"warningCount": len(warnings), "agentIds": [item["agentId"] for item in warnings[:12]]},
+        )
+    return next_binding, warnings
+
+
+def _binding_to_api(binding: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "mode": str(binding.get("mode") or "").strip(),
+        "defaultAgentId": str(binding.get("defaultAgentId") or "").strip(),
+        "availableAgentIds": list(binding.get("availableAgentIds") or []),
+        "pool": list(binding.get("pool") or []),
+        "flowBindings": dict(binding.get("flowBindings") or {}),
+        "slots": dict(binding.get("slots") or {}),
+        "excludedAgentIds": list(binding.get("excludedAgentIds") or []),
+        "excludedSlots": list(binding.get("excludedSlots") or []),
+        "createdAt": str(binding.get("createdAt") or "").strip(),
+        "updatedAt": str(binding.get("updatedAt") or "").strip(),
+    }
+
+
+def _agent_options() -> list[dict[str, Any]]:
+    return [
+        {
+            "agentId": str(agent.get("agentId") or "").strip(),
+            "agentCode": str(agent.get("agentCode") or "").strip(),
+            "displayName": str(agent.get("displayName") or "").strip(),
+            "primaryMode": str(agent.get("primaryMode") or "general").strip() or "general",
+            "roleKey": str(agent.get("roleKey") or "").strip(),
+            "profileId": str(agent.get("profileId") or "").strip(),
+            "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+            "directSessionId": str(agent.get("directSessionId") or "").strip(),
+            "metadata": dict(agent.get("metadata") or {}) if isinstance(agent.get("metadata"), dict) else {},
+        }
+        for agent in list_agents(include_archived=False)
+    ]
+
+
+def _load_mode_bindings() -> dict[str, Any]:
+    path = mode_binding_path()
+    if not path.exists():
+        return {"schemaVersion": MODE_BINDING_VERSION, "bindings": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"schemaVersion": MODE_BINDING_VERSION, "bindings": []}
+    return payload if isinstance(payload, dict) else {"schemaVersion": MODE_BINDING_VERSION, "bindings": []}
+
+
+def _save_mode_bindings(payload: dict[str, Any]) -> None:
+    data = {
+        "schemaVersion": MODE_BINDING_VERSION,
+        "updatedAt": _now(),
+        "bindings": [_normalize_binding(item) for item in payload.get("bindings") or [] if isinstance(item, dict)],
+        "repairWarnings": list(payload.get("repairWarnings") or [])[-50:],
+    }
+    _atomic_write_json(mode_binding_path(), data)
+
+
+def _normalize_binding(raw: dict[str, Any]) -> dict[str, Any]:
+    mode = _normalize_mode(raw.get("mode"))
+    now = _now()
+    return {
+        "mode": mode,
+        "defaultAgentId": str(raw.get("defaultAgentId") or "").strip(),
+        "availableAgentIds": _dedupe(raw.get("availableAgentIds") or []),
+        "pool": _dedupe(raw.get("pool") or []),
+        "flowBindings": _safe_agent_map(raw.get("flowBindings") or {}),
+        "slots": _safe_agent_map(raw.get("slots") or {}),
+        "excludedAgentIds": _dedupe(raw.get("excludedAgentIds") or []),
+        "excludedSlots": _safe_key_list(raw.get("excludedSlots") or []),
+        "createdAt": str(raw.get("createdAt") or now).strip(),
+        "updatedAt": str(raw.get("updatedAt") or now).strip(),
+    }
+
+
+def _normalize_mode(value: Any) -> str:
+    normalized = str(value or "").strip().lower().replace("-", "_")
+    if not normalized or not MODE_ID_PATTERN.fullmatch(normalized):
+        raise AgentModeBindingError("Invalid mode binding id.")
+    return normalized
+
+
+def _normalize_agent_list(values: list[str]) -> list[str]:
+    if not isinstance(values, list):
+        raise AgentModeBindingError("Agent id list is required.")
+    return _dedupe(_validate_agent_reference(item, allow_blank=False) for item in values)
+
+
+def _normalize_agent_map(values: dict[str, str]) -> dict[str, str]:
+    if not isinstance(values, dict):
+        raise AgentModeBindingError("Agent binding map is required.")
+    return {
+        _safe_key(key): _validate_agent_reference(value, allow_blank=True)
+        for key, value in values.items()
+        if _safe_key(key)
+    }
+
+
+def _assign_agent_slot(slots: dict[str, Any], agent_id: str, slot: str) -> dict[str, str]:
+    normalized_slot = _safe_key(slot)
+    current = _safe_agent_map(slots)
+    for key, value in list(current.items()):
+        if value == agent_id:
+            current[key] = ""
+    if normalized_slot:
+        current[normalized_slot] = _validate_agent_reference(agent_id, allow_blank=False)
+    return current
+
+
+def _slot_for_agent(slots: dict[str, Any], agent_id: str) -> str:
+    for key, value in _safe_agent_map(slots).items():
+        if value == agent_id:
+            return key
+    return ""
+
+
+def _slot_exclusions(values: Any, agent_id: str, slot: str) -> list[str]:
+    excluded = set(_dedupe(values or []))
+    if _safe_key(slot):
+        excluded.discard(agent_id)
+    else:
+        excluded.add(agent_id)
+    return sorted(excluded)
+
+
+def _excluded_slots(values: Any, slot: str, *, previous_slot: str = "") -> list[str]:
+    excluded = set(_safe_key_list(values or []))
+    normalized_slot = _safe_key(slot)
+    if normalized_slot:
+        excluded.discard(normalized_slot)
+    elif previous_slot:
+        excluded.add(previous_slot)
+    return sorted(excluded)
+
+
+def _validate_agent_reference(value: Any, *, allow_blank: bool) -> str:
+    agent_id = str(value or "").strip()
+    if not agent_id:
+        if allow_blank:
+            return ""
+        raise AgentModeBindingError("Agent id is required.")
+    if not get_agent(agent_id, include_archived=False):
+        raise AgentModeBindingError(f"Agent not found or archived: {agent_id}")
+    return agent_id
+
+
+def _safe_agent_map(values: dict[str, Any]) -> dict[str, str]:
+    if not isinstance(values, dict):
+        return {}
+    return {_safe_key(key): str(value or "").strip() for key, value in values.items() if _safe_key(key)}
+
+
+def _safe_key(value: Any) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip().lower()).strip("._-")
+
+
+def _safe_key_list(values: Any) -> list[str]:
+    return _dedupe(_safe_key(item) for item in list(values or []) if _safe_key(item))
+
+
+def _dedupe(values: Any) -> list[str]:
+    if values is None or isinstance(values, (str, bytes)):
+        return []
+    try:
+        iterator = iter(values)
+    except TypeError:
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in iterator:
+        item = str(value or "").strip()
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _default_binding_map() -> dict[str, dict[str, Any]]:
+    return {
+        str(item["mode"]): _normalize_binding(copy.deepcopy(item))
+        for item in DEFAULT_MODE_BINDINGS
+    }
+
+
+def _binding_signature(
+    bindings: list[Any],
+) -> list[tuple[str, str, tuple[str, ...], tuple[str, ...], tuple[tuple[str, str], ...], tuple[tuple[str, str], ...], tuple[str, ...], tuple[str, ...]]]:
+    signature = []
+    for item in bindings:
+        if not isinstance(item, dict):
+            continue
+        signature.append(
+            (
+                str(item.get("mode") or ""),
+                str(item.get("defaultAgentId") or ""),
+                tuple(str(value or "") for value in item.get("availableAgentIds") or []),
+                tuple(str(value or "") for value in item.get("pool") or []),
+                tuple(sorted((str(key), str(value or "")) for key, value in dict(item.get("flowBindings") or {}).items())),
+                tuple(sorted((str(key), str(value or "")) for key, value in dict(item.get("slots") or {}).items())),
+                tuple(str(value or "") for value in item.get("excludedAgentIds") or []),
+                tuple(str(value or "") for value in item.get("excludedSlots") or []),
+            )
+        )
+    return sorted(signature)
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _relative_project_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(Path(PROJECT_ROOT).resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _record_mode_binding_event(
+    event_code: str,
+    mode: str,
+    *,
+    level: str = "info",
+    outcome: str = "observed",
+    fields: dict[str, Any] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_configuration",
+            "mode_binding",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome,
+            fields={"mode": str(mode or "").strip(), **dict(fields or {})},
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()

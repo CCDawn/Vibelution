@@ -31,9 +31,12 @@ const runtimeWorkbenchBase = {
 
 function runtimeWithActiveWork(active: {
   chat_turn?: Record<string, unknown> | null;
+  chat_room_round?: Record<string, unknown> | null;
   self_evolution_run?: Record<string, unknown> | null;
   supervised_evolution_run?: Record<string, unknown> | null;
+  supervised_worktree_evolution_run?: Record<string, unknown> | null;
 }, extras: Record<string, unknown> = {}) {
+  const { activeItems, ...runtimeExtras } = extras;
   return {
     workRuns: {
       active: {
@@ -42,11 +45,12 @@ function runtimeWithActiveWork(active: {
         supervised_evolution_run: null,
         ...active,
       },
+      ...(activeItems && typeof activeItems === "object" ? { activeItems } : {}),
     },
     taskSummary: "",
     sessionTitle: "",
     currentPhase: "",
-    ...extras,
+    ...runtimeExtras,
   };
 }
 
@@ -578,6 +582,116 @@ describe("systemStatus", () => {
       summary: "audit launcher shutdown",
       status: "tooling",
     });
+  });
+
+  it("uses activeItems to show multiple parallel chat turns", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork(
+        {
+          chat_turn: {
+            runId: "chat-compat",
+            runKind: "chat_turn",
+            status: "running",
+            userMessage: "兼容位",
+          },
+        },
+        {
+          activeItems: {
+            chat_turn: [
+              {
+                runId: "chat-alpha",
+                runKind: "chat_turn",
+                status: "running",
+                userMessage: "alpha 并行任务",
+              },
+              {
+                runId: "chat-beta",
+                runKind: "chat_turn",
+                status: "queued",
+                userMessage: "beta 排队任务",
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "chat",
+      count: 2,
+      overflowCount: 1,
+      summary: "alpha 并行任务",
+    });
+    expect(indicator?.items).toMatchObject([
+      {
+        kind: "chat",
+        runId: "chat-alpha",
+        status: "running",
+        summary: "alpha 并行任务",
+      },
+      {
+        kind: "chat",
+        runId: "chat-beta",
+        status: "queued",
+        summary: "beta 排队任务",
+        tone: "caution",
+      },
+    ]);
+  });
+
+  it("uses activeItems to show multiple parallel chat room rounds", () => {
+    const indicator = deriveActiveWorkIndicator(
+      runtimeWithActiveWork(
+        {
+          chat_room_round: {
+            runId: "room-compat",
+            runKind: "chat_room_round",
+            status: "running",
+            topic: "兼容群聊",
+          },
+        },
+        {
+          activeItems: {
+            chat_room_round: [
+              {
+                runId: "room-alpha",
+                runKind: "chat_room_round",
+                status: "running",
+                topic: "科研群聊 A",
+              },
+              {
+                runId: "room-beta",
+                runKind: "chat_room_round",
+                status: "queued",
+                topic: "科研群聊 B",
+              },
+            ],
+          },
+        },
+      ),
+    );
+
+    expect(indicator).toMatchObject({
+      kind: "chat_room",
+      count: 2,
+      overflowCount: 1,
+      summary: "科研群聊 A",
+    });
+    expect(indicator?.items).toMatchObject([
+      {
+        kind: "chat_room",
+        runId: "room-alpha",
+        status: "running",
+        summary: "科研群聊 A",
+      },
+      {
+        kind: "chat_room",
+        runId: "room-beta",
+        status: "queued",
+        summary: "科研群聊 B",
+        tone: "caution",
+      },
+    ]);
   });
 
   it("ignores terminal active work snapshots", () => {

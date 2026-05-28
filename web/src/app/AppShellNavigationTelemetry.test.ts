@@ -98,4 +98,12 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).not.toContain('to="/chat-rooms"');
     expect(appShellSource).not.toContain('t("navChatRooms")');
   });
+
+  it("keeps file navigation inside the workbench utility menu", () => {
+    expect(appShellSource).toContain("filterUtilityFileTree");
+    expect(appShellSource).toContain("renderUtilityFileTree");
+    expect(appShellSource).toContain("utility-file-navigator");
+    expect(appShellSource).toContain("openPreviewTab(activeSessionId, path)");
+    expect(appShellSource).toContain('navigate("/chat")');
+  });
 });

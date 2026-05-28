@@ -19,7 +19,14 @@ from core.research.agent_templates import ensure_research_prompt_defaults, norma
 from core.research.agent_runner import AgentEvidenceResult, DeterministicResearchAgentRunner, LLMResearchAgentRunner
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import research_service, runtime_scene_service
+from core.web.services import (
+    agent_directory_service,
+    agent_mode_binding_service,
+    prompt_template_service,
+    research_service,
+    runtime_scene_service,
+    session_service,
+)
 
 
 def test_research_recommendation_score_uses_novelty_first_weights():
@@ -427,11 +434,250 @@ def test_research_agent_pool_allows_custom_agent_and_blocks_referenced_delete(tm
 
     created = next(agent for agent in payload["agents"] if agent["key"] == "paper_reader")
     assert created["label"] == "论文阅读 Agent"
-    assert created["llmConfigId"] == "research_broad"
+    assert created["profileId"] == "research_broad"
+    assert "llmConfigId" not in created
     assert (workspace.research_prompts_dir() / "paper_reader.md").exists()
 
     with pytest.raises(ValueError, match="still used by flow nodes"):
         research_service.delete_research_agent_binding("paper_reader")
+
+
+def test_research_agent_binding_save_updates_unified_agent_stack(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.root = root / "workspace"
+
+        def research_prompts_dir(self):
+            return self.root / "prompts" / "research"
+
+        def get_research_prompt_path(self, filename):
+            return self.research_prompts_dir() / filename
+
+        def get_research_agent_config_path(self):
+            return self.research_prompts_dir() / "agents.json"
+
+        def get_research_flow_canvas_path(self):
+            return self.research_prompts_dir() / "flow_canvas.json"
+
+        def read_research_agent_config(self):
+            path = self.get_research_agent_config_path()
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+        def write_research_agent_config(self, data):
+            path = self.get_research_agent_config_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return True
+
+        def read_research_flow_canvas(self):
+            return research_service._legacy_research_flow_canvas()
+
+        def write_research_prompt(self, filename, content):
+            path = self.get_research_prompt_path(filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            return True
+
+        def read_research_prompt(self, filename):
+            path = self.get_research_prompt_path(filename)
+            return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_service, "_list_llm_config_options", lambda: [{"configId": "research_broad"}])
+    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+
+    payload = research_service.save_research_agent_binding(
+        "paper_reader",
+        "research_broad_explorer",
+        "research_broad",
+        label="论文阅读 Agent",
+        prompt_filename="paper_reader.md",
+    )
+
+    created = next(agent for agent in payload["agents"] if agent["key"] == "paper_reader")
+    agent = agent_directory_service.get_agent(created["agentId"])
+    prompt = prompt_template_service.get_prompt_template("prompt-research-paper_reader")
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
+
+    assert agent is not None
+    assert agent["primaryMode"] == "research"
+    assert agent["roleKey"] == "research_paper_reader"
+    assert agent["profileId"] == "research_broad"
+    assert agent["promptTemplateId"] == "prompt-research-paper_reader"
+    assert prompt is not None
+    assert prompt["sourcePath"] == "workspace/prompts/research/paper_reader.md"
+    assert created["profileId"] == agent["profileId"]
+    assert "llmConfigId" not in created
+    stored_config = json.loads(workspace.get_research_agent_config_path().read_text(encoding="utf-8"))
+    stored_agent = next(item for item in stored_config["agents"] if item["key"] == "paper_reader")
+    assert stored_agent["profileId"] == "research_broad"
+    assert "llmConfigId" not in stored_agent
+    assert bindings["flowBindings"]["paper_reader"] == agent["agentId"]
+    assert agent["agentId"] in bindings["pool"]
+
+
+def test_delete_research_agent_binding_blocks_agent_id_canvas_reference(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.root = root / "workspace"
+            self._canvas = {"schemaVersion": 1, "viewport": {}, "nodes": [], "edges": []}
+
+        def research_prompts_dir(self):
+            return self.root / "prompts" / "research"
+
+        def get_research_prompt_path(self, filename):
+            return self.research_prompts_dir() / filename
+
+        def get_research_agent_config_path(self):
+            return self.research_prompts_dir() / "agents.json"
+
+        def get_research_flow_canvas_path(self):
+            return self.research_prompts_dir() / "flow_canvas.json"
+
+        def read_research_agent_config(self):
+            path = self.get_research_agent_config_path()
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+        def write_research_agent_config(self, data):
+            path = self.get_research_agent_config_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return True
+
+        def read_research_flow_canvas(self):
+            return self._canvas
+
+        def write_research_prompt(self, filename, content):
+            path = self.get_research_prompt_path(filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            return True
+
+        def read_research_prompt(self, filename):
+            path = self.get_research_prompt_path(filename)
+            return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_service, "_list_llm_config_options", lambda: [{"configId": "research_broad"}])
+    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    events = []
+    monkeypatch.setattr(research_service, "_record_research_config_event", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    payload = research_service.save_research_agent_binding(
+        "paper_reader",
+        "research_broad_explorer",
+        "research_broad",
+        label="论文阅读 Agent",
+        prompt_filename="paper_reader.md",
+    )
+    created = next(agent for agent in payload["agents"] if agent["key"] == "paper_reader")
+    workspace._canvas = {
+        "schemaVersion": 1,
+        "viewport": {},
+        "nodes": [
+            {
+                "id": "reader",
+                "label": "论文阅读",
+                "type": "agent",
+                "status": "ready",
+                "agentId": created["agentId"],
+                "agentKey": "stale_wrong_key",
+                "promptKey": "",
+                "llmConfigId": "",
+            }
+        ],
+        "edges": [],
+    }
+
+    with pytest.raises(ValueError, match="still used by flow nodes"):
+        research_service.delete_research_agent_binding("paper_reader")
+
+    assert agent_directory_service.get_agent(created["agentId"])["status"] == "active"
+    assert events[-1][0][0] == "research.agent_binding.delete_failed"
+    assert events[-1][1]["fields"]["reason"] == "still_used_by_flow_nodes"
+    assert events[-1][1]["fields"]["agentId"] == created["agentId"]
+
+
+def test_delete_research_agent_binding_cleans_mode_binding_refs(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.root = root / "workspace"
+
+        def research_prompts_dir(self):
+            return self.root / "prompts" / "research"
+
+        def get_research_prompt_path(self, filename):
+            return self.research_prompts_dir() / filename
+
+        def get_research_agent_config_path(self):
+            return self.research_prompts_dir() / "agents.json"
+
+        def get_research_flow_canvas_path(self):
+            return self.research_prompts_dir() / "flow_canvas.json"
+
+        def read_research_agent_config(self):
+            path = self.get_research_agent_config_path()
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+        def write_research_agent_config(self, data):
+            path = self.get_research_agent_config_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return True
+
+        def read_research_flow_canvas(self):
+            return {}
+
+        def write_research_prompt(self, filename, content):
+            path = self.get_research_prompt_path(filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            return True
+
+        def read_research_prompt(self, filename):
+            path = self.get_research_prompt_path(filename)
+            return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_service, "_list_llm_config_options", lambda: [{"configId": "research_broad"}])
+    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+
+    payload = research_service.save_research_agent_binding(
+        "paper_reader",
+        "research_broad_explorer",
+        "research_broad",
+        label="论文阅读 Agent",
+        prompt_filename="paper_reader.md",
+    )
+    created = next(agent for agent in payload["agents"] if agent["key"] == "paper_reader")
+    before = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
+    assert before["flowBindings"]["paper_reader"] == created["agentId"]
+    assert created["agentId"] in before["pool"]
+
+    result = research_service.delete_research_agent_binding("paper_reader")
+
+    after = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
+    assert all(value != created["agentId"] for value in after["flowBindings"].values())
+    assert "paper_reader" not in after["flowBindings"]
+    assert created["agentId"] not in after["availableAgentIds"]
+    assert created["agentId"] not in after["pool"]
+    assert agent_directory_service.get_agent(created["agentId"])["status"] == "archived"
+    assert all(agent["key"] != "paper_reader" for agent in result["agents"])
 
 
 def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path, monkeypatch):
@@ -464,26 +710,51 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
 
     default_canvas = research_service.get_research_flow_canvas()
     assert default_canvas["path"].endswith("flow_canvas.json")
+    assert default_canvas["canvasKind"] == "research_flow_canvas"
     assert default_canvas["validation"]["valid"] is True
     assert default_canvas["validation"]["summary"]["errorCount"] == 0
     assert {node["id"] for node in default_canvas["nodes"]} >= {
         "broad_search",
         "knowledge_store",
         "knowledge_lookup",
-        "literature_project_parse",
-        "semantic_cluster",
-        "novelty_reverse_check",
+        "deep_search",
         "evidence_review",
-        "theme_card",
+        "theme_generation",
     }
-    assert any(edge["condition"] == "needs_evidence" for edge in default_canvas["edges"])
-    assert next(edge for edge in default_canvas["edges"] if edge["id"] == "edge_broad_store")["target"] == "knowledge_store"
-    assert next(edge for edge in default_canvas["edges"] if edge["id"] == "edge_store_lookup")["target"] == "knowledge_lookup"
-    assert next(edge for edge in default_canvas["edges"] if edge["id"] == "edge_lookup_deep")["target"] == "deep_search"
-    assert next(edge for edge in default_canvas["edges"] if edge["id"] == "edge_novelty_review")["source"] == "novelty_reverse_check"
-    assert next(edge for edge in default_canvas["edges"] if edge["id"] == "edge_review_deep")["type"] == "evidence_loop"
+    assert {edge["id"] for edge in default_canvas["edges"]} >= {"edge_broad_store", "edge_store_lookup", "edge_review_themes"}
+    assert {edge["condition"] for edge in default_canvas["edges"]} >= {"completed", "needs_evidence", "approved", "selected"}
+
+    default_payload = {
+        **default_canvas,
+        "viewport": {"x": 42, "y": -16, "zoom": 1.42},
+        "nodes": [
+            {**node, "x": 240.5, "y": 180.25} if node["id"] == "broad_search" else node
+            for node in default_canvas["nodes"]
+        ],
+    }
+    saved_default = research_service.save_research_flow_canvas(default_payload)
+    reloaded_default = research_service.get_research_flow_canvas()
+    assert saved_default["canvasKind"] == "research_flow_canvas"
+    assert saved_default["viewport"] == {"x": 42, "y": -16, "zoom": 1.42}
+    assert next(node for node in reloaded_default["nodes"] if node["id"] == "broad_search")["x"] == 240.5
+    assert next(node for node in reloaded_default["nodes"] if node["id"] == "broad_search")["y"] == 180.25
+    assert {edge["id"] for edge in reloaded_default["edges"]} >= {"edge_broad_store", "edge_store_lookup", "edge_review_themes"}
+    flow_events = [event for event in events if event[0][0] == "research.flow_canvas.updated"]
+    assert flow_events[-1][1]["fields"]["nodeCount"] >= 2
+
+    with pytest.raises(ValueError, match="/api/research/organization"):
+        research_service.save_research_flow_canvas(
+            {
+                "canvasKind": "research_agent_organization",
+                "nodes": default_canvas["nodes"][:1],
+                "edges": [],
+                "viewport": {"x": 0, "y": 0, "zoom": 1},
+            }
+        )
+    assert any(event[0][0] == "research.flow_canvas.update_failed" for event in events)
 
     payload = {
+        "canvasKind": "research_flow_canvas",
         "nodes": [
             {
                 "id": "topic_probe",
@@ -531,8 +802,8 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
     assert saved["edges"][0]["condition"] == "completed"
     assert saved["edges"][0]["type"] == "success"
     assert saved["viewport"] == {"x": 42, "y": -16, "zoom": 1.42}
-    assert events[-1][0][0] == "research.flow_canvas.updated"
-    assert research_service.get_research_flow_canvas()["nodes"][1]["type"] == "decision"
+    assert any(event[0][0] == "research.flow_canvas.updated" for event in events)
+    assert saved["nodes"][1]["type"] == "decision"
 
     saved_loop = research_service.save_research_flow_canvas(
         {
@@ -549,6 +820,137 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
         }
     )
     assert saved_loop["edges"][0]["type"] == "evidence_loop"
+
+
+def test_research_flow_canvas_save_syncs_agent_id_to_mode_binding(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.project_root = root
+            self.root = root / "workspace"
+
+        def get_research_flow_canvas_path(self):
+            return self.root / "prompts" / "research" / "flow_canvas.json"
+
+        def read_research_flow_canvas(self):
+            path = self.get_research_flow_canvas_path()
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+        def write_research_flow_canvas(self, data):
+            path = self.get_research_flow_canvas_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            return True
+
+        def get_research_agent_config_path(self):
+            return self.root / "prompts" / "research" / "agents.json"
+
+        def read_research_agent_config(self):
+            path = self.get_research_agent_config_path()
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+        def write_research_agent_config(self, data):
+            path = self.get_research_agent_config_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            return True
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    events = []
+    monkeypatch.setattr(research_service, "_record_research_config_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    agent = agent_directory_service.create_agent_instance(
+        display_name="科研广搜 Agent",
+        profile_id="research_live_profile",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+    )
+    workspace.write_research_agent_config(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "key": "broad",
+                    "label": "科研广搜 Agent",
+                    "promptFilename": "broad.md",
+                    "templateId": "research_broad_explorer",
+                    "llmConfigId": "stale_legacy_profile",
+                    "agentId": agent["agentId"],
+                    "enabled": True,
+                }
+            ],
+        }
+    )
+
+    saved = research_service.save_research_flow_canvas(
+        {
+            "canvasKind": "research_flow_canvas",
+            "nodes": [
+                {
+                    "id": "topic_probe",
+                    "label": "主题探针",
+                    "type": "agent",
+                    "status": "ready",
+                    "x": 100,
+                    "y": 120,
+                    "agentId": agent["agentId"],
+                    "agentKey": "",
+                    "promptKey": "",
+                    "llmConfigId": "stale_legacy_profile",
+                    "description": "search",
+                    "routeCondition": "start",
+                }
+            ],
+            "edges": [],
+            "viewport": {"x": 0, "y": 0, "zoom": 1},
+        }
+    )
+
+    node = saved["nodes"][0]
+    assert node["agentId"] == agent["agentId"]
+    assert node["agentKey"] == "broad"
+    assert node["llmConfigId"] == ""
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
+    assert bindings["flowBindings"]["topic_probe"] == agent["agentId"]
+    assert events[-1][0][0] == "research.flow_canvas.updated"
+    assert events[-1][1]["fields"]["flowBindingSyncCount"] == 1
+
+    with pytest.raises(ValueError, match="不能连接到自身"):
+        research_service.save_research_flow_canvas(
+            {
+                "canvasKind": "research_flow_canvas",
+                "nodes": [
+                    {
+                        "id": "bad_probe",
+                        "label": "错误探针",
+                        "type": "agent",
+                        "status": "ready",
+                        "x": 100,
+                        "y": 120,
+                        "agentId": agent["agentId"],
+                        "agentKey": "",
+                        "promptKey": "",
+                        "llmConfigId": "stale_legacy_profile",
+                        "description": "search",
+                        "routeCondition": "start",
+                    }
+                ],
+                "edges": [
+                    {
+                        "id": "edge_bad",
+                        "source": "bad_probe",
+                        "target": "bad_probe",
+                        "label": "错误自环",
+                        "condition": "completed",
+                    }
+                ],
+            }
+        )
+    bindings_after_failed_save = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
+    assert "bad_probe" not in bindings_after_failed_save["flowBindings"]
 
 
 def test_research_flow_canvas_rejects_mojibake_payload(tmp_path, monkeypatch):
@@ -632,8 +1034,7 @@ def test_research_flow_canvas_preserves_saved_default_node_positions(tmp_path, m
     payload = research_service._default_research_flow_canvas()
     expected_positions = {
         "broad_search": {"x": 24.5, "y": 221.25},
-        "knowledge_store": {"x": 444.75, "y": 310.5},
-        "deep_search": {"x": 1199.125, "y": -36.75},
+        "deep_search": {"x": 444.75, "y": 310.5},
     }
     for node in payload["nodes"]:
         position = expected_positions.get(node["id"])
@@ -655,6 +1056,128 @@ def test_research_flow_canvas_preserves_saved_default_node_positions(tmp_path, m
 
     assert saved_positions == expected_positions
     assert reloaded_positions == expected_positions
+
+
+def test_research_flow_canvas_legacy_untyped_process_migrates_to_flow_canvas(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+
+        def get_research_flow_canvas_path(self):
+            return self.root / "prompts" / "research" / "flow_canvas.json"
+
+        def read_research_flow_canvas(self):
+            return {
+                "nodes": [
+                    {
+                        "id": "nslb_context_snapshot",
+                        "label": "读取竞赛上下文",
+                        "type": "tool",
+                        "status": "ready",
+                        "x": 0,
+                        "y": 0,
+                        "agentKey": "huawei_context_snapshot",
+                        "promptKey": "",
+                        "llmConfigId": "",
+                        "description": "",
+                        "routeCondition": "",
+                    },
+                    {
+                        "id": "nslb_harness_doctor",
+                        "label": "运行环境体检",
+                        "type": "evaluation",
+                        "status": "idle",
+                        "x": 260,
+                        "y": 0,
+                        "agentKey": "huawei_doctor",
+                        "promptKey": "",
+                        "llmConfigId": "",
+                        "description": "",
+                        "routeCondition": "",
+                    },
+                ],
+                "edges": [
+                    {
+                        "id": "edge_context_doctor",
+                        "source": "nslb_context_snapshot",
+                        "target": "nslb_harness_doctor",
+                        "label": "上下文就绪",
+                        "condition": "completed",
+                        "type": "success",
+                    }
+                ],
+                "viewport": {"x": 0, "y": 0, "zoom": 1},
+            }
+
+        def write_research_flow_canvas(self, data):
+            return True
+
+    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace(tmp_path))
+
+    canvas = research_service.get_research_flow_canvas()
+
+    assert canvas["canvasKind"] == "research_flow_canvas"
+    assert {node["id"] for node in canvas["nodes"]} == {"nslb_context_snapshot", "nslb_harness_doctor"}
+    assert {node["type"] for node in canvas["nodes"]} == {"tool", "evaluation"}
+    assert canvas["edges"][0]["condition"] == "completed"
+    assert research_service._flow_contract_for_node({"agentKey": "huawei_doctor"})["outputs"]["blocked"] == {"harness_blocker"}
+
+
+def test_research_flow_canvas_legacy_agent_graph_does_not_pollute_flow_canvas(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.root = root
+
+        def get_research_flow_canvas_path(self):
+            return self.root / "prompts" / "research" / "flow_canvas.json"
+
+        def read_research_flow_canvas(self):
+            return {
+                "nodes": [
+                    {
+                        "id": "ceo_agent",
+                        "label": "CEO Agent",
+                        "type": "agent",
+                        "status": "ready",
+                        "x": 80,
+                        "y": 120,
+                        "agentKey": "research_ceo",
+                        "promptKey": "research_ceo",
+                    },
+                    {
+                        "id": "research_worker",
+                        "label": "科研 Agent",
+                        "type": "agent",
+                        "status": "idle",
+                        "x": 360,
+                        "y": 120,
+                        "agentKey": "research_worker",
+                        "promptKey": "research_worker",
+                    },
+                ],
+                "edges": [
+                    {
+                        "id": "edge_ceo_worker",
+                        "source": "ceo_agent",
+                        "target": "research_worker",
+                        "label": "委派",
+                        "condition": "delegate",
+                        "type": "delegation",
+                    }
+                ],
+                "viewport": {"x": 0, "y": 0, "zoom": 1},
+            }
+
+        def write_research_flow_canvas(self, data):
+            return True
+
+    monkeypatch.setattr(research_service, "get_workspace", lambda: FakeWorkspace(tmp_path))
+
+    canvas = research_service.get_research_flow_canvas()
+
+    assert canvas["canvasKind"] == "research_flow_canvas"
+    assert {node["id"] for node in canvas["nodes"]} >= {"broad_search", "knowledge_store", "deep_search"}
+    assert all(edge["condition"] != "delegate" for edge in canvas["edges"])
 
 
 def test_research_flow_canvas_rejects_misaligned_graph_contract(tmp_path, monkeypatch):
@@ -705,6 +1228,7 @@ def test_research_flow_canvas_rejects_misaligned_graph_contract(tmp_path, monkey
     with pytest.raises(ValueError, match="无法满足"):
         research_service.save_research_flow_canvas(
             {
+                "canvasKind": "research_flow_canvas",
                 "nodes": base_nodes,
                 "edges": [
                     {
@@ -768,6 +1292,7 @@ def test_research_flow_canvas_rejects_structural_contract_errors(tmp_path, monke
     with pytest.raises(ValueError, match="不能连接到自身"):
         research_service.save_research_flow_canvas(
             {
+                "canvasKind": "research_flow_canvas",
                 "nodes": nodes,
                 "edges": [
                     {"id": "edge_self", "source": "broad_search", "target": "broad_search", "condition": "completed", "type": "success"}
@@ -778,6 +1303,7 @@ def test_research_flow_canvas_rejects_structural_contract_errors(tmp_path, monke
     with pytest.raises(ValueError, match="路由 ID 重复"):
         research_service.save_research_flow_canvas(
             {
+                "canvasKind": "research_flow_canvas",
                 "nodes": nodes,
                 "edges": [
                     {"id": "edge_dup", "source": "broad_search", "target": "deep_search", "condition": "completed", "type": "success"},
@@ -789,6 +1315,7 @@ def test_research_flow_canvas_rejects_structural_contract_errors(tmp_path, monke
     with pytest.raises(ValueError, match="触发条件 needs_evidence 与箭头类型 success 不一致"):
         research_service.save_research_flow_canvas(
             {
+                "canvasKind": "research_flow_canvas",
                 "nodes": nodes,
                 "edges": [
                     {"id": "edge_drift", "source": "broad_search", "target": "deep_search", "condition": "needs_evidence", "type": "success"}
@@ -811,7 +1338,7 @@ def test_research_flow_canvas_executes_next_ready_node_and_routes_successors(tmp
                 import json
 
                 return json.loads(path.read_text(encoding="utf-8"))
-            return {}
+            return research_service._legacy_research_flow_canvas()
 
         def write_research_flow_canvas(self, data):
             path = self.get_research_flow_canvas_path()
@@ -921,7 +1448,7 @@ def test_theme_discovery_actions_sync_flow_canvas_statuses(tmp_path, monkeypatch
                 import json
 
                 return json.loads(path.read_text(encoding="utf-8"))
-            return {}
+            return research_service._legacy_research_flow_canvas()
 
         def write_research_flow_canvas(self, data):
             path = self.get_research_flow_canvas_path()
@@ -974,6 +1501,7 @@ def test_research_flow_canvas_blocks_theme_card_without_selected_theme(tmp_path,
 
         def read_research_flow_canvas(self):
             return {
+                "canvasKind": "research_flow_canvas",
                 "nodes": [
                     {
                         "id": "theme_card",
@@ -1026,6 +1554,7 @@ def test_research_flow_canvas_reopens_done_search_on_missing_evidence(tmp_path, 
 
         def read_research_flow_canvas(self):
             return {
+                "canvasKind": "research_flow_canvas",
                 "nodes": [
                     {
                         "id": "deep_search",
@@ -1102,7 +1631,7 @@ def test_research_flow_canvas_blocks_new_node_while_another_is_running(tmp_path,
             return tmp_path / "prompts" / "research" / "flow_canvas.json"
 
         def read_research_flow_canvas(self):
-            canvas = research_service._default_research_flow_canvas()
+            canvas = research_service._legacy_research_flow_canvas()
             for node in canvas["nodes"]:
                 if node["id"] == "broad_search":
                     node["status"] = "done"
@@ -1168,6 +1697,188 @@ def test_llm_research_agent_runner_requires_search_tool_calls(tmp_path, monkeypa
 
     with pytest.raises(ValueError, match="did not call any search tools"):
         runner.run_search(phase="broad", session=session, suggested_queries=["ai scientist"], existing_sources=[])
+
+
+def test_llm_research_agent_runner_resolves_model_and_prompt_from_agent_instance(tmp_path, monkeypatch):
+    project_root = tmp_path
+    (project_root / "workspace" / "prompts" / "research").mkdir(parents=True, exist_ok=True)
+    previous_agent_root = agent_directory_service.PROJECT_ROOT
+    previous_prompt_root = prompt_template_service.PROJECT_ROOT
+    agent_directory_service.PROJECT_ROOT = project_root
+    prompt_template_service.PROJECT_ROOT = project_root
+    try:
+        agent = agent_directory_service.create_agent_instance(
+            display_name="统一科研 Agent",
+            profile_id="research_live_profile",
+            primary_mode="research",
+            role_key="research_broad",
+            prompt_template_id="prompt-research-broad-custom",
+        )
+        prompt_template_service.update_prompt_template(
+            "prompt-research-broad-custom",
+            name="自定义广搜提示词",
+            category="research",
+            source_path="workspace/prompts/research/custom_broad.md",
+            content="Use custom AgentInstance prompt. You must call search tools.",
+        )
+    finally:
+        agent_directory_service.PROJECT_ROOT = previous_agent_root
+        prompt_template_service.PROJECT_ROOT = previous_prompt_root
+
+    class FakeWorkspace:
+        @property
+        def root(self):
+            return project_root / "workspace"
+
+        @property
+        def project_root(self):
+            return project_root
+
+        def read_research_agent_config(self):
+            return {
+                "agents": [
+                    {
+                        "key": "broad",
+                        "promptFilename": "stale_legacy.md",
+                        "templateId": "research_broad_explorer",
+                        "llmConfigId": "stale_legacy_profile",
+                        "agentId": agent["agentId"],
+                        "enabled": True,
+                    }
+                ]
+            }
+
+        def read_research_prompt(self, filename):
+            return "STALE LEGACY PROMPT"
+
+    captured: dict[str, Any] = {}
+
+    class FakeClient:
+        def invoke(self, messages, tools=None, metadata=None):
+            captured["profile_id"] = self.profile_id
+            captured["system"] = messages[0]["content"]
+
+            class Response:
+                content = '{"summary":"done"}'
+                tool_calls = []
+
+            return Response()
+
+        def __init__(self, profile_id):
+            self.profile_id = profile_id
+
+    monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
+    monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient(profile_id))
+    runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
+    session = ResearchDiscoverySession(
+        session_id=new_id("research-session"),
+        open_goal="Find a theme",
+        constraints="public sources",
+        preferences="novel",
+    )
+
+    with pytest.raises(ValueError, match="did not call any search tools"):
+        runner.run_search(phase="broad", session=session, suggested_queries=["ai scientist"], existing_sources=[])
+
+    assert captured["profile_id"] == "research_live_profile"
+    assert "Use custom AgentInstance prompt" in captured["system"]
+    assert "STALE LEGACY PROMPT" not in captured["system"]
+
+
+def test_llm_research_agent_runner_prefers_mode_binding_over_legacy_agent_config(tmp_path, monkeypatch):
+    project_root = tmp_path
+    previous_agent_root = agent_directory_service.PROJECT_ROOT
+    previous_prompt_root = prompt_template_service.PROJECT_ROOT
+    previous_binding_root = agent_mode_binding_service.PROJECT_ROOT
+    agent_directory_service.PROJECT_ROOT = project_root
+    prompt_template_service.PROJECT_ROOT = project_root
+    agent_mode_binding_service.PROJECT_ROOT = project_root
+    try:
+        agent = agent_directory_service.create_agent_instance(
+            display_name="ModeBinding 广搜 Agent",
+            profile_id="research_mode_bound_profile",
+            primary_mode="research",
+            role_key="research_broad",
+            template_id="research_broad_explorer",
+            prompt_template_id="prompt-research-mode-bound",
+            metadata={"researchAgentKey": "broad", "researchTemplateId": "research_broad_explorer"},
+        )
+        prompt_template_service.update_prompt_template(
+            "prompt-research-mode-bound",
+            name="ModeBinding 广搜提示词",
+            category="research",
+            source_path="workspace/prompts/research/mode_bound_broad.md",
+            content="Use ModeBinding prompt. You must call search tools.",
+        )
+        agent_mode_binding_service.update_mode_binding(
+            "research",
+            default_agent_id=agent["agentId"],
+            available_agent_ids=[agent["agentId"]],
+            pool=[agent["agentId"]],
+            flow_bindings={"broad": agent["agentId"]},
+        )
+    finally:
+        agent_directory_service.PROJECT_ROOT = previous_agent_root
+        prompt_template_service.PROJECT_ROOT = previous_prompt_root
+        agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
+
+    class FakeWorkspace:
+        @property
+        def root(self):
+            return project_root / "workspace"
+
+        @property
+        def project_root(self):
+            return project_root
+
+        def read_research_agent_config(self):
+            return {
+                "agents": [
+                    {
+                        "key": "broad",
+                        "promptFilename": "stale_legacy.md",
+                        "templateId": "research_broad_explorer",
+                        "llmConfigId": "stale_legacy_profile",
+                        "enabled": True,
+                    }
+                ]
+            }
+
+        def read_research_prompt(self, filename):
+            return "STALE LEGACY PROMPT"
+
+    captured: dict[str, Any] = {}
+
+    class FakeClient:
+        def __init__(self, profile_id):
+            self.profile_id = profile_id
+
+        def invoke(self, messages, tools=None, metadata=None):
+            captured["profile_id"] = self.profile_id
+            captured["system"] = messages[0]["content"]
+
+            class Response:
+                content = '{"summary":"done"}'
+                tool_calls = []
+
+            return Response()
+
+    monkeypatch.setattr("core.research.agent_runner.get_workspace", lambda: FakeWorkspace())
+    monkeypatch.setattr("core.research.agent_runner.get_llm_client", lambda profile_id=None: FakeClient(profile_id))
+    runner = LLMResearchAgentRunner(search_provider=DeterministicResearchSearchProvider())
+    session = ResearchDiscoverySession(
+        session_id=new_id("research-session"),
+        open_goal="Find a theme",
+        constraints="public sources",
+        preferences="novel",
+    )
+
+    with pytest.raises(ValueError, match="did not call any search tools"):
+        runner.run_search(phase="broad", session=session, suggested_queries=["ai scientist"], existing_sources=[])
+
+    assert captured["profile_id"] == "research_mode_bound_profile"
+    assert "Use ModeBinding prompt" in captured["system"]
+    assert "STALE LEGACY PROMPT" not in captured["system"]
 
 
 def test_theme_discovery_draft_generates_five_persisted_candidates(tmp_path):
@@ -1451,6 +2162,7 @@ def test_research_flow_canvas_api_declares_utf8_json(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.headers["content-type"].lower().startswith("application/json")
     assert "charset=utf-8" in response.headers["content-type"].lower()
+    assert response.json()["canvasKind"] == "research_flow_canvas"
     assert response.json()["nodes"][0]["label"] == "广撒网探索"
 
 

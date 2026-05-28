@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import queue
 import re
@@ -11,6 +12,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from config.public_config import (
+    CONFIG_PATH,
+    build_effective_config,
+    list_llm_model_options,
+    load_public_config,
+    save_public_config,
+)
+from config.settings import reload_config
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 
@@ -76,6 +85,8 @@ SAFE_BUILTIN_TEST_REASONS: dict[str, str] = {
     "get_self_model_tool": "Reads the persisted self model with no caller-supplied arguments.",
     "task_list_tool": "Reads the current task list with no caller-supplied arguments.",
 }
+IMAGE2_TOOL_NAME = "image2_generate_tool"
+IMAGE2_FALLBACK_MODEL = "gpt-image-1.5"
 
 
 class ToolRegistryError(ValueError):
@@ -114,6 +125,55 @@ def get_tool_registry() -> dict[str, Any]:
         "agentScopes": _agent_scope_summaries(tools),
         "tools": tools,
     }
+
+
+def get_image2_model_config() -> dict[str, Any]:
+    """Return the image2 tool's model selector state without exposing secrets."""
+
+    public_config = load_public_config()
+    return _image2_model_config_payload(public_config)
+
+
+def set_image2_default_model(model_ref: str) -> dict[str, Any]:
+    """Persist the model library entry used by image2_generate_tool."""
+
+    normalized_ref = str(model_ref or "").strip()
+    public_config = load_public_config()
+    available_model_refs = {
+        str(item.get("model_id") or "").strip()
+        for item in list_llm_model_options(public_config)
+        if str(item.get("source") or "") == "model_library" and str(item.get("model_id") or "").strip()
+    }
+    if normalized_ref and normalized_ref not in available_model_refs:
+        raise ToolRegistryError(f"Unknown image2 model reference: {normalized_ref}")
+
+    updated = copy.deepcopy(public_config)
+    tools_config = updated.setdefault("tools", {})
+    if not isinstance(tools_config, dict):
+        raise ToolRegistryError("tools config must be an object")
+    image2_config = tools_config.setdefault("image2", {})
+    if not isinstance(image2_config, dict):
+        raise ToolRegistryError("tools.image2 config must be an object")
+    previous_ref = str(image2_config.get("default_model_ref") or "").strip()
+    image2_config["default_model_ref"] = normalized_ref
+
+    build_effective_config(updated)
+    save_public_config(updated)
+    reload_config(str(CONFIG_PATH))
+    _record_registry_event(
+        "tool_registry.image2_model.updated",
+        "image2 tool default model changed.",
+        tool_id=IMAGE2_TOOL_NAME,
+        status="configured" if normalized_ref else "fallback",
+        outcome="succeeded",
+        fields={
+            "source": "tool_config",
+            "previousModelRef": previous_ref,
+            "modelRef": normalized_ref,
+            "runtimeConfigReloaded": True,
+        },
+    )
+    return _image2_model_config_payload(load_public_config())
 
 
 def create_generated_tool(payload: dict[str, Any]) -> dict[str, Any]:
@@ -241,7 +301,12 @@ def delete_tool(tool_id: str) -> dict[str, Any]:
     return delete_generated_tool(normalized)
 
 
-def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str | None = None) -> dict[str, Any]:
+def test_tool(
+    tool_id: str,
+    args: dict[str, Any] | None = None,
+    agent_scope: str | None = None,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
     """Run a controlled test call for one tool.
 
     Generated tools use their manifest response template. Built-ins only run when
@@ -251,6 +316,7 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str
     normalized = _normalize_tool_id(tool_id)
     scope_id = _normalize_agent_scope_id(agent_scope)
     scope_summary = _agent_scope_summary(scope_id)
+    agent_summary = _tool_test_agent_summary(agent_id)
     builtin_names = _builtin_tool_names()
     if normalized in builtin_names:
         item = _with_agent_scope_states(next(tool for tool in _builtin_tool_items() if tool["name"] == normalized))
@@ -270,7 +336,11 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str
                 status="blocked",
                 outcome="blocked",
                 level="warning",
-                fields={"source": "built_in", "agentScope": scope_id},
+                fields={
+                    "source": "built_in",
+                    "agentScope": scope_id,
+                    "agentId": str(agent_summary.get("agentId") or ""),
+                },
             )
             return {
                 "toolId": normalized,
@@ -284,8 +354,22 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str
                 "testPolicy": item["testPolicy"],
                 "agentCompatibility": compatibility,
                 "agentScope": scope_summary,
+                "agent": agent_summary,
                 "timeout": _timeout_metadata(False, TOOL_TEST_TIMEOUT_SECONDS, 0),
             }
+        test_args = dict(SAFE_BUILTIN_TEST_ARGS.get(normalized) or {})
+        agent_policy_block = _agent_policy_test_block(normalized, test_args, agent_summary)
+        if agent_policy_block:
+            return _blocked_tool_test_response(
+                normalized,
+                source="built_in",
+                message=agent_policy_block,
+                args_used=test_args,
+                test_policy=item["testPolicy"],
+                agent_scope=scope_summary,
+                agent=agent_summary,
+                event_reason="agent_tool_policy",
+            )
         if normalized not in SAFE_BUILTIN_TEST_ARGS:
             test_policy = _builtin_test_policy(normalized)
             compatibility = _agent_compatibility_result(
@@ -316,10 +400,10 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str
                 "testPolicy": test_policy,
                 "agentCompatibility": compatibility,
                 "agentScope": scope_summary,
+                "agent": agent_summary,
                 "timeout": _timeout_metadata(False, TOOL_TEST_TIMEOUT_SECONDS, 0),
             }
 
-        test_args = dict(SAFE_BUILTIN_TEST_ARGS[normalized])
         test_policy = _builtin_test_policy(normalized)
         return _run_tool_test_with_timeout(
             normalized,
@@ -327,7 +411,8 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str
             test_policy=test_policy,
             args_used=test_args,
             agent_scope=scope_summary,
-            run=lambda: _test_safe_builtin_tool(normalized, test_args, test_policy),
+            agent=agent_summary,
+            run=lambda: _test_safe_builtin_tool(normalized, test_args, test_policy, agent_summary),
         )
 
     records = _load_generated_tools()
@@ -355,11 +440,24 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str
             "testPolicy": scoped_item["testPolicy"],
             "agentCompatibility": compatibility,
             "agentScope": scope_summary,
+            "agent": agent_summary,
             "timeout": _timeout_metadata(False, TOOL_TEST_TIMEOUT_SECONDS, 0),
         }
     if not item["validated"]:
         raise ToolRegistryError("Generated tool must be validated before testing")
     supplied_args = args if isinstance(args, dict) else {}
+    agent_policy_block = _agent_policy_test_block(normalized, supplied_args, agent_summary)
+    if agent_policy_block:
+        return _blocked_tool_test_response(
+            normalized,
+            source="generated",
+            message=agent_policy_block,
+            args_used=supplied_args,
+            test_policy=scoped_item["testPolicy"],
+            agent_scope=scope_summary,
+            agent=agent_summary,
+            event_reason="agent_tool_policy",
+        )
     response_template = str(item.get("responseTemplate") or "").strip()
     result_text = response_template or f"Generated tool `{normalized}` test completed."
     return _run_tool_test_with_timeout(
@@ -368,16 +466,34 @@ def test_tool(tool_id: str, args: dict[str, Any] | None = None, agent_scope: str
         test_policy=item["testPolicy"],
         args_used=supplied_args,
         agent_scope=scope_summary,
+        agent=agent_summary,
         run=lambda: _test_generated_tool_manifest(normalized, item, supplied_args, result_text),
     )
 
 
-def _test_safe_builtin_tool(tool_name: str, test_args: dict[str, Any], test_policy: dict[str, Any]) -> dict[str, Any]:
+def _test_safe_builtin_tool(
+    tool_name: str,
+    test_args: dict[str, Any],
+    test_policy: dict[str, Any],
+    agent: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from core.infrastructure.tool_executor import ToolExecutor
+    from contextlib import nullcontext
+
+    active_agent = agent if isinstance(agent, dict) else {}
+    agent_id = str(active_agent.get("agentId") or "").strip()
+    runtime_context: Any
+    if agent_id:
+        from core.web.services.agent_directory_service import active_agent_runtime
+
+        runtime_context = active_agent_runtime(agent_id)
+    else:
+        runtime_context = nullcontext()
 
     executor = ToolExecutor()
     parsed_args = _agent_parse_tool_args(tool_name, test_args)
-    result, action = executor.execute(tool_name, parsed_args)
+    with runtime_context:
+        result, action = executor.execute(tool_name, parsed_args)
     result_text = str(result or "")
     status = "failed" if _is_tool_failure_result(result_text) else "succeeded"
     compatibility = _build_tool_message_compatibility(
@@ -462,6 +578,103 @@ def _test_generated_tool_manifest(
     }
 
 
+def _tool_test_agent_summary(agent_id: str | None) -> dict[str, Any]:
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        return {}
+    try:
+        from core.web.services.agent_directory_service import get_agent, resolve_tool_policy_for_agent
+
+        agent = get_agent(normalized, include_archived=False)
+        if not agent:
+            raise ToolRegistryError(f"Agent not found: {normalized}")
+        policy = resolve_tool_policy_for_agent(normalized)
+        return {
+            "agentId": str(agent.get("agentId") or normalized).strip(),
+            "agentCode": str(agent.get("agentCode") or "").strip(),
+            "displayName": str(agent.get("displayName") or "").strip(),
+            "primaryMode": str(agent.get("primaryMode") or "").strip(),
+            "roleKey": str(agent.get("roleKey") or "").strip(),
+            "toolPolicyId": str(policy.get("policyId") or agent.get("toolPolicyId") or "").strip(),
+        }
+    except ToolRegistryError:
+        raise
+    except Exception as exc:
+        raise ToolRegistryError(f"Unable to resolve Agent for tool test: {type(exc).__name__}") from exc
+
+
+def _agent_policy_test_block(tool_name: str, args: dict[str, Any], agent: dict[str, Any] | None) -> str:
+    active_agent = agent if isinstance(agent, dict) else {}
+    agent_id = str(active_agent.get("agentId") or "").strip()
+    if not agent_id:
+        return ""
+    try:
+        from core.web.services.agent_directory_service import evaluate_tool_policy, resolve_tool_policy_for_agent
+
+        decision = evaluate_tool_policy(
+            tool_name,
+            args if isinstance(args, dict) else {},
+            policy=resolve_tool_policy_for_agent(agent_id),
+            agent_id=agent_id,
+        )
+    except Exception as exc:
+        return f"[工具策略提示] 当前工具测试无法验证该 Agent 的 ToolPolicy: {type(exc).__name__}。"
+    if getattr(decision, "allowed", True):
+        return ""
+    return str(getattr(decision, "message", "") or "[工具策略提示] 当前工具测试被该 Agent 的 ToolPolicy 拦截。")
+
+
+def _blocked_tool_test_response(
+    tool_name: str,
+    *,
+    source: str,
+    message: str,
+    args_used: dict[str, Any],
+    test_policy: dict[str, Any],
+    agent_scope: dict[str, Any],
+    agent: dict[str, Any],
+    event_reason: str,
+) -> dict[str, Any]:
+    parsed_args = args_used if isinstance(args_used, dict) else {}
+    compatibility = _agent_compatibility_result(
+        status="blocked",
+        callable=False,
+        message=message,
+        tool_name=tool_name,
+        args=parsed_args,
+    )
+    _record_registry_event(
+        "tool_registry.test.blocked",
+        "Tool test was blocked before execution.",
+        tool_id=tool_name,
+        status="blocked",
+        outcome="blocked",
+        level="warning",
+        fields={
+            "source": source,
+            "testPolicy": str(test_policy.get("mode") or ""),
+            "agentScope": str(agent_scope.get("id") or MAIN_AGENT_SCOPE_ID),
+            "agentId": str(agent.get("agentId") or ""),
+            "reason": event_reason,
+        },
+    )
+    return {
+        "toolId": tool_name,
+        "source": source,
+        "status": "blocked",
+        "called": False,
+        "callable": False,
+        "message": message,
+        "resultPreview": "",
+        "argsUsed": parsed_args,
+        "testPolicy": test_policy,
+        "agentCompatibility": compatibility,
+        "agentScope": agent_scope,
+        "agent": agent,
+        "timeout": _timeout_metadata(False, TOOL_TEST_TIMEOUT_SECONDS, 0),
+    }
+
+
 def _run_tool_test_with_timeout(
     tool_name: str,
     *,
@@ -469,6 +682,7 @@ def _run_tool_test_with_timeout(
     test_policy: dict[str, Any],
     args_used: dict[str, Any],
     agent_scope: dict[str, Any],
+    agent: dict[str, Any] | None = None,
     run: Any,
 ) -> dict[str, Any]:
     timeout_seconds = _effective_tool_test_timeout()
@@ -506,6 +720,7 @@ def _run_tool_test_with_timeout(
                 "testPolicy": str(test_policy.get("mode") or ""),
                 "durationMs": duration_ms,
                 "timeoutSeconds": timeout_seconds,
+                "agentId": str((agent or {}).get("agentId") or "") if isinstance(agent, dict) else "",
             },
         )
         return {
@@ -520,6 +735,7 @@ def _run_tool_test_with_timeout(
             "testPolicy": test_policy,
             "agentCompatibility": compatibility,
             "agentScope": agent_scope,
+            "agent": agent if isinstance(agent, dict) else {},
             "timeout": _timeout_metadata(True, timeout_seconds, duration_ms),
         }
 
@@ -547,6 +763,7 @@ def _run_tool_test_with_timeout(
                 "testPolicy": str(test_policy.get("mode") or ""),
                 "durationMs": duration_ms,
                 "errorType": type(exc).__name__,
+                "agentId": str((agent or {}).get("agentId") or "") if isinstance(agent, dict) else "",
             },
         )
         return {
@@ -561,6 +778,7 @@ def _run_tool_test_with_timeout(
             "testPolicy": test_policy,
             "agentCompatibility": compatibility,
             "agentScope": agent_scope,
+            "agent": agent if isinstance(agent, dict) else {},
             "timeout": _timeout_metadata(False, timeout_seconds, duration_ms),
         }
 
@@ -569,6 +787,7 @@ def _run_tool_test_with_timeout(
     event_fields = payload.pop("_eventFields", {})
     payload["timeout"] = _timeout_metadata(False, timeout_seconds, duration_ms)
     payload["agentScope"] = agent_scope
+    payload["agent"] = agent if isinstance(agent, dict) else {}
     _record_completed_tool_test(
         tool_name,
         source=source,
@@ -600,6 +819,7 @@ def _record_completed_tool_test(
         message = "Generated tool manifest test executed."
     compatibility = payload.get("agentCompatibility") if isinstance(payload.get("agentCompatibility"), dict) else {}
     agent_scope = payload.get("agentScope") if isinstance(payload.get("agentScope"), dict) else {}
+    agent = payload.get("agent") if isinstance(payload.get("agent"), dict) else {}
     _record_registry_event(
         "tool_registry.test.executed",
         message,
@@ -612,6 +832,7 @@ def _record_completed_tool_test(
             "testPolicy": str(test_policy.get("mode") or ""),
             "agentCompatibility": str(compatibility.get("status") or ""),
             "agentScope": str(agent_scope.get("id") or MAIN_AGENT_SCOPE_ID),
+            "agentId": str(agent.get("agentId") or ""),
             "durationMs": duration_ms,
             **event_fields,
         },
@@ -1060,6 +1281,47 @@ def _save_generated_tools(records: list[dict[str, Any]]) -> None:
 
 def _normalize_tool_id(value: object) -> str:
     return str(value or "").strip().replace("-", "_").lower()
+
+
+def _image2_model_config_payload(public_config: dict[str, Any]) -> dict[str, Any]:
+    tools_config = public_config.get("tools", {})
+    image2_config = tools_config.get("image2", {}) if isinstance(tools_config, dict) else {}
+    default_model_ref = str(image2_config.get("default_model_ref") or "").strip() if isinstance(image2_config, dict) else ""
+    models = [_image2_model_option_payload(option) for option in list_llm_model_options(public_config)]
+    models = [model for model in models if model]
+    selected = next((model for model in models if model["modelRef"] == default_model_ref), None)
+    fallback = {
+        "modelRef": "",
+        "label": "Environment / built-in fallback",
+        "model": IMAGE2_FALLBACK_MODEL,
+        "providerKind": "",
+        "source": "fallback",
+        "apiKeyEnv": "",
+        "apiKeyConfigured": False,
+    }
+    return {
+        "schemaVersion": 1,
+        "toolId": IMAGE2_TOOL_NAME,
+        "defaultModelRef": default_model_ref,
+        "selectedModel": selected or fallback,
+        "models": models,
+        "fallbackModel": fallback,
+    }
+
+
+def _image2_model_option_payload(option: dict[str, Any]) -> dict[str, Any]:
+    model_ref = str(option.get("model_id") or "").strip()
+    if not model_ref or str(option.get("source") or "") != "model_library":
+        return {}
+    return {
+        "modelRef": model_ref,
+        "label": str(option.get("label") or option.get("model") or model_ref).strip() or model_ref,
+        "model": str(option.get("model") or "").strip(),
+        "providerKind": str(option.get("provider_kind") or "").strip(),
+        "source": str(option.get("source") or "model_library").strip(),
+        "apiKeyEnv": str(option.get("api_key_env") or "").strip(),
+        "apiKeyConfigured": bool(option.get("api_key_configured")),
+    }
 
 
 def _normalize_schema(value: object) -> dict[str, Any]:

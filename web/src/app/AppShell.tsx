@@ -1,13 +1,14 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigationType } from "react-router-dom";
-import { Brain, ChevronDown, GitBranch, LoaderCircle, Moon, Power, RefreshCw, ScrollText, Settings, Sun, Wrench } from "lucide-react";
+import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { Bot, Brain, ChevronDown, FolderTree, GitBranch, LoaderCircle, Moon, Power, RefreshCw, ScrollText, Search, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
 import {
   BackendHealth,
   ConfigSummary,
+  FileTreeNode,
   GitStatusSummary,
   RuntimeRestartResponse,
   RuntimeSummary,
@@ -15,6 +16,7 @@ import {
 } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import {
+  collectBrowserMemorySnapshot,
   collectBrowserPageSnapshot,
   postBrowserTelemetry,
   summarizeConsoleArgs,
@@ -39,6 +41,7 @@ import { resolvePollingInterval } from "./pollingPolicy";
 import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
+import { useChatWorkbenchStore } from "../store/chatWorkbenchStore";
 import styles from "./AppShell.module.css";
 import packageJson from "../../package.json";
 
@@ -49,6 +52,60 @@ function linkClassName({ isActive }: { isActive: boolean }) {
 const API_FAILURE_TELEMETRY_THROTTLE_MS = 15_000;
 const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
 const APP_VERSION = packageJson.version;
+const BROWSER_MEMORY_SAMPLE_INTERVAL_MS = 30_000;
+
+function filterUtilityFileTree(nodes: FileTreeNode[], query: string): FileTreeNode[] {
+  const term = query.trim().toLowerCase();
+  if (!term) {
+    return nodes;
+  }
+  return nodes.flatMap((node) => {
+    const matches = node.name.toLowerCase().includes(term) || node.path.toLowerCase().includes(term);
+    if (node.type === "directory") {
+      const filteredChildren = filterUtilityFileTree(node.children ?? [], query);
+      if (matches) {
+        return [{ ...node, children: node.children ?? [] }];
+      }
+      if (filteredChildren.length > 0) {
+        return [{ ...node, children: filteredChildren }];
+      }
+      return [];
+    }
+    return matches ? [node] : [];
+  });
+}
+
+function renderUtilityFileTree(
+  nodes: FileTreeNode[],
+  onOpenFile: (path: string) => void,
+  activeFilePath: string,
+) {
+  return nodes.map((node) => {
+    if (node.type === "directory") {
+      return (
+        <details key={node.path} className={styles.utilityFileDir} open>
+          <summary>{node.name}</summary>
+          <div className={styles.utilityFileChildren}>
+            {renderUtilityFileTree(node.children ?? [], onOpenFile, activeFilePath)}
+          </div>
+        </details>
+      );
+    }
+    const active = activeFilePath === node.path;
+    return (
+      <button
+        key={node.path}
+        type="button"
+        className={active ? `${styles.utilityFileButton} ${styles.utilityFileButtonActive}` : styles.utilityFileButton}
+        onClick={() => onOpenFile(node.path)}
+        title={node.path}
+      >
+        <span>{node.name}</span>
+        <small>{node.path}</small>
+      </button>
+    );
+  });
+}
 
 export function shouldSuppressApiFailureTelemetry(
   failure: FetchJsonFailureReport,
@@ -97,6 +154,22 @@ export function shouldThrottleApiFailureTelemetry(
     }
   }
   return false;
+}
+
+export function apiFailureTelemetryEventCode(failure: FetchJsonFailureReport): string {
+  const endpoint = failure.endpoint.split(/[?#]/, 1)[0];
+  if (endpoint === "/api/config/discover-models") {
+    return failure.failureKind === "network" ? "config.model_discovery.network_error" : "config.model_discovery.failed";
+  }
+  return failure.failureKind === "network" ? "browser.api.network_error" : "browser.api.request_failed";
+}
+
+export function apiFailureTelemetryLevel(failure: FetchJsonFailureReport): BrowserTelemetryEventInput["level"] {
+  const endpoint = failure.endpoint.split(/[?#]/, 1)[0];
+  if (endpoint === "/api/config/discover-models" && failure.failureKind === "http" && failure.status !== null && failure.status < 500) {
+    return "warning";
+  }
+  return "error";
 }
 
 export function buildShutdownRequestedTelemetry(): BrowserTelemetryEventInput {
@@ -229,7 +302,9 @@ export function shouldTreatShutdownAsLocallyComplete({
 
 export function AppShell() {
   const { lang, t, statusLabel } = useAppI18n();
+  const queryClient = useQueryClient();
   const location = useLocation();
+  const navigate = useNavigate();
   const navigationType = useNavigationType();
   const [shutdownOpen, setShutdownOpen] = useState(false);
   const [shutdownTitle, setShutdownTitle] = useState("");
@@ -238,6 +313,7 @@ export function AppShell() {
   const [shutdownRequested, setShutdownRequested] = useState(false);
   const [restartRequested, setRestartRequested] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
+  const [utilityFileFilter, setUtilityFileFilter] = useState("");
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
   const [frontendVisible, setFrontendVisible] = useState(
@@ -253,6 +329,11 @@ export function AppShell() {
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(`page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
+  const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
+  const activeSessionWorkspace = useChatWorkbenchStore((state) =>
+    state.activeSessionId ? state.sessionWorkspaces[state.activeSessionId] : undefined,
+  );
+  const openPreviewTab = useChatWorkbenchStore((state) => state.openPreviewTab);
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -289,6 +370,12 @@ export function AppShell() {
     queryFn: () => fetchJson<GitStatusSummary>("/api/git/status"),
     refetchInterval: gitRefetchInterval,
     refetchIntervalInBackground: false,
+  });
+  const fileTreeQuery = useQuery({
+    queryKey: queryKeys.fileTree(),
+    queryFn: () => fetchJson<FileTreeNode[]>("/api/files/tree"),
+    enabled: utilityOpen,
+    staleTime: 8_000,
   });
 
   const workbench = runtimeQuery.data?.workbench;
@@ -387,6 +474,13 @@ export function AppShell() {
   const currentTime = clockFormatter.format(clockNow);
   const buildId = __VIBELUTION_BUILD_ID__;
   const gitStatus = gitStatusQuery.data;
+  const utilityFilteredFileTree = useMemo(
+    () => filterUtilityFileTree(fileTreeQuery.data ?? [], utilityFileFilter),
+    [fileTreeQuery.data, utilityFileFilter],
+  );
+  const utilityActiveFilePath = activeSessionWorkspace?.activeTab && activeSessionWorkspace.activeTab !== "agent"
+    ? activeSessionWorkspace.activeTab
+    : "";
   const gitAvailable = Boolean(gitStatus?.available);
   const gitDirty = Boolean(gitStatus?.dirty);
   const gitTone: SystemStatusTone = gitAvailable ? (gitDirty ? "caution" : "running") : "idle";
@@ -404,6 +498,16 @@ export function AppShell() {
   const closeUtilityMenu = useCallback(() => {
     setUtilityOpen(false);
   }, []);
+  const handleUtilityOpenFile = useCallback((path: string) => {
+    if (!activeSessionId) {
+      navigate("/chat");
+      closeUtilityMenu();
+      return;
+    }
+    openPreviewTab(activeSessionId, path);
+    navigate("/chat");
+    closeUtilityMenu();
+  }, [activeSessionId, closeUtilityMenu, navigate, openPreviewTab]);
 
   const frontendStateLabel = {
     connected: t("systemFrontend_connected"),
@@ -574,9 +678,9 @@ export function AppShell() {
       }
       emitBrowserTelemetry({
         phase: "api",
-        eventCode: failure.failureKind === "network" ? "browser.api.network_error" : "browser.api.request_failed",
+        eventCode: apiFailureTelemetryEventCode(failure),
         message: `${failure.method} ${failure.endpoint} failed${failure.status === null ? "" : ` (${failure.status})`}`,
-        level: "error",
+        level: apiFailureTelemetryLevel(failure),
         fields: {
           endpoint: failure.endpoint,
           method: failure.method,
@@ -691,6 +795,42 @@ export function AppShell() {
       },
     });
   }, [emitBrowserTelemetry, location.hash, location.pathname, location.search, navigationType]);
+
+  useEffect(() => {
+    function queryCacheSummary() {
+      const queries = queryClient.getQueryCache().getAll();
+      const activeQueries = queries.filter((query) => query.getObserversCount() > 0);
+      const fetchingQueries = queries.filter((query) => query.state.fetchStatus === "fetching");
+      return {
+        queryCount: queries.length,
+        activeQueryCount: activeQueries.length,
+        fetchingQueryCount: fetchingQueries.length,
+        staleQueryCount: queries.filter((query) => query.isStale()).length,
+        sessionQueryCount: queries.filter((query) => String(query.queryKey[0] ?? "") === "sessions").length,
+        logQueryCount: queries.filter((query) => String(query.queryKey[0] ?? "") === "logs").length,
+      };
+    }
+
+    const emitMemorySample = (reason: string) => {
+      emitBrowserTelemetry({
+        phase: "memory",
+        eventCode: "browser.memory.sampled",
+        message: `Browser memory sampled: ${reason}`,
+        fields: {
+          reason,
+          ...collectBrowserMemorySnapshot(),
+          ...queryCacheSummary(),
+        },
+      });
+    };
+
+    const initialTimer = window.setTimeout(() => emitMemorySample("route_settled"), 1_000);
+    const interval = window.setInterval(() => emitMemorySample("periodic"), BROWSER_MEMORY_SAMPLE_INTERVAL_MS);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(interval);
+    };
+  }, [emitBrowserTelemetry, location.pathname, queryClient]);
 
   useEffect(() => {
     function handlePopState() {
@@ -1219,6 +1359,10 @@ export function AppShell() {
                   <Wrench size={16} />
                   <span>{t("navTools")}</span>
                 </NavLink>
+                <NavLink to="/agents" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
+                  <Bot size={16} />
+                  <span>{t("navAgents")}</span>
+                </NavLink>
                 <NavLink to="/memory" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
                   <Brain size={16} />
                   <span>{t("navMemory")}</span>
@@ -1227,7 +1371,47 @@ export function AppShell() {
                   <GitBranch size={16} />
                   <span>{t("navGit")}</span>
                 </NavLink>
+                <button
+                  type="button"
+                  className={styles.utilityButton}
+                  role="menuitem"
+                  onClick={() => document.getElementById("utility-file-navigator")?.scrollIntoView({ block: "nearest" })}
+                >
+                  <FolderTree size={16} />
+                  <span>{t("files")}</span>
+                </button>
               </div>
+              <section id="utility-file-navigator" className={styles.utilityFilePanel} aria-label={t("files")}>
+                <div className={styles.utilityFileHeader}>
+                  <div>
+                    <strong>{t("files")}</strong>
+                    <span>
+                      {activeSessionId
+                        ? (lang === "zh" ? "点击文件会在当前会话工作区打开预览。" : "Click a file to open it in the current chat workspace.")
+                        : (lang === "zh" ? "先进入会话后可打开文件预览。" : "Open a chat first to preview files.")}
+                    </span>
+                  </div>
+                </div>
+                <div className={styles.utilityFileSearch}>
+                  <Search size={14} />
+                  <input
+                    value={utilityFileFilter}
+                    onChange={(event) => setUtilityFileFilter(event.target.value)}
+                    placeholder={t("searchFilesPlaceholder")}
+                  />
+                </div>
+                <div className={styles.utilityFileTree}>
+                  {fileTreeQuery.isError ? (
+                    <p className={styles.utilityFileState}>{t("loadFailed")}</p>
+                  ) : fileTreeQuery.isPending && !fileTreeQuery.data ? (
+                    <p className={styles.utilityFileState}>{t("loadingFiles")}</p>
+                  ) : utilityFilteredFileTree.length === 0 ? (
+                    <p className={styles.utilityFileState}>{t("noFileMatches")}</p>
+                  ) : (
+                    renderUtilityFileTree(utilityFilteredFileTree, handleUtilityOpenFile, utilityActiveFilePath)
+                  )}
+                </div>
+              </section>
               <div className={styles.gitMiniPanel} aria-label={t("gitStatusGuide")} title={gitTitle}>
                 <div className={styles.gitMiniHeader}>
                   <div className={styles.gitChip}>

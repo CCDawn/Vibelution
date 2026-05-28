@@ -296,10 +296,16 @@ def _normalize_supervised_agent_bindings(bindings: Optional[Dict[str, Any]]) -> 
             continue
         normalized[role] = {
             "agentId": str(raw_binding.get("agentId") or "").strip(),
+            "agentCode": str(raw_binding.get("agentCode") or "").strip(),
             "displayName": str(raw_binding.get("displayName") or "").strip(),
+            "primaryMode": str(raw_binding.get("primaryMode") or "").strip(),
+            "roleKey": str(raw_binding.get("roleKey") or role).strip() or role,
             "profileId": str(raw_binding.get("profileId") or "").strip(),
+            "promptTemplateId": str(raw_binding.get("promptTemplateId") or "").strip(),
             "directSessionId": str(raw_binding.get("directSessionId") or "").strip(),
             "workspacePath": str(raw_binding.get("workspacePath") or "").strip(),
+            "toolPolicyId": str(raw_binding.get("toolPolicyId") or "").strip(),
+            "memoryPolicyId": str(raw_binding.get("memoryPolicyId") or "").strip(),
             "role": str(raw_binding.get("role") or role).strip(),
             "roleLabel": str(raw_binding.get("roleLabel") or "").strip(),
         }
@@ -1619,6 +1625,7 @@ def run_supervised_evolution_session(
                     expect_restart=expect_restart,
                     post_restart_observe_seconds=post_restart_observe_seconds,
                     keep_worktree=keep_worktree,
+                    agent_binding=role_agent_binding,
                     progress_callback=emit_live_case_progress,
                     cancel_checker=cancel_checker,
                 )

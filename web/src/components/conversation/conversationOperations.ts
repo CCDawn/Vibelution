@@ -10,6 +10,13 @@ export type ConversationOperation = {
   status: string;
   summary: string;
   durationSeconds: number | null;
+  arguments?: Record<string, unknown>;
+  resultPreview?: string;
+  resultType?: string;
+  resultLength?: number;
+  error?: string;
+  timeoutSeconds?: number;
+  tracePath?: string;
 };
 
 export type ConversationOperationLabels = {
@@ -65,6 +72,13 @@ export function buildConversationOperations(
         status: toolCall.status || "done",
         summary: toolCall.summary?.trim() ?? "",
         durationSeconds: coerceToolDurationSeconds(toolCall),
+        arguments: toolCall.arguments,
+        resultPreview: toolCall.resultPreview,
+        resultType: toolCall.resultType,
+        resultLength: numberOrNull(toolCall.resultLength) ?? undefined,
+        error: toolCall.error,
+        timeoutSeconds: numberOrNull(toolCall.timeoutSeconds) ?? undefined,
+        tracePath: toolCall.tracePath,
       });
     });
   }

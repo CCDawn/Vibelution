@@ -72,6 +72,21 @@ def build_chat_user_message(content: str) -> Dict[str, Any]:
     return {"role": "user", "content": f"## {title}\n{content.strip()}"}
 
 
+def build_chat_user_multimodal_message(content: str, image_urls: list[str]) -> Dict[str, Any]:
+    """构建带图片输入的 chat 用户消息。"""
+
+    title = _TITLES[RuntimeInputKind.CHAT_USER_MESSAGE]
+    text = f"## {title}\n{content.strip()}".strip()
+    blocks: list[dict[str, Any]] = []
+    if text:
+        blocks.append({"type": "text", "text": text})
+    for image_url in image_urls:
+        url = str(image_url or "").strip()
+        if url:
+            blocks.append({"type": "image_url", "image_url": {"url": url}})
+    return {"role": "user", "content": blocks or [{"type": "text", "text": text}]}
+
+
 def build_supervised_evolution_request_message(content: str) -> SystemMessage:
     """构建监督进化请求消息。"""
     return build_runtime_input_message(RuntimeInput(RuntimeInputKind.SUPERVISED_EVOLUTION_REQUEST, content))

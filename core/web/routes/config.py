@@ -78,6 +78,7 @@ class ConfigDraftAddProfilePayload(ConfigDraftPayload):
 
 class ConfigDraftTestPayload(ConfigDraftPayload):
     profileId: str | None = None
+    capability: str = "text"
 
 
 class ConfigDiscoverModelsPayload(ConfigDraftPayload):
@@ -221,6 +222,7 @@ def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
             payload.publicConfig,
             draft_meta=payload.draftMeta,
             profile_id=payload.profileId,
+            capability=payload.capability,
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)

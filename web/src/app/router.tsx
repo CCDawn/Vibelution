@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
+import { AgentsRoute } from "../routes/AgentsRoute";
 import { ChatCodingRoute } from "../routes/ChatCodingRoute";
 import { ChatRoomsRoute } from "../routes/ChatRoomsRoute";
 import { ConfigRoute } from "../routes/ConfigRoute";
@@ -83,6 +84,7 @@ export const router = createBrowserRouter([
       },
       { path: "evolution", element: <LegacyEvolutionRedirect /> },
       { path: "tools", element: <ToolsRoute /> },
+      { path: "agents", element: <AgentsRoute /> },
       { path: "git", element: <GitRoute /> },
       { path: "memory", element: <MemoryRoute forcedView="overview" /> },
       { path: "memory/effective", element: <MemoryRoute forcedView="effective" /> },

@@ -262,6 +262,83 @@ def test_runtime_scene_issue_state_clusters_repeated_active_errors(tmp_path, mon
     assert "browser.console.error ×3" in detail["packageDiagnosis"]["agentNextStep"]
 
 
+def test_runtime_scene_diagnosis_names_legacy_model_discovery_auth_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-model-discovery-auth"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "backend",
+                "phase": "api",
+                "event_code": "backend.api.request",
+                "level": "warning",
+                "outcome": "client_error",
+                "message": "POST /api/config/discover-models -> 422",
+                "fields": {
+                    "method": "POST",
+                    "path": "/api/config/discover-models",
+                    "pathTemplate": "/api/config/discover-models",
+                    "statusCode": 422,
+                },
+                "raw_refs": [{"path": "raw/backend.api.log", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02Z",
+                "seq": 2,
+                "component": "browser_page",
+                "phase": "api",
+                "event_code": "browser.api.request_failed",
+                "level": "error",
+                "outcome": "observed",
+                "message": "POST /api/config/discover-models failed (422)",
+                "fields": {
+                    "pageInstanceId": "page-a",
+                    "endpoint": "/api/config/discover-models",
+                    "method": "POST",
+                    "status": 422,
+                    "failureKind": "http",
+                    "failureMessage": "认证失败（HTTP 401），请检查 API Key。密钥来源：未找到环境变量 OPENAI_API_KEY。",
+                },
+                "raw_refs": [{"path": "raw/browser.telemetry.log", "tail_lines": 80}],
+            },
+        ],
+        status="stopped",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    active_cluster = issue_state["firstActiveCluster"]
+    assert diagnosis["severity"] == "error"
+    assert issue_state["historicalClusterCount"] == 0
+    assert issue_state["historicalClusters"] == []
+    assert issue_state["controlSignalCount"] == 0
+    assert diagnosis["firstSignal"]["eventCode"] == "config.model_discovery.failed"
+    assert diagnosis["firstSignal"]["sourceEventCode"] == "browser.api.request_failed"
+    assert diagnosis["firstSignal"]["diagnosisReason"] == "missing_openai_api_key"
+    assert diagnosis["firstSignal"]["diagnosisLabel"] == "配置模型发现失败：缺少 OPENAI_API_KEY"
+    assert active_cluster["eventCode"] == "config.model_discovery.failed"
+    assert active_cluster["label"] == "配置模型发现失败：缺少 OPENAI_API_KEY"
+    assert active_cluster["representativeSignal"]["fields"]["sourceEventCode"] == "browser.api.request_failed"
+    assert "配置模型发现失败：缺少 OPENAI_API_KEY" in diagnosis["userSummary"]
+    assert "先配置 OPENAI_API_KEY" in diagnosis["agentNextStep"]
+    assert diagnosis["evidencePaths"][0] == "raw/browser.telemetry.log"
+    assert "请求返回 422" not in diagnosis["userSummary"]
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    package_index = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "package_index.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["primary_issue"] == "config.model_discovery.failed"
+    assert "config-model-discovery-failed" in package_index["tags"]
+    assert "缺少 OPENAI_API_KEY" in package_index["search_text"]
+
+
 def test_runtime_scene_issue_state_excludes_control_signals_from_clusters(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     _seed_scene(
@@ -342,6 +419,405 @@ def test_runtime_scene_issue_state_tracks_tool_registry_policy_signals(tmp_path,
     assert "issueState.activeClusterCount" not in diagnosis["agentNextStep"]
 
 
+def test_runtime_scene_busy_command_is_actionable_policy_not_active_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-busy-command"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "runtime_manager",
+                "phase": "command",
+                "event_code": "command.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Runtime manager command event: command.failed",
+                "fields": {
+                    "commandId": "cmd-self-1",
+                    "type": "start_self_evolution_run",
+                    "message": "当前已经有一轮网页自进化在运行或暂停中，请先继续或终止这一轮。",
+                },
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02Z",
+                "seq": 2,
+                "component": "runtime_manager",
+                "phase": "queue",
+                "event_code": "command_queue.command_result_written",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Runtime manager queue event: command_queue.command_result_written",
+                "fields": {
+                    "commandId": "cmd-self-1",
+                    "ok": False,
+                    "completed": True,
+                    "errorType": "SelfEvolutionRunBusyError",
+                    "message": "当前已经有一轮网页自进化在运行或暂停中，请先继续或终止这一轮。",
+                },
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "warning"
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["policySignalCount"] == 2
+    assert issue_state["policyClusterCount"] == 2
+    assert diagnosis["firstSignal"]["eventCode"] == "command.failed"
+    assert "控制/策略问题簇" in diagnosis["userSummary"]
+    assert "issueState.policyClusterCount" in diagnosis["agentNextStep"]
+    assert "issueState.activeClusterCount" not in diagnosis["agentNextStep"]
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["diagnosis_status"] == "policy_only"
+    assert summary["agent_brief"]["actionability"] == "policy_acknowledge_only"
+    assert summary["agent_brief"]["needs_action"] is False
+
+
+def test_runtime_scene_self_evolution_busy_manager_event_is_policy_not_active_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-self-evolution-busy-manager"
+    command_id = "cmd-self-2"
+    busy_message = "当前已经有一轮网页自进化在运行或暂停中，请先继续或终止这一轮。"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "runtime_manager",
+                "phase": "command",
+                "event_code": "command.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Runtime manager command event: command.failed",
+                "fields": {
+                    "commandId": command_id,
+                    "type": "start_self_evolution_run",
+                    "message": busy_message,
+                },
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02Z",
+                "seq": 2,
+                "component": "self_evolution_run",
+                "phase": "runtime_manager",
+                "event_code": "self_evolution_run.manager.start_self_evolution_run.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": busy_message,
+                "fields": {
+                    "commandId": command_id,
+                    "commandType": "start_self_evolution_run",
+                    "errorType": "SelfEvolutionRunBusyError",
+                },
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:03Z",
+                "seq": 3,
+                "component": "runtime_manager",
+                "phase": "queue",
+                "event_code": "command_queue.command_result_written",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Runtime manager queue event: command_queue.command_result_written",
+                "fields": {
+                    "commandId": command_id,
+                    "ok": False,
+                    "completed": True,
+                    "errorType": "SelfEvolutionRunBusyError",
+                    "message": busy_message,
+                },
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "warning"
+    assert issue_state["activeClusterCount"] == 0
+    assert issue_state["policySignalCount"] == 3
+    assert issue_state["policyClusterCount"] == 3
+    assert issue_state["firstPolicyCluster"]["eventCode"] == "command.failed"
+    assert diagnosis["firstSignal"]["eventCode"] == "command.failed"
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["diagnosis_status"] == "policy_only"
+    assert summary["agent_brief"]["needs_action"] is False
+
+
+def test_runtime_scene_conversation_artifact_failure_wraps_image2_root_cause(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-diagnosis-image2-wrapper"
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "image2",
+                "phase": "generate",
+                "event_code": "image2.generate.started",
+                "level": "info",
+                "outcome": "running",
+                "message": "image2.generate.started",
+                "fields": {"sessionId": "session-image2", "model": "gpt-image-1.5"},
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02Z",
+                "seq": 2,
+                "component": "conversation",
+                "phase": "assistant_artifact",
+                "event_code": "conversation.assistant_artifact",
+                "level": "error",
+                "outcome": "failed",
+                "message": "assistant: 图片生成失败：image2 provider returned 404: <html>",
+                "fields": {
+                    "sessionId": "session-image2",
+                    "role": "assistant",
+                    "status": "failed",
+                    "contentPreview": "图片生成失败：image2 provider returned 404: <html>",
+                },
+                "raw_refs": [{"path": "conversations/session-image2.jsonl", "tail_lines": 80}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:03Z",
+                "seq": 3,
+                "component": "image2",
+                "phase": "generate",
+                "event_code": "image2.generate.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": "image2.generate.failed",
+                "fields": {
+                    "errorType": "RuntimeError",
+                    "errorPreview": "image2 provider returned 404: <html>",
+                    "durationMs": 391,
+                },
+                "raw_refs": [{"path": "artifacts/session-image2-image2.jsonl", "tail_lines": 80}],
+            },
+        ],
+        status="running",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "error"
+    assert issue_state["activeClusterCount"] == 1
+    assert issue_state["activeErrorCount"] == 1
+    assert issue_state["controlSignalCount"] == 1
+    assert issue_state["firstActiveCluster"]["eventCode"] == "image2.generate.failed"
+    assert diagnosis["firstSignal"]["eventCode"] == "image2.generate.failed"
+    assert diagnosis["evidencePaths"][0] == "artifacts/session-image2-image2.jsonl"
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
+    assert summary["agent_brief"]["primary_issue"] == "image2.generate.failed"
+
+
+def test_runtime_scene_startup_wrappers_do_not_duplicate_specific_frontend_root_cause(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-startup-wrapper-frontend-root"
+    command_id = "cmd-open-workbench-1"
+    frontend_error = (
+        "npm run build failed with exit code 1.\n"
+        "frontend.build.failed\n"
+        "src/routes/ResearchFlowCanvasRoute.tsx(1475,45): error TS2552: "
+        "Cannot find name 'ORGANIZATION_CANVAS_KIND'."
+    )
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "frontend",
+                "phase": "build",
+                "event_code": "frontend.build.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Frontend build failed.",
+                "fields": {"exitCode": 1, "reason": "frontend sources changed"},
+                "raw_refs": [{"path": "raw/frontend.build.log", "tail_lines": 120}],
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02Z",
+                "seq": 2,
+                "component": "launcher",
+                "phase": "session",
+                "event_code": "runtime.scene.startup.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Managed runtime scene startup failed.",
+                "fields": {"reason": frontend_error},
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:03Z",
+                "seq": 3,
+                "component": "runtime_manager",
+                "phase": "command",
+                "event_code": "command.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Runtime manager command event: command.failed",
+                "fields": {
+                    "commandId": command_id,
+                    "type": "open_workbench",
+                    "message": f"{frontend_error}\nLauncher exit code: 1",
+                },
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:04Z",
+                "seq": 4,
+                "component": "runtime_manager",
+                "phase": "queue",
+                "event_code": "command_queue.command_result_written",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Runtime manager queue event: command_queue.command_result_written",
+                "fields": {
+                    "commandId": command_id,
+                    "ok": False,
+                    "completed": True,
+                    "errorType": "RuntimeError",
+                    "message": frontend_error,
+                },
+            },
+        ],
+        status="failed",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "error"
+    assert issue_state["activeClusterCount"] == 1
+    assert issue_state["activeErrorCount"] == 1
+    assert issue_state["controlSignalCount"] == 3
+    assert issue_state["policySignalCount"] == 0
+    assert issue_state["firstActiveCluster"]["eventCode"] == "frontend.build.failed"
+    assert diagnosis["firstSignal"]["eventCode"] == "frontend.build.failed"
+    active_codes = {cluster["eventCode"] for cluster in issue_state["activeClusters"]}
+    assert "runtime.scene.startup.failed" not in active_codes
+    assert "command.failed" not in active_codes
+    assert "command_queue.command_result_written" not in active_codes
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
+    assert summary["agent_brief"]["primary_issue"] == "frontend.build.failed"
+
+
+def test_runtime_scene_startup_failure_keeps_launcher_root_when_no_specific_event_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-startup-launcher-root"
+    command_id = "cmd-open-workbench-2"
+    reason = (
+        "The term 'Get-InventoryPythonPath' is not recognized as the name of a cmdlet, "
+        "function, script file, or operable program."
+    )
+    _seed_scene(
+        tmp_path,
+        scene_id,
+        [
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:01Z",
+                "seq": 1,
+                "component": "launcher",
+                "phase": "session",
+                "event_code": "runtime.scene.startup.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Managed runtime scene startup failed.",
+                "fields": {"reason": reason},
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:02Z",
+                "seq": 2,
+                "component": "runtime_manager",
+                "phase": "command",
+                "event_code": "command.failed",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Runtime manager command event: command.failed",
+                "fields": {
+                    "commandId": command_id,
+                    "type": "open_workbench",
+                    "message": f"Get-InventoryPythonPath : {reason}\nLauncher exit code: 1",
+                },
+            },
+            {
+                "runtime_scene_id": scene_id,
+                "ts": "2026-05-18T12:00:03Z",
+                "seq": 3,
+                "component": "runtime_manager",
+                "phase": "queue",
+                "event_code": "command_queue.command_result_written",
+                "level": "error",
+                "outcome": "failed",
+                "message": "Runtime manager queue event: command_queue.command_result_written",
+                "fields": {
+                    "commandId": command_id,
+                    "ok": False,
+                    "completed": True,
+                    "errorType": "RuntimeError",
+                    "message": f"Get-InventoryPythonPath : {reason}",
+                },
+            },
+        ],
+        status="failed",
+    )
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    diagnosis = detail["packageDiagnosis"]
+    issue_state = diagnosis["issueState"]
+    assert diagnosis["severity"] == "error"
+    assert issue_state["activeClusterCount"] == 1
+    assert issue_state["activeErrorCount"] == 1
+    assert issue_state["controlSignalCount"] == 2
+    assert issue_state["policySignalCount"] == 0
+    assert issue_state["firstActiveCluster"]["eventCode"] == "startup.launcher.command_missing"
+    assert issue_state["firstActiveCluster"]["label"] == "启动失败：PowerShell 函数缺失 Get-InventoryPythonPath"
+    assert diagnosis["firstSignal"]["eventCode"] == "startup.launcher.command_missing"
+    assert diagnosis["firstSignal"]["sourceEventCode"] == "runtime.scene.startup.failed"
+    assert diagnosis["firstSignal"]["diagnosisReason"] == "powershell_command_missing"
+    assert "Get-InventoryPythonPath" in diagnosis["agentNextStep"]
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["diagnosis_status"] == "active_issue"
+    assert summary["agent_brief"]["primary_issue"] == "startup.launcher.command_missing"
+
+
 def test_runtime_scene_issue_state_clusters_recovered_historical_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     _seed_scene(
@@ -401,6 +877,9 @@ def test_runtime_scene_issue_state_clusters_recovered_historical_errors(tmp_path
     assert issue_state["firstHistoricalCluster"]["identity"] == {"runId": "build-1"}
     assert "frontend.build.failed ×2" in detail["packageDiagnosis"]["userSummary"]
     assert "frontend.build.failed ×2" in detail["packageDiagnosis"]["agentNextStep"]
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / "20260518T120000Z__scene-diagnosis-historical-cluster" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["diagnosis_status"] == "resolved"
+    assert summary["agent_brief"]["primary_issue"] == "none"
 
 
 def test_runtime_scene_detail_exposes_clean_package_diagnosis(tmp_path, monkeypatch):
@@ -442,6 +921,9 @@ def test_runtime_scene_detail_exposes_clean_package_diagnosis(tmp_path, monkeypa
     assert "raw/backend.stderr.log" in diagnosis["recommendedOrder"]
     assert diagnosis["startupTrace"]["missingStepIds"]
     assert "startupTrace.missingStepIds" in diagnosis["agentNextStep"]
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / "20260518T120000Z__scene-diagnosis-clean" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["diagnosis_status"] == "healthy"
+    assert summary["agent_brief"]["primary_issue"] == "none"
 
 
 def test_runtime_scene_package_diagnosis_uses_effective_running_status(tmp_path, monkeypatch):
@@ -544,6 +1026,71 @@ def test_runtime_scene_timeline_folds_repeated_work_run_snapshots(tmp_path, monk
     assert summary["fields"]["firstTimestamp"] == "2026-05-18T12:00:01Z"
     assert summary["fields"]["lastTimestamp"] == "2026-05-18T12:00:02Z"
     assert "Folded 2 repeated work run snapshots" in summary["message"]
+
+
+def test_runtime_scene_diagnosis_exposes_compact_work_run_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    scene_id = "scene-work-run-summary"
+    rows: list[dict] = []
+    for index in range(7):
+        rows.append(
+            {
+                "runtime_scene_id": scene_id,
+                "ts": f"2026-05-18T12:00:0{index}Z",
+                "seq": index + 1,
+                "component": "work_run",
+                "phase": "state",
+                "event_code": "work_run.snapshot.persisted",
+                "level": "info",
+                "outcome": "succeeded",
+                "message": "Work run snapshot persisted: self/run-busy running",
+                "fields": {
+                    "runKind": "self",
+                    "runId": "run-busy",
+                    "status": "running",
+                    "phase": "reading",
+                    "activeRunId": "run-busy",
+                    "runtimeStatus": "error",
+                    "snapshotPath": "C:\\workspace\\.runtime\\run-busy.json",
+                },
+            }
+        )
+    rows.append(
+        {
+            "runtime_scene_id": scene_id,
+            "ts": "2026-05-18T12:00:08Z",
+            "seq": 8,
+            "component": "work_run",
+            "phase": "state",
+            "event_code": "work_run.snapshot.persisted",
+            "level": "info",
+            "outcome": "succeeded",
+            "message": "Work run snapshot persisted: chat_turn/run-done completed",
+            "fields": {
+                "runKind": "chat_turn",
+                "runId": "run-done",
+                "status": "completed",
+                "phase": "done",
+            },
+        }
+    )
+    _seed_scene(tmp_path, scene_id, rows, status="running")
+
+    detail = runtime_scene_service.get_runtime_scene_detail(scene_id)
+
+    work_runs = detail["packageDiagnosis"]["workRunSummary"]
+    assert work_runs["eventsPath"] == "timeline.jsonl"
+    assert work_runs["snapshotEventCount"] == 8
+    assert work_runs["runCount"] == 2
+    assert work_runs["activeRunCount"] == 1
+    assert work_runs["highFrequencyRunCount"] == 1
+    assert work_runs["activeRuns"][0]["runId"] == "run-busy"
+    assert work_runs["highFrequencyRuns"][0]["snapshotCount"] == 7
+
+    summary = json.loads((tmp_path / "logs" / "runtime_scenes" / f"20260518T120000Z__{scene_id}" / "summary.json").read_text(encoding="utf-8"))
+    assert summary["agent_brief"]["work_run_focus"]["active_run_count"] == 1
+    assert summary["agent_brief"]["work_run_focus"]["high_frequency_run_count"] == 1
+    assert summary["agent_brief"]["work_run_focus"]["first_active_run"]["runId"] == "run-busy"
 
 
 def test_runtime_scene_detail_exposes_startup_trace_with_desktop_entry(tmp_path, monkeypatch):

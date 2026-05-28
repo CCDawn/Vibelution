@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,7 +33,9 @@ from fastapi.testclient import TestClient
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.web.services import (
+    agent_mode_binding_service,
     agent_directory_service,
+    chat_room_service,
     chat_review_service,
     config_service,
     evolution_service,
@@ -42,6 +45,7 @@ from core.web.services import (
     session_service,
     self_evolution_control_service,
     self_evolution_service,
+    supervised_agent_service,
     supervised_control_service,
     supervised_worktree_evolution_service,
     workbench_contract_service,
@@ -722,6 +726,92 @@ def test_runtime_shutdown_stops_active_chat_turn_before_manager_close(tmp_path, 
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
         session_service._clear_session_live_output("session-live")
+
+
+def test_runtime_shutdown_stops_active_chat_room_round_before_manager_close(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    script_path = tmp_path / "vibelution_launcher.ps1"
+    script_path.write_text("Write-Host managed\n", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{}", encoding="utf-8")
+    calls: list[object] = []
+
+    monkeypatch.setattr(runtime_service, "LAUNCHER_SCRIPT_PATH", script_path)
+    monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", state_path)
+    monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by)),
+    )
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    room = chat_room_service.create_chat_room(
+        title="关闭前群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+        config={"maxSpeakers": 1},
+    )
+    room_started = threading.Event()
+    release_room = threading.Event()
+
+    def blocking_runner(participant, prompt, context):
+        room_started.set()
+        assert release_room.wait(2.0)
+        return {
+            "status": "completed",
+            "raw_output": "room done",
+            "summary": "room done",
+        }
+
+    room_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-runtime-shutdown-room")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", room_executor)
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "关闭前保存群聊现场",
+        agent_runner=blocking_runner,
+        background=True,
+    )
+    round_id = detail["activeRoundId"]
+    assert round_id
+    assert room_started.wait(1.0)
+
+    try:
+        response = client.post("/api/runtime/shutdown")
+
+        assert response.status_code == 202
+        payload = response.json()
+        assert payload["accepted"] is True
+        assert payload["mode"] == "runtime_manager"
+        assert payload["chatRoomRounds"] == [
+            {
+                "kind": "chat_room_round",
+                "roomId": room["roomId"],
+                "runId": round_id,
+                "roundId": round_id,
+                "status": "stopped",
+            }
+        ]
+        final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+        assert final_detail["status"] == "ready"
+        assert final_detail["activeRoundId"] == ""
+        assert final_detail["rounds"][-1]["status"] == "stopped"
+        assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
+        assert calls == [
+            "ensure",
+            (
+                "close_workbench",
+                {"reason": "web_close_button", "source": "web_ui", "stopManager": True},
+                "web_ui",
+            ),
+        ]
+    finally:
+        release_room.set()
+        room_executor.shutdown(wait=True, cancel_futures=True)
 
 
 def test_runtime_shutdown_releases_active_evolution_runs_before_manager_close(tmp_path, monkeypatch):
@@ -1688,6 +1778,11 @@ def test_self_evolution_control_paths_record_child_log_before_agent_turn(tmp_pat
     )
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(self_evolution_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(self_evolution_control_service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         self_evolution_control_service,
         "get_workbench_contract",
@@ -1785,6 +1880,98 @@ def test_runtime_browser_telemetry_records_into_active_scene(tmp_path, monkeypat
     assert manifest["browser"]["current_pathname"] == "/chat"
     assert manifest["browser"]["active_nav_href"] == "/self-evolution"
     assert manifest["browser"]["current_heading"] == "Self evolution"
+
+
+def test_runtime_browser_memory_telemetry_updates_manifest_summary(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-memory", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-memory",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = client.post(
+        "/api/runtime/browser-telemetry",
+        json={
+            "phase": "memory",
+            "eventCode": "browser.memory.sampled",
+            "message": "Browser memory sampled: route_settled",
+            "level": "info",
+            "fields": {
+                "pathname": "/config",
+                "reason": "route_settled",
+                "available": True,
+                "usedJSHeapMB": 512.5,
+                "totalJSHeapMB": 640.0,
+                "jsHeapLimitMB": 4096.0,
+                "queryCount": 17,
+                "activeQueryCount": 6,
+                "fetchingQueryCount": 1,
+                "staleQueryCount": 3,
+                "sessionQueryCount": 2,
+                "logQueryCount": 1,
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    telemetry_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "browser_page.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert telemetry_events[-1]["phase"] == "memory"
+    assert telemetry_events[-1]["event_code"] == "browser.memory.sampled"
+    assert telemetry_events[-1]["fields"]["usedJSHeapMB"] == 512.5
+
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["browser"]["last_memory_used_js_heap_mb"] == 512.5
+    assert manifest["browser"]["last_memory_query_count"] == 17
+    assert manifest["browser"]["last_memory_pathname"] == "/config"
+
+
+def test_runtime_browser_stream_lifecycle_telemetry_updates_manifest(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-stream", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-stream",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    response = client.post(
+        "/api/runtime/browser-telemetry",
+        json={
+            "phase": "session_stream",
+            "eventCode": "browser.session_stream.closed",
+            "message": "Session detail stream closed.",
+            "level": "info",
+            "fields": {
+                "sessionId": "session-1",
+                "readyState": 1,
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["browser"]["last_session_stream_event_code"] == "browser.session_stream.closed"
+    assert manifest["browser"]["last_session_stream_session_id"] == "session-1"
 
 
 def test_runtime_browser_visibility_noise_stays_in_raw_log(tmp_path, monkeypatch):
@@ -1930,6 +2117,51 @@ def test_backend_api_runtime_event_records_mutating_request(tmp_path, monkeypatc
     manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["backend"]["api_log_path"] == "raw/backend.api.log"
     assert manifest["backend"]["last_api_path"] == "/api/runtime/shutdown"
+
+
+def test_backend_api_runtime_event_marks_model_discovery_client_error_operational(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-model-discovery-api", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-model-discovery-api",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    runtime_scene_service.record_backend_api_event(
+        {
+            "method": "POST",
+            "path": "/api/config/discover-models",
+            "path_template": "/api/config/discover-models",
+            "status_code": 422,
+            "duration_ms": 12.3,
+            "client": "127.0.0.1",
+        }
+    )
+
+    backend_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "backend.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    api_event = backend_events[-1]
+    assert api_event["level"] == "info"
+    assert api_event["outcome"] == "operational_client_error"
+    assert api_event["fields"]["statusCode"] == 422
+    assert api_event["fields"]["operationalClientError"] is True
+    summary = json.loads((scene_dir / "summary.json").read_text(encoding="utf-8"))
+    active_codes = {
+        cluster["eventCode"]
+        for cluster in summary["diagnosis"]["issueState"]["activeClusters"]
+    }
+    assert "backend.api.request" not in active_codes
 
 
 def test_backend_api_runtime_event_skips_health_noise(tmp_path, monkeypatch):
@@ -2117,6 +2349,61 @@ def test_session_detail_context_usage_comes_from_persisted_messages_after_restar
     assert payload["contextUsage"]["used"] > 0
 
 
+def test_session_detail_context_limit_prefers_model_window_over_compression_default(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    cfg = session_service.get_config().model_copy(deep=True)
+    primary = cfg.llm.get_profile(role="primary")
+    provider = cfg.llm.get_provider(primary.provider_id)
+    provider.context_window = 1_000_000
+    cfg.context_compression.max_token_limit = 32_768
+    monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    monkeypatch.setattr(
+        session_service,
+        "_resolved_model_context_window",
+        lambda _cfg, _profile_id: 1_000_000,
+    )
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["contextUsage"]["limit"] == 1_000_000
+
+
+def test_session_detail_context_limit_prefers_live_runtime_window(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    runtime_state_path = tmp_path / "workspace" / "ui_runtime_state.json"
+    runtime_state_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_state_path.write_text(
+        json.dumps(
+            {
+                "context_token_limit": 900_000,
+                "context_compression": {
+                    "effectiveTokenLimit": 450_000,
+                    "contextWindowLimit": 900_000,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    cfg = session_service.get_config().model_copy(deep=True)
+    cfg.context_compression.max_token_limit = 32_768
+    monkeypatch.setattr(session_service, "get_config", lambda: cfg)
+    monkeypatch.setattr(
+        session_service,
+        "_resolved_model_context_window",
+        lambda _cfg, _profile_id: 1_000_000,
+    )
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["contextUsage"]["limit"] == 900_000
+
+
 def test_session_detail_exposes_prompt_cache_observation(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     runtime_state = {
@@ -2233,6 +2520,71 @@ def test_normalize_persisted_tool_calls_preserves_timeout_as_failed():
     assert tool_calls[1]["status"] == "done"
 
 
+def test_normalize_persisted_tool_calls_preserves_safe_details():
+    tool_calls = session_service._normalize_persisted_tool_calls(
+        [
+            {
+                "name": "image2_generate_tool",
+                "status": "failed",
+                "summary": "Read timed out.",
+                "args": {
+                    "prompt": "生成美女图片",
+                    "size": "1024x1024",
+                    "_cancel_checker": "internal",
+                    "api_key": "secret",
+                },
+                "error": "HTTPSConnectionPool read timed out",
+                "durationMs": 180452,
+                "timeoutSeconds": 180,
+                "resultType": "str",
+                "resultLength": 755,
+                "tracePath": "conversations/session/tool_calls.jsonl",
+            },
+        ]
+    )
+
+    assert tool_calls == [
+        {
+            "name": "image2_generate_tool",
+            "status": "failed",
+            "summary": "Read timed out.",
+            "arguments": {
+                "prompt": "生成美女图片",
+                "size": "1024x1024",
+            },
+            "error": "HTTPSConnectionPool read timed out",
+            "durationMs": 180452,
+            "timeoutSeconds": 180,
+            "resultType": "str",
+            "resultLength": 755,
+            "tracePath": "conversations/session/tool_calls.jsonl",
+        }
+    ]
+
+
+def test_chat_turn_records_keep_tool_names_when_persisted_calls_have_details():
+    records = session_service._build_chat_turn_records_from_messages(
+        [
+            {"role": "user", "content": "生成图片"},
+            {
+                "role": "assistant",
+                "content": "已调用工具。",
+                "tool_calls": [
+                    {
+                        "name": "image2_generate_tool",
+                        "status": "failed",
+                        "args": {"prompt": "生成美女图片"},
+                        "error": "timeout",
+                    }
+                ],
+            },
+        ]
+    )
+
+    assert records[0].tool_calls == ["image2_generate_tool"]
+    assert records[0].tool_call_count == 1
+
+
 def test_session_detail_exposes_recent_next_state_signal_summaries(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     append_chat_next_state_signal(
@@ -2293,6 +2645,9 @@ def test_create_session_persists_new_active_empty_conversation(tmp_path, monkeyp
         "session-live",
         payload["id"],
     ]
+    created = state["conversations"][-1]
+    assert "agent_profile_id" not in created
+    assert "agentProfileId" not in created
 
 
 def test_update_session_title_persists_to_list_and_detail(tmp_path, monkeypatch):
@@ -2320,6 +2675,7 @@ def test_update_session_title_persists_to_list_and_detail(tmp_path, monkeypatch)
 def test_update_session_agent_profile_persists_to_list_and_detail(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     base_config = session_service.get_config().model_copy(deep=True)
     base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
     base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
@@ -2341,7 +2697,47 @@ def test_update_session_agent_profile_persists_to_list_and_detail(tmp_path, monk
     assert sessions_response.json()[0]["agentProfileId"] == "subagent_explorer"
 
     state = load_chat_state(tmp_path)
-    assert state["conversations"][0]["agent_profile_id"] == "subagent_explorer"
+    assert "agent_profile_id" not in state["conversations"][0]
+    assert "agentProfileId" not in state["conversations"][0]
+    agent = agent_directory_service.get_agent(payload["agentId"])
+    assert agent is not None
+    assert agent["profileId"] == "subagent_explorer"
+
+
+def test_update_session_agent_id_persists_as_primary_binding(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["subagent_explorer"] = base_config.llm.profiles["primary"].model_copy(deep=True)
+    base_config.llm.profiles["subagent_explorer"].profile_id = "subagent_explorer"
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="备用会话 Agent",
+        profile_id="subagent_explorer",
+        primary_mode="chat",
+        prompt_template_id="prompt-chat-default",
+    )
+
+    response = client.patch(
+        "/api/sessions/session-live",
+        json={"agentId": agent["agentId"]},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["id"] == "session-live"
+    assert payload["agentId"] == agent["agentId"]
+    assert payload["agentProfileId"] == "subagent_explorer"
+
+    state = load_chat_state(tmp_path)
+    assert state["conversations"][0]["agent_id"] == agent["agentId"]
+    assert state["conversations"][0]["agentId"] == agent["agentId"]
+    assert "agent_profile_id" not in state["conversations"][0]
+    assert "agentProfileId" not in state["conversations"][0]
+    rebound_agent = agent_directory_service.get_agent(agent["agentId"])
+    assert rebound_agent is not None
+    assert rebound_agent["directSessionId"] == "session-live"
 
 
 def test_session_agent_templates_list_config_profiles(monkeypatch):
@@ -2676,6 +3072,274 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     assert persisted_event["fields"]["sessionId"] == "session-live"
     assert persisted_event["fields"]["assistantTextLength"] == len("已完成网页对话提交接线。")
     assert persisted_event["child_log_path"] == "conversations/session-live-turns.jsonl"
+
+
+def test_session_user_image_attachment_upload_and_submit_reaches_agent(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["primary"].supports_image_input = True
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    seen: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen["initial_prompt"] = initial_prompt
+            seen["attachments"] = list(attachments or [])
+            return {
+                "status": "completed",
+                "summary": "我已经看到了图片。",
+                "raw_output": "我已经看到了图片。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+    attachment = upload_response.json()
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "请看图", "attachmentIds": [attachment["artifactId"]], "mentalModelEnabled": False},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    user_message = payload["messages"][-2]
+    assert user_message["attachments"][0]["artifactId"] == attachment["artifactId"]
+    assert user_message["attachments"][0]["filename"] == "sketch.png"
+    assert seen["initial_prompt"] == "请看图"
+    seen_attachment = seen["attachments"][0]
+    assert seen_attachment["artifactId"] == attachment["artifactId"]
+    assert seen_attachment["dataUrl"].startswith("data:image/png;base64,")
+
+    state = load_chat_state(tmp_path)
+    stored_user = state["conversations"][0]["messages"][-2]
+    assert stored_user["attachments"][0]["artifactId"] == attachment["artifactId"]
+    assert "dataUrl" not in stored_user["attachments"][0]
+
+
+def test_session_user_image_attachment_vision_intent_blocks_unsupported_agent(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "分析这张图里有什么", "attachmentIds": [upload_response.json()["artifactId"]]},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["currentPhase"] == "failed"
+    assert "未确认支持图像输入" in payload["messages"][-1]["content"]
+    state = load_chat_state(tmp_path)
+    assert state["conversations"][0]["last_turn_status"] == "failed"
+
+
+def test_session_user_image_attachment_picture_content_phrase_stays_vision_intent(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "画面里有什么", "attachmentIds": [upload_response.json()["artifactId"]]},
+    )
+
+    assert response.status_code == 202
+    assert "未确认支持图像输入" in response.json()["messages"][-1]["content"]
+
+
+def test_session_user_image_attachment_vision_intent_reaches_supported_agent(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["primary"].supports_image_input = True
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    seen: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen["initial_prompt"] = initial_prompt
+            seen["attachments"] = list(attachments or [])
+            return {"status": "completed", "summary": "看到了图片。", "raw_output": "看到了图片。", "outcome": "done"}
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "分析这张图", "attachmentIds": [upload_response.json()["artifactId"]]},
+    )
+
+    assert response.status_code == 202
+    assert seen["initial_prompt"] == "分析这张图"
+    assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
+
+
+def test_session_user_image_attachment_edit_intent_routes_to_image2(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    captured: dict[str, object] = {}
+
+    def fake_image2_generate_tool(**kwargs):
+        captured.update(kwargs)
+        session_service.append_session_assistant_artifact_message(
+            "session-live",
+            "已生成图片。",
+            metadata={
+                "kind": "image2_generation",
+                "status": "succeeded",
+                "imageUrl": "/api/sessions/session-live/artifacts/generated.png",
+                "artifactId": "generated.png",
+            },
+        )
+        return json.dumps({"ok": True, "status": "succeeded", "artifactId": "generated.png"})
+
+    monkeypatch.setattr("tools.image2_tools.image2_generate_tool", fake_image2_generate_tool)
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+    artifact_id = upload_response.json()["artifactId"]
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "把这张图改成 2D 卡通头像", "attachmentIds": [artifact_id]},
+    )
+
+    assert response.status_code == 202
+    assert captured["prompt"] == "把这张图改成 2D 卡通头像"
+    assert captured["input_artifact_id"] == artifact_id
+    state = load_chat_state(tmp_path)
+    assert state["conversations"][0]["last_turn_status"] == "ready"
+    assert state["conversations"][0]["messages"][-1]["metadata"]["kind"] == "image2_generation"
+
+
+def test_session_user_image_attachment_empty_text_asks_for_clarification(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "", "attachmentIds": [upload_response.json()["artifactId"]]},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["currentPhase"] == "ready"
+    assert "分析这张图片" in payload["messages"][-1]["content"]
+
+
+def test_session_user_image_attachment_rejects_unsupported_type(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=b"not an image",
+        headers={"Content-Type": "text/plain", "X-Vibelution-Filename": "note.txt"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_session_user_image_attachment_rejects_spoofed_image_payload(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=b"not really a png",
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "spoof.png"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_submit_session_message_preserves_chinese_content_round_trip(tmp_path, monkeypatch):
@@ -3288,6 +3952,387 @@ def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, m
         == ("conversation", "turn_phantom_image_success_blocked", "conversation.turn.phantom_image_success_blocked")
         for event in events
     )
+
+
+def test_different_agent_sessions_run_chat_turns_concurrently(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-concurrent")
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", executor)
+
+    started_sessions: set[str] = set()
+    started_lock = threading.Lock()
+    both_started = threading.Event()
+    release = threading.Event()
+
+    class BlockingAgent:
+        def run_single_turn(self, initial_prompt=None):
+            prompt = str(initial_prompt or "")
+            session_id = alpha["id"] if "alpha" in prompt else beta["id"]
+            with started_lock:
+                started_sessions.add(session_id)
+                if started_sessions == {alpha["id"], beta["id"]}:
+                    both_started.set()
+            assert release.wait(2.0)
+            return {
+                "status": "completed",
+                "summary": f"{session_id} done",
+                "raw_output": f"{session_id} done",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+
+    try:
+        first = session_service.submit_session_message(alpha["id"], "alpha 并行任务")
+        second = session_service.submit_session_message(beta["id"], "beta 并行任务")
+
+        assert first["currentPhase"] == "running"
+        assert second["currentPhase"] == "running"
+        assert both_started.wait(1.0), "expected different agents to overlap"
+    finally:
+        release.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    assert session_service.get_session_detail(alpha["id"])["messages"][-1]["content"] == f"{alpha['id']} done"
+    assert session_service.get_session_detail(beta["id"])["messages"][-1]["content"] == f"{beta['id']} done"
+
+
+def test_same_agent_sessions_queue_chat_turns_serially(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if conversation["conversation_id"] == beta["id"]:
+            conversation["agent_id"] = alpha["agentId"]
+            conversation["agentId"] = alpha["agentId"]
+    save_chat_state(tmp_path, state)
+
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-queue")
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", executor)
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_first = threading.Event()
+    release_second = threading.Event()
+    prompts: list[str] = []
+
+    class BlockingAgent:
+        def run_single_turn(self, initial_prompt=None):
+            prompt = str(initial_prompt or "")
+            prompts.append(prompt)
+            if "alpha" in prompt:
+                first_started.set()
+                assert release_first.wait(2.0)
+                return {
+                    "status": "completed",
+                    "summary": "alpha done",
+                    "raw_output": "alpha done",
+                    "outcome": "done",
+                    "tool_call_count": 0,
+                    "tool_trace": [],
+                }
+            second_started.set()
+            assert release_second.wait(2.0)
+            return {
+                "status": "completed",
+                "summary": "beta done",
+                "raw_output": "beta done",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+
+    try:
+        first = session_service.submit_session_message(alpha["id"], "alpha 串行任务")
+        assert first["currentPhase"] == "running"
+        assert first_started.wait(1.0)
+
+        second = session_service.submit_session_message(beta["id"], "beta 串行任务")
+        assert second["currentPhase"] == "queued"
+        assert not second_started.wait(0.2)
+
+        release_first.set()
+        assert second_started.wait(1.0), "expected queued turn to start after first turn"
+    finally:
+        release_first.set()
+        release_second.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    assert prompts == ["alpha 串行任务", "beta 串行任务"]
+    assert session_service.get_session_detail(alpha["id"])["messages"][-1]["content"] == "alpha done"
+    assert session_service.get_session_detail(beta["id"])["messages"][-1]["content"] == "beta done"
+
+
+def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if conversation["conversation_id"] == beta["id"]:
+            conversation["agent_id"] = alpha["agentId"]
+            conversation["agentId"] = alpha["agentId"]
+    save_chat_state(tmp_path, state)
+
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-stop-queued")
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", executor)
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_first = threading.Event()
+    release_second = threading.Event()
+    prompts: list[str] = []
+
+    class BlockingAgent:
+        def run_single_turn(self, initial_prompt=None):
+            prompt = str(initial_prompt or "")
+            prompts.append(prompt)
+            if "alpha" in prompt:
+                first_started.set()
+                assert release_first.wait(2.0)
+                return {
+                    "status": "completed",
+                    "summary": "alpha done",
+                    "raw_output": "alpha done",
+                    "outcome": "done",
+                    "tool_call_count": 0,
+                    "tool_trace": [],
+                }
+            second_started.set()
+            assert release_second.wait(2.0)
+            return {
+                "status": "completed",
+                "summary": "beta done",
+                "raw_output": "beta done",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+
+    try:
+        first = session_service.submit_session_message(alpha["id"], "alpha 串行任务")
+        assert first["currentPhase"] == "running"
+        assert first_started.wait(1.0)
+
+        second = session_service.submit_session_message(beta["id"], "beta 串行任务")
+        assert second["currentPhase"] == "queued"
+        assert not second_started.wait(0.2)
+
+        stopped = session_service.request_stop_session_turn(beta["id"])
+        assert stopped["currentPhase"] == "ready"
+        assert "本轮已按请求停止" in stopped["messages"][-1]["content"]
+
+        release_first.set()
+        assert not second_started.wait(0.5), "stopped queued turn must not be started after the active turn releases"
+    finally:
+        release_first.set()
+        release_second.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    assert prompts == ["alpha 串行任务"]
+    beta_detail = session_service.get_session_detail(beta["id"])
+    assert beta_detail["messages"][-1]["role"] == "assistant"
+    assert "本轮已按请求停止" in beta_detail["messages"][-1]["content"]
+
+
+def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if conversation["conversation_id"] == beta["id"]:
+            conversation["agent_id"] = alpha["agentId"]
+            conversation["agentId"] = alpha["agentId"]
+    save_chat_state(tmp_path, state)
+
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-shutdown-queued")
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", executor)
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_first = threading.Event()
+    release_second = threading.Event()
+    prompts: list[str] = []
+
+    class BlockingAgent:
+        def run_single_turn(self, initial_prompt=None):
+            prompt = str(initial_prompt or "")
+            prompts.append(prompt)
+            if "alpha" in prompt:
+                first_started.set()
+                assert release_first.wait(2.0)
+                return {
+                    "status": "completed",
+                    "summary": "alpha done",
+                    "raw_output": "alpha done",
+                    "outcome": "done",
+                    "tool_call_count": 0,
+                    "tool_trace": [],
+                }
+            second_started.set()
+            assert release_second.wait(2.0)
+            return {
+                "status": "completed",
+                "summary": "beta done",
+                "raw_output": "beta done",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+
+    try:
+        session_service.submit_session_message(alpha["id"], "alpha 关闭前任务")
+        assert first_started.wait(1.0)
+        queued = session_service.submit_session_message(beta["id"], "beta 关闭前任务")
+        assert queued["currentPhase"] == "queued"
+
+        stopped = runtime_service._stop_active_chat_turns_before_shutdown()
+        assert {item["sessionId"] for item in stopped} == {alpha["id"], beta["id"]}
+        assert {item["status"] for item in stopped} == {"stopped"}
+
+        release_first.set()
+        assert not second_started.wait(0.5), "shutdown-stopped queued turn must not start after active turn releases"
+    finally:
+        release_first.set()
+        release_second.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    assert prompts == ["alpha 关闭前任务"]
+    assert session_service.get_session_detail(alpha["id"])["currentPhase"] == "ready"
+    assert session_service.get_session_detail(beta["id"])["currentPhase"] == "ready"
+
+
+def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-active-items")
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", executor)
+
+    started_sessions: set[str] = set()
+    started_lock = threading.Lock()
+    both_started = threading.Event()
+    release = threading.Event()
+
+    class BlockingAgent:
+        def run_single_turn(self, initial_prompt=None):
+            prompt = str(initial_prompt or "")
+            session_id = alpha["id"] if "alpha" in prompt else beta["id"]
+            with started_lock:
+                started_sessions.add(session_id)
+                if started_sessions == {alpha["id"], beta["id"]}:
+                    both_started.set()
+            assert release.wait(2.0)
+            return {
+                "status": "completed",
+                "summary": f"{session_id} done",
+                "raw_output": f"{session_id} done",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+
+    try:
+        session_service.submit_session_message(alpha["id"], "alpha 并行任务")
+        session_service.submit_session_message(beta["id"], "beta 并行任务")
+        assert both_started.wait(1.0), "expected different agents to overlap"
+
+        payload = runtime_service.get_runtime_summary()
+        chat_items = payload["workRuns"]["activeItems"]["chat_turn"]
+        assert {item["sessionId"] for item in chat_items} == {alpha["id"], beta["id"]}
+        assert {item["status"] for item in chat_items} == {"running"}
+        assert payload["lifecycleProof"]["activeWorkRuns"]["count"] == 2
+        assert payload["lifecycleProof"]["activeWorkRuns"]["kinds"] == ["chat_turn", "chat_turn"]
+    finally:
+        release.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
+    monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    state = load_chat_state(tmp_path)
+    for conversation in state["conversations"]:
+        if conversation["conversation_id"] == beta["id"]:
+            conversation["agent_id"] = alpha["agentId"]
+            conversation["agentId"] = alpha["agentId"]
+    save_chat_state(tmp_path, state)
+
+    executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="pytest-chat-queued-items")
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", executor)
+    first_started = threading.Event()
+    second_started = threading.Event()
+    release_first = threading.Event()
+    release_second = threading.Event()
+
+    class BlockingAgent:
+        def run_single_turn(self, initial_prompt=None):
+            prompt = str(initial_prompt or "")
+            if "alpha" in prompt:
+                first_started.set()
+                assert release_first.wait(2.0)
+                return {
+                    "status": "completed",
+                    "summary": "alpha done",
+                    "raw_output": "alpha done",
+                    "outcome": "done",
+                    "tool_call_count": 0,
+                    "tool_trace": [],
+                }
+            second_started.set()
+            assert release_second.wait(2.0)
+            return {
+                "status": "completed",
+                "summary": "beta done",
+                "raw_output": "beta done",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **kwargs: BlockingAgent())
+
+    try:
+        session_service.submit_session_message(alpha["id"], "alpha 串行任务")
+        assert first_started.wait(1.0)
+        session_service.submit_session_message(beta["id"], "beta 串行任务")
+
+        payload = runtime_service.get_runtime_summary()
+        chat_items = sorted(
+            payload["workRuns"]["activeItems"]["chat_turn"],
+            key=lambda item: item["sessionId"],
+        )
+        assert {item["sessionId"] for item in chat_items} == {alpha["id"], beta["id"]}
+        assert {item["status"] for item in chat_items} == {"queued", "running"}
+        assert not second_started.wait(0.2)
+    finally:
+        release_first.set()
+        release_second.set()
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
@@ -6596,6 +7641,14 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
     assert relay_preset["provider"]["base_url"] == "https://pixel.try-chatapi.com/v1"
     assert relay_preset["model"]["transport"] == "responses"
     assert relay_preset["model"]["contract"] == "tool_chat"
+    image2_preset = preset_options["relay_image2"]
+    assert image2_preset["category"] == "relay"
+    assert image2_preset["provider"]["kind"] == "relay"
+    assert image2_preset["provider"]["base_url"] == "https://ai-pixel.online"
+    assert not image2_preset["provider"]["base_url"].endswith("/v1")
+    assert image2_preset["model"]["model"] == "image2"
+    assert image2_preset["model"]["streaming"] is False
+    assert image2_preset["model"]["tool_calling_mode"] == "disabled"
     assert preset_options["custom_openai_compatible_relay"]["category"] == "openai_compatible"
     assert preset_options["custom_openai_compatible_relay"]["provider"]["kind"] == "openai_compatible"
     assert preset_options["custom_relay_responses"]["category"] == "relay"
@@ -6683,6 +7736,9 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert editor_meta["network.proxy_url"]["label"] == "代理地址"
     assert "科研调研" in editor_meta["network.proxy_enabled"]["hint"]
     assert editor_meta["tools.file.editable_extensions"]["kind"] == "string_list"
+    assert editor_meta["tools.image2.default_model_ref"]["kind"] == "select"
+    assert editor_meta["tools.image2.default_model_ref"]["label"] == "默认生图模型"
+    assert any(option["value"] == "relay_image2" for option in editor_meta["tools.image2.default_model_ref"]["options"])
     assert editor_meta["prompt.sections"]["kind"] == "object_list"
     assert editor_meta["prompt.sections"]["badge"] == "列表"
     assert editor_meta["llm.profiles.primary.provider.kind"]["label"] == "服务商类型"
@@ -7195,6 +8251,94 @@ def test_config_workspace_test_llm_allows_localhost_for_local_provider(monkeypat
     payload = response.json()
     assert payload["ok"] is True
     assert payload["provider_kind"] == "local"
+
+
+def test_config_workspace_test_llm_image_input_reports_unsupported(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    target = public_config["llm"]["profiles"]["primary"]
+    target["provider"] = {
+        "kind": "local",
+        "api_key_env": "",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "compat_mode": "openai",
+        "requires_api_key": False,
+        "context_window": 65536,
+    }
+    target["model"] = "llama3.2"
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        config_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def invoke(self, messages, tools=None, metadata=None):
+            assert messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+            raise RuntimeError("connection refused")
+
+    monkeypatch.setattr("core.llm.LLMClient", FakeClient)
+
+    response = client.post(
+        "/api/config/test-llm",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "profileId": "primary",
+            "capability": "image_input",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["capability"] == "image_input"
+    assert payload["capability_status"] == "unknown"
+    assert payload["supports_image_input"] is None
+    assert payload["api_key_source"] == "not-required"
+    assert payload["requires_api_key"] is False
+    assert recorded_scene_events
+    fields = recorded_scene_events[-1][1]["fields"]
+    assert fields["capability"] == "image_input"
+    assert fields["supportsImageInput"] is None
+    assert "base64" not in str(fields).lower()
+
+
+def test_config_workspace_test_llm_image_input_maps_provider_unsupported(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def invoke(self, messages, tools=None, metadata=None):
+            assert messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+            raise RuntimeError("OpenAIException - No endpoints found that support image input")
+
+    monkeypatch.setattr("core.llm.LLMClient", FakeClient)
+
+    response = client.post(
+        "/api/config/test-llm",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "profileId": "primary",
+            "capability": "image_input",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["capability_status"] == "unsupported"
+    assert payload["supports_image_input"] is False
+    assert payload["message"] == "image input is not supported by this model route"
 
 
 def test_config_workspace_draft_model_rejects_path_api_key_env(monkeypatch):
@@ -8652,7 +9796,9 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     )
     _reset_supervised_live_state()
     monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -8729,6 +9875,55 @@ def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_p
     assert bundle_path.exists()
 
     _reset_supervised_live_state()
+
+
+def test_start_supervised_run_reports_stale_agent_slot_as_validation_error(tmp_path, monkeypatch):
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "custom_prompt_tasks.jsonl"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_path.write_text(
+        json.dumps({"case_id": "case_1", "prompt": "fix bug"}) + "\n",
+        encoding="utf-8",
+    )
+    _reset_supervised_live_state()
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        supervised_control_service._RUN_EXECUTOR,
+        "submit",
+        lambda fn, *args, **kwargs: pytest.fail("stale Agent slot must block before run submission"),
+    )
+    supervised_agent_service.ensure_supervised_agent_instances()
+    replacement = agent_directory_service.create_agent_instance(
+        display_name="已归档的基线 Agent",
+        profile_id="primary",
+        primary_mode="supervised_evolution",
+        role_key="baseline",
+        prompt_template_id="prompt-supervised-baseline",
+    )
+    current = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    slots = dict(current["slots"])
+    slots["baseline"] = replacement["agentId"]
+    agent_mode_binding_service.update_mode_binding("supervised_evolution", slots=slots)
+    agent_directory_service.archive_agent_instance(replacement["agentId"])
+
+    response = client.post(
+        "/api/evolution/runs",
+        json={
+            "sourceKind": "dataset",
+            "datasetName": "custom_prompt_jsonl",
+            "datasetLimit": 1,
+            "keepWorktree": True,
+        },
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "baseline" in detail
+    assert replacement["agentId"] in detail
 
 
 def test_start_supervised_run_from_web_does_not_write_real_runtime_manager_store(tmp_path, monkeypatch):
@@ -9630,6 +10825,7 @@ def test_self_evolution_routes_expose_read_only_evidence(monkeypatch):
 
 def test_start_self_evolution_run_from_web_exposes_active_snapshot(monkeypatch):
     _reset_self_evolution_live_state()
+    _use_local_self_evolution_start(monkeypatch)
     monkeypatch.setattr(
         self_evolution_control_service,
         "get_workbench_contract",
@@ -9679,6 +10875,7 @@ def test_start_self_evolution_run_from_web_exposes_active_snapshot(monkeypatch):
 
 def test_start_self_evolution_run_from_web_does_not_write_real_runtime_manager_store(monkeypatch):
     _reset_self_evolution_live_state()
+    _use_local_self_evolution_start(monkeypatch)
     monkeypatch.setattr(
         self_evolution_control_service,
         "get_workbench_contract",
@@ -9727,6 +10924,7 @@ def test_start_self_evolution_run_from_web_does_not_write_real_runtime_manager_s
 
 def test_start_self_evolution_run_allows_readonly_chat_but_blocks_write_chat(monkeypatch):
     _reset_self_evolution_live_state()
+    _use_local_self_evolution_start(monkeypatch)
     monkeypatch.setattr(
         self_evolution_control_service,
         "get_workbench_contract",
@@ -9776,6 +10974,7 @@ def test_start_self_evolution_run_allows_readonly_chat_but_blocks_write_chat(mon
 
 def test_start_self_evolution_run_rejects_when_supervised_run_active(monkeypatch):
     _reset_self_evolution_live_state()
+    _use_local_self_evolution_start(monkeypatch)
     monkeypatch.setattr(
         self_evolution_control_service,
         "get_workbench_contract",
@@ -9812,6 +11011,7 @@ def test_start_self_evolution_run_rejects_when_supervised_run_active(monkeypatch
 
 def test_start_self_evolution_run_rejects_when_supervised_run_paused(monkeypatch):
     _reset_self_evolution_live_state()
+    _use_local_self_evolution_start(monkeypatch)
     monkeypatch.setattr(
         self_evolution_control_service,
         "get_workbench_contract",
@@ -10206,3 +11406,36 @@ def _reset_self_evolution_live_state() -> None:
     with self_evolution_control_service._RUN_STATE_LOCK:
         self_evolution_control_service._RUN_STATES.clear()
         self_evolution_control_service._ACTIVE_RUN_ID = None
+
+
+def _use_local_self_evolution_start(monkeypatch) -> None:
+    monkeypatch.setattr(self_evolution_control_service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(self_evolution_control_service, "get_active_supervised_worktree_run", lambda: None)
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "_capture_preflight_state",
+        lambda run_id: {
+            "runDir": "",
+            "backupDir": "",
+            "manifestPath": "",
+            "baseRev": "",
+            "dirtyEntries": {},
+        },
+    )
+    monkeypatch.setattr(
+        self_evolution_control_service,
+        "self_evolution_agent_bindings",
+        lambda: {
+            role: {
+                "agentId": f"test-self-{role}",
+                "displayName": f"Test self {role}",
+                "profileId": "primary",
+                "promptTemplateId": f"prompt-self-{role}",
+                "directSessionId": f"session-self-{role}",
+                "workspacePath": f"workspace/agents/test-self-{role}",
+                "role": role,
+                "roleLabel": role,
+            }
+            for role in ("executor", "reviewer", "summarizer")
+        },
+    )

@@ -115,6 +115,10 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     from core.runtime_manager import evolution_store
     from core.runtime_manager import work_run_store
     from core.web.services import runtime_scene_service
+    from core.web.services import agent_directory_service
+    from core.web.services import agent_mode_binding_service
+    from core.web.services import prompt_template_service
+    from core.web.services import supervised_agent_service
     try:
         from core.web.services import session_service
     except Exception:
@@ -135,15 +139,23 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     monkeypatch.setattr(work_run_store, "WORK_RUNS_DIR", work_runs_dir)
     monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
     if session_service is not None:
         previous_executor = session_service._SESSION_EXECUTOR
         isolated_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-web-chat-turn")
         monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", isolated_executor)
         monkeypatch.setattr(session_service, "_WORK_RUN_STORE", work_run_store.WorkRunStore(root=work_runs_dir))
+        monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
         with session_service._RUNNING_SESSIONS_LOCK:
             session_service._RUNNING_SESSION_IDS.clear()
             session_service._SESSION_ACTIVE_TURN_IDS.clear()
             session_service._SESSION_ACTIVE_TURN_LEASES.clear()
+        with session_service._SESSION_AGENT_SCHEDULER_LOCK:
+            session_service._SESSION_AGENT_ACTIVE_TURN_IDS.clear()
+            session_service._SESSION_AGENT_QUEUES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
         yield
@@ -153,6 +165,9 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
             session_service._RUNNING_SESSION_IDS.clear()
             session_service._SESSION_ACTIVE_TURN_IDS.clear()
             session_service._SESSION_ACTIVE_TURN_LEASES.clear()
+        with session_service._SESSION_AGENT_SCHEDULER_LOCK:
+            session_service._SESSION_AGENT_ACTIVE_TURN_IDS.clear()
+            session_service._SESSION_AGENT_QUEUES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
     else:

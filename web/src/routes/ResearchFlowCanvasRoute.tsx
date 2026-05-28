@@ -1,15 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  CheckCircle2,
   CirclePlus,
-  FastForward,
   GitBranchPlus,
   Link2,
   Lock,
+  MessageSquareText,
   MousePointer2,
-  Play,
+  RefreshCw,
   Redo2,
   Save,
+  Send,
+  ShieldCheck,
   Trash2,
   Undo2,
   Unlock,
@@ -30,11 +33,12 @@ import {
   ResearchAgentConfig,
   ResearchFlowCanvas,
   ResearchFlowEdge,
-  ResearchFlowExecutionResponse,
   ResearchFlowNode,
   ResearchFlowValidation,
   ResearchFlowValidationIssue,
-  ResearchDiscoverySessionList,
+  ResearchOrganization,
+  ResearchOrgMessageResponse,
+  ResearchOrgProposalResponse,
   ResearchPromptWorkspace,
 } from "../api/types";
 import styles from "./ResearchFlowCanvasRoute.module.css";
@@ -86,7 +90,7 @@ type ReconnectState = {
   hoverNodeId: string | null;
 };
 
-type InspectorView = "properties" | "issues";
+type InspectorView = "properties" | "issues" | "organization";
 
 const NODE_WIDTH = 220;
 const NODE_HEIGHT = 112;
@@ -207,6 +211,21 @@ export const RESEARCH_EDGE_TEMPLATES: ResearchEdgeTemplate[] = [
   },
 ];
 
+const RESEARCH_ORG_MESSAGE_TYPE_OPTIONS = [
+  { value: "notice", label: "通知" },
+  { value: "request", label: "请求" },
+  { value: "task", label: "任务" },
+  { value: "report", label: "汇报" },
+  { value: "escalation", label: "升级" },
+  { value: "decision", label: "决策" },
+];
+
+const RESEARCH_ORG_DELIVERY_MODE_OPTIONS = [
+  { value: "private", label: "私聊" },
+  { value: "broadcast", label: "广播" },
+  { value: "zone", label: "区域广播" },
+];
+
 const FLOW_CONDITION_EDGE_TYPES: Record<string, string[]> = {
   completed: ["success", "human_handoff"],
   needs_evidence: ["evidence_loop"],
@@ -215,6 +234,8 @@ const FLOW_CONDITION_EDGE_TYPES: Record<string, string[]> = {
   failed: ["failure"],
   blocked: ["blocked"],
 };
+
+const FLOW_CANVAS_KIND = "research_flow_canvas";
 
 const FLOW_NODE_ACTION_ALIASES: Record<string, string> = {
   broad_search: "broad",
@@ -323,7 +344,7 @@ const RESEARCH_FLOW_NODE_CONTRACTS: Record<string, FlowContract> = {
 
 type ResearchModuleTemplate = Pick<
   ResearchFlowNode,
-  "label" | "type" | "status" | "agentKey" | "promptKey" | "llmConfigId" | "description" | "routeCondition"
+  "label" | "type" | "status" | "agentId" | "agentKey" | "promptKey" | "description" | "routeCondition"
 > & {
   key: string;
   baseId: string;
@@ -351,7 +372,7 @@ const DEFAULT_RESEARCH_MODULE_TEMPLATE_KEY = "knowledge_lookup";
 const RESEARCH_MODULE_TEMPLATE_GROUPS: ResearchModuleTemplate["group"][] = ["能力模块", "Agent模块", "人工/产物", "自定义模板"];
 const RESEARCH_EDGE_TEMPLATE_GROUPS: ResearchEdgeTemplate["group"][] = ["主流程", "人工/异常", "自定义模板"];
 
-export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
+const RESEARCH_MODULE_TEMPLATE_CANDIDATES = [
   {
     key: "knowledge_store",
     baseId: "knowledge_store",
@@ -361,7 +382,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "knowledge_store",
     promptKey: "",
-    llmConfigId: "",
     description: "把搜索得到的来源、论断、证据和缺口写入 ResearchKnowledgeBase，供后续调研、自进化记忆和避免重复搜索复用。",
     routeCondition: "搜索完成后自动写入知识库。",
   },
@@ -374,7 +394,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "knowledge_lookup",
     promptKey: "",
-    llmConfigId: "",
     description: "从本地科研知识库检索已有来源、论断、证据和缺口，给后续搜索提供上下文并减少重复搜索。",
     routeCondition: "知识入库完成后先查本地知识库。",
   },
@@ -387,7 +406,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "literature_project_parse",
     promptKey: "",
-    llmConfigId: "",
     description: "对论文、PDF、GitHub README 和项目结构做结构化解析，提取方法、数据集、指标、限制和可复用组件。",
     routeCondition: "深搜拿到文献、项目或数据集来源后解析。",
   },
@@ -400,7 +418,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "semantic_cluster",
     promptKey: "",
-    llmConfigId: "",
     description: "对来源、论断和候选问题做去重、聚类和低密度空白识别，减少重复证据并暴露交叉创新点。",
     routeCondition: "解析完成后进行语义去重和簇级空白发现。",
   },
@@ -413,7 +430,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "novelty_reverse_check",
     promptKey: "",
-    llmConfigId: "",
     description: "围绕候选问题、关键词和机制组合反向检索论文、网页和 GitHub，标记已有相似工作与仍未覆盖的缺口。",
     routeCondition: "聚类后对高潜力空白做反向查重。",
   },
@@ -426,7 +442,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "broad",
     promptKey: "broad",
-    llmConfigId: "research_broad",
     description: "从开放目标出发，让 agent 使用真实网络和工具发现跨学科候选方向。",
     routeCondition: "输入开放目标、约束和偏好后启动。",
   },
@@ -439,7 +454,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "deep",
     promptKey: "deep",
-    llmConfigId: "research_deep",
     description: "围绕上一阶段发现的关键缺口、论文、GitHub 项目和数据集补充证据。",
     routeCondition: "有候选线索或知识上下文后继续。",
   },
@@ -452,7 +466,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "review",
     promptKey: "review",
-    llmConfigId: "research_review",
     description: "审查来源可靠性、论断可追溯性和缺失证据，决定是否回到补搜。",
     routeCondition: "证据链或新颖性反查结果准备完成后进入。",
   },
@@ -465,7 +478,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "themes",
     promptKey: "themes",
-    llmConfigId: "research_themes",
     description: "基于证据链生成可证伪、新颖且扣题的科研主题候选。",
     routeCondition: "证据审查通过或用户手动确认继续。",
   },
@@ -478,7 +490,6 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "",
     promptKey: "",
-    llmConfigId: "",
     description: "用户比较候选主题卡，选择最值得推进的方向。",
     routeCondition: "主题候选生成后等待确认。",
   },
@@ -491,11 +502,14 @@ export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = [
     status: "idle",
     agentKey: "card",
     promptKey: "card",
-    llmConfigId: "research_card",
     description: "产出赛题要求的科学假设与研究计划结构，包括数据集、方法、实验、指标和参考文献。",
     routeCondition: "用户确认主题后生成。",
   },
 ];
+
+export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = RESEARCH_MODULE_TEMPLATE_CANDIDATES.filter((template) =>
+  ["能力模块", "Agent模块", "人工/产物"].includes(template.group),
+) as ResearchModuleTemplate[];
 
 function cloneCanvas(canvas: ResearchFlowCanvas): ResearchFlowCanvas {
   return {
@@ -598,21 +612,23 @@ export function researchFlowExecutionBlockReason({
   sessionLoading,
   canvasLocked,
   dirty,
-  executing,
+  executing = false,
   validationErrorCount,
 }: {
-  sessionId: string;
-  sessionLoading: boolean;
+  sessionId?: string;
+  sessionLoading?: boolean;
   canvasLocked: boolean;
   dirty: boolean;
-  executing: boolean;
+  executing?: boolean;
   validationErrorCount: number;
 }) {
   if (executing) {
     return "节点正在执行中，请等待当前执行完成。";
   }
-  if (!sessionId) {
-    return sessionLoading ? "科研会话正在加载，加载完成后即可执行。" : "先选择一个科研会话后再执行。";
+  if (typeof sessionId !== "undefined" || typeof sessionLoading !== "undefined") {
+    if (!sessionId) {
+      return sessionLoading ? "科研会话正在加载，加载完成后即可执行。" : "先选择一个科研会话后再执行。";
+    }
   }
   if (dirty) {
     return "画布有未保存修改，先保存后再执行。";
@@ -643,7 +659,7 @@ export function researchFlowLockBlockReason({
     return "画布加载完成后才能锁定观察。";
   }
   if (executing) {
-    return "节点执行中，完成后才能解除锁定。";
+    return "节点执行中，完成后才能锁定观察。";
   }
   if (saving) {
     return "画布正在保存，保存完成后才能锁定。";
@@ -653,6 +669,22 @@ export function researchFlowLockBlockReason({
   }
   if (validationErrorCount > 0) {
     return "当前画布存在契约错误，先修复后再锁定。";
+  }
+  return "";
+}
+
+export function researchFlowUnlockBlockReason({
+  saving,
+  executing,
+}: {
+  saving: boolean;
+  executing: boolean;
+}) {
+  if (executing) {
+    return "节点执行中，完成后才能取消锁定。";
+  }
+  if (saving) {
+    return "画布正在保存，保存完成后才能取消锁定。";
   }
   return "";
 }
@@ -981,7 +1013,9 @@ function edgeTypeLabel(type: string) {
 
 export function normalizeEdgeCondition(condition: string) {
   const normalized = condition.trim().toLowerCase();
-  return EDGE_CONDITION_OPTIONS.some((option) => option.value === normalized) ? normalized : "completed";
+  return EDGE_CONDITION_OPTIONS.some((option) => option.value === normalized) || FLOW_CONDITION_EDGE_TYPES[normalized]
+    ? normalized
+    : "completed";
 }
 
 function edgeConditionLabel(condition: string) {
@@ -1006,16 +1040,13 @@ export function researchFlowIssueAdvice(issue: Pick<ResearchFlowValidationIssue,
   if (issue.code === "node_missing_required_input") {
     return "从能产出所需上下文的上游模块连入此模块。";
   }
-  if (issue.code === "edge_contract_mismatch") {
+  if (issue.code === "edge_contract_mismatch" || issue.code === "edge_io_mismatch" || issue.code === "edge_condition_not_produced" || issue.code === "target_input_unverified" || issue.code === "unknown_source_contract") {
     return "检查起点输出、终点输入和触发条件是否匹配。";
   }
-  if (issue.code === "edge_condition_type_mismatch") {
+  if (issue.code === "edge_condition_type_mismatch" || issue.code === "edge_type_condition_mismatch") {
     return "让箭头类型和触发条件保持同一种语义。";
   }
-  if (issue.code === "flow_missing_start_node") {
-    return "保留至少一个没有上游依赖的起点模块。";
-  }
-  if (issue.code === "node_unreachable") {
+  if (issue.code === "flow_missing_start_node" || issue.code === "node_unreachable") {
     return "把该模块接回从起点可到达的主流程。";
   }
   if (issue.code === "duplicate_edge_pair") {
@@ -1023,6 +1054,9 @@ export function researchFlowIssueAdvice(issue: Pick<ResearchFlowValidationIssue,
   }
   if (issue.code === "duplicate_edge_id") {
     return "删除重复路由后重新添加，生成唯一 ID。";
+  }
+  if (issue.code === "edge_missing_endpoint") {
+    return "把路由两端都连接到存在的模块。";
   }
   if (issue.code === "self_loop") {
     return "把这条路由连接到另一个模块，避免模块指向自身。";
@@ -1149,9 +1183,9 @@ function sanitizeCustomModuleTemplate(value: unknown, index: number): ResearchMo
     label: stringField(value.label, "自定义模块").trim() || "自定义模块",
     type: normalizeNodeTemplateType(value.type),
     status: normalizeNodeTemplateStatus(value.status),
+    agentId: stringField(value.agentId),
     agentKey: stringField(value.agentKey),
     promptKey: stringField(value.promptKey),
-    llmConfigId: stringField(value.llmConfigId),
     description: stringField(value.description),
     routeCondition: stringField(value.routeCondition),
   };
@@ -1233,7 +1267,7 @@ function nextCustomTemplateKey(prefix: string, rawBase: string, templates: Pick<
 }
 
 export function createCustomResearchModuleTemplate(
-  node: Pick<ResearchFlowNode, "id" | "label" | "type" | "agentKey" | "promptKey" | "llmConfigId" | "description" | "routeCondition">,
+  node: Pick<ResearchFlowNode, "id" | "label" | "type" | "agentId" | "agentKey" | "promptKey" | "llmConfigId" | "description" | "routeCondition">,
   templates: Pick<ResearchModuleTemplate, "key">[] = [],
 ): ResearchModuleTemplate {
   const baseId = safeTemplateIdPart(node.id || node.agentKey || node.promptKey || node.label) || "research_module";
@@ -1244,9 +1278,9 @@ export function createCustomResearchModuleTemplate(
     label: node.label.trim() || "自定义模块",
     type: normalizeNodeTemplateType(node.type),
     status: "idle",
+    agentId: node.agentId,
     agentKey: node.agentKey,
     promptKey: node.promptKey,
-    llmConfigId: node.llmConfigId,
     description: node.description,
     routeCondition: node.routeCondition,
   };
@@ -1283,14 +1317,13 @@ function researchEdgeTemplateGroups(templates: ResearchEdgeTemplate[]) {
 }
 
 export function researchFlowModuleTemplateKey(
-  node: Pick<ResearchFlowNode, "type" | "agentKey" | "promptKey" | "llmConfigId" | "description" | "routeCondition"> & Partial<Pick<ResearchFlowNode, "label">>,
+  node: Pick<ResearchFlowNode, "type" | "agentKey" | "promptKey" | "description" | "routeCondition"> & Partial<Pick<ResearchFlowNode, "label">>,
   templates: ResearchModuleTemplate[] = RESEARCH_MODULE_TEMPLATES,
 ) {
   const matchesTemplate = (template: ResearchModuleTemplate) =>
     template.type === node.type &&
     template.agentKey === node.agentKey &&
     template.promptKey === node.promptKey &&
-    template.llmConfigId === node.llmConfigId &&
     template.description === node.description &&
     template.routeCondition === node.routeCondition;
   const exact = node.label ? templates.find((template) => matchesTemplate(template) && template.label === node.label) : null;
@@ -1302,12 +1335,58 @@ export function applyResearchModuleTemplateToNode(template: ResearchModuleTempla
   return {
     label: template.label,
     type: template.type,
+    agentId: template.agentId,
     agentKey: template.agentKey,
     promptKey: template.promptKey,
-    llmConfigId: template.llmConfigId,
+    llmConfigId: "",
     description: template.description,
     routeCondition: template.routeCondition,
   };
+}
+
+function researchAgentInstanceId(agent: Pick<ResearchAgentConfig, "agentId" | "agentInstanceId"> | undefined) {
+  return (agent?.agentId || agent?.agentInstanceId || "").trim();
+}
+
+function researchAgentProfileId(agent: Pick<ResearchAgentConfig, "profileId"> | undefined) {
+  return (agent?.profileId || "").trim();
+}
+
+export function applyResearchAgentBindingToNode(agent: ResearchAgentConfig | undefined): Partial<ResearchFlowNode> {
+  if (!agent) {
+    return {};
+  }
+  return {
+    agentId: researchAgentInstanceId(agent),
+    agentKey: agent.key,
+    promptKey: agent.key,
+    llmConfigId: "",
+  };
+}
+
+export function normalizeResearchFlowNodesForSave(
+  nodes: ResearchFlowNode[],
+  agents: ResearchAgentConfig[],
+): ResearchFlowNode[] {
+  const byKey = new Map(agents.map((agent) => [agent.key, agent]));
+  const byId = new Map(
+    agents
+      .map((agent) => [researchAgentInstanceId(agent), agent] as const)
+      .filter(([agentId]) => Boolean(agentId)),
+  );
+  return nodes.map((node) => {
+    const agent = (node.agentId ? byId.get(node.agentId) : undefined) ?? (node.agentKey ? byKey.get(node.agentKey) : undefined);
+    if (!agent) {
+      return node.agentId ? { ...node, llmConfigId: "" } : node;
+    }
+    return {
+      ...node,
+      agentId: researchAgentInstanceId(agent),
+      agentKey: node.agentKey || agent.key,
+      promptKey: node.promptKey || agent.key,
+      llmConfigId: "",
+    };
+  });
 }
 
 export function findResearchEdgeTemplate(key: string, templates: ResearchEdgeTemplate[] = RESEARCH_EDGE_TEMPLATES) {
@@ -1350,7 +1429,7 @@ function researchFlowContractOutputs(contract: FlowContract) {
 
 function researchFlowOutputsForCondition(contract: FlowContract, condition: string) {
   const outputs = researchFlowContractOutputs(contract);
-  return outputs[condition] ?? outputs.completed ?? [];
+  return outputs[normalizeEdgeCondition(condition)] ?? outputs.completed ?? [];
 }
 
 function researchFlowContractInputOptions(contract: FlowContract) {
@@ -1374,7 +1453,7 @@ function researchFlowIssue(
   return { severity, code, message, ...details };
 }
 
-export function validateResearchFlowCanvasContract(canvas: Pick<ResearchFlowCanvas, "nodes" | "edges">): ResearchFlowValidation {
+export function validateResearchFlowCanvasContract(canvas: Pick<ResearchFlowCanvas, "nodes" | "edges"> & Partial<Pick<ResearchFlowCanvas, "canvasKind">>): ResearchFlowValidation {
   const nodeById = new Map(canvas.nodes.map((node) => [node.id, node] as const));
   const incoming = new Map<string, ResearchFlowEdge[]>();
   const outgoing = new Map<string, ResearchFlowEdge[]>();
@@ -1385,6 +1464,11 @@ export function validateResearchFlowCanvasContract(canvas: Pick<ResearchFlowCanv
   for (const node of canvas.nodes) {
     incoming.set(node.id, []);
     outgoing.set(node.id, []);
+    if (!NODE_TYPE_OPTIONS.some((option) => option.value === node.type)) {
+      issues.push(researchFlowIssue("error", "node_type_not_supported", `模块 ${node.label || node.id} 使用了不支持的类型：${node.type}。`, {
+        nodeId: node.id,
+      }));
+    }
   }
 
   for (const edge of canvas.edges) {
@@ -1423,17 +1507,21 @@ export function validateResearchFlowCanvasContract(canvas: Pick<ResearchFlowCanv
       );
     }
     pairIds.add(pairKey);
-    if (outgoing.has(edge.source)) {
-      outgoing.get(edge.source)!.push(edge);
-    }
-    if (incoming.has(edge.target)) {
-      incoming.get(edge.target)!.push(edge);
-    }
     const sourceNode = nodeById.get(edge.source);
     const targetNode = nodeById.get(edge.target);
     if (!sourceNode || !targetNode) {
+      issues.push(
+        researchFlowIssue(
+          "error",
+          "edge_missing_endpoint",
+          `路由 ${edge.id || edge.source} 必须连接两个存在的模块。`,
+          { edgeId: edge.id, source: edge.source, target: edge.target },
+        ),
+      );
       continue;
     }
+    outgoing.get(edge.source)?.push(edge);
+    incoming.get(edge.target)?.push(edge);
     const sourceContract = researchFlowNodeContract(sourceNode);
     const targetContract = researchFlowNodeContract(targetNode);
     if (!sourceContract) {
@@ -1545,7 +1633,7 @@ export function validateResearchFlowCanvasContract(canvas: Pick<ResearchFlowCanv
 }
 
 export function isValidResearchFlowConnection(
-  canvas: Pick<ResearchFlowCanvas, "nodes" | "edges">,
+  canvas: Pick<ResearchFlowCanvas, "nodes" | "edges"> & Partial<Pick<ResearchFlowCanvas, "canvasKind">>,
   sourceId: string,
   targetId: string,
   condition = "completed",
@@ -1564,6 +1652,7 @@ export function isValidResearchFlowConnection(
     return false;
   }
   const validation = validateResearchFlowCanvasContract({
+    canvasKind: canvas.canvasKind ?? FLOW_CANVAS_KIND,
     nodes: filtered.nodes,
     edges: [...filtered.edges, { id: edgeId || "__probe__", source: sourceId, target: targetId, label: "校验", condition: targetCondition, type: targetEdgeType }],
   });
@@ -1573,6 +1662,7 @@ export function isValidResearchFlowConnection(
 export function findResearchModuleTemplate(key: string, templates: ResearchModuleTemplate[] = RESEARCH_MODULE_TEMPLATES) {
   return (
     templates.find((template) => template.key === key) ??
+    templates.find((template) => template.key === DEFAULT_RESEARCH_MODULE_TEMPLATE_KEY) ??
     RESEARCH_MODULE_TEMPLATES.find((template) => template.key === DEFAULT_RESEARCH_MODULE_TEMPLATE_KEY)!
   );
 }
@@ -1607,9 +1697,10 @@ export function createResearchNodeFromTemplate(
     status: template.status,
     x: position?.x ?? 120 + (nodes.length % 4) * 260,
     y: position?.y ?? 180 + Math.floor(nodes.length / 4) * 170,
+    agentId: template.agentId,
     agentKey: template.agentKey,
     promptKey: template.promptKey,
-    llmConfigId: template.llmConfigId,
+    llmConfigId: "",
     description: template.description,
     routeCondition: template.routeCondition,
   };
@@ -1645,33 +1736,40 @@ export function ResearchFlowCanvasRoute() {
   const [reconnect, setReconnect] = useState<ReconnectState | null>(null);
   const [canvasOffset, setCanvasOffset] = useState<CanvasOffset>({ x: 0, y: 0 });
   const [canvasZoom, setCanvasZoom] = useState(1);
-  const [activeSessionId, setActiveSessionId] = useState("");
-  const [executionMessage, setExecutionMessage] = useState("");
+  const [observationMessage, setObservationMessage] = useState("");
   const [connectionMessage, setConnectionMessage] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "warning" | "error">("idle");
   const [customTemplates, setCustomTemplates] = useState<ResearchCustomTemplates>(() => readCustomResearchTemplates());
-  const [canvasLocked, setCanvasLocked] = useState(false);
-  const [flowRunActive, setFlowRunActive] = useState(false);
+  const [canvasLocked, setCanvasLocked] = useState(true);
   const [selectedModuleTemplateKey, setSelectedModuleTemplateKey] = useState(DEFAULT_RESEARCH_MODULE_TEMPLATE_KEY);
   const [newEdgeTemplateKey, setNewEdgeTemplateKey] = useState("main_flow");
   const [inspectorView, setInspectorView] = useState<InspectorView>("properties");
+  const [orgDeliveryMode, setOrgDeliveryMode] = useState("private");
+  const [orgTargetAgentId, setOrgTargetAgentId] = useState("");
+  const [orgZoneId, setOrgZoneId] = useState("");
+  const [orgMessageType, setOrgMessageType] = useState("task");
+  const [orgMessageContent, setOrgMessageContent] = useState("");
+  const [orgMailboxOnly, setOrgMailboxOnly] = useState(false);
+  const [orgMessageFeedback, setOrgMessageFeedback] = useState("");
 
   const canvasQuery = useQuery({
     queryKey: queryKeys.researchFlowCanvas(),
     queryFn: () => fetchJson<ResearchFlowCanvas>("/api/research/flow-canvas"),
-    refetchInterval: canvasLocked || flowRunActive ? 1000 : false,
+    refetchInterval: canvasLocked ? 2000 : false,
     refetchIntervalInBackground: false,
-  });
-
-  const sessionsQuery = useQuery({
-    queryKey: queryKeys.researchThemeDiscoverySessions(),
-    queryFn: () => fetchJson<ResearchDiscoverySessionList>("/api/research/theme-discovery/sessions"),
   });
 
   const promptsQuery = useQuery({
     queryKey: queryKeys.researchThemeDiscoveryPrompts(),
     queryFn: () => fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/prompts"),
+  });
+
+  const organizationQuery = useQuery({
+    queryKey: queryKeys.researchOrganization(),
+    queryFn: () => fetchJson<ResearchOrganization>("/api/research/organization"),
+    refetchInterval: inspectorView === "organization" ? 2000 : false,
+    refetchIntervalInBackground: false,
   });
 
   useEffect(() => {
@@ -1686,8 +1784,9 @@ export function ResearchFlowCanvasRoute() {
   useEffect(() => {
     if (canvasQuery.data) {
       const next = cloneCanvas(canvasQuery.data);
-      const observing = canvasLocked || flowRunActive;
-      if (observing && draftSignatureRef.current) {
+      const observing = canvasLocked;
+      const hadDraft = Boolean(draftSignatureRef.current);
+      if (observing && hadDraft) {
         next.viewport = canvasViewportFromView(canvasOffset, canvasZoom);
       }
       const nextSignature = canvasSignature(next);
@@ -1706,7 +1805,7 @@ export function ResearchFlowCanvasRoute() {
       setSavedSignature(nextSignature);
       setHistory({ past: [], future: [] });
       setSaveStatus("idle");
-      if (!observing) {
+      if (!observing || !hadDraft) {
         setCanvasOffset(viewportOffset(next.viewport));
         setCanvasZoom(clampCanvasZoom(next.viewport?.zoom ?? 1));
       }
@@ -1723,7 +1822,7 @@ export function ResearchFlowCanvasRoute() {
         return { kind: "node", id: next.nodes[0]?.id ?? "" };
       });
     }
-  }, [canvasQuery.data]);
+  }, [canvasLocked, canvasOffset, canvasQuery.data, canvasZoom]);
 
   useEffect(() => {
     if (!drag) {
@@ -1797,9 +1896,10 @@ export function ResearchFlowCanvasRoute() {
   const selectedEdge = draft && selection?.kind === "edge" ? draft.edges.find((edge) => edge.id === selection.id) ?? null : null;
   const agentOptions = promptsQuery.data?.agents ?? [];
   const llmOptions = promptsQuery.data?.llmConfigs ?? [];
-  const selectedNodeAgent = selectedNode?.agentKey ? agentOptions.find((agent) => agent.key === selectedNode.agentKey) : undefined;
-  const sessions = sessionsQuery.data?.sessions ?? [];
-  const activeExecutionSessionId = activeSessionId || sessions[0]?.sessionId || "";
+  const selectedNodeAgent = selectedNode
+    ? agentOptions.find((agent) => researchAgentInstanceId(agent) && researchAgentInstanceId(agent) === selectedNode.agentId)
+        ?? agentOptions.find((agent) => agent.key === selectedNode.agentKey)
+    : undefined;
   const moduleTemplates = useMemo(
     () => [...RESEARCH_MODULE_TEMPLATES, ...customTemplates.moduleTemplates],
     [customTemplates.moduleTemplates],
@@ -1816,14 +1916,10 @@ export function ResearchFlowCanvasRoute() {
   const deleteImpact = useMemo(() => summarizeDeleteImpact(draft, selection), [draft, selection]);
   const canUndo = history.past.length > 0;
   const canRedo = history.future.length > 0;
-  const canvasObservationActive = canvasLocked || flowRunActive;
+  const canvasObservationActive = canvasLocked;
   const selectedModuleTemplate = useMemo(
     () => findResearchModuleTemplate(selectedModuleTemplateKey, moduleTemplates),
     [moduleTemplates, selectedModuleTemplateKey],
-  );
-  const selectedNodeContract = useMemo(
-    () => (selectedNode ? researchFlowNodeContract(selectedNode) : null),
-    [selectedNode],
   );
   const selectedNodeTemplateKey = useMemo(
     () => (selectedNode ? researchFlowModuleTemplateKey(selectedNode, moduleTemplates) : "__custom__"),
@@ -1835,14 +1931,6 @@ export function ResearchFlowCanvasRoute() {
         ? null
         : findResearchModuleTemplate(selectedNodeTemplateKey, moduleTemplates),
     [moduleTemplates, selectedNodeTemplateKey],
-  );
-  const selectedEdgeSourceContract = useMemo(
-    () => (draft && selectedEdge ? researchFlowNodeContract(draft.nodes.find((node) => node.id === selectedEdge.source) ?? { id: "", agentKey: "", promptKey: "", label: "" }) : null),
-    [draft, selectedEdge],
-  );
-  const selectedEdgeTargetContract = useMemo(
-    () => (draft && selectedEdge ? researchFlowNodeContract(draft.nodes.find((node) => node.id === selectedEdge.target) ?? { id: "", agentKey: "", promptKey: "", label: "" }) : null),
-    [draft, selectedEdge],
   );
   const selectedEdgeTemplateKey = useMemo(
     () => (selectedEdge ? researchFlowEdgeTemplateKey(selectedEdge, edgeTemplates) : "__custom__"),
@@ -1868,6 +1956,18 @@ export function ResearchFlowCanvasRoute() {
         : [],
     [selectedEdge, validationIssues],
   );
+  const organization = organizationQuery.data;
+  const organizationAgents = organization?.agents ?? [];
+  const activeOrganizationAgents = organizationAgents.filter((agent) => agent.status !== "archived");
+  const pendingOrganizationProposals = (organization?.proposals ?? []).filter((proposal) => proposal.status !== "applied");
+  const recentOrganizationAudit = [...(organization?.auditEvents ?? [])].slice(-12).reverse();
+  const recentOrganizationMessages = [...(organization?.messages ?? [])].slice(-6).reverse();
+  const organizationZones = organization?.zones ?? [];
+  const defaultOrganizationTargetId = orgTargetAgentId || activeOrganizationAgents.find((agent) => agent.role === "ceo")?.agentId || activeOrganizationAgents[0]?.agentId || "";
+  const canSendOrganizationMessage =
+    Boolean(orgMessageContent.trim()) &&
+    (orgDeliveryMode !== "private" || Boolean(defaultOrganizationTargetId)) &&
+    (orgDeliveryMode !== "zone" || Boolean(orgZoneId));
   const saveStatusClass =
     saveStatus === "error"
       ? styles.saveStatusError
@@ -1896,12 +1996,6 @@ export function ResearchFlowCanvasRoute() {
     }
     return [...draft.nodes].reverse().find((node) => pointInNode(point, node)) ?? null;
   };
-
-  useEffect(() => {
-    if (!activeSessionId && sessions[0]?.sessionId) {
-      setActiveSessionId(sessions[0].sessionId);
-    }
-  }, [activeSessionId, sessions]);
 
   useEffect(() => {
     if (!reconnect || !draft) {
@@ -1933,7 +2027,7 @@ export function ResearchFlowCanvasRoute() {
           [reconnect.endpoint]: node.id,
         } as ResearchFlowEdge;
         if (!isValidResearchFlowConnection(draft, probe.source, probe.target, probe.condition, probe.id, probe.type)) {
-          setConnectionMessage(`无法重连到 ${node.label}，输入输出契约不匹配。`);
+          setConnectionMessage(`无法重连到 ${node.label}，路由契约不匹配。`);
           setReconnect(null);
           return;
         }
@@ -1952,12 +2046,15 @@ export function ResearchFlowCanvasRoute() {
   }, [canvasOffset, canvasZoom, draft, reconnect?.edgeId, reconnect?.endpoint]);
 
   const saveAgentMutation = useMutation({
-    mutationFn: async (payload: ResearchAgentConfig) =>
-      fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/agent-templates", {
+    mutationFn: async (payload: ResearchAgentConfig) => {
+      const body: Partial<ResearchAgentConfig> = { ...payload };
+      delete body.llmConfigId;
+      return fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/agent-templates", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
+        body: JSON.stringify(body),
+      });
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoveryPrompts() });
       setSaveMessage("科研 Agent 配置已更新，所有画布统一生效。");
@@ -1977,8 +2074,9 @@ export function ResearchFlowCanvasRoute() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           schemaVersion: payload.schemaVersion,
+          canvasKind: payload.canvasKind || FLOW_CANVAS_KIND,
           viewport: payload.viewport,
-          nodes: payload.nodes,
+          nodes: normalizeResearchFlowNodesForSave(payload.nodes, agentOptions),
           edges: payload.edges,
         }),
       }),
@@ -2020,8 +2118,8 @@ export function ResearchFlowCanvasRoute() {
     ? `${workbenchExitLabel}前要保存科研流程画布吗？`
     : "离开前要保存科研流程画布吗？";
   const leaveGuardBody = pendingWorkbenchExit
-    ? `当前模块、路由或视图状态还没有写回唯一事实来源。保存后会继续${workbenchExitLabel}；不保存会丢弃本次草稿。`
-    : "当前模块、路由或视图状态还没有写回唯一事实来源。保存后离开会先提交画布；不保存离开会丢弃本次草稿。";
+    ? `当前模块、路由或视图状态还没有写回唯一事实来源。保存后会继续${workbenchExitLabel}；不保存会丢弃本次修改。`
+    : "当前模块、路由或视图状态还没有写回唯一事实来源。保存后离开会先提交流程画布；不保存离开会丢弃本次修改。";
   const leaveGuardSaveLabel = leaveGuardSaving
     ? "保存中"
     : pendingWorkbenchExit
@@ -2059,87 +2157,107 @@ export function ResearchFlowCanvasRoute() {
   }, [dirty, saveMutation.isPending]);
 
   useEffect(() => {
-    if (!canvasLocked && !flowRunActive) {
+    if (!canvasLocked) {
       return;
     }
     setConnect({ active: false, sourceId: null });
     setDrag(null);
     setReconnect(null);
-  }, [canvasLocked, flowRunActive]);
+  }, [canvasLocked]);
 
-  const executeMutation = useMutation({
-    mutationFn: async (payload: { sessionId: string; nodeId?: string }) =>
-      fetchJson<ResearchFlowExecutionResponse>("/api/research/flow-canvas/execute", {
+  const sendOrgMessageMutation = useMutation({
+    mutationFn: async () => {
+      const targetAgentId = orgTargetAgentId || organizationQuery.data?.agents.find((agent) => agent.role === "ceo")?.agentId || "";
+      return fetchJson<ResearchOrgMessageResponse>("/api/research/organization/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
-    onMutate: () => {
-      setFlowRunActive(true);
-      setExecutionMessage("执行已开始，画布正在实时同步节点状态。");
-      void queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
+        body: JSON.stringify({
+          sourceType: "user",
+          targetAgentId: orgDeliveryMode === "private" ? targetAgentId : "",
+          deliveryMode: orgDeliveryMode,
+          zoneId: orgDeliveryMode === "zone" ? orgZoneId : "",
+          messageType: orgMessageType,
+          content: orgMessageContent,
+          wakeTarget: !orgMailboxOnly,
+          mailboxOnly: orgMailboxOnly,
+          humanOverride: true,
+          createdBy: "user",
+        }),
+      });
     },
     onSuccess: async (result) => {
-      const next = cloneCanvas(result.canvas);
-      const nextSignature = canvasSignature(next);
-      draftSignatureRef.current = nextSignature;
-      savedSignatureRef.current = nextSignature;
-      setDraft(next);
-      setSavedSignature(nextSignature);
-      setHistory({ past: [], future: [] });
-      setSaveStatus("idle");
-      setCanvasOffset(viewportOffset(next.viewport));
-      setCanvasZoom(clampCanvasZoom(next.viewport?.zoom ?? 1));
-      setExecutionMessage(result.execution.message);
-      setSelection({ kind: "node", id: result.execution.nodeId });
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySessions() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoverySession(result.execution.sessionId) }),
-      ]);
+      const blockedCount = result.message.deliveries.filter((delivery) => !delivery.allowed).length;
+      const deliveredCount = result.message.deliveries.length - blockedCount;
+      setOrgMessageFeedback(`已投递 ${deliveredCount} 个 Agent${blockedCount ? `，拦截 ${blockedCount} 个` : ""}。`);
+      setOrgMessageContent("");
+      await queryClient.invalidateQueries({ queryKey: queryKeys.researchOrganization() });
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : "执行失败";
-      setExecutionMessage(message);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
-    },
-    onSettled: () => {
-      setFlowRunActive(false);
+      const message = error instanceof Error ? error.message : "发送失败";
+      setOrgMessageFeedback(`组织通信失败: ${message}`);
     },
   });
+
+  const applyOrgProposalMutation = useMutation({
+    mutationFn: async (proposalId: string) =>
+      fetchJson<ResearchOrgProposalResponse>(`/api/research/organization/proposals/${encodeURIComponent(proposalId)}/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: async (result) => {
+      setOrgMessageFeedback(`已应用组织提案：${result.proposal.title}`);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.researchOrganization() });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "应用失败";
+      setOrgMessageFeedback(`组织提案应用失败: ${message}`);
+    },
+  });
+
+  const retryOrgWakeMutation = useMutation({
+    mutationFn: async (messageId: string) =>
+      fetchJson<ResearchOrgMessageResponse>(`/api/research/organization/messages/${encodeURIComponent(messageId)}/retry-wake`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: async (result) => {
+      const statuses = result.message.deliveries.map((delivery) => delivery.wakeStatus).filter(Boolean);
+      setOrgMessageFeedback(`已重试唤醒：${statuses.join(" / ") || "无可重试消息"}`);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.researchOrganization() });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : "重试失败";
+      setOrgMessageFeedback(`重试唤醒失败: ${message}`);
+    },
+  });
+
   const executionBlockReason = researchFlowExecutionBlockReason({
-    sessionId: activeExecutionSessionId,
-    sessionLoading: sessionsQuery.isLoading,
     canvasLocked,
     dirty,
-    executing: executeMutation.isPending,
     validationErrorCount: validationErrors.length,
   });
   const lockBlockReason = researchFlowLockBlockReason({
     draftReady: Boolean(draft),
     dirty,
     saving: saveMutation.isPending,
-    executing: executeMutation.isPending || flowRunActive,
+    executing: false,
     validationErrorCount: validationErrors.length,
   });
-  const canvasEditable = !canvasLocked && !executeMutation.isPending && !flowRunActive;
-  const primaryBlockAction = dirty
-    ? "保存画布"
-    : validationErrors.length > 0
-      ? "查看问题"
-      : !canvasLocked
-        ? "锁定观察"
-        : "";
-  const executionGuideActive = Boolean(executionBlockReason) && !executeMutation.isPending;
+  const unlockBlockReason = researchFlowUnlockBlockReason({
+    saving: saveMutation.isPending,
+    executing: false,
+  });
+  const canvasEditable = !canvasLocked;
 
   const toggleCanvasLock = () => {
     if (canvasLocked) {
-      if (lockBlockReason) {
-        setExecutionMessage(lockBlockReason);
+      if (unlockBlockReason) {
+        setObservationMessage(unlockBlockReason);
         return;
       }
       setCanvasLocked(false);
-      setExecutionMessage("画布已解除锁定，可以继续编辑流程结构。");
+      setObservationMessage("已取消锁定，可以编辑组织结构；保存后再锁定观察。");
       setSaveMessage("");
       setSaveStatus("idle");
       return;
@@ -2151,36 +2269,9 @@ export function ResearchFlowCanvasRoute() {
     }
     setCanvasLocked(true);
     setConnectionMessage("");
-    setSaveMessage("画布已锁定，正在实时观察流程状态。");
+    setSaveMessage("流程画布已锁定，正在实时观察模块和路由状态。");
     setSaveStatus("success");
-    setExecutionMessage("观察模式已开启，可以执行流程并实时查看节点状态变化。");
-  };
-
-  const runFlowNode = (nodeId?: string) => {
-    if (executionBlockReason) {
-      setExecutionMessage(executionBlockReason);
-      return;
-    }
-    setExecutionMessage("");
-    executeMutation.mutate({ sessionId: activeExecutionSessionId, nodeId });
-  };
-
-  const handleExecutionGuideAction = () => {
-    if (dirty) {
-      if (draft && !saveMutation.isPending && validationErrors.length === 0 && canvasEditable) {
-        saveMutation.mutate(draft);
-      }
-      return;
-    }
-    if (validationErrors.length > 0) {
-      setInspectorView("issues");
-      return;
-    }
-    if (!canvasLocked) {
-      toggleCanvasLock();
-      return;
-    }
-    setExecutionMessage(executionBlockReason);
+    setObservationMessage("观察模式已开启，顶部科研执行会读取这份稳定流程。");
   };
 
   const handleSaveAndLeave = async () => {
@@ -2190,7 +2281,7 @@ export function ResearchFlowCanvasRoute() {
       return;
     }
     if (validationErrors.length > 0) {
-      setSaveMessage("当前画布存在契约错误，先修复后再保存离开。");
+      setSaveMessage("当前流程画布存在结构错误，先修复后再保存离开。");
       setSaveStatus("error");
       return;
     }
@@ -2227,7 +2318,7 @@ export function ResearchFlowCanvasRoute() {
   };
 
   const commitDraftEdit = useCallback((updater: (current: ResearchFlowCanvas) => ResearchFlowCanvas, options: CommitDraftOptions = {}) => {
-    if (canvasLocked || flowRunActive) {
+    if (canvasLocked) {
       setSaveMessage("画布已锁定为观察模式，解除锁定后才能修改结构。");
       setSaveStatus("warning");
       return;
@@ -2247,7 +2338,7 @@ export function ResearchFlowCanvasRoute() {
     if ("selection" in options) {
       setSelection(options.selection ?? null);
     }
-  }, [canvasLocked, flowRunActive]);
+  }, [canvasLocked]);
 
   const restoreCanvasFromHistory = useCallback(
     (direction: "undo" | "redo") => {
@@ -2371,7 +2462,7 @@ export function ResearchFlowCanvasRoute() {
     }
     const edgeType = selectedEdge.type || defaultEdgeTypeForCondition(selectedEdge.condition);
     if (!edgeTypeMatchesCondition(selectedEdge.condition, edgeType)) {
-      setSaveMessage("当前线的触发条件和箭头类型不一致，先修正后再保存模板。");
+      setSaveMessage("当前路由的触发条件和箭头类型不一致，先修正后再保存模板。");
       setSaveStatus("error");
       return;
     }
@@ -2449,7 +2540,7 @@ export function ResearchFlowCanvasRoute() {
     setReconnect({ edgeId: edge.id, endpoint, hoverNodeId: null });
   };
 
-  const handleNodePointerDown = (event: PointerEvent<HTMLButtonElement>, node: ResearchFlowNode) => {
+  const handleNodePointerDown = (event: PointerEvent<HTMLDivElement>, node: ResearchFlowNode) => {
     event.stopPropagation();
     if (!canvasEditable || connect.active || reconnect) {
       return;
@@ -2494,7 +2585,7 @@ export function ResearchFlowCanvasRoute() {
       type: template.type,
     };
     if (!isValidResearchFlowConnection(current, edge.source, edge.target, edge.condition, edge.id, edge.type)) {
-      setConnectionMessage(`无法连接 ${current.nodes.find((item) => item.id === edge.source)?.label || edge.source} → ${node.label}，输入输出契约不匹配。`);
+      setConnectionMessage(`无法连接 ${current.nodes.find((item) => item.id === edge.source)?.label || edge.source} → ${node.label}，路由契约不匹配。`);
       return;
     }
     setConnectionMessage("");
@@ -2551,11 +2642,7 @@ export function ResearchFlowCanvasRoute() {
     if (!selectedNode || !agent) {
       return;
     }
-    updateNode(selectedNode.id, {
-      agentKey: agent.key,
-      promptKey: agent.key,
-      llmConfigId: "",
-    });
+    updateNode(selectedNode.id, applyResearchAgentBindingToNode(agent));
   };
 
   const focusValidationIssue = (issue: ResearchFlowValidationIssue) => {
@@ -2587,7 +2674,7 @@ export function ResearchFlowCanvasRoute() {
         <div className={styles.heading}>
           <p>Research Flow Canvas</p>
           <h1>科研流程画布</h1>
-          <span>把科研流程改成可配置的动态路线图：模块、状态、路由、Agent 和 LLM 都在这里统一编排。</span>
+          <span>编排科研模块、路由契约和执行状态；组织通信保留在右侧专用面板。</span>
         </div>
         <div className={styles.headerActions}>
           <Link className={styles.secondaryButton} to="/research">
@@ -2650,8 +2737,8 @@ export function ResearchFlowCanvasRoute() {
             value={selectedModuleTemplateKey}
             onChange={(event) => setSelectedModuleTemplateKey(event.target.value)}
             disabled={!draft || !canvasEditable}
-            aria-label="模块库"
-            title="模块库"
+            aria-label="模块模板库"
+            title="模块模板库"
           >
             {moduleTemplateGroups.map((group) => (
               <optgroup key={group} label={group}>
@@ -2687,7 +2774,7 @@ export function ResearchFlowCanvasRoute() {
             {saveMutation.isPending
               ? "保存中"
               : validationErrors.length > 0
-                ? "先修复契约"
+                ? "先修复结构"
                 : saveStatus === "error" && dirty
                   ? "重试保存"
                   : dirty
@@ -2698,100 +2785,36 @@ export function ResearchFlowCanvasRoute() {
             className={canvasLocked ? `${styles.primaryButton} ${styles.lockButtonActive}` : styles.secondaryButton}
             type="button"
             onClick={toggleCanvasLock}
-            disabled={!canvasLocked && Boolean(lockBlockReason)}
-            title={canvasLocked ? lockBlockReason || "解除锁定后可以编辑画布。" : lockBlockReason || "锁定后进入观察模式，才能执行流程。"}
+            disabled={canvasLocked ? Boolean(unlockBlockReason) : Boolean(lockBlockReason)}
+            title={canvasLocked ? unlockBlockReason || "取消锁定后可以编辑画布。" : lockBlockReason || "锁定后进入观察模式，科研执行才会读取稳定流程。"}
             aria-pressed={canvasLocked}
           >
-            {canvasLocked ? <Lock size={16} /> : <Unlock size={16} />}
-            {canvasLocked ? "已锁定" : "锁定观察"}
+            {canvasLocked ? <Unlock size={16} /> : <Lock size={16} />}
+            {canvasLocked ? "取消锁定" : "锁定观察"}
           </button>
         </div>
       </header>
 
-      <section className={styles.executionBar} aria-label="科研流程执行路由">
+      <section className={styles.executionBar} aria-label="科研流程画布观察状态">
         <div className={styles.executionGroup}>
-          <span>科研会话</span>
-          <select
-            className={styles.sessionSelect}
-            value={activeExecutionSessionId}
-            onChange={(event) => setActiveSessionId(event.target.value)}
-            disabled={sessionsQuery.isLoading || executeMutation.isPending}
-          >
-            {sessions.length ? null : <option value="">暂无会话</option>}
-            {sessions.map((session) => (
-              <option key={session.sessionId} value={session.sessionId}>
-                {session.openGoal.slice(0, 42) || session.sessionId}
-              </option>
-            ))}
-          </select>
+          <span>事实来源</span>
+          <strong>{draft?.path || "workspace/prompts/research/flow_canvas.json"}</strong>
         </div>
         <div className={canvasObservationActive ? `${styles.observerStatus} ${styles.observerStatusActive}` : styles.observerStatus}>
           <span>实时观察</span>
-          <strong>{canvasLocked ? "已锁定同步" : flowRunActive ? "同步中" : "未锁定"}</strong>
+          <strong>{canvasLocked ? "已锁定同步" : "编辑模式"}</strong>
         </div>
-        <button
-          className={styles.primaryButton}
-          type="button"
-          onClick={() => runFlowNode()}
-          disabled={Boolean(executionBlockReason)}
-          title={executionBlockReason || undefined}
-        >
-          <FastForward size={16} />
-          {executeMutation.isPending ? "执行中" : "执行下一节点"}
-        </button>
-        <button
-          className={styles.secondaryButton}
-          type="button"
-          onClick={() => selectedNode && runFlowNode(selectedNode.id)}
-          disabled={Boolean(executionBlockReason) || !selectedNode}
-          title={executionBlockReason || (!selectedNode ? "先在画布中选择一个节点。" : undefined)}
-        >
-          <Play size={16} />
-          执行选中节点
-        </button>
+        <div className={styles.observerStatus}>
+          <span>结构检查</span>
+          <strong>{validationErrors.length ? `${validationErrors.length} 错误` : `${draft?.nodes.length ?? 0} 模块 / ${draft?.edges.length ?? 0} 路由`}</strong>
+        </div>
         <p className={styles.executionHint}>
-          {executionBlockReason || executionMessage || "执行路由会调用真实科研 agent，并把节点状态写回唯一事实来源。"}
+          {executionBlockReason || observationMessage || "流程画布锁定后保持只读同步；科研执行会读取这份稳定流程。"}
         </p>
       </section>
 
-      {executionGuideActive ? (
-        <section className={styles.executionGuide} aria-label="执行前检查">
-          <div className={styles.executionGuideCopy}>
-            <strong>{executionBlockReason}</strong>
-            <span>
-              执行需要一份已保存、无契约错误并处于观察锁定的画布。当前阻断项处理后，执行按钮会自动恢复。
-            </span>
-          </div>
-          <div className={styles.executionGuideActions}>
-            {primaryBlockAction ? (
-              <button
-                className={validationErrors.length > 0 ? styles.secondaryButton : styles.primaryButton}
-                type="button"
-                onClick={handleExecutionGuideAction}
-                disabled={dirty && (!draft || saveMutation.isPending || validationErrors.length > 0 || !canvasEditable)}
-              >
-                {primaryBlockAction}
-              </button>
-            ) : null}
-            {dirty ? (
-              <button
-                className={styles.secondaryButton}
-                type="button"
-                onClick={() => {
-                  setInspectorView("properties");
-                  setSaveMessage("先保存画布，再锁定观察即可执行。");
-                  setSaveStatus("warning");
-                }}
-              >
-                查看事实来源
-              </button>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-
       <div className={styles.body}>
-        <main className={styles.canvasShell} aria-label="科研流程图画布">
+        <main className={styles.canvasShell} aria-label="科研流程画布">
           <div className={styles.zoomControl} aria-label="画布缩放控制">
             <button
               className={styles.iconButton}
@@ -2937,6 +2960,7 @@ export function ResearchFlowCanvasRoute() {
                 })}
                 {draft.nodes.map((node) => {
                   const active = selection?.kind === "node" && selection.id === node.id;
+                  const canInlineEditNodeTitle = active && canvasEditable && !connect.active && !reconnect;
                   const pendingSource = connect.sourceId === node.id;
                   const reconnectTarget =
                     reconnectEdge &&
@@ -2946,9 +2970,11 @@ export function ResearchFlowCanvasRoute() {
                   const nodeErrorCount = nodeIssues.filter((issue) => issue.severity === "error").length;
                   const nodeWarningCount = nodeIssues.length - nodeErrorCount;
                   return (
-                    <button
+                    <div
                       key={node.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={active}
                       className={[
                         styles.node,
                         nodeStatusToneClass(node.status),
@@ -2964,6 +2990,15 @@ export function ResearchFlowCanvasRoute() {
                         event.stopPropagation();
                         handleNodeClick(node);
                       }}
+                      onKeyDown={(event) => {
+                        if ((event.target as HTMLElement).tagName === "INPUT") {
+                          return;
+                        }
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleNodeClick(node);
+                        }
+                      }}
                     >
                       <span className={styles.nodeTopline}>
                         <span className={styles.nodeStatusCluster}>
@@ -2972,7 +3007,19 @@ export function ResearchFlowCanvasRoute() {
                         </span>
                         <span>{node.type}</span>
                       </span>
-                      <strong>{node.label}</strong>
+                      {canInlineEditNodeTitle ? (
+                        <input
+                          className={styles.nodeTitleInput}
+                          aria-label={`模块名称：${node.label || node.id}`}
+                          value={node.label}
+                          placeholder="模块名称"
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => updateNode(node.id, { label: event.target.value })}
+                        />
+                      ) : (
+                        <strong>{node.label || node.id}</strong>
+                      )}
                       <span className={styles.nodeMeta}>
                         <GitBranchPlus size={14} />
                         {node.agentKey || "未绑定 agent"}
@@ -2982,8 +3029,8 @@ export function ResearchFlowCanvasRoute() {
                           {nodeErrorCount ? `错误 ${nodeErrorCount}` : `警告 ${nodeWarningCount}`}
                         </span>
                       ) : null}
-                      <small>{node.routeCondition || "未设置路由条件"}</small>
-                    </button>
+                      <small>{node.routeCondition || "未设置触发说明"}</small>
+                    </div>
                   );
                 })}
                 </div>
@@ -2992,16 +3039,22 @@ export function ResearchFlowCanvasRoute() {
           )}
         </main>
 
-        <aside className={styles.inspector} aria-label="流程模块配置">
+        <aside className={styles.inspector} aria-label="科研流程配置">
           <div className={styles.inspectorHeader}>
             <p>
-              {selectedNode
+              {inspectorView === "organization"
+                ? "科研组织通信"
+                : selectedNode
                 ? "当前选中模块"
                 : selectedEdge
                   ? "当前选中路由"
                   : "唯一事实来源"}
             </p>
-            <strong>{draft?.path || "workspace/prompts/research/flow_canvas.json"}</strong>
+            <strong>
+              {inspectorView === "organization"
+                ? organization?.path || "workspace/research/organization_graph.json"
+                : draft?.path || "workspace/prompts/research/flow_canvas.json"}
+            </strong>
             {selectedNode ? <span className={styles.selectionSummary}>{selectedNode.label} / {selectedNode.agentKey || selectedNode.id}</span> : null}
             {selectedEdge ? (
               <span className={styles.selectionSummary}>
@@ -3011,7 +3064,7 @@ export function ResearchFlowCanvasRoute() {
               </span>
             ) : null}
             <span className={saveStatusClass}>
-              {saveMessage || (validationErrors.length ? `契约错误 ${validationErrors.length} 项` : dirty ? "有未保存修改" : `已同步 ${draft?.updatedAt ?? ""}`)}
+              {saveMessage || (validationErrors.length ? `结构错误 ${validationErrors.length} 项` : dirty ? "有未保存修改" : `已同步 ${draft?.updatedAt ?? ""}`)}
             </span>
           </div>
 
@@ -3036,10 +3089,261 @@ export function ResearchFlowCanvasRoute() {
                   {validationErrors.length}/{validationWarnings.length}
                 </span>
               </button>
+              <button
+                type="button"
+                className={inspectorView === "organization" ? `${styles.inspectorTab} ${styles.inspectorTabActive}` : styles.inspectorTab}
+                onClick={() => setInspectorView("organization")}
+                aria-pressed={inspectorView === "organization"}
+              >
+                组织通信
+                <span className={styles.inspectorTabBadge}>
+                  {pendingOrganizationProposals.length}/{organization?.auditEvents.length ?? 0}
+                </span>
+              </button>
             </nav>
 
             <div className={styles.inspectorContent}>
-              {inspectorView === "issues" ? (
+              {inspectorView === "organization" ? (
+                <section className={styles.organizationPanel} aria-label="科研组织通信">
+                  <div className={styles.organizationSummaryGrid}>
+                    <div className={styles.organizationMetric}>
+                      <ShieldCheck size={16} />
+                      <span>Agent</span>
+                      <strong>{organizationAgents.length}</strong>
+                    </div>
+                    <div className={styles.organizationMetric}>
+                      <GitBranchPlus size={16} />
+                      <span>通信边</span>
+                      <strong>{organization?.edges.length ?? 0}</strong>
+                    </div>
+                    <div className={styles.organizationMetric}>
+                      <CheckCircle2 size={16} />
+                      <span>待确认</span>
+                      <strong>{pendingOrganizationProposals.length}</strong>
+                    </div>
+                  </div>
+
+                  {organizationQuery.isLoading ? (
+                    <div className={styles.issueEmpty}>
+                      <strong>正在读取组织图</strong>
+                      <span>事实源来自 workspace/research/organization_graph.json。</span>
+                    </div>
+                  ) : null}
+
+                  <div className={styles.organizationSectionHeader}>
+                    <strong>组织图成员</strong>
+                    <span>节点只表示 Agent，工具权限来自每个 Agent 的 ToolPolicy。</span>
+                  </div>
+                  <div className={styles.organizationAgentList}>
+                    {organizationAgents.map((agent) => (
+                      <article key={agent.agentId} className={styles.organizationAgentCard}>
+                        <div>
+                          <strong>{agent.agentCode ? `${agent.agentCode} · ${agent.displayName}` : agent.displayName}</strong>
+                          <span className={styles.organizationAgentMeta}>
+                            {agent.employeeRank || "member"} / {agent.role || "research_agent"} / {agent.status}
+                          </span>
+                        </div>
+                        <div className={styles.organizationBadgeRow}>
+                          {agent.protected ? <span className={styles.organizationBadgeProtected}>核心保护</span> : null}
+                          <span className={styles.organizationBadge}>{agent.allowedTools.length ? `${agent.allowedTools.length} tools` : "未显式授权"}</span>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+
+                  <form
+                    className={styles.organizationForm}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (canSendOrganizationMessage && !sendOrgMessageMutation.isPending) {
+                        sendOrgMessageMutation.mutate();
+                      }
+                    }}
+                  >
+                    <div className={styles.organizationSectionHeader}>
+                      <strong>发送组织消息</strong>
+                      <span>用户消息带 human_override，可越过通信边；Agent 之间仍按边和等级校验。</span>
+                    </div>
+                    <div className={styles.twoColumns}>
+                      <label>
+                        通信方式
+                        <select value={orgDeliveryMode} onChange={(event) => setOrgDeliveryMode(event.target.value)}>
+                          {RESEARCH_ORG_DELIVERY_MODE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        消息类型
+                        <select value={orgMessageType} onChange={(event) => setOrgMessageType(event.target.value)}>
+                          {RESEARCH_ORG_MESSAGE_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+                    {orgDeliveryMode === "private" ? (
+                      <label>
+                        目标 Agent
+                        <select value={defaultOrganizationTargetId} onChange={(event) => setOrgTargetAgentId(event.target.value)}>
+                          {activeOrganizationAgents.map((agent) => (
+                            <option key={agent.agentId} value={agent.agentId}>
+                              {agent.agentCode ? `${agent.agentCode} · ${agent.displayName}` : agent.displayName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    {orgDeliveryMode === "zone" ? (
+                      <label>
+                        目标区域
+                        <select value={orgZoneId} onChange={(event) => setOrgZoneId(event.target.value)}>
+                          <option value="">选择区域</option>
+                          {organizationZones.map((zone) => (
+                            <option key={zone.zoneId} value={zone.zoneId}>
+                              {zone.label || zone.zoneId}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label>
+                      消息正文
+                      <textarea
+                        value={orgMessageContent}
+                        onChange={(event) => setOrgMessageContent(event.target.value)}
+                        placeholder="例如：请 CEO 组织一次新颖科研主题发现，并让组织顾问评估需要新增哪些专家 Agent。"
+                      />
+                    </label>
+                    <label className={styles.inlineToggle}>
+                      <input
+                        type="checkbox"
+                        checked={orgMailboxOnly}
+                        onChange={(event) => setOrgMailboxOnly(event.target.checked)}
+                      />
+                      只投递邮箱，不立即唤醒
+                    </label>
+                    <div className={styles.organizationActionRow}>
+                      <button
+                        className={styles.primaryButton}
+                        type="submit"
+                        disabled={!canSendOrganizationMessage || sendOrgMessageMutation.isPending}
+                      >
+                        <Send size={16} />
+                        {sendOrgMessageMutation.isPending ? "发送中" : "发送消息"}
+                      </button>
+                      <button
+                        className={styles.secondaryButton}
+                        type="button"
+                        onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.researchOrganization() })}
+                      >
+                        <RefreshCw size={16} />
+                        刷新
+                      </button>
+                    </div>
+                    {orgMessageFeedback ? <p className={styles.fieldHint}>{orgMessageFeedback}</p> : null}
+                  </form>
+
+                  <div className={styles.organizationSectionHeader}>
+                    <strong>提案面板</strong>
+                    <span>创建、归档、扩大工具权限等高风险组织变更必须用户确认。</span>
+                  </div>
+                  <div className={styles.organizationProposalList}>
+                    {pendingOrganizationProposals.length ? (
+                      pendingOrganizationProposals.map((proposal) => (
+                        <article key={proposal.proposalId} className={styles.organizationProposalCard}>
+                          <div>
+                            <strong>{proposal.title}</strong>
+                            <span>{proposal.riskLevel} / {proposal.status} / {proposal.actions.length} actions</span>
+                          </div>
+                          <button
+                            className={styles.primaryButton}
+                            type="button"
+                            disabled={applyOrgProposalMutation.isPending}
+                            onClick={() => applyOrgProposalMutation.mutate(proposal.proposalId)}
+                          >
+                            确认应用
+                          </button>
+                        </article>
+                      ))
+                    ) : (
+                      <div className={styles.issueEmpty}>
+                        <strong>暂无待确认提案</strong>
+                        <span>组织顾问后续提出的增删 Agent、调权限和改通信边会出现在这里。</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className={styles.organizationSectionHeader}>
+                    <strong>通信消息</strong>
+                    <span>优先展示投递、拦截、唤醒和重试状态。</span>
+                  </div>
+                  <div className={styles.organizationMessageList}>
+                    {recentOrganizationMessages.map((message) => {
+                      const retryable = message.deliveries.some((delivery) => delivery.wakeStatus === "skipped_busy");
+                      return (
+                        <article key={message.messageId} className={styles.organizationAuditCard}>
+                          <div className={styles.organizationAuditHeader}>
+                            <MessageSquareText size={16} />
+                            <strong>{message.messageType} / {message.deliveryMode}</strong>
+                            <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
+                          </div>
+                          <p>{message.summary || message.content}</p>
+                          <div className={styles.organizationBadgeRow}>
+                            {message.deliveries.map((delivery) => (
+                              <span key={`${message.messageId}-${delivery.targetAgentId}`} className={delivery.allowed ? styles.organizationBadge : styles.organizationBadgeBlocked}>
+                                {delivery.targetAgentCode || delivery.targetAgentName || delivery.targetAgentId}: {delivery.allowed ? delivery.wakeStatus || "delivered" : delivery.reason}
+                              </span>
+                            ))}
+                          </div>
+                          {retryable ? (
+                            <button
+                              className={styles.secondaryButton}
+                              type="button"
+                              disabled={retryOrgWakeMutation.isPending}
+                              onClick={() => retryOrgWakeMutation.mutate(message.messageId)}
+                            >
+                              <RefreshCw size={16} />
+                              重试唤醒
+                            </button>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+
+                  <div className={styles.organizationSectionHeader}>
+                    <strong>审计流</strong>
+                    <span>谁发给谁、是否允许、命中哪条边、是否唤醒。</span>
+                  </div>
+                  <div className={styles.organizationAuditList}>
+                    {recentOrganizationAudit.map((event) => (
+                      <article
+                        key={event.auditEventId}
+                        className={[
+                          styles.organizationAuditCard,
+                          event.allowed ? styles.organizationAuditAllowed : styles.organizationAuditBlocked,
+                        ].join(" ")}
+                      >
+                        <div className={styles.organizationAuditHeader}>
+                          <strong>{event.eventType}</strong>
+                          <span>{event.allowed ? "allowed" : "blocked"}</span>
+                        </div>
+                        <p>{event.summary || event.reason || "无摘要"}</p>
+                        <code>
+                          {event.sourceAgentId || event.sourceType || "user"} {"->"} {event.targetAgentId || event.proposalId || "organization"}
+                          {event.edgeId ? ` / ${event.edgeId}` : ""}
+                          {event.wakeStatus ? ` / ${event.wakeStatus}` : ""}
+                        </code>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ) : inspectorView === "issues" ? (
                 <section className={styles.issuePanel} aria-label="错误与警告">
               <div className={styles.issueSummary}>
                 <div className={validationErrors.length ? styles.issueSummaryError : styles.issueSummaryOk}>
@@ -3104,8 +3408,8 @@ export function ResearchFlowCanvasRoute() {
                 </div>
               ) : (
                 <div className={styles.issueEmpty}>
-                  <strong>契约校验通过</strong>
-                  <span>当前画布没有错误或警告，可以保存并执行。</span>
+                  <strong>结构校验通过</strong>
+                  <span>当前流程画布没有错误或警告，可以保存并锁定观察。</span>
                 </div>
               )}
             </section>
@@ -3144,8 +3448,8 @@ export function ResearchFlowCanvasRoute() {
                 </label>
               </div>
               <label>
-                Agent 模板
-                <select value={selectedNode.agentKey} onChange={(event) => applyAgentBinding(agentOptions.find((agent) => agent.key === event.target.value))}>
+                绑定 Agent
+                <select value={selectedNodeAgent?.key ?? selectedNode.agentKey} onChange={(event) => applyAgentBinding(agentOptions.find((agent) => agent.key === event.target.value))}>
                   <option value="">不绑定</option>
                   {agentOptions.map((agent) => (
                     <option key={agent.key} value={agent.key}>
@@ -3155,15 +3459,15 @@ export function ResearchFlowCanvasRoute() {
                 </select>
               </label>
               <label>
-                LLM 配置
+                模型配置来自 Agent
                 <select
-                  value={selectedNodeAgent?.llmConfigId ?? ""}
+                  value={researchAgentProfileId(selectedNodeAgent)}
                   disabled={!selectedNodeAgent || saveAgentMutation.isPending}
                   onChange={(event) => {
                     if (!selectedNodeAgent) {
                       return;
                     }
-                    saveAgentMutation.mutate({ ...selectedNodeAgent, llmConfigId: event.target.value });
+                    saveAgentMutation.mutate({ ...selectedNodeAgent, profileId: event.target.value });
                   }}
                 >
                   <option value="">未绑定</option>
@@ -3175,18 +3479,18 @@ export function ResearchFlowCanvasRoute() {
                 </select>
               </label>
               {selectedNode.llmConfigId ? (
-                <p className={styles.fieldHint}>旧节点级 LLM 已不作为主路径；当前以全局 Agent 配置为准。</p>
+                <p className={styles.fieldHint}>模型以绑定 Agent 的配置为准，保存后会同步到使用该 Agent 的科研节点。</p>
               ) : null}
               <div className={styles.twoColumns}>
                 <label>
-                  Prompt Key
+                  动作键
                   <input
                     value={selectedNode.promptKey}
                     onChange={(event) => updateNode(selectedNode.id, { promptKey: event.target.value })}
                   />
                 </label>
                 <label>
-                  Agent Key
+                  Agent 键
                   <input
                     value={selectedNode.agentKey}
                     onChange={(event) => updateNode(selectedNode.id, { agentKey: event.target.value })}
@@ -3194,7 +3498,7 @@ export function ResearchFlowCanvasRoute() {
                 </label>
               </div>
               <label>
-                进入条件
+                触发说明
                 <textarea
                   value={selectedNode.routeCondition}
                   onChange={(event) => updateNode(selectedNode.id, { routeCondition: event.target.value })}
@@ -3247,36 +3551,6 @@ export function ResearchFlowCanvasRoute() {
                   <button className={styles.secondaryButton} type="button" onClick={saveSelectedNodeAsTemplate}>
                     保存为模块模板
                   </button>
-                </div>
-              </div>
-              <div className={styles.contractPanel}>
-                <div className={styles.contractBlock}>
-                  <span>输入契约</span>
-                  <div className={styles.contractChips}>
-                    {selectedNodeContract?.inputs.length ? (
-                      selectedNodeContract.inputs.map((group, index) => (
-                        <span key={`${selectedNode.id}-input-${index}`} className={styles.contractChip}>
-                          {group.join(" / ")}
-                        </span>
-                      ))
-                    ) : (
-                      <span className={styles.contractChipMuted}>无</span>
-                    )}
-                  </div>
-                </div>
-                <div className={styles.contractBlock}>
-                  <span>输出契约</span>
-                  <div className={styles.contractChips}>
-                    {selectedNodeContract ? (
-                      Object.entries(selectedNodeContract.outputs).map(([condition, outputs]) => (
-                        <span key={`${selectedNode.id}-output-${condition}`} className={styles.contractChip}>
-                          {condition}: {outputs.join(" / ")}
-                        </span>
-                      ))
-                    ) : (
-                      <span className={styles.contractChipMuted}>未知模块</span>
-                    )}
-                  </div>
                 </div>
               </div>
             </fieldset>
@@ -3405,8 +3679,8 @@ export function ResearchFlowCanvasRoute() {
                           template.type,
                         )
                       ) {
-                        setConnectionMessage(`无法套用线模板「${template.label}」，当前起点和终点的输入输出契约不匹配。`);
-                        setSaveMessage("线模板未套用。请先切换起点/终点，或选择匹配当前模块契约的模板。");
+                        setConnectionMessage(`无法套用线模板「${template.label}」，当前两端模块或路由契约不匹配。`);
+                        setSaveMessage("线模板未套用。请先切换起点/终点，或选择匹配当前流程语义的模板。");
                         setSaveStatus("error");
                         return;
                       }
@@ -3454,38 +3728,8 @@ export function ResearchFlowCanvasRoute() {
                 <strong>→</strong>
                 <span>{draft?.nodes.find((node) => node.id === selectedEdge.target)?.label ?? selectedEdge.target}</span>
               </div>
-              <div className={styles.contractPanel}>
-                <div className={styles.contractBlock}>
-                  <span>源输出</span>
-                  <div className={styles.contractChips}>
-                    {selectedEdgeSourceContract ? (
-                      Object.entries(selectedEdgeSourceContract.outputs).map(([condition, outputs]) => (
-                        <span key={`${selectedEdge.id}-source-${condition}`} className={styles.contractChip}>
-                          {condition}: {outputs.join(" / ")}
-                        </span>
-                      ))
-                    ) : (
-                      <span className={styles.contractChipMuted}>未知模块</span>
-                    )}
-                  </div>
-                </div>
-                <div className={styles.contractBlock}>
-                  <span>目标输入</span>
-                  <div className={styles.contractChips}>
-                    {selectedEdgeTargetContract?.inputs.length ? (
-                      selectedEdgeTargetContract.inputs.map((group, index) => (
-                        <span key={`${selectedEdge.id}-target-${index}`} className={styles.contractChip}>
-                          {group.join(" / ")}
-                        </span>
-                      ))
-                    ) : (
-                      <span className={styles.contractChipMuted}>无</span>
-                    )}
-                  </div>
-                </div>
-              </div>
               {selectedEdgeIssues.length ? (
-                <div className={styles.edgeIssueList} aria-label="路由契约问题">
+                <div className={styles.edgeIssueList} aria-label="路由结构问题">
                   {selectedEdgeIssues.slice(0, 3).map((issue) => (
                     <div key={`${issue.code}:${issue.edgeId || issue.nodeId || issue.message}`} className={styles.validationIssue}>
                       <span className={issue.severity === "error" ? styles.validationIssueError : styles.validationIssueWarning}>
@@ -3500,7 +3744,7 @@ export function ResearchFlowCanvasRoute() {
           ) : (
             <div className={styles.emptyInspector}>
               <strong>选择一个模块或路由</strong>
-              <span>点击画布节点可编辑状态、提示词、LLM 和进入条件；开启连线后先点起点再点目标。</span>
+              <span>点击画布模块可编辑状态、绑定 Agent、动作键和触发说明；开启连线后先点起点再点目标。</span>
               </div>
             )}
             </div>
@@ -3528,7 +3772,7 @@ export function ResearchFlowCanvasRoute() {
                 disabled={!draft || leaveGuardSaving || validationErrors.length > 0}
               >
                 <Save size={16} />
-                {validationErrors.length > 0 ? "先修复契约" : leaveGuardSaveLabel}
+                  {validationErrors.length > 0 ? "先修复结构" : leaveGuardSaveLabel}
               </button>
               <button className={styles.dangerButton} type="button" onClick={handleDiscardAndLeave} disabled={leaveGuardSaving}>
                 {leaveGuardDiscardLabel}

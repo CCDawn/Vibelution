@@ -73,7 +73,6 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-strong);
-  box-shadow: var(--shadow-strong);
 }
 
 .summaryCard {
@@ -142,8 +141,8 @@
   left: 50%;
   width: 3px;
   transform: translateX(-50%);
-  border-radius: 999px;
-  background: rgba(236, 230, 220, 0.08);
+  border-radius: var(--radius-control);
+  background: var(--surface-resize-track);
   transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
@@ -184,8 +183,9 @@
 .sectionTitle,
 .detailTitle {
   margin: 0;
-  font-size: 24px;
-  line-height: 1.2;
+  font-size: 1rem;
+  font-weight: 760;
+  line-height: 1.22;
 }
 
 .detailLead {
@@ -202,7 +202,7 @@
   justify-content: center;
   min-height: 28px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   font-size: 12px;
   font-weight: 600;
 }
@@ -266,7 +266,7 @@
   gap: 8px;
   min-height: 40px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: 8px;
   border: 1px solid var(--border-soft);
   background: var(--surface-card-muted);
   color: var(--fg-primary);
@@ -279,8 +279,8 @@
 .filterButtonActive,
 .decisionButtonActive,
 .primaryAction {
-  background: rgba(196, 156, 85, 0.16);
-  border-color: rgba(196, 156, 85, 0.3);
+  background: color-mix(in srgb, var(--accent-warm) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
   color: var(--accent-warm-2);
 }
 
@@ -391,7 +391,7 @@
 
 .queueItem:hover,
 .queueItemActive {
-  border-color: rgba(194, 155, 86, 0.28);
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
   background: var(--surface-panel-strong);
 }
 
@@ -436,8 +436,8 @@
 
 .selectionButtonActive {
   color: var(--accent-warm-2);
-  border-color: rgba(196, 156, 85, 0.34);
-  background: rgba(196, 156, 85, 0.14);
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
 }
 
 .selectionButton:disabled,
@@ -535,7 +535,8 @@
 .signalSection h3,
 .detailSection h3 {
   margin: 0 0 10px;
-  font-size: 18px;
+  font-size: 0.95rem;
+  font-weight: 760;
 }
 
 .signalSection ul,
@@ -672,7 +673,6 @@
 @media (min-width: 1281px) and (max-width: 1600px) {
   .page {
     overflow: auto;
-    padding-top: 92px;
     padding-bottom: 18px;
   }
 
@@ -687,7 +687,6 @@
   .page {
     height: 100%;
     overflow: auto;
-    padding-top: 130px;
     padding-bottom: 18px;
   }
 
@@ -737,10 +736,6 @@
 }
 
 @media (max-width: 720px) {
-  .page {
-    padding-top: 172px;
-  }
-
   .summaryStrip,
   .factGrid,
   .metricGrid {
@@ -748,6 +743,6 @@
   }
 
   .title {
-    font-size: 30px;
+    font-size: var(--route-topbar-title-size);
   }
 }

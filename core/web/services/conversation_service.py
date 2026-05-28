@@ -11,13 +11,20 @@ def list_conversations() -> list[dict[str, Any]]:
     """Return direct agent conversations and group rooms in one index."""
 
     items: list[dict[str, Any]] = []
-    for session in session_service.list_sessions():
+    sessions = session_service.list_sessions()
+    session_summaries = {
+        str(session.get("id") or "").strip(): session
+        for session in sessions
+        if isinstance(session, dict) and str(session.get("id") or "").strip()
+    }
+    for session in sessions:
         items.append(
             {
                 "conversationId": str(session.get("id") or "").strip(),
                 "type": "direct_agent",
                 "title": str(session.get("agentDisplayName") or session.get("title") or "").strip(),
                 "agentId": str(session.get("agentId") or "").strip(),
+                "agentCode": str(session.get("agentCode") or "").strip(),
                 "directSessionId": str(session.get("id") or "").strip(),
                 "roomId": "",
                 "status": str(session.get("status") or "").strip(),
@@ -28,7 +35,7 @@ def list_conversations() -> list[dict[str, Any]]:
                 "agentTemplateLabel": str(session.get("agentTemplateLabel") or "").strip(),
             }
         )
-    for room in chat_room_service.list_chat_rooms():
+    for room in chat_room_service.list_chat_rooms(session_summaries=session_summaries):
         latest_round = _latest_round(room)
         items.append(
             {

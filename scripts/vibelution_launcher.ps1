@@ -835,12 +835,23 @@ function ConvertTo-PlainHashtable {
     if ($null -eq $Value) {
         return @{}
     }
+    if ($Value -is [string] -or $Value -is [ValueType]) {
+        return $Value
+    }
     if ($Value -is [System.Collections.IDictionary]) {
         $result = @{}
         foreach ($key in $Value.Keys) {
             $current = $Value[$key]
             if ($current -is [System.Collections.IDictionary] -or $current -is [pscustomobject]) {
                 $result[$key] = ConvertTo-PlainHashtable $current
+            } elseif ($current -is [System.Array] -and -not ($current -is [string])) {
+                $result[$key] = @($current | ForEach-Object {
+                    if ($_ -is [System.Collections.IDictionary] -or $_ -is [pscustomobject]) {
+                        ConvertTo-PlainHashtable $_
+                    } else {
+                        $_
+                    }
+                })
             } else {
                 $result[$key] = $current
             }
@@ -858,6 +869,14 @@ function ConvertTo-PlainHashtable {
         $current = $prop.Value
         if ($current -is [System.Collections.IDictionary] -or $current -is [pscustomobject]) {
             $result[$prop.Name] = ConvertTo-PlainHashtable $current
+        } elseif ($current -is [System.Array] -and -not ($current -is [string])) {
+            $result[$prop.Name] = @($current | ForEach-Object {
+                if ($_ -is [System.Collections.IDictionary] -or $_ -is [pscustomobject]) {
+                    ConvertTo-PlainHashtable $_
+                } else {
+                    $_
+                }
+            })
         } else {
             $result[$prop.Name] = $current
         }
@@ -897,6 +916,7 @@ function Get-RuntimeSceneRelativePaths {
         Supervisor = "raw/supervisor.log"
         SupervisorStderr = "raw/supervisor.stderr.log"
         Browser = "raw/browser.log"
+        BrowserProcessMemory = "raw/browser.process-memory.log"
     }
 }
 
@@ -3211,7 +3231,7 @@ function Invoke-RepoResidualWorkbenchCleanup {
     $arguments = @(
         "-m",
         "core.runtime_manager.process_inventory",
-        "--cleanup-residual-workbench",
+        "--cleanup-unmanaged-workbench-backends",
         "--json",
         "--timeout-seconds",
         "4"
@@ -3225,13 +3245,11 @@ function Invoke-RepoResidualWorkbenchCleanup {
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $pythonPath
     $psi.WorkingDirectory = $projectDir
+    $psi.Arguments = ConvertTo-ProcessArgumentString -ArgumentList $arguments
     $psi.UseShellExecute = $false
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
-    foreach ($argument in $arguments) {
-        [void]$psi.ArgumentList.Add($argument)
-    }
 
     try {
         $process = [System.Diagnostics.Process]::Start($psi)
@@ -3272,6 +3290,209 @@ function Invoke-RepoResidualWorkbenchCleanup {
             terminated = @()
             remaining = @()
         }
+    }
+}
+
+function Get-ManagedBrowserProcessMemoryPayload {
+    param([string]$ProfileDir = $browserProfileDir)
+
+    $pythonPath = Resolve-ResidualCleanupPythonPath
+    if (-not $pythonPath) {
+        return [pscustomobject]@{
+            supported = $false
+            reason = "python_unavailable"
+            profileDir = $ProfileDir
+            count = 0
+            totalWorkingSetMB = 0
+            totalPrivateMB = 0
+            items = @()
+        }
+    }
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $arguments = @(
+        "-m",
+        "core.runtime_manager.process_inventory",
+        "--managed-browser-profile",
+        $ProfileDir,
+        "--json"
+    )
+    $psi.FileName = $pythonPath
+    $psi.WorkingDirectory = $projectDir
+    $psi.Arguments = ConvertTo-ProcessArgumentString -ArgumentList $arguments
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    try {
+        $process = [System.Diagnostics.Process]::Start($psi)
+        if (-not $process.WaitForExit(5000)) {
+            try {
+                $process.Kill()
+            } catch {
+            }
+            return [pscustomobject]@{
+                supported = $false
+                reason = "snapshot_timeout"
+                profileDir = $ProfileDir
+                count = 0
+                totalWorkingSetMB = 0
+                totalPrivateMB = 0
+                items = @()
+            }
+        }
+        $stdout = $process.StandardOutput.ReadToEnd()
+        $stderr = $process.StandardError.ReadToEnd()
+        if ($process.ExitCode -ne 0) {
+            return [pscustomobject]@{
+                supported = $false
+                reason = "snapshot_failed"
+                exitCode = $process.ExitCode
+                stderr = $stderr
+                profileDir = $ProfileDir
+                count = 0
+                totalWorkingSetMB = 0
+                totalPrivateMB = 0
+                items = @()
+            }
+        }
+        return ($stdout | ConvertFrom-Json -ErrorAction Stop)
+    } catch {
+        return [pscustomobject]@{
+            supported = $false
+            reason = "snapshot_exception"
+            error = $_.Exception.Message
+            profileDir = $ProfileDir
+            count = 0
+            totalWorkingSetMB = 0
+            totalPrivateMB = 0
+            items = @()
+        }
+    }
+}
+
+function Write-ManagedBrowserProcessMemorySnapshot {
+    param([string]$Reason = "startup")
+
+    if (-not $script:currentRuntimeSceneId) {
+        return
+    }
+
+    $snapshot = Get-ManagedBrowserProcessMemoryPayload
+    $items = @()
+    if ($snapshot -and $snapshot.items) {
+        $items = @($snapshot.items)
+    }
+    $topProcesses = @($items | Select-Object -First 8)
+    $snapshotSupported = [bool](Get-ObjectPropertyValue -Object $snapshot -Name "supported" -Default $false)
+    $snapshotProfileDir = [string](Get-ObjectPropertyValue -Object $snapshot -Name "profileDir" -Default $browserProfileDir)
+    $snapshotCount = [int](Get-ObjectPropertyValue -Object $snapshot -Name "count" -Default 0)
+    $snapshotWorkingSetMB = [double](Get-ObjectPropertyValue -Object $snapshot -Name "totalWorkingSetMB" -Default 0)
+    $snapshotPrivateMB = [double](Get-ObjectPropertyValue -Object $snapshot -Name "totalPrivateMB" -Default 0)
+    $fields = @{
+        reason = $Reason
+        supported = $snapshotSupported
+        profileDir = $snapshotProfileDir
+        count = $snapshotCount
+        totalWorkingSetMB = $snapshotWorkingSetMB
+        totalPrivateMB = $snapshotPrivateMB
+        topProcesses = @($topProcesses)
+    }
+    $snapshotReason = [string](Get-ObjectPropertyValue -Object $snapshot -Name "reason" -Default "")
+    if ($snapshotReason) {
+        $fields.snapshotReason = $snapshotReason
+    }
+
+    Append-RuntimeSceneRawLog `
+        -RelativePath (Get-RuntimeSceneRelativePaths).BrowserProcessMemory `
+        -Message ("Managed browser process memory ({0}): count={1}; workingSetMB={2}; privateMB={3}" -f $Reason, $fields.count, $fields.totalWorkingSetMB, $fields.totalPrivateMB)
+    Write-RuntimeSceneEvent `
+        -Component "browser" `
+        -Phase "memory" `
+        -EventCode "browser.process_memory.sampled" `
+        -Message "Managed browser process memory sampled." `
+        -Outcome "observed" `
+        -Fields $fields `
+        -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).BrowserProcessMemory -TailLines 80)
+    Update-RuntimeSceneManifest @{
+        browser = @{
+            process_memory = @{
+                supported = $snapshotSupported
+                count = $snapshotCount
+                total_working_set_mb = $snapshotWorkingSetMB
+                total_private_mb = $snapshotPrivateMB
+                last_sample_reason = $Reason
+                top_processes = @($topProcesses)
+            }
+        }
+    }
+}
+
+function Invoke-ManagedBrowserRenderCacheCleanup {
+    $relativeCacheDirs = @(
+        "GraphiteDawnCache",
+        "GrShaderCache",
+        "ShaderCache",
+        "Default\GPUCache",
+        "Default\DawnWebGPUCache"
+    )
+    $deleted = @()
+    $skipped = @()
+    $failed = @()
+
+    if (-not (Test-Path -LiteralPath $browserProfileDir)) {
+        return
+    }
+
+    try {
+        $profileRoot = (Resolve-Path -LiteralPath $browserProfileDir).Path
+    } catch {
+        return
+    }
+    $profilePrefix = $profileRoot.TrimEnd("\") + "\"
+
+    foreach ($relativePath in $relativeCacheDirs) {
+        $target = Join-Path $browserProfileDir $relativePath
+        if (-not (Test-Path -LiteralPath $target)) {
+            continue
+        }
+        try {
+            $resolvedTarget = (Resolve-Path -LiteralPath $target).Path
+            if (-not ($resolvedTarget.Equals($profileRoot, [StringComparison]::OrdinalIgnoreCase) -or $resolvedTarget.StartsWith($profilePrefix, [StringComparison]::OrdinalIgnoreCase))) {
+                $skipped += [pscustomobject]@{
+                    path = $relativePath
+                    reason = "outside_profile"
+                }
+                continue
+            }
+            Remove-Item -LiteralPath $resolvedTarget -Recurse -Force -ErrorAction Stop
+            $deleted += $relativePath
+        } catch {
+            $failed += [pscustomobject]@{
+                path = $relativePath
+                error = $_.Exception.Message
+            }
+        }
+    }
+
+    if ($script:currentRuntimeSceneId) {
+        Append-RuntimeSceneRawLog `
+            -RelativePath (Get-RuntimeSceneRelativePaths).Browser `
+            -Message ("Managed browser render cache cleanup: deleted={0}; skipped={1}; failed={2}" -f $deleted.Count, $skipped.Count, $failed.Count)
+        Write-RuntimeSceneEvent `
+            -Component "browser" `
+            -Phase "profile" `
+            -EventCode "browser.render_cache.cleaned" `
+            -Message "Managed browser render cache cleanup completed." `
+            -Outcome "observed" `
+            -Fields @{
+                profile_dir = $browserProfileDir
+                deleted = @($deleted)
+                skipped = @($skipped)
+                failed = @($failed)
+            } `
+            -RawRefs @(New-RuntimeSceneRawRef -RelativePath (Get-RuntimeSceneRelativePaths).Browser -TailLines 80)
     }
 }
 
@@ -3611,15 +3832,26 @@ function Start-ManagedBackend {
 function Start-ManagedBrowser {
     param([string]$BrowserExecutable)
 
+    Invoke-ManagedBrowserRenderCacheCleanup
+
     $windowMode = if ($script:workbenchWindowMode) { [string]$script:workbenchWindowMode } else { "windowed" }
     $fullscreenForced = ($windowMode -eq "fullscreen")
     $browserArgs = @(
         "--user-data-dir=$browserProfileDir",
         "--app=$url",
-        "--force-dark-mode",
         "--no-first-run",
         "--no-default-browser-check",
-        "--disable-session-crashed-bubble"
+        "--disable-session-crashed-bubble",
+        "--disable-gpu",
+        "--disable-direct-composition",
+        "--disable-background-networking",
+        "--disable-background-mode",
+        "--disable-component-update",
+        "--disable-extensions",
+        "--disable-features=msEdgeWallet,msEdgeShoppingAssistant,EdgeSearchIndexer,OptimizationGuideModelDownloading,OptimizationHintsFetching",
+        "--disable-sync",
+        "--metrics-recording-only",
+        "--no-service-autorun"
     )
     if ($fullscreenForced) {
         $browserArgs += "--start-fullscreen"
@@ -3627,7 +3859,7 @@ function Start-ManagedBrowser {
 
     Write-Note "Starting managed Edge app window ($windowMode mode) ..."
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; fullscreen_forced = $fullscreenForced } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window ($windowMode mode)."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -3642,6 +3874,8 @@ function Start-ManagedBrowser {
                 app_chrome_theme = "dark"
                 window_mode = $windowMode
                 fullscreen_forced = $fullscreenForced
+                profile_dir = $browserProfileDir
+                launch_flags = @($browserArgs | Where-Object { $_ -notlike "--app=*" -and $_ -notlike "--user-data-dir=*" })
             }
     }
     $proc = Start-GuiProcessWithoutConsole `
@@ -3653,7 +3887,7 @@ function Start-ManagedBrowser {
     if (-not $windowProcess) {
         Stop-ProcessesById (Get-ManagedBrowserPids)
         if ($script:currentRuntimeSceneId) {
-            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; window_mode = $windowMode; fullscreen_forced = $fullscreenForced } }
+            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir } }
             Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window did not open successfully."
             Write-RuntimeSceneEvent `
                 -Component "browser" `
@@ -3669,13 +3903,14 @@ function Start-ManagedBrowser {
                     console_window_suppressed = $true
                     window_mode = $windowMode
                     fullscreen_forced = $fullscreenForced
+                    profile_dir = $browserProfileDir
                 }
         }
         throw "Managed Edge app window did not open successfully."
     }
 
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; fullscreen_forced = $fullscreenForced } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window opened (launch PID=$($proc.Id), window PID=$($windowProcess.Id))."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -3691,8 +3926,11 @@ function Start-ManagedBrowser {
                 console_window_suppressed = $true
                 window_mode = $windowMode
                 fullscreen_forced = $fullscreenForced
+                profile_dir = $browserProfileDir
             }
     }
+
+    Write-ManagedBrowserProcessMemorySnapshot -Reason "browser_opened"
 
     return [pscustomobject]@{
         LaunchPid = $proc.Id

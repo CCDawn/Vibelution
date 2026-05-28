@@ -13,18 +13,36 @@ body {
   font-family: var(--font-body);
   background: var(--bg-canvas);
   color: var(--fg-primary);
+  font-size: 14px;
   text-rendering: optimizeLegibility;
   overflow: hidden;
 }
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
 button {
   cursor: pointer;
+}
+
+button,
+input,
+textarea,
+select {
+  letter-spacing: 0;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 a {
@@ -46,6 +64,56 @@ pre {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(140, 135, 125, 0.28);
+  background: color-mix(in srgb, var(--fg-tertiary) 34%, transparent);
   border-radius: 999px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent-warm) 34%, transparent);
+  color: var(--fg-primary);
+}
+
+:where([class*="page"], [class*="route"]) {
+  color: var(--fg-primary);
+}
+
+:where([class*="toolbar"], [class*="header"]) {
+  letter-spacing: 0;
+}
+
+:where([class*="eyebrow"], [class*="Eyebrow"]) {
+  color: var(--fg-tertiary);
+  font-weight: 720;
+  letter-spacing: 0.06em;
+}
+
+:where([class*="title"], [class*="Title"], [class*="heading"], [class*="Heading"]) {
+  letter-spacing: 0;
+}
+
+:where(
+  [class*="Surface"],
+  [class*="surface"],
+  [class*="Panel"],
+  [class*="panel"],
+  [class*="Card"],
+  [class*="card"],
+  [class*="Block"],
+  [class*="block"]
+) {
+  border-color: var(--border-soft);
+}
+
+:where(button, input, textarea, select) {
+  border-radius: var(--radius-control);
+}
+
+:where(input, textarea, select) {
+  border: 1px solid var(--border-soft);
+  background: var(--surface-input);
+  color: var(--fg-primary);
+}
+
+:where(button:disabled, input:disabled, textarea:disabled, select:disabled) {
+  cursor: not-allowed;
 }

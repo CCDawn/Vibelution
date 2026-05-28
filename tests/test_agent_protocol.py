@@ -392,6 +392,75 @@ class TestToolMessageFlow:
         assert result.additional_kwargs["reasoning_content"] == "先看日志"
         assert captured["thoughts"][-1][0] == "先看日志"
 
+    def test_invoke_llm_stream_preserves_final_usage_observation(self, monkeypatch):
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+            def stream_response(self, *_args, **_kwargs):
+                return None
+
+            def stream_thought(self, *_args, **_kwargs):
+                return None
+
+        class DummyChunk:
+            def __init__(self, content, *, response_metadata=None):
+                self.content = content
+                self.tool_calls = []
+                self.additional_kwargs = {}
+                self.response_metadata = response_metadata or {}
+
+            def __add__(self, other):
+                metadata = dict(self.response_metadata)
+                metadata.update(getattr(other, "response_metadata", None) or {})
+                return DummyChunk(
+                    (self.content or "") + (getattr(other, "content", "") or ""),
+                    response_metadata=metadata,
+                )
+
+        class DummyLLM:
+            def stream(self, _msgs):
+                yield DummyChunk("完成")
+                yield DummyChunk(
+                    "",
+                    response_metadata={
+                        "usage_observation": {
+                            "input_tokens": 80,
+                            "output_tokens": 10,
+                            "total_tokens": 90,
+                            "cached_input_tokens": 40,
+                            "cache_hit_rate": 0.5,
+                        }
+                    },
+                )
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.config = SimpleNamespace(
+            llm=SimpleNamespace(
+                get_profile=lambda role="primary": SimpleNamespace(streaming=True)
+            ),
+        )
+        agent.llm_with_tools = DummyLLM()
+
+        result = agent._invoke_llm([AIMessage(content="hello")])
+
+        assert result is not None
+        assert result.content == "完成"
+        assert result.response_metadata["usage_observation"]["input_tokens"] == 80
+        assert result.response_metadata["usage_observation"]["cached_input_tokens"] == 40
+
     def test_get_llm_for_current_mode_rebinds_restart_whitelist(self):
         bound_tools = []
 
@@ -2231,6 +2300,161 @@ class TestLocalProviderBootstrap:
 
         assert provider.kind == "local"
         mental_model.set_shared_llm.assert_called_once_with(agent.llm_with_tools)
+
+    def test_runtime_agent_profile_binding_maps_selected_profile_to_primary(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-supervised-baseline")
+        monkeypatch.setenv("VIBELUTION_AGENT_PROFILE_ID", "supervised_baseline")
+        monkeypatch.setenv("VIBELUTION_AGENT_DIRECT_SESSION_ID", "session-baseline")
+        monkeypatch.setenv("VIBELUTION_AGENT_WORKSPACE_PATH", "workspace/agents/agent-supervised-baseline")
+        monkeypatch.setenv("VIBELUTION_SUPERVISED_ROLE", "baseline")
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+
+        captured = {}
+
+        class DummyClient:
+            def __init__(self, config=None, role=None, profile_id=None):
+                captured["model"] = config.llm.get_profile(role=role).model
+                captured["profile_id"] = config.llm.get_profile(role=role).profile_id
+
+            def bind_tools(self, _tools):
+                return MagicMock()
+
+        monkeypatch.setattr(
+            agent_module,
+            "get_llm_client",
+            lambda role=None, profile_id=None, config=None: DummyClient(
+                config=config,
+                role=role,
+                profile_id=profile_id,
+            ),
+        )
+
+        config = Settings(
+            None,
+            **{
+                "llm.profiles.primary.model": "primary-model",
+                "llm.profiles.primary.api_key_env": "",
+                "llm.profiles.primary.provider.kind": "local",
+                "llm.profiles.primary.provider.api_key": "",
+                "llm.profiles.primary.provider.api_key_env": "",
+                "llm.profiles.primary.provider.base_url": "http://localhost:11434/v1",
+                "llm.profiles.primary.provider.compat_mode": "openai",
+                "llm.profiles.primary.provider.requires_api_key": False,
+                "llm.profiles.supervised_baseline.model": "baseline-model",
+                "llm.profiles.supervised_baseline.api_key_env": "",
+                "llm.profiles.supervised_baseline.provider.kind": "local",
+                "llm.profiles.supervised_baseline.provider.api_key": "",
+                "llm.profiles.supervised_baseline.provider.api_key_env": "",
+                "llm.profiles.supervised_baseline.provider.base_url": "http://localhost:11434/v1",
+                "llm.profiles.supervised_baseline.provider.compat_mode": "openai",
+                "llm.profiles.supervised_baseline.provider.requires_api_key": False,
+            },
+        )
+
+        original_config = config.config
+        agent = SelfEvolvingAgent(config=original_config)
+
+        assert agent.runtime_agent_binding["agentId"] == "agent-supervised-baseline"
+        assert agent.runtime_agent_binding["supervisedRole"] == "baseline"
+        assert captured == {"model": "baseline-model", "profile_id": "primary"}
+        assert original_config.llm.profiles["primary"].model == "primary-model"
+
+    def test_runtime_agent_binding_seeds_context_engine_packet_for_single_turn(self, monkeypatch):
+        monkeypatch.setenv("VIBELUTION_AGENT_ID", "agent-supervised-baseline")
+        monkeypatch.setenv("VIBELUTION_AGENT_PROFILE_ID", "primary")
+        monkeypatch.setenv("VIBELUTION_AGENT_DIRECT_SESSION_ID", "session-baseline")
+        monkeypatch.setenv("VIBELUTION_SUPERVISED_ROLE", "baseline")
+        monkeypatch.setattr(agent_module.Key_Tools, "create_llm_facing_tools", lambda: [])
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_model_discovery", lambda self: 16000)
+        monkeypatch.setattr(SelfEvolvingAgent, "_init_token_compressor", lambda self: None)
+        monkeypatch.setattr(agent_module, "get_state_manager", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_event_bus", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_tool_executor", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_security_validator", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(agent_module, "get_git_memory_service", lambda: MagicMock())
+        monkeypatch.setattr(agent_module, "get_mental_model", lambda **_kwargs: MagicMock())
+        monkeypatch.setattr(
+            agent_module,
+            "get_llm_client",
+            lambda **_kwargs: type("DummyClient", (), {"bind_tools": lambda self, _tools: MagicMock()})(),
+        )
+
+        class DummyPromptManager:
+            def __init__(self):
+                self.goal = ""
+
+            def update_current_goal(self, goal):
+                self.goal = goal
+
+            def set_runtime_goal_packet(self, _packet):
+                pass
+
+            def clear_state_memory(self, persist=False):
+                pass
+
+            def build(self):
+                return "system"
+
+        monkeypatch.setattr(agent_module, "get_prompt_manager", lambda: DummyPromptManager())
+        monkeypatch.setattr(agent_module, "get_session_state", lambda: MagicMock())
+        monkeypatch.setattr(
+            agent_module,
+            "build_agent_context",
+            lambda agent_id, **kwargs: SimpleNamespace(
+                agent_id=agent_id,
+                session_id=kwargs.get("session_id", ""),
+                context_block="## Agent Runtime Context\nPromptTemplateId: prompt-supervised-baseline",
+            ),
+        )
+
+        config = Settings(
+            None,
+            **{
+                "agent.default_mode": "supervised_evolution",
+                "llm.profiles.primary.model": "primary-model",
+                "llm.profiles.primary.api_key_env": "",
+                "llm.profiles.primary.provider.kind": "local",
+                "llm.profiles.primary.provider.api_key": "",
+                "llm.profiles.primary.provider.api_key_env": "",
+                "llm.profiles.primary.provider.base_url": "http://localhost:11434/v1",
+                "llm.profiles.primary.provider.compat_mode": "openai",
+                "llm.profiles.primary.provider.requires_api_key": False,
+            },
+        )
+        agent = SelfEvolvingAgent(config=config.config)
+        messages, resumed = TurnOutcomeController.prepare_turn_messages(
+            system_prompt="system",
+            user_prompt="probe",
+            effective_goal="probe",
+            active_turn_messages=None,
+            active_turn_goal="",
+            build_system_message=agent_module.build_system_message,
+            build_external_request_message=agent._get_mode_policy().runtime_input_builder,
+            allow_append_user_message=False,
+        )
+
+        agent._seed_runtime_agent_context_for_turn(run_id="case-1")
+        pending = list(agent._pending_runtime_context_blocks)
+        assert pending == ["## Agent Runtime Context\nPromptTemplateId: prompt-supervised-baseline"]
+
+        for block in reversed(pending):
+            messages.insert(1, SystemMessage(content=block))
+
+        assert resumed is False
+        assert any(
+            isinstance(message, SystemMessage)
+            and "prompt-supervised-baseline" in str(message.content)
+            for message in messages
+        )
 
 
 class TestDelegationExposure:

@@ -81,7 +81,7 @@
   height: 100%;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: transparent;
   cursor: col-resize;
   position: relative;
@@ -103,7 +103,7 @@
   align-items: center;
   gap: 6px;
   padding: 4px;
-  border-radius: 999px;
+  border-radius: 8px;
   border: 1px solid var(--border-soft);
   background: var(--surface-panel-strong);
 }
@@ -112,7 +112,7 @@
   min-height: 36px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 6px;
   background: transparent;
   color: var(--fg-secondary);
   font: inherit;
@@ -128,7 +128,6 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
-  box-shadow: var(--shadow-soft);
   padding: 14px;
 }
 
@@ -355,9 +354,7 @@
   min-height: 164px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
-  background:
-    radial-gradient(circle at top, rgba(80, 96, 124, 0.22), transparent 58%),
-    var(--surface-card);
+  background: var(--surface-card);
   overflow: hidden;
   display: grid;
   place-items: center;
@@ -366,11 +363,11 @@
 .petAvatarHalo {
   position: absolute;
   inset: auto;
-  width: 132px;
-  height: 132px;
-  border-radius: 999px;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent-warm) 22%, transparent), rgba(216, 167, 91, 0));
-  filter: blur(4px);
+  width: 128px;
+  height: 86px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--accent-warm) 7%, transparent);
 }
 
 .petAvatarMark {
@@ -380,7 +377,7 @@
   justify-content: center;
   gap: 7px;
   animation: petFloat 4s ease-in-out infinite;
-  filter: drop-shadow(0 18px 30px rgba(0, 0, 0, 0.35));
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.24));
 }
 
 .petAvatarBody {
@@ -389,9 +386,9 @@
   border: 1px solid color-mix(in srgb, var(--accent-warm) 42%, transparent);
   border-radius: 48% 48% 42% 42%;
   background:
-    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.34) 0 7px, transparent 8px),
-    radial-gradient(circle at 66% 28%, rgba(255, 255, 255, 0.34) 0 7px, transparent 8px),
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-warm) 46%, #ef6250), color-mix(in srgb, var(--accent-warm) 20%, #82342d));
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.28) 0 7px, transparent 8px),
+    radial-gradient(circle at 66% 28%, rgba(255, 255, 255, 0.28) 0 7px, transparent 8px),
+    linear-gradient(180deg, color-mix(in srgb, var(--accent-warm) 36%, var(--surface-panel-strong)), color-mix(in srgb, var(--accent-cool) 20%, var(--surface-card)));
 }
 
 .petAvatarClaw {
@@ -399,7 +396,7 @@
   height: 42px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 36%, transparent);
   border-radius: 60% 42% 58% 46%;
-  background: color-mix(in srgb, var(--accent-warm) 34%, #b73f35);
+  background: color-mix(in srgb, var(--accent-warm) 18%, var(--surface-panel-strong));
 }
 
 .petAvatarClaw:first-child {
@@ -513,7 +510,7 @@
 
 .selectionToggle {
   min-height: 32px;
-  border-radius: 999px;
+  border-radius: 8px;
   border: 1px solid rgba(148, 163, 184, 0.2);
   background: var(--surface-panel-strong);
   color: var(--fg-secondary);
@@ -559,15 +556,15 @@
 .vitalTrack {
   width: 100%;
   height: 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: rgba(64, 74, 86, 0.7);
   overflow: hidden;
 }
 
 .vitalFill {
   height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 72%, transparent), rgba(124, 155, 150, 0.9));
+  border-radius: var(--radius-control);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-warm) 72%, transparent), color-mix(in srgb, var(--accent-cool) 78%, transparent));
 }
 
 .paginationBar {

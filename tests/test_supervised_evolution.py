@@ -312,23 +312,39 @@ def test_run_supervised_evolution_session_persists_agent_bindings(tmp_path: Path
         encoding="utf-8",
     )
 
+    runner_calls = []
+
     def fake_runner(**kwargs):
+        runner_calls.append(kwargs)
         return _fake_result("success", "ok", str(kwargs["prompt"]))
 
     bindings = {
         "baseline": {
             "agentId": "agent-baseline",
+            "agentCode": "A101",
             "displayName": "监督进化基线 Agent",
             "profileId": "supervised_baseline",
+            "primaryMode": "supervised_evolution",
+            "roleKey": "baseline",
+            "promptTemplateId": "prompt-supervised-baseline",
             "directSessionId": "session-baseline",
             "workspacePath": "workspace/agents/agent-baseline",
+            "toolPolicyId": "tool-agent-baseline",
+            "memoryPolicyId": "memory-agent-baseline",
+            "apiKey": "should-not-leak",
         },
         "candidate": {
             "agentId": "agent-candidate",
+            "agentCode": "A102",
             "displayName": "监督进化候选 Agent",
             "profileId": "supervised_candidate",
+            "primaryMode": "supervised_evolution",
+            "roleKey": "candidate",
+            "promptTemplateId": "prompt-supervised-candidate",
             "directSessionId": "session-candidate",
             "workspacePath": "workspace/agents/agent-candidate",
+            "toolPolicyId": "tool-agent-candidate",
+            "memoryPolicyId": "memory-agent-candidate",
         },
     }
 
@@ -340,11 +356,24 @@ def test_run_supervised_evolution_session_persists_agent_bindings(tmp_path: Path
     )
 
     assert decision.agent_bindings["baseline"]["agentId"] == "agent-baseline"
+    assert decision.agent_bindings["baseline"]["agentCode"] == "A101"
+    assert decision.agent_bindings["baseline"]["promptTemplateId"] == "prompt-supervised-baseline"
+    assert decision.agent_bindings["baseline"]["toolPolicyId"] == "tool-agent-baseline"
+    assert decision.agent_bindings["baseline"]["memoryPolicyId"] == "memory-agent-baseline"
     assert decision.baseline_runs[0].agent_binding["profileId"] == "supervised_baseline"
+    assert decision.baseline_runs[0].agent_binding["promptTemplateId"] == "prompt-supervised-baseline"
     assert decision.candidate_runs[0].agent_binding["directSessionId"] == "session-candidate"
+    assert runner_calls[0]["agent_binding"]["agentId"] == "agent-baseline"
+    assert runner_calls[0]["agent_binding"]["agentCode"] == "A101"
+    assert runner_calls[0]["agent_binding"]["promptTemplateId"] == "prompt-supervised-baseline"
+    assert runner_calls[1]["agent_binding"]["profileId"] == "supervised_candidate"
     persisted = json.loads(Path(decision.decision_path or "").read_text(encoding="utf-8"))
     assert persisted["agent_bindings"]["candidate"]["agentId"] == "agent-candidate"
+    assert persisted["agent_bindings"]["candidate"]["agentCode"] == "A102"
+    assert persisted["agent_bindings"]["candidate"]["promptTemplateId"] == "prompt-supervised-candidate"
     assert persisted["baseline_runs"][0]["agent_binding"]["agentId"] == "agent-baseline"
+    assert persisted["baseline_runs"][0]["agent_binding"]["promptTemplateId"] == "prompt-supervised-baseline"
+    assert "apiKey" not in json.dumps(persisted, ensure_ascii=False)
 
 
 def test_materialized_reviewed_chat_case_enters_supervised_run_with_review_provenance(tmp_path: Path):

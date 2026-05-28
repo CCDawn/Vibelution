@@ -4006,6 +4006,125 @@ def test_residual_process_payload_ignores_launcher_managed_backend(monkeypatch, 
     assert payload["items"][0]["pid"] == 49780
 
 
+def test_managed_browser_process_payload_groups_profile_children(monkeypatch, tmp_path):
+    class MemoryInfo:
+        def __init__(self, rss, private):
+            self.rss = rss
+            self.private = private
+
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    profile_dir = tmp_path / "repo" / ".runtime" / "launcher" / "edge-app-profile"
+    profile_dir.mkdir(parents=True)
+    ordinary_profile = tmp_path / "Edge" / "User Data"
+    ordinary_profile.mkdir(parents=True)
+    mib = 1024 * 1024
+
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 100,
+                        "ppid": 1,
+                        "name": "msedge.exe",
+                        "cmdline": ["msedge.exe", f"--user-data-dir={profile_dir}", "--app=http://127.0.0.1:8000"],
+                        "memory_info": MemoryInfo(200 * mib, 180 * mib),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 101,
+                        "ppid": 100,
+                        "name": "msedge.exe",
+                        "cmdline": ["msedge.exe", "--type=gpu-process"],
+                        "memory_info": MemoryInfo(120 * mib, 110 * mib),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 102,
+                        "ppid": 100,
+                        "name": "msedge.exe",
+                        "cmdline": [
+                            "msedge.exe",
+                            "--type=renderer",
+                            "--renderer-sub-type=extension",
+                            f"--user-data-dir={profile_dir}",
+                        ],
+                        "memory_info": MemoryInfo(90 * mib, 80 * mib),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 200,
+                        "ppid": 1,
+                        "name": "msedge.exe",
+                        "cmdline": ["msedge.exe", f"--user-data-dir={ordinary_profile}"],
+                        "memory_info": MemoryInfo(500 * mib, 450 * mib),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.managed_browser_process_payload(profile_dir=profile_dir)
+
+    assert payload["supported"] is True
+    assert payload["count"] == 3
+    assert payload["totalWorkingSetMB"] == 410
+    assert payload["totalPrivateMB"] == 370
+    assert {item["pid"] for item in payload["items"]} == {100, 101, 102}
+    assert {item["type"] for item in payload["items"]} == {"browser", "gpu-process", "renderer"}
+    assert any(item["subtype"] == "extension" for item in payload["items"])
+
+
+def test_unmanaged_backend_cleanup_payload_leaves_frontend_dev_servers_out(monkeypatch, tmp_path):
+    class FakeProc:
+        def __init__(self, info):
+            self.info = info
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(
+        process_inventory.psutil,
+        "process_iter",
+        lambda attrs: iter(
+            [
+                FakeProc(
+                    {
+                        "pid": 49780,
+                        "ppid": 1,
+                        "name": "python.exe",
+                        "cmdline": ["python", "scripts/web_workbench.py", "--port", "8013", "--no-browser"],
+                        "cwd": str(repo),
+                    }
+                ),
+                FakeProc(
+                    {
+                        "pid": 51518,
+                        "ppid": 1,
+                        "name": "node.exe",
+                        "cmdline": ["node", "node_modules/.bin/vite", "--host", "127.0.0.1"],
+                        "cwd": str(repo),
+                    }
+                ),
+            ]
+        ),
+    )
+
+    payload = process_inventory.unmanaged_workbench_process_payload(project_root=repo)
+    residual = process_inventory.residual_process_payload(project_root=repo)
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["pid"] == 49780
+    assert residual["count"] == 2
+
+
 def test_residual_process_payload_ignores_descendants_of_active_backend(monkeypatch, tmp_path):
     class FakeProc:
         def __init__(self, info):

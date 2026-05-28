@@ -151,6 +151,7 @@ def request_runtime_shutdown() -> dict[str, object]:
         message="Runtime shutdown requested from web UI.",
         fields={"source": "web_ui"},
     )
+    stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
     if _can_use_managed_launcher_shutdown():
@@ -167,6 +168,7 @@ def request_runtime_shutdown() -> dict[str, object]:
                 outcome="accepted",
                 fields=_shutdown_event_fields(
                     mode="runtime_manager",
+                    stopped_chat_room_rounds=stopped_chat_room_rounds,
                     stopped_chat_turns=stopped_chat_turns,
                     stopped_evolution_runs=stopped_evolution_runs,
                 ),
@@ -180,6 +182,7 @@ def request_runtime_shutdown() -> dict[str, object]:
                     en="Closing the workbench. The app window will close after the backend stops.",
                 ),
                 "chatTurns": stopped_chat_turns,
+                "chatRoomRounds": stopped_chat_room_rounds,
                 "evolutionRuns": stopped_evolution_runs,
             }
         except Exception:
@@ -190,6 +193,7 @@ def request_runtime_shutdown() -> dict[str, object]:
                 outcome="accepted",
                 fields=_shutdown_event_fields(
                     mode="managed_fallback",
+                    stopped_chat_room_rounds=stopped_chat_room_rounds,
                     stopped_chat_turns=stopped_chat_turns,
                     stopped_evolution_runs=stopped_evolution_runs,
                 ),
@@ -203,6 +207,7 @@ def request_runtime_shutdown() -> dict[str, object]:
                     en="Closing the workbench. The app window will close after the backend stops.",
                 ),
                 "chatTurns": stopped_chat_turns,
+                "chatRoomRounds": stopped_chat_room_rounds,
                 "evolutionRuns": stopped_evolution_runs,
             }
 
@@ -213,6 +218,7 @@ def request_runtime_shutdown() -> dict[str, object]:
         outcome="accepted",
         fields=_shutdown_event_fields(
             mode="local",
+            stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
             stopped_evolution_runs=stopped_evolution_runs,
         ),
@@ -226,6 +232,7 @@ def request_runtime_shutdown() -> dict[str, object]:
             en="Shutting down the local backend.",
         ),
         "chatTurns": stopped_chat_turns,
+        "chatRoomRounds": stopped_chat_room_rounds,
         "evolutionRuns": stopped_evolution_runs,
     }
 
@@ -239,6 +246,7 @@ def request_runtime_restart() -> dict[str, object]:
         message="Runtime restart requested from web UI.",
         fields={"source": "web_ui"},
     )
+    stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
 
@@ -257,6 +265,7 @@ def request_runtime_restart() -> dict[str, object]:
             level="error",
             fields=_restart_event_fields(
                 mode="runtime_manager",
+                stopped_chat_room_rounds=stopped_chat_room_rounds,
                 stopped_chat_turns=stopped_chat_turns,
                 stopped_evolution_runs=stopped_evolution_runs,
             )
@@ -271,6 +280,7 @@ def request_runtime_restart() -> dict[str, object]:
         outcome="accepted",
         fields=_restart_event_fields(
             mode="runtime_manager",
+            stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
             stopped_evolution_runs=stopped_evolution_runs,
         )
@@ -286,6 +296,7 @@ def request_runtime_restart() -> dict[str, object]:
             en="Restarting the workbench safely. The runtime manager will stop the old backend before starting it again.",
         ),
         "chatTurns": stopped_chat_turns,
+        "chatRoomRounds": stopped_chat_room_rounds,
         "evolutionRuns": stopped_evolution_runs,
     }
 
@@ -339,14 +350,17 @@ def _record_restart_event(
 def _shutdown_event_fields(
     *,
     mode: str,
+    stopped_chat_room_rounds: list[dict[str, object]],
     stopped_chat_turns: list[dict[str, object]],
     stopped_evolution_runs: list[dict[str, object]],
 ) -> dict[str, object]:
     return {
         "source": "web_ui",
         "mode": mode,
+        "chatRoomRoundCount": len(stopped_chat_room_rounds),
         "chatTurnCount": len(stopped_chat_turns),
         "evolutionRunCount": len(stopped_evolution_runs),
+        "chatRoomRoundStatuses": _status_counts(stopped_chat_room_rounds),
         "chatTurnStatuses": _status_counts(stopped_chat_turns),
         "evolutionRunStatuses": _status_counts(stopped_evolution_runs),
         "evolutionRunKinds": sorted(
@@ -362,14 +376,17 @@ def _shutdown_event_fields(
 def _restart_event_fields(
     *,
     mode: str,
+    stopped_chat_room_rounds: list[dict[str, object]],
     stopped_chat_turns: list[dict[str, object]],
     stopped_evolution_runs: list[dict[str, object]],
 ) -> dict[str, object]:
     return {
         "source": "web_ui",
         "mode": mode,
+        "chatRoomRoundCount": len(stopped_chat_room_rounds),
         "chatTurnCount": len(stopped_chat_turns),
         "evolutionRunCount": len(stopped_evolution_runs),
+        "chatRoomRoundStatuses": _status_counts(stopped_chat_room_rounds),
         "chatTurnStatuses": _status_counts(stopped_chat_turns),
         "evolutionRunStatuses": _status_counts(stopped_evolution_runs),
         "evolutionRunKinds": sorted(
@@ -522,6 +539,31 @@ def _stop_active_chat_turns_before_shutdown() -> list[dict[str, object]]:
     return stopped
 
 
+def _stop_active_chat_room_rounds_before_shutdown() -> list[dict[str, object]]:
+    """Persist active chat room round stop state before the backend/launcher is closed."""
+
+    reason = text_for(
+        get_web_language(),
+        zh="工作台关闭前停止活跃群聊轮次。",
+        en="Stopped active chat room rounds before workbench shutdown.",
+    )
+    try:
+        from . import chat_room_service
+
+        return list(chat_room_service.force_stop_active_chat_room_rounds_for_shutdown(reason))
+    except Exception as exc:
+        return [
+            {
+                "kind": "chat_room_round",
+                "roomId": "",
+                "runId": "",
+                "roundId": "",
+                "status": "failed",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        ]
+
+
 def _stop_active_evolution_runs_before_shutdown() -> list[dict[str, object]]:
     """Release active evolution leases before closing the workbench."""
 
@@ -603,6 +645,16 @@ def _work_run_summary() -> dict[str, dict[str, dict | None]]:
             "self_evolution_run": self_latest,
             "supervised_evolution_run": supervised_latest,
             "supervised_worktree_evolution_run": supervised_worktree_latest,
+        },
+        "activeItems": {
+            "chat_turn": [
+                item for item in (chat.get("activeItems") or [])
+                if isinstance(item, dict)
+            ],
+            "chat_room_round": [
+                item for item in (chat_room.get("activeItems") or [])
+                if isinstance(item, dict)
+            ],
         },
     }
 
@@ -974,23 +1026,45 @@ def _same_project_root(left: str, right: str) -> bool:
 
 
 def _active_work_runs(work_runs: dict) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    active_items = work_runs.get("activeItems") if isinstance(work_runs, dict) else {}
+    if isinstance(active_items, dict):
+        for kind, payloads in active_items.items():
+            if not isinstance(payloads, list):
+                continue
+            for payload in payloads:
+                if not isinstance(payload, dict):
+                    continue
+                item = _active_work_run_item(str(kind or ""), payload)
+                key = (item.get("kind") or "", item.get("runId") or "")
+                if item and key not in seen:
+                    seen.add(key)
+                    items.append(item)
+
     active = work_runs.get("active") if isinstance(work_runs, dict) else {}
     if not isinstance(active, dict):
-        return []
-    items: list[dict[str, str]] = []
+        return items
     for kind, payload in active.items():
         if not isinstance(payload, dict):
             continue
-        run_id = str(payload.get("runId") or payload.get("sessionId") or "").strip()
-        status = str(payload.get("status") or payload.get("currentPhase") or "").strip()
-        items.append(
-            {
-                "kind": str(kind or ""),
-                "runId": run_id,
-                "status": status,
-            }
-        )
+        item = _active_work_run_item(str(kind or ""), payload)
+        key = (item.get("kind") or "", item.get("runId") or "")
+        if item and key not in seen:
+            seen.add(key)
+            items.append(item)
     return items
+
+
+def _active_work_run_item(kind: str, payload: dict) -> dict[str, str]:
+    run_id = str(payload.get("runId") or payload.get("sessionId") or "").strip()
+    status = str(payload.get("status") or payload.get("currentPhase") or "").strip()
+    return {
+        "kind": kind,
+        "runId": run_id,
+        "status": status,
+        "sessionId": str(payload.get("sessionId") or "").strip(),
+    }
 
 
 def _active_work_run_detail(lang: str, active_work_runs: list[dict[str, str]]) -> str:
