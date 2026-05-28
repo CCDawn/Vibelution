@@ -9,9 +9,13 @@ describe("ToolsRoute layout contract", () => {
     expect(routerSource).toContain("<ToolsRoute />");
     expect(routerSource).not.toContain('path: "tools"');
     expect(routerSource).not.toContain('to="/agents/tools" replace');
-    expect(routeSource).toContain('<AgentManagementNav active="tools" />');
-    expect(routeSource.indexOf('<AgentManagementNav active="tools" />')).toBeGreaterThan(routeSource.indexOf("</header>"));
-    expect(routeSource.indexOf('<AgentManagementNav active="tools" />')).toBeLessThan(routeSource.indexOf("styles.summaryGrid"));
+    expect(routeSource).toContain('<AgentManagementNav active="tools" className={styles.managementNav} />');
+    expect(routeSource.indexOf('<AgentManagementNav active="tools" className={styles.managementNav} />')).toBeGreaterThan(
+      routeSource.indexOf("</header>"),
+    );
+    expect(routeSource.indexOf('<AgentManagementNav active="tools" className={styles.managementNav} />')).toBeLessThan(
+      routeSource.indexOf("styles.summaryGrid"),
+    );
   });
 
   it("keeps manual generated-tool creation out of the page", () => {

@@ -2213,8 +2213,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </button>
       </header>
 
-      <AgentManagementNav active="memory" />
-      {renderSubnav()}
+      <div className={styles.controlStrip}>
+        <AgentManagementNav active="memory" className={styles.managementNav} />
+        {renderSubnav()}
+      </div>
 
       <div className={styles.viewStack}>
         {forcedView === "overview"

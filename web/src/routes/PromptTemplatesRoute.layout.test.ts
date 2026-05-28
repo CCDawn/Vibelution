@@ -7,9 +7,13 @@ describe("PromptTemplatesRoute layout contract", () => {
   it("lives inside Agent management navigation with the shared nav row", () => {
     expect(routerSource).toContain('path: "agents/prompts"');
     expect(routerSource).toContain("<PromptTemplatesRoute />");
-    expect(routeSource).toContain('<AgentManagementNav active="prompts" />');
-    expect(routeSource.indexOf('<AgentManagementNav active="prompts" />')).toBeGreaterThan(routeSource.indexOf("</header>"));
-    expect(routeSource.indexOf('<AgentManagementNav active="prompts" />')).toBeLessThan(routeSource.indexOf("styles.summaryGrid"));
+    expect(routeSource).toContain('<AgentManagementNav active="prompts" className={styles.managementNav} />');
+    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNav} />')).toBeGreaterThan(
+      routeSource.indexOf("</header>"),
+    );
+    expect(routeSource.indexOf('<AgentManagementNav active="prompts" className={styles.managementNav} />')).toBeLessThan(
+      routeSource.indexOf("styles.summaryGrid"),
+    );
   });
 
   it("loads prompt templates and linked Agents through the existing APIs", () => {

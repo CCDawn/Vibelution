@@ -1,6 +1,6 @@
 .route {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
@@ -13,7 +13,8 @@
   justify-content: space-between;
   gap: var(--route-topbar-gap);
   min-width: 0;
-  padding: var(--route-topbar-padding);
+  min-height: 36px;
+  padding: 3px 12px;
   border-bottom: 1px solid var(--border-strong);
   background: var(--surface-header);
 }
@@ -22,16 +23,16 @@
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
   align-items: baseline;
-  gap: 2px 8px;
+  gap: 1px 7px;
   min-width: 0;
 }
 
 .eyebrow,
 .panelEyebrow {
-  margin: 0 0 2px;
+  margin: 0 0 1px;
   color: var(--fg-tertiary);
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
+  font-size: 0.61rem;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
@@ -39,7 +40,7 @@
   margin: 0;
   font-family: var(--font-body);
   font-weight: 760;
-  font-size: var(--route-topbar-title-size);
+  font-size: 0.95rem;
   line-height: 1.1;
   white-space: nowrap;
 }
@@ -48,8 +49,8 @@
   min-width: 0;
   margin: 0;
   color: var(--fg-secondary);
-  font-size: var(--route-topbar-subtitle-size);
-  line-height: 1.25;
+  font-size: 0.7rem;
+  line-height: 1.18;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -60,9 +61,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 7px 12px;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-card);
@@ -75,16 +76,29 @@
   background: var(--surface-panel-hover);
 }
 
+.controlStrip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 12px 0;
+}
+
+.managementNav {
+  margin: 0;
+}
+
 .subnav {
   display: inline-flex;
   align-items: center;
   justify-self: start;
-  gap: 6px;
+  gap: 3px;
   min-width: 0;
-  margin: 8px 12px 0;
+  margin: 0;
   padding: 3px;
   border: 1px solid var(--border-soft);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-control);
   background: var(--surface-panel-muted);
 }
 
@@ -92,9 +106,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 30px;
+  min-height: 24px;
   min-width: 74px;
-  padding: 0 11px;
+  padding: 0 9px;
   border-radius: var(--radius-control);
   color: var(--fg-secondary);
   font-size: 0.75rem;
@@ -123,27 +137,38 @@
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: var(--route-summary-gap);
-  padding: 8px 12px 0;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  margin: 4px 12px 0;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 90%, var(--surface-card));
 }
 
 .summaryCard {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: baseline;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
-  padding: var(--route-summary-padding);
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-panel);
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 0;
+  border-right: 1px solid color-mix(in srgb, var(--border-soft) 58%, transparent);
+  border-radius: 0;
+  background: transparent;
+}
+
+.summaryCard:last-child {
+  border-right: 0;
 }
 
 .summaryCard span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
+  font-size: 0.61rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   white-space: nowrap;
 }
 
@@ -151,7 +176,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -327,9 +352,9 @@
 .overviewGrid,
 .effectiveGrid {
   display: grid;
-  gap: 12px;
+  gap: 8px;
   min-height: 0;
-  padding: var(--route-workspace-padding);
+  padding: 8px 10px;
 }
 
 .overviewGrid {
@@ -346,10 +371,10 @@
 .manageListPanel {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 9px;
   min-height: 0;
   min-width: 0;
-  padding: 14px;
+  padding: 10px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -360,36 +385,36 @@
 }
 
 .reviewQueuePanel {
-  margin: 12px 14px 0;
+  margin: 8px 10px 0;
 }
 
 .panelLead,
 .manageFormPanel > p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.82rem;
-  line-height: 1.45;
+  font-size: 0.76rem;
+  line-height: 1.32;
 }
 
 .compactMemoryList {
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: 6px;
   min-height: 0;
 }
 
 .reviewQueueList {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .reviewQueueItem {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: start;
   min-width: 0;
-  padding: 11px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
@@ -398,8 +423,8 @@
 .reviewRank {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
   border-radius: 999px;
   color: var(--accent-warm-2);
@@ -410,21 +435,21 @@
 
 .reviewQueueBody {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
 .reviewReasonList {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .reviewReasonPill {
   display: inline-flex;
   align-items: center;
-  min-height: 22px;
-  padding: 0 7px;
+  min-height: 20px;
+  padding: 0 6px;
   border: 1px solid color-mix(in srgb, var(--state-warning) 26%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--state-warning) 9%, transparent);
@@ -445,8 +470,8 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  margin: 8px 14px 0;
-  padding: 8px 10px;
+  margin: 6px 10px 0;
+  padding: 6px 8px;
   border: 1px solid color-mix(in srgb, var(--state-warning) 30%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--state-warning) 10%, transparent);
@@ -469,10 +494,10 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(250px, 300px) minmax(360px, 0.95fr) minmax(420px, 1.1fr);
-  gap: 12px;
+  grid-template-columns: minmax(230px, 280px) minmax(340px, 0.95fr) minmax(440px, 1.1fr);
+  gap: 8px;
   min-height: 0;
-  padding: var(--route-workspace-padding);
+  padding: 8px 10px;
 }
 
 .manageFormPanel {
@@ -496,16 +521,16 @@
 .itemPanel {
   display: grid;
   grid-template-rows: auto auto auto auto minmax(0, 1fr);
-  gap: 12px;
-  padding: 14px;
+  gap: 9px;
+  padding: 10px;
 }
 
 .detailPanel {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 9px;
   overflow: auto;
-  padding: 14px;
+  padding: 10px;
 }
 
 .panelHeader {
@@ -538,8 +563,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 24px;
+  padding: 0 7px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
@@ -552,8 +577,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 34px;
-  padding: 0 10px;
+  min-height: 30px;
+  padding: 0 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
@@ -578,7 +603,7 @@
 .filterGroup {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .filterButton,
@@ -587,8 +612,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 28px;
-  padding: 4px 8px;
+  min-height: 24px;
+  padding: 3px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   background: var(--surface-card);
@@ -618,7 +643,7 @@
 .itemList {
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: 6px;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
@@ -666,11 +691,11 @@
 
 .sourceButton {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  min-height: 54px;
-  padding: 9px 10px;
+  gap: 8px;
+  min-height: 46px;
+  padding: 7px 8px;
 }
 
 .sourceButtonActive,
@@ -683,8 +708,8 @@
 .sourceIcon {
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, transparent);
   border-radius: 8px;
   color: var(--accent-cool);
@@ -711,7 +736,7 @@
 .itemPath,
 .itemSummary {
   color: var(--fg-secondary);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .sourceCopy span,
@@ -744,13 +769,13 @@
 
 .itemButton {
   display: grid;
-  gap: 7px;
-  padding: 11px 12px;
+  gap: 5px;
+  padding: 8px 9px;
 }
 
 .itemContentButton {
   display: grid;
-  gap: 7px;
+  gap: 5px;
   width: 100%;
   min-width: 0;
   overflow: hidden;
@@ -783,15 +808,15 @@
 .usageList {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px;
 }
 
 .channelPill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 22px;
-  padding: 0 7px;
+  min-height: 20px;
+  padding: 0 6px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 20%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
@@ -804,8 +829,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 22px;
-  padding: 0 7px;
+  min-height: 20px;
+  padding: 0 6px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   background: color-mix(in srgb, var(--surface-card) 74%, transparent);
@@ -836,7 +861,7 @@
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
-  padding-bottom: 12px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -851,14 +876,14 @@
 .visibilityHeader p {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.84rem;
-  line-height: 1.45;
+  font-size: 0.76rem;
+  line-height: 1.32;
 }
 
 .factGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .factGrid section,
@@ -876,7 +901,7 @@
 .factGrid section {
   display: grid;
   gap: 4px;
-  padding: 10px;
+  padding: 8px;
 }
 
 .factGrid span {
@@ -898,8 +923,8 @@
 .managementPanel,
 .sectionPanel {
   display: grid;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px;
 }
 
 .impactPanel {
@@ -1246,8 +1271,8 @@
 .emptyDetail {
   display: grid;
   place-items: center;
-  min-height: 160px;
-  padding: 18px;
+  min-height: 120px;
+  padding: 14px;
   border: 1px dashed var(--border-soft);
   border-radius: 8px;
   color: var(--fg-secondary);
@@ -1317,6 +1342,11 @@
     display: grid;
     grid-template-columns: 1fr;
     align-items: start;
+  }
+
+  .controlStrip,
+  .subnav {
+    grid-template-columns: 1fr;
   }
 
   .subnav {

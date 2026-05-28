@@ -172,25 +172,27 @@ export function SkillsRoute() {
         </button>
       </header>
 
-      <AgentManagementNav active="skills" />
+      <div className={styles.controlStrip}>
+        <AgentManagementNav active="skills" className={styles.managementNav} />
 
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>Total</span>
-          <strong>{counts.total}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>Codex</span>
-          <strong>{counts.codex}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>Agents</span>
-          <strong>{counts.agents}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.readOnly}</span>
-          <strong>{libraryQuery.data?.mode ?? "read_only"}</strong>
-        </section>
+        <div className={styles.summaryGrid}>
+          <section className={styles.summaryCard}>
+            <span>Total</span>
+            <strong>{counts.total}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>Codex</span>
+            <strong>{counts.codex}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>Agents</span>
+            <strong>{counts.agents}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.readOnly}</span>
+            <strong>{libraryQuery.data?.mode ?? "read_only"}</strong>
+          </section>
+        </div>
       </div>
 
       <main className={styles.workspace}>

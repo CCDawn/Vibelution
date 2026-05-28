@@ -813,25 +813,27 @@ export function ToolsRoute() {
         </button>
       </header>
 
-      <AgentManagementNav active="tools" />
+      <div className={styles.controlStrip}>
+        <AgentManagementNav active="tools" className={styles.managementNav} />
 
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{t("toolsTotal")}</span>
-          <strong>{counts?.total ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{t("toolsBuiltIn")}</span>
-          <strong>{counts?.builtIn ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{t("toolsGenerated")}</span>
-          <strong>{counts?.generated ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{t("toolsLlmVisible")}</span>
-          <strong>{counts?.llmVisible ?? 0}</strong>
-        </section>
+        <div className={styles.summaryGrid}>
+          <section className={styles.summaryCard}>
+            <span>{t("toolsTotal")}</span>
+            <strong>{counts?.total ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{t("toolsBuiltIn")}</span>
+            <strong>{counts?.builtIn ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{t("toolsGenerated")}</span>
+            <strong>{counts?.generated ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{t("toolsLlmVisible")}</span>
+            <strong>{counts?.llmVisible ?? 0}</strong>
+          </section>
+        </div>
       </div>
 
       <section className={styles.agentScopeBar}>
