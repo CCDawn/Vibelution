@@ -82,4 +82,13 @@ describe("RuntimeScenesPane layout contract", () => {
     expect(paneSource).toContain("scene.researchLogs?.length");
     expect(paneSource).toContain("research: \"科研\"");
   });
+
+  it("can initialize and update the active runtime scene from deep-link props", () => {
+    expect(paneSource).toContain("initialSceneId?: string");
+    expect(paneSource).toContain("initialPath?: string");
+    expect(paneSource).toContain("const [activeSceneId, setActiveSceneId] = useState(initialSceneId)");
+    expect(paneSource).toContain("initialSceneId && initialPath ? { [initialSceneId]: initialPath } : {}");
+    expect(paneSource).toContain("setActiveSceneId(initialSceneId)");
+    expect(paneSource).toContain("[initialPath, initialSceneId]");
+  });
 });

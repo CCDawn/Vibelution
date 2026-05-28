@@ -526,9 +526,10 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any]:
         "fixedRole": True,
         "selfEvolutionRole": role_key,
         "selfEvolutionRoleLabel": label,
+        "functionalDisplayName": label,
     }
     if (
-        str(existing.get("displayName") or "").strip() != label
+        str((metadata or {}).get("functionalDisplayName") or "").strip() != label
         or str(existing.get("primaryMode") or "").strip() != "self_evolution"
         or str(existing.get("roleKey") or "").strip() != role_key
         or str(existing.get("profileId") or "").strip() != profile_id
@@ -545,6 +546,7 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any]:
             prompt_template_id=prompt_template_id,
             metadata=expected_metadata,
             status="active",
+            preserve_generated_display_name=True,
         )
     return existing
 

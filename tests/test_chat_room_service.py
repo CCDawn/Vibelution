@@ -86,6 +86,41 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
     assert list_session_calls == 2
 
 
+def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = "agent-missing"
+    state["conversations"][0]["agentId"] = "agent-missing"
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(
+        title="断链群聊",
+        participant_session_ids=["session-alpha"],
+    )
+
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+
+    participant = detail["participants"][0]
+    assert participant["sessionId"] == "session-alpha"
+    assert participant["agentId"] == "agent-missing"
+    assert participant["agentMissing"] is True
+    assert participant["agentStatusCode"] == "missing_agent"
+    assert "缺少有效 Agent" in participant["agentStatusMessage"]
+    assert participant["enabled"] is False
+
+    try:
+        chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "无效成员不应被调度",
+            agent_runner=lambda participant, prompt, context: {"status": "completed"},
+        )
+    except chat_room_service.ChatRoomValidationError as exc:
+        assert "没有可发言" in str(exc)
+    else:
+        raise AssertionError("missing-agent participant should not be scheduled")
+
+
 def test_chat_room_event_stream_yields_initial_detail_snapshot(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -315,7 +350,7 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_profile
         for line in event_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-    assert captured["workspace_path"] == str((tmp_path / "workspace" / "sessions" / "session-beta").resolve())
+    assert captured["workspace_path"] == str((tmp_path / "workspace" / "agents" / agent_id).resolve())
     assert captured["primary_model"] == "explorer-model"
     assert f"AgentId: {agent_id}" in captured["runtime_context"]
     assert captured["history"]
@@ -649,6 +684,85 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
     assert final_detail["rounds"][-1]["status"] == "stopped"
     assert "pytest shutdown" in final_detail["rounds"][-1]["summary"]
     assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
+
+
+def test_stop_chat_room_round_cancels_active_round_and_publishes_ready_detail(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    room = chat_room_service.create_chat_room(
+        title="可停止群聊",
+        participant_session_ids=["session-alpha", "session-beta"],
+    )
+
+    runner_started = threading.Event()
+    release_runner = threading.Event()
+
+    def blocking_runner(participant, prompt, context):
+        runner_started.set()
+        assert release_runner.wait(2.0)
+        return {"status": "completed", "raw_output": "late response", "summary": "late"}
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-user-stop")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", executor)
+
+    try:
+        started = chat_room_service.start_chat_room_round(
+            room["roomId"],
+            "需要停止的讨论",
+            agent_runner=blocking_runner,
+            background=True,
+        )
+        assert runner_started.wait(1.0)
+
+        stopped = chat_room_service.stop_chat_room_round(room["roomId"], reason="pytest user stop")
+
+        assert started["activeRoundId"]
+        assert stopped["status"] == "ready"
+        assert stopped["activeRoundId"] == ""
+        latest_round = stopped["rounds"][-1]
+        assert latest_round["roundId"] == started["activeRoundId"]
+        assert latest_round["status"] == "stopped"
+        assert "pytest user stop" in latest_round["summary"]
+        assert chat_room_service.load_chat_room_work_run_summary()["active"] is None
+        user_stop_events = [
+            event
+            for event in recorded_events
+            if event[0][:3] == ("chat_room", "round", "chat_room.round.user_stopped")
+        ]
+        assert len(user_stop_events) == 1
+        assert user_stop_events[0][1]["outcome"] == "stopped"
+        assert user_stop_events[0][1]["lifecycle"] is True
+        assert user_stop_events[0][1]["fields"]["roomId"] == room["roomId"]
+        assert user_stop_events[0][1]["fields"]["roundId"] == started["activeRoundId"]
+        assert user_stop_events[0][1]["fields"]["reason"] == "pytest user stop"
+    finally:
+        release_runner.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert final_detail["rounds"][-1]["status"] == "stopped"
+
+
+def test_stop_chat_room_round_rejects_room_without_active_round(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    room = chat_room_service.create_chat_room(title="空闲群聊", participant_session_ids=["session-alpha"])
+
+    try:
+        chat_room_service.stop_chat_room_round(room["roomId"])
+    except chat_room_service.ChatRoomBusyError as exc:
+        assert "没有正在运行" in str(exc)
+    else:
+        raise AssertionError("idle chat room stop should fail")
 
 
 def test_opportunistic_chat_room_mode_prioritizes_configured_speakers(tmp_path, monkeypatch):

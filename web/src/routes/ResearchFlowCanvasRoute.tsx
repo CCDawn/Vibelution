@@ -243,12 +243,6 @@ const FLOW_NODE_ACTION_ALIASES: Record<string, string> = {
   evidence_review: "review",
   theme_generation: "themes",
   theme_card: "card",
-  human_choice: "human_choice",
-  knowledge_store: "knowledge_store",
-  knowledge_lookup: "knowledge_lookup",
-  literature_project_parse: "literature_project_parse",
-  semantic_cluster: "semantic_cluster",
-  novelty_reverse_check: "novelty_reverse_check",
 };
 
 type FlowContract = {
@@ -262,55 +256,19 @@ const RESEARCH_FLOW_NODE_CONTRACTS: Record<string, FlowContract> = {
   broad: {
     inputs: [],
     outputs: {
-      completed: ["sources", "research_leads", "knowledge_candidates"],
-      needs_evidence: ["sources", "evidence_requests"],
-    },
-    terminal: false,
-  },
-  knowledge_store: {
-    inputs: [["sources"], ["knowledge_candidates"]],
-    outputs: {
-      completed: ["knowledge_entries", "knowledge_context"],
-    },
-    terminal: false,
-  },
-  knowledge_lookup: {
-    inputs: [["knowledge_entries"], ["sources"], ["knowledge_context"]],
-    outputs: {
-      completed: ["knowledge_context", "sources"],
+      completed: ["sources", "research_leads", "evidence_context"],
     },
     terminal: false,
   },
   deep: {
-    inputs: [["knowledge_context"], ["sources"], ["evidence_requests"], ["research_leads"]],
+    inputs: [["evidence_context"], ["sources"], ["evidence_requests"], ["research_leads"]],
     outputs: {
       completed: ["sources", "evidence_context", "research_leads"],
     },
     terminal: false,
   },
-  literature_project_parse: {
-    inputs: [["sources"]],
-    outputs: {
-      completed: ["parsed_records", "source_signals"],
-    },
-    terminal: false,
-  },
-  semantic_cluster: {
-    inputs: [["parsed_records"]],
-    outputs: {
-      completed: ["clusters", "gaps"],
-    },
-    terminal: false,
-  },
-  novelty_reverse_check: {
-    inputs: [["clusters"], ["gaps"]],
-    outputs: {
-      completed: ["novelty_evidence", "evidence_context"],
-    },
-    terminal: false,
-  },
   review: {
-    inputs: [["novelty_evidence"], ["evidence_context"], ["sources"], ["parsed_records"]],
+    inputs: [["evidence_context"], ["sources"], ["research_leads"]],
     outputs: {
       approved: ["approved_evidence"],
       needs_evidence: ["evidence_requests"],
@@ -322,19 +280,12 @@ const RESEARCH_FLOW_NODE_CONTRACTS: Record<string, FlowContract> = {
   themes: {
     inputs: [["approved_evidence"]],
     outputs: {
-      completed: ["candidate_themes"],
-    },
-    terminal: false,
-  },
-  human_choice: {
-    inputs: [["candidate_themes"]],
-    outputs: {
       selected: ["selected_theme"],
     },
     terminal: false,
   },
   card: {
-    inputs: [["selected_theme"]],
+    inputs: [["candidate_themes"], ["selected_theme"]],
     outputs: {
       completed: ["theme_card"],
     },
@@ -348,7 +299,7 @@ type ResearchModuleTemplate = Pick<
 > & {
   key: string;
   baseId: string;
-  group: "能力模块" | "Agent模块" | "人工/产物" | "自定义模板";
+  group: "Agent模块" | "自定义模板";
 };
 
 type ResearchEdgeTemplate = {
@@ -368,76 +319,16 @@ type ResearchCustomTemplates = {
 
 type ResearchTemplateStorage = Pick<Storage, "getItem" | "setItem">;
 
-const DEFAULT_RESEARCH_MODULE_TEMPLATE_KEY = "knowledge_lookup";
-const RESEARCH_MODULE_TEMPLATE_GROUPS: ResearchModuleTemplate["group"][] = ["能力模块", "Agent模块", "人工/产物", "自定义模板"];
+const DEFAULT_RESEARCH_MODULE_TEMPLATE_KEY = "broad_search";
+const RESEARCH_MODULE_TEMPLATE_GROUPS: ResearchModuleTemplate["group"][] = ["Agent模块", "自定义模板"];
 const RESEARCH_EDGE_TEMPLATE_GROUPS: ResearchEdgeTemplate["group"][] = ["主流程", "人工/异常", "自定义模板"];
 
 const RESEARCH_MODULE_TEMPLATE_CANDIDATES = [
   {
-    key: "knowledge_store",
-    baseId: "knowledge_store",
-    group: "能力模块",
-    label: "科研知识入库",
-    type: "tool",
-    status: "idle",
-    agentKey: "knowledge_store",
-    promptKey: "",
-    description: "把搜索得到的来源、论断、证据和缺口写入 ResearchKnowledgeBase，供后续调研、自进化记忆和避免重复搜索复用。",
-    routeCondition: "搜索完成后自动写入知识库。",
-  },
-  {
-    key: "knowledge_lookup",
-    baseId: "knowledge_lookup",
-    group: "能力模块",
-    label: "知识库检索",
-    type: "tool",
-    status: "idle",
-    agentKey: "knowledge_lookup",
-    promptKey: "",
-    description: "从本地科研知识库检索已有来源、论断、证据和缺口，给后续搜索提供上下文并减少重复搜索。",
-    routeCondition: "知识入库完成后先查本地知识库。",
-  },
-  {
-    key: "literature_project_parse",
-    baseId: "literature_project_parse",
-    group: "能力模块",
-    label: "文献/项目解析",
-    type: "tool",
-    status: "idle",
-    agentKey: "literature_project_parse",
-    promptKey: "",
-    description: "对论文、PDF、GitHub README 和项目结构做结构化解析，提取方法、数据集、指标、限制和可复用组件。",
-    routeCondition: "深搜拿到文献、项目或数据集来源后解析。",
-  },
-  {
-    key: "semantic_cluster",
-    baseId: "semantic_cluster",
-    group: "能力模块",
-    label: "语义去重与聚类",
-    type: "tool",
-    status: "idle",
-    agentKey: "semantic_cluster",
-    promptKey: "",
-    description: "对来源、论断和候选问题做去重、聚类和低密度空白识别，减少重复证据并暴露交叉创新点。",
-    routeCondition: "解析完成后进行语义去重和簇级空白发现。",
-  },
-  {
-    key: "novelty_reverse_check",
-    baseId: "novelty_reverse_check",
-    group: "能力模块",
-    label: "新颖性反查",
-    type: "tool",
-    status: "idle",
-    agentKey: "novelty_reverse_check",
-    promptKey: "",
-    description: "围绕候选问题、关键词和机制组合反向检索论文、网页和 GitHub，标记已有相似工作与仍未覆盖的缺口。",
-    routeCondition: "聚类后对高潜力空白做反向查重。",
-  },
-  {
     key: "broad_search",
     baseId: "broad_search",
     group: "Agent模块",
-    label: "广撒网探索",
+    label: "广撒网 agent",
     type: "agent",
     status: "idle",
     agentKey: "broad",
@@ -449,7 +340,7 @@ const RESEARCH_MODULE_TEMPLATE_CANDIDATES = [
     key: "deep_search",
     baseId: "deep_search",
     group: "Agent模块",
-    label: "定向深搜",
+    label: "定向深搜 agent",
     type: "agent",
     status: "idle",
     agentKey: "deep",
@@ -461,19 +352,19 @@ const RESEARCH_MODULE_TEMPLATE_CANDIDATES = [
     key: "evidence_review",
     baseId: "evidence_review",
     group: "Agent模块",
-    label: "证据审查",
+    label: "证据审查 agent",
     type: "agent",
     status: "idle",
     agentKey: "review",
     promptKey: "review",
     description: "审查来源可靠性、论断可追溯性和缺失证据，决定是否回到补搜。",
-    routeCondition: "证据链或新颖性反查结果准备完成后进入。",
+    routeCondition: "深搜完成后进入；若证据不足则回到定向深搜。",
   },
   {
     key: "theme_generation",
     baseId: "theme_generation",
     group: "Agent模块",
-    label: "主题生成",
+    label: "主题生成 agent",
     type: "agent",
     status: "idle",
     agentKey: "themes",
@@ -482,33 +373,21 @@ const RESEARCH_MODULE_TEMPLATE_CANDIDATES = [
     routeCondition: "证据审查通过或用户手动确认继续。",
   },
   {
-    key: "human_choice",
-    baseId: "human_choice",
-    group: "人工/产物",
-    label: "人工选题确认",
-    type: "human",
-    status: "idle",
-    agentKey: "",
-    promptKey: "",
-    description: "用户比较候选主题卡，选择最值得推进的方向。",
-    routeCondition: "主题候选生成后等待确认。",
-  },
-  {
     key: "theme_card",
     baseId: "theme_card",
-    group: "人工/产物",
-    label: "正式主题卡",
-    type: "artifact",
+    group: "Agent模块",
+    label: "主题卡 agent",
+    type: "agent",
     status: "idle",
     agentKey: "card",
     promptKey: "card",
     description: "产出赛题要求的科学假设与研究计划结构，包括数据集、方法、实验、指标和参考文献。",
-    routeCondition: "用户确认主题后生成。",
+    routeCondition: "用户确认主题生成 agent 的候选方向后生成正式主题卡。",
   },
 ];
 
 export const RESEARCH_MODULE_TEMPLATES: ResearchModuleTemplate[] = RESEARCH_MODULE_TEMPLATE_CANDIDATES.filter((template) =>
-  ["能力模块", "Agent模块", "人工/产物"].includes(template.group),
+  template.group === "Agent模块",
 ) as ResearchModuleTemplate[];
 
 function cloneCanvas(canvas: ResearchFlowCanvas): ResearchFlowCanvas {

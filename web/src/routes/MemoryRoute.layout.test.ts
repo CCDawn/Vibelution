@@ -195,16 +195,27 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("overviewQuery.isError ? (");
   });
 
-  it("is registered as an independent top-level route and global nav item", () => {
-    expect(routerSource).toContain('path: "memory"');
+  it("is registered as an Agent management section with memory subviews", () => {
+    expect(routerSource).toContain('path: "agents/memory"');
     expect(routerSource).toContain('<MemoryRoute forcedView="overview" />');
-    expect(routerSource).toContain('path: "memory/effective"');
+    expect(routerSource).toContain('path: "agents/memory/effective"');
     expect(routerSource).toContain('<MemoryRoute forcedView="effective" />');
-    expect(routerSource).toContain('path: "memory/manage"');
+    expect(routerSource).toContain('path: "agents/memory/manage"');
     expect(routerSource).toContain('<MemoryRoute forcedView="manage" />');
-    expect(routerSource).toContain('path: "memory/sources"');
+    expect(routerSource).toContain('path: "agents/memory/sources"');
     expect(routerSource).toContain('<MemoryRoute forcedView="sources" />');
-    expect(appShellSource).toContain('to="/memory"');
-    expect(appShellSource).toContain('t("navMemory")');
+    expect(routerSource).not.toContain('path: "memory"');
+    expect(routerSource).not.toContain('path: "memory/effective"');
+    expect(routerSource).not.toContain('path: "memory/manage"');
+    expect(routerSource).not.toContain('path: "memory/sources"');
+    expect(routerSource).not.toContain('to="/agents/memory" replace');
+    expect(routeSource).toContain('{ key: "overview", href: "/agents/memory" }');
+    expect(routeSource).toContain('to={`/agents/memory/sources?section=');
+    expect(routeSource).toContain('to={`/agents/memory/manage?section=');
+    expect(routeSource).toContain('<AgentManagementNav active="memory" />');
+    expect(routeSource.indexOf('<AgentManagementNav active="memory" />')).toBeGreaterThan(routeSource.indexOf("</header>"));
+    expect(routeSource.indexOf('<AgentManagementNav active="memory" />')).toBeLessThan(routeSource.indexOf("{renderSubnav()}"));
+    expect(routeSource.indexOf("{renderSubnav()}")).toBeLessThan(routeSource.indexOf("styles.viewStack"));
+    expect(appShellSource).not.toContain('to="/memory"');
   });
 });

@@ -268,6 +268,9 @@ export function LogsRoute() {
   const { lang, t, statusLabel } = useAppI18n();
   const queryClient = useQueryClient();
   const location = useLocation();
+  const runtimeSceneQuery = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const initialRuntimeSceneId = runtimeSceneQuery.get("scene") ?? "";
+  const initialRuntimeScenePath = runtimeSceneQuery.get("path") ?? "";
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [activeRootId, setActiveRootId] = useState<string>("");
@@ -1018,7 +1021,14 @@ export function LogsRoute() {
 
       <div ref={workspaceRef} className={styles.workspace} style={layoutStyle}>
         {activeRoot && isRuntimeScenesRoot ? (
-          <RuntimeScenesPane activeRoot={activeRoot} lang={lang} t={t} statusLabel={statusLabel} />
+          <RuntimeScenesPane
+            activeRoot={activeRoot}
+            lang={lang}
+            t={t}
+            statusLabel={statusLabel}
+            initialSceneId={initialRuntimeSceneId}
+            initialPath={initialRuntimeScenePath}
+          />
         ) : (
           <div ref={layoutRef} className={styles.resizableLayout}>
             <aside className={sidebarCollapsed ? `${styles.sidebar} ${styles.paneCollapsed}` : styles.sidebar} aria-hidden={sidebarCollapsed}>

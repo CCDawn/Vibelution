@@ -136,6 +136,10 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("syncChatRoomDetail(payload.detail)");
     expect(routeSource).toContain("browser.chat_room_stream.closed");
     expect(routeSource).toContain("handleStartGroupRound");
+    expect(routeSource).toContain("stopGroupRoundMutation");
+    expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/stop`");
+    expect(routeSource).toContain("handleStopGroupRound");
+    expect(routeSource).toContain("disabled={startGroupRoundMutation.isPending}");
     expect(routeSource).toContain("updateGroupRoomMutation");
     expect(routeSource).toContain("deleteGroupRoomMutation");
     expect(routeSource).toContain("groupManageTitleDraft");
@@ -165,6 +169,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.groupBubble).toBeTypeOf("string");
     expect(routeStyles.groupTypingDots).toBeTypeOf("string");
     expect(routeStyles.groupComposerBar).toBeTypeOf("string");
+    expect(routeStyles.groupStopButton).toBeTypeOf("string");
   });
 
   it("logs direct session stream close events for lifecycle diagnosis", () => {

@@ -31,6 +31,7 @@ from .routes.research import router as research_router
 from .routes.reset import router as reset_router
 from .routes.runtime import router as runtime_router
 from .routes.sessions import router as sessions_router
+from .routes.skills import router as skills_router
 from .routes.tools import router as tools_router
 from .services.runtime_scene_service import record_backend_api_event
 
@@ -205,6 +206,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
     app.include_router(chat_rooms_router, prefix="/api")
+    app.include_router(skills_router, prefix="/api")
     app.include_router(tools_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
     app.include_router(git_router, prefix="/api")

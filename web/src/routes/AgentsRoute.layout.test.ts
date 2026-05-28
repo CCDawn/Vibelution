@@ -10,11 +10,14 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
   });
 
-  it("keeps Agent Center as a first-class route and utility entry", () => {
+  it("keeps Agent management as a first-class top navigation route", () => {
     expect(routerSource).toContain('path: "agents"');
     expect(routerSource).toContain("<AgentsRoute />");
     expect(shellSource).toContain('to="/agents"');
     expect(shellSource).toContain('t("navAgents")');
+    expect(routeSource).toContain('<AgentManagementNav active="agents" />');
+    expect(routeSource.indexOf('<AgentManagementNav active="agents" />')).toBeGreaterThan(routeSource.indexOf("</header>"));
+    expect(routeSource.indexOf('<AgentManagementNav active="agents" />')).toBeLessThan(routeSource.indexOf("styles.summaryGrid"));
   });
 
   it("uses filter, table, and detail panels instead of a card wall", () => {
@@ -30,6 +33,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.prompt");
     expect(routeSource).toContain("copy.tools");
     expect(routeSource).toContain("copy.memory");
+    expect(routeSource).toContain("copy.runtimeStatus");
+    expect(routeSource).toContain("runtimeStatusLabel");
+    expect(routeSource).toContain("runtimeStatusTone");
+    expect(routeSource).toContain("runtimeNextStep");
+    expect(routeSource).toContain("copy.territory");
+    expect(routeSource).toContain("workspaceTerritory");
     expect(routeSource).toContain("copy.context");
     expect(routeSource).toContain("copy.communication");
     expect(routeSource).toContain("copy.delegation");
@@ -80,6 +89,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("allowedTools: sortedIds(payload.draft.allowedTools)");
     expect(routeSource).toContain("blockedTools: sortedIds(payload.draft.blockedTools)");
+    expect(routeSource).toContain("writeScopes: sortedIds(payload.draft.writeScopes)");
+    expect(routeSource).toContain("toggleToolPolicyScope(\"writeScopes\", \"shared\"");
+    expect(routeSource).toContain("copy.workspaceWriteScopes");
+    expect(routeSource).toContain("styles.workspaceScopePanel");
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"allowed\")");
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"blocked\")");
     expect(routeSource).toContain("queryKeys.tools()");
@@ -109,7 +122,49 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("activePane === \"activity\"");
     expect(routeSource).toContain("fetchJson<AgentRunHistory>");
     expect(routeSource).toContain("queryKeys.agentRuns");
+    expect(routeSource).toContain("summary?.runningAgentCount");
+    expect(routeSource).toContain("summary?.blockedAgentCount");
+    expect(routeSource).toContain("styles.runtimePill");
+    expect(routeSource).toContain("styles.runtimeFocusPanel");
     expect(routeSource).toContain("styles.runHistoryList");
+  });
+
+  it("surfaces pending Agent inbox messages from the activity pane", () => {
+    expect(routeSource).toContain("AgentInboxMessage");
+    expect(routeSource).toContain("queryKeys.agentMessages");
+    expect(routeSource).toContain("/messages?status=pending&limit=8");
+    expect(routeSource).toContain("/consume");
+    expect(routeSource).toContain("consumeMessageMutation");
+    expect(routeSource).toContain("copy.inboxTitle");
+    expect(routeSource).toContain("styles.inboxMessageList");
+    expect(routeSource).toContain("styles.inboxMessageItem");
+  });
+
+  it("summarizes runs, inbox messages, and context events in one activity timeline", () => {
+    expect(routeSource).toContain("AgentActivityTimelineItem");
+    expect(routeSource).toContain("buildActivityTimeline");
+    expect(routeSource).toContain("activityTimeline");
+    expect(routeSource).toContain("copy.activityTimeline");
+    expect(routeSource).toContain("copy.runtimeFocus");
+    expect(routeSource).toContain("copy.runtimeNextStep");
+    expect(routeSource).toContain("styles.runtimeNextStep");
+    expect(routeSource).toContain("findRuntimeFocusEvidence");
+    expect(routeSource).toContain("runtimeFocusEvidence");
+    expect(routeSource).toContain("selectedAgent.runtimeStatus?.runId");
+    expect(routeSource).toContain("selectedAgent.runtimeStatus?.sessionId");
+    expect(routeSource).toContain("openAgentLogs(runtimeFocusEvidence)");
+    expect(routeSource).toContain("openAgentSession");
+    expect(routeSource).toContain("openAgentLogs");
+    expect(routeSource).toContain("focusInboxMessage");
+    expect(routeSource).toContain("/chat?session=");
+    expect(routeSource).toContain('root: "runtime_scenes"');
+    expect(routeSource).toContain("scene: evidence.runtimeSceneId");
+    expect(routeSource).toContain("navigate(\"/logs\")");
+    expect(routeSource).toContain("styles.activityTimelineList");
+    expect(routeSource).toContain("styles.activityTimelineItem");
+    expect(routeSource).toContain("styles.timelineActions");
+    expect(routeSource).toContain("styles.inboxMessageItemFocused");
+    expect(routeSource).toContain("activityTimelineItem_${item.kind}");
   });
 
   it("edits Agent runtime delegation and supervision policies from the activity pane", () => {

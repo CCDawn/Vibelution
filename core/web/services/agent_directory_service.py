@@ -27,7 +27,23 @@ DEFAULT_TOOL_POLICY_ID = "default"
 DEFAULT_MEMORY_POLICY_ID = "private"
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
 AGENT_CODE_PREFIX = "A"
-AGENT_WORKSPACE_SUBDIRS = ("conversation", "memory", "events", "tmp", "logs", "artifacts")
+AGENT_SHARED_WORKSPACE_PATH = "workspace/shared"
+AGENT_WORKSPACE_SUBDIRS = (
+    "conversation",
+    "memory",
+    "events",
+    "tmp",
+    "logs",
+    "artifacts",
+    "scratch",
+    "notes",
+    "inbox",
+    "outbox",
+    "runs",
+)
+AGENT_TERRITORY_WRITE_SCOPES = ("private",)
+AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
+TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
 KNOWN_AGENT_PRIMARY_MODES = {"chat", "research", "self_evolution", "supervised_evolution", "general"}
 WRITE_RETRY_TIMEOUT_SECONDS = 2.0
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -135,6 +151,16 @@ class SupervisionPolicyDecision:
     evidence_level: str = "standard"
 
 
+@dataclass(frozen=True)
+class AgentWorkspaceWriteDecision:
+    allowed: bool
+    path: str = ""
+    scope: str = ""
+    reason: str = ""
+    message: str = ""
+    agent_id: str = ""
+
+
 def utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -238,6 +264,7 @@ def create_agent_instance(
         state["memoryPolicies"] = policies
         save_state(state)
     _record_agent_event("agent.created", agent, lifecycle=True)
+    _record_agent_territory_event("agent_territory.resolved", agent, outcome="created")
     return _agent_to_api(agent)
 
 
@@ -356,6 +383,7 @@ def ensure_agent_for_session(
             agent["updatedAt"] = now
             save_state(state)
             _record_agent_event("agent.repaired", agent)
+            _record_agent_territory_event("agent_territory.resolved", agent, outcome="repaired")
     return _agent_to_api(agent)
 
 
@@ -376,6 +404,7 @@ def update_agent_instance(
     supervision_policy: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
     status: str | None = None,
+    preserve_generated_display_name: bool = False,
 ) -> dict[str, Any]:
     updated_tool_policy: dict[str, Any] | None = None
     updated_memory_policy: dict[str, Any] | None = None
@@ -390,9 +419,23 @@ def update_agent_instance(
             title = trim_lines(display_name or "", max_lines=1).strip()
             if not title:
                 raise AgentDirectoryError("Agent display name is required.")
-            agent["displayName"] = title[:120].rstrip()
             metadata_payload = dict(agent.get("metadata") or {})
-            metadata_payload["displayNameSource"] = "user"
+            if preserve_generated_display_name:
+                current_display_name = str(agent.get("displayName") or "").strip()
+                metadata_payload = _with_functional_display_name(metadata_payload, title)
+                if not current_display_name or _display_name_is_functional_or_machine(current_display_name, {**agent, "metadata": metadata_payload}):
+                    agent["displayName"] = _agent_public_display_name(
+                        title,
+                        existing_agents=state.get("agents") or [],
+                        agent_id=str(agent.get("agentId") or ""),
+                        metadata=metadata_payload,
+                    )
+                    metadata_payload = _mark_display_name_generated(metadata_payload, force=True)
+                else:
+                    metadata_payload = _mark_display_name_generated(metadata_payload)
+            else:
+                agent["displayName"] = title[:120].rstrip()
+                metadata_payload["displayNameSource"] = "user"
             agent["metadata"] = metadata_payload
         if template_id is not None:
             normalized_template = str(template_id or "").strip()
@@ -452,7 +495,9 @@ def update_agent_instance(
                 policy_id = f"memory-{agent['agentId']}"
                 agent["memoryPolicyId"] = policy_id
             policies = _memory_policies(state)
-            workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(str(agent["agentId"])))
+            workspace_path = _agent_workspace_relative_path(str(agent["agentId"]))
+            agent["workspacePath"] = workspace_path
+            _ensure_agent_workspace(workspace_path)
             base_policy = policies.get(policy_id) if isinstance(policies.get(policy_id), dict) else default_memory_policy(policy_id, workspace_path)
             updated_memory_policy = normalize_memory_policy(
                 {**base_policy, **dict(memory_policy or {})},
@@ -555,11 +600,13 @@ def repair_agent_directory() -> dict[str, Any]:
         state = load_state()
         changed = False
         display_name_repaired_agents: list[dict[str, Any]] = []
+        territory_repaired_agents: list[dict[str, Any]] = []
         used_agent_codes: set[str] = set()
         policies = _memory_policies(state)
         for agent in state.get("agents") or []:
             if not isinstance(agent, dict):
                 continue
+            territory_changed = False
             if not str(agent.get("primaryMode") or "").strip():
                 agent["primaryMode"] = _infer_agent_primary_mode(agent)
                 changed = True
@@ -626,23 +673,40 @@ def repair_agent_directory() -> dict[str, Any]:
                 used_agent_codes.add(str(agent["agentCode"]))
                 changed = True
             workspace_path = str(agent.get("workspacePath") or "").strip()
-            if not workspace_path:
-                workspace_path = _agent_workspace_relative_path(str(agent.get("agentId") or "agent"))
+            expected_workspace_path = _agent_workspace_relative_path(str(agent.get("agentId") or "agent"))
+            if not workspace_path or not _is_agent_private_workspace_path(workspace_path, str(agent.get("agentId") or "")):
+                metadata = dict(agent.get("metadata") or {})
+                if workspace_path:
+                    metadata["legacyWorkspacePath"] = workspace_path
+                    agent["metadata"] = metadata
+                workspace_path = expected_workspace_path
                 agent["workspacePath"] = workspace_path
                 changed = True
+                territory_changed = True
             _ensure_agent_workspace(workspace_path)
             memory_policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{agent.get('agentId')}"
             if str(agent.get("memoryPolicyId") or "").strip() != memory_policy_id:
                 agent["memoryPolicyId"] = memory_policy_id
                 changed = True
-            if memory_policy_id and memory_policy_id not in policies:
-                policies[memory_policy_id] = default_memory_policy(memory_policy_id, workspace_path)
+                territory_changed = True
+            normalized_policy = normalize_memory_policy(
+                policies.get(memory_policy_id, {}) if isinstance(policies.get(memory_policy_id), dict) else {},
+                memory_policy_id,
+                workspace_path,
+            ) if memory_policy_id else {}
+            if memory_policy_id and policies.get(memory_policy_id) != normalized_policy:
+                policies[memory_policy_id] = normalized_policy
                 changed = True
+                territory_changed = True
+            if territory_changed:
+                territory_repaired_agents.append(dict(agent))
         state["memoryPolicies"] = policies
         if changed:
             save_state(state)
             for repaired_agent in display_name_repaired_agents:
                 _record_agent_event("agent.display_name_repaired", repaired_agent)
+            for repaired_agent in territory_repaired_agents:
+                _record_agent_territory_event("agent_territory.resolved", repaired_agent, outcome="repaired")
         return state
 
 
@@ -742,9 +806,89 @@ def resolve_memory_policy_for_agent(agent_id: str) -> dict[str, Any]:
         return {}
     policy_id = str(agent.get("memoryPolicyId") or "").strip()
     policy = _memory_policies(state).get(policy_id)
+    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
     if isinstance(policy, dict):
-        return dict(policy)
-    return default_memory_policy(policy_id or f"memory-{agent_id}", str(agent.get("workspacePath") or ""))
+        return normalize_memory_policy(policy, policy_id, workspace_path)
+    return default_memory_policy(policy_id or f"memory-{agent_id}", workspace_path)
+
+
+def resolve_agent_workspace_territory(agent_id: str) -> dict[str, Any]:
+    state = load_state()
+    agent = _find_agent(state, agent_id)
+    if agent is None:
+        return {}
+    return _agent_workspace_territory(agent)
+
+
+def ensure_agent_shared_workspace() -> Path:
+    path = _resolve_project_path(AGENT_SHARED_WORKSPACE_PATH)
+    shared_root = (_project_root() / "workspace" / "shared").resolve()
+    if path != shared_root:
+        raise AgentDirectoryError(f"Invalid shared workspace path: {path}")
+    for subdir in ("memory", "artifacts", "notes", "logs", "research", "tmp"):
+        (path / subdir).mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def evaluate_agent_workspace_write(agent_id: str, path_value: str | Path, *, purpose: str = "") -> AgentWorkspaceWriteDecision:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return AgentWorkspaceWriteDecision(
+            False,
+            path=str(path_value or ""),
+            reason="missing_agent",
+            message="Agent id is required for workspace writes.",
+        )
+    agent = get_agent(normalized_agent_id, include_archived=True)
+    if not agent:
+        return AgentWorkspaceWriteDecision(
+            False,
+            path=str(path_value or ""),
+            reason="missing_agent",
+            message=f"Agent not found: {normalized_agent_id}",
+            agent_id=normalized_agent_id,
+        )
+    territory = _agent_workspace_territory(agent)
+    target = _resolve_project_path(str(path_value or ""))
+    private_root = _resolve_project_path(str(territory.get("privateRoot") or ""))
+    shared_root = _resolve_project_path(str(territory.get("sharedRoot") or AGENT_SHARED_WORKSPACE_PATH))
+    tool_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else resolve_tool_policy_for_agent(normalized_agent_id)
+    write_scopes = set(_normalize_tool_policy_scopes(tool_policy.get("writeScopes") if isinstance(tool_policy, dict) else []))
+    if _path_is_within(target, private_root):
+        return AgentWorkspaceWriteDecision(
+            True,
+            path=_relative_project_path(target),
+            scope="private",
+            agent_id=normalized_agent_id,
+        )
+    if _path_is_within(target, shared_root):
+        if "shared" in write_scopes:
+            return AgentWorkspaceWriteDecision(
+                True,
+                path=_relative_project_path(target),
+                scope="shared",
+                agent_id=normalized_agent_id,
+            )
+        decision = AgentWorkspaceWriteDecision(
+            False,
+            path=_relative_project_path(target),
+            scope="shared",
+            reason="shared_write_requires_policy",
+            message="Shared workspace writes require an explicit shared write policy.",
+            agent_id=normalized_agent_id,
+        )
+        _record_agent_territory_write_blocked(agent, decision, purpose=purpose)
+        return decision
+    decision = AgentWorkspaceWriteDecision(
+        False,
+        path=_relative_project_path(target),
+        scope="external",
+        reason="outside_agent_territory",
+        message="Agent writes must stay inside the Agent private territory unless a policy grants another scope.",
+        agent_id=normalized_agent_id,
+    )
+    _record_agent_territory_write_blocked(agent, decision, purpose=purpose)
+    return decision
 
 
 def resolve_delegation_policy_for_agent(agent_id: str) -> dict[str, Any]:
@@ -1287,18 +1431,19 @@ def default_tool_policy(policy_id: str = DEFAULT_TOOL_POLICY_ID) -> dict[str, An
 
 
 def normalize_tool_policy(policy: dict[str, Any], policy_id: str = "") -> dict[str, Any]:
-    payload = default_tool_policy(policy_id or str(policy.get("policyId") or policy.get("id") or DEFAULT_TOOL_POLICY_ID))
-    payload.update(policy if isinstance(policy, dict) else {})
+    raw_policy = policy if isinstance(policy, dict) else {}
+    payload = default_tool_policy(policy_id or str(raw_policy.get("policyId") or raw_policy.get("id") or DEFAULT_TOOL_POLICY_ID))
+    payload.update(raw_policy)
     for key in (
         "allowedTools",
         "preferredTools",
         "blockedTools",
-        "readScopes",
-        "writeScopes",
         "allowedCommandKinds",
         "blockedCommandPatterns",
     ):
         payload[key] = [str(item or "").strip() for item in list(payload.get(key) or []) if str(item or "").strip()]
+    payload["readScopes"] = _normalize_tool_policy_scopes(payload.get("readScopes"))
+    payload["writeScopes"] = _normalize_tool_policy_scopes(payload.get("writeScopes"))
     payload["perToolRules"] = dict(payload.get("perToolRules") or {})
     try:
         payload["maxCallsPerTurn"] = max(0, int(payload.get("maxCallsPerTurn") or 0))
@@ -1307,8 +1452,19 @@ def normalize_tool_policy(policy: dict[str, Any], policy_id: str = "") -> dict[s
     return payload
 
 
+def _normalize_tool_policy_scopes(scopes: Any) -> list[str]:
+    normalized: list[str] = []
+    raw_scopes = [scopes] if isinstance(scopes, str) else list(scopes or [])
+    for item in raw_scopes:
+        scope = str(item or "").strip().lower()
+        if scope not in TOOL_POLICY_WORKSPACE_SCOPES or scope in normalized:
+            continue
+        normalized.append(scope)
+    return normalized
+
+
 def default_memory_policy(policy_id: str, agent_workspace_path: str) -> dict[str, Any]:
-    workspace_path = str(agent_workspace_path or "").strip()
+    workspace_path = _workspace_path_for_policy(str(agent_workspace_path or "").strip(), "")
     return {
         "policyId": str(policy_id or "").strip(),
         "privateMemoryRoot": f"{workspace_path}/memory" if workspace_path else "",
@@ -1326,7 +1482,7 @@ def normalize_memory_policy(policy: dict[str, Any], policy_id: str, agent_worksp
     payload = default_memory_policy(policy_id, agent_workspace_path)
     payload.update(policy if isinstance(policy, dict) else {})
     payload["policyId"] = str(policy_id or payload.get("policyId") or "").strip()
-    workspace_path = str(agent_workspace_path or "").strip()
+    workspace_path = _workspace_path_for_policy(str(agent_workspace_path or "").strip(), str(payload.get("privateMemoryRoot") or ""))
     for key, suffix in (
         ("privateMemoryRoot", "memory"),
         ("episodicEventsPath", "events/episodic_events.jsonl"),
@@ -1336,7 +1492,7 @@ def normalize_memory_policy(policy: dict[str, Any], policy_id: str, agent_worksp
         ("summariesPath", "memory/summaries.jsonl"),
     ):
         value = str(payload.get(key) or "").strip()
-        if not value and workspace_path:
+        if workspace_path:
             value = f"{workspace_path}/{suffix}"
         payload[key] = value
     for key in ("readSharedGroups", "writeSharedGroups"):
@@ -1436,6 +1592,7 @@ def _agent_to_api(agent: dict[str, Any]) -> dict[str, Any]:
         ),
         "directSessionId": str(agent.get("directSessionId") or "").strip(),
         "workspacePath": workspace,
+        "workspaceTerritory": _agent_workspace_territory(agent),
         "toolPolicyId": str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID,
         "memoryPolicyId": str(agent.get("memoryPolicyId") or "").strip(),
         "createdBy": str(agent.get("createdBy") or "").strip(),
@@ -1474,6 +1631,48 @@ def _memory_policies(state: dict[str, Any]) -> dict[str, Any]:
     return {
         str(policy_id): normalize_memory_policy(policy if isinstance(policy, dict) else {}, str(policy_id), "")
         for policy_id, policy in policies.items()
+    }
+
+
+def _workspace_path_for_policy(agent_workspace_path: str, existing_private_root: str = "") -> str:
+    workspace_path = str(agent_workspace_path or "").strip()
+    if workspace_path:
+        return workspace_path
+    private_root = str(existing_private_root or "").strip().replace("\\", "/")
+    suffix = "/memory"
+    if private_root.endswith(suffix):
+        return private_root[: -len(suffix)]
+    return ""
+
+
+def _agent_workspace_territory(agent: dict[str, Any]) -> dict[str, Any]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    private_root = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
+    if not _is_agent_private_workspace_path(private_root, agent_id):
+        private_root = _agent_workspace_relative_path(agent_id)
+    subdirs = {
+        subdir: f"{private_root}/{subdir}"
+        for subdir in AGENT_WORKSPACE_SUBDIRS
+    }
+    return {
+        "schemaVersion": 1,
+        "agentId": agent_id,
+        "privateRoot": private_root,
+        "sharedRoot": AGENT_SHARED_WORKSPACE_PATH,
+        "defaultWriteScope": "private",
+        "readScopes": list(AGENT_TERRITORY_READ_SCOPES),
+        "writeScopes": list(AGENT_TERRITORY_WRITE_SCOPES),
+        "subdirs": subdirs,
+        "memoryRoot": subdirs.get("memory", ""),
+        "eventsRoot": subdirs.get("events", ""),
+        "artifactsRoot": subdirs.get("artifacts", ""),
+        "scratchRoot": subdirs.get("scratch", ""),
+        "inboxRoot": subdirs.get("inbox", ""),
+        "outboxRoot": subdirs.get("outbox", ""),
+        "runsRoot": subdirs.get("runs", ""),
+        "legacyWorkspacePath": str((agent.get("metadata") or {}).get("legacyWorkspacePath") or "").strip()
+        if isinstance(agent.get("metadata"), dict)
+        else "",
     }
 
 
@@ -1758,6 +1957,17 @@ def _agent_workspace_relative_path(agent_id: str) -> str:
     return f"workspace/agents/{_safe_fragment(agent_id)}"
 
 
+def _is_agent_private_workspace_path(path_value: str, agent_id: str) -> bool:
+    if not str(agent_id or "").strip():
+        return False
+    try:
+        actual = _resolve_project_path(path_value)
+        expected = _resolve_project_path(_agent_workspace_relative_path(agent_id))
+    except Exception:
+        return False
+    return actual == expected
+
+
 def _ensure_agent_workspace(path_value: str) -> Path:
     path = _resolve_project_path(path_value)
     agents_root = (_project_root() / "workspace" / "agents").resolve()
@@ -1766,6 +1976,7 @@ def _ensure_agent_workspace(path_value: str) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     for subdir in AGENT_WORKSPACE_SUBDIRS:
         (path / subdir).mkdir(parents=True, exist_ok=True)
+    ensure_agent_shared_workspace()
     return path
 
 
@@ -1775,6 +1986,21 @@ def _resolve_project_path(path_value: str) -> Path:
     if not path.is_absolute():
         path = _project_root() / path
     return path.resolve()
+
+
+def _relative_project_path(path: Path) -> str:
+    resolved = Path(path).resolve()
+    root = _project_root().resolve()
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return str(resolved)
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    resolved_path = Path(path).resolve()
+    resolved_root = Path(root).resolve()
+    return resolved_path == resolved_root or resolved_root in resolved_path.parents
 
 
 def _project_root() -> Path:
@@ -1942,6 +2168,59 @@ def _record_agent_event(event_code: str, agent: dict[str, Any], *, lifecycle: bo
         return
 
 
+def _record_agent_territory_event(event_code: str, agent: dict[str, Any], *, outcome: str = "observed", level: str = "info") -> None:
+    try:
+        territory = _agent_workspace_territory(agent)
+        record_runtime_scene_event(
+            "agent_directory",
+            "territory",
+            event_code,
+            message=event_code,
+            level=level,
+            outcome=outcome,
+            fields={
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "privateRoot": str(territory.get("privateRoot") or "").strip(),
+                "sharedRoot": str(territory.get("sharedRoot") or "").strip(),
+                "defaultWriteScope": str(territory.get("defaultWriteScope") or "").strip(),
+                "writeScopeCount": len(list(territory.get("writeScopes") or [])),
+                "legacyWorkspace": bool(str(territory.get("legacyWorkspacePath") or "").strip()),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_territory_write_blocked(
+    agent: dict[str, Any],
+    decision: AgentWorkspaceWriteDecision,
+    *,
+    purpose: str = "",
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "territory",
+            "agent_territory.write_blocked",
+            message=decision.message or "Agent workspace write blocked.",
+            level="warning",
+            outcome="blocked",
+            fields={
+                "agentId": str(agent.get("agentId") or decision.agent_id or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "path": decision.path,
+                "scope": decision.scope,
+                "reason": decision.reason,
+                "purpose": trim_lines(str(purpose or ""), max_lines=1),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
 def _record_agent_tool_policy_event(agent: dict[str, Any], policy: dict[str, Any]) -> None:
     try:
         record_runtime_scene_event(
@@ -1958,6 +2237,9 @@ def _record_agent_tool_policy_event(agent: dict[str, Any], policy: dict[str, Any
                 "allowedToolCount": len(list(policy.get("allowedTools") or [])),
                 "blockedToolCount": len(list(policy.get("blockedTools") or [])),
                 "preferredToolCount": len(list(policy.get("preferredTools") or [])),
+                "readScopeCount": len(list(policy.get("readScopes") or [])),
+                "writeScopeCount": len(list(policy.get("writeScopes") or [])),
+                "sharedWriteEnabled": "shared" in set(_normalize_tool_policy_scopes(policy.get("writeScopes"))),
             },
             lifecycle=True,
         )
@@ -2167,6 +2449,7 @@ def _format_tool_policy_summary(policy: dict[str, Any]) -> str:
     allowed = list(policy.get("allowedTools") or [])
     blocked = list(policy.get("blockedTools") or [])
     preferred = list(policy.get("preferredTools") or [])
+    write_scopes = _normalize_tool_policy_scopes(policy.get("writeScopes"))
     parts = [f"ToolPolicy: {policy.get('policyId') or DEFAULT_TOOL_POLICY_ID}"]
     if allowed:
         parts.append(f"allowed={', '.join(allowed[:12])}")
@@ -2176,4 +2459,5 @@ def _format_tool_policy_summary(policy: dict[str, Any]) -> str:
         parts.append(f"preferred={', '.join(preferred[:8])}")
     if blocked:
         parts.append(f"blocked={', '.join(blocked[:8])}")
+    parts.append(f"writeScopes={', '.join(write_scopes) if write_scopes else 'private_only'}")
     return "; ".join(parts)

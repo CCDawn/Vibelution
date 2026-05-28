@@ -329,6 +329,77 @@ def get_runtime_scene_detail(scene_id: str) -> dict:
     }
 
 
+def list_runtime_scene_evidence_for_agent(
+    agent_id: str,
+    *,
+    session_id: str = "",
+    run_id: str = "",
+    limit: int = 5,
+    scene_limit: int = 12,
+) -> dict[str, Any]:
+    """Return recent runtime scene events that mention one Agent/session/run."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    normalized_run_id = str(run_id or "").strip()
+    if not any([normalized_agent_id, normalized_session_id, normalized_run_id]):
+        return {"agentId": normalized_agent_id, "sessionId": normalized_session_id, "runId": normalized_run_id, "matches": []}
+
+    bounded_limit = max(1, min(int(limit or 5), 20))
+    bounded_scene_limit = max(1, min(int(scene_limit or 12), 30))
+    matches: list[dict[str, Any]] = []
+    for scene_dir in _scene_dirs()[:bounded_scene_limit]:
+        manifest = _load_scene_manifest(scene_dir)
+        scene_id = _scene_id(scene_dir, manifest)
+        if not scene_id:
+            continue
+        package_index = _runtime_scene_package_index(scene_dir, manifest, scene_id)
+        for event in reversed(_read_scene_timeline(scene_dir)):
+            if not _runtime_scene_event_matches_agent(
+                event,
+                agent_id=normalized_agent_id,
+                session_id=normalized_session_id,
+                run_id=normalized_run_id,
+            ):
+                continue
+            matches.append(
+                {
+                    "runtimeSceneId": scene_id,
+                    "directoryName": scene_dir.name,
+                    "displayName": package_index["displayName"],
+                    "startedAt": package_index["startedAt"],
+                    "status": _runtime_scene_status(manifest),
+                    "eventCode": str(event.get("eventCode") or ""),
+                    "component": str(event.get("component") or ""),
+                    "phase": str(event.get("phase") or ""),
+                    "level": str(event.get("level") or ""),
+                    "outcome": str(event.get("outcome") or ""),
+                    "message": str(event.get("message") or ""),
+                    "timestamp": str(event.get("timestamp") or ""),
+                    "rawRefs": _runtime_scene_signal_raw_refs(event),
+                    "matchedFields": _runtime_scene_matched_fields(
+                        event,
+                        agent_id=normalized_agent_id,
+                        session_id=normalized_session_id,
+                        run_id=normalized_run_id,
+                    ),
+                }
+            )
+            if len(matches) >= bounded_limit:
+                return {
+                    "agentId": normalized_agent_id,
+                    "sessionId": normalized_session_id,
+                    "runId": normalized_run_id,
+                    "matches": matches,
+                }
+    return {
+        "agentId": normalized_agent_id,
+        "sessionId": normalized_session_id,
+        "runId": normalized_run_id,
+        "matches": matches,
+    }
+
+
 def build_runtime_scene_prompt_index(limit: int = 3) -> str:
     """Return a compact prompt-facing index for the newest runtime scene packages."""
 
@@ -1901,6 +1972,47 @@ def _work_run_snapshot_fold_key(event: dict[str, Any]) -> tuple[str, str, str, s
         str(fields.get("status") or ""),
         str(fields.get("phase") or ""),
     )
+
+
+def _runtime_scene_event_matches_agent(
+    event: dict[str, Any],
+    *,
+    agent_id: str,
+    session_id: str,
+    run_id: str,
+) -> bool:
+    return bool(
+        _runtime_scene_matched_fields(
+            event,
+            agent_id=agent_id,
+            session_id=session_id,
+            run_id=run_id,
+        )
+    )
+
+
+def _runtime_scene_matched_fields(
+    event: dict[str, Any],
+    *,
+    agent_id: str,
+    session_id: str,
+    run_id: str,
+) -> dict[str, str]:
+    fields = event.get("fields") if isinstance(event.get("fields"), dict) else {}
+    matches: dict[str, str] = {}
+    if agent_id:
+        for key in ("agentId", "agent_id", "targetAgentId", "sourceAgentId", "parentAgentId"):
+            if str(fields.get(key) or "").strip() == agent_id:
+                matches[key] = agent_id
+    if session_id:
+        for key in ("sessionId", "session_id", "targetSessionId", "sourceSessionId", "parentSessionId"):
+            if str(fields.get(key) or "").strip() == session_id:
+                matches[key] = session_id
+    if run_id:
+        for key in ("runId", "turnId", "sourceRunId", "parentRunId", "activeRunId", "subRunId"):
+            if str(fields.get(key) or "").strip() == run_id:
+                matches[key] = run_id
+    return matches
 
 
 def _work_run_snapshot_summary_event(event: dict[str, Any], repeat_count: int, last_timestamp: str) -> dict[str, Any]:

@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.orchestration import context_engine
 from core.web.services import (
     agent_config_workspace_service,
     agent_directory_service,
@@ -130,6 +131,151 @@ def test_agent_instance_generates_public_person_name_and_keeps_functional_name(t
     assert agent["agentCode"]
     assert agent["metadata"]["functionalDisplayName"] == "科研 Agent"
     assert agent["metadata"]["displayNameSource"] == "generated_person_name"
+    assert agent["workspaceTerritory"]["privateRoot"] == agent["workspacePath"]
+    assert agent["workspaceTerritory"]["sharedRoot"] == "workspace/shared"
+    assert agent["workspaceTerritory"]["writeScopes"] == ["private"]
+    for subdir in ("scratch", "notes", "inbox", "outbox", "runs", "artifacts"):
+        assert (tmp_path / agent["workspaceTerritory"]["subdirs"][subdir]).is_dir()
+    assert (tmp_path / "workspace" / "shared").is_dir()
+
+
+def test_repair_agent_directory_moves_legacy_workspace_into_private_territory(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(display_name="旧会话 Agent")
+    state = agent_directory_service.load_state()
+    raw = state["agents"][0]
+    raw["workspacePath"] = "workspace/sessions/session-legacy"
+    policy_id = raw["memoryPolicyId"]
+    state["memoryPolicies"][policy_id] = {
+        "policyId": policy_id,
+        "privateMemoryRoot": "workspace/sessions/session-legacy/memory",
+        "readSharedGroups": ["project"],
+        "writeSharedGroups": ["project"],
+    }
+    agent_directory_service.save_state(state)
+
+    repaired = agent_directory_service.get_agent(agent["agentId"])
+
+    assert repaired["workspacePath"] == f"workspace/agents/{agent['agentId']}"
+    assert repaired["workspaceTerritory"]["legacyWorkspacePath"] == "workspace/sessions/session-legacy"
+    assert repaired["memoryPolicy"]["privateMemoryRoot"] == f"workspace/agents/{agent['agentId']}/memory"
+    assert repaired["memoryPolicy"]["agentInboxMessagesPath"] == f"workspace/agents/{agent['agentId']}/events/agent_inbox_messages.jsonl"
+    assert repaired["memoryPolicy"]["readSharedGroups"] == ["project"]
+    assert repaired["memoryPolicy"]["writeSharedGroups"] == ["project"]
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    issues = workspace["health"]["byAgent"][agent["agentId"]]
+    assert any(item["code"] == "legacy_workspace_retained" and item["severity"] == "info" for item in issues)
+
+
+def test_agent_config_workspace_logs_stage_timings_and_reuses_loaded_agents(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    agent = agent_directory_service.create_agent_instance(display_name="计时 Agent", primary_mode="research")
+    captured_bindings = {}
+    recorded_events = []
+
+    def fake_get_mode_bindings_payload(*, agent_options=None):
+        captured_bindings["agentOptions"] = list(agent_options or [])
+        return {
+            "modes": {
+                "research": {
+                    "mode": "research",
+                    "defaultAgentId": agent["agentId"],
+                    "availableAgentIds": [agent["agentId"]],
+                    "pool": [agent["agentId"]],
+                    "flowBindings": {},
+                    "slots": {},
+                    "excludedAgentIds": [],
+                    "excludedSlots": [],
+                }
+            },
+            "repairWarnings": [],
+        }
+
+    monkeypatch.setattr(agent_config_workspace_service, "get_mode_bindings_payload", fake_get_mode_bindings_payload)
+    monkeypatch.setattr(
+        agent_config_workspace_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    assert captured_bindings["agentOptions"][0]["agentId"] == agent["agentId"]
+    assert captured_bindings["agentOptions"][0]["primaryMode"] == "research"
+    assert payload["summary"]["agentCount"] == 1
+    loaded_events = [
+        event for event in recorded_events if event[0][:3] == ("agent_configuration", "workspace", "agent_config.workspace.loaded")
+    ]
+    assert loaded_events
+    timings = loaded_events[-1][1]["fields"]["timingsMs"]
+    assert {"list_agents", "mode_bindings", "runtime_statuses", "total"}.issubset(timings)
+    assert timings["total"] >= timings["mode_bindings"]
+
+
+def test_agent_workspace_write_boundary_uses_tool_policy_for_shared_paths(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    agent = agent_directory_service.create_agent_instance(display_name="领地 Agent")
+
+    own = agent_directory_service.evaluate_agent_workspace_write(
+        agent["agentId"],
+        tmp_path / agent["workspaceTerritory"]["artifactsRoot"] / "result.txt",
+        purpose="test_private",
+    )
+    shared = agent_directory_service.evaluate_agent_workspace_write(
+        agent["agentId"],
+        tmp_path / "workspace" / "shared" / "notes" / "public.md",
+        purpose="test_shared",
+    )
+    external = agent_directory_service.evaluate_agent_workspace_write(
+        agent["agentId"],
+        tmp_path / "workspace" / "agents" / "other-agent" / "memory" / "memo.json",
+        purpose="test_external",
+    )
+
+    assert own.allowed is True
+    assert own.scope == "private"
+    assert shared.allowed is False
+    assert shared.reason == "shared_write_requires_policy"
+    assert external.allowed is False
+    assert external.reason == "outside_agent_territory"
+    assert any(
+        event[0][:3] == ("agent_directory", "territory", "agent_territory.write_blocked")
+        and event[1]["fields"]["reason"] == "shared_write_requires_policy"
+        for event in recorded_events
+    )
+
+    updated = agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={
+            "writeScopes": ["shared", "shared", "external"],
+            "readScopes": ["private", "shared", "outside"],
+        },
+    )
+    shared_allowed = agent_directory_service.evaluate_agent_workspace_write(
+        agent["agentId"],
+        tmp_path / "workspace" / "shared" / "notes" / "public.md",
+        purpose="test_shared_allowed",
+    )
+    external_after_policy = agent_directory_service.evaluate_agent_workspace_write(
+        agent["agentId"],
+        tmp_path / "workspace" / "agents" / "other-agent" / "memory" / "memo.json",
+        purpose="test_external_after_policy",
+    )
+
+    assert updated["toolPolicy"]["writeScopes"] == ["shared"]
+    assert updated["toolPolicy"]["readScopes"] == ["private", "shared"]
+    assert shared_allowed.allowed is True
+    assert shared_allowed.scope == "shared"
+    assert external_after_policy.allowed is False
+    assert external_after_policy.reason == "outside_agent_territory"
 
 
 def test_repair_agent_directory_keeps_generated_person_name_stable(tmp_path, monkeypatch):
@@ -149,6 +295,24 @@ def test_repair_agent_directory_keeps_generated_person_name_stable(tmp_path, mon
     assert second_name == first_name
     assert third_name == first_name
     assert third_mtime == second_mtime == first_mtime
+
+
+def test_update_agent_instance_keeps_generated_person_name_when_functional_title_syncs(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="科研 Agent", primary_mode="research")
+    first_name = agent["displayName"]
+
+    updated = agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        display_name="科研 Agent",
+        primary_mode="research",
+        role_key="research_broad",
+        preserve_generated_display_name=True,
+    )
+
+    assert updated["displayName"] == first_name
+    assert updated["metadata"]["functionalDisplayName"] == "科研 Agent"
+    assert updated["metadata"]["displayNameSource"] == "generated_person_name"
 
 
 def test_repair_agent_directory_migrates_legacy_functional_user_display_name(tmp_path, monkeypatch):
@@ -196,6 +360,44 @@ def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
     assert payload["summary"]["agentCount"] >= 1
     assert any(item["policyId"] == "default" for item in payload["toolPolicies"])
     assert payload["memoryPolicies"]
+
+
+def test_agent_config_workspace_surfaces_runtime_status_from_run_snapshots(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    running_agent = agent_directory_service.create_agent_instance(display_name="运行 Agent", profile_id="primary")
+    failed_agent = agent_directory_service.create_agent_instance(display_name="失败 Agent", profile_id="primary")
+
+    context_engine.record_agent_turn_result(
+        running_agent["agentId"],
+        running_agent["directSessionId"],
+        {
+            "runId": "turn-running",
+            "status": "running",
+            "summary": "still working",
+            "updatedAt": "2026-05-28T10:00:00Z",
+        },
+    )
+    context_engine.record_agent_turn_result(
+        failed_agent["agentId"],
+        failed_agent["directSessionId"],
+        {
+            "runId": "turn-failed",
+            "status": "failed",
+            "summary": "tool failed",
+            "updatedAt": "2026-05-28T10:01:00Z",
+        },
+    )
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+    agents = {item["agentId"]: item for item in payload["agents"]}
+
+    assert agents[running_agent["agentId"]]["runtimeStatus"]["state"] == "running"
+    assert agents[running_agent["agentId"]]["runtimeStatus"]["runId"]
+    assert agents[failed_agent["agentId"]]["runtimeStatus"]["state"] == "failed"
+    assert agents[failed_agent["agentId"]]["runtimeStatus"]["summary"] == "tool failed"
+    assert payload["summary"]["runningAgentCount"] == 1
+    assert payload["summary"]["blockedAgentCount"] == 1
 
 
 def test_agent_create_api_adds_direct_agent_with_safe_defaults(tmp_path, monkeypatch):
@@ -367,7 +569,14 @@ def test_agent_patch_tool_policy_creates_agent_private_policy_and_logs(tmp_path,
 
     response = client.patch(
         f"/api/agents/{agent['agentId']}",
-        json={"toolPolicy": {"allowedTools": ["image2_generate_tool"], "blockedTools": ["shell_command"]}},
+        json={
+            "toolPolicy": {
+                "allowedTools": ["image2_generate_tool"],
+                "blockedTools": ["shell_command"],
+                "writeScopes": ["shared", "external", "shared"],
+                "readScopes": ["shared", "private", "external"],
+            }
+        },
     )
 
     assert response.status_code == 200, response.text
@@ -375,10 +584,13 @@ def test_agent_patch_tool_policy_creates_agent_private_policy_and_logs(tmp_path,
     assert payload["toolPolicyId"] == f"tool-{agent['agentId']}"
     assert payload["toolPolicy"]["allowedTools"] == ["image2_generate_tool"]
     assert payload["toolPolicy"]["blockedTools"] == ["shell_command"]
+    assert payload["toolPolicy"]["writeScopes"] == ["shared"]
+    assert payload["toolPolicy"]["readScopes"] == ["shared", "private"]
     assert any(
         event[0][:3] == ("agent_directory", "tool_policy", "agent.tool_policy.updated")
         and event[1]["fields"]["allowedToolCount"] == 1
         and event[1]["fields"]["blockedToolCount"] == 1
+        and event[1]["fields"]["sharedWriteEnabled"] is True
         for event in recorded_events
     )
 

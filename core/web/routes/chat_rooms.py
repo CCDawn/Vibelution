@@ -18,6 +18,7 @@ from core.web.services.chat_room_service import (
     list_chat_room_modes,
     list_chat_rooms,
     start_chat_room_round,
+    stop_chat_room_round,
     stream_chat_room_events,
     update_chat_room,
 )
@@ -138,3 +139,13 @@ def chat_room_start_round(room_id: str, payload: ChatRoomRoundPayload) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChatRoomValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/chat-rooms/{room_id}/stop", status_code=status.HTTP_202_ACCEPTED)
+def chat_room_stop_round(room_id: str) -> dict:
+    try:
+        return stop_chat_room_round(room_id)
+    except ChatRoomNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChatRoomBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
