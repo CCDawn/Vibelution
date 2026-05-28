@@ -18,6 +18,19 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert builtin["testPolicy"]["mode"] == "blocked"
     assert safe_builtin["testPolicy"]["mode"] == "safe_builtin_fixture"
     assert safe_builtin["testPolicy"]["argsPreview"] == {"limit": 3}
+    assert safe_builtin["permissionPolicy"]["requiresExplicitAllow"] is False
+
+
+def test_tool_registry_marks_research_knowledge_tool_as_explicit_allow(tmp_path, monkeypatch):
+    monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")
+
+    payload = registry.get_tool_registry()
+
+    tool = next(item for item in payload["tools"] if item["name"] == "research_knowledge_query_tool")
+    assert tool["source"] == "built_in"
+    assert tool["llmVisible"] is True
+    assert tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert "ToolPolicy.allowedTools" in tool["permissionPolicy"]["reason"]
 
 
 def test_tool_registry_exposes_agent_scoped_tool_views(tmp_path, monkeypatch):

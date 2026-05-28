@@ -56,6 +56,15 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("styles.policyModeButtonActive");
   });
 
+  it("calls out tools that require explicit Agent allow-list permission", () => {
+    expect(routeSource).toContain("explicit_required");
+    expect(routeSource).toContain("tool.permissionPolicy?.requiresExplicitAllow");
+    expect(routeSource).toContain("需显式授权");
+    expect(routeSource).toContain("只有加入允许清单后才会对当前 Agent 可见并可调用");
+    expect(routeSource).toContain("policyModeCounts.explicit_required");
+    expect(routeSource).toContain("policy_${mode}");
+  });
+
   it("supports Agent-scoped bulk ToolPolicy draft assignment", () => {
     expect(routeSource).toContain("policyDraft");
     expect(routeSource).toContain("permissionTools");

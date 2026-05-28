@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4 - 2026-05-28
+
+- Exposed restricted tool permission metadata in the tool registry so Agent management can distinguish default-inherited tools from explicit-allow tools.
+- Updated the Agent tools workbench to show the research knowledge query tool as requiring explicit Agent allow-list permission before it becomes visible or callable.
+
 ## 0.4.3 - 2026-05-28
 
 - Added the protected research Capability Steward Agent as the third default core role beside CEO and organization advisor.

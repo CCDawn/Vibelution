@@ -24,12 +24,13 @@ import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizableP
 import styles from "./ToolsRoute.module.css";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
-type ToolPolicyMode = "inherited" | "allowed" | "blocked" | "excluded";
+type ToolPolicyMode = "inherited" | "explicit_required" | "allowed" | "blocked" | "excluded";
+type EditableToolPolicyMode = "inherited" | "allowed" | "blocked";
 type ToolPermissionFilter = "all" | ToolPolicyMode;
 type Translate = (key: TranslationKey) => string;
 
 const FILTERS: ToolFilter[] = ["all", "built_in", "generated", "llm", "enabled"];
-const PERMISSION_FILTERS: ToolPermissionFilter[] = ["all", "allowed", "blocked", "inherited", "excluded"];
+const PERMISSION_FILTERS: ToolPermissionFilter[] = ["all", "allowed", "blocked", "explicit_required", "inherited", "excluded"];
 const TOOLS_LEFT_PANEL_WIDTH_KEY = "vibelution.tools.left-panel-width";
 const TOOLS_LEFT_PANEL_BOUNDS = { min: 260, max: 520 };
 const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
@@ -242,14 +243,16 @@ function toolPolicyDraftDirty(base: ToolPolicy, draft: ToolPolicy | null) {
 function toolPolicyModeCounts(policy: ToolPolicy, tools: ToolRegistryItem[]) {
   return tools.reduce(
     (counts, tool) => {
-      counts[toolPolicyMode(policy, tool.name)] += 1;
+      counts[toolPolicyMode(policy, tool)] += 1;
       return counts;
     },
-    { inherited: 0, allowed: 0, blocked: 0, excluded: 0 } satisfies Record<ToolPolicyMode, number>,
+    { inherited: 0, explicit_required: 0, allowed: 0, blocked: 0, excluded: 0 } satisfies Record<ToolPolicyMode, number>,
   );
 }
 
-function toolPolicyMode(policy: ToolPolicy, toolName: string): ToolPolicyMode {
+function toolPolicyMode(policy: ToolPolicy, tool: ToolRegistryItem | string): ToolPolicyMode {
+  const toolName = typeof tool === "string" ? tool : tool.name;
+  const requiresExplicitAllow = typeof tool === "string" ? false : Boolean(tool.permissionPolicy?.requiresExplicitAllow);
   const allowed = new Set(policy.allowedTools ?? []);
   const blocked = new Set(policy.blockedTools ?? []);
   if (blocked.has(toolName)) {
@@ -257,6 +260,9 @@ function toolPolicyMode(policy: ToolPolicy, toolName: string): ToolPolicyMode {
   }
   if (allowed.has(toolName)) {
     return "allowed";
+  }
+  if (requiresExplicitAllow) {
+    return "explicit_required";
   }
   if (allowed.size > 0) {
     return "excluded";
@@ -267,12 +273,14 @@ function toolPolicyMode(policy: ToolPolicy, toolName: string): ToolPolicyMode {
 function toolPolicyModeLabel(mode: ToolPolicyMode, lang: string) {
   const zh = {
     inherited: "跟随默认",
+    explicit_required: "需显式授权",
     allowed: "允许清单",
     blocked: "禁用",
     excluded: "未在允许清单",
   };
   const en = {
     inherited: "Default",
+    explicit_required: "Explicit allow required",
     allowed: "Allow-list",
     blocked: "Blocked",
     excluded: "Excluded",
@@ -283,12 +291,14 @@ function toolPolicyModeLabel(mode: ToolPolicyMode, lang: string) {
 function toolPolicyModeReason(mode: ToolPolicyMode, lang: string) {
   const zh = {
     inherited: "该工具未被当前 Agent 单独限制。",
+    explicit_required: "该工具是受限能力，只有加入允许清单后才会对当前 Agent 可见并可调用。",
     allowed: "该工具在当前 Agent 的允许清单中。",
     blocked: "该工具被当前 Agent 禁用，测试不会执行。",
     excluded: "当前 Agent 使用允许清单，该工具未被列入。",
   };
   const en = {
     inherited: "This tool is not individually restricted for the selected Agent.",
+    explicit_required: "This restricted tool stays hidden and blocked until this Agent explicitly allows it.",
     allowed: "This tool is in the selected Agent allow-list.",
     blocked: "This tool is blocked for the selected Agent; tests will not execute it.",
     excluded: "The selected Agent uses an allow-list and this tool is not included.",
@@ -296,7 +306,7 @@ function toolPolicyModeReason(mode: ToolPolicyMode, lang: string) {
   return (lang === "zh" ? zh : en)[mode];
 }
 
-function nextToolPolicy(policy: ToolPolicy, toolName: string, mode: Exclude<ToolPolicyMode, "excluded">): ToolPolicy {
+function nextToolPolicy(policy: ToolPolicy, toolName: string, mode: EditableToolPolicyMode): ToolPolicy {
   const allowed = new Set(policy.allowedTools ?? []);
   const blocked = new Set(policy.blockedTools ?? []);
   allowed.delete(toolName);
@@ -483,13 +493,13 @@ export function ToolsRoute() {
   const activePolicyBaseSignature = `${activePolicyAgent?.agentId ?? ""}:${activePolicy.policyId}:${toolPolicyListSignature(activePolicy.allowedTools)}:${toolPolicyListSignature(activePolicy.blockedTools)}`;
   const effectivePolicy = policyDraft ?? activePolicy;
   const policyDirty = toolPolicyDraftDirty(activePolicy, policyDraft);
-  const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(effectivePolicy, activeTool.name) : "inherited";
+  const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(effectivePolicy, activeTool) : "inherited";
   const policyModeCounts = useMemo(() => toolPolicyModeCounts(effectivePolicy, tools), [effectivePolicy, tools]);
   const selectedPolicyToolNameSet = useMemo(() => new Set(selectedPolicyToolNames), [selectedPolicyToolNames]);
   const permissionTools = useMemo(() => {
     const query = permissionSearchText.trim().toLowerCase();
     return tools.filter((tool) => {
-      const mode = toolPolicyMode(effectivePolicy, tool.name);
+      const mode = toolPolicyMode(effectivePolicy, tool);
       if (permissionFilter !== "all" && mode !== permissionFilter) {
         return false;
       }
@@ -730,7 +740,7 @@ export function ToolsRoute() {
     setLeftPanelWidth(nextWidth);
   }
 
-  function updateActiveToolPolicy(mode: Exclude<ToolPolicyMode, "excluded">) {
+  function updateActiveToolPolicy(mode: EditableToolPolicyMode) {
     if (!activeTool || !activePolicyAgent) {
       return;
     }
@@ -747,7 +757,7 @@ export function ToolsRoute() {
     setSelectedPolicyToolNames((current) => uniqueToolList([...current, ...permissionTools.map((tool) => tool.name)]));
   }
 
-  function setSelectedToolsPolicyMode(mode: Exclude<ToolPolicyMode, "excluded">) {
+  function setSelectedToolsPolicyMode(mode: EditableToolPolicyMode) {
     if (!activePolicyAgent || !selectedPolicyToolNames.length) {
       return;
     }
@@ -890,7 +900,7 @@ export function ToolsRoute() {
           <div className={styles.toolList}>
             {visibleTools.map((tool) => {
               const isActive = tool.id === activeTool?.id;
-              const policyMode = activePolicyAgent ? toolPolicyMode(effectivePolicy, tool.name) : "inherited";
+              const policyMode = activePolicyAgent ? toolPolicyMode(effectivePolicy, tool) : "inherited";
               return (
                 <button
                   key={`${tool.source}-${tool.id}`}
@@ -966,6 +976,9 @@ export function ToolsRoute() {
                 </span>
                 <span>
                   inherited: <strong>{policyModeCounts.inherited}</strong>
+                </span>
+                <span>
+                  {lang === "zh" ? "需授权" : "explicit"}: <strong>{policyModeCounts.explicit_required}</strong>
                 </span>
                 <span>
                   excluded: <strong>{policyModeCounts.excluded}</strong>
@@ -1064,7 +1077,7 @@ export function ToolsRoute() {
             </div>
             <div className={styles.bulkPolicyList}>
               {permissionTools.map((tool) => {
-                const mode = toolPolicyMode(effectivePolicy, tool.name);
+                const mode = toolPolicyMode(effectivePolicy, tool);
                 const selected = selectedPolicyToolNameSet.has(tool.name);
                 return (
                   <label

@@ -483,7 +483,8 @@
 }
 
 .policy_blocked,
-.policy_excluded {
+.policy_excluded,
+.policy_explicit_required {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 9%, transparent);
   color: var(--accent-warm-2);
