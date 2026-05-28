@@ -1600,6 +1600,12 @@ class TestToolMessageFlow:
         assert exc_info.value.code == 0
 
     def test_spawn_agent_structured_protocol_parses_marker_payload(self, monkeypatch):
+        scene_events = []
+
+        def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+            scene_events.append((component, phase, event_code, kwargs))
+            return {"accepted": True}
+
         class FakePipe:
             def __init__(self, lines):
                 self._lines = list(lines)
@@ -1625,6 +1631,7 @@ class TestToolMessageFlow:
                 )
                 self.stderr = FakePipe([])
                 self.returncode = 0
+                self.pid = 24680
 
             def poll(self):
                 return 0
@@ -1636,6 +1643,10 @@ class TestToolMessageFlow:
                 self.returncode = -9
 
         monkeypatch.setattr("tools.agent_tools.subprocess.Popen", DummyPopen)
+        monkeypatch.setattr(
+            "core.web.services.runtime_scene_service.record_runtime_scene_event",
+            fake_record_runtime_scene_event,
+        )
 
         result = spawn_agent_impl(
             task_type="diagnose",
@@ -1650,6 +1661,17 @@ class TestToolMessageFlow:
         assert payload["summary"] == "已定位根因"
         assert payload["confidence"] == "high"
         assert "subagent thinking line" in payload["process_output"]
+        assert payload["subRunId"].startswith("subagent-diagnose-d1-")
+        assert [event[2] for event in scene_events] == ["subagent.run.started", "subagent.run.finished"]
+        assert {
+            event[3]["fields"]["subRunId"]
+            for event in scene_events
+        } == {payload["subRunId"]}
+        assert all(
+            event[3]["child_log_path"] == f"agent/sub_agent_runs/{payload['subRunId']}.jsonl"
+            for event in scene_events
+        )
+        assert scene_events[-1][3]["child_log_payload"]["summary"] == "已定位根因"
 
     def test_spawn_agent_infers_platform_conclusion_from_non_json_output(self, monkeypatch):
         class FakePipe:
@@ -1699,6 +1721,12 @@ class TestToolMessageFlow:
         assert payload["evidence"]
 
     def test_spawn_agent_timeout_preserves_partial_process_output(self, monkeypatch):
+        scene_events = []
+
+        def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+            scene_events.append((component, phase, event_code, kwargs))
+            return {"accepted": True}
+
         class SlowPipe:
             def __init__(self, line):
                 self._line = line
@@ -1733,6 +1761,10 @@ class TestToolMessageFlow:
                 self.returncode = -9
 
         monkeypatch.setattr("tools.agent_tools.subprocess.Popen", TimeoutPopen)
+        monkeypatch.setattr(
+            "core.web.services.runtime_scene_service.record_runtime_scene_event",
+            fake_record_runtime_scene_event,
+        )
 
         result = spawn_agent_impl(
             task_type="diagnose",
@@ -1746,8 +1778,18 @@ class TestToolMessageFlow:
         assert "超时" in payload["summary"]
         assert "step1" in payload["process_output"]
         assert "timeout stderr" in payload["raw_output"]
+        assert payload["subRunId"].startswith("subagent-diagnose-d1-")
+        assert [event[2] for event in scene_events] == ["subagent.run.started", "subagent.run.timeout"]
+        assert scene_events[-1][3]["fields"]["status"] == "timeout"
+        assert scene_events[-1][3]["child_log_payload"]["timeoutSeconds"] == 1
 
     def test_spawn_agent_cancel_kills_process_and_returns_cancelled(self, monkeypatch):
+        scene_events = []
+
+        def fake_record_runtime_scene_event(component, phase, event_code, **kwargs):
+            scene_events.append((component, phase, event_code, kwargs))
+            return {"accepted": True}
+
         class SlowPipe:
             def readline(self):
                 import time
@@ -1791,6 +1833,10 @@ class TestToolMessageFlow:
         monkeypatch.setattr("tools.agent_tools.subprocess.run", fake_run)
         monkeypatch.setattr("tools.agent_tools.subprocess.CREATE_NEW_PROCESS_GROUP", 0x00000200, raising=False)
         monkeypatch.setattr("tools.agent_tools.subprocess.CREATE_NO_WINDOW", 0x08000000, raising=False)
+        monkeypatch.setattr(
+            "core.web.services.runtime_scene_service.record_runtime_scene_event",
+            fake_record_runtime_scene_event,
+        )
 
         result = spawn_agent_impl(
             task_type="diagnose",
@@ -1808,6 +1854,9 @@ class TestToolMessageFlow:
         assert taskkill_calls
         assert taskkill_calls[0][0] == ["taskkill", "/PID", "43210", "/T", "/F"]
         assert taskkill_calls[0][1]["creationflags"] & 0x08000000
+        assert payload["subRunId"].startswith("subagent-diagnose-d1-")
+        assert [event[2] for event in scene_events] == ["subagent.run.started", "subagent.run.cancelled"]
+        assert scene_events[-1][3]["fields"]["stopReason"] == "操作者请求停止当前轮。"
 
     def test_spawn_agent_streams_live_stdout_before_final_marker(self, monkeypatch):
         class FakePipe:
