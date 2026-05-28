@@ -87,6 +87,10 @@ SAFE_BUILTIN_TEST_REASONS: dict[str, str] = {
 }
 IMAGE2_TOOL_NAME = "image2_generate_tool"
 IMAGE2_FALLBACK_MODEL = "gpt-image-1.5"
+DEFAULT_PERMISSION_POLICY = {
+    "requiresExplicitAllow": False,
+    "reason": "",
+}
 
 
 class ToolRegistryError(ValueError):
@@ -996,6 +1000,7 @@ def _builtin_tool_items() -> list[dict[str, Any]]:
                 "validationError": "",
                 "argsSchema": _args_schema_for_tool(tool),
                 "testPolicy": _builtin_test_policy(name),
+                "permissionPolicy": _permission_policy_for_tool(name),
                 "createdAt": "",
                 "updatedAt": "",
             }
@@ -1036,6 +1041,7 @@ def _generated_tool_item(record: dict[str, Any], *, builtin_names: set[str]) -> 
         "argsSchema": _normalize_schema(item.get("argsSchema")),
         "responseTemplate": str(item.get("responseTemplate") or "").strip(),
         "testPolicy": _generated_test_policy(status == "validated"),
+        "permissionPolicy": dict(DEFAULT_PERMISSION_POLICY),
         "createdAt": str(item.get("createdAt") or ""),
         "updatedAt": str(item.get("updatedAt") or ""),
     }
@@ -1069,6 +1075,22 @@ def _generated_test_policy(validated: bool) -> dict[str, Any]:
         "simulated": True,
         "reason": "Generated tool tests validate the manifest response template without executing browser-submitted code.",
         "argsPreview": {},
+    }
+
+
+def _permission_policy_for_tool(tool_name: str) -> dict[str, Any]:
+    normalized = str(tool_name or "").strip()
+    try:
+        from core.web.services.agent_directory_service import EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
+
+        requires_explicit_allow = normalized in EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS
+    except Exception:
+        requires_explicit_allow = False
+    if not requires_explicit_allow:
+        return dict(DEFAULT_PERMISSION_POLICY)
+    return {
+        "requiresExplicitAllow": True,
+        "reason": "This tool is hidden and blocked until the selected Agent explicitly includes it in ToolPolicy.allowedTools.",
     }
 
 

@@ -598,6 +598,11 @@ export type ToolTestPolicy = {
   argsPreview: Record<string, unknown>;
 };
 
+export type ToolPermissionPolicy = {
+  requiresExplicitAllow: boolean;
+  reason: string;
+};
+
 export type ToolAgentCompatibility = {
   status: string;
   callable: boolean;
@@ -642,6 +647,7 @@ export type ToolRegistryItem = {
   validationError: string;
   argsSchema: Record<string, unknown>;
   testPolicy: ToolTestPolicy;
+  permissionPolicy?: ToolPermissionPolicy;
   agentScopes: Record<ToolAgentScopeId, ToolAgentScopeState>;
   responseTemplate?: string;
   createdAt: string;
