@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.10 - 2026-05-29
+
+- Added read-only research organization context to persistent Research Agent turns so a CEO/advisor/steward can see connected team members, Agent IDs/codes, roles, responsibilities, communication edges, allowed message types/intents, and wake policy before using `agent_message_tool`.
+- Filtered the runtime organization context to the current Agent's connected communication subgraph so stale historical research nodes do not pollute the member list.
+
 ## 0.4.9 - 2026-05-29
 
 - Added the project Agent bus and Agent Teams workspace so project-wide and team-scoped broadcasts can target active Agents, wake or interrupt them, appear in the shared bus timeline, and be revoked through the UI.

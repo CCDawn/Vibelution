@@ -2,12 +2,37 @@ import json
 
 from core.orchestration import context_engine
 from core.runtime_manager import work_run_store
-from core.web.services import agent_directory_service, prompt_template_service
+from core.web.services import agent_directory_service, prompt_template_service, research_organization_service
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+
+
+class _FakeResearchWorkspace:
+    def __init__(self, root):
+        self.root = root / "workspace"
+
+    def get_research_organization_path(self):
+        return self.root / "research" / "organization_graph.json"
+
+    def read_research_organization(self):
+        path = self.get_research_organization_path()
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    def write_research_organization(self, data):
+        path = self.get_research_organization_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+
+
+def _use_tmp_research_org_workspace(tmp_path, monkeypatch):
+    workspace = _FakeResearchWorkspace(tmp_path)
+    monkeypatch.setattr(research_organization_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    return workspace
 
 
 def test_build_agent_context_collects_isolated_agent_runtime_context(tmp_path, monkeypatch):
@@ -55,6 +80,71 @@ def test_build_agent_context_collects_isolated_agent_runtime_context(tmp_path, m
     assert "Agent Prompt Template" in packet.context_block
     assert "prompt-research-broad" in packet.context_block
     assert "广撒网探索 agent" in packet.context_block
+
+
+def test_build_agent_context_includes_research_org_member_and_edge_context(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+
+    organization = research_organization_service.get_research_organization()
+    ceo = next(node for node in organization["agents"] if node["role"] == "ceo")
+    advisor = next(node for node in organization["agents"] if node["role"] == "organization_advisor")
+    steward = next(node for node in organization["agents"] if node["role"] == "capability_steward")
+
+    packet = context_engine.build_agent_context(
+        ceo["agentId"],
+        session_id=ceo["agent"]["directSessionId"],
+        run_id="turn-research-ceo",
+    )
+
+    assert "Research Organization Context" in packet.context_block
+    assert ceo["agentCode"] in packet.context_block
+    assert advisor["agentCode"] in packet.context_block
+    assert steward["agentCode"] in packet.context_block
+    assert ceo["agentId"] in packet.context_block
+    assert advisor["agentId"] in packet.context_block
+    assert steward["agentId"] in packet.context_block
+    assert "Directly reachable from you:" in packet.context_block
+    assert f"edge-{ceo['agentId']}-{advisor['agentId']}" in packet.context_block
+    assert f"edge-{ceo['agentId']}-{steward['agentId']}" in packet.context_block
+    assert "allowedTypes=" in packet.context_block
+    assert "Use AgentId or AgentCode with agent_message_tool" in packet.context_block
+
+
+def test_build_agent_context_filters_research_org_context_to_connected_subgraph(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    disconnected = agent_directory_service.create_agent_instance(
+        display_name="旧研究员",
+        primary_mode="research",
+        role_key="research_specialist",
+        prompt_template_id="prompt-research-broad",
+        direct_session_id="session-old-specialist",
+        metadata={"researchOrgRole": "research_specialist", "systemRole": "research_specialist"},
+    )
+    organization = research_organization_service.get_research_organization()
+    ceo = next(node for node in organization["agents"] if node["role"] == "ceo")
+    advisor = next(node for node in organization["agents"] if node["role"] == "organization_advisor")
+    organization["agents"].append(
+        {
+            "nodeId": disconnected["agentId"],
+            "agentId": disconnected["agentId"],
+            "role": "research_specialist",
+            "employeeRank": "member",
+            "status": "active",
+        }
+    )
+    research_organization_service.save_research_organization(organization)
+
+    packet = context_engine.build_agent_context(
+        ceo["agentId"],
+        session_id=ceo["agent"]["directSessionId"],
+        run_id="turn-research-ceo",
+    )
+
+    assert ceo["agentId"] in packet.context_block
+    assert advisor["agentId"] in packet.context_block
+    assert f"agentId={disconnected['agentId']} " not in packet.context_block
 
 
 def test_build_agent_context_returns_empty_packet_for_missing_agent(tmp_path, monkeypatch):
