@@ -39,6 +39,18 @@ def default_agent_factory(*, mode: str, workspace_path: str | None = None, confi
     return SelfEvolvingAgent(mode=mode, workspace_path=workspace_path, config=config)
 
 
+def create_agent_runtime(
+    *,
+    mode: str,
+    workspace_path: str | None = None,
+    config: Any = None,
+    agent_factory: AgentFactory = default_agent_factory,
+) -> Any:
+    """Create a runtime Agent through the shared Core First seam."""
+
+    return agent_factory(mode=mode, workspace_path=workspace_path, config=config)
+
+
 def run_agent_single_turn(
     request: AgentSingleTurnRequest,
     *,
@@ -46,10 +58,11 @@ def run_agent_single_turn(
 ) -> AgentSingleTurnResult:
     """Run one Agent Turn and return the visible result plus next carryover."""
 
-    agent = agent_factory(
+    agent = create_agent_runtime(
         mode=request.mode,
         workspace_path=request.workspace_path,
         config=request.config,
+        agent_factory=agent_factory,
     )
     seed_turn_carryover = getattr(agent, "seed_turn_carryover", None)
     if callable(seed_turn_carryover) and request.carryover:
@@ -80,5 +93,6 @@ __all__ = [
     "AgentFactory",
     "AgentSingleTurnRequest",
     "AgentSingleTurnResult",
+    "create_agent_runtime",
     "run_agent_single_turn",
 ]
