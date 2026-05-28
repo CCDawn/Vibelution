@@ -1,7 +1,6 @@
 import copy
 import hashlib
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -722,7 +721,20 @@ def test_self_evolution_turn_uses_executor_context_engine_packet(tmp_path, monke
         def export_turn_carryover(self):
             return {}
 
-    monkeypatch.setitem(sys.modules, "agent", SimpleNamespace(SelfEvolvingAgent=FakeSelfEvolvingAgent))
+    def fake_run_agent_single_turn(request):
+        agent = FakeSelfEvolvingAgent(
+            mode=request.mode,
+            workspace_path=request.workspace_path,
+            config=request.config,
+        )
+        if request.runtime_context:
+            agent.seed_runtime_context(request.runtime_context)
+        if request.interrupt_checker:
+            agent.set_turn_interrupt_checker(request.interrupt_checker)
+        result = agent.run_single_turn(initial_prompt=request.initial_prompt)
+        return SimpleNamespace(result=result, carryover=agent.export_turn_carryover())
+
+    monkeypatch.setattr(service, "run_agent_single_turn", fake_run_agent_single_turn)
     monkeypatch.setattr(service._RUN_EXECUTOR, "submit", lambda fn, context: fn(context))
 
     snapshot = service.start_self_evolution_run({"goal": "只读观察"})
