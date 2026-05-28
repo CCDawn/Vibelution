@@ -82,6 +82,48 @@ describe("api failure telemetry", () => {
     ).toBe(true);
   });
 
+  it("suppresses pagehide-adjacent background GET cancellations", () => {
+    expect(
+      shouldSuppressApiFailureTelemetry(
+        {
+          endpoint: "/api/conversations",
+          method: "GET",
+          status: null,
+          message: "Failed to fetch",
+          failureKind: "network",
+        },
+        {
+          shutdownRequested: false,
+          runtimeControllerState: "managed",
+          visibilityState: "visible",
+          pagehideAtMs: 10_000,
+          nowMs: 10_500,
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps foreground network failures visible outside pagehide cancellation window", () => {
+    expect(
+      shouldSuppressApiFailureTelemetry(
+        {
+          endpoint: "/api/conversations",
+          method: "GET",
+          status: null,
+          message: "Failed to fetch",
+          failureKind: "network",
+        },
+        {
+          shutdownRequested: false,
+          runtimeControllerState: "managed",
+          visibilityState: "visible",
+          pagehideAtMs: 10_000,
+          nowMs: 14_000,
+        },
+      ),
+    ).toBe(false);
+  });
+
   it("keeps normal API failures visible", () => {
     expect(
       shouldSuppressApiFailureTelemetry(

@@ -53,6 +53,7 @@ const API_FAILURE_TELEMETRY_THROTTLE_MS = 15_000;
 const API_FAILURE_BACKGROUND_METHODS = new Set(["GET", "HEAD"]);
 const APP_VERSION = packageJson.version;
 const BROWSER_MEMORY_SAMPLE_INTERVAL_MS = 30_000;
+const PAGEHIDE_NETWORK_FAILURE_SUPPRESSION_MS = 2_500;
 
 function filterUtilityFileTree(nodes: FileTreeNode[], query: string): FileTreeNode[] {
   const term = query.trim().toLowerCase();
@@ -114,10 +115,29 @@ export function shouldSuppressApiFailureTelemetry(
     restartRequested?: boolean;
     runtimeControllerState: string;
     visibilityState?: DocumentVisibilityState | string;
+    pagehideAtMs?: number;
+    nowMs?: number;
   },
 ): boolean {
-  const { shutdownRequested, restartRequested, runtimeControllerState, visibilityState } = options;
+  const {
+    shutdownRequested,
+    restartRequested,
+    runtimeControllerState,
+    visibilityState,
+    pagehideAtMs,
+    nowMs = Date.now(),
+  } = options;
   if (shutdownRequested || restartRequested || runtimeControllerState === "closing") {
+    return true;
+  }
+  if (
+    failure.failureKind === "network" &&
+    API_FAILURE_BACKGROUND_METHODS.has(failure.method.toUpperCase()) &&
+    typeof pagehideAtMs === "number" &&
+    pagehideAtMs > 0 &&
+    nowMs >= pagehideAtMs &&
+    nowMs - pagehideAtMs <= PAGEHIDE_NETWORK_FAILURE_SUPPRESSION_MS
+  ) {
     return true;
   }
   if (
@@ -329,6 +349,7 @@ export function AppShell() {
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(`page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
   const apiFailureTelemetrySeenRef = useRef(new Map<string, number>());
+  const pagehideAtMsRef = useRef(0);
   const activeSessionId = useChatWorkbenchStore((state) => state.activeSessionId);
   const activeSessionWorkspace = useChatWorkbenchStore((state) =>
     state.activeSessionId ? state.sessionWorkspaces[state.activeSessionId] : undefined,
@@ -670,6 +691,7 @@ export function AppShell() {
         restartRequested,
         runtimeControllerState,
         visibilityState: typeof document === "undefined" ? "visible" : document.visibilityState,
+        pagehideAtMs: pagehideAtMsRef.current,
       })) {
         return;
       }
@@ -762,6 +784,7 @@ export function AppShell() {
     }, 0);
 
     function handlePageHide(event: PageTransitionEvent) {
+      pagehideAtMsRef.current = Date.now();
       emitBrowserTelemetry(
         {
           phase: "lifecycle",
