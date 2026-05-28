@@ -18,6 +18,7 @@ import { ResearchFlowCanvasRoute } from "../routes/ResearchFlowCanvasRoute";
 import { ResearchRoute } from "../routes/ResearchRoute";
 import { SkillsRoute } from "../routes/SkillsRoute";
 import { SupervisedReviewRoute } from "../routes/SupervisedReviewRoute";
+import { TeamsRoute } from "../routes/TeamsRoute";
 import { ToolsRoute } from "../routes/ToolsRoute";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
@@ -86,6 +87,7 @@ export const router = createBrowserRouter([
       },
       { path: "evolution", element: <LegacyEvolutionRedirect /> },
       { path: "agents", element: <AgentsRoute /> },
+      { path: "agents/teams", element: <TeamsRoute /> },
       { path: "agents/prompts", element: <PromptTemplatesRoute /> },
       { path: "agents/tools", element: <ToolsRoute /> },
       { path: "agents/skills", element: <SkillsRoute /> },
