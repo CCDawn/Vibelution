@@ -1,5 +1,6 @@
 from core.orchestration.turn_runner import (
     AgentSingleTurnRequest,
+    call_agent_factory_with_supported_kwargs,
     create_agent_runtime,
     prepare_agent_turn,
     run_agent_single_turn,
@@ -28,6 +29,60 @@ def test_create_agent_runtime_uses_shared_agent_factory():
         "workspace_path": "workspace/session",
         "config": "config",
     }
+
+
+def test_call_agent_factory_with_supported_kwargs_filters_by_signature():
+    captured = {}
+    agent = object()
+
+    def factory(*, config=None):
+        captured["config"] = config
+        return agent
+
+    created = call_agent_factory_with_supported_kwargs(
+        factory,
+        workspace_path="workspace/session",
+        config="config",
+    )
+
+    assert created is agent
+    assert captured == {"config": "config"}
+
+
+def test_call_agent_factory_with_supported_kwargs_supports_var_kwargs():
+    captured = {}
+    agent = object()
+
+    def factory(**kwargs):
+        captured.update(kwargs)
+        return agent
+
+    created = call_agent_factory_with_supported_kwargs(
+        factory,
+        workspace_path="workspace/session",
+        config="config",
+    )
+
+    assert created is agent
+    assert captured == {
+        "workspace_path": "workspace/session",
+        "config": "config",
+    }
+
+
+def test_call_agent_factory_with_supported_kwargs_calls_no_arg_factory():
+    agent = object()
+
+    def factory():
+        return agent
+
+    created = call_agent_factory_with_supported_kwargs(
+        factory,
+        workspace_path="workspace/session",
+        config="config",
+    )
+
+    assert created is agent
 
 
 def test_run_agent_single_turn_seeds_context_and_exports_carryover():
