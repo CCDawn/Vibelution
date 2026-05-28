@@ -5,7 +5,7 @@ import { useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
-import { AgentConfigWorkspace, ProjectAgentBusEvent, Team, TeamCanvasNode, TeamListPayload, TeamOrganizationCanvas } from "../api/types";
+import { AgentConfigWorkspace, ProjectAgentBusEvent, ProjectAgentBusTimeline, Team, TeamCanvasNode, TeamListPayload, TeamOrganizationCanvas } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { agentDisplayInfo } from "./agentDisplay";
@@ -81,6 +81,10 @@ function nodeTone(node: TeamCanvasNode) {
   return styles.nodeOpen;
 }
 
+function projectBusEventRevoked(event: ProjectAgentBusEvent) {
+  return String(event.status ?? "").trim().toLowerCase() === "revoked";
+}
+
 export function TeamsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -100,6 +104,10 @@ export function TeamsRoute() {
     queryKey: queryKeys.agentConfigWorkspace(),
     queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace"),
   });
+  const projectBusQuery = useQuery({
+    queryKey: queryKeys.projectAgentBus(),
+    queryFn: () => fetchJson<ProjectAgentBusTimeline>("/api/project-agent-bus?limit=120"),
+  });
   const activeAgents = useMemo(
     () => (workspaceQuery.data?.agents ?? []).filter((agent) => agent.status !== "archived"),
     [workspaceQuery.data],
@@ -115,6 +123,14 @@ export function TeamsRoute() {
   const selectedTeam = teamDetailQuery.data ?? teams.find((team) => team.teamId === effectiveTeamId) ?? null;
   const canvas = canvasFromTeam(selectedTeam);
   const selectedNode = canvas?.nodes.find((node) => node.id === selectedNodeId) ?? canvas?.nodes[0] ?? null;
+  const teamBusEvents = useMemo(
+    () =>
+      [...(projectBusQuery.data?.events ?? [])]
+        .filter((event) => String(event.metadata?.teamId ?? "").trim() === selectedTeam?.teamId)
+        .reverse()
+        .slice(0, 6),
+    [projectBusQuery.data?.events, selectedTeam?.teamId],
+  );
 
   useEffect(() => {
     if (requestedTeamId && teams.some((team) => team.teamId === requestedTeamId)) {
@@ -150,6 +166,7 @@ export function TeamsRoute() {
       setTeamDraft({ name: "", purpose: "" });
       queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
       queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
     },
   });
 
@@ -196,6 +213,24 @@ export function TeamsRoute() {
       }),
     onSuccess: () => {
       setTeamMessage("");
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+    },
+  });
+
+  const revokeTeamMessageMutation = useMutation({
+    mutationFn: (eventId: string) =>
+      fetchJson<ProjectAgentBusEvent>(`/api/project-agent-bus/messages/${encodeURIComponent(eventId)}/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reason: "Revoked from Agent Center team broadcast history.",
+          stopTargets: true,
+        }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
     },
   });
 
@@ -549,6 +584,57 @@ export function TeamsRoute() {
                   <div className={styles.messageError}>{sendTeamMessageMutation.error.message}</div>
                 ) : null}
               </form>
+              <section className={styles.teamHistoryPanel}>
+                <div className={styles.sectionTitle}>
+                  <strong>{lang === "zh" ? "最近团队广播" : "Recent team broadcasts"}</strong>
+                  <span>{teamBusEvents.length} events</span>
+                </div>
+                {projectBusQuery.isPending ? (
+                  <div className={styles.empty}>{lang === "zh" ? "正在读取项目总群..." : "Loading project bus..."}</div>
+                ) : teamBusEvents.length ? (
+                  <div className={styles.teamHistoryList}>
+                    {teamBusEvents.map((event) => {
+                      const revoked = projectBusEventRevoked(event);
+                      return (
+                        <article key={event.eventId} className={revoked ? `${styles.teamHistoryItem} ${styles.teamHistoryItemRevoked}` : styles.teamHistoryItem}>
+                          <div className={styles.teamHistoryHeader}>
+                            <strong>{event.summary || event.content}</strong>
+                            <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
+                          </div>
+                          <p>{revoked ? (lang === "zh" ? "这条团队广播已撤回，目标 Agent 已请求停止。" : "This team broadcast was revoked and target agents were asked to stop.") : event.content}</p>
+                          <div className={styles.teamHistoryMeta}>
+                            <span>{formatTime(event.createdAt, lang)}</span>
+                            <span>{event.deliveries.length} deliveries</span>
+                            <span>{event.interruptions.length} interrupts</span>
+                          </div>
+                          <div className={styles.deliveryList}>
+                            {event.deliveries.map((delivery) => (
+                              <span key={`${event.eventId}-${delivery.targetAgentId}-${delivery.inboxMessageId}`}>
+                                {delivery.targetAgentCode || delivery.targetAgentName || delivery.targetAgentId}: {delivery.revoked ? "revoked" : delivery.wake?.wakeStatus || delivery.status}
+                              </span>
+                            ))}
+                          </div>
+                          {event.createdBy === "user" && !revoked ? (
+                            <button
+                              type="button"
+                              className={styles.revokeButton}
+                              disabled={revokeTeamMessageMutation.isPending}
+                              onClick={() => revokeTeamMessageMutation.mutate(event.eventId)}
+                            >
+                              {revokeTeamMessageMutation.isPending ? (lang === "zh" ? "撤回中" : "Revoking") : (lang === "zh" ? "撤回" : "Revoke")}
+                            </button>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className={styles.empty}>{lang === "zh" ? "当前团队还没有广播记录。" : "No team broadcasts yet."}</div>
+                )}
+                {revokeTeamMessageMutation.error instanceof Error ? (
+                  <div className={styles.messageError}>{revokeTeamMessageMutation.error.message}</div>
+                ) : null}
+              </section>
             </div>
           ) : (
             <div className={styles.empty}>{lang === "zh" ? "创建或选择一个团队节点。" : "Create or select a team node."}</div>
