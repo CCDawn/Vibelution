@@ -1,6 +1,7 @@
 from core.orchestration.turn_runner import (
     AgentSingleTurnRequest,
     create_agent_runtime,
+    prepare_agent_turn,
     run_agent_single_turn,
     run_existing_agent_single_turn,
 )
@@ -79,6 +80,38 @@ def test_run_agent_single_turn_seeds_context_and_exports_carryover():
     }
     assert result.result == {"status": "completed", "summary": "done"}
     assert result.carryover == {"next": "state"}
+
+
+def test_prepare_agent_turn_seeds_optional_supported_inputs():
+    captured: dict[str, object] = {}
+
+    class FakeAgent:
+        def seed_turn_carryover(self, carryover):
+            captured["carryover"] = carryover
+
+        def seed_runtime_context(self, context):
+            captured["runtime_context"] = context
+
+        def set_turn_interrupt_checker(self, checker):
+            captured["interrupt_reason"] = checker()
+
+        def seed_chat_history(self, history):
+            captured["chat_history"] = history
+
+    prepare_agent_turn(
+        FakeAgent(),
+        carryover={"previous": "state"},
+        runtime_context="Runtime Context",
+        interrupt_checker=lambda: "stop_requested",
+        chat_history=[{"role": "assistant", "content": "hello"}],
+    )
+
+    assert captured == {
+        "carryover": {"previous": "state"},
+        "runtime_context": "Runtime Context",
+        "interrupt_reason": "stop_requested",
+        "chat_history": [{"role": "assistant", "content": "hello"}],
+    }
 
 
 def test_run_existing_agent_single_turn_passes_supported_optional_kwargs():

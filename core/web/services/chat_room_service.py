@@ -17,7 +17,7 @@ from core.chatroom.scheduler import get_scheduler_registry
 from core.chatroom.store import ChatRoomStore, utc_now_iso
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
 from core.orchestration.output_boundary import sanitize_assistant_visible_text
-from core.orchestration.turn_runner import run_existing_agent_single_turn
+from core.orchestration.turn_runner import prepare_agent_turn, run_existing_agent_single_turn
 from core.runtime_manager import work_run_store
 from core.runtime_manager.work_run_leases import READONLY_CHAT_LEASE
 from core.ui.chat_state import load_chat_state, normalize_chat_messages, save_chat_state
@@ -1010,15 +1010,12 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         round_id=round_id,
     ), session_service._session_tool_workspace_override(workspace):
         agent = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
-        stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
-        if callable(stop_configurer):
-            stop_configurer(lambda: _chat_room_round_stop_reason(round_id))
-        restore = getattr(agent, "seed_chat_history", None)
-        if callable(restore):
-            restore(participant.get("recentMessages") or [])
-        seed_runtime_context = getattr(agent, "seed_runtime_context", None)
-        if callable(seed_runtime_context) and agent_context is not None and agent_context.context_block:
-            seed_runtime_context(agent_context.context_block)
+        prepare_agent_turn(
+            agent,
+            interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
+            chat_history=participant.get("recentMessages") or [],
+            runtime_context=agent_context.context_block if agent_context is not None else "",
+        )
         result = run_existing_agent_single_turn(agent, initial_prompt=prompt, disable_tools=True)
     if agent_context is not None and agent_context.agent_id:
         record_agent_turn_result(
