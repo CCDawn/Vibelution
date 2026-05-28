@@ -2870,6 +2870,27 @@ def _persist_session_turn_result(
             else _format_visible_reply(result)
         )
         assistant_text = _ensure_assistant_visible_text(assistant_text, result=result, lang=lang)
+        phantom_image_success = _is_phantom_image_generation_success(
+            assistant_text,
+            result,
+            messages,
+        )
+        if phantom_image_success:
+            assistant_text = text_for(
+                lang,
+                zh="这轮没有实际生成新的图片：系统没有捕获到图片生成工具调用产生的图片结果。请重新发送生成请求。",
+                en="No new image was actually generated in this turn: no image-generation artifact was captured. Please send the generation request again.",
+            )
+            if isinstance(result, dict):
+                result = {
+                    **result,
+                    "status": "failed_runtime",
+                    "summary": assistant_text,
+                    "raw_output": assistant_text,
+                    "error": assistant_text,
+                    "outcome": "failed",
+                }
+                result_status = "failed_runtime"
         assistant_entry = _make_chat_message(
             "assistant",
             assistant_text,
@@ -2977,6 +2998,7 @@ def _persist_session_turn_result(
                 "resumeAllowed": final_status in {"stopped_by_user", "paused_limit", "needs_continue"},
                 "toolCallCount": len(tool_calls),
                 "hasMentalSnapshot": bool(assistant_entry.get("mental_snapshot")),
+                "phantomImageSuccess": phantom_image_success,
             },
         )
         _record_session_turn_lifecycle_event(
@@ -2992,8 +3014,22 @@ def _persist_session_turn_result(
                 "toolCallCount": len(_extract_chat_tool_calls(result)),
                 "hasThought": bool(assistant_entry.get("thought")),
                 "hasMentalSnapshot": bool(assistant_entry.get("mental_snapshot")),
+                "phantomImageSuccess": phantom_image_success,
             },
         )
+        if phantom_image_success:
+            _record_session_turn_lifecycle_event(
+                session_id,
+                "phantom_image_success_blocked",
+                turn_id=turn_id,
+                level="warning",
+                outcome="failed_runtime",
+                fields={
+                    "assistantTextLength": len(assistant_text),
+                    "toolCallCount": len(tool_calls),
+                    "hasImageArtifactEvidence": False,
+                },
+            )
     _record_session_cycle_message(
         session_id,
         assistant_entry,
@@ -3903,6 +3939,90 @@ def _extract_chat_tool_calls(result: Any) -> list[dict[str, Any]]:
     if tool_calls:
         return tool_calls
     return _normalize_persisted_tool_calls(result.get("tool_calls") or result.get("tools") or [])
+
+
+def _is_phantom_image_generation_success(
+    assistant_text: str,
+    result: Any,
+    messages: list[dict[str, Any]],
+) -> bool:
+    if not _looks_like_image_generation_success_text(assistant_text):
+        return False
+    if _has_image_generation_artifact_evidence(result):
+        return False
+    if _result_has_image2_tool_call(result):
+        return False
+    return not _latest_message_is_image_generation_artifact(messages)
+
+
+def _looks_like_image_generation_success_text(value: Any) -> bool:
+    text = re.sub(r"\s+", "", str(value or "")).strip().lower()
+    if not text:
+        return False
+    exact_success = {
+        "已生成图片。",
+        "已生成图片",
+        "图片已生成。",
+        "图片已生成",
+        "图片生成完成。",
+        "图片生成完成",
+        "图片已成功生成！",
+        "图片已成功生成!",
+        "图片已成功生成",
+        "已成功生成图片。",
+        "已成功生成图片",
+    }
+    if text in {item.lower() for item in exact_success}:
+        return True
+    if len(text) > 60:
+        return False
+    success_terms = ("已生成", "生成完成", "成功生成", "已成功生成")
+    return "图片" in text and any(term in text for term in success_terms)
+
+
+def _result_has_image2_tool_call(result: Any) -> bool:
+    for tool_call in _extract_chat_tool_calls(result):
+        if str(tool_call.get("name") or "").strip() == "image2_generate_tool":
+            return True
+    return False
+
+
+def _has_image_generation_artifact_evidence(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    stack: list[Any] = [result]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            marker = id(current)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            if str(current.get("imageUrl") or current.get("image_url") or "").strip():
+                return True
+            if str(current.get("artifactId") or current.get("artifact_id") or "").strip():
+                kind = str(current.get("kind") or current.get("toolName") or current.get("tool_name") or "").strip()
+                if not kind or "image" in kind.lower() or kind == "image2_generate_tool":
+                    return True
+            for value in current.values():
+                if isinstance(value, (dict, list, tuple)):
+                    stack.append(value)
+        elif isinstance(current, (list, tuple)):
+            stack.extend(current)
+    return False
+
+
+def _latest_message_is_image_generation_artifact(messages: list[dict[str, Any]]) -> bool:
+    for message in reversed(list(messages or [])[-3:]):
+        if not isinstance(message, dict):
+            continue
+        metadata = message.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        if str(metadata.get("kind") or "").strip() == "image2_generation" and str(metadata.get("imageUrl") or "").strip():
+            return True
+    return False
 
 
 def _extract_chat_thought(result: Any, assistant_text: str) -> str:

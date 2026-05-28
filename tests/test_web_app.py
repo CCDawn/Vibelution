@@ -3250,6 +3250,46 @@ def test_chat_turn_registers_as_work_run_until_finished(tmp_path, monkeypatch):
     assert latest_chat["status"] == "completed"
 
 
+def test_persist_turn_result_blocks_phantom_image_generation_success(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    turn_id = "turn-image2"
+    session_service._set_session_running("session-live", True, turn_id=turn_id)
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append({"args": args, "kwargs": kwargs}) or {"accepted": True},
+    )
+
+    session_service._persist_session_turn_result(
+        "session-live",
+        {
+            "status": "completed",
+            "summary": "已生成图片。",
+            "raw_output": "已生成图片。",
+            "outcome": "done",
+            "tool_call_count": 0,
+            "tool_trace": [],
+        },
+        turn_id=turn_id,
+    )
+    session_service._set_session_running("session-live", False, turn_id=turn_id)
+
+    conversation = load_chat_state(tmp_path)["conversations"][0]
+    message = conversation["messages"][-1]
+    assert message["role"] == "assistant"
+    assert "没有实际生成新的图片" in message["content"]
+    assert not message.get("tool_calls")
+    assert message.get("metadata") is None
+    assert conversation["last_turn_status"] == "failed"
+    assert any(
+        event["args"][:3]
+        == ("conversation", "turn_phantom_image_success_blocked", "conversation.turn.phantom_image_success_blocked")
+        for event in events
+    )
+
+
 def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
