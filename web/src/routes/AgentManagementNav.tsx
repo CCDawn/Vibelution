@@ -3,10 +3,11 @@ import { NavLink } from "react-router-dom";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./AgentManagementNav.module.css";
 
-type AgentManagementSection = "agents" | "prompts" | "tools" | "skills" | "memory";
+type AgentManagementSection = "agents" | "teams" | "prompts" | "tools" | "skills" | "memory";
 
 const ITEMS: Array<{ key: AgentManagementSection; href: string }> = [
   { key: "agents", href: "/agents" },
+  { key: "teams", href: "/agents/teams" },
   { key: "prompts", href: "/agents/prompts" },
   { key: "tools", href: "/agents/tools" },
   { key: "skills", href: "/agents/skills" },
@@ -16,6 +17,7 @@ const ITEMS: Array<{ key: AgentManagementSection; href: string }> = [
 function sectionLabel(section: AgentManagementSection, lang: string) {
   const zh = {
     agents: "Agent",
+    teams: "团队",
     prompts: "提示词",
     tools: "工具",
     skills: "技能",
@@ -23,6 +25,7 @@ function sectionLabel(section: AgentManagementSection, lang: string) {
   };
   const en = {
     agents: "Agents",
+    teams: "Teams",
     prompts: "Prompts",
     tools: "Tools",
     skills: "Skills",
@@ -33,14 +36,15 @@ function sectionLabel(section: AgentManagementSection, lang: string) {
 
 type AgentManagementNavProps = {
   active: AgentManagementSection;
+  className?: string;
 };
 
-export function AgentManagementNav({ active }: AgentManagementNavProps) {
+export function AgentManagementNav({ active, className = "" }: AgentManagementNavProps) {
   const { lang } = useAppI18n();
   const label = lang === "zh" ? "Agent 管理导航" : "Agent management navigation";
 
   return (
-    <nav className={styles.nav} aria-label={label}>
+    <nav className={className ? `${styles.nav} ${className}` : styles.nav} aria-label={label}>
       {ITEMS.map((item) => (
         <NavLink
           key={item.key}

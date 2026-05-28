@@ -35,6 +35,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
     prompt_workspace = _timed_stage(timings, "prompt_templates", _safe_prompt_workspace)
     config_workspace = _timed_stage(timings, "model_config", _safe_config_workspace)
     chat_rooms = _timed_stage(timings, "chat_rooms", _safe_chat_rooms)
+    teams = _timed_stage(timings, "teams", _safe_teams)
     policy_options = _timed_stage(timings, "policy_options", _safe_policy_options)
 
     agent_refs = {str(agent.get("agentId") or ""): agent for agent in agents if str(agent.get("agentId") or "")}
@@ -61,6 +62,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
             agents=agents,
             mode_bindings=mode_bindings,
             chat_rooms=chat_rooms,
+            teams=teams,
             active_agent_ids=active_agent_ids,
         ),
     )
@@ -73,6 +75,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
             profile_refs=profile_refs,
             mode_bindings=mode_bindings,
             chat_rooms=chat_rooms,
+            teams=teams,
             active_agent_ids=active_agent_ids,
         ),
     )
@@ -90,7 +93,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
         for agent in agents
     ]
     groups = _timed_stage(timings, "derive_groups", lambda: _derive_groups(enriched_agents))
-    summary = _timed_stage(timings, "summary", lambda: _summary(enriched_agents, groups, health["issues"], chat_rooms, mode_bindings))
+    summary = _timed_stage(timings, "summary", lambda: _summary(enriched_agents, groups, health["issues"], chat_rooms, teams, mode_bindings))
     timings["total"] = round((perf_counter() - total_started) * 1000, 1)
     payload = {
         "schemaVersion": SCHEMA_VERSION,
@@ -109,6 +112,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
         "toolPolicies": policy_options.get("toolPolicies") or [],
         "memoryPolicies": policy_options.get("memoryPolicies") or [],
         "chatRooms": _compact_chat_rooms(chat_rooms),
+        "teams": _compact_teams(teams),
         "references": references,
         "health": health,
         "repairWarnings": {
@@ -125,6 +129,7 @@ def _derive_references(
     agents: list[dict[str, Any]],
     mode_bindings: dict[str, Any],
     chat_rooms: list[dict[str, Any]],
+    teams: list[dict[str, Any]],
     active_agent_ids: set[str],
 ) -> dict[str, list[dict[str, Any]]]:
     references: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -203,6 +208,27 @@ def _derive_references(
                     status="active" if agent_id in active_agent_ids else "stale",
                 )
             )
+
+    for team in teams:
+        team_id = str(team.get("teamId") or "").strip()
+        team_name = str(team.get("name") or team_id).strip()
+        team_status = str(team.get("status") or "active").strip()
+        for member in list(team.get("members") or []):
+            if not isinstance(member, dict):
+                continue
+            agent_id = str(member.get("agentId") or "").strip()
+            if not agent_id:
+                continue
+            references[agent_id].append(
+                _reference(
+                    "team",
+                    source_id=team_id,
+                    source_label=team_name,
+                    field=str(member.get("role") or member.get("memberId") or ""),
+                    route="/agents/teams",
+                    status="active" if team_status != "archived" and agent_id in active_agent_ids else "stale",
+                )
+            )
     return {agent_id: _dedupe_references(items) for agent_id, items in references.items()}
 
 
@@ -213,6 +239,7 @@ def _derive_health(
     profile_refs: dict[str, dict[str, Any]],
     mode_bindings: dict[str, Any],
     chat_rooms: list[dict[str, Any]],
+    teams: list[dict[str, Any]],
     active_agent_ids: set[str],
 ) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
@@ -350,6 +377,24 @@ def _derive_health(
                     }
                 )
 
+    for team in teams:
+        for member in list(team.get("members") or []):
+            if not isinstance(member, dict):
+                continue
+            agent_id = str(member.get("agentId") or "").strip()
+            if agent_id and agent_id not in active_agent_ids:
+                issues.append(
+                    {
+                        "severity": "warning",
+                        "code": "stale_team_member",
+                        "agentId": agent_id,
+                        "title": "团队成员引用了不可用 Agent",
+                        "detail": f"{team.get('name') or team.get('teamId') or '-'} 中的成员 agentId={agent_id} 不在活跃 Agent 列表中。",
+                        "source": "team",
+                        "action": "在团队画布中替换或解绑该成员。",
+                    }
+                )
+
     blocking = [item for item in issues if item.get("severity") == "blocking"]
     warnings = [item for item in issues if item.get("severity") == "warning"]
     return {
@@ -369,6 +414,7 @@ def _derive_groups(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ("all", "全部 Agent"),
         ("chat", "会话 Agent"),
         ("group_chat", "群聊成员"),
+        ("team", "团队成员"),
         ("research", "科研团队"),
         ("supervised_evolution", "监督进化"),
         ("self_evolution", "自进化"),
@@ -406,6 +452,8 @@ def _agent_in_group(agent: dict[str, Any], group_id: str) -> bool:
     references = list(agent.get("references") or [])
     if group_id == "group_chat":
         return any(item.get("kind") == "chat_room" for item in references)
+    if group_id == "team":
+        return any(item.get("kind") == "team" for item in references)
     if group_id == "needs_review":
         return any(item.get("severity") in {"blocking", "warning"} for item in list(agent.get("health") or []))
     if str(agent.get("primaryMode") or "").strip() == group_id:
@@ -418,6 +466,7 @@ def _summary(
     groups: list[dict[str, Any]],
     issues: list[dict[str, Any]],
     chat_rooms: list[dict[str, Any]],
+    teams: list[dict[str, Any]],
     mode_bindings: dict[str, Any],
 ) -> dict[str, Any]:
     active_agents = [item for item in agents if str(item.get("status") or "active").strip() != "archived"]
@@ -437,6 +486,7 @@ def _summary(
         ),
         "modeCount": len(dict(mode_bindings.get("modes") or {})),
         "chatRoomCount": len(chat_rooms),
+        "teamCount": len([item for item in teams if str(item.get("status") or "active") != "archived"]),
         "groupCount": len(groups),
         "healthIssueCount": len(issues),
         "blockingIssueCount": sum(1 for item in issues if item.get("severity") == "blocking"),
@@ -577,6 +627,25 @@ def _compact_chat_rooms(rooms: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _compact_teams(teams: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "teamId": str(team.get("teamId") or "").strip(),
+            "name": str(team.get("name") or "").strip(),
+            "purpose": str(team.get("purpose") or "").strip(),
+            "status": str(team.get("status") or "").strip(),
+            "agentIds": [
+                str(member.get("agentId") or "").strip()
+                for member in list(team.get("members") or [])
+                if isinstance(member, dict) and str(member.get("agentId") or "").strip()
+            ],
+            "memberCount": len(list(team.get("members") or [])),
+            "updatedAt": str(team.get("updatedAt") or "").strip(),
+        }
+        for team in teams
+    ]
+
+
 def _safe_prompt_workspace() -> dict[str, Any]:
     try:
         return list_prompt_templates(include_inactive=True)
@@ -598,6 +667,16 @@ def _safe_chat_rooms() -> list[dict[str, Any]]:
         return chat_room_service.list_chat_rooms()
     except Exception as exc:
         _record_workspace_error("agent_config.chat_rooms.load_failed", exc)
+        return []
+
+
+def _safe_teams() -> list[dict[str, Any]]:
+    try:
+        from . import team_service
+
+        return list(team_service.list_teams(include_archived=True).get("teams") or [])
+    except Exception as exc:
+        _record_workspace_error("agent_config.teams.load_failed", exc)
         return []
 
 
