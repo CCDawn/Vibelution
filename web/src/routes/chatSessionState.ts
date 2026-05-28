@@ -7,7 +7,7 @@ export type SessionDetailLoadState = {
 };
 
 export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary {
-  return {
+  const summary: SessionSummary = {
     id: detail.id,
     title: detail.title,
     workspacePath: detail.workspacePath,
@@ -17,6 +17,37 @@ export function sessionSummaryFromDetail(detail: SessionDetail): SessionSummary 
     updatedAt: detail.updatedAt,
     currentPhase: detail.currentPhase,
   };
+  if (detail.agentId !== undefined) {
+    summary.agentId = detail.agentId;
+  }
+  if (detail.agentCode !== undefined) {
+    summary.agentCode = detail.agentCode;
+  }
+  if (detail.agentDisplayName !== undefined) {
+    summary.agentDisplayName = detail.agentDisplayName;
+  }
+  if (detail.agentProfileId !== undefined) {
+    summary.agentProfileId = detail.agentProfileId;
+  }
+  if (detail.agentTemplateId !== undefined) {
+    summary.agentTemplateId = detail.agentTemplateId;
+  }
+  if (detail.agentTemplateLabel !== undefined) {
+    summary.agentTemplateLabel = detail.agentTemplateLabel;
+  }
+  if (detail.agentWorkspacePath !== undefined) {
+    summary.agentWorkspacePath = detail.agentWorkspacePath;
+  }
+  if (detail.agentMissing !== undefined) {
+    summary.agentMissing = detail.agentMissing;
+  }
+  if (detail.agentStatusCode !== undefined) {
+    summary.agentStatusCode = detail.agentStatusCode;
+  }
+  if (detail.agentStatusMessage !== undefined) {
+    summary.agentStatusMessage = detail.agentStatusMessage;
+  }
+  return summary;
 }
 
 export function mergeSessionDetailIntoSummaries(
@@ -37,6 +68,18 @@ export function mergeSessionDetailIntoSummaries(
           ...nextSummary,
         }
       : session,
+  );
+}
+
+export function removeDeletedSessionFromSummaries(
+  sessions: SessionSummary[] | undefined,
+  deletedSessionId: string,
+  nextDetail: SessionDetail,
+): SessionSummary[] {
+  const currentSessions = sessions ?? [];
+  return mergeSessionDetailIntoSummaries(
+    currentSessions.filter((session) => session.id !== deletedSessionId),
+    nextDetail,
   );
 }
 

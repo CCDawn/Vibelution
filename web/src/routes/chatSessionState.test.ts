@@ -7,6 +7,7 @@ import {
   markSessionSummaryRunning,
   markSessionDetailRunning,
   mergeSessionDetailIntoSummaries,
+  removeDeletedSessionFromSummaries,
   sessionSummaryFromDetail,
   shouldAcceptSessionStreamEvent,
 } from "./chatSessionState";
@@ -63,6 +64,36 @@ describe("chatSessionState", () => {
     });
   });
 
+  it("preserves agent identity fields when deriving a sidebar summary", () => {
+    expect(
+      sessionSummaryFromDetail(
+        makeDetail({
+          agentId: "agent-001",
+          agentCode: "A001",
+          agentDisplayName: "陈晨",
+          agentProfileId: "research",
+          agentTemplateId: "template-research",
+          agentTemplateLabel: "科研 Agent",
+          agentWorkspacePath: "workspace/agents/agent-001",
+          agentMissing: true,
+          agentStatusCode: "archived",
+          agentStatusMessage: "缺少有效 Agent",
+        }),
+      ),
+    ).toMatchObject({
+      agentId: "agent-001",
+      agentCode: "A001",
+      agentDisplayName: "陈晨",
+      agentProfileId: "research",
+      agentTemplateId: "template-research",
+      agentTemplateLabel: "科研 Agent",
+      agentWorkspacePath: "workspace/agents/agent-001",
+      agentMissing: true,
+      agentStatusCode: "archived",
+      agentStatusMessage: "缺少有效 Agent",
+    });
+  });
+
   it("lets active detail override a stale failed session summary", () => {
     const merged = mergeSessionDetailIntoSummaries(
       [
@@ -94,6 +125,22 @@ describe("chatSessionState", () => {
       currentPhase: "running",
     });
     expect(merged[1]).toEqual(olderSession);
+  });
+
+  it("removes a deleted session before merging the next active detail", () => {
+    const deletedSession = makeSummary({ id: "deleted-session", title: "删除的会话" });
+    const olderSession = makeSummary({ id: "older-session", title: "旧会话", status: "ready", currentPhase: "ready" });
+    const merged = removeDeletedSessionFromSummaries(
+      [deletedSession, olderSession],
+      "deleted-session",
+      makeDetail({ id: "next-session", title: "下一个会话", taskSummary: "已切换" }),
+    );
+
+    expect(merged.map((session) => session.id)).toEqual(["next-session", "older-session"]);
+    expect(merged[0]).toMatchObject({
+      title: "下一个会话",
+      taskSummary: "已切换",
+    });
   });
 
   it("only marks the requested session summary as running", () => {

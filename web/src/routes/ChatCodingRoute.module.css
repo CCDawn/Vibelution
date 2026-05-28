@@ -596,6 +596,21 @@
   white-space: nowrap;
 }
 
+.agentIndexWarning {
+  color: var(--state-error);
+  font-size: 0.66rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.agentMissingNotice {
+  margin: -2px 8px 7px 45px;
+  color: var(--state-error);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .agentIndexDetails {
   display: grid;
   gap: 7px;
@@ -2199,6 +2214,7 @@
 .groupComposerBar button:disabled,
 .groupComposerBar input:disabled,
 .groupManagementActions button:disabled,
+.groupTitleField input:disabled,
 .groupModeSelect select:disabled,
 .groupMemberChip input:disabled {
   cursor: not-allowed;
@@ -2292,17 +2308,24 @@
   align-items: start;
 }
 
+.groupTitleField {
+  grid-column: 1 / -1;
+}
+
+.groupTitleField,
 .groupModeSelect {
   display: grid;
   gap: 5px;
   min-width: 0;
 }
 
+.groupTitleField span,
 .groupModeSelect span {
   color: var(--fg-tertiary);
   font-size: 0.72rem;
 }
 
+.groupTitleField input,
 .groupModeSelect select {
   width: 100%;
   min-width: 0;
@@ -2351,7 +2374,7 @@
 
 .groupMemberChip {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   width: 100%;
@@ -2374,10 +2397,44 @@
   margin: 0;
 }
 
-.groupMemberChip span {
+.groupMemberCopy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.groupMemberCopy strong,
+.groupMemberCopy small {
   min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupMemberCopy strong {
   font-size: 0.78rem;
+  line-height: 1.15;
+}
+
+.groupMemberCopy small {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+  line-height: 1.1;
+}
+
+.agentMissingInline {
+  color: var(--state-error);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.agentMissingLine {
+  display: block;
+  margin-top: 4px;
+  color: var(--state-error);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
