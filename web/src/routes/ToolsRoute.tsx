@@ -19,6 +19,7 @@ import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy"
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import type { TranslationKey } from "../i18n/dictionary";
 import { useAppI18n } from "../i18n/useAppI18n";
+import { AgentManagementNav } from "./AgentManagementNav";
 import { clampPaneWidth, keyboardPaneWidth, storedPaneWidth } from "./resizablePane";
 import styles from "./ToolsRoute.module.css";
 
@@ -801,6 +802,8 @@ export function ToolsRoute() {
           {t("gitRefresh")}
         </button>
       </header>
+
+      <AgentManagementNav active="tools" />
 
       <div className={styles.summaryGrid}>
         <section className={styles.summaryCard}>

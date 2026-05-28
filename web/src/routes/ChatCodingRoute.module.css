@@ -2221,6 +2221,12 @@
   opacity: 0.56;
 }
 
+.groupComposerBar .groupStopButton {
+  color: var(--danger, #ef6b73);
+  border-color: color-mix(in srgb, var(--danger, #ef6b73) 35%, var(--border-soft));
+  background: color-mix(in srgb, var(--danger, #ef6b73) 12%, var(--surface-card));
+}
+
 .groupManagementPanel {
   display: grid;
   gap: 11px;
@@ -2693,7 +2699,7 @@
 
 .groupComposerBar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 10px;
   padding: 12px 16px;
   border-top: 1px solid var(--border-soft);

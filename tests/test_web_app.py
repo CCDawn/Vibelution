@@ -25,6 +25,7 @@ from core.gym.promotion import (
     rollback_gym_promotion_proposal,
 )
 from core.web import app as web_app
+from core.chat.slash_commands import parse_skill_slash_command
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.runtime_manager import constants as runtime_manager_constants
 from core.runtime_manager.work_run_store import WorkRunStore
@@ -43,6 +44,7 @@ from core.web.services import (
     runtime_service,
     runtime_scene_service,
     session_service,
+    skill_service,
     self_evolution_control_service,
     self_evolution_service,
     supervised_agent_service,
@@ -1071,6 +1073,53 @@ def test_runtime_scene_endpoints_read_timeline_package_without_legacy_events(tmp
     assert detail["packageSummary"]["eventLogCount"] == 0
     assert detail["eventLogs"] == []
     assert "scene-package-only" in detail["packageIndex"]["searchText"]
+
+
+def test_agent_runtime_evidence_api_returns_matching_runtime_scene_events(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-agent-evidence")
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    from core.web.services import agent_directory_service
+
+    agent = agent_directory_service.create_agent_instance(
+        display_name="证据 Agent",
+        direct_session_id="session-evidence",
+    )
+    evidence_event = {
+        "runtime_scene_id": "scene-agent-evidence",
+        "ts": "2026-05-18T12:00:07Z",
+        "seq": 1,
+        "component": "agent_directory",
+        "phase": "message",
+        "event_code": "agent.message.consumed",
+        "level": "info",
+        "outcome": "succeeded",
+        "message": "Agent message consumed.",
+        "fields": {
+            "agentId": agent["agentId"],
+            "sessionId": "session-evidence",
+            "runId": "run-evidence",
+        },
+        "raw_refs": [{"path": "events/agent_directory.jsonl", "tail_lines": 80}],
+    }
+    with (scene_dir / "timeline.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(evidence_event, ensure_ascii=False) + "\n")
+
+    response = client.get(
+        f"/api/agents/{agent['agentId']}/runtime-evidence",
+        params={"sessionId": "session-evidence", "runId": "run-evidence"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["agentId"] == agent["agentId"]
+    assert payload["matches"][0]["runtimeSceneId"] == "scene-agent-evidence"
+    assert payload["matches"][0]["eventCode"] == "agent.message.consumed"
+    assert payload["matches"][0]["rawRefs"] == [{"path": "events/agent_directory.jsonl", "tail_lines": 80}]
+    assert payload["matches"][0]["matchedFields"] == {
+        "agentId": agent["agentId"],
+        "sessionId": "session-evidence",
+        "runId": "run-evidence",
+    }
 
 
 def test_runtime_scene_package_records_conversation_as_child_log(tmp_path, monkeypatch):
@@ -2316,6 +2365,91 @@ def test_session_detail_exists(tmp_path, monkeypatch):
     assert payload["contextUsage"]["limit"] > 0
 
 
+def test_skills_api_lists_read_only_skill_library(tmp_path, monkeypatch):
+    skill_root = tmp_path / "skills"
+    skill_dir = skill_root / "brt"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: brt\ndescription: BRT gate\n---\n\n# BRT\n\nStop before implementation.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(skill_service, "default_skill_roots", lambda: [skill_root])
+
+    response = client.get("/api/skills")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "read_only"
+    assert payload["counts"]["total"] == 1
+    assert payload["skills"][0]["command"] == "/brt"
+    assert "content" not in payload["skills"][0]
+
+
+def test_skills_api_returns_skill_detail(tmp_path, monkeypatch):
+    skill_root = tmp_path / "skills"
+    skill_dir = skill_root / "brt"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: brt\ndescription: BRT gate\n---\n\n# BRT\n\nAsk one question at a time.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(skill_service, "default_skill_roots", lambda: [skill_root])
+
+    response = client.get("/api/skills/brt")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "brt"
+    assert payload["command"] == "/brt"
+    assert "Ask one question at a time." in payload["content"]
+
+
+def test_session_detail_surfaces_missing_agent_placeholder(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "断链会话",
+                    "agent_id": "agent-missing",
+                    "agentId": "agent-missing",
+                    "updated_at": "2026-05-18T12:00:00",
+                    "last_turn_status": "ready",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "继续",
+                            "timestamp": "2026-05-18T11:55:00",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    sessions_response = client.get("/api/sessions")
+    detail_response = client.get("/api/sessions/session-live")
+
+    assert sessions_response.status_code == 200
+    session_summary = sessions_response.json()[0]
+    assert session_summary["agentId"] == "agent-missing"
+    assert session_summary["agentMissing"] is True
+    assert session_summary["agentStatusCode"] == "missing_agent"
+    assert session_summary["agentDisplayName"] == "缺少有效 Agent"
+    assert "缺少有效 Agent" in session_summary["agentStatusMessage"]
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["agentMissing"] is True
+    assert detail["groupContextEvents"] == []
+    assert detail["agentInboxMessages"] == []
+    assert detail["toolPolicy"] is None
+    assert detail["memoryPolicy"] is None
+
+
 def test_session_detail_context_usage_comes_from_persisted_messages_after_restart(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     state = load_chat_state(tmp_path)
@@ -2819,6 +2953,30 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
     ]
 
 
+def test_delete_session_keeps_bound_agent_active(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.ensure_agent_for_session(
+        "session-live",
+        display_name="科研复核 Agent",
+        primary_mode="research",
+        role_key="research_review",
+        prompt_template_id="prompt-research-review",
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    save_chat_state(tmp_path, state)
+
+    response = client.delete("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    kept_agent = agent_directory_service.get_agent(agent["agentId"], include_archived=True)
+    assert kept_agent is not None
+    assert kept_agent["status"] == "active"
+
+
 def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -3072,6 +3230,171 @@ def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypat
     assert persisted_event["fields"]["sessionId"] == "session-live"
     assert persisted_event["fields"]["assistantTextLength"] == len("已完成网页对话提交接线。")
     assert persisted_event["child_log_path"] == "conversations/session-live-turns.jsonl"
+
+
+def test_session_submit_message_routes_slash_skill_into_scheduled_context(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    skill_root = tmp_path / "skills"
+    skill_dir = skill_root / "brt"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: brt\ndescription: BRT gate\n---\n\n# BRT\n\nStop before implementation.\n",
+        encoding="utf-8",
+    )
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
+    monkeypatch.setattr(
+        session_service,
+        "parse_skill_slash_command",
+        lambda content: parse_skill_slash_command(content, skill_roots=[skill_root]),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "/brt 设计斜杠 skill 调用"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-2]["role"] == "user"
+    assert payload["messages"][-2]["content"] == "/brt 设计斜杠 skill 调用"
+    persisted_skill = payload["messages"][-2]["metadata"]["slashSkillCommand"]
+    assert persisted_skill["command"] == "brt"
+    assert persisted_skill["skillName"] == "brt"
+    assert persisted_skill["skillHash"]
+    assert "content" not in persisted_skill
+    assert len(scheduled_contexts) == 1
+    invocation = scheduled_contexts[0]["skill_invocation"]
+    assert invocation["command"] == "brt"
+    assert invocation["args"] == "设计斜杠 skill 调用"
+    assert invocation["skillName"] == "brt"
+    assert invocation["skillHash"]
+
+
+def test_session_worker_seeds_slash_skill_runtime_context(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    skill_root = tmp_path / "skills"
+    skill_dir = skill_root / "brt"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: brt\ndescription: BRT gate\n---\n\n# BRT\n\nAsk one question at a time.\n",
+        encoding="utf-8",
+    )
+    seen_contexts: list[str] = []
+    seen_prompt: dict[str, str] = {}
+    scene_events: list[dict] = []
+
+    class DummyAgent:
+        def set_mental_model_enabled_override(self, _enabled):
+            pass
+
+        def seed_chat_history(self, _messages):
+            pass
+
+        def seed_runtime_context(self, content):
+            seen_contexts.append(content)
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen_prompt["value"] = initial_prompt
+            return {"status": "completed", "summary": "ok", "raw_output": "ok", "outcome": "done"}
+
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    monkeypatch.setattr(
+        session_service,
+        "parse_skill_slash_command",
+        lambda content: parse_skill_slash_command(content, skill_roots=[skill_root]),
+    )
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda component, phase, event_code, **kwargs: scene_events.append(
+            {"component": component, "phase": phase, "eventCode": event_code, **kwargs}
+        ),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "/brt 设计斜杠 skill 调用"},
+    )
+
+    assert response.status_code == 202
+    assert seen_prompt["value"] == "/brt 设计斜杠 skill 调用"
+    slash_contexts = [context for context in seen_contexts if "## Slash Skill Context" in context]
+    assert slash_contexts
+    assert "Command: /brt" in slash_contexts[-1]
+    assert "Ask one question at a time." in slash_contexts[-1]
+    assert any(event["eventCode"] == "conversation.skill_command.routed" for event in scene_events)
+
+
+def test_edit_resubmit_session_message_routes_slash_skill_into_scheduled_context(tmp_path, monkeypatch):
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": "session-live",
+            "updated_at": "2026-05-18T12:03:00",
+            "conversations": [
+                {
+                    "conversation_id": "session-live",
+                    "title": "真实会话",
+                    "updated_at": "2026-05-18T12:03:00",
+                    "last_turn_status": "ready",
+                    "messages": [
+                        {"role": "user", "content": "原始需求", "timestamp": "2026-05-18T12:00:00"},
+                        {"role": "assistant", "content": "原始回答", "timestamp": "2026-05-18T12:01:00"},
+                        {"role": "user", "content": "后续追问", "timestamp": "2026-05-18T12:02:00"},
+                        {"role": "assistant", "content": "后续回答", "timestamp": "2026-05-18T12:03:00"},
+                    ],
+                }
+            ],
+        },
+    )
+    skill_root = tmp_path / "skills"
+    skill_dir = skill_root / "brt"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: brt\ndescription: BRT gate\n---\n\n# BRT\n\nStop before implementation.\n",
+        encoding="utf-8",
+    )
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
+    monkeypatch.setattr(
+        session_service,
+        "parse_skill_slash_command",
+        lambda content: parse_skill_slash_command(content, skill_roots=[skill_root]),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={
+            "messageId": "session-live-message-3",
+            "content": "/brt 重新设计斜杠入口",
+            "mentalModelEnabled": False,
+        },
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-2]["role"] == "user"
+    assert payload["messages"][-2]["content"] == "/brt 重新设计斜杠入口"
+    persisted_skill = payload["messages"][-2]["metadata"]["slashSkillCommand"]
+    assert persisted_skill["command"] == "brt"
+    assert persisted_skill["skillName"] == "brt"
+    assert persisted_skill["skillHash"]
+    assert "content" not in persisted_skill
+    assert len(scheduled_contexts) == 1
+    invocation = scheduled_contexts[0]["skill_invocation"]
+    assert invocation["command"] == "brt"
+    assert invocation["args"] == "重新设计斜杠入口"
+    assert invocation["skillName"] == "brt"
+
+    session_service._set_session_running("session-live", False)
+    session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
 
 
 def test_session_user_image_attachment_upload_and_submit_reaches_agent(tmp_path, monkeypatch):
@@ -3598,6 +3921,59 @@ def test_submit_session_message_does_not_promote_contextual_confirmation_to_task
     assert payload["activeTask"]["title"] != "好的开始修改"
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["active_task"]["goal"] == "优化日志摘要入口"
+
+
+def test_submit_session_contextual_confirmation_preserves_action_intent_in_prompt(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "agent-avatar-task",
+            "kind": "coding",
+            "status": "editing",
+            "title": "现在agent可以设置默认头像吗",
+            "goal": "现在agent可以设置默认头像吗",
+            "changed_files": ["workspace/avatars/avatars.json"],
+            "latest_summary": "Agent 目前不能设置默认图片头像。要我现在开始实现吗？",
+            "next_action": "",
+            "metadata": {"outcome": "no_change"},
+        },
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    captured: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            captured["seeded"] = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            captured["prompt"] = initial_prompt
+            return {
+                "status": "completed",
+                "summary": "已开始实现 Agent 默认头像支持。",
+                "raw_output": "已开始实现 Agent 默认头像支持。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "开始实现"},
+    )
+
+    assert response.status_code == 202
+    assert "用户确认：开始实现" in captured["prompt"]
+    assert "请基于已确认的当前目标继续执行：现在agent可以设置默认头像吗" in captured["prompt"]
+    assert captured["prompt"] != "现在agent可以设置默认头像吗"
+    payload = response.json()
+    assert payload["activeTask"]["goal"] == "现在agent可以设置默认头像吗"
+    assert payload["activeTask"]["title"] == "现在agent可以设置默认头像吗"
 
 
 def test_submit_session_continue_recovers_context_when_active_task_goal_is_confirmation(tmp_path, monkeypatch):
@@ -6804,8 +7180,13 @@ def test_submit_session_message_includes_stream_friendly_tool_and_mental_payload
     assert assistant["mentalSnapshot"]["intervention"] == "继续保持当前路径。"
     assert assistant["mentalSnapshot"]["metrics"]["sample_size"] == 3
     assert assistant["toolCalls"] == [
-        {"name": "read_file_tool", "status": "done", "summary": "read ok"},
-        {"name": "run_test_for_tool", "status": "done", "summary": "tests passed"},
+        {"name": "read_file_tool", "status": "done", "summary": "read ok", "resultPreview": "read ok"},
+        {
+            "name": "run_test_for_tool",
+            "status": "done",
+            "summary": "tests passed",
+            "resultPreview": "tests passed",
+        },
     ]
     assert payload["currentPhase"] == "ready"
 

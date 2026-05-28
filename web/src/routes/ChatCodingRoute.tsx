@@ -11,6 +11,7 @@ import {
   Plus,
   Search,
   Sparkles,
+  Square,
   Trash2,
   UsersRound,
   X,
@@ -910,6 +911,26 @@ export function ChatCodingRoute() {
     },
   });
 
+  const stopGroupRoundMutation = useMutation({
+    mutationFn: async ({ roomId }: { roomId: string }) =>
+      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/stop`, {
+        method: "POST",
+      }),
+    onSuccess: (room) => {
+      setActiveGroupRoomId(room.roomId);
+      setRightIndexPanel("members");
+      setGroupRoomActionError("");
+      syncChatRoomDetail(room);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+    onError: (error, variables) => {
+      setGroupRoomActionError(describeError(error, lang === "zh" ? "停止群聊讨论失败" : "Stop group discussion failed"));
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(variables.roomId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+  });
+
   const updateGroupRoomMutation = useMutation({
     mutationFn: async (
       { roomId, title, sessionIds, mode }: { roomId: string; title: string; sessionIds: string[]; mode: string },
@@ -1523,6 +1544,10 @@ export function ChatCodingRoute() {
     !activeGroupRoom
     || groupRoundRunning
     || deleteGroupRoomMutation.isPending;
+  const groupStopDisabled =
+    !activeGroupRoom
+    || !groupRoundRunning
+    || stopGroupRoundMutation.isPending;
   const activeSurfaceTitle = groupPanelActive
     ? activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
     : detail?.title ?? runtime?.sessionTitle ?? t("loadingSession");
@@ -2179,6 +2204,15 @@ export function ChatCodingRoute() {
       roomId: activeGroupRoomId,
       topic,
       mode: activeGroupRoom?.mode || "round_robin",
+    });
+  }
+
+  function handleStopGroupRound() {
+    if (!activeGroupRoomId || !groupRoundRunning || stopGroupRoundMutation.isPending) {
+      return;
+    }
+    stopGroupRoundMutation.mutate({
+      roomId: activeGroupRoomId,
     });
   }
 
@@ -2924,7 +2958,7 @@ export function ChatCodingRoute() {
                 <input
                   value={groupTopicDraft}
                   onChange={(event) => setGroupTopicDraft(event.target.value)}
-                  disabled={startGroupRoundMutation.isPending || groupRoundRunning}
+                  disabled={startGroupRoundMutation.isPending}
                   placeholder={lang === "zh" ? "输入下一轮群聊议题" : "Topic for the next group round"}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.shiftKey) {
@@ -2950,6 +2984,22 @@ export function ChatCodingRoute() {
                       : (lang === "zh" ? "启动一轮" : "Run round")}
                   </span>
                 </button>
+                {groupRoundRunning ? (
+                  <button
+                    type="button"
+                    className={styles.groupStopButton}
+                    onClick={handleStopGroupRound}
+                    disabled={groupStopDisabled}
+                    title={lang === "zh" ? "停止当前群聊轮次" : "Stop current group round"}
+                  >
+                    <Square size={15} />
+                    <span>
+                      {stopGroupRoundMutation.isPending
+                        ? (lang === "zh" ? "停止中" : "Stopping")
+                        : (lang === "zh" ? "停止" : "Stop")}
+                    </span>
+                  </button>
+                ) : null}
               </div>
             </div>
           ) : !activeSessionId && !sessionsQuery.isPending ? (

@@ -35,6 +35,62 @@ def test_mode_binding_repairs_chat_and_research_agent_refs(tmp_path, monkeypatch
     assert payload["agentRefs"][research_agent["agentId"]]["roleKey"] == "research_broad"
 
 
+def test_mode_binding_payload_reuses_loaded_agent_options_without_per_reference_get_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    chat_agent = agent_directory_service.create_agent_instance(
+        display_name="对话 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-chat",
+    )
+    research_agent = agent_directory_service.create_agent_instance(
+        display_name="科研 Agent",
+        profile_id="research_broad",
+        primary_mode="research",
+        role_key="research_broad",
+    )
+    agent_options = [
+        {
+            "agentId": chat_agent["agentId"],
+            "agentCode": chat_agent["agentCode"],
+            "displayName": chat_agent["displayName"],
+            "primaryMode": chat_agent["primaryMode"],
+            "roleKey": chat_agent["roleKey"],
+            "profileId": chat_agent["profileId"],
+            "promptTemplateId": chat_agent["promptTemplateId"],
+            "directSessionId": chat_agent["directSessionId"],
+            "metadata": chat_agent["metadata"],
+        },
+        {
+            "agentId": research_agent["agentId"],
+            "agentCode": research_agent["agentCode"],
+            "displayName": research_agent["displayName"],
+            "primaryMode": research_agent["primaryMode"],
+            "roleKey": research_agent["roleKey"],
+            "profileId": research_agent["profileId"],
+            "promptTemplateId": research_agent["promptTemplateId"],
+            "directSessionId": research_agent["directSessionId"],
+            "metadata": research_agent["metadata"],
+        },
+    ]
+    monkeypatch.setattr(
+        agent_mode_binding_service,
+        "get_agent",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("get_agent should not run during repair")),
+    )
+    monkeypatch.setattr(
+        agent_mode_binding_service,
+        "list_agents",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("list_agents should be provided by caller")),
+    )
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload(agent_options=agent_options)
+
+    assert payload["modes"]["chat"]["defaultAgentId"] == chat_agent["agentId"]
+    assert research_agent["agentId"] in payload["modes"]["research"]["pool"]
+    assert payload["agentRefs"][research_agent["agentId"]]["primaryMode"] == "research"
+
+
 def test_mode_binding_repairs_supervised_slots_from_agent_instances(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     baseline = agent_directory_service.create_agent_instance(

@@ -95,14 +95,16 @@ def test_run_session_turn_injects_session_workspace(tmp_path, monkeypatch):
 
     payload = session_service.submit_session_message("session-live", "do it", mental_model_enabled=False)
 
+    agent_id = payload["agentId"]
     session_workspace = tmp_path / "workspace" / "sessions" / "session-live"
-    assert Path(captured["workspace_path"]) == session_workspace.resolve()
+    agent_workspace = tmp_path / "workspace" / "agents" / agent_id
+    assert Path(captured["workspace_path"]) == agent_workspace.resolve()
     assert payload["workspacePath"] == "workspace/sessions/session-live"
-    assert (session_workspace / "artifacts" / "result.txt").read_text(encoding="utf-8") == "session artifact"
+    assert (agent_workspace / "artifacts" / "result.txt").read_text(encoding="utf-8") == "session artifact"
     assert not (tmp_path / "workspace" / "artifacts" / "result.txt").exists()
-    task_payload = json.loads((session_workspace / "memory" / "tasks.json").read_text(encoding="utf-8"))
+    task_payload = json.loads((agent_workspace / "memory" / "tasks.json").read_text(encoding="utf-8"))
     assert task_payload["goal"] == "session goal"
-    self_model = json.loads((session_workspace / "mental_model" / "self_model.json").read_text(encoding="utf-8"))
+    self_model = json.loads((agent_workspace / "mental_model" / "self_model.json").read_text(encoding="utf-8"))
     assert self_model["strengths"] == ["session scoped"]
     conversation_log = session_workspace / "logs" / "conversation.jsonl"
     assert conversation_log.exists()
@@ -156,7 +158,9 @@ def test_run_session_turn_uses_selected_agent_profile(tmp_path, monkeypatch):
 
     session_service.submit_session_message("session-live", "do it", mental_model_enabled=False)
 
-    assert Path(captured["workspace_path"]) == (tmp_path / "workspace" / "sessions" / "session-live").resolve()
+    repaired_state = load_chat_state(tmp_path)
+    agent_id = repaired_state["conversations"][0]["agent_id"]
+    assert Path(captured["workspace_path"]) == (tmp_path / "workspace" / "agents" / agent_id).resolve()
     assert captured["primary_profile_id"] == "primary"
     assert captured["primary_model"] == "explorer-model"
     assert captured["explorer_model"] == "explorer-model"

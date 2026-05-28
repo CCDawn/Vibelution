@@ -29,7 +29,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('t("navResearch")');
   });
 
-  it("collapses logs tools memory and git behind one hover utility menu", () => {
+  it("collapses logs tools and git behind one hover utility menu", () => {
     const primaryNav = shellSource.slice(
       shellSource.indexOf("<nav className={styles.nav}>"),
       shellSource.indexOf("</nav>"),
@@ -37,6 +37,7 @@ describe("AppShell layout contract", () => {
 
     expect(primaryNav).not.toContain('to="/logs"');
     expect(primaryNav).not.toContain('to="/tools"');
+    expect(primaryNav).not.toContain('to="/agents/tools"');
     expect(primaryNav).not.toContain('to="/memory"');
     expect(primaryNav).not.toContain('to="/git"');
     expect(shellSource).toContain("utilityCluster");
@@ -46,9 +47,10 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("hidden={!utilityOpen}");
     expect(shellSource).toContain('event.key === "Escape"');
     expect(shellSource).toContain('to="/logs"');
-    expect(shellSource).toContain('to="/tools"');
-    expect(shellSource).toContain('to="/memory"');
-    expect(shellSource).toContain("Brain");
+    expect(shellSource).toContain('to="/agents/tools"');
+    expect(shellSource).not.toContain('to="/tools"');
+    expect(shellSource).not.toContain('to="/memory"');
+    expect(shellSource).toContain("Wrench");
     expect(shellSource).toContain('to="/git"');
     expect(styles.utilityTrigger).toBeTypeOf("string");
     expect(styles.utilityPanel).toBeTypeOf("string");

@@ -30,10 +30,10 @@ describe("ConfigRoute layout density contract", () => {
     const viewCard = cssRule(".treeFieldCardView");
     const overviewGrid = cssRule(".hashGrid");
 
-    expect(overviewGrid).toContain("minmax(360px, 1.6fr) minmax(180px, 0.7fr)");
-    expect(treeGrid).toContain("repeat(auto-fit, minmax(230px, 1fr))");
-    expect(viewCard).toContain("grid-template-columns: minmax(108px, 0.42fr) minmax(0, 1fr)");
-    expect(viewCard).toContain("min-height: 40px");
+    expect(overviewGrid).toContain("minmax(280px, 1.4fr) minmax(180px, 0.6fr)");
+    expect(treeGrid).toContain("repeat(auto-fit, minmax(260px, 1fr))");
+    expect(viewCard).toContain("grid-template-columns: minmax(124px, 0.25fr) minmax(0, 1fr)");
+    expect(viewCard).toContain("min-height: 34px");
   });
 
   it("does not collapse the config tree to one column until phone width", () => {
@@ -83,8 +83,8 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).toContain("resolveProfileDisplayState");
 
     expect(configRouteCss).toContain(".profileTable");
-    expect(cssRule(".profileTable")).toContain("min-width: 880px");
-    expect(cssRule(".profileTable th")).toContain("text-transform: uppercase");
+    expect(cssRule(".profileTable")).toContain("min-width: 900px");
+    expect(cssRule(".profileTable th")).toContain("text-transform: none");
   });
 
   it("keeps model-library advanced transport fields behind a disclosure", () => {

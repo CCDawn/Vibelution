@@ -55,6 +55,8 @@ type RuntimeScenesPaneProps = {
   lang: "zh" | "en";
   t: (key: TranslationKey) => string;
   statusLabel: (status: string) => string;
+  initialSceneId?: string;
+  initialPath?: string;
 };
 
 function filterRuntimeScenes(items: RuntimeSceneListItem[], query: string): RuntimeSceneListItem[] {
@@ -792,14 +794,16 @@ async function copyText(text: string) {
   }
 }
 
-export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeScenesPaneProps) {
+export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSceneId = "", initialPath = "" }: RuntimeScenesPaneProps) {
   const queryClient = useQueryClient();
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [sceneSearch, setSceneSearch] = useState("");
   const [selectedSceneIds, setSelectedSceneIds] = useState<string[]>([]);
-  const [activeSceneId, setActiveSceneId] = useState("");
+  const [activeSceneId, setActiveSceneId] = useState(initialSceneId);
   const [severityFilter, setSeverityFilter] = useState<LogSeverityFilter>("all");
-  const [openRawLogByScene, setOpenRawLogByScene] = useState<Record<string, string>>({});
+  const [openRawLogByScene, setOpenRawLogByScene] = useState<Record<string, string>>(() =>
+    initialSceneId && initialPath ? { [initialSceneId]: initialPath } : {},
+  );
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [actionNotice, setActionNotice] = useState<ActionNotice | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -828,6 +832,16 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel }: RuntimeS
   );
   const visibleSceneIds = useMemo(() => filteredScenes.map((item) => item.runtimeSceneId), [filteredScenes]);
   const selectedSceneIdSet = useMemo(() => new Set(selectedSceneIds), [selectedSceneIds]);
+
+  useEffect(() => {
+    if (!initialSceneId) {
+      return;
+    }
+    setActiveSceneId(initialSceneId);
+    if (initialPath) {
+      setOpenRawLogByScene((current) => ({ ...current, [initialSceneId]: initialPath }));
+    }
+  }, [initialPath, initialSceneId]);
 
   useEffect(() => {
     const availableIds = new Set((runtimeScenesQuery.data ?? []).map((item) => item.runtimeSceneId));

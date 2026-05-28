@@ -1,4 +1,6 @@
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi.testclient import TestClient
 
@@ -173,3 +175,72 @@ def test_chat_room_api_updates_and_deletes_room(tmp_path, monkeypatch):
     assert delete_response.status_code == 200
     assert delete_response.json() == {"deleted": True, "roomId": room["roomId"]}
     assert client.get(f"/api/chat-rooms/{room['roomId']}").status_code == 404
+
+
+def test_chat_room_api_stops_active_round(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+
+    create_response = client.post(
+        "/api/chat-rooms",
+        json={
+            "title": "待停止群聊",
+            "participantSessionIds": ["session-a"],
+        },
+    )
+    assert create_response.status_code == 201
+    room = create_response.json()
+
+    runner_started = threading.Event()
+    release_runner = threading.Event()
+
+    def blocking_runner(participant, prompt, context):
+        runner_started.set()
+        assert release_runner.wait(2.0)
+        return {"status": "completed", "raw_output": "late response", "summary": "late"}
+
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-route-stop")
+    monkeypatch.setattr(chat_room_service, "_CHAT_ROOM_EXECUTOR", executor)
+    monkeypatch.setattr(chat_room_service, "_run_participant_agent", blocking_runner)
+
+    try:
+        round_response = client.post(
+            f"/api/chat-rooms/{room['roomId']}/rounds",
+            json={"topic": "这轮要停下"},
+        )
+        assert round_response.status_code == 202
+        round_id = round_response.json()["activeRoundId"]
+        assert runner_started.wait(1.0)
+
+        stop_response = client.post(f"/api/chat-rooms/{room['roomId']}/stop")
+    finally:
+        release_runner.set()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    assert stop_response.status_code == 202
+    stopped = stop_response.json()
+    assert stopped["status"] == "ready"
+    assert stopped["activeRoundId"] == ""
+    assert stopped["rounds"][-1]["roundId"] == round_id
+    assert stopped["rounds"][-1]["status"] == "stopped"
+
+
+def test_chat_room_api_rejects_stop_when_no_round_is_running(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+
+    create_response = client.post(
+        "/api/chat-rooms",
+        json={
+            "title": "空闲群聊",
+            "participantSessionIds": ["session-a"],
+        },
+    )
+    assert create_response.status_code == 201
+    room = create_response.json()
+
+    stop_response = client.post(f"/api/chat-rooms/{room['roomId']}/stop")
+
+    assert stop_response.status_code == 409

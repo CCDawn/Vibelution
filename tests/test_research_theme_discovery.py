@@ -27,6 +27,7 @@ from core.web.services import (
     runtime_scene_service,
     session_service,
 )
+from core.ui.chat_state import save_chat_state
 
 
 def test_research_recommendation_score_uses_novelty_first_weights():
@@ -521,6 +522,92 @@ def test_research_agent_binding_save_updates_unified_agent_stack(tmp_path, monke
     assert agent["agentId"] in bindings["pool"]
 
 
+def test_research_agent_instance_sync_skips_current_direct_session_update(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.root = root / "workspace"
+            self.writes = 0
+
+        def get_research_agent_config_path(self):
+            return self.root / "prompts" / "research" / "agents.json"
+
+        def read_research_agent_config(self):
+            return {}
+
+        def write_research_agent_config(self, data):
+            self.writes += 1
+            return True
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+
+    session_id = "research-direct-broad"
+    label = "广撒网探索 Agent"
+    agent = agent_directory_service.create_agent_instance(
+        display_name=label,
+        template_id="research_broad_explorer",
+        profile_id="primary",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+        direct_session_id=session_id,
+        metadata={
+            "researchAgentKey": "broad",
+            "researchTemplateId": "research_broad_explorer",
+            "researchPromptFilename": "broad.md",
+        },
+    )
+    save_chat_state(
+        tmp_path,
+        {
+            "version": 1,
+            "active_conversation_id": session_id,
+            "conversations": [
+                {
+                    "conversation_id": session_id,
+                    "title": label,
+                    "agent_id": agent["agentId"],
+                    "agentId": agent["agentId"],
+                    "messages": [],
+                    "updated_at": "2026-05-28T00:00:00",
+                }
+            ],
+        },
+    )
+    update_calls = []
+    monkeypatch.setattr(session_service, "update_chat_session", lambda *args, **kwargs: update_calls.append((args, kwargs)))
+
+    result = research_service._ensure_research_agent_instances(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "key": "broad",
+                    "label": label,
+                    "enabled": True,
+                    "templateId": "research_broad_explorer",
+                    "profileId": "primary",
+                    "promptFilename": "broad.md",
+                    "agentInstanceId": agent["agentId"],
+                    "agentId": agent["agentId"],
+                    "directSessionId": session_id,
+                    "roleKey": "research_broad",
+                    "promptTemplateId": "prompt-research-broad",
+                }
+            ],
+        }
+    )
+
+    assert update_calls == []
+    assert result["agents"][0]["directSessionId"] == session_id
+    assert workspace.writes == 0
+
+
 def test_delete_research_agent_binding_blocks_agent_id_canvas_reference(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
@@ -713,15 +800,21 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
     assert default_canvas["canvasKind"] == "research_flow_canvas"
     assert default_canvas["validation"]["valid"] is True
     assert default_canvas["validation"]["summary"]["errorCount"] == 0
-    assert {node["id"] for node in default_canvas["nodes"]} >= {
+    assert [node["id"] for node in default_canvas["nodes"]] == [
         "broad_search",
-        "knowledge_store",
-        "knowledge_lookup",
         "deep_search",
         "evidence_review",
         "theme_generation",
+        "theme_card",
+    ]
+    assert {node["type"] for node in default_canvas["nodes"]} == {"agent"}
+    assert {edge["id"] for edge in default_canvas["edges"]} == {
+        "edge_broad_deep",
+        "edge_deep_review",
+        "edge_review_deep",
+        "edge_review_themes",
+        "edge_themes_card",
     }
-    assert {edge["id"] for edge in default_canvas["edges"]} >= {"edge_broad_store", "edge_store_lookup", "edge_review_themes"}
     assert {edge["condition"] for edge in default_canvas["edges"]} >= {"completed", "needs_evidence", "approved", "selected"}
 
     default_payload = {
@@ -738,7 +831,13 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
     assert saved_default["viewport"] == {"x": 42, "y": -16, "zoom": 1.42}
     assert next(node for node in reloaded_default["nodes"] if node["id"] == "broad_search")["x"] == 240.5
     assert next(node for node in reloaded_default["nodes"] if node["id"] == "broad_search")["y"] == 180.25
-    assert {edge["id"] for edge in reloaded_default["edges"]} >= {"edge_broad_store", "edge_store_lookup", "edge_review_themes"}
+    assert {edge["id"] for edge in reloaded_default["edges"]} == {
+        "edge_broad_deep",
+        "edge_deep_review",
+        "edge_review_deep",
+        "edge_review_themes",
+        "edge_themes_card",
+    }
     flow_events = [event for event in events if event[0][0] == "research.flow_canvas.updated"]
     assert flow_events[-1][1]["fields"]["nodeCount"] >= 2
 
@@ -1176,7 +1275,14 @@ def test_research_flow_canvas_legacy_agent_graph_does_not_pollute_flow_canvas(tm
     canvas = research_service.get_research_flow_canvas()
 
     assert canvas["canvasKind"] == "research_flow_canvas"
-    assert {node["id"] for node in canvas["nodes"]} >= {"broad_search", "knowledge_store", "deep_search"}
+    assert [node["id"] for node in canvas["nodes"]] == [
+        "broad_search",
+        "deep_search",
+        "evidence_review",
+        "theme_generation",
+        "theme_card",
+    ]
+    assert {node["type"] for node in canvas["nodes"]} == {"agent"}
     assert all(edge["condition"] != "delegate" for edge in canvas["edges"])
 
 
@@ -1372,60 +1478,27 @@ def test_research_flow_canvas_executes_next_ready_node_and_routes_successors(tmp
     assert result["execution"]["routeOutcome"] == "completed"
     assert result["session"]["summary"]["sourceCount"] > 0
     assert next(node for node in canvas["nodes"] if node["id"] == "broad_search")["status"] == "done"
-    assert next(node for node in canvas["nodes"] if node["id"] == "knowledge_store")["status"] == "ready"
-    assert next(node for node in canvas["nodes"] if node["id"] == "deep_search")["status"] == "idle"
+    assert next(node for node in canvas["nodes"] if node["id"] == "deep_search")["status"] == "ready"
     event_codes = [event[0][0] for event in events]
     assert "research.flow_canvas.updated" not in event_codes
     assert "research.flow_canvas.node_started" in event_codes
     assert events[-1][0][0] == "research.flow_canvas.node_executed"
-    assert events[-1][1]["fields"]["activatedNodeIds"] == ["knowledge_store"]
-
-    store_result = research_service.execute_research_flow_canvas_node(created["session"]["sessionId"])
-    store_canvas = store_result["canvas"]
-    assert store_result["execution"]["nodeId"] == "knowledge_store"
-    assert next(node for node in store_canvas["nodes"] if node["id"] == "knowledge_lookup")["status"] == "ready"
-    assert store_result["execution"]["activatedNodeIds"] == ["knowledge_lookup"]
-
-    lookup_result = research_service.execute_research_flow_canvas_node(created["session"]["sessionId"])
-    lookup_canvas = lookup_result["canvas"]
-    assert lookup_result["execution"]["nodeId"] == "knowledge_lookup"
-    assert next(node for node in lookup_canvas["nodes"] if node["id"] == "deep_search")["status"] == "ready"
-    assert lookup_result["execution"]["activatedNodeIds"] == ["deep_search"]
-    assert any(
-        event.get("eventCode") == "research.capability.knowledge_lookup.completed"
-        for event in lookup_result["session"]["events"]
-    )
+    assert events[-1][1]["fields"]["activatedNodeIds"] == ["deep_search"]
 
     deep_result = research_service.execute_research_flow_canvas_node(created["session"]["sessionId"])
     deep_canvas = deep_result["canvas"]
     assert deep_result["execution"]["nodeId"] == "deep_search"
-    assert next(node for node in deep_canvas["nodes"] if node["id"] == "literature_project_parse")["status"] == "ready"
-    assert next(node for node in deep_canvas["nodes"] if node["id"] == "semantic_cluster")["status"] == "idle"
-
-    parse_result = research_service.execute_research_flow_canvas_node(created["session"]["sessionId"])
-    parse_canvas = parse_result["canvas"]
-    assert parse_result["execution"]["nodeId"] == "literature_project_parse"
-    assert parse_result["execution"]["activatedNodeIds"] == ["semantic_cluster"]
-    assert next(node for node in parse_canvas["nodes"] if node["id"] == "semantic_cluster")["status"] == "ready"
-    parse_event = next(
-        event for event in parse_result["session"]["events"]
-        if event.get("eventCode") == "research.capability.literature_project_parse.completed"
-    )
-    parse_fields = parse_event["fields"]
-    assert parse_fields["capabilityMode"] == "metadata_signal_parser"
-    assert parse_fields["parsedSourceCount"] > 0
-    assert parse_fields["parseTypeCounts"]["paper_or_pdf"] > 0
-    assert parse_fields["parseTypeCounts"]["github_repository"] > 0
-    assert parse_fields["signalCounts"]["method"] > 0
-    assert parse_fields["parsedRecords"][0]["sourceId"]
+    assert next(node for node in deep_canvas["nodes"] if node["id"] == "evidence_review")["status"] == "ready"
+    assert next(node for node in deep_canvas["nodes"] if node["id"] == "theme_generation")["status"] == "idle"
+    assert deep_result["execution"]["activatedNodeIds"] == ["evidence_review"]
 
     rerun_result = research_service.execute_research_flow_canvas_node(created["session"]["sessionId"], node_id="broad_search")
     rerun_canvas = rerun_result["canvas"]
     assert rerun_result["execution"]["nodeId"] == "broad_search"
     assert next(node for node in rerun_canvas["nodes"] if node["id"] == "broad_search")["status"] == "done"
-    assert next(node for node in rerun_canvas["nodes"] if node["id"] == "knowledge_store")["status"] == "ready"
-    assert next(node for node in rerun_canvas["nodes"] if node["id"] == "knowledge_lookup")["status"] == "stale"
-    assert rerun_result["execution"]["activatedNodeIds"] == ["knowledge_store"]
+    assert next(node for node in rerun_canvas["nodes"] if node["id"] == "deep_search")["status"] == "ready"
+    assert next(node for node in rerun_canvas["nodes"] if node["id"] == "evidence_review")["status"] == "idle"
+    assert rerun_result["execution"]["activatedNodeIds"] == ["deep_search"]
     rerun_started = [
         event
         for event in events
@@ -1480,13 +1553,12 @@ def test_theme_discovery_actions_sync_flow_canvas_statuses(tmp_path, monkeypatch
 
     assert next(node for node in canvas_after_create["nodes"] if node["id"] == "broad_search")["status"] == "ready"
     assert next(node for node in canvas_after_create["nodes"] if node["id"] == "evidence_review")["status"] == "idle"
-    assert next(node for node in canvas_after_create["nodes"] if node["id"] == "human_choice")["status"] == "idle"
+    assert next(node for node in canvas_after_create["nodes"] if node["id"] == "theme_card")["status"] == "idle"
 
     research_service.run_broad_theme_search(session_id)
     canvas_after_broad = research_service.get_research_flow_canvas()
 
     assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "broad_search")["status"] == "done"
-    assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "knowledge_store")["status"] == "ready"
     assert next(node for node in canvas_after_broad["nodes"] if node["id"] == "deep_search")["status"] == "idle"
     assert any(event[0][0] == "research.flow_canvas.synced" for event in events)
 
@@ -2163,7 +2235,7 @@ def test_research_flow_canvas_api_declares_utf8_json(tmp_path, monkeypatch):
     assert response.headers["content-type"].lower().startswith("application/json")
     assert "charset=utf-8" in response.headers["content-type"].lower()
     assert response.json()["canvasKind"] == "research_flow_canvas"
-    assert response.json()["nodes"][0]["label"] == "广撒网探索"
+    assert response.json()["nodes"][0]["label"] == "广撒网 agent"
 
 
 def test_public_search_provider_uses_configured_proxy(monkeypatch):

@@ -28,6 +28,8 @@ from config.settings import get_web_chat_config
 from core.chat.chat_result_contract import build_chat_coding_result_contract
 from core.chat.chat_result_formatter import format_chat_reply
 from core.chat.chat_task_types import trim_lines
+from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
+from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
 from core.infrastructure.event_bus import EventNames, get_event_bus
 from core.mental_model_flags import is_mental_model_enabled
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService
@@ -71,9 +73,9 @@ from .i18n import get_web_language, text_for
 from .agent_directory_service import (
     AgentNotFoundError,
     active_agent_runtime,
-    archive_agent_instance,
     consume_agent_inbox_message,
     ensure_agent_for_session,
+    evaluate_agent_workspace_write,
     evaluate_delegation_wake_policy,
     get_agent,
     list_agent_inbox_messages_for_agent,
@@ -634,6 +636,31 @@ def _ensure_conversation_agent_metadata(
     primary_mode = str((existing_agent or {}).get("primaryMode") or default_primary_mode).strip() or default_primary_mode
     role_key = str((existing_agent or {}).get("roleKey") or "").strip()
     prompt_template_id = str((existing_agent or {}).get("promptTemplateId") or "").strip()
+    if existing_agent_id and not existing_agent:
+        changed = False
+        if conversation.get("agent_id") != existing_agent_id:
+            conversation["agent_id"] = existing_agent_id
+            changed = True
+        if conversation.get("agentId") != existing_agent_id:
+            conversation["agentId"] = existing_agent_id
+            changed = True
+        return changed
+    if existing_agent and str(existing_agent.get("status") or "active").strip().lower() == "archived":
+        changed = False
+        if conversation.get("agent_id") != existing_agent_id:
+            conversation["agent_id"] = existing_agent_id
+            changed = True
+        if conversation.get("agentId") != existing_agent_id:
+            conversation["agentId"] = existing_agent_id
+            changed = True
+        changed = _repair_conversation_agent_profile_from_instance(
+            conversation,
+            conversation_id=conversation_id,
+            agent_id=existing_agent_id,
+            agent=existing_agent,
+            agent_profile_id=agent_profile_id,
+        ) or changed
+        return changed
     if existing_agent and str(existing_agent.get("directSessionId") or "").strip() == conversation_id:
         changed = False
         if conversation.get("agent_id") != existing_agent_id:
@@ -707,6 +734,48 @@ def _agent_from_lookup(
         agent = agent_by_id.get(normalized)
         return agent if isinstance(agent, dict) else None
     return get_agent(normalized)
+
+
+def _session_agent_status_payload(
+    agent_id: str,
+    agent: dict[str, Any] | None,
+) -> dict[str, Any]:
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        return {
+            "agentMissing": False,
+            "agentStatusCode": "",
+            "agentStatusMessage": "",
+        }
+    if not isinstance(agent, dict):
+        return {
+            "agentMissing": True,
+            "agentStatusCode": "missing_agent",
+            "agentStatusMessage": text_for(
+                get_web_language(),
+                zh="缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。",
+                en="Missing valid Agent: this session references an Agent that no longer exists or is unavailable.",
+            ),
+        }
+    if str(agent.get("status") or "active").strip().lower() == "archived":
+        return {
+            "agentMissing": True,
+            "agentStatusCode": "archived_agent",
+            "agentStatusMessage": text_for(
+                get_web_language(),
+                zh="缺少有效 Agent：当前会话引用的 Agent 已归档，不能继续作为可用成员运行。",
+                en="Missing valid Agent: this session references an archived Agent and cannot run it as an active member.",
+            ),
+        }
+    return {
+        "agentMissing": False,
+        "agentStatusCode": "",
+        "agentStatusMessage": "",
+    }
+
+
+def _session_agent_is_available(summary: dict[str, Any]) -> bool:
+    return bool(str(summary.get("agentId") or "").strip()) and not bool(summary.get("agentMissing"))
 
 
 @contextmanager
@@ -1198,11 +1267,6 @@ def delete_chat_session(session_id: str) -> dict:
     _set_session_running(conversation_id, False)
     _clear_session_turn_control(conversation_id)
     _clear_session_live_output(conversation_id)
-    if target_agent_id:
-        try:
-            archive_agent_instance(target_agent_id)
-        except Exception:
-            pass
     return get_session_detail(next_active_id) or {}
 
 
@@ -1546,10 +1610,18 @@ def submit_session_message(
             or DEFAULT_SESSION_AGENT_PROFILE_ID
         )
         previous_messages = normalize_chat_messages(conversation.get("messages") or [])
+        skill_command = parse_skill_slash_command(message)
+        skill_invocation = _skill_invocation_payload(skill_command) if skill_command is not None else None
         turn_control = _create_session_turn_control(conversation_id)
         persisted_message_metadata = dict(message_metadata or {}) if isinstance(message_metadata, dict) else {}
         if persisted_message_metadata:
             persisted_message_metadata.setdefault("turnId", turn_control.turn_id)
+        if skill_invocation:
+            persisted_message_metadata["slashSkillCommand"] = {
+                "command": skill_invocation.get("command", ""),
+                "skillName": skill_invocation.get("skillName", ""),
+                "skillHash": skill_invocation.get("skillHash", ""),
+            }
         user_entry = _make_chat_message(
             "user",
             message,
@@ -1668,6 +1740,7 @@ def submit_session_message(
                 "profile_id": agent_profile_id,
                 "agent_id": agent_id,
                 "leases": requested_leases,
+                "skill_invocation": skill_invocation,
             }
             _record_image_attachment_router_event(
                 conversation_id,
@@ -1761,6 +1834,7 @@ def submit_session_message(
         "active_task": active_task,
         "profile_id": agent_profile_id,
         "agent_id": agent_id,
+        "skill_invocation": skill_invocation,
     }
     _record_session_turn_scheduled_event(context)
     try:
@@ -1918,6 +1992,8 @@ def edit_and_resubmit_session_message(
             )
 
         previous_messages = normalize_chat_messages(conversation.get("messages") or [])
+        skill_command = parse_skill_slash_command(message)
+        skill_invocation = _skill_invocation_payload(skill_command) if skill_command is not None else None
         target_index = _find_user_message_index_by_api_id(conversation_id, previous_messages, target_message_id)
         if target_index < 0:
             raise SessionValidationError(
@@ -1962,7 +2038,14 @@ def edit_and_resubmit_session_message(
             or DEFAULT_SESSION_AGENT_PROFILE_ID
         )
         original_entry = dict(previous_messages[target_index])
-        user_entry = _make_chat_message("user", message)
+        user_metadata = {}
+        if skill_invocation:
+            user_metadata["slashSkillCommand"] = {
+                "command": skill_invocation.get("command", ""),
+                "skillName": skill_invocation.get("skillName", ""),
+                "skillHash": skill_invocation.get("skillHash", ""),
+            }
+        user_entry = _make_chat_message("user", message, metadata=user_metadata)
         edited_messages = previous_messages[:target_index] + [user_entry]
         conversation["messages"] = edited_messages
         conversation.pop("last_turn_error", None)
@@ -2057,6 +2140,7 @@ def edit_and_resubmit_session_message(
         "active_task": active_task,
         "profile_id": agent_profile_id,
         "agent_id": agent_id,
+        "skill_invocation": skill_invocation,
     }
     _record_session_turn_scheduled_event(context)
     try:
@@ -2429,6 +2513,8 @@ def _resolve_session_user_prompt(
     if isinstance(existing_task, dict):
         existing_goal = trim_lines(existing_task.get("goal") or existing_task.get("title") or "", max_lines=2)
     if existing_goal and _is_effective_user_message(existing_goal):
+        if _is_contextual_confirmation_message(prompt):
+            return _build_contextual_confirmation_prompt(prompt, existing_goal, existing_task=existing_task), "active_task_confirmation"
         return existing_goal, "active_task_fallback"
 
     history_goal = _latest_effective_user_message(history_messages)
@@ -2436,6 +2522,31 @@ def _resolve_session_user_prompt(
         return history_goal, "history_fallback"
 
     return prompt, "raw_non_meaningful"
+
+
+def _build_contextual_confirmation_prompt(
+    confirmation: str,
+    goal: str,
+    *,
+    existing_task: dict[str, Any] | None = None,
+) -> str:
+    compact_confirmation = trim_lines(confirmation or "", max_lines=1)
+    compact_goal = trim_lines(goal or "", max_lines=2)
+    if not compact_confirmation or not compact_goal:
+        return compact_goal or compact_confirmation
+    lines = [
+        f"用户确认：{compact_confirmation}",
+        f"请基于已确认的当前目标继续执行：{compact_goal}",
+    ]
+    if isinstance(existing_task, dict):
+        latest_summary = trim_lines(existing_task.get("latest_summary") or "", max_lines=2)
+        next_action = trim_lines(existing_task.get("next_action") or "", max_lines=2)
+        if latest_summary:
+            lines.append(f"最近进展：{latest_summary}")
+        if next_action:
+            lines.append(f"下一步：{next_action}")
+    lines.append("不要把这个确认短句当成新的任务标题，也不要只重复回答目标本身。")
+    return "\n".join(lines)
 
 
 def _looks_like_runtime_failure_notice(text: Any) -> bool:
@@ -2542,17 +2653,22 @@ def _build_session_summary(conversation: dict[str, Any]) -> dict[str, Any]:
     )
     agent_workspace_path = str((agent or {}).get("workspacePath") or "").strip()
     agent_code = str((agent or {}).get("agentCode") or "").strip()
+    agent_status = _session_agent_status_payload(agent_id, agent)
+    agent_display_name = str((agent or {}).get("displayName") or "").strip()
+    if agent_status["agentMissing"] and not agent_display_name:
+        agent_display_name = text_for(get_web_language(), zh="缺少有效 Agent", en="Missing Agent")
     return {
         "id": conversation["id"],
         "title": conversation["title"],
         "agentId": agent_id,
         "agentCode": agent_code,
-        "agentDisplayName": str((agent or {}).get("displayName") or conversation["title"]).strip(),
+        "agentDisplayName": agent_display_name or str(conversation["title"]).strip(),
         "agentProfileId": agent_profile_id,
         "agentTemplateId": agent_profile_id,
         "agentTemplateLabel": _session_agent_profile_label(agent_profile_id, get_web_language()),
         "workspacePath": str(conversation.get("workspacePath") or _session_workspace_relative_path(conversation["id"])),
         "agentWorkspacePath": agent_workspace_path,
+        **agent_status,
         "status": status,
         "taskSummary": summary,
         "lastActive": updated_at,
@@ -2582,6 +2698,9 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
     detail_messages = _messages_with_live_output(conversation["id"], conversation.get("messages") or [])
     context_usage = _build_session_context_usage(conversation["id"], detail_messages)
     cache_usage = _build_session_cache_usage()
+    agent_available = _session_agent_is_available(summary)
+    available_agent_id = summary.get("agentId") or "" if agent_available else ""
+    available_agent = get_agent(available_agent_id) if available_agent_id else None
     detail = {
         **summary,
         "activeTask": _active_task_to_api(active_task),
@@ -2595,14 +2714,14 @@ def _build_session_detail(conversation: dict[str, Any]) -> dict[str, Any]:
         "cacheUsage": cache_usage,
         "lastTurnError": _session_turn_error_to_api(conversation.get("lastTurnError")),
         "nextStateSignals": _recent_chat_next_state_signal_summaries(conversation["id"], limit=5),
-        "groupContextEvents": list_group_context_events_for_agent(summary.get("agentId") or "", limit=8)
-        if summary.get("agentId")
+        "groupContextEvents": list_group_context_events_for_agent(available_agent_id, limit=8)
+        if available_agent_id
         else [],
-        "agentInboxMessages": list_agent_inbox_messages_for_agent(summary.get("agentId") or "", limit=8, status="pending")
-        if summary.get("agentId")
+        "agentInboxMessages": list_agent_inbox_messages_for_agent(available_agent_id, limit=8, status="pending")
+        if available_agent_id
         else [],
-        "toolPolicy": (get_agent(summary.get("agentId") or "") or {}).get("toolPolicy") if summary.get("agentId") else None,
-        "memoryPolicy": (get_agent(summary.get("agentId") or "") or {}).get("memoryPolicy") if summary.get("agentId") else None,
+        "toolPolicy": (available_agent or {}).get("toolPolicy") if available_agent_id else None,
+        "memoryPolicy": (available_agent or {}).get("memoryPolicy") if available_agent_id else None,
         "stopRequested": bool(turn_snapshot["stopRequested"]),
         "stopRequestedAt": str(turn_snapshot["stopRequestedAt"] or "").strip(),
         "stopReason": str(turn_snapshot["stopReason"] or "").strip(),
@@ -4000,6 +4119,17 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         else (resolve_memory_policy_for_agent(agent_id) if agent_id else {})
     )
     memory_root = str(memory_policy.get("privateMemoryRoot") or "").strip()
+    agent_workspace_path = (
+        agent_directory_service._ensure_agent_workspace(str((agent or {}).get("workspacePath") or "")).resolve()
+        if agent and str((agent or {}).get("workspacePath") or "").strip()
+        else session_workspace
+    )
+    workspace_decision = (
+        evaluate_agent_workspace_write(agent_id, agent_workspace_path, purpose="chat_turn_tool_workspace")
+        if agent_id
+        else None
+    )
+    tool_workspace = agent_workspace_path if not workspace_decision or workspace_decision.allowed else session_workspace
     _record_session_turn_lifecycle_event(
         session_id,
         "worker_started",
@@ -4015,6 +4145,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "agentId": agent_id,
             "agentWorkspacePath": agent_workspace,
             "agentMemoryRoot": memory_root,
+            "toolWorkspacePath": str(tool_workspace),
+            "toolWorkspaceScope": str(getattr(workspace_decision, "scope", "") or ""),
         },
     )
     effective_agent_profile_id = _normalize_session_agent_profile_id(
@@ -4064,7 +4196,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         with (
             active_agent_runtime(agent_id, session_id=session_id, turn_id=turn_id),
             mental_model_enabled_override(mental_model_enabled),
-            _session_tool_workspace_override(session_workspace, memory_workspace=agent_workspace or session_workspace),
+            _session_tool_workspace_override(tool_workspace, memory_workspace=agent_workspace_path if agent else tool_workspace),
         ):
             initial_stop_reason = _get_turn_control_stop_reason(turn_control)
             if initial_stop_reason:
@@ -4098,7 +4230,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     },
                 )
                 agent_profile_id = effective_agent_profile_id
-                agent = _create_chat_agent_for_session(session_workspace, agent_profile_id=agent_profile_id)
+                agent = _create_chat_agent_for_session(tool_workspace, agent_profile_id=agent_profile_id)
                 attachments = _normalize_message_attachments(context.get("attachments") or [])
                 _record_session_turn_lifecycle_event(
                     session_id,
@@ -4108,6 +4240,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     fields={
                         "agentType": type(agent).__name__,
                         "workspacePath": _session_workspace_relative_path(session_id),
+                        "toolWorkspacePath": str(tool_workspace),
                         "agentProfileId": agent_profile_id,
                         "agentId": agent_id,
                         "promptTemplateId": str((get_agent(agent_id) or {}).get("promptTemplateId") or "").strip() if agent_id else "",
@@ -4124,10 +4257,20 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 history_messages = _history_messages_for_agent_seed(context.get("history_messages") or [])
                 runtime_context_block = agent_context_packet.context_block if agent_context_packet is not None else ""
+                skill_invocation = context.get("skill_invocation")
+                skill_runtime_context_block = _skill_runtime_context_from_invocation(skill_invocation)
                 if callable(restore) and history_messages:
                     restore(history_messages)
                 if callable(runtime_context_seed) and runtime_context_block:
                     runtime_context_seed(runtime_context_block)
+                if callable(runtime_context_seed) and skill_runtime_context_block:
+                    runtime_context_seed(skill_runtime_context_block)
+                    _record_session_skill_command_event(
+                        session_id,
+                        turn_id=turn_id,
+                        invocation=skill_invocation,
+                        outcome="routed",
+                    )
                 _record_session_turn_lifecycle_event(
                     session_id,
                     "history_seeded",
@@ -4137,6 +4280,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
                         "seededHistoryMessageCount": len(history_messages),
                         "agentRuntimeContextIncluded": bool(runtime_context_block),
+                        "skillRuntimeContextIncluded": bool(skill_runtime_context_block),
                         "restoreAvailable": callable(restore),
                     },
                 )
@@ -4281,6 +4425,79 @@ def create_chat_agent(workspace_path: str | Path | None = None, config: Any | No
     from agent import SelfEvolvingAgent
 
     return SelfEvolvingAgent(config=config, mode="chat", workspace_path=str(workspace_path) if workspace_path else None)
+
+
+def _skill_invocation_payload(command: SkillSlashCommand | None) -> dict[str, Any] | None:
+    if command is None:
+        return None
+    return {
+        "command": command.command,
+        "args": command.args,
+        **skill_descriptor_for_log(command.skill),
+        "_skill": command.skill,
+    }
+
+
+def _skill_runtime_context_from_invocation(invocation: Any) -> str:
+    if not isinstance(invocation, dict):
+        return ""
+    skill = invocation.get("_skill")
+    if skill is None:
+        return ""
+    return build_skill_runtime_context(
+        skill,
+        command=str(invocation.get("command") or ""),
+        args=str(invocation.get("args") or ""),
+    )
+
+
+def _record_session_skill_command_event(
+    session_id: str,
+    *,
+    turn_id: str = "",
+    invocation: Any = None,
+    outcome: str = "routed",
+) -> None:
+    if not isinstance(invocation, dict):
+        return
+    fields = {
+        "sessionId": str(session_id or "").strip(),
+        "turnId": str(turn_id or "").strip(),
+        "command": str(invocation.get("command") or "").strip(),
+        "skillName": str(invocation.get("skillName") or "").strip(),
+        "skillPath": str(invocation.get("skillPath") or "").strip(),
+        "skillHash": str(invocation.get("skillHash") or "").strip(),
+        "skillContentLength": int(invocation.get("skillContentLength") or 0),
+        "argsLength": len(str(invocation.get("args") or "")),
+    }
+    child_payload = {
+        "session_id": fields["sessionId"],
+        "turn_id": fields["turnId"],
+        "command": fields["command"],
+        "skill_name": fields["skillName"],
+        "skill_hash": fields["skillHash"],
+        "skill_content_length": fields["skillContentLength"],
+        "args_length": fields["argsLength"],
+        "outcome": str(outcome or "routed"),
+    }
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "skill_command",
+            "conversation.skill_command.routed",
+            level="info",
+            outcome=outcome,
+            message="Chat slash skill command routed.",
+            fields=fields,
+            child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-skill-commands.jsonl",
+            child_log_payload=child_payload,
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene skill command log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
 
 
 def _run_session_continuation_loop(

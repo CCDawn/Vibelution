@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from core.orchestration.context_engine import list_agent_runs_for_agent
 from core.web.services import agent_directory_service, session_service
+from core.web.services.runtime_scene_service import list_runtime_scene_evidence_for_agent
 from core.web.services.agent_config_workspace_service import get_agent_config_workspace
 from core.web.services.agent_directory_service import (
     AgentDirectoryError,
@@ -228,6 +229,13 @@ def agent_run_list(agent_id: str, limit: int = 20) -> dict:
     if not get_agent(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
     return list_agent_runs_for_agent(agent_id, limit=limit)
+
+
+@router.get("/agents/{agent_id}/runtime-evidence")
+def agent_runtime_evidence(agent_id: str, sessionId: str = "", runId: str = "", limit: int = 5) -> dict:
+    if not get_agent(agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return list_runtime_scene_evidence_for_agent(agent_id, session_id=sessionId, run_id=runId, limit=limit)
 
 
 @router.get("/agents/{agent_id}/messages")

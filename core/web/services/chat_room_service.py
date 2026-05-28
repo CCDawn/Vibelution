@@ -23,7 +23,7 @@ from core.runtime_manager.work_run_leases import READONLY_CHAT_LEASE
 from core.ui.chat_state import load_chat_state, normalize_chat_messages, save_chat_state
 
 from . import agent_directory_service, session_service
-from .agent_directory_service import active_agent_runtime, write_group_context_event
+from .agent_directory_service import active_agent_runtime, evaluate_agent_workspace_write, write_group_context_event
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
 
@@ -475,6 +475,67 @@ def start_chat_room_round(
     )
 
 
+def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
+    """Request and persist a user stop for the active chat room round."""
+
+    lang = get_web_language()
+    normalized_room_id = str(room_id or "").strip()
+    if not normalized_room_id:
+        raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+    stop_reason = str(reason or "").strip() or text_for(
+        lang,
+        zh="用户请求停止当前群聊轮次。",
+        en="The user requested the current chat room round to stop.",
+    )
+    stopped_at = utc_now_iso()
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        room = _find_room(state, normalized_room_id)
+        if room is None:
+            raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+        active_round_id = str(room.get("activeRoundId") or "").strip()
+        target_round = _find_round(room, active_round_id) if active_round_id else None
+        if (
+            target_round is None
+            or str(target_round.get("status") or "").strip().lower() not in RUNNING_ROUND_STATUSES
+        ):
+            raise ChatRoomBusyError(text_for(lang, zh="当前群聊没有正在运行的轮次。", en="No chat room round is running."))
+        _request_chat_room_round_stop(active_round_id, stop_reason)
+        session_service.cancel_agent_execution_reservation(active_round_id)
+        target_round["status"] = "stopped"
+        target_round["summary"] = _stopped_round_summary(
+            stop_reason,
+            message_count=len(list(target_round.get("messages") or [])),
+            speaker_count=len(list(target_round.get("speakerOrder") or [])),
+        )
+        target_round["updatedAt"] = stopped_at
+        target_round["finishedAt"] = stopped_at
+        room["status"] = "ready"
+        room["activeRoundId"] = ""
+        room["updatedAt"] = stopped_at
+        _store().save(state)
+        room_payload = dict(room)
+        round_payload = dict(target_round)
+
+    _persist_chat_room_work_run(
+        room_payload,
+        round_payload,
+        status="stopped",
+        summary=str(round_payload.get("summary") or stop_reason),
+    )
+    _record_room_event(
+        "round",
+        "chat_room.round.user_stopped",
+        room_payload,
+        round_payload,
+        fields={"reason": trim_lines(stop_reason, max_lines=2)},
+        outcome="stopped",
+        lifecycle=True,
+    )
+    _publish_chat_room_detail_snapshot(normalized_room_id)
+    return _room_to_api(room_payload)
+
+
 def stream_chat_room_events(room_id: str, initial_detail: dict[str, Any] | None = None):
     """Yield SSE snapshots for one chat room."""
 
@@ -870,11 +931,19 @@ def _supervision_decision_to_message(decision: Any) -> dict[str, Any]:
 
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
     session_id = str(participant.get("sessionId") or "").strip()
-    workspace = _participant_workspace(session_id, context.get("roomId"), participant.get("participantId"))
+    session_workspace = _participant_workspace(session_id, context.get("roomId"), participant.get("participantId"))
     _sync_agent_directory_project_root()
     agent_id = str(participant.get("agentId") or "").strip()
     round_id = str(context.get("roundId") or "").strip()
     agent_context = build_agent_context(agent_id, session_id=session_id, run_id=round_id) if agent_id else None
+    agent = agent_directory_service.get_agent(agent_id) if agent_id else None
+    agent_workspace = (
+        agent_directory_service._ensure_agent_workspace(str((agent or {}).get("workspacePath") or "")).resolve()
+        if agent and str((agent or {}).get("workspacePath") or "").strip()
+        else session_workspace
+    )
+    write_decision = evaluate_agent_workspace_write(agent_id, agent_workspace, purpose="chat_room_agent_workspace") if agent_id else None
+    workspace = agent_workspace if not write_decision or write_decision.allowed else session_workspace
     agent_profile_id = (
         str((agent_context.profile_id if agent_context is not None else "") or "").strip()
         or str(participant.get("agentProfileId") or participant.get("agentTemplateId") or "primary").strip()
@@ -891,7 +960,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         session_id=session_id,
         room_id=str(context.get("roomId") or "").strip(),
         round_id=round_id,
-    ):
+    ), session_service._session_tool_workspace_override(workspace):
         agent = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
         stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
         if callable(stop_configurer):
@@ -1336,6 +1405,9 @@ def _participant_from_session(
     title = str(summary.get("title") or session_id).strip() or session_id
     detail = (session_service.get_session_detail(session_id) or {}) if include_recent_messages else {}
     agent_profile_id = str(summary.get("agentProfileId") or detail.get("agentProfileId") or "primary").strip() or "primary"
+    agent_missing = bool(summary.get("agentMissing") or detail.get("agentMissing"))
+    agent_status_code = str(summary.get("agentStatusCode") or detail.get("agentStatusCode") or "").strip()
+    agent_status_message = str(summary.get("agentStatusMessage") or detail.get("agentStatusMessage") or "").strip()
     return {
         "participantId": f"session-{_safe_fragment(session_id)}",
         "kind": "session_agent",
@@ -1348,7 +1420,10 @@ def _participant_from_session(
         "agentProfileId": agent_profile_id,
         "agentTemplateId": agent_profile_id,
         "agentTemplateLabel": str(summary.get("agentTemplateLabel") or detail.get("agentTemplateLabel") or agent_profile_id),
-        "enabled": True,
+        "agentMissing": agent_missing,
+        "agentStatusCode": agent_status_code,
+        "agentStatusMessage": agent_status_message,
+        "enabled": not agent_missing,
         "status": str(summary.get("status") or ""),
         "recentMessages": (
             _compact_messages(detail.get("messages") or [])
@@ -1377,7 +1452,7 @@ def _refresh_participants(
                 recent_messages=list(item.get("recentMessages") or []),
             )
             participant["participantId"] = str(item.get("participantId") or participant["participantId"])
-            participant["enabled"] = bool(item.get("enabled", True))
+            participant["enabled"] = False if participant.get("agentMissing") else bool(item.get("enabled", True))
             participant["agentId"] = str(item.get("agentId") or participant.get("agentId") or "").strip()
             participant["agentCode"] = str(item.get("agentCode") or participant.get("agentCode") or "").strip()
             participant["directSessionId"] = str(item.get("directSessionId") or participant.get("directSessionId") or participant.get("sessionId") or "").strip()

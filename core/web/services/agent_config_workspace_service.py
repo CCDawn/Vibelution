@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import UTC, datetime
+from time import perf_counter
 from typing import Any
+
+from core.orchestration.context_engine import list_agent_runs_for_agent
 
 from . import chat_room_service, config_service
 from .agent_directory_service import list_agents
@@ -20,12 +23,19 @@ SCHEMA_VERSION = 1
 def get_agent_config_workspace() -> dict[str, Any]:
     """Return a read-only workspace that explains every persistent Agent once."""
 
-    agents = list_agents(include_archived=True)
-    mode_bindings = get_mode_bindings_payload()
-    prompt_workspace = _safe_prompt_workspace()
-    config_workspace = _safe_config_workspace()
-    chat_rooms = _safe_chat_rooms()
-    policy_options = _safe_policy_options()
+    timings: dict[str, float] = {}
+    total_started = perf_counter()
+    agents = _timed_stage(timings, "list_agents", lambda: list_agents(include_archived=True))
+    active_agent_options = [_agent_option(agent) for agent in agents if str(agent.get("status") or "active").strip() != "archived"]
+    mode_bindings = _timed_stage(
+        timings,
+        "mode_bindings",
+        lambda: get_mode_bindings_payload(agent_options=active_agent_options),
+    )
+    prompt_workspace = _timed_stage(timings, "prompt_templates", _safe_prompt_workspace)
+    config_workspace = _timed_stage(timings, "model_config", _safe_config_workspace)
+    chat_rooms = _timed_stage(timings, "chat_rooms", _safe_chat_rooms)
+    policy_options = _timed_stage(timings, "policy_options", _safe_policy_options)
 
     agent_refs = {str(agent.get("agentId") or ""): agent for agent in agents if str(agent.get("agentId") or "")}
     active_agent_ids = {
@@ -44,21 +54,30 @@ def get_agent_config_workspace() -> dict[str, Any]:
         if str(item.get("profileId") or "")
     }
 
-    references = _derive_references(
-        agents=agents,
-        mode_bindings=mode_bindings,
-        chat_rooms=chat_rooms,
-        active_agent_ids=active_agent_ids,
+    references = _timed_stage(
+        timings,
+        "derive_references",
+        lambda: _derive_references(
+            agents=agents,
+            mode_bindings=mode_bindings,
+            chat_rooms=chat_rooms,
+            active_agent_ids=active_agent_ids,
+        ),
     )
-    health = _derive_health(
-        agents=agents,
-        prompt_refs=prompt_refs,
-        profile_refs=profile_refs,
-        mode_bindings=mode_bindings,
-        chat_rooms=chat_rooms,
-        active_agent_ids=active_agent_ids,
+    health = _timed_stage(
+        timings,
+        "derive_health",
+        lambda: _derive_health(
+            agents=agents,
+            prompt_refs=prompt_refs,
+            profile_refs=profile_refs,
+            mode_bindings=mode_bindings,
+            chat_rooms=chat_rooms,
+            active_agent_ids=active_agent_ids,
+        ),
     )
     issues_by_agent = _issues_by_agent(health["issues"])
+    runtime_status_by_agent = _timed_stage(timings, "runtime_statuses", lambda: _derive_runtime_statuses(agents))
     enriched_agents = [
         {
             **agent,
@@ -66,11 +85,13 @@ def get_agent_config_workspace() -> dict[str, Any]:
             "promptTemplate": prompt_refs.get(str(agent.get("promptTemplateId") or "")),
             "references": references.get(str(agent.get("agentId") or ""), []),
             "health": issues_by_agent.get(str(agent.get("agentId") or ""), []),
+            "runtimeStatus": runtime_status_by_agent.get(str(agent.get("agentId") or ""), _default_runtime_status(agent)),
         }
         for agent in agents
     ]
-    groups = _derive_groups(enriched_agents)
-    summary = _summary(enriched_agents, groups, health["issues"], chat_rooms, mode_bindings)
+    groups = _timed_stage(timings, "derive_groups", lambda: _derive_groups(enriched_agents))
+    summary = _timed_stage(timings, "summary", lambda: _summary(enriched_agents, groups, health["issues"], chat_rooms, mode_bindings))
+    timings["total"] = round((perf_counter() - total_started) * 1000, 1)
     payload = {
         "schemaVersion": SCHEMA_VERSION,
         "generatedAt": _now(),
@@ -95,7 +116,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
             "promptTemplates": list(prompt_workspace.get("repairWarnings") or []),
         },
     }
-    _record_workspace_loaded(summary)
+    _record_workspace_loaded(summary, timings=timings)
     return payload
 
 
@@ -267,6 +288,18 @@ def _derive_health(
             issues.append(_agent_issue(agent, "warning", "missing_direct_session", "缺少直连会话", "群聊和主动唤醒需要一个可恢复的 directSessionId。"))
         if not str(agent.get("workspacePath") or "").strip():
             issues.append(_agent_issue(agent, "blocking", "missing_workspace", "缺少独立工作区", "workspacePath 为空。"))
+        territory = agent.get("workspaceTerritory") if isinstance(agent.get("workspaceTerritory"), dict) else {}
+        legacy_workspace = str(territory.get("legacyWorkspacePath") or "").strip()
+        if legacy_workspace:
+            issues.append(
+                _agent_issue(
+                    agent,
+                    "info",
+                    "legacy_workspace_retained",
+                    "保留了历史会话工作区",
+                    f"旧路径 {legacy_workspace} 已保留为兼容引用；新的默认写入进入 Agent 私有领地。",
+                )
+            )
         if not str(agent.get("toolPolicyId") or "").strip():
             issues.append(_agent_issue(agent, "warning", "missing_tool_policy", "缺少工具权限策略", "toolPolicyId 为空。"))
         if not str(agent.get("memoryPolicyId") or "").strip():
@@ -392,6 +425,16 @@ def _summary(
         "agentCount": len(agents),
         "activeAgentCount": len(active_agents),
         "archivedAgentCount": len(agents) - len(active_agents),
+        "runningAgentCount": sum(
+            1
+            for item in active_agents
+            if str((item.get("runtimeStatus") or {}).get("state") or "").strip() == "running"
+        ),
+        "blockedAgentCount": sum(
+            1
+            for item in active_agents
+            if str((item.get("runtimeStatus") or {}).get("state") or "").strip() in {"blocked", "failed"}
+        ),
         "modeCount": len(dict(mode_bindings.get("modes") or {})),
         "chatRoomCount": len(chat_rooms),
         "groupCount": len(groups),
@@ -400,6 +443,117 @@ def _summary(
         "warningIssueCount": sum(1 for item in issues if item.get("severity") == "warning"),
         "inboxPendingCount": sum(_safe_int(item.get("agentInboxPendingCount")) for item in agents),
     }
+
+
+def _derive_runtime_statuses(agents: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    statuses: dict[str, dict[str, Any]] = {}
+    for agent in agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        if not agent_id:
+            continue
+        statuses[agent_id] = _runtime_status_for_agent(agent)
+    return statuses
+
+
+def _runtime_status_for_agent(agent: dict[str, Any]) -> dict[str, Any]:
+    base = _default_runtime_status(agent)
+    agent_id = str(agent.get("agentId") or "").strip()
+    if not agent_id or base["state"] == "archived":
+        return base
+    try:
+        history = list_agent_runs_for_agent(agent_id, limit=6)
+    except Exception as exc:
+        return {
+            **base,
+            "state": "unknown",
+            "label": "Unknown",
+            "reason": "run_history_unavailable",
+            "summary": type(exc).__name__,
+        }
+    snapshots = [item for item in [*(history.get("runs") or []), *(history.get("subAgentRuns") or [])] if isinstance(item, dict)]
+    if not snapshots:
+        return base
+    snapshots.sort(key=_runtime_snapshot_sort_key, reverse=True)
+    active = next((item for item in snapshots if _runtime_state_from_status(str(item.get("status") or item.get("currentPhase") or "")) == "running"), None)
+    latest = active or snapshots[0]
+    state = _runtime_state_from_status(str(latest.get("status") or latest.get("currentPhase") or ""))
+    return {
+        "state": state,
+        "label": _runtime_state_label(state),
+        "reason": str(latest.get("status") or latest.get("currentPhase") or state).strip() or state,
+        "runId": str(latest.get("runId") or "").strip(),
+        "runKind": str(latest.get("runKind") or "").strip(),
+        "sessionId": str(latest.get("sessionId") or latest.get("parentSessionId") or agent.get("directSessionId") or "").strip(),
+        "summary": str(latest.get("summary") or "").strip(),
+        "updatedAt": str(
+            latest.get("updatedAt")
+            or latest.get("finishedAt")
+            or latest.get("endedAt")
+            or latest.get("startedAt")
+            or latest.get("createdAt")
+            or agent.get("updatedAt")
+            or ""
+        ).strip(),
+    }
+
+
+def _default_runtime_status(agent: dict[str, Any]) -> dict[str, Any]:
+    status = str(agent.get("status") or "active").strip().lower()
+    if status == "archived":
+        return {
+            "state": "archived",
+            "label": "Archived",
+            "reason": "agent_archived",
+            "runId": "",
+            "runKind": "",
+            "sessionId": str(agent.get("directSessionId") or "").strip(),
+            "summary": "",
+            "updatedAt": str(agent.get("updatedAt") or "").strip(),
+        }
+    return {
+        "state": "idle",
+        "label": "Idle",
+        "reason": "no_recent_runs",
+        "runId": "",
+        "runKind": "",
+        "sessionId": str(agent.get("directSessionId") or "").strip(),
+        "summary": "",
+        "updatedAt": str(agent.get("updatedAt") or "").strip(),
+    }
+
+
+def _runtime_state_from_status(status: str) -> str:
+    normalized = str(status or "").strip().lower()
+    if normalized in {"queued", "running", "stopping", "paused"}:
+        return "running"
+    if normalized in {"failed", "error", "timeout"}:
+        return "failed"
+    if normalized in {"blocked", "needs_continue", "needs_input", "waiting", "paused_limit"}:
+        return "blocked"
+    if normalized in {"stopped", "cancelled", "stopped_by_user"}:
+        return "stopped"
+    return "idle"
+
+
+def _runtime_state_label(state: str) -> str:
+    return {
+        "running": "Running",
+        "failed": "Failed",
+        "blocked": "Blocked",
+        "stopped": "Stopped",
+        "archived": "Archived",
+        "unknown": "Unknown",
+        "idle": "Idle",
+    }.get(str(state or "idle"), "Idle")
+
+
+def _runtime_snapshot_sort_key(snapshot: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(snapshot.get("updatedAt") or ""),
+        str(snapshot.get("finishedAt") or snapshot.get("endedAt") or ""),
+        str(snapshot.get("startedAt") or snapshot.get("createdAt") or ""),
+        str(snapshot.get("runId") or ""),
+    )
 
 
 def _compact_chat_rooms(rooms: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -453,6 +607,29 @@ def _safe_policy_options() -> dict[str, list[dict[str, Any]]]:
     except Exception as exc:
         _record_workspace_error("agent_config.policies.load_failed", exc)
         return {"toolPolicies": [], "memoryPolicies": []}
+
+
+def _agent_option(agent: dict[str, Any]) -> dict[str, Any]:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return {
+        "agentId": str(agent.get("agentId") or "").strip(),
+        "agentCode": str(agent.get("agentCode") or "").strip(),
+        "displayName": str(agent.get("displayName") or "").strip(),
+        "primaryMode": str(agent.get("primaryMode") or "general").strip() or "general",
+        "roleKey": str(agent.get("roleKey") or "").strip(),
+        "profileId": str(agent.get("profileId") or "").strip(),
+        "promptTemplateId": str(agent.get("promptTemplateId") or "").strip(),
+        "directSessionId": str(agent.get("directSessionId") or "").strip(),
+        "metadata": dict(metadata),
+    }
+
+
+def _timed_stage(timings: dict[str, float], name: str, fn: Any) -> Any:
+    started = perf_counter()
+    try:
+        return fn()
+    finally:
+        timings[name] = round((perf_counter() - started) * 1000, 1)
 
 
 def _agent_issue(agent: dict[str, Any], severity: str, code: str, title: str, detail: str) -> dict[str, Any]:
@@ -550,7 +727,7 @@ def _relative_path(path_func: Any) -> str:
         return str(path)
 
 
-def _record_workspace_loaded(summary: dict[str, Any]) -> None:
+def _record_workspace_loaded(summary: dict[str, Any], *, timings: dict[str, float] | None = None) -> None:
     try:
         record_runtime_scene_event(
             "agent_configuration",
@@ -565,6 +742,7 @@ def _record_workspace_loaded(summary: dict[str, Any]) -> None:
                 "modeCount": summary.get("modeCount", 0),
                 "chatRoomCount": summary.get("chatRoomCount", 0),
                 "healthIssueCount": summary.get("healthIssueCount", 0),
+                "timingsMs": dict(timings or {}),
             },
             lifecycle=False,
         )

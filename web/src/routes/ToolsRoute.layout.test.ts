@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./ToolsRoute.tsx?raw";
+import routerSource from "../app/router.tsx?raw";
 
 describe("ToolsRoute layout contract", () => {
+  it("lives inside Agent management navigation", () => {
+    expect(routerSource).toContain('path: "agents/tools"');
+    expect(routerSource).toContain("<ToolsRoute />");
+    expect(routerSource).not.toContain('path: "tools"');
+    expect(routerSource).not.toContain('to="/agents/tools" replace');
+    expect(routeSource).toContain('<AgentManagementNav active="tools" />');
+    expect(routeSource.indexOf('<AgentManagementNav active="tools" />')).toBeGreaterThan(routeSource.indexOf("</header>"));
+    expect(routeSource.indexOf('<AgentManagementNav active="tools" />')).toBeLessThan(routeSource.indexOf("styles.summaryGrid"));
+  });
+
   it("keeps manual generated-tool creation out of the page", () => {
     expect(routeSource).not.toContain('fetchJson<ToolRegistryItem>("/api/tools/generated"');
     expect(routeSource).not.toContain("toolsAddGenerated");

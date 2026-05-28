@@ -75,6 +75,45 @@ export type MemoryMutationResponse = {
   item: MemoryItem;
 };
 
+export type SkillLibraryRoot = {
+  path: string;
+  source: "codex" | "agents" | "other" | string;
+  exists: boolean;
+};
+
+export type SkillLibraryItem = {
+  name: string;
+  aliases: string[];
+  command: string;
+  description: string;
+  source: "codex" | "agents" | "other" | string;
+  rootPath: string;
+  path: string;
+  directoryName: string;
+  hash: string;
+  contentLength: number;
+  preview: string;
+  previewTruncated: boolean;
+};
+
+export type SkillLibraryDetail = SkillLibraryItem & {
+  content: string;
+  contentTruncated: boolean;
+};
+
+export type SkillLibraryPayload = {
+  schemaVersion: number;
+  mode: "read_only" | string;
+  roots: SkillLibraryRoot[];
+  counts: {
+    total: number;
+    codex: number;
+    agents: number;
+    other: number;
+  };
+  skills: SkillLibraryItem[];
+};
+
 export type LogRoot = {
   id: string;
   path: string;
@@ -921,6 +960,9 @@ export type SessionSummary = {
   agentTemplateLabel?: string;
   workspacePath?: string;
   agentWorkspacePath?: string;
+  agentMissing?: boolean;
+  agentStatusCode?: string;
+  agentStatusMessage?: string;
   status: string;
   taskSummary: string;
   lastActive: string;
@@ -953,6 +995,25 @@ export type MemoryPolicy = {
   summariesPath: string;
   readSharedGroups: string[];
   writeSharedGroups: string[];
+};
+
+export type AgentWorkspaceTerritory = {
+  schemaVersion: number;
+  agentId: string;
+  privateRoot: string;
+  sharedRoot: string;
+  defaultWriteScope: "private" | "shared" | string;
+  readScopes: string[];
+  writeScopes: string[];
+  subdirs: Record<string, string>;
+  memoryRoot: string;
+  eventsRoot: string;
+  artifactsRoot: string;
+  scratchRoot: string;
+  inboxRoot: string;
+  outboxRoot: string;
+  runsRoot: string;
+  legacyWorkspacePath?: string;
 };
 
 export type GroupContextEvent = {
@@ -1029,6 +1090,17 @@ export type AgentSupervisionDecision = {
   evidenceLevel: "light" | "standard" | "strict" | string;
 };
 
+export type AgentRuntimeStatus = {
+  state: "idle" | "running" | "failed" | "blocked" | "stopped" | "archived" | "unknown" | string;
+  label: string;
+  reason: string;
+  runId: string;
+  runKind: string;
+  sessionId: string;
+  summary: string;
+  updatedAt: string;
+};
+
 export type AgentInstance = {
   agentId: string;
   agentCode: string;
@@ -1041,6 +1113,7 @@ export type AgentInstance = {
   promptTemplateId: string;
   directSessionId: string;
   workspacePath: string;
+  workspaceTerritory?: AgentWorkspaceTerritory;
   toolPolicyId: string;
   memoryPolicyId: string;
   createdBy: string;
@@ -1051,6 +1124,7 @@ export type AgentInstance = {
   };
   createdAt: string;
   updatedAt: string;
+  runtimeStatus?: AgentRuntimeStatus;
   memoryPolicy?: MemoryPolicy;
   toolPolicy?: ToolPolicy;
   groupContextEvents?: GroupContextEvent[];
@@ -1108,6 +1182,33 @@ export type AgentRunHistory = {
   limit: number;
   runs: AgentRunSnapshot[];
   subAgentRuns: SubAgentRunSnapshot[];
+};
+
+export type AgentRuntimeEvidenceMatch = {
+  runtimeSceneId: string;
+  directoryName: string;
+  displayName: string;
+  startedAt: string;
+  status: string;
+  eventCode: string;
+  component: string;
+  phase: string;
+  level: string;
+  outcome: string;
+  message: string;
+  timestamp: string;
+  rawRefs: Array<{
+    path: string;
+    tail_lines?: number;
+  }>;
+  matchedFields: Record<string, string>;
+};
+
+export type AgentRuntimeEvidence = {
+  agentId: string;
+  sessionId: string;
+  runId: string;
+  matches: AgentRuntimeEvidenceMatch[];
 };
 
 export type PromptTemplate = {
@@ -1278,6 +1379,8 @@ export type AgentConfigWorkspace = {
     agentCount: number;
     activeAgentCount: number;
     archivedAgentCount: number;
+    runningAgentCount: number;
+    blockedAgentCount: number;
     modeCount: number;
     chatRoomCount: number;
     groupCount: number;
@@ -1530,6 +1633,9 @@ export type ChatRoomParticipant = {
   agentProfileId?: string;
   agentTemplateId?: string;
   agentTemplateLabel?: string;
+  agentMissing?: boolean;
+  agentStatusCode?: string;
+  agentStatusMessage?: string;
   enabled: boolean;
   status: string;
   recentMessages?: Array<{

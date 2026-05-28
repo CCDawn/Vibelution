@@ -19,7 +19,7 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).toContain("showFallbackWorkflowModeControl");
     expect(routeSource).toContain("workflowControlsDisabled");
     expect(routeSource).not.toContain("enabled: activeView === \"discovery\"");
-    expect(routeSource).toContain("activeView === \"discovery\"");
+    expect(routeSource).not.toContain("activeView === \"discovery\"");
     expect(routeSource).toContain("initialPayload");
     expect(routeSource).toContain("autoDraftStepIndex");
     expect(routeSource).toContain("PREVIOUS_DEFAULT_INPUT");
@@ -37,12 +37,12 @@ describe("ResearchRoute layout contract", () => {
     expect(routeSource).toContain("confirmEvidenceSearch");
     expect(routeSource).toContain("candidateCardPreview");
     expect(routeSource).toContain("defaultCollapsed");
-    expect(routeSource).toContain("CodeMirror");
-    expect(routeSource).toContain("promptWorkbench");
+    expect(routeSource).not.toContain("CodeMirror");
+    expect(routeSource).toContain("/agents/prompts?category=research");
     expect(routeSource).toContain("/research/flow-canvas");
-    expect(routeSource).toContain("promptAgentRail");
-    expect(routeSource).toContain("promptEditorPanel");
-    expect(routeSource).toContain("promptInspectorPanel");
+    expect(routeSource).not.toContain("promptAgentRail");
+    expect(routeSource).not.toContain("promptEditorPanel");
+    expect(routeSource).not.toContain("promptInspectorPanel");
     expect(routeSource).toContain("run-broad-search");
     expect(routeSource).toContain("run-deep-search");
     expect(routeSource).toContain("extract-evidence");
@@ -69,11 +69,12 @@ describe("ResearchRoute layout contract", () => {
     expect(styles.evidencePanel).toBeTypeOf("string");
     expect(styles.outputPanel).toBeTypeOf("string");
     expect(styles.themeGrid).toBeTypeOf("string");
-    expect(styles.promptWorkbench).toBeTypeOf("string");
-    expect(styles.promptAgentRail).toBeTypeOf("string");
-    expect(styles.promptEditorPanel).toBeTypeOf("string");
-    expect(styles.promptInspectorPanel).toBeTypeOf("string");
-    expect(styles.promptCodeEditor).toBeTypeOf("string");
+    const exportedClassNames = Object.keys(styles).join("\n");
+    expect(exportedClassNames).not.toContain("promptWorkbench");
+    expect(exportedClassNames).not.toContain("promptAgentRail");
+    expect(exportedClassNames).not.toContain("promptEditorPanel");
+    expect(exportedClassNames).not.toContain("promptInspectorPanel");
+    expect(exportedClassNames).not.toContain("promptCodeEditor");
   });
 
   it("stacks workflow stages as full-width vertical rows", () => {
@@ -118,11 +119,13 @@ describe("ResearchRoute layout contract", () => {
     expect(styles.agentTrace_error).toBeTypeOf("string");
   });
 
-  it("lets users restore each research agent prompt from its default prompt", () => {
-    expect(routeSource).toContain("defaultContent");
-    expect(routeSource).toContain("恢复默认提示词");
-    expect(routeSource).toContain("Restore default prompt");
-    expect(routeSource).not.toContain("恢复当前内容");
-    expect(routeSource).not.toContain("Reset current content");
+  it("moves research prompt editing to the Agent prompt center", () => {
+    expect(routeSource).toContain("Agent 提示词中心");
+    expect(routeSource).toContain("Agent prompt center");
+    expect(routeSource).toContain("/agents/prompts?category=research");
+    expect(routeSource).not.toContain("/api/research/theme-discovery/prompts");
+    expect(routeSource).not.toContain("defaultContent");
+    expect(routeSource).not.toContain("恢复默认提示词");
+    expect(routeSource).not.toContain("Restore default prompt");
   });
 });

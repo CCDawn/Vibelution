@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate } from "react-router-dom";
+import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
 import { AgentsRoute } from "../routes/AgentsRoute";
@@ -12,9 +12,11 @@ import { LegacyEvolutionRedirect } from "../routes/LegacyEvolutionRedirect";
 import { LogsRoute } from "../routes/LogsRoute";
 import { MemoryRoute } from "../routes/MemoryRoute";
 import { PetRoute } from "../routes/PetRoute";
+import { PromptTemplatesRoute } from "../routes/PromptTemplatesRoute";
 import { ResetRoute } from "../routes/ResetRoute";
 import { ResearchFlowCanvasRoute } from "../routes/ResearchFlowCanvasRoute";
 import { ResearchRoute } from "../routes/ResearchRoute";
+import { SkillsRoute } from "../routes/SkillsRoute";
 import { SupervisedReviewRoute } from "../routes/SupervisedReviewRoute";
 import { ToolsRoute } from "../routes/ToolsRoute";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
@@ -83,13 +85,15 @@ export const router = createBrowserRouter([
         ),
       },
       { path: "evolution", element: <LegacyEvolutionRedirect /> },
-      { path: "tools", element: <ToolsRoute /> },
       { path: "agents", element: <AgentsRoute /> },
+      { path: "agents/prompts", element: <PromptTemplatesRoute /> },
+      { path: "agents/tools", element: <ToolsRoute /> },
+      { path: "agents/skills", element: <SkillsRoute /> },
+      { path: "agents/memory", element: <MemoryRoute forcedView="overview" /> },
+      { path: "agents/memory/effective", element: <MemoryRoute forcedView="effective" /> },
+      { path: "agents/memory/manage", element: <MemoryRoute forcedView="manage" /> },
+      { path: "agents/memory/sources", element: <MemoryRoute forcedView="sources" /> },
       { path: "git", element: <GitRoute /> },
-      { path: "memory", element: <MemoryRoute forcedView="overview" /> },
-      { path: "memory/effective", element: <MemoryRoute forcedView="effective" /> },
-      { path: "memory/manage", element: <MemoryRoute forcedView="manage" /> },
-      { path: "memory/sources", element: <MemoryRoute forcedView="sources" /> },
       { path: "logs", element: <LogsRoute /> },
       { path: "research", element: <ResearchRoute /> },
       { path: "research/flow-canvas", element: <ResearchFlowCanvasRoute /> },

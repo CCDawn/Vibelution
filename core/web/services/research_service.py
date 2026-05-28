@@ -22,6 +22,8 @@ from core.research.agent_templates import (
 )
 from core.research import ResearchThemeDiscoveryService
 from core.infrastructure.workspace_manager import get_workspace
+from core.chat.chat_task_types import trim_lines
+from core.ui.chat_state import load_chat_state
 from config.public_config import build_effective_config, load_public_config
 from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, session_service
 from .config_service import _profile_label
@@ -94,7 +96,6 @@ _RESEARCH_FLOW_MODULE_CONTRACTS: dict[str, dict[str, Any]] = {
         "inputs": [],
         "outputs": {
             "completed": {"sources", "research_leads", "knowledge_candidates"},
-            "needs_evidence": {"sources", "evidence_requests"},
         },
         "terminal": False,
     },
@@ -148,7 +149,9 @@ _RESEARCH_FLOW_MODULE_CONTRACTS: dict[str, dict[str, Any]] = {
     "themes": {
         "label": "主题生成",
         "inputs": [{"approved_evidence"}],
-        "outputs": {"completed": {"candidate_themes"}},
+        "outputs": {
+            "selected": {"selected_theme"},
+        },
         "terminal": False,
     },
     "human_choice": {
@@ -305,15 +308,15 @@ def _legacy_research_flow_canvas() -> dict[str, Any]:
         "schemaVersion": 1,
         "canvasKind": _FLOW_CANVAS_KIND,
         "updatedAt": _utc_now(),
-        "viewport": {"x": 0, "y": 0, "zoom": 1},
+        "viewport": {"x": 40, "y": 120, "zoom": 0.92},
         "nodes": [
             {
                 "id": "broad_search",
-                "label": "广撒网探索",
+                "label": "广撒网 agent",
                 "type": "agent",
                 "status": "ready",
                 "x": 80,
-                "y": 120,
+                "y": 160,
                 "agentKey": "broad",
                 "promptKey": "broad",
                 "llmConfigId": "",
@@ -321,90 +324,25 @@ def _legacy_research_flow_canvas() -> dict[str, Any]:
                 "routeCondition": "输入开放目标、约束和偏好后启动",
             },
             {
-                "id": "knowledge_store",
-                "label": "科研知识入库",
-                "type": "tool",
-                "status": "idle",
-                "x": 380,
-                "y": 120,
-                "agentKey": "knowledge_store",
-                "promptKey": "",
-                "llmConfigId": "",
-                "description": "把广搜/深搜得到的来源、论断、证据和缺口写入 ResearchKnowledgeBase，供后续调研、自进化记忆和避免重复搜索复用。",
-                "routeCondition": "搜索完成后自动写入知识库",
-            },
-            {
-                "id": "knowledge_lookup",
-                "label": "知识库检索",
-                "type": "tool",
-                "status": "idle",
-                "x": 680,
-                "y": 120,
-                "agentKey": "knowledge_lookup",
-                "promptKey": "",
-                "llmConfigId": "",
-                "description": "从本地科研知识库检索已有来源、论断、证据和缺口，给后续搜索提供上下文并减少重复搜索。",
-                "routeCondition": "知识入库完成后先查本地知识库",
-            },
-            {
                 "id": "deep_search",
-                "label": "定向深搜",
+                "label": "定向深搜 agent",
                 "type": "agent",
                 "status": "idle",
-                "x": 980,
-                "y": 120,
+                "x": 480,
+                "y": 160,
                 "agentKey": "deep",
                 "promptKey": "deep",
                 "llmConfigId": "",
                 "description": "围绕上一阶段发现的关键缺口、论文、GitHub 项目和数据集补充证据。",
-                "routeCondition": "知识库检索完成并提供已知证据上下文后继续",
-            },
-            {
-                "id": "literature_project_parse",
-                "label": "文献/项目解析",
-                "type": "tool",
-                "status": "idle",
-                "x": 1280,
-                "y": 120,
-                "agentKey": "literature_project_parse",
-                "promptKey": "",
-                "llmConfigId": "",
-                "description": "对论文、PDF、GitHub README 和项目结构做结构化解析，提取方法、数据集、指标、限制和可复用组件。",
-                "routeCondition": "深搜拿到文献、项目或数据集来源后解析",
-            },
-            {
-                "id": "semantic_cluster",
-                "label": "语义去重与聚类",
-                "type": "tool",
-                "status": "idle",
-                "x": 1580,
-                "y": 120,
-                "agentKey": "semantic_cluster",
-                "promptKey": "",
-                "llmConfigId": "",
-                "description": "对来源、论断和候选问题做去重、聚类和低密度空白识别，减少重复证据并暴露交叉创新点。",
-                "routeCondition": "解析完成后进行语义去重和簇级空白发现",
-            },
-            {
-                "id": "novelty_reverse_check",
-                "label": "新颖性反查",
-                "type": "tool",
-                "status": "idle",
-                "x": 1880,
-                "y": 120,
-                "agentKey": "novelty_reverse_check",
-                "promptKey": "",
-                "llmConfigId": "",
-                "description": "围绕候选问题、关键词和机制组合反向检索论文、网页和 GitHub，标记已有相似工作与仍未覆盖的缺口。",
-                "routeCondition": "聚类后对高潜力空白做反向查重",
+                "routeCondition": "广撒网 agent 输出候选线索和初筛证据后继续",
             },
             {
                 "id": "evidence_review",
-                "label": "证据审查",
+                "label": "证据审查 agent",
                 "type": "agent",
                 "status": "needs_review",
-                "x": 2180,
-                "y": 120,
+                "x": 880,
+                "y": 160,
                 "agentKey": "review",
                 "promptKey": "review",
                 "llmConfigId": "",
@@ -413,11 +351,11 @@ def _legacy_research_flow_canvas() -> dict[str, Any]:
             },
             {
                 "id": "theme_generation",
-                "label": "主题生成",
+                "label": "主题生成 agent",
                 "type": "agent",
                 "status": "idle",
-                "x": 2480,
-                "y": 120,
+                "x": 1280,
+                "y": 160,
                 "agentKey": "themes",
                 "promptKey": "themes",
                 "llmConfigId": "",
@@ -425,44 +363,25 @@ def _legacy_research_flow_canvas() -> dict[str, Any]:
                 "routeCondition": "证据审查通过或用户手动确认继续",
             },
             {
-                "id": "human_choice",
-                "label": "人工选题确认",
-                "type": "human",
-                "status": "needs_input",
-                "x": 2480,
-                "y": 340,
-                "agentKey": "",
-                "promptKey": "",
-                "llmConfigId": "",
-                "description": "用户比较候选主题卡，选择最值得推进的方向。",
-                "routeCondition": "主题候选生成后等待确认",
-            },
-            {
                 "id": "theme_card",
-                "label": "正式主题卡",
-                "type": "artifact",
+                "label": "主题卡 agent",
+                "type": "agent",
                 "status": "idle",
-                "x": 2780,
-                "y": 220,
+                "x": 1680,
+                "y": 160,
                 "agentKey": "card",
                 "promptKey": "card",
                 "llmConfigId": "",
                 "description": "产出赛题要求的科学假设与研究计划结构，包括数据集、方法、实验、指标和参考文献。",
-                "routeCondition": "用户确认主题后生成",
+                "routeCondition": "用户确认主题生成 agent 的候选方向后生成正式主题卡",
             },
         ],
         "edges": [
-            {"id": "edge_broad_store", "source": "broad_search", "target": "knowledge_store", "label": "搜索结果", "condition": "completed", "type": "success"},
-            {"id": "edge_store_lookup", "source": "knowledge_store", "target": "knowledge_lookup", "label": "入库索引", "condition": "completed", "type": "success"},
-            {"id": "edge_lookup_deep", "source": "knowledge_lookup", "target": "deep_search", "label": "检索上下文", "condition": "completed", "type": "success"},
-            {"id": "edge_deep_parse", "source": "deep_search", "target": "literature_project_parse", "label": "来源集合", "condition": "completed", "type": "success"},
-            {"id": "edge_parse_cluster", "source": "literature_project_parse", "target": "semantic_cluster", "label": "结构化条目", "condition": "completed", "type": "success"},
-            {"id": "edge_cluster_novelty", "source": "semantic_cluster", "target": "novelty_reverse_check", "label": "候选空白", "condition": "completed", "type": "success"},
-            {"id": "edge_novelty_review", "source": "novelty_reverse_check", "target": "evidence_review", "label": "新颖性证据", "condition": "completed", "type": "success"},
+            {"id": "edge_broad_deep", "source": "broad_search", "target": "deep_search", "label": "候选线索", "condition": "completed", "type": "success"},
+            {"id": "edge_deep_review", "source": "deep_search", "target": "evidence_review", "label": "深搜证据包", "condition": "completed", "type": "success"},
             {"id": "edge_review_deep", "source": "evidence_review", "target": "deep_search", "label": "缺证据补搜", "condition": "needs_evidence", "type": "evidence_loop"},
             {"id": "edge_review_themes", "source": "evidence_review", "target": "theme_generation", "label": "证据通过", "condition": "approved", "type": "approval_gate"},
-            {"id": "edge_themes_choice", "source": "theme_generation", "target": "human_choice", "label": "候选主题", "condition": "completed", "type": "human_handoff"},
-            {"id": "edge_choice_card", "source": "human_choice", "target": "theme_card", "label": "选定主题", "condition": "selected", "type": "selection"},
+            {"id": "edge_themes_card", "source": "theme_generation", "target": "theme_card", "label": "选定主题", "condition": "selected", "type": "selection"},
         ],
     }
 
@@ -627,19 +546,35 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                     if str(agent.get("profileId") or "").strip() != profile_id:
                         agent["profileId"] = profile_id
                         changed = True
-                    updated_instance = agent_directory_service.update_agent_instance(
-                        agent_instance_id,
-                        display_name=label,
-                        template_id=str(agent.get("templateId") or "").strip(),
-                        profile_id=profile_id,
-                        primary_mode="research",
-                        role_key=f"research_{key}",
-                        prompt_template_id=f"prompt-research-{key}",
-                        metadata={
-                            "researchAgentKey": key,
-                            "researchTemplateId": str(agent.get("templateId") or "").strip(),
-                            "researchPromptFilename": str(agent.get("promptFilename") or "").strip(),
-                        },
+                    expected_metadata = {
+                        "researchAgentKey": key,
+                        "researchTemplateId": str(agent.get("templateId") or "").strip(),
+                        "researchPromptFilename": str(agent.get("promptFilename") or "").strip(),
+                    }
+                    instance_metadata = dict((instance or {}).get("metadata") or {})
+                    needs_instance_update = (
+                        str((instance or {}).get("templateId") or "").strip() != str(agent.get("templateId") or "").strip()
+                        or str((instance or {}).get("profileId") or "").strip() != profile_id
+                        or str((instance or {}).get("primaryMode") or "").strip() != "research"
+                        or str((instance or {}).get("roleKey") or "").strip() != f"research_{key}"
+                        or str((instance or {}).get("promptTemplateId") or "").strip() != f"prompt-research-{key}"
+                        or str(instance_metadata.get("functionalDisplayName") or "").strip() != label
+                        or any(instance_metadata.get(field) != value for field, value in expected_metadata.items())
+                    )
+                    updated_instance = (
+                        agent_directory_service.update_agent_instance(
+                            agent_instance_id,
+                            display_name=label,
+                            template_id=str(agent.get("templateId") or "").strip(),
+                            profile_id=profile_id,
+                            primary_mode="research",
+                            role_key=f"research_{key}",
+                            prompt_template_id=f"prompt-research-{key}",
+                            metadata=expected_metadata,
+                            preserve_generated_display_name=True,
+                        )
+                        if needs_instance_update
+                        else (instance or {})
                     )
                     if agent.get("agentInstanceId") != agent_instance_id:
                         agent["agentInstanceId"] = agent_instance_id
@@ -656,11 +591,18 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
                     direct_session_id = str(updated_instance.get("directSessionId") or agent.get("directSessionId") or "").strip()
                     if direct_session_id:
                         try:
-                            session_service.update_chat_session(
+                            if not _research_direct_session_is_current(
                                 direct_session_id,
                                 title=label,
                                 profile_id=profile_id,
-                            )
+                                agent_id=agent_instance_id,
+                                project_root=project_root,
+                            ):
+                                session_service.update_chat_session(
+                                    direct_session_id,
+                                    title=label,
+                                    profile_id=profile_id,
+                                )
                         except Exception:
                             pass
                         if agent.get("directSessionId") != direct_session_id:
@@ -693,6 +635,44 @@ def _ensure_research_agent_instances(agent_config: dict[str, Any]) -> dict[str, 
         agent_mode_binding_service.PROJECT_ROOT = previous_binding_root
 
 
+def _research_direct_session_is_current(
+    session_id: str,
+    *,
+    title: str,
+    profile_id: str,
+    agent_id: str,
+    project_root: Path,
+) -> bool:
+    """Return whether a research direct session already matches the Agent binding."""
+
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return False
+    expected_title = trim_lines(title or "", max_lines=1).strip()
+    expected_profile_id = str(profile_id or "").strip()
+    expected_agent_id = str(agent_id or "").strip()
+    try:
+        payload = load_chat_state(project_root)
+    except Exception:
+        return False
+    conversations = payload.get("conversations")
+    if not isinstance(conversations, list):
+        return False
+    for item in conversations:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("conversation_id") or "").strip() != normalized_session_id:
+            continue
+        current_agent_id = str(item.get("agent_id") or item.get("agentId") or "").strip()
+        current_profile_id = str(item.get("agent_profile_id") or item.get("agentProfileId") or "").strip()
+        return (
+            (not expected_title or str(item.get("title") or "").strip() == expected_title)
+            and (not expected_agent_id or current_agent_id == expected_agent_id)
+            and (not current_profile_id or current_profile_id == expected_profile_id)
+        )
+    return False
+
+
 def _sync_research_mode_binding(agents: list[dict[str, Any]]) -> None:
     active_agent_ids = [
         str(agent.get("agentId") or agent.get("agentInstanceId") or "").strip()
@@ -709,6 +689,12 @@ def _sync_research_mode_binding(agents: list[dict[str, Any]]) -> None:
     }
     flow_bindings = {key: value for key, value in flow_bindings.items() if key and value}
     try:
+        if _research_mode_binding_is_current(
+            default_agent_id=active_agent_ids[0],
+            active_agent_ids=active_agent_ids,
+            flow_bindings=flow_bindings,
+        ):
+            return
         agent_mode_binding_service.update_mode_binding(
             "research",
             default_agent_id=active_agent_ids[0],
@@ -725,6 +711,75 @@ def _sync_research_mode_binding(agents: list[dict[str, Any]]) -> None:
             level="warning",
             fields={"agentCount": len(active_agent_ids), "errorType": type(exc).__name__, "message": str(exc)},
         )
+
+
+def _research_mode_binding_is_current(
+    *,
+    default_agent_id: str,
+    active_agent_ids: list[str],
+    flow_bindings: dict[str, str],
+) -> bool:
+    try:
+        load_bindings = getattr(agent_mode_binding_service, "_load_mode_bindings", None)
+        raw_payload = load_bindings() if callable(load_bindings) else None
+    except Exception:
+        raw_payload = None
+    if _research_mode_binding_payload_is_current(
+        raw_payload,
+        default_agent_id=default_agent_id,
+        active_agent_ids=active_agent_ids,
+        flow_bindings=flow_bindings,
+    ):
+        return True
+    try:
+        payload = agent_mode_binding_service.repair_mode_bindings()
+    except Exception:
+        return False
+    return _research_mode_binding_payload_is_current(
+        payload,
+        default_agent_id=default_agent_id,
+        active_agent_ids=active_agent_ids,
+        flow_bindings=flow_bindings,
+    )
+
+
+def _research_mode_binding_payload_is_current(
+    payload: Any,
+    *,
+    default_agent_id: str,
+    active_agent_ids: list[str],
+    flow_bindings: dict[str, str],
+) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    bindings = payload.get("bindings")
+    if not isinstance(bindings, list):
+        return False
+    research_binding = next(
+        (
+            item
+            for item in bindings
+            if isinstance(item, dict) and str(item.get("mode") or "").strip() == "research"
+        ),
+        None,
+    )
+    if not research_binding:
+        return False
+    current_available_agent_ids = [
+        str(item or "").strip()
+        for item in list(research_binding.get("availableAgentIds") or [])
+        if str(item or "").strip()
+    ]
+    return (
+        str(research_binding.get("defaultAgentId") or "").strip() == str(default_agent_id or "").strip()
+        and all(agent_id in current_available_agent_ids for agent_id in active_agent_ids)
+        and [str(item or "").strip() for item in list(research_binding.get("pool") or []) if str(item or "").strip()] == active_agent_ids
+        and {
+            str(key or "").strip(): str(value or "").strip()
+            for key, value in dict(research_binding.get("flowBindings") or {}).items()
+            if str(key or "").strip() and str(value or "").strip()
+        } == flow_bindings
+    )
 
 
 def _research_agent_storage_payload(config: dict[str, Any]) -> dict[str, Any]:
@@ -948,6 +1003,7 @@ def save_research_agent_binding(
                 "configSurface": "agent_config",
             },
             status="active" if next_enabled else None,
+            preserve_generated_display_name=True,
         )
     else:
         previous_session_root = session_service.PROJECT_ROOT
@@ -978,6 +1034,7 @@ def save_research_agent_binding(
                     "configSurface": "agent_config",
                 },
                 status="active" if next_enabled else None,
+                preserve_generated_display_name=True,
             )
         finally:
             session_service.PROJECT_ROOT = previous_session_root
@@ -2001,6 +2058,13 @@ def _read_research_mode_binding_for_workspace() -> dict[str, Any]:
     agent_directory_service.PROJECT_ROOT = project_root
     agent_mode_binding_service.PROJECT_ROOT = project_root
     try:
+        load_bindings = getattr(agent_mode_binding_service, "_load_mode_bindings", None)
+        payload = load_bindings() if callable(load_bindings) else {}
+        bindings = payload.get("bindings") if isinstance(payload, dict) else []
+        if isinstance(bindings, list):
+            for item in bindings:
+                if isinstance(item, dict) and str(item.get("mode") or "").strip() == "research":
+                    return dict(item)
         payload = agent_mode_binding_service.get_mode_bindings_payload()
         modes = payload.get("modes") if isinstance(payload.get("modes"), dict) else {}
         research = modes.get("research") if isinstance(modes.get("research"), dict) else {}

@@ -15,4 +15,12 @@ describe("LogsRoute layout contract", () => {
     expect(routeSource).toContain("<details className={styles.diagnosticsPanel}>");
     expect(routeSource).toContain("<summary className={styles.diagnosticsSummaryRow}>");
   });
+
+  it("passes runtime scene deep-link parameters into the runtime scene pane", () => {
+    expect(routeSource).toContain("const runtimeSceneQuery = useMemo(() => new URLSearchParams(location.search), [location.search])");
+    expect(routeSource).toContain('runtimeSceneQuery.get("scene") ?? ""');
+    expect(routeSource).toContain('runtimeSceneQuery.get("path") ?? ""');
+    expect(routeSource).toContain("initialSceneId={initialRuntimeSceneId}");
+    expect(routeSource).toContain("initialPath={initialRuntimeScenePath}");
+  });
 });

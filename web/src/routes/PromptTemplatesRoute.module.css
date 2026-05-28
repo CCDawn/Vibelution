@@ -1,0 +1,464 @@
+.route {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--route-topbar-gap);
+  min-width: 0;
+  padding: var(--route-topbar-padding);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-header);
+}
+
+.header > div {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.eyebrow,
+.panelEyebrow {
+  margin: 0 0 3px;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--route-topbar-title-size);
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.header p:last-child {
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--route-topbar-subtitle-size);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refreshButton,
+.filterButton,
+.filterButtonActive,
+.primaryButton,
+.secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+}
+
+.refreshButton,
+.primaryButton,
+.secondaryButton {
+  padding: 7px 12px;
+}
+
+.refreshButton:hover,
+.filterButton:hover,
+.primaryButton:hover,
+.secondaryButton:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--surface-panel-hover);
+}
+
+.primaryButton {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  color: var(--accent-warm-2);
+}
+
+.refreshButton:disabled,
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.56;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--route-summary-gap);
+  padding: 8px 12px 0;
+}
+
+.summaryCard,
+.listPanel,
+.editorPanel,
+.detailCard,
+.agentList {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel);
+}
+
+.summaryCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: var(--route-summary-padding);
+}
+
+.summaryCard span,
+.templateMeta span,
+.detailRow span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.summaryCard strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(320px, 420px) minmax(480px, 1fr);
+  gap: 12px;
+  min-height: 0;
+  padding: var(--route-workspace-padding);
+}
+
+.listPanel,
+.editorPanel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  padding: 14px;
+}
+
+.listPanel {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.editorPanel {
+  grid-template-rows: auto auto minmax(360px, 1fr) auto;
+  overflow: hidden;
+}
+
+.panelHeader,
+.editorHeader,
+.contentHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.panelHeader h2,
+.editorHeader h2,
+.contentHeader h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.panelHeader p,
+.editorHeader p {
+  margin: 4px 0 0;
+  color: var(--fg-secondary);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-input-strong);
+  color: var(--fg-tertiary);
+}
+
+.searchBox input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg-primary);
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filterButton,
+.filterButtonActive {
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 0.78rem;
+}
+
+.filterButtonActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 14%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.templateList {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.templateButton,
+.templateButtonActive {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel-muted);
+  color: var(--fg-primary);
+  text-align: left;
+}
+
+.templateButton:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-strong);
+}
+
+.templateButtonActive {
+  border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent-warm);
+  background: var(--surface-active-neutral);
+}
+
+.templateMain {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.templateMain strong,
+.templateMain span,
+.templateMeta span,
+.detailRow strong,
+.agentItem strong,
+.agentItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.templateMain span,
+.emptyState,
+.helperText,
+.notice,
+.errorText {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.templateMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.templateMeta span,
+.statePill,
+.categoryPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  max-width: 100%;
+  padding: 0 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-card);
+}
+
+.categoryPill {
+  color: var(--accent-cool-2);
+}
+
+.statePill {
+  color: var(--state-success);
+}
+
+.editorMeta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.detailRow {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.detailRow strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.field span {
+  color: var(--fg-tertiary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.field input,
+.field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--fg-primary);
+  background: var(--surface-input-strong);
+  font: inherit;
+}
+
+.field input {
+  min-height: 36px;
+  padding: 0 10px;
+}
+
+.field textarea {
+  min-height: 100%;
+  resize: none;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.contentHeader {
+  align-items: center;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.bottomGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.58fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.detailCard,
+.agentList {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.detailCard h3,
+.agentList h3 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+}
+
+.agentRows {
+  display: grid;
+  gap: 7px;
+  max-height: 170px;
+  overflow: auto;
+}
+
+.agentItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.agentItem span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.agentItem code {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.notice {
+  color: var(--state-success);
+}
+
+.errorText {
+  color: var(--state-danger);
+}
+
+@media (max-width: 980px) {
+  .summaryGrid,
+  .workspace,
+  .editorMeta,
+  .bottomGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace {
+    overflow: auto;
+  }
+}

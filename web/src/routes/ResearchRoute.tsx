@@ -1,7 +1,4 @@
-import { markdown } from "@codemirror/lang-markdown";
-import { EditorView } from "@codemirror/view";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import CodeMirror from "@uiw/react-codemirror";
 import {
   BadgeCheck,
   BookOpenCheck,
@@ -16,13 +13,10 @@ import {
   Layers3,
   ArrowDown,
   LoaderCircle,
-  RadioTower,
   RefreshCw,
-  RotateCcw,
   SearchCheck,
   Sparkles,
   Target,
-  Save,
   Pause,
   Play,
   Trash2,
@@ -41,11 +35,9 @@ import {
   ResearchFlowCanvas,
   ResearchFlowExecutionResponse,
   ResearchFlowNode,
-  ResearchPromptWorkspace,
   ResearchSource,
   ResearchThemeCard,
 } from "../api/types";
-import { workbenchCodeMirrorTheme } from "../design/codeMirrorTheme";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./ResearchRoute.module.css";
 
@@ -55,20 +47,12 @@ type DraftInput = {
   preferences: string;
 };
 
-type ResearchViewKey = "discovery" | "prompts";
 type ResearchStageKey = "broad" | "deep" | "evidence" | "themes" | "card";
 type ResearchWorkflowMode = "manual" | "auto";
 
 type FlowStageItem = {
   node: ResearchFlowNode;
   stage: ResearchStageKey;
-};
-
-type ResearchPromptDraft = {
-  key: string;
-  filename: string;
-  content: string;
-  defaultContent: string;
 };
 
 const PREVIOUS_DEFAULT_INPUT = {
@@ -129,34 +113,13 @@ const COPY = {
     sources: "来源与证据",
     workflow: "流程条",
     prompts: "提示词",
+    promptCenter: "Agent 提示词中心",
     researchView: "科研",
-    promptWorkspace: "工作区提示词",
-    promptBody: "工作区是真值来源。这里编辑的内容会直接写入 `workspace/prompts/research/`。",
-    promptEditor: "提示词编辑器",
-    promptAgentList: "科研 Agent",
-    promptCurrentAgent: "当前 Agent",
-    promptDefaultPreview: "默认提示词预览",
-    promptDirty: "有未保存修改",
-    promptClean: "已与工作区同步",
-    promptStats: "字符",
-    promptFile: "文件",
     agentTemplate: "Agent 模板",
     llmConfig: "LLM 配置",
     agentTemplateConfig: "Agent 绑定配置",
     agentTemplateSaved: "Agent 绑定已保存",
     llmConfigMissing: "未找到对应 LLM 配置",
-    promptSave: "保存提示词",
-    promptReset: "恢复默认提示词",
-    promptSaved: "已保存到工作区",
-    promptLoading: "正在读取科研提示词...",
-    promptEmpty: "尚未找到提示词文件，保存后会自动创建。",
-    promptKeys: {
-      broad: "广撒网 agent",
-      deep: "定向深搜 agent",
-      review: "证据审查 agent",
-      themes: "主题生成 agent",
-      card: "主题卡 agent",
-    },
     selectedCard: "概念级主题卡",
     agentReview: "Agent 自评",
     agentReport: "Agent 调研报告",
@@ -240,34 +203,13 @@ const COPY = {
     sources: "Sources and evidence",
     workflow: "Workflow rail",
     prompts: "Prompts",
+    promptCenter: "Agent prompt center",
     researchView: "Research",
-    promptWorkspace: "Workspace prompts",
-    promptBody: "The workspace is the source of truth. Changes here are written directly into `workspace/prompts/research/`.",
-    promptEditor: "Prompt editor",
-    promptAgentList: "Research agents",
-    promptCurrentAgent: "Current agent",
-    promptDefaultPreview: "Default prompt preview",
-    promptDirty: "Unsaved changes",
-    promptClean: "Synced with workspace",
-    promptStats: "chars",
-    promptFile: "File",
     agentTemplate: "Agent template",
     llmConfig: "LLM config",
     agentTemplateConfig: "Agent binding config",
     agentTemplateSaved: "Agent binding saved",
     llmConfigMissing: "LLM config not found",
-    promptSave: "Save prompts",
-    promptReset: "Restore default prompt",
-    promptSaved: "Saved to workspace",
-    promptLoading: "Loading research prompts...",
-    promptEmpty: "No prompt files found yet. Saving will create them.",
-    promptKeys: {
-      broad: "Broad-search agent",
-      deep: "Deep-search agent",
-      review: "Evidence-review agent",
-      themes: "Theme-generation agent",
-      card: "Theme-card agent",
-    },
     selectedCard: "Concept theme card",
     agentReview: "Agent review",
     agentReport: "Agent research report",
@@ -320,7 +262,6 @@ const STAGES = [
   { id: "card", icon: BadgeCheck },
 ] as const;
 
-const RESEARCH_PROMPT_KEYS = ["broad", "deep", "review", "themes", "card"] as const;
 const AUTO_DRAFT_STEPS = [
   { stage: "broad", suffix: "run-broad-search" },
   { stage: "deep", suffix: "run-deep-search" },
@@ -333,8 +274,6 @@ export function ResearchRoute() {
   const copy = COPY[lang];
   const queryClient = useQueryClient();
   const [activeSessionId, setActiveSessionId] = useState("");
-  const [activeView, setActiveView] = useState<ResearchViewKey>("discovery");
-  const [activePromptKey, setActivePromptKey] = useState<(typeof RESEARCH_PROMPT_KEYS)[number]>("broad");
   const [activeStage, setActiveStage] = useState<ResearchStageKey>("broad");
   const [activeFlowNodeId, setActiveFlowNodeId] = useState("");
   const [runningFlowNodeId, setRunningFlowNodeId] = useState("");
@@ -342,7 +281,6 @@ export function ResearchRoute() {
   const [workflowMode, setWorkflowMode] = useState<ResearchWorkflowMode>("manual");
   const [autoDraftPauseRequested, setAutoDraftPauseRequested] = useState(false);
   const [draft, setDraft] = useState<DraftInput>(copy.defaultInput);
-  const [promptDrafts, setPromptDrafts] = useState<Record<string, ResearchPromptDraft>>({});
   const autoDraftPauseRequestedRef = useRef(false);
 
   useEffect(() => {
@@ -388,29 +326,6 @@ export function ResearchRoute() {
     queryFn: () => fetchJson<ResearchFlowCanvas>("/api/research/flow-canvas"),
     refetchInterval: runningStage ? 1200 : false,
   });
-  const promptsQuery = useQuery({
-    queryKey: queryKeys.researchThemeDiscoveryPrompts(),
-    queryFn: () => fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/prompts"),
-    enabled: activeView === "prompts",
-  });
-
-  useEffect(() => {
-    if (activeView !== "prompts" || !promptsQuery.data) {
-      return;
-    }
-    setPromptDrafts((current) => {
-      const next: Record<string, ResearchPromptDraft> = {};
-      for (const item of promptsQuery.data?.prompts ?? []) {
-        next[item.key] = {
-          key: item.key,
-          filename: item.filename,
-          content: current[item.key]?.content ?? item.content ?? "",
-          defaultContent: item.defaultContent ?? "",
-        };
-      }
-      return next;
-    });
-  }, [activeView, promptsQuery.data]);
 
   const currentThemes = useMemo(
     () =>
@@ -699,36 +614,6 @@ export function ResearchRoute() {
     sessionQuery.error ||
     sessionsQuery.error ||
     flowCanvasQuery.error;
-  const promptWorkspace = promptsQuery.data;
-  const promptItems = useMemo(
-    () => RESEARCH_PROMPT_KEYS.map((key) => promptDrafts[key]).filter(Boolean),
-    [promptDrafts],
-  );
-  useEffect(() => {
-    if (!promptItems.length) {
-      return;
-    }
-    if (!promptItems.some((item) => item.key === activePromptKey)) {
-      setActivePromptKey(promptItems[0].key as (typeof RESEARCH_PROMPT_KEYS)[number]);
-    }
-  }, [activePromptKey, promptItems]);
-  const agentByKey = useMemo(
-    () => new Map((promptWorkspace?.agents ?? []).map((agent) => [agent.key, agent])),
-    [promptWorkspace?.agents],
-  );
-  const agentTemplates = promptWorkspace?.agentTemplates ?? [];
-  const llmConfigs = promptWorkspace?.llmConfigs ?? [];
-  const activePromptItem = promptItems.find((item) => item.key === activePromptKey) ?? promptItems[0];
-  const activePromptAgent = activePromptItem ? agentByKey.get(activePromptItem.key) : undefined;
-  const activePromptTemplate =
-    agentTemplates.find((template) => template.templateId === activePromptAgent?.templateId) ?? agentTemplates[0];
-  const activePromptProfileId = activePromptAgent?.profileId || "";
-  const activePromptLlmConfig = llmConfigs.find((config) => config.configId === activePromptProfileId);
-  const activePromptIsDirty = Boolean(
-    activePromptItem &&
-      promptsQuery.data &&
-      promptsQuery.data?.prompts.find((prompt) => prompt.key === activePromptItem.key)?.content !== activePromptItem.content,
-  );
   const activeStageMeta = STAGES.find((stage) => stage.id === effectiveStage) ?? STAGES[0];
   const activeStageLabel = activeFlowItem?.node.label || stageLabel(activeStageMeta.id, copy);
   const activeStageStatus = activeFlowItem
@@ -736,42 +621,6 @@ export function ResearchRoute() {
     : displayedStageStatus(effectiveStage, active, runningStage);
   const showFallbackWorkflowModeControl = !flowStageItems.length;
   const workflowControlsDisabled = busy || !activeSessionId || !nextFlowNode;
-
-  const savePromptMutation = useMutation({
-    mutationFn: (payload: { key: string; content: string }) =>
-      fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/prompts", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
-    onSuccess: async (payload) => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoveryPrompts() });
-      setPromptDrafts(
-        Object.fromEntries(
-          payload.prompts.map((item) => [
-            item.key,
-            {
-              key: item.key,
-              filename: item.filename,
-              content: item.content,
-              defaultContent: item.defaultContent,
-            },
-          ]),
-        ) as Record<string, ResearchPromptDraft>,
-      );
-    },
-  });
-  const saveAgentTemplateMutation = useMutation({
-    mutationFn: (payload: { key: string; templateId: string; profileId: string }) =>
-      fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/agent-templates", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.researchThemeDiscoveryPrompts() });
-    },
-  });
 
   return (
     <section className={styles.route}>
@@ -783,20 +632,12 @@ export function ResearchRoute() {
         </div>
         <div className={styles.headerActions}>
           <nav className={styles.subnav} aria-label={copy.researchView}>
-            <button
-              type="button"
-              className={activeView === "discovery" ? `${styles.subnavLink} ${styles.subnavLinkActive}` : styles.subnavLink}
-              onClick={() => setActiveView("discovery")}
-            >
+            <span className={`${styles.subnavLink} ${styles.subnavLinkActive}`}>
               {copy.researchView}
-            </button>
-            <button
-              type="button"
-              className={activeView === "prompts" ? `${styles.subnavLink} ${styles.subnavLinkActive}` : styles.subnavLink}
-              onClick={() => setActiveView("prompts")}
-            >
-              {copy.prompts}
-            </button>
+            </span>
+            <Link className={styles.subnavLink} to="/agents/prompts?category=research">
+              {copy.promptCenter}
+            </Link>
             <Link className={styles.subnavLink} to="/research/flow-canvas">
               流程画布
             </Link>
@@ -863,203 +704,7 @@ export function ResearchRoute() {
         </section>
       </div>
 
-      <main className={activeView === "prompts" ? styles.promptWorkspace : styles.workspace}>
-        {activeView === "prompts" ? (
-          <section className={styles.promptPanel}>
-            <div className={styles.panelHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.promptWorkspace}</p>
-                <h2>{promptWorkspace?.root ? promptWorkspace.root : copy.promptWorkspace}</h2>
-              </div>
-              <RadioTower size={18} />
-            </div>
-            <p className={styles.panelLead}>{copy.promptBody}</p>
-            {promptWorkspace?.agentConfigPath ? (
-              <p className={styles.promptConfigLine}>
-                {copy.agentTemplateConfig}: <code>{promptWorkspace.agentConfigPath}</code>
-              </p>
-            ) : null}
-            {promptsQuery.isPending ? <p className={styles.emptyText}>{copy.promptLoading}</p> : null}
-            {!promptItems.length && !promptsQuery.isPending ? <p className={styles.emptyText}>{copy.promptEmpty}</p> : null}
-            {activePromptItem ? (
-              <div className={styles.promptWorkbench}>
-                <aside className={styles.promptAgentRail} aria-label={copy.promptAgentList}>
-                  <div className={styles.promptRailHeader}>
-                    <strong>{copy.promptAgentList}</strong>
-                    <span>{promptItems.length}</span>
-                  </div>
-                  <div className={styles.promptAgentList}>
-                    {promptItems.map((item) => {
-                      const agent = agentByKey.get(item.key);
-                      const agentProfileId = agent?.profileId || "";
-                      const llmConfig = llmConfigs.find((config) => config.configId === agentProfileId);
-                      const originalContent = promptsQuery.data?.prompts.find((prompt) => prompt.key === item.key)?.content;
-                      const isDirty = Boolean(originalContent !== undefined && originalContent !== item.content);
-                      return (
-                        <button
-                          key={item.key}
-                          type="button"
-                          className={`${styles.promptAgentButton} ${activePromptItem.key === item.key ? styles.promptAgentButton_active : ""}`}
-                          aria-pressed={activePromptItem.key === item.key}
-                          onClick={() => setActivePromptKey(item.key as (typeof RESEARCH_PROMPT_KEYS)[number])}
-                        >
-                          <span>
-                            {copy.promptKeys[item.key as keyof typeof copy.promptKeys] ?? item.key}
-                            {isDirty ? <em>{copy.promptDirty}</em> : null}
-                          </span>
-                          <small>{llmConfig ? `${llmConfig.label} · ${llmConfig.model}` : copy.llmConfigMissing}</small>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </aside>
-
-                <section className={styles.promptEditorPanel}>
-                  <div className={styles.promptEditorHeader}>
-                    <div>
-                      <p className={styles.panelEyebrow}>{copy.promptEditor}</p>
-                      <h3>{copy.promptKeys[activePromptItem.key as keyof typeof copy.promptKeys] ?? activePromptItem.key}</h3>
-                    </div>
-                    <span className={activePromptIsDirty ? styles.statePill : styles.countPill}>
-                      {activePromptIsDirty ? copy.promptDirty : copy.promptClean}
-                    </span>
-                  </div>
-                  <div className={styles.promptEditorMeta}>
-                    <span>
-                      {copy.promptFile}: <code>{activePromptItem.filename}</code>
-                    </span>
-                    <span>
-                      {activePromptItem.content.length} {copy.promptStats}
-                    </span>
-                  </div>
-                  <div className={styles.promptCodeEditor}>
-                    <CodeMirror
-                      value={activePromptItem.content}
-                      theme={workbenchCodeMirrorTheme}
-                      height="100%"
-                      extensions={[markdown(), EditorView.lineWrapping]}
-                      onChange={(value) =>
-                        setPromptDrafts((current) => ({
-                          ...current,
-                          [activePromptItem.key]: {
-                            ...activePromptItem,
-                            content: value,
-                          },
-                        }))
-                      }
-                      basicSetup={{
-                        foldGutter: false,
-                        allowMultipleSelections: false,
-                      }}
-                    />
-                  </div>
-                </section>
-
-                <aside className={styles.promptInspectorPanel}>
-                  <div className={styles.promptInspectorHeader}>
-                    <p className={styles.panelEyebrow}>{copy.promptCurrentAgent}</p>
-                    <h3>{activePromptItem.key}</h3>
-                  </div>
-                  <label className={styles.agentTemplateField}>
-                    <span>{copy.agentTemplate}</span>
-                    <select
-                      value={activePromptAgent?.templateId ?? ""}
-                      disabled={!agentTemplates.length || saveAgentTemplateMutation.isPending}
-                      onChange={(event) =>
-                        saveAgentTemplateMutation.mutate({
-                          key: activePromptItem.key,
-                          templateId: event.target.value,
-                          profileId: activePromptProfileId || llmConfigs[0]?.configId || "",
-                        })
-                      }
-                    >
-                      {agentTemplates.map((template) => (
-                        <option key={template.templateId} value={template.templateId}>
-                          {template.label}
-                        </option>
-                      ))}
-                    </select>
-                    {activePromptTemplate?.description ? <em>{activePromptTemplate.description}</em> : null}
-                  </label>
-                  <label className={styles.agentTemplateField}>
-                    <span>{copy.llmConfig}</span>
-                    <select
-                      value={activePromptProfileId}
-                      disabled={!llmConfigs.length || saveAgentTemplateMutation.isPending}
-                      onChange={(event) =>
-                        saveAgentTemplateMutation.mutate({
-                          key: activePromptItem.key,
-                          templateId: activePromptAgent?.templateId ?? activePromptTemplate?.templateId ?? "",
-                          profileId: event.target.value,
-                        })
-                      }
-                    >
-                      {llmConfigs.map((config) => (
-                        <option key={config.configId} value={config.configId}>
-                          {config.label}
-                        </option>
-                      ))}
-                    </select>
-                    {activePromptLlmConfig ? (
-                      <em>
-                        {activePromptLlmConfig.providerKind} / {activePromptLlmConfig.model}
-                      </em>
-                    ) : (
-                      <em>{copy.llmConfigMissing}</em>
-                    )}
-                  </label>
-                  <section className={styles.promptDefaultPanel}>
-                    <strong>{copy.promptDefaultPreview}</strong>
-                    <p>{clip(activePromptItem.defaultContent || "", 360)}</p>
-                  </section>
-                  <div className={styles.cardActions}>
-                    <button
-                      className={styles.primaryButton}
-                      disabled={savePromptMutation.isPending}
-                      onClick={() =>
-                        savePromptMutation.mutate({
-                          key: activePromptItem.key,
-                          content: promptDrafts[activePromptItem.key]?.content ?? "",
-                        })
-                      }
-                    >
-                      <Save size={15} />
-                      {copy.promptSave}
-                    </button>
-                    <button
-                      className={styles.secondaryButton}
-                      disabled={savePromptMutation.isPending}
-                      onClick={() =>
-                        setPromptDrafts((current) => ({
-                          ...current,
-                          [activePromptItem.key]: {
-                            ...activePromptItem,
-                            content:
-                              promptsQuery.data?.prompts.find((prompt) => prompt.key === activePromptItem.key)?.defaultContent ??
-                              activePromptItem.defaultContent ??
-                              "",
-                          },
-                        }))
-                      }
-                    >
-                      <RotateCcw size={15} />
-                      {copy.promptReset}
-                    </button>
-                  </div>
-                </aside>
-              </div>
-            ) : null}
-            {savePromptMutation.isSuccess ? <p className={styles.okText}>{copy.promptSaved}</p> : null}
-            {saveAgentTemplateMutation.isSuccess ? <p className={styles.okText}>{copy.agentTemplateSaved}</p> : null}
-            {savePromptMutation.error ? <p className={styles.errorText}>{errorMessage(savePromptMutation.error)}</p> : null}
-            {saveAgentTemplateMutation.error ? (
-              <p className={styles.errorText}>{errorMessage(saveAgentTemplateMutation.error)}</p>
-            ) : null}
-          </section>
-        ) : null}
-
-        {activeView === "discovery" ? (
-          <>
+      <main className={styles.workspace}>
             <aside className={styles.sessionRail}>
           <section className={styles.intakePanel}>
             <div className={styles.panelHeader}>
@@ -1214,8 +859,6 @@ export function ResearchRoute() {
             </div>
               </section>
             </aside>
-          </>
-        ) : null}
       </main>
     </section>
   );

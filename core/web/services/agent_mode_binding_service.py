@@ -49,16 +49,16 @@ DEFAULT_MODE_BINDINGS: tuple[dict[str, Any], ...] = (
 )
 
 
-def get_mode_bindings_payload() -> dict[str, Any]:
+def get_mode_bindings_payload(*, agent_options: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Return repaired mode bindings plus the active Agent index."""
 
-    payload = repair_mode_bindings()
+    agents = agent_options if agent_options is not None else _agent_options()
+    payload = repair_mode_bindings(agent_options=agents)
     modes = {
         str(item.get("mode") or ""): _binding_to_api(item)
         for item in payload.get("bindings") or []
         if isinstance(item, dict)
     }
-    agents = _agent_options()
     return {
         "schemaVersion": MODE_BINDING_VERSION,
         "storagePath": _relative_project_path(mode_binding_path()),
@@ -275,9 +275,15 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
     return get_mode_bindings_payload()
 
 
-def repair_mode_bindings() -> dict[str, Any]:
+def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Load bindings, seed known modes, and remove stale Agent references."""
 
+    agents = agent_options if agent_options is not None else _agent_options()
+    active_agent_ids = {
+        str(agent.get("agentId") or "").strip()
+        for agent in agents
+        if str(agent.get("agentId") or "").strip()
+    }
     payload = _load_mode_bindings()
     bindings_by_mode = _default_binding_map()
     changed = False
@@ -302,11 +308,11 @@ def repair_mode_bindings() -> dict[str, Any]:
         merged["excludedSlots"] = _safe_key_list([*list(existing.get("excludedSlots") or []), *list(record.get("excludedSlots") or [])])
         bindings_by_mode[record["mode"]] = _normalize_binding(merged)
 
-    seeded = _seed_bindings_from_agents(bindings_by_mode)
+    seeded = _seed_bindings_from_agents(bindings_by_mode, agents=agents)
     repaired: list[dict[str, Any]] = []
     repair_warnings: list[dict[str, str]] = []
     for binding in seeded.values():
-        next_binding, warnings = _repair_agent_references(binding)
+        next_binding, warnings = _repair_agent_references(binding, active_agent_ids=active_agent_ids)
         repaired.append(next_binding)
         repair_warnings.extend(warnings)
     next_payload = {
@@ -374,8 +380,11 @@ def mode_binding_path() -> Path:
     return PROJECT_ROOT / "workspace" / "agent_config" / "mode_bindings.json"
 
 
-def _seed_bindings_from_agents(bindings_by_mode: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    agents = _agent_options()
+def _seed_bindings_from_agents(
+    bindings_by_mode: dict[str, dict[str, Any]],
+    *,
+    agents: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     active_ids = [str(agent.get("agentId") or "") for agent in agents]
     by_mode: dict[str, list[str]] = {}
     supervised_slots: dict[str, str] = {}
@@ -435,7 +444,11 @@ def _seed_binding(
         binding["slots"] = existing_slots
 
 
-def _repair_agent_references(binding: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, str]]]:
+def _repair_agent_references(
+    binding: dict[str, Any],
+    *,
+    active_agent_ids: set[str],
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
     mode = str(binding.get("mode") or "").strip()
     warnings: list[dict[str, str]] = []
 
@@ -443,7 +456,7 @@ def _repair_agent_references(binding: dict[str, Any]) -> tuple[dict[str, Any], l
         normalized = str(agent_id or "").strip()
         if not normalized:
             return ""
-        if get_agent(normalized, include_archived=False):
+        if normalized in active_agent_ids:
             return normalized
         warnings.append({"mode": mode, "field": field, "agentId": normalized})
         return ""

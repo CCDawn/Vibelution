@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, KeyRound, MessageSquareText, Pencil, Play, Plus, RefreshCw, Trash2, UsersRound, X } from "lucide-react";
+import { Check, KeyRound, MessageSquareText, Pencil, Play, Plus, RefreshCw, Square, Trash2, UsersRound, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 
@@ -52,6 +52,7 @@ export function ChatRoomsRoute() {
   const location = useLocation();
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [roomTitle, setRoomTitle] = useState("");
+  const [activeRoomTitleDraft, setActiveRoomTitleDraft] = useState("");
   const [topic, setTopic] = useState("");
   const [selectedSessionIds, setSelectedSessionIds] = useState<string[]>([]);
   const [selectedModeId, setSelectedModeId] = useState("");
@@ -102,12 +103,14 @@ export function ChatRoomsRoute() {
       const room = rooms.find((item) => item.roomId === requestedRoomId);
       if (room) {
         setSelectedSessionIds(room.participants.map((participant) => participant.sessionId));
+        setActiveRoomTitleDraft(room.title);
       }
       return;
     }
     if (!selectedRoomId && rooms.length > 0) {
       setSelectedRoomId(rooms[0].roomId);
       setSelectedSessionIds(rooms[0].participants.map((participant) => participant.sessionId));
+      setActiveRoomTitleDraft(rooms[0].title);
     }
   }, [requestedRoomId, rooms, selectedRoomId]);
 
@@ -122,6 +125,12 @@ export function ChatRoomsRoute() {
       setSelectedModeId(readyModes[0].id);
     }
   }, [readyModes, selectedModeId]);
+
+  useEffect(() => {
+    if (activeRoom) {
+      setActiveRoomTitleDraft(activeRoom.title);
+    }
+  }, [activeRoom]);
 
   const selectedSessionSet = useMemo(() => new Set(selectedSessionIds), [selectedSessionIds]);
 
@@ -156,12 +165,14 @@ export function ChatRoomsRoute() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          title: activeRoomTitleDraft.trim(),
           participantSessionIds: selectedSessionIds,
           mode: runnableModeId,
         }),
       }),
     onSuccess: (room) => {
       setSelectedRoomId(room.roomId);
+      setActiveRoomTitleDraft(room.title);
       setRoomActionError("");
       queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
       queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(room.roomId) });
@@ -209,6 +220,23 @@ export function ChatRoomsRoute() {
     },
     onError: (error) => {
       setRoomActionError(describeError(error, lang === "en" ? "Run round failed" : "启动讨论失败"));
+    },
+  });
+
+  const stopRoundMutation = useMutation({
+    mutationFn: async () =>
+      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${activeRoom?.roomId}/stop`, {
+        method: "POST",
+      }),
+    onSuccess: (room) => {
+      setSelectedRoomId(room.roomId);
+      setRoomActionError("");
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+    },
+    onError: (error) => {
+      setRoomActionError(describeError(error, lang === "en" ? "Stop round failed" : "停止讨论失败"));
     },
   });
 
@@ -278,13 +306,23 @@ export function ChatRoomsRoute() {
   };
 
   const createDisabled = createRoomMutation.isPending || selectedSessionIds.length === 0 || !selectedModeReady;
-  const updateDisabled = updateRoomMutation.isPending || !activeRoom || selectedSessionIds.length === 0 || !selectedModeReady;
-  const roundDisabled = startRoundMutation.isPending || !activeRoom || !topic.trim() || activeRoom.status === "running" || !selectedModeReady;
-  const selectedDiffersFromRoom = Boolean(
+  const updateDisabled = updateRoomMutation.isPending || !activeRoom || !activeRoomTitleDraft.trim() || selectedSessionIds.length === 0 || !selectedModeReady;
+  const roomRunning = String(activeRoom?.status ?? "").trim().toLowerCase() === "running";
+  const roundDisabled = startRoundMutation.isPending || !activeRoom || !topic.trim() || roomRunning || !selectedModeReady;
+  const stopRoundDisabled = stopRoundMutation.isPending || !activeRoom || !roomRunning;
+  const selectedMembersDifferFromRoom = Boolean(
     activeRoom
     && (
       selectedSessionIds.length !== activeRoomSessionIds.size
       || selectedSessionIds.some((sessionId) => !activeRoomSessionIds.has(sessionId))
+    ),
+  );
+  const selectedDiffersFromRoom = Boolean(
+    activeRoom
+    && (
+      activeRoomTitleDraft.trim() !== activeRoom.title.trim()
+      || runnableModeId !== (activeRoom.mode || "round_robin")
+      || selectedMembersDifferFromRoom
     ),
   );
   const createRoomLabel = createRoomMutation.isPending
@@ -355,6 +393,7 @@ export function ChatRoomsRoute() {
                 onClick={() => {
                   setSelectedRoomId(room.roomId);
                   setSelectedSessionIds(room.participants.map((participant) => participant.sessionId));
+                  setActiveRoomTitleDraft(room.title);
                 }}
               >
                 <strong>{room.title}</strong>
@@ -423,8 +462,19 @@ export function ChatRoomsRoute() {
             />
             <button type="button" className={styles.primaryButton} disabled={roundDisabled} onClick={() => startRoundMutation.mutate()}>
               <Play size={15} />
-              <span>{startRoundMutation.isPending ? (lang === "en" ? "Running" : "讨论中") : (lang === "en" ? "Run round" : "启动讨论")}</span>
+              <span>{startRoundMutation.isPending || roomRunning ? (lang === "en" ? "Running" : "讨论中") : (lang === "en" ? "Run round" : "启动讨论")}</span>
             </button>
+            {roomRunning ? (
+              <button
+                type="button"
+                className={styles.stopButton}
+                disabled={stopRoundDisabled}
+                onClick={() => stopRoundMutation.mutate()}
+              >
+                <Square size={15} />
+                <span>{stopRoundMutation.isPending ? (lang === "en" ? "Stopping" : "停止中") : (lang === "en" ? "Stop" : "停止")}</span>
+              </button>
+            ) : null}
           </div>
 
           <div className={styles.messageList}>
@@ -485,6 +535,17 @@ export function ChatRoomsRoute() {
               <p className={styles.actionHint}>
                 {lang === "en" ? "Select at least one ready session and a ready mode." : "至少选择一个会话，并使用 ready 模式。"}
               </p>
+            ) : null}
+            {activeRoom ? (
+              <label className={styles.roomManageField}>
+                <span>{lang === "en" ? "Current room name" : "当前群聊名称"}</span>
+                <input
+                  value={activeRoomTitleDraft}
+                  maxLength={80}
+                  disabled={updateRoomMutation.isPending || activeRoom.status === "running"}
+                  onChange={(event) => setActiveRoomTitleDraft(event.target.value)}
+                />
+              </label>
             ) : null}
             {activeRoom ? (
               <button

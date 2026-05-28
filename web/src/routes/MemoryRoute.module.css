@@ -1,6 +1,6 @@
 .route {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
@@ -8,7 +8,7 @@
 
 .header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   gap: var(--route-topbar-gap);
@@ -78,8 +78,10 @@
 .subnav {
   display: inline-flex;
   align-items: center;
+  justify-self: start;
   gap: 6px;
   min-width: 0;
+  margin: 8px 12px 0;
   padding: 3px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);

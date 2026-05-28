@@ -1068,11 +1068,6 @@
   padding: 9px;
 }
 
-.promptTemplateCardActive {
-  border-color: color-mix(in srgb, var(--accent-cool) 35%, var(--border-hairline));
-  background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-muted));
-}
-
 .promptTemplateMain {
   display: grid;
   gap: 3px;
@@ -1582,13 +1577,6 @@
 .field input,
 .field select {
   min-height: var(--control-height);
-}
-
-.promptTemplateTextarea {
-  min-height: 220px;
-  resize: vertical;
-  font-family: var(--font-mono);
-  line-height: 1.5;
 }
 
 .toggleField {

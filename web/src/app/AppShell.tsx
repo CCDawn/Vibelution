@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useNavigationType } from "react-router-dom";
-import { Bot, Brain, ChevronDown, FolderTree, GitBranch, LoaderCircle, Moon, Power, RefreshCw, ScrollText, Search, Settings, Sun, Wrench } from "lucide-react";
+import { ChevronDown, FolderTree, GitBranch, LoaderCircle, Moon, Power, RefreshCw, ScrollText, Search, Settings, Sun, Wrench } from "lucide-react";
 
 import { fetchJson, setFetchJsonFailureReporter, type FetchJsonFailureReport } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -1300,6 +1300,9 @@ export function AppShell() {
           <NavLink to="/research" className={linkClassName}>
             {t("navResearch")}
           </NavLink>
+          <NavLink to="/agents" className={linkClassName}>
+            {t("navAgents")}
+          </NavLink>
         </nav>
 
         <div className={styles.topActions}>
@@ -1355,17 +1358,9 @@ export function AppShell() {
                   <ScrollText size={16} />
                   <span>{t("navLogs")}</span>
                 </NavLink>
-                <NavLink to="/tools" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
+                <NavLink to="/agents/tools" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
                   <Wrench size={16} />
                   <span>{t("navTools")}</span>
-                </NavLink>
-                <NavLink to="/agents" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
-                  <Bot size={16} />
-                  <span>{t("navAgents")}</span>
-                </NavLink>
-                <NavLink to="/memory" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
-                  <Brain size={16} />
-                  <span>{t("navMemory")}</span>
                 </NavLink>
                 <NavLink to="/git" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
                   <GitBranch size={16} />

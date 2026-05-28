@@ -111,7 +111,11 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
 
   it("creates and matches reusable module and route templates", () => {
     expect(RESEARCH_MODULE_TEMPLATES.map((template) => template.key)).toEqual(
-      expect.arrayContaining(["knowledge_lookup", "literature_project_parse", "semantic_cluster", "novelty_reverse_check", "evidence_review"]),
+      expect.arrayContaining(["broad_search", "deep_search", "evidence_review", "theme_generation", "theme_card"]),
+    );
+    expect(RESEARCH_MODULE_TEMPLATES.every((template) => template.type === "agent")).toBe(true);
+    expect(RESEARCH_MODULE_TEMPLATES.map((template) => template.key)).not.toEqual(
+      expect.arrayContaining(["knowledge_lookup", "literature_project_parse", "semantic_cluster", "novelty_reverse_check", "human_choice"]),
     );
     expect(RESEARCH_MODULE_TEMPLATES.map((template) => template.key)).not.toContain("research_ceo_agent");
     expect(RESEARCH_MODULE_TEMPLATES.some((template) => "llmConfigId" in template)).toBe(false);
@@ -120,23 +124,23 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
     );
     expect(RESEARCH_EDGE_TEMPLATES.map((template) => template.key)).not.toContain("collaboration_chat");
 
-    const template = findResearchModuleTemplate("knowledge_lookup");
+    const template = findResearchModuleTemplate("broad_search");
     const firstNode = createResearchNodeFromTemplate(template, baseCanvas.nodes, { x: 42, y: 84 });
     expect(firstNode).toMatchObject({
-      id: "knowledge_lookup",
-      label: "知识库检索",
-      type: "tool",
-      agentKey: "knowledge_lookup",
-      promptKey: "",
+      id: "broad_search_2",
+      label: "广撒网 agent 2",
+      type: "agent",
+      agentKey: "broad",
+      promptKey: "broad",
       llmConfigId: "",
       x: 42,
       y: 84,
     });
-    expect(nextTemplateNodeId([...baseCanvas.nodes, firstNode], "knowledge_lookup")).toBe("knowledge_lookup_2");
-    expect(findResearchModuleTemplate("missing_template").key).toBe("knowledge_lookup");
+    expect(nextTemplateNodeId([...baseCanvas.nodes, firstNode], "broad_search")).toBe("broad_search_3");
+    expect(findResearchModuleTemplate("missing_template").key).toBe("broad_search");
     expect(researchFlowModuleTemplateKey(createResearchNodeFromTemplate(findResearchModuleTemplate("deep_search"), baseCanvas.nodes))).toBe("deep_search");
     expect(applyResearchModuleTemplateToNode(findResearchModuleTemplate("deep_search"))).toMatchObject({
-      label: "定向深搜",
+      label: "定向深搜 agent",
       type: "agent",
       agentKey: "deep",
       promptKey: "deep",
@@ -154,10 +158,10 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
 
   it("persists custom templates through storage", () => {
     const customNode = {
-      ...createResearchNodeFromTemplate(findResearchModuleTemplate("knowledge_lookup"), baseCanvas.nodes),
-      label: "自定义检索",
+      ...createResearchNodeFromTemplate(findResearchModuleTemplate("deep_search"), baseCanvas.nodes),
+      label: "自定义深搜 agent",
       llmConfigId: "stale_legacy_profile",
-      routeCondition: "复用本地知识后继续。",
+      routeCondition: "复用上一轮候选线索后继续。",
     };
     const customModuleTemplate = createCustomResearchModuleTemplate(customNode, RESEARCH_MODULE_TEMPLATES);
     expect("llmConfigId" in customModuleTemplate).toBe(false);
@@ -171,7 +175,7 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
     const storage = memoryStorage();
     expect(writeCustomResearchTemplates({ moduleTemplates: [customModuleTemplate], edgeTemplates: [customEdgeTemplate] }, storage)).toBe(true);
     expect(readCustomResearchTemplates(storage)).toMatchObject({
-      moduleTemplates: [{ key: customModuleTemplate.key, label: "自定义检索", group: "自定义模板" }],
+      moduleTemplates: [{ key: customModuleTemplate.key, label: "自定义深搜 agent", group: "自定义模板" }],
       edgeTemplates: [{ key: customEdgeTemplate.key, label: "复核后继续", group: "自定义模板" }],
     });
     expect(readCustomResearchTemplates(storage).moduleTemplates.some((template) => "llmConfigId" in template)).toBe(false);

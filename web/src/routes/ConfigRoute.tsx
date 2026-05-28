@@ -20,7 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type BlockerFunction, useBlocker } from "react-router-dom";
+import { Link, type BlockerFunction, useBlocker } from "react-router-dom";
 import { json } from "@codemirror/lang-json";
 import { EditorView } from "@codemirror/view";
 
@@ -44,7 +44,6 @@ import {
   HealthFinding,
   HealthQuickAction,
   LogHelper,
-  PromptTemplate,
   PromptTemplateWorkspace,
   ResearchAgentConfig,
   ResearchPromptWorkspace,
@@ -131,13 +130,6 @@ type ProfileDraft = {
 
 type ProfileEditState = {
   modelId: string;
-};
-
-type PromptTemplateEditorState = {
-  templateId: string;
-  name: string;
-  category: string;
-  content: string;
 };
 
 type AgentRunPanelState = {
@@ -391,20 +383,14 @@ export const CONFIG_COPY = {
     profileGroupEvolution: "进化模式",
     profileGroupResearch: "科研模型配置",
     profileGroupOther: "其他模型配置",
-    promptTemplateCenterTitle: "系统提示词模板",
-    promptTemplateCenterBody: "所有长期 Agent 引用的系统提示词集中在这里编辑；修改后引用它的 Agent 会统一使用新内容。",
+    promptTemplateCenterTitle: "Agent 提示词中心",
+    promptTemplateCenterBody: "提示词编辑已迁移到 Agent 管理，配置中心只保留当前模板和引用关系概览，避免双处编辑同一份 Agent 提示词。",
     promptTemplateCategory: "分类",
     promptTemplateSource: "来源",
     promptTemplateUsage: "引用 Agent",
-    promptTemplateContent: "提示词内容",
-    promptTemplateEdit: "编辑模板",
-    promptTemplateSave: "保存模板",
-    promptTemplateSaving: "保存提示词模板中",
-    promptTemplateUpdated: "提示词模板已保存。",
+    promptTemplateOpenCenter: "打开提示词中心",
+    promptTemplateOpenResearch: "查看科研提示词",
     promptTemplateEmpty: "暂无提示词模板。",
-    promptTemplateEditorEmpty: "选择一个模板后在这里编辑内容。",
-    promptTemplateLoadFailed: "提示词模板读取失败：",
-    promptTemplateSaveFailed: "提示词模板保存失败：",
     agentConfigCenterTitle: "Agent 配置中心",
     agentConfigCenterBody: "所有长期 Agent 都在这里按统一结构查看：模型、提示词、会话、工作区和被哪些模式引用。",
     agentConfigRefs: "模式引用",
@@ -715,20 +701,14 @@ export const CONFIG_COPY = {
     profileGroupEvolution: "Evolution mode",
     profileGroupResearch: "Research model configs",
     profileGroupOther: "Other model configs",
-    promptTemplateCenterTitle: "System prompt templates",
-    promptTemplateCenterBody: "Edit the system prompts referenced by long-lived agents in one place. Linked agents use the updated template content together.",
+    promptTemplateCenterTitle: "Agent prompt center",
+    promptTemplateCenterBody: "Prompt editing has moved to Agent management. Config keeps the current template and usage overview only, so the same Agent prompt is not edited in two places.",
     promptTemplateCategory: "Category",
     promptTemplateSource: "Source",
     promptTemplateUsage: "Linked agents",
-    promptTemplateContent: "Prompt content",
-    promptTemplateEdit: "Edit template",
-    promptTemplateSave: "Save template",
-    promptTemplateSaving: "Saving prompt template",
-    promptTemplateUpdated: "Prompt template saved.",
+    promptTemplateOpenCenter: "Open prompt center",
+    promptTemplateOpenResearch: "View research prompts",
     promptTemplateEmpty: "No prompt templates yet.",
-    promptTemplateEditorEmpty: "Select a template to edit its content here.",
-    promptTemplateLoadFailed: "Prompt template load failed: ",
-    promptTemplateSaveFailed: "Prompt template save failed: ",
     agentConfigCenterTitle: "Agent config center",
     agentConfigCenterBody: "Review every long-lived agent through the unified structure: model, prompt, session, workspace, and mode references.",
     agentConfigRefs: "Mode refs",
@@ -2420,7 +2400,6 @@ export function ConfigRoute() {
   const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
   const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfileDraft());
   const [profileEditors, setProfileEditors] = useState<Record<string, ProfileEditState>>({});
-  const [promptTemplateEditor, setPromptTemplateEditor] = useState<PromptTemplateEditorState | null>(null);
   const [agentRunPanel, setAgentRunPanel] = useState<AgentRunPanelState | null>(null);
   const [imageInputChecks, setImageInputChecks] = useState<Record<string, ImageInputCheckState>>({});
   const [researchAgentDraft, setResearchAgentDraft] = useState<ResearchAgentDraft>(emptyResearchAgentDraft());
@@ -2453,7 +2432,6 @@ export function ConfigRoute() {
     setModelEditorError("");
     setProfileDraft(emptyProfileDraft(workspace.profileCards[0]?.profileId ?? "primary"));
     setProfileEditors({});
-    setPromptTemplateEditor(null);
     setAgentRunPanel(null);
   }
 
@@ -2602,15 +2580,9 @@ export function ConfigRoute() {
     () => new Map(promptTemplates.map((template) => [template.promptTemplateId, template])),
     [promptTemplates],
   );
-  const promptTemplateAgentCounts = useMemo(
-    () =>
-      new Map(
-        promptTemplates.map((template) => [
-          template.promptTemplateId,
-          agentInstances.filter((agent) => agent.promptTemplateId === template.promptTemplateId).length,
-        ]),
-      ),
-    [agentInstances, promptTemplates],
+  const promptTemplateUsageTotal = useMemo(
+    () => agentInstances.filter((agent) => Boolean(agent.promptTemplateId)).length,
+    [agentInstances],
   );
   const modeBindings = modeBindingsQuery.data?.modes ?? null;
   const modeBindingWarnings = modeBindingsQuery.data?.repairWarnings ?? [];
@@ -3000,55 +2972,6 @@ export function ConfigRoute() {
     } catch (error) {
       const message = markError(error);
       setNotice({ tone: "error", text: `${copy.researchAgentDeleteBlocked}${message}` });
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function editPromptTemplate(templateId: string) {
-    setBusyAction(copy.promptTemplateSaving);
-    try {
-      const template = await fetchJson<PromptTemplate>(`/api/prompt-templates/${encodeURIComponent(templateId)}`);
-      setPromptTemplateEditor({
-        templateId: template.promptTemplateId,
-        name: template.name,
-        category: template.category,
-        content: template.content ?? "",
-      });
-      setNotice({ tone: "neutral", text: "" });
-    } catch (error) {
-      const message = markError(error);
-      setNotice({ tone: "error", text: `${copy.promptTemplateLoadFailed}${message}` });
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function savePromptTemplate() {
-    if (!promptTemplateEditor) {
-      return;
-    }
-    setBusyAction(copy.promptTemplateSaving);
-    try {
-      const updated = await requestJson<PromptTemplate>(
-        `/api/prompt-templates/${encodeURIComponent(promptTemplateEditor.templateId)}`,
-        {
-          name: promptTemplateEditor.name,
-          content: promptTemplateEditor.content,
-        },
-        "PATCH",
-      );
-      setPromptTemplateEditor({
-        templateId: updated.promptTemplateId,
-        name: updated.name,
-        category: updated.category,
-        content: updated.content ?? promptTemplateEditor.content,
-      });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.promptTemplates() });
-      setNotice({ tone: "success", text: copy.promptTemplateUpdated });
-    } catch (error) {
-      const message = markError(error);
-      setNotice({ tone: "error", text: `${copy.promptTemplateSaveFailed}${message}` });
     } finally {
       setBusyAction("");
     }
@@ -5096,77 +5019,36 @@ export function ConfigRoute() {
           </div>
           <p className={styles.sectionText}>{copy.promptTemplateCenterBody}</p>
           <div className={styles.promptTemplateGrid}>
-            {promptTemplates.length ? promptTemplates.map((template) => {
-              const linkedAgentCount = promptTemplateAgentCounts.get(template.promptTemplateId) ?? 0;
-              const selected = promptTemplateEditor?.templateId === template.promptTemplateId;
-              return (
-                <article key={template.promptTemplateId} className={selected ? `${styles.promptTemplateCard} ${styles.promptTemplateCardActive}` : styles.promptTemplateCard}>
-                  <div className={styles.promptTemplateMain}>
-                    <strong>{template.name || template.promptTemplateId}</strong>
-                    <span>{template.promptTemplateId}</span>
-                    <span>{template.sourcePath || "-"}</span>
-                  </div>
-                  <div className={styles.promptTemplateMeta}>
-                    <span>{template.category || "-"}</span>
-                    <span>{template.status || "active"}</span>
-                    <span>{copy.promptTemplateSource}: {template.sourceExists ? copy.yes : copy.no}</span>
-                    <span>{copy.promptTemplateUsage}: {linkedAgentCount}</span>
-                    <span>{template.contentHash || "-"}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className={`${styles.actionButton} ${styles.compactButton}`}
-                    disabled={Boolean(busyAction)}
-                    onClick={() => void editPromptTemplate(template.promptTemplateId)}
-                  >
-                    <Pencil size={14} />
-                    {copy.promptTemplateEdit}
-                  </button>
-                </article>
-              );
-            }) : (
-              <p className={styles.helperText}>{promptTemplatesQuery.isPending ? copy.loading : copy.promptTemplateEmpty}</p>
-            )}
+            <article className={styles.promptTemplateCard}>
+              <div className={styles.promptTemplateMain}>
+                <strong>{promptTemplatesQuery.isPending ? copy.loading : promptTemplates.length}</strong>
+                <span>{copy.promptTemplateCenterTitle}</span>
+              </div>
+              <div className={styles.promptTemplateMeta}>
+                <span>{copy.promptTemplateCategory}: {new Set(promptTemplates.map((template) => template.category || "general")).size}</span>
+                <span>{copy.promptTemplateUsage}: {promptTemplateUsageTotal}</span>
+              </div>
+            </article>
+            <article className={styles.promptTemplateCard}>
+              <div className={styles.promptTemplateMain}>
+                <strong>{copy.promptTemplateUsage}</strong>
+                <span>{copy.promptTemplateCenterBody}</span>
+              </div>
+              <div className={styles.formActions}>
+                <Link className={styles.primaryButton} to="/agents/prompts">
+                  <ExternalLink size={14} />
+                  {copy.promptTemplateOpenCenter}
+                </Link>
+                <Link className={styles.actionButton} to="/agents/prompts?category=research">
+                  <Pencil size={14} />
+                  {copy.promptTemplateOpenResearch}
+                </Link>
+              </div>
+            </article>
           </div>
-          <div className={styles.formSurface}>
-            {promptTemplateEditor ? (
-              <>
-                <div className={styles.formGrid}>
-                  <label className={styles.field}>
-                    <span>{copy.researchAgentPrompt}</span>
-                    <input
-                      value={promptTemplateEditor.name}
-                      onChange={(event) => setPromptTemplateEditor((current) => current ? { ...current, name: event.target.value } : current)}
-                    />
-                  </label>
-                  <label className={styles.field}>
-                    <span>{copy.promptTemplateCategory}</span>
-                    <input value={promptTemplateEditor.category} disabled />
-                  </label>
-                </div>
-                <label className={styles.field}>
-                  <span>{copy.promptTemplateContent}</span>
-                  <textarea
-                    className={styles.promptTemplateTextarea}
-                    value={promptTemplateEditor.content}
-                    onChange={(event) => setPromptTemplateEditor((current) => current ? { ...current, content: event.target.value } : current)}
-                  />
-                </label>
-                <div className={styles.formActions}>
-                  <button type="button" className={styles.primaryButton} disabled={Boolean(busyAction)} onClick={() => void savePromptTemplate()}>
-                    <Save size={14} />
-                    {busyAction === copy.promptTemplateSaving ? copy.promptTemplateSaving : copy.promptTemplateSave}
-                  </button>
-                  <button type="button" className={styles.actionButton} disabled={Boolean(busyAction)} onClick={() => setPromptTemplateEditor(null)}>
-                    <RotateCcw size={14} />
-                    {copy.cancelEditing}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className={styles.helperText}>{copy.promptTemplateEditorEmpty}</p>
-            )}
-          </div>
+          {!promptTemplates.length && !promptTemplatesQuery.isPending ? (
+            <p className={styles.helperText}>{copy.promptTemplateEmpty}</p>
+          ) : null}
         </section>
         ) : null}
 

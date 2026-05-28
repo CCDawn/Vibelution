@@ -54,6 +54,7 @@
 
 .iconButton,
 .primaryButton,
+.stopButton,
 .secondaryButton,
 .createButton,
 .emptyActionButton {
@@ -76,6 +77,13 @@
   padding: 0 12px;
   color: var(--fg-primary);
   background: color-mix(in srgb, var(--accent-cool) 20%, var(--surface-card));
+}
+
+.stopButton {
+  padding: 0 12px;
+  color: var(--danger, #ef6b73);
+  border-color: color-mix(in srgb, var(--danger, #ef6b73) 35%, var(--border-soft));
+  background: color-mix(in srgb, var(--danger, #ef6b73) 12%, var(--surface-card));
 }
 
 .secondaryButton,
@@ -103,6 +111,7 @@
 
 .iconButton:hover,
 .primaryButton:hover,
+.stopButton:hover,
 .secondaryButton:hover,
 .createButton:hover,
 .emptyActionButton:hover,
@@ -116,10 +125,12 @@
 }
 
 .primaryButton:disabled,
+.stopButton:disabled,
 .secondaryButton:disabled,
 .createButton:disabled,
 .emptyActionButton:disabled,
 .applyButton:disabled,
+.roomManageField input:disabled,
 .sessionIconButton:disabled,
 .sessionDeleteButton:disabled,
 .newAgentButton:disabled {
@@ -342,6 +353,16 @@
   border-bottom: 1px solid var(--border-soft);
 }
 
+.roomManageField {
+  display: grid;
+  gap: 5px;
+}
+
+.roomManageField span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
 .createBoxHeader {
   display: flex;
   align-items: center;
@@ -360,10 +381,11 @@
 }
 
 .topicBar {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
 .topicBar input,
+.roomManageField input,
 .createBox input {
   min-width: 0;
   min-height: 34px;

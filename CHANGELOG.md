@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 - 2026-05-28
+
+- Added Impeccable product/design context for Vibelution frontend visual work.
+- Unified Agent management routes around Agent Center navigation, prompt templates, tools, skills, memory, runtime evidence, and responsive `/agents` behavior.
+- Added a read-only Skill Library plus `/skill` slash-command routing into chat turns with bounded runtime context and lifecycle logging.
+- Added missing-Agent placeholders and safer delete/reference cleanup so sessions, rooms, bindings, and research canvases can surface invalid Agent content without crashing.
+- Streamlined research theme discovery onto Agent-only flow-canvas nodes and updated related route/tests.
+- Refined the Agent management surface with a denser control-room layout, stronger runtime/status hierarchy, and polished operational navigation.
+
 ## 0.3.0 - 2026-05-27
 
 - Added the unified Agent configuration foundation across AgentInstance, PromptTemplate, ModeBinding, and ContextEngine boundaries.

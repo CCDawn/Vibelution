@@ -740,11 +740,11 @@ describe("config route copy", () => {
     expect(visibleCopy).not.toContain("Prompt file");
   });
 
-  it("exposes a dedicated system prompt template center", () => {
-    expect(CONFIG_COPY.zh.promptTemplateCenterTitle).toBe("系统提示词模板");
-    expect(CONFIG_COPY.en.promptTemplateCenterTitle).toBe("System prompt templates");
-    expect(CONFIG_COPY.zh.promptTemplateContent).toBe("提示词内容");
-    expect(CONFIG_COPY.en.promptTemplateContent).toBe("Prompt content");
+  it("points configuration users to the Agent prompt center", () => {
+    expect(CONFIG_COPY.zh.promptTemplateCenterTitle).toBe("Agent 提示词中心");
+    expect(CONFIG_COPY.en.promptTemplateCenterTitle).toBe("Agent prompt center");
+    expect(CONFIG_COPY.zh.promptTemplateOpenCenter).toBe("打开提示词中心");
+    expect(CONFIG_COPY.en.promptTemplateOpenCenter).toBe("Open prompt center");
   });
 
   it("keeps the settings sidebar status focused on save readiness", () => {

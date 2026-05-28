@@ -25,6 +25,7 @@ import { queryKeys } from "../api/queryKeys";
 import { MemoryItem, MemoryMutationResponse, MemoryOverview, MemorySection } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
+import { AgentManagementNav } from "./AgentManagementNav";
 import styles from "./MemoryRoute.module.css";
 
 type Copy = {
@@ -793,10 +794,10 @@ type MemoryRouteProps = {
 };
 
 const MEMORY_VIEWS: Array<{ key: MemoryRouteView; href: string }> = [
-  { key: "overview", href: "/memory" },
-  { key: "effective", href: "/memory/effective" },
-  { key: "manage", href: "/memory/manage" },
-  { key: "sources", href: "/memory/sources" },
+  { key: "overview", href: "/agents/memory" },
+  { key: "effective", href: "/agents/memory/effective" },
+  { key: "manage", href: "/agents/memory/manage" },
+  { key: "sources", href: "/agents/memory/sources" },
 ];
 
 function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
@@ -1556,7 +1557,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <div className={styles.reviewQueueActions}>
                 <NavLink
                   className={styles.detailActionButton}
-                  to={`/memory/sources?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
+                  to={`/agents/memory/sources?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
                   onClick={() => openReviewTarget(pair)}
                 >
                   <FileText size={14} />
@@ -1565,7 +1566,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 {target === "manage" ? (
                   <NavLink
                     className={styles.detailActionButton}
-                    to={`/memory/manage?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
+                    to={`/agents/memory/manage?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
                     onClick={() => openReviewTarget(pair)}
                   >
                     <Pencil size={14} />
@@ -2206,12 +2207,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <h1 className={styles.title}>{memoryViewLabel(copy, forcedView)}</h1>
           <p className={styles.subtitle}>{memoryViewSubtitle(copy, forcedView)}</p>
         </div>
-        {renderSubnav()}
         <button type="button" className={styles.refreshButton} onClick={refresh}>
           <RefreshCw size={16} />
           {copy.refresh}
         </button>
       </header>
+
+      <AgentManagementNav active="memory" />
+      {renderSubnav()}
 
       <div className={styles.viewStack}>
         {forcedView === "overview"
