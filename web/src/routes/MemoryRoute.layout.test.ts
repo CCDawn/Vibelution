@@ -212,9 +212,13 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('{ key: "overview", href: "/agents/memory" }');
     expect(routeSource).toContain('to={`/agents/memory/sources?section=');
     expect(routeSource).toContain('to={`/agents/memory/manage?section=');
-    expect(routeSource).toContain('<AgentManagementNav active="memory" />');
-    expect(routeSource.indexOf('<AgentManagementNav active="memory" />')).toBeGreaterThan(routeSource.indexOf("</header>"));
-    expect(routeSource.indexOf('<AgentManagementNav active="memory" />')).toBeLessThan(routeSource.indexOf("{renderSubnav()}"));
+    expect(routeSource).toContain('<AgentManagementNav active="memory" className={styles.managementNav} />');
+    expect(routeSource.indexOf('<AgentManagementNav active="memory" className={styles.managementNav} />')).toBeGreaterThan(
+      routeSource.indexOf("</header>"),
+    );
+    expect(routeSource.indexOf('<AgentManagementNav active="memory" className={styles.managementNav} />')).toBeLessThan(
+      routeSource.indexOf("{renderSubnav()}"),
+    );
     expect(routeSource.indexOf("{renderSubnav()}")).toBeLessThan(routeSource.indexOf("styles.viewStack"));
     expect(appShellSource).not.toContain('to="/memory"');
   });

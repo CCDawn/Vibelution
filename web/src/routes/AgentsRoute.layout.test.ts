@@ -16,9 +16,13 @@ describe("AgentsRoute layout contract", () => {
     expect(routerSource).toContain("<AgentsRoute />");
     expect(shellSource).toContain('to="/agents"');
     expect(shellSource).toContain('t("navAgents")');
-    expect(routeSource).toContain('<AgentManagementNav active="agents" />');
-    expect(routeSource.indexOf('<AgentManagementNav active="agents" />')).toBeGreaterThan(routeSource.indexOf("</header>"));
-    expect(routeSource.indexOf('<AgentManagementNav active="agents" />')).toBeLessThan(routeSource.indexOf("styles.summaryGrid"));
+    expect(routeSource).toContain('<AgentManagementNav active="agents" className={styles.managementNav} />');
+    expect(routeSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeGreaterThan(
+      routeSource.indexOf("</header>"),
+    );
+    expect(routeSource.indexOf('<AgentManagementNav active="agents" className={styles.managementNav} />')).toBeLessThan(
+      routeSource.indexOf("styles.summaryGrid"),
+    );
   });
 
   it("uses filter, table, and detail panels instead of a card wall", () => {
@@ -82,6 +86,16 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("queryKeys.chatRooms()");
     expect(routeSource).toContain("styles.roomMembershipList");
     expect(routeSource).toContain("styles.roomCheckField");
+  });
+
+  it("surfaces Team references as first-class Agent Center relationships", () => {
+    expect(routeSource).toContain('team: "团队"');
+    expect(routeSource).toContain('team: "Team"');
+    expect(routeSource).toContain("summary?.teamCount");
+    expect(routeSource).toContain("referenceRoute(reference)");
+    expect(routeSource).toContain('`/agents/teams?team=${encodeURIComponent(reference.sourceId)}`');
+    expect(routeSource).toContain("styles.referenceRouteButton");
+    expect(routeSource).toContain("styles.referenceStatusStale");
   });
 
   it("edits Agent tool permissions from the same detail card", () => {
@@ -201,6 +215,15 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.archiveAgent");
     expect(routeSource).toContain("styles.dangerZone");
     expect(routeSource).toContain("styles.dangerButton");
+  });
+
+  it("separates protected core Agents from the destructive archive zone", () => {
+    expect(routeSource).toContain("copy.archiveProtection");
+    expect(routeSource).toContain("copy.archiveProtectionHint");
+    expect(routeSource).toContain("selectedAgentProtected ? styles.protectedZone : styles.dangerZone");
+    expect(routeSource).toContain("selectedAgentProtected ? <ShieldCheck");
+    expect(routeSource).toContain("summary?.archivedAgentCount");
+    expect(styles.protectedZone).toBeTruthy();
   });
 
   it("keeps the desktop workspace as three scan-friendly columns", () => {

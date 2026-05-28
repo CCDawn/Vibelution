@@ -10,9 +10,13 @@ describe("SkillsRoute layout contract", () => {
     expect(routerSource).toContain("<SkillsRoute />");
     expect(routerSource).not.toContain('path: "skills"');
     expect(routerSource).not.toContain('to="/agents/skills" replace');
-    expect(routeSource).toContain('<AgentManagementNav active="skills" />');
-    expect(routeSource.indexOf('<AgentManagementNav active="skills" />')).toBeGreaterThan(routeSource.indexOf("</header>"));
-    expect(routeSource.indexOf('<AgentManagementNav active="skills" />')).toBeLessThan(routeSource.indexOf("styles.summaryGrid"));
+    expect(routeSource).toContain('<AgentManagementNav active="skills" className={styles.managementNav} />');
+    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNav} />')).toBeGreaterThan(
+      routeSource.indexOf("</header>"),
+    );
+    expect(routeSource.indexOf('<AgentManagementNav active="skills" className={styles.managementNav} />')).toBeLessThan(
+      routeSource.indexOf("styles.summaryGrid"),
+    );
     expect(appShellSource).not.toContain('to="/skills"');
   });
 

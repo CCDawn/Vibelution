@@ -275,25 +275,27 @@ export function PromptTemplatesRoute() {
         </button>
       </header>
 
-      <AgentManagementNav active="prompts" />
+      <div className={styles.controlStrip}>
+        <AgentManagementNav active="prompts" className={styles.managementNav} />
 
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.templates}</span>
-          <strong>{templates.length}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.linkedAgents}</span>
-          <strong>{agents.filter((agent) => agent.promptTemplateId).length}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.category}</span>
-          <strong>{visibleFilters.length - 1}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.source}</span>
-          <strong>{templatesQuery.data?.storagePath ?? templatesQuery.data?.path ?? "-"}</strong>
-        </section>
+        <div className={styles.summaryGrid}>
+          <section className={styles.summaryCard}>
+            <span>{copy.templates}</span>
+            <strong>{templates.length}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.linkedAgents}</span>
+            <strong>{agents.filter((agent) => agent.promptTemplateId).length}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.category}</span>
+            <strong>{visibleFilters.length - 1}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.source}</span>
+            <strong>{templatesQuery.data?.storagePath ?? templatesQuery.data?.path ?? "-"}</strong>
+          </section>
+        </div>
       </div>
 
       <main className={styles.workspace}>

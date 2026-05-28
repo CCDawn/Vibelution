@@ -314,6 +314,7 @@ function referenceLabel(reference: AgentConfigReference, lang: "zh" | "en") {
     mode_slot: "角色槽位",
     flow_binding: "流程绑定",
     chat_room: "群聊",
+    team: "团队",
   };
   const en: Record<string, string> = {
     direct_session: "Direct session",
@@ -323,8 +324,16 @@ function referenceLabel(reference: AgentConfigReference, lang: "zh" | "en") {
     mode_slot: "Role slot",
     flow_binding: "Flow binding",
     chat_room: "Group room",
+    team: "Team",
   };
   return (lang === "zh" ? zh : en)[kind] ?? kind;
+}
+
+function referenceRoute(reference: AgentConfigReference) {
+  if (reference.kind === "team" && reference.sourceId) {
+    return `/agents/teams?team=${encodeURIComponent(reference.sourceId)}`;
+  }
+  return reference.route || "";
 }
 
 function uniqueModes(agent: AgentConfigWorkspaceAgent) {
@@ -847,6 +856,11 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archiveAgentHint: "归档会从默认模式、群聊成员和可选池中移除该 Agent，但保留会话、记忆、日志和工作区。",
         archiveConfirm: "确认归档 {name}？这会隐藏该 Agent 并清理模式/群聊引用，但不会物理删除数据。",
         protectedAgent: "受保护 Agent 不能归档",
+        archiveProtection: "归档保护",
+        archiveProtectionTitle: "核心保护",
+        archiveProtectionHint: "这是科研团队核心 Agent，当前状态仍是活跃；系统只是在这里禁止归档操作，不代表它已经归档。",
+        archivedAgents: "已归档",
+        teams: "团队",
         healthIssues: "健康问题",
         chatRooms: "群聊",
         inbox: "待处理消息",
@@ -980,6 +994,11 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archiveAgentHint: "Archiving removes this Agent from defaults, rooms, and pools while keeping sessions, memory, logs, and workspace data.",
         archiveConfirm: "Archive {name}? This hides the Agent and cleans mode/room references, but does not physically delete data.",
         protectedAgent: "Protected Agents cannot be archived",
+        archiveProtection: "Archive protected",
+        archiveProtectionTitle: "Core protection",
+        archiveProtectionHint: "This is a core research Agent and is still active. This panel only blocks archive actions; it does not mean the Agent is archived.",
+        archivedAgents: "Archived",
+        teams: "Teams",
         healthIssues: "Health Issues",
         chatRooms: "Group Rooms",
         inbox: "Pending inbox",
@@ -1718,37 +1737,47 @@ export function AgentsRoute() {
         </button>
       </header>
 
-      <AgentManagementNav active="agents" />
+      <div className={styles.controlStrip}>
+        <AgentManagementNav active="agents" className={styles.managementNav} />
 
-      <div className={styles.summaryGrid}>
-        <section className={styles.summaryCard}>
-          <span>{copy.allAgents}</span>
-          <strong>{summary?.agentCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.activeAgents}</span>
-          <strong>{summary?.activeAgentCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.healthIssues}</span>
-          <strong>{summary?.healthIssueCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.chatRooms}</span>
-          <strong>{summary?.chatRoomCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.inbox}</span>
-          <strong>{summary?.inboxPendingCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.runningAgents}</span>
-          <strong>{summary?.runningAgentCount ?? 0}</strong>
-        </section>
-        <section className={styles.summaryCard}>
-          <span>{copy.blockedAgents}</span>
-          <strong>{summary?.blockedAgentCount ?? 0}</strong>
-        </section>
+        <div className={styles.summaryGrid}>
+          <section className={styles.summaryCard}>
+            <span>{copy.allAgents}</span>
+            <strong>{summary?.agentCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.activeAgents}</span>
+            <strong>{summary?.activeAgentCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.archivedAgents}</span>
+            <strong>{summary?.archivedAgentCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.teams}</span>
+            <strong>{summary?.teamCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.healthIssues}</span>
+            <strong>{summary?.healthIssueCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.chatRooms}</span>
+            <strong>{summary?.chatRoomCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.inbox}</span>
+            <strong>{summary?.inboxPendingCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.runningAgents}</span>
+            <strong>{summary?.runningAgentCount ?? 0}</strong>
+          </section>
+          <section className={styles.summaryCard}>
+            <span>{copy.blockedAgents}</span>
+            <strong>{summary?.blockedAgentCount ?? 0}</strong>
+          </section>
+        </div>
       </div>
 
       <div className={styles.workspace}>
@@ -2190,26 +2219,30 @@ export function AgentsRoute() {
                 )}
               </section>
 
-              <section className={styles.dangerZone}>
+              <section className={selectedAgentProtected ? styles.protectedZone : styles.dangerZone}>
                 <div className={styles.panelHeader}>
                   <div>
-                    <p className={styles.panelEyebrow}>{copy.archiveAgentTitle}</p>
-                    <h3>{copy.archiveAgent}</h3>
+                    <p className={styles.panelEyebrow}>{selectedAgentProtected ? copy.archiveProtectionTitle : copy.archiveAgentTitle}</p>
+                    <h3>{selectedAgentProtected ? copy.archiveProtection : copy.archiveAgent}</h3>
                   </div>
-                  <Trash2 size={16} />
+                  {selectedAgentProtected ? <ShieldCheck size={16} /> : <Trash2 size={16} />}
                 </div>
-                <p>{selectedAgentProtected ? copy.protectedAgent : copy.archiveAgentHint}</p>
-                <div className={styles.editorActions}>
-                  <button
-                    type="button"
-                    className={styles.dangerButton}
-                    disabled={!canArchiveAgent || archiveAgentMutation.isPending}
-                    onClick={archiveSelectedAgent}
-                  >
-                    <Trash2 size={15} />
-                    {archiveAgentMutation.isPending ? copy.archivingAgent : copy.archiveAgent}
-                  </button>
-                </div>
+                <p>{selectedAgentProtected ? copy.archiveProtectionHint : copy.archiveAgentHint}</p>
+                {selectedAgentProtected ? (
+                  <span className={styles.cleanPill}>{copy.protectedAgent}</span>
+                ) : (
+                  <div className={styles.editorActions}>
+                    <button
+                      type="button"
+                      className={styles.dangerButton}
+                      disabled={!canArchiveAgent || archiveAgentMutation.isPending}
+                      onClick={archiveSelectedAgent}
+                    >
+                      <Trash2 size={15} />
+                      {archiveAgentMutation.isPending ? copy.archivingAgent : copy.archiveAgent}
+                    </button>
+                  </div>
+                )}
               </section>
                 </>
               ) : null}
@@ -2538,9 +2571,26 @@ export function AgentsRoute() {
                   <div className={styles.referenceList}>
                     {selectedAgent.references.map((reference) => (
                       <div key={`${reference.kind}:${reference.sourceId}:${reference.mode}:${reference.field}`} className={styles.referenceItem}>
-                        <strong>{referenceLabel(reference, lang)}</strong>
+                        <div className={styles.referenceHeader}>
+                          <strong>{referenceLabel(reference, lang)}</strong>
+                          <span className={reference.status === "stale" ? styles.referenceStatusStale : styles.referenceStatusActive}>
+                            {reference.status || "active"}
+                          </span>
+                        </div>
                         <span>{reference.sourceLabel}</span>
-                        <small>{[reference.mode, reference.field].filter(Boolean).join(" / ") || reference.sourceId}</small>
+                        <div className={styles.referenceMetaRow}>
+                          <small>{[reference.mode, reference.field].filter(Boolean).join(" / ") || reference.sourceId}</small>
+                          {referenceRoute(reference) ? (
+                            <button
+                              type="button"
+                              className={styles.referenceRouteButton}
+                              onClick={() => navigate(referenceRoute(reference))}
+                            >
+                              <ExternalLink size={12} />
+                              {lang === "zh" ? "打开" : "Open"}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>

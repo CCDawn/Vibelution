@@ -1,12 +1,12 @@
 .route {
   display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  --agent-density-gap: 8px;
+  --agent-density-gap: 6px;
   --agent-panel-pad: 10px;
   --agent-row-pad-y: 6px;
-  --agent-control-height: 30px;
+  --agent-control-height: 26px;
   background:
     radial-gradient(circle at top left, color-mix(in srgb, var(--accent-warm) 10%, transparent), transparent 32rem),
     linear-gradient(180deg, color-mix(in srgb, var(--surface-page) 96%, var(--bg-canvas)) 0%, var(--bg-canvas) 100%);
@@ -18,7 +18,8 @@
   align-items: center;
   gap: var(--route-topbar-gap);
   min-width: 0;
-  padding: 7px 12px;
+  min-height: 36px;
+  padding: 3px 12px;
   border-bottom: 1px solid var(--border-hairline);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--surface-header) 96%, var(--accent-warm) 4%), var(--surface-header));
@@ -29,7 +30,7 @@
   display: grid;
   grid-template-columns: auto auto minmax(0, 1fr);
   align-items: baseline;
-  gap: 2px 8px;
+  gap: 1px 7px;
   min-width: 0;
 }
 
@@ -37,15 +38,15 @@
 .panelEyebrow {
   margin: 0 0 1px;
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
-  letter-spacing: 0.08em;
+  font-size: 0.61rem;
+  letter-spacing: 0.07em;
   text-transform: uppercase;
 }
 
 .title {
   margin: 0;
   font-family: var(--font-body);
-  font-size: var(--route-topbar-title-size);
+  font-size: 0.95rem;
   font-weight: 760;
   line-height: 1.1;
   white-space: nowrap;
@@ -55,8 +56,8 @@
   min-width: 0;
   margin: 0;
   color: var(--fg-secondary);
-  font-size: var(--route-topbar-subtitle-size);
-  line-height: 1.25;
+  font-size: 0.7rem;
+  line-height: 1.18;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -66,9 +67,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 5px;
   min-height: var(--agent-control-height);
-  padding: 5px 10px;
+  padding: 3px 8px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-card);
@@ -93,8 +94,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 0 8px;
+  min-height: 26px;
+  padding: 0 7px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   font-size: 0.76rem;
@@ -150,8 +151,8 @@
   justify-self: start;
   min-height: 22px;
   max-width: 100%;
-  padding: 0 8px;
-  font-size: 0.68rem;
+  padding: 0 7px;
+  font-size: 0.66rem;
   line-height: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -194,32 +195,50 @@
   color: var(--fg-secondary);
 }
 
+.controlStrip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 12px 0;
+}
+
+.managementNav {
+  margin: 0;
+}
+
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 7px;
-  padding: 7px 12px 0;
+  grid-template-columns: repeat(9, minmax(64px, 1fr));
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 90%, var(--surface-card));
 }
 
 .summaryCard {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
-  min-height: 40px;
-  padding: 6px 9px;
-  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel) 96%, var(--fg-primary) 3%), var(--surface-panel));
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--fg-primary) 5%, transparent);
+  min-height: 26px;
+  padding: 3px 8px;
+  border-right: 1px solid color-mix(in srgb, var(--border-soft) 58%, transparent);
+  background: transparent;
+}
+
+.summaryCard:last-child {
+  border-right: 0;
 }
 
 .summaryCard span {
   color: var(--fg-tertiary);
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
+  font-size: 0.61rem;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
 }
@@ -228,7 +247,7 @@
   min-width: 0;
   overflow: hidden;
   color: color-mix(in srgb, var(--fg-primary) 92%, var(--accent-cool));
-  font-size: 0.94rem;
+  font-size: 0.8rem;
   line-height: 1;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -239,7 +258,7 @@
   grid-template-columns: minmax(230px, 286px) minmax(560px, 1.05fr) minmax(430px, 0.95fr);
   gap: var(--agent-density-gap);
   min-height: 0;
-  padding: 8px 12px 10px;
+  padding: 6px 12px 10px;
 }
 
 .filterPanel,
@@ -506,17 +525,22 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .agentIdentity {
   display: grid;
-  gap: 1px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 7px;
 }
 
 .agentIdentity strong {
+  min-width: 0;
+  overflow: hidden;
   color: color-mix(in srgb, var(--fg-primary) 88%, var(--accent-cool));
-  font-size: 0.78rem;
+  font-size: 0.82rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agentIdentity > span {
@@ -577,7 +601,8 @@
 }
 
 .createAgentPanel p,
-.dangerZone p {
+.dangerZone p,
+.protectedZone p {
   margin: 0;
   color: var(--fg-secondary);
   font-size: 0.78rem;
@@ -1436,6 +1461,20 @@
   color: var(--state-error);
 }
 
+.protectedZone {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 7%, var(--surface-card));
+}
+
+.protectedZone svg {
+  color: var(--accent-cool);
+}
+
 .dangerButton {
   border: 1px solid color-mix(in srgb, var(--state-error) 40%, transparent);
   background: color-mix(in srgb, var(--state-error) 10%, var(--surface-panel));
@@ -1492,32 +1531,41 @@
 .policyGrid div,
 .detailSection {
   min-width: 0;
-  border: 1px solid var(--border-soft);
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
   border-radius: 8px;
-  background: var(--surface-card);
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
 }
 
 .factGrid section,
 .policyGrid div {
   display: grid;
-  gap: 4px;
-  padding: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "icon label"
+    "icon value"
+    "icon meta";
+  column-gap: 8px;
+  row-gap: 2px;
+  padding: 7px 8px;
 }
 
 .factGrid svg,
 .policyGrid svg,
 .detailSection svg {
+  grid-area: icon;
   color: var(--accent-cool);
 }
 
 .factGrid span,
 .policyGrid span {
+  grid-area: label;
   color: var(--fg-tertiary);
   font-size: 0.72rem;
 }
 
 .factGrid strong,
 .policyGrid strong {
+  grid-area: value;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -1528,6 +1576,7 @@
 
 .factGrid small,
 .referenceItem small {
+  grid-area: meta;
   min-width: 0;
   overflow: hidden;
   color: var(--fg-tertiary);
@@ -1588,6 +1637,62 @@
   line-height: 1.4;
 }
 
+.referenceHeader,
+.referenceMetaRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.referenceStatusActive,
+.referenceStatusStale {
+  display: inline-flex;
+  align-items: center;
+  min-height: 19px;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 760;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.referenceStatusActive {
+  border-color: color-mix(in srgb, var(--state-success) 28%, transparent);
+  background: color-mix(in srgb, var(--state-success) 8%, transparent);
+  color: var(--state-success);
+}
+
+.referenceStatusStale {
+  border-color: color-mix(in srgb, var(--accent-warm) 32%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.referenceRouteButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.referenceRouteButton:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--surface-panel-hover);
+}
+
 .issueItem_blocking {
   border-color: color-mix(in srgb, var(--state-error) 32%, transparent);
 }
@@ -1623,6 +1728,20 @@
   overflow-wrap: anywhere;
 }
 
+@media (max-width: 1120px) {
+  .controlStrip {
+    grid-template-columns: 1fr;
+  }
+
+  .managementNav {
+    justify-self: start;
+  }
+
+  .summaryGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1280px) {
   .workspace {
     grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
@@ -1640,6 +1759,7 @@
   }
 
   .header > div,
+  .controlStrip,
   .workspace,
   .detailTabs,
   .editorGrid,
