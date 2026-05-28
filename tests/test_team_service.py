@@ -109,6 +109,25 @@ def test_send_team_message_targets_active_team_members_only(tmp_path, monkeypatc
     assert agent_directory_service.count_agent_inbox_messages_for_agent(outsider["agentId"]) == 0
 
 
+def test_team_message_is_visible_in_project_bus_timeline_by_team_metadata(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    team = team_service.create_team(name="Timeline Team", members=[{"agentId": alpha["agentId"]}])
+    monkeypatch.setattr(project_agent_bus_service.session_service, "wake_agent_for_inbox_message", lambda message: {})
+
+    event = team_service.send_team_message(team["teamId"], content="记录到团队广播历史")
+    timeline = project_agent_bus_service.list_project_agent_bus_events()
+
+    team_events = [
+        item
+        for item in timeline["events"]
+        if item.get("metadata", {}).get("teamId") == team["teamId"]
+    ]
+    assert team_events[-1]["eventId"] == event["eventId"]
+    assert team_events[-1]["metadata"]["source"] == "team"
+    assert team_events[-1]["targetAgentIds"] == [alpha["agentId"]]
+
+
 def test_send_team_message_requires_active_members(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     team = team_service.create_team(name="Empty Team")

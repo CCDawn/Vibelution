@@ -128,6 +128,9 @@ _REPLACEMENT_ONLY_TEXT_PATTERN = re.compile(r"^\?{3,}$")
 _SESSION_WORKSPACE_SAFE_CHARS = re.compile(r"[^A-Za-z0-9_.-]+")
 _SESSION_IMAGE_ARTIFACT_SAFE_CHARS = re.compile(r"^[A-Za-z0-9_.-]+$")
 _SESSION_WORKSPACE_SUBDIRS = ("artifacts", "tmp", "mental_model", "notes", "logs", "memory")
+_SESSION_INDEX_EVENT_DEDUPE_LOCK = threading.Lock()
+_SESSION_MISSING_INDEX_EVENT_KEYS: set[tuple[str, str, str, str, str]] = set()
+_AGENT_DIRECTORY_INDEX_EVENT_KEYS: set[tuple[str, str, str]] = set()
 _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES = {
     "png": "image/png",
     "jpg": "image/jpeg",
@@ -5635,6 +5638,13 @@ def _record_session_agent_missing_index_event(
     if not session_id:
         return
     agent_status_code = str(summary.get("agentStatusCode") or "").strip()
+    agent_id = str(summary.get("agentId") or "").strip()
+    normalized_source = str(source or "").strip()
+    dedupe_key = (str(PROJECT_ROOT.resolve()), session_id, agent_id, agent_status_code, normalized_source)
+    with _SESSION_INDEX_EVENT_DEDUPE_LOCK:
+        if dedupe_key in _SESSION_MISSING_INDEX_EVENT_KEYS:
+            return
+        _SESSION_MISSING_INDEX_EVENT_KEYS.add(dedupe_key)
     try:
         record_runtime_scene_event(
             "conversation",
@@ -5645,17 +5655,17 @@ def _record_session_agent_missing_index_event(
             message="Session hidden from indexes because its bound Agent is missing or archived.",
             fields={
                 "sessionId": session_id,
-                "agentId": str(summary.get("agentId") or "").strip(),
+                "agentId": agent_id,
                 "agentStatusCode": agent_status_code,
-                "source": str(source or "").strip(),
+                "source": normalized_source,
             },
             child_log_path=f"conversations/{_safe_session_workspace_token(session_id)}-agent-bindings.jsonl",
             child_log_payload={
                 "session_id": session_id,
-                "agent_id": str(summary.get("agentId") or "").strip(),
+                "agent_id": agent_id,
                 "agent_status_code": agent_status_code,
                 "agent_status_message": trim_lines(str(summary.get("agentStatusMessage") or ""), max_lines=2),
-                "source": str(source or "").strip(),
+                "source": normalized_source,
                 "hidden_from_index": True,
             },
             lifecycle=True,
@@ -5669,6 +5679,15 @@ def _record_agent_directory_conversation_index_event(
     *,
     session_id: str,
 ) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    agent_id = str(agent.get("agentId") or "").strip()
+    if not normalized_session_id or not agent_id:
+        return
+    dedupe_key = (str(PROJECT_ROOT.resolve()), normalized_session_id, agent_id)
+    with _SESSION_INDEX_EVENT_DEDUPE_LOCK:
+        if dedupe_key in _AGENT_DIRECTORY_INDEX_EVENT_KEYS:
+            return
+        _AGENT_DIRECTORY_INDEX_EVENT_KEYS.add(dedupe_key)
     try:
         record_runtime_scene_event(
             "conversation",
@@ -5678,8 +5697,8 @@ def _record_agent_directory_conversation_index_event(
             outcome="indexed",
             message="Agent Directory direct session added to the conversation index.",
             fields={
-                "sessionId": str(session_id or "").strip(),
-                "agentId": str(agent.get("agentId") or "").strip(),
+                "sessionId": normalized_session_id,
+                "agentId": agent_id,
                 "agentCode": str(agent.get("agentCode") or "").strip(),
                 "primaryMode": str(agent.get("primaryMode") or "").strip(),
                 "roleKey": str(agent.get("roleKey") or "").strip(),
