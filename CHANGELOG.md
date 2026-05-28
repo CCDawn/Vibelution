@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 - 2026-05-28
+
+- Fixed Research AgentInstance sync so archived or missing Research Agents are replaced before mode binding updates, preventing repeated `research.mode_binding.sync_failed` runtime-scene errors from stale Agent ids.
+- Added lifecycle logging for stale Research Agent replacement and regression coverage for archived Research mode binding references.
+
 ## 0.4.0 - 2026-05-28
 
 - Added Impeccable product/design context for Vibelution frontend visual work.
