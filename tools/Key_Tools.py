@@ -828,6 +828,7 @@ def create_key_tools() -> List[BaseTool]:
 
         适合把发现、请求、审查意见或交接信息发给指定 Agent。目标可用 agentId、A001 这类稳定代号或唯一名称。
         消息会写入目标 Agent 的 inbox；wake_target=True 时会尝试唤醒目标的空闲直聊会话。
+        如果任一方属于科研组织图，消息会先经过科研组织通讯边、messageType/intent、监督策略和唤醒规则校验。
 
         Args:
             target_agent: 目标 Agent 的 agentId、稳定代号或唯一名称

@@ -14,6 +14,7 @@ from core.web.services import (
     chat_room_service,
     conversation_service,
     prompt_template_service,
+    research_organization_service,
     self_evolution_control_service,
     session_service,
     supervised_agent_service,
@@ -36,6 +37,31 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
         tmp_path / "workspace" / "web_self_evolution",
     )
     monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
+
+
+class _FakeResearchWorkspace:
+    def __init__(self, root):
+        self.root = root / "workspace"
+
+    def get_research_organization_path(self):
+        return self.root / "research" / "organization_graph.json"
+
+    def read_research_organization(self):
+        path = self.get_research_organization_path()
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+    def write_research_organization(self, data):
+        path = self.get_research_organization_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return True
+
+
+def _use_tmp_research_org_workspace(tmp_path, monkeypatch):
+    workspace = _FakeResearchWorkspace(tmp_path)
+    monkeypatch.setattr(research_organization_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_organization_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    return workspace
 
 
 def _seed_chat_sessions(root):
@@ -239,6 +265,67 @@ def test_agent_and_conversation_api_create_direct_agent(tmp_path, monkeypatch):
     assert direct["agentPromptTemplateId"] == "prompt-chat-default"
 
 
+def test_agent_directory_index_logging_is_deduplicated_per_agent_session(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    recorded_events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    session = session_service.create_chat_session(title="Index Only Agent")
+    agent = agent_directory_service.update_agent_instance(
+        session["agentId"],
+        primary_mode="research",
+        role_key="research_ceo",
+        prompt_template_id="prompt-research-ceo",
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"] = []
+    save_chat_state(tmp_path, state)
+
+    first = session_service.list_sessions()
+    second = session_service.list_sessions()
+
+    assert any(item["id"] == agent["directSessionId"] for item in first)
+    assert any(item["id"] == agent["directSessionId"] for item in second)
+    index_events = [
+        event for event in recorded_events
+        if event[0][2] == "session.agent_directory_index_added"
+    ]
+    assert len(index_events) == 1
+    assert index_events[0][1]["fields"]["sessionId"] == agent["directSessionId"]
+    assert index_events[0][1]["fields"]["agentId"] == agent["agentId"]
+
+
+def test_missing_agent_hidden_index_logging_is_deduplicated_per_session(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_chat_sessions(tmp_path)
+    sessions = session_service.list_sessions()
+    alpha = next(item for item in sessions if item["id"] == "session-alpha")
+    agent_directory_service.archive_agent_instance(alpha["agentId"])
+    recorded_events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    first = session_service.list_sessions()
+    second = session_service.list_sessions()
+
+    assert "session-alpha" not in {item["id"] for item in first}
+    assert "session-alpha" not in {item["id"] for item in second}
+    hidden_events = [
+        event for event in recorded_events
+        if event[0][2] == "session.agent_missing.hidden_from_index"
+    ]
+    assert len(hidden_events) == 1
+    assert hidden_events[0][1]["fields"]["sessionId"] == "session-alpha"
+    assert hidden_events[0][1]["fields"]["agentId"] == alpha["agentId"]
+    assert hidden_events[0][1]["fields"]["agentStatusCode"] == "archived_agent"
+
+
 def test_agent_directory_repairs_legacy_mode_role_and_prompt_fields(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     state = agent_directory_service.default_state()
@@ -266,7 +353,6 @@ def test_agent_directory_repairs_legacy_mode_role_and_prompt_fields(tmp_path, mo
     assert repaired["promptTemplateId"] == "prompt-research-broad"
 
 
-def test_agent_directory_resolves_workspace_root_without_nested_workspace(tmp_path, monkeypatch):
 def test_conversation_index_exposes_agent_management_role_fields(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     detail = session_service.create_chat_session(title="科研成员")
@@ -369,6 +455,8 @@ def test_agent_directory_direct_session_can_accept_messages_after_materializatio
     assert persisted["agent_id"] == agent["agentId"]
     assert persisted["messages"][-1]["role"] == "user"
 
+
+def test_agent_directory_resolves_workspace_root_without_nested_workspace(tmp_path, monkeypatch):
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", workspace_root)
@@ -925,6 +1013,161 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
     consumed = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="consumed")
     assert consumed[0]["messageId"] == payload["messageId"]
     assert consumed[0]["consumedByTurnId"] == payload["delivery"]["turnId"]
+
+
+def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    recorded_events = []
+    from core.web.services import runtime_scene_service
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    org = research_organization_service.get_research_organization()
+    ceo = next(node for node in org["agents"] if node["role"] == "ceo")
+    steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
+
+    with agent_directory_service.active_agent_runtime(ceo["agentId"], session_id=ceo["agent"]["directSessionId"]):
+        result, action = ToolExecutor().execute(
+            "agent_message_tool",
+            {
+                "target_agent": steward["agent"]["agentCode"],
+                "content": "请审查数据库试水团队的工具权限。",
+                "summary": "能力权限审查",
+                "wake_target": False,
+                "metadata_json": json.dumps(
+                    {
+                        "researchOrgMessageType": "task",
+                        "researchOrgIntent": "tool_policy",
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["ok"] is True
+    assert payload["status"] == "sent"
+    assert payload["route"] == "research_org"
+    assert payload["sourceAgentId"] == ceo["agentId"]
+    assert payload["targetAgentId"] == steward["agentId"]
+    assert payload["researchOrgMessageId"]
+    assert payload["delivery"]["edgeId"] == f"edge-{ceo['agentId']}-{steward['agentId']}"
+    tool_events = [
+        event for event in recorded_events
+        if event[0][2] == "agent_inbox.tool_sent"
+    ]
+    assert tool_events
+    tool_fields = tool_events[-1][1]["fields"]
+    assert tool_fields["route"] == "research_org"
+    assert tool_fields["messageId"] == payload["messageId"]
+    assert tool_fields["researchOrgMessageId"] == payload["researchOrgMessageId"]
+    assert tool_fields["edgeId"] == f"edge-{ceo['agentId']}-{steward['agentId']}"
+    assert tool_fields["messageType"] == "task"
+    assert tool_fields["intent"] == "tool_policy"
+    assert tool_fields["deliveryMode"] == "private"
+
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(steward["agentId"], status="pending")
+    assert [item["messageId"] for item in pending] == [payload["messageId"]]
+    assert pending[0]["kind"] == "research_org_task"
+    assert pending[0]["createdBy"] == "research_org"
+    assert pending[0]["metadata"]["researchOrgMessageId"] == payload["researchOrgMessageId"]
+    assert pending[0]["metadata"]["researchOrgMessageType"] == "task"
+    assert pending[0]["metadata"]["researchOrgIntent"] == "tool_policy"
+
+
+def test_agent_message_tool_blocks_research_core_messages_without_allowed_policy(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    recorded_events = []
+    from core.web.services import runtime_scene_service
+
+    monkeypatch.setattr(
+        runtime_scene_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    org = research_organization_service.get_research_organization()
+    ceo = next(node for node in org["agents"] if node["role"] == "ceo")
+    advisor = next(node for node in org["agents"] if node["role"] == "organization_advisor")
+
+    with agent_directory_service.active_agent_runtime(advisor["agentId"], session_id=advisor["agent"]["directSessionId"]):
+        result, action = ToolExecutor().execute(
+            "agent_message_tool",
+            {
+                "target_agent": ceo["agentId"],
+                "content": "请 CEO 立刻执行这个组织任务。",
+                "wake_target": False,
+                "metadata_json": json.dumps(
+                    {
+                        "researchOrgMessageType": "task",
+                        "researchOrgIntent": "organization_design",
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["route"] == "research_org"
+    assert payload["reason"] == "message_type_not_allowed"
+    assert payload["wakeStatus"] == "blocked"
+    assert payload["delivery"]["inboxMessageId"] == ""
+    tool_events = [
+        event for event in recorded_events
+        if event[0][2] == "agent_inbox.tool_blocked"
+    ]
+    assert tool_events
+    tool_fields = tool_events[-1][1]["fields"]
+    assert tool_fields["route"] == "research_org"
+    assert tool_fields["researchOrgMessageId"] == payload["researchOrgMessageId"]
+    assert tool_fields["edgeId"] == f"edge-{advisor['agentId']}-{ceo['agentId']}"
+    assert tool_fields["messageType"] == "task"
+    assert tool_fields["intent"] == "organization_design"
+    assert tool_fields["deliveryMode"] == "private"
+    assert tool_fields["reason"] == "message_type_not_allowed"
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(ceo["agentId"], status="pending") == []
+
+
+def test_agent_message_tool_blocks_outsider_to_research_core_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    org = research_organization_service.get_research_organization()
+    steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
+    outsider = session_service.create_chat_session(title="外部 Chat Agent")
+
+    with agent_directory_service.active_agent_runtime(outsider["agentId"], session_id=outsider["id"]):
+        result, action = ToolExecutor().execute(
+            "agent_message_tool",
+            {
+                "target_agent": steward["agentId"],
+                "content": "绕过组织图直接请求工具权限调整。",
+                "wake_target": False,
+                "metadata_json": json.dumps(
+                    {
+                        "researchOrgMessageType": "request",
+                        "researchOrgIntent": "tool_policy",
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["route"] == "research_org"
+    assert payload["reason"] == "source_not_in_organization"
+    assert payload["delivery"]["inboxMessageId"] == ""
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(steward["agentId"], status="pending") == []
 
 
 def test_agent_configuration_indexes_repair_update_and_persist(tmp_path, monkeypatch):

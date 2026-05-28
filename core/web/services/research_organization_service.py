@@ -78,6 +78,23 @@ def get_research_organization() -> dict[str, Any]:
     return _organization_to_api(graph)
 
 
+def get_research_organization_canvas_graph() -> dict[str, Any]:
+    """Return a lightweight organization graph for read-only canvas rendering."""
+
+    workspace = get_workspace()
+    reader = getattr(workspace, "read_research_organization", None)
+    raw = reader() if callable(reader) else (
+        json.loads(_organization_path(workspace).read_text(encoding="utf-8"))
+        if _organization_path(workspace).exists()
+        else {}
+    )
+    graph = _normalize_organization(raw if isinstance(raw, dict) else {})
+    if not graph.get("agents"):
+        graph = _ensure_default_organization(graph)
+        _write_organization(graph)
+    return _organization_to_canvas_api(graph)
+
+
 def save_research_organization(payload: dict[str, Any]) -> dict[str, Any]:
     """Persist a caller-provided organization graph after normalization."""
 
@@ -431,6 +448,29 @@ def _organization_to_api(graph: dict[str, Any]) -> dict[str, Any]:
     payload["path"] = str(_organization_path(get_workspace()))
     payload["agents"] = [_agent_node_to_api(node) for node in payload.get("agents") or []]
     payload["edges"] = [_edge_to_api(edge) for edge in payload.get("edges") or []]
+    return payload
+
+
+def _organization_to_canvas_api(graph: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_organization(graph)
+    active_agents_by_id = {
+        _clean_id(agent.get("agentId")): agent
+        for agent in list_agents(include_archived=False)
+        if isinstance(agent, dict) and _clean_id(agent.get("agentId"))
+    }
+    payload["path"] = str(_organization_path(get_workspace()))
+    payload["agents"] = [
+        _agent_node_to_canvas_api(node, active_agents_by_id.get(_clean_id(node.get("agentId"))))
+        for node in payload.get("agents") or []
+        if _clean_id(node.get("agentId")) in active_agents_by_id
+    ]
+    active_node_ids = {_clean_id(node.get("agentId")) for node in payload["agents"]}
+    payload["edges"] = [
+        _edge_to_api(edge)
+        for edge in payload.get("edges") or []
+        if _clean_id(edge.get("fromAgentId") or edge.get("source")) in active_node_ids
+        and _clean_id(edge.get("toAgentId") or edge.get("target")) in active_node_ids
+    ]
     return payload
 
 
@@ -818,6 +858,41 @@ def _agent_node_to_api(node: dict[str, Any]) -> dict[str, Any]:
         "memoryPolicy": resolve_memory_policy_for_agent(agent_id) if agent_id else {},
         "allowedTools": list(tool_policy.get("allowedTools") or []),
         "updatedAt": str((agent or {}).get("updatedAt") or node.get("updatedAt") or ""),
+    }
+
+
+def _agent_node_to_canvas_api(node: dict[str, Any], active_agent: dict[str, Any] | None = None) -> dict[str, Any]:
+    stored_agent = node.get("agent") if isinstance(node.get("agent"), dict) else {}
+    agent = active_agent if isinstance(active_agent, dict) else stored_agent
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return {
+        "nodeId": _clean_id(node.get("nodeId")) or _clean_id(node.get("agentId")),
+        "agentId": _clean_id(node.get("agentId")),
+        "agentCode": str(agent.get("agentCode") or node.get("agentCode") or ""),
+        "displayName": str(agent.get("displayName") or node.get("displayName") or ""),
+        "role": str(node.get("role") or metadata.get("researchOrgRole") or metadata.get("systemRole") or ""),
+        "employeeRank": str(node.get("employeeRank") or metadata.get("employeeRank") or "member"),
+        "protected": bool(node.get("protected") or metadata.get("protected")),
+        "zoneId": str(node.get("zoneId") or ""),
+        "status": str(agent.get("status") or node.get("status") or "active"),
+        "x": _coerce_int(node.get("x"), 0),
+        "y": _coerce_int(node.get("y"), 0),
+        "agent": {
+            "agentId": str(agent.get("agentId") or node.get("agentId") or ""),
+            "agentCode": str(agent.get("agentCode") or node.get("agentCode") or ""),
+            "displayName": str(agent.get("displayName") or node.get("displayName") or ""),
+            "roleKey": str(agent.get("roleKey") or ""),
+            "promptTemplateId": str(agent.get("promptTemplateId") or ""),
+            "templateId": str(agent.get("templateId") or ""),
+            "metadata": {
+                "functionalDisplayName": str(metadata.get("functionalDisplayName") or ""),
+                "responsibilities": list(metadata.get("responsibilities") or [])[:8]
+                if isinstance(metadata.get("responsibilities"), list)
+                else [],
+            },
+        },
+        "allowedTools": list((node.get("toolPolicy") if isinstance(node.get("toolPolicy"), dict) else {}).get("allowedTools") or [])[:40],
+        "updatedAt": str(agent.get("updatedAt") or node.get("updatedAt") or ""),
     }
 
 

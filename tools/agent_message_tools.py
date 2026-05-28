@@ -20,6 +20,9 @@ def agent_message_tool(
     """
     Send a persistent message from the current Agent to another Agent.
 
+    Messages involving explicit research organization Agents are routed through
+    the research organization graph policy before any inbox write.
+
     Args:
         target_agent: Target Agent id, stable code such as A002, or unique display name.
         content: Message body for the target Agent.
@@ -36,6 +39,7 @@ def agent_message_tool(
         from core.web.services import session_service
         from core.web.services.agent_directory_service import (
             current_agent_runtime,
+            get_agent,
             list_agents,
             write_agent_inbox_message,
         )
@@ -75,7 +79,8 @@ def agent_message_tool(
                 }
             )
 
-        target = _resolve_target_agent(normalized_target, list_agents(include_archived=False))
+        agents = list_agents(include_archived=False)
+        target = _resolve_target_agent(normalized_target, agents)
         if not target.get("ok"):
             return _json_result(target)
         target_agent_payload = target["agent"]
@@ -92,6 +97,21 @@ def agent_message_tool(
             )
 
         metadata = _parse_metadata(metadata_json)
+        source_agent_payload = get_agent(source_agent_id, include_archived=True) or {}
+        research_org_result = _try_send_research_org_message(
+            source_agent=source_agent_payload,
+            target_agent=target_agent_payload,
+            source_agent_id=source_agent_id,
+            source_session_id=source_session_id,
+            content=message_body,
+            summary=summary,
+            wake_target=wake_target,
+            thread_id=thread_id,
+            metadata=metadata,
+        )
+        if research_org_result is not None:
+            return _json_result(research_org_result)
+
         message = write_agent_inbox_message(
             target_agent_id,
             source_agent_id=source_agent_id,
@@ -116,11 +136,12 @@ def agent_message_tool(
                 "reason": "",
             }
         )
-        _record_agent_message_tool_event(message, delivery)
+        _record_agent_message_tool_event(message, delivery, route="direct")
         return _json_result(
             {
                 "ok": True,
                 "status": "sent",
+                "route": "direct",
                 "messageId": message.get("messageId") or "",
                 "sourceAgentId": source_agent_id,
                 "sourceSessionId": source_session_id,
@@ -191,25 +212,165 @@ def _parse_metadata(metadata_json: str) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {"value": payload}
 
 
-def _record_agent_message_tool_event(message: dict[str, Any], delivery: dict[str, Any]) -> None:
+def _try_send_research_org_message(
+    *,
+    source_agent: dict[str, Any],
+    target_agent: dict[str, Any],
+    source_agent_id: str,
+    source_session_id: str,
+    content: str,
+    summary: str,
+    wake_target: bool,
+    thread_id: str,
+    metadata: dict[str, Any],
+) -> dict[str, Any] | None:
+    if not (_agent_has_research_org_scope(source_agent) or _agent_has_research_org_scope(target_agent)):
+        return None
+
+    from core.web.services import research_organization_service
+
+    target_agent_id = str(target_agent.get("agentId") or "").strip()
+    organization = research_organization_service.get_research_organization()
+    organization_agent_ids = {
+        str(node.get("agentId") or "").strip()
+        for node in organization.get("agents") or []
+        if isinstance(node, dict)
+    }
+    if source_agent_id not in organization_agent_ids and target_agent_id not in organization_agent_ids:
+        return None
+
+    message_type = _metadata_text(metadata, "researchOrgMessageType", "messageType") or "request"
+    intent = _metadata_text(metadata, "researchOrgIntent", "intent")
+    delivery_mode = _metadata_text(metadata, "researchOrgDeliveryMode", "deliveryMode") or "private"
+    mailbox_only = _metadata_bool(metadata, "researchOrgMailboxOnly", "mailboxOnly")
+    result = research_organization_service.send_research_org_message(
+        {
+            "sourceType": "agent",
+            "sourceAgentId": source_agent_id,
+            "sourceSessionId": source_session_id,
+            "targetAgentId": target_agent_id,
+            "messageType": message_type,
+            "intent": intent,
+            "deliveryMode": delivery_mode,
+            "content": content,
+            "summary": summary,
+            "threadId": thread_id,
+            "wakeTarget": bool(wake_target),
+            "mailboxOnly": mailbox_only,
+            "createdBy": "agent_tool",
+        }
+    )
+    message = result.get("message") if isinstance(result.get("message"), dict) else {}
+    deliveries = message.get("deliveries") if isinstance(message.get("deliveries"), list) else []
+    delivery = deliveries[0] if deliveries and isinstance(deliveries[0], dict) else {}
+    allowed = bool(delivery.get("allowed"))
+    inbox_message_id = str(delivery.get("inboxMessageId") or "").strip()
+    research_org_message_id = str(message.get("messageId") or "").strip()
+    tool_message_id = inbox_message_id or research_org_message_id
+    tool_message = {
+        "messageId": tool_message_id,
+        "sourceAgentId": source_agent_id,
+        "sourceSessionId": source_session_id,
+        "targetAgentId": target_agent_id,
+        "targetSessionId": str(target_agent.get("directSessionId") or "").strip(),
+    }
+    _record_agent_message_tool_event(
+        tool_message,
+        delivery,
+        route="research_org",
+        outcome="sent" if allowed else "blocked",
+        extra_fields={
+            "researchOrgMessageId": research_org_message_id,
+            "edgeId": str(delivery.get("edgeId") or "").strip(),
+            "messageType": str(message.get("messageType") or message_type).strip(),
+            "intent": str(message.get("intent") or intent).strip(),
+            "deliveryMode": str(message.get("deliveryMode") or delivery_mode).strip(),
+        },
+    )
+    return {
+        "ok": allowed,
+        "status": "sent" if allowed else "blocked",
+        "route": "research_org",
+        "messageId": tool_message_id,
+        "researchOrgMessageId": research_org_message_id,
+        "sourceAgentId": source_agent_id,
+        "sourceSessionId": source_session_id,
+        "targetAgentId": target_agent_id,
+        "targetAgentCode": target_agent.get("agentCode") or "",
+        "targetSessionId": target_agent.get("directSessionId") or "",
+        "wakeStatus": delivery.get("wakeStatus") or ("blocked" if not allowed else ""),
+        "reason": delivery.get("reason") or "",
+        "delivery": delivery,
+    }
+
+
+def _agent_has_research_org_scope(agent: dict[str, Any]) -> bool:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    return any(str(metadata.get(key) or "").strip() for key in ("researchOrgRole", "systemRole"))
+
+
+def _metadata_text(metadata: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = metadata.get(key)
+        if value is None:
+            continue
+        text = trim_lines(str(value), max_lines=1).strip()
+        if text:
+            return text
+    return ""
+
+
+def _metadata_bool(metadata: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        if key not in metadata:
+            continue
+        value = metadata.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().casefold() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
+    return False
+
+
+def _record_agent_message_tool_event(
+    message: dict[str, Any],
+    delivery: dict[str, Any],
+    *,
+    route: str,
+    outcome: str = "sent",
+    extra_fields: dict[str, Any] | None = None,
+) -> None:
     try:
         from core.web.services.runtime_scene_service import record_runtime_scene_event
 
+        sent = outcome == "sent"
+        fields = {
+            "messageId": str(message.get("messageId") or "").strip(),
+            "sourceAgentId": str(message.get("sourceAgentId") or "").strip(),
+            "targetAgentId": str(message.get("targetAgentId") or "").strip(),
+            "targetSessionId": str(message.get("targetSessionId") or "").strip(),
+            "wakeStatus": str(delivery.get("wakeStatus") or "").strip(),
+            "turnId": str(delivery.get("turnId") or "").strip(),
+            "route": route,
+            "reason": str(delivery.get("reason") or "").strip(),
+        }
+        if isinstance(extra_fields, dict):
+            fields.update(
+                {
+                    str(key): value
+                    for key, value in extra_fields.items()
+                    if str(key or "").strip()
+                }
+            )
         record_runtime_scene_event(
             "agent_inbox",
             "tool",
-            "agent_inbox.tool_sent",
-            message="agent_inbox.tool_sent",
-            level="info",
-            outcome="sent",
-            fields={
-                "messageId": str(message.get("messageId") or "").strip(),
-                "sourceAgentId": str(message.get("sourceAgentId") or "").strip(),
-                "targetAgentId": str(message.get("targetAgentId") or "").strip(),
-                "targetSessionId": str(message.get("targetSessionId") or "").strip(),
-                "wakeStatus": str(delivery.get("wakeStatus") or "").strip(),
-                "turnId": str(delivery.get("turnId") or "").strip(),
-            },
+            "agent_inbox.tool_sent" if sent else "agent_inbox.tool_blocked",
+            message="agent_inbox.tool_sent" if sent else "agent_inbox.tool_blocked",
+            level="info" if sent else "warning",
+            outcome=outcome,
+            fields=fields,
             lifecycle=True,
         )
     except Exception:
