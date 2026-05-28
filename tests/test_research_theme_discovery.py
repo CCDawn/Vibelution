@@ -30,6 +30,89 @@ from core.web.services import (
 from core.ui.chat_state import save_chat_state
 
 
+def _explicit_research_worker_flow_canvas():
+    return {
+        "schemaVersion": 1,
+        "canvasKind": "research_flow_canvas",
+        "updatedAt": "2026-05-28T00:00:00Z",
+        "viewport": {"x": 40, "y": 120, "zoom": 0.92},
+        "nodes": [
+            {
+                "id": "broad_search",
+                "label": "广撒网 agent",
+                "type": "agent",
+                "status": "ready",
+                "x": 80,
+                "y": 160,
+                "agentKey": "broad",
+                "promptKey": "broad",
+                "llmConfigId": "",
+                "description": "从开放目标出发，让 agent 使用真实网络和工具发现跨学科候选方向。",
+                "routeCondition": "输入开放目标、约束和偏好后启动",
+            },
+            {
+                "id": "deep_search",
+                "label": "定向深搜 agent",
+                "type": "agent",
+                "status": "idle",
+                "x": 480,
+                "y": 160,
+                "agentKey": "deep",
+                "promptKey": "deep",
+                "llmConfigId": "",
+                "description": "围绕上一阶段发现的关键缺口、论文、GitHub 项目和数据集补充证据。",
+                "routeCondition": "广撒网 agent 输出候选线索和初筛证据后继续",
+            },
+            {
+                "id": "evidence_review",
+                "label": "证据审查 agent",
+                "type": "agent",
+                "status": "needs_review",
+                "x": 880,
+                "y": 160,
+                "agentKey": "review",
+                "promptKey": "review",
+                "llmConfigId": "",
+                "description": "审查来源可靠性、论断可追溯性和缺失证据，决定是否回到补搜。",
+                "routeCondition": "深搜完成后进入；若证据不足则回到定向深搜",
+            },
+            {
+                "id": "theme_generation",
+                "label": "主题生成 agent",
+                "type": "agent",
+                "status": "idle",
+                "x": 1280,
+                "y": 160,
+                "agentKey": "themes",
+                "promptKey": "themes",
+                "llmConfigId": "",
+                "description": "基于证据链生成可证伪、新颖且扣题的科研主题候选。",
+                "routeCondition": "证据审查通过或用户手动确认继续",
+            },
+            {
+                "id": "theme_card",
+                "label": "主题卡 agent",
+                "type": "agent",
+                "status": "idle",
+                "x": 1680,
+                "y": 160,
+                "agentKey": "card",
+                "promptKey": "card",
+                "llmConfigId": "",
+                "description": "产出赛题要求的科学假设与研究计划结构，包括数据集、方法、实验、指标和参考文献。",
+                "routeCondition": "用户确认主题生成 agent 的候选方向后生成正式主题卡",
+            },
+        ],
+        "edges": [
+            {"id": "edge_broad_deep", "source": "broad_search", "target": "deep_search", "label": "候选线索", "condition": "completed", "type": "success"},
+            {"id": "edge_deep_review", "source": "deep_search", "target": "evidence_review", "label": "深搜证据包", "condition": "completed", "type": "success"},
+            {"id": "edge_review_deep", "source": "evidence_review", "target": "deep_search", "label": "缺证据补搜", "condition": "needs_evidence", "type": "evidence_loop"},
+            {"id": "edge_review_themes", "source": "evidence_review", "target": "theme_generation", "label": "证据通过", "condition": "approved", "type": "approval_gate"},
+            {"id": "edge_themes_card", "source": "theme_generation", "target": "theme_card", "label": "选定主题", "condition": "selected", "type": "selection"},
+        ],
+    }
+
+
 def test_research_recommendation_score_uses_novelty_first_weights():
     score = calculate_recommendation_score(
         {
@@ -348,11 +431,52 @@ def test_research_prompt_defaults_are_agent_specific(tmp_path):
     assert "dataset_plan" in card
 
 
+def test_research_agent_config_defaults_to_ceo_managed_empty_pool():
+    config = normalize_research_agent_config({"schemaVersion": 1, "agents": []})
+
+    assert config["agents"] == []
+    assert config["deletedDefaultAgents"] == []
+
+
 def test_research_agent_config_can_hide_deleted_default_agent():
     config = normalize_research_agent_config({"schemaVersion": 1, "deletedDefaultAgents": ["review"], "agents": []})
 
     assert "review" not in {agent["key"] for agent in config["agents"]}
     assert "review" in config["deletedDefaultAgents"]
+
+
+def test_research_agent_config_drops_legacy_seed_default_agents():
+    config = normalize_research_agent_config(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "key": "broad",
+                    "label": "广撒网 agent",
+                    "promptFilename": "broad.md",
+                    "templateId": "research_broad_explorer",
+                    "profileId": "research_broad",
+                    "agentId": "agent-legacy-broad",
+                    "agentInstanceId": "agent-legacy-broad",
+                    "directSessionId": "session-legacy-broad",
+                    "roleKey": "research_broad",
+                    "promptTemplateId": "prompt-research-broad",
+                },
+                {
+                    "key": "paper_reader",
+                    "label": "论文阅读员",
+                    "promptFilename": "paper_reader.md",
+                    "templateId": "research_deep_investigator",
+                    "profileId": "research_deep",
+                    "activationSource": "manual_config",
+                    "agentId": "agent-paper-reader",
+                },
+            ],
+        }
+    )
+
+    assert [agent["key"] for agent in config["agents"]] == ["paper_reader"]
+    assert "broad" in config["deletedDefaultAgents"]
 
 
 def test_research_prompt_update_failure_emits_runtime_scene_log(monkeypatch):
@@ -471,7 +595,7 @@ def test_research_agent_binding_save_updates_unified_agent_stack(tmp_path, monke
             return True
 
         def read_research_flow_canvas(self):
-            return research_service._legacy_research_flow_canvas()
+            return _explicit_research_worker_flow_canvas()
 
         def write_research_prompt(self, filename, content):
             path = self.get_research_prompt_path(filename)
@@ -666,6 +790,7 @@ def test_research_agent_instance_sync_replaces_archived_mode_binding_ref(tmp_pat
                 {
                     "key": "broad",
                     "label": "广撒网探索 Agent",
+                    "activationSource": "manual_config",
                     "enabled": True,
                     "templateId": "research_broad_explorer",
                     "profileId": "research_broad",
@@ -887,27 +1012,20 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
     assert default_canvas["validation"]["valid"] is True
     assert default_canvas["validation"]["summary"]["errorCount"] == 0
     assert [node["id"] for node in default_canvas["nodes"]] == [
-        "broad_search",
-        "deep_search",
-        "evidence_review",
-        "theme_generation",
-        "theme_card",
+        "research_ceo_entry",
+        "organization_advisor_entry",
     ]
     assert {node["type"] for node in default_canvas["nodes"]} == {"agent"}
     assert {edge["id"] for edge in default_canvas["edges"]} == {
-        "edge_broad_deep",
-        "edge_deep_review",
-        "edge_review_deep",
-        "edge_review_themes",
-        "edge_themes_card",
+        "edge_ceo_advisor",
     }
-    assert {edge["condition"] for edge in default_canvas["edges"]} >= {"completed", "needs_evidence", "approved", "selected"}
+    assert {edge["condition"] for edge in default_canvas["edges"]} == {"completed"}
 
     default_payload = {
         **default_canvas,
         "viewport": {"x": 42, "y": -16, "zoom": 1.42},
         "nodes": [
-            {**node, "x": 240.5, "y": 180.25} if node["id"] == "broad_search" else node
+            {**node, "x": 240.5, "y": 180.25} if node["id"] == "research_ceo_entry" else node
             for node in default_canvas["nodes"]
         ],
     }
@@ -915,14 +1033,10 @@ def test_research_flow_canvas_roundtrip_uses_workspace_source_of_truth(tmp_path,
     reloaded_default = research_service.get_research_flow_canvas()
     assert saved_default["canvasKind"] == "research_flow_canvas"
     assert saved_default["viewport"] == {"x": 42, "y": -16, "zoom": 1.42}
-    assert next(node for node in reloaded_default["nodes"] if node["id"] == "broad_search")["x"] == 240.5
-    assert next(node for node in reloaded_default["nodes"] if node["id"] == "broad_search")["y"] == 180.25
+    assert next(node for node in reloaded_default["nodes"] if node["id"] == "research_ceo_entry")["x"] == 240.5
+    assert next(node for node in reloaded_default["nodes"] if node["id"] == "research_ceo_entry")["y"] == 180.25
     assert {edge["id"] for edge in reloaded_default["edges"]} == {
-        "edge_broad_deep",
-        "edge_deep_review",
-        "edge_review_deep",
-        "edge_review_themes",
-        "edge_themes_card",
+        "edge_ceo_advisor",
     }
     flow_events = [event for event in events if event[0][0] == "research.flow_canvas.updated"]
     assert flow_events[-1][1]["fields"]["nodeCount"] >= 2
@@ -1063,6 +1177,7 @@ def test_research_flow_canvas_save_syncs_agent_id_to_mode_binding(tmp_path, monk
                     "promptFilename": "broad.md",
                     "templateId": "research_broad_explorer",
                     "llmConfigId": "stale_legacy_profile",
+                    "activationSource": "manual_config",
                     "agentId": agent["agentId"],
                     "enabled": True,
                 }
@@ -1165,7 +1280,7 @@ def test_research_flow_canvas_rejects_mojibake_payload(tmp_path, monkeypatch):
 
     assert events[-1][0][0] == "research.flow_canvas.update_failed"
     assert events[-1][1]["fields"]["mojibakeMarkerCount"] >= 2
-    assert events[-1][1]["fields"]["mojibakeMarkers"][0]["id"] == "broad_search"
+    assert events[-1][1]["fields"]["mojibakeMarkers"][0]["id"] == "research_ceo_entry"
 
 
 def test_research_flow_canvas_rejects_question_mark_encoding_loss(tmp_path, monkeypatch):
@@ -1218,8 +1333,8 @@ def test_research_flow_canvas_preserves_saved_default_node_positions(tmp_path, m
 
     payload = research_service._default_research_flow_canvas()
     expected_positions = {
-        "broad_search": {"x": 24.5, "y": 221.25},
-        "deep_search": {"x": 444.75, "y": 310.5},
+        "research_ceo_entry": {"x": 24.5, "y": 221.25},
+        "organization_advisor_entry": {"x": 444.75, "y": 310.5},
     }
     for node in payload["nodes"]:
         position = expected_positions.get(node["id"])
@@ -1362,11 +1477,8 @@ def test_research_flow_canvas_legacy_agent_graph_does_not_pollute_flow_canvas(tm
 
     assert canvas["canvasKind"] == "research_flow_canvas"
     assert [node["id"] for node in canvas["nodes"]] == [
-        "broad_search",
-        "deep_search",
-        "evidence_review",
-        "theme_generation",
-        "theme_card",
+        "research_ceo_entry",
+        "organization_advisor_entry",
     ]
     assert {node["type"] for node in canvas["nodes"]} == {"agent"}
     assert all(edge["condition"] != "delegate" for edge in canvas["edges"])
@@ -1530,7 +1642,7 @@ def test_research_flow_canvas_executes_next_ready_node_and_routes_successors(tmp
                 import json
 
                 return json.loads(path.read_text(encoding="utf-8"))
-            return research_service._legacy_research_flow_canvas()
+            return _explicit_research_worker_flow_canvas()
 
         def write_research_flow_canvas(self, data):
             path = self.get_research_flow_canvas_path()
@@ -1607,7 +1719,7 @@ def test_theme_discovery_actions_sync_flow_canvas_statuses(tmp_path, monkeypatch
                 import json
 
                 return json.loads(path.read_text(encoding="utf-8"))
-            return research_service._legacy_research_flow_canvas()
+            return _explicit_research_worker_flow_canvas()
 
         def write_research_flow_canvas(self, data):
             path = self.get_research_flow_canvas_path()
@@ -1789,7 +1901,7 @@ def test_research_flow_canvas_blocks_new_node_while_another_is_running(tmp_path,
             return tmp_path / "prompts" / "research" / "flow_canvas.json"
 
         def read_research_flow_canvas(self):
-            canvas = research_service._legacy_research_flow_canvas()
+            canvas = _explicit_research_worker_flow_canvas()
             for node in canvas["nodes"]:
                 if node["id"] == "broad_search":
                     node["status"] = "done"
@@ -2321,7 +2433,7 @@ def test_research_flow_canvas_api_declares_utf8_json(tmp_path, monkeypatch):
     assert response.headers["content-type"].lower().startswith("application/json")
     assert "charset=utf-8" in response.headers["content-type"].lower()
     assert response.json()["canvasKind"] == "research_flow_canvas"
-    assert response.json()["nodes"][0]["label"] == "广撒网 agent"
+    assert response.json()["nodes"][0]["label"] == "CEO Agent"
 
 
 def test_public_search_provider_uses_configured_proxy(monkeypatch):

@@ -111,7 +111,15 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
 
   it("creates and matches reusable module and route templates", () => {
     expect(RESEARCH_MODULE_TEMPLATES.map((template) => template.key)).toEqual(
-      expect.arrayContaining(["broad_search", "deep_search", "evidence_review", "theme_generation", "theme_card"]),
+      expect.arrayContaining([
+        "research_ceo_entry",
+        "organization_advisor_entry",
+        "broad_search",
+        "deep_search",
+        "evidence_review",
+        "theme_generation",
+        "theme_card",
+      ]),
     );
     expect(RESEARCH_MODULE_TEMPLATES.every((template) => template.type === "agent")).toBe(true);
     expect(RESEARCH_MODULE_TEMPLATES.map((template) => template.key)).not.toEqual(

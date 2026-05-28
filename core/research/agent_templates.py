@@ -275,7 +275,7 @@ def ensure_research_prompt_defaults(workspace: Any) -> None:
 
 
 def normalize_research_agent_config(raw: dict[str, Any] | None) -> dict[str, Any]:
-    """Return complete research agent bindings with defaults filled in."""
+    """Return explicitly activated research agent bindings."""
 
     raw = raw if isinstance(raw, dict) else {}
     raw_agents = raw.get("agents") if isinstance(raw.get("agents"), list) else []
@@ -291,52 +291,35 @@ def normalize_research_agent_config(raw: dict[str, Any] | None) -> dict[str, Any
     }
     known_templates = {item["templateId"] for item in RESEARCH_AGENT_TEMPLATES}
     agents: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for key, filename in RESEARCH_PROMPT_FILES.items():
-        if key in deleted_default_agents and key not in raw_by_key:
-            seen.add(key)
+    for key, existing in raw_by_key.items():
+        try:
+            normalized_key = normalize_research_agent_key(key)
+        except ValueError:
             continue
-        existing = raw_by_key.get(key, {})
+        if _is_legacy_seed_default_agent(normalized_key, existing):
+            deleted_default_agents.add(normalized_key)
+            continue
         template_id = str(existing.get("templateId") or "").strip()
         if template_id not in known_templates:
-            template_id = RESEARCH_AGENT_DEFAULT_TEMPLATE[key]
+            template_id = RESEARCH_AGENT_DEFAULT_TEMPLATE.get(normalized_key, RESEARCH_AGENT_TEMPLATES[0]["templateId"])
         profile_id = str(existing.get("profileId") or existing.get("llmConfigId") or "").strip()
         if not profile_id:
-            profile_id = RESEARCH_AGENT_DEFAULT_LLM_CONFIG[key]
+            profile_id = RESEARCH_AGENT_DEFAULT_LLM_CONFIG.get(normalized_key, "")
         prompt_filename = normalize_research_prompt_filename(
-            str(existing.get("promptFilename") or filename),
-            key,
+            str(existing.get("promptFilename") or RESEARCH_PROMPT_FILES.get(normalized_key) or ""),
+            normalized_key,
         )
         agent = {
-            "key": key,
-            "label": str(existing.get("label") or RESEARCH_AGENT_LABELS[key]),
+            "key": normalized_key,
+            "label": str(existing.get("label") or RESEARCH_AGENT_LABELS.get(normalized_key) or normalized_key.replace("_", " ").title()),
             "promptFilename": prompt_filename,
             "templateId": template_id,
             "profileId": profile_id,
             "enabled": bool(existing.get("enabled", True)),
         }
-        _copy_unified_agent_fields(agent, existing)
-        agents.append(agent)
-        seen.add(key)
-    for key, existing in raw_by_key.items():
-        if key in seen:
-            continue
-        try:
-            normalized_key = normalize_research_agent_key(key)
-        except ValueError:
-            continue
-        template_id = str(existing.get("templateId") or "").strip()
-        if template_id not in known_templates:
-            template_id = RESEARCH_AGENT_TEMPLATES[0]["templateId"]
-        profile_id = str(existing.get("profileId") or existing.get("llmConfigId") or "").strip()
-        agent = {
-            "key": normalized_key,
-            "label": str(existing.get("label") or normalized_key.replace("_", " ").title()),
-            "promptFilename": normalize_research_prompt_filename(str(existing.get("promptFilename") or ""), normalized_key),
-            "templateId": template_id,
-            "profileId": profile_id,
-            "enabled": bool(existing.get("enabled", True)),
-        }
+        activation_source = str(existing.get("activationSource") or "").strip()
+        if activation_source:
+            agent["activationSource"] = activation_source
         _copy_unified_agent_fields(agent, existing)
         agents.append(agent)
     return {
@@ -344,6 +327,22 @@ def normalize_research_agent_config(raw: dict[str, Any] | None) -> dict[str, Any
         "deletedDefaultAgents": sorted(deleted_default_agents),
         "agents": agents,
     }
+
+
+def _is_legacy_seed_default_agent(key: str, existing: dict[str, Any]) -> bool:
+    """Return whether a pre-team default research role should no longer auto-activate."""
+
+    if key not in RESEARCH_PROMPT_FILES:
+        return False
+    if str(existing.get("activationSource") or "").strip():
+        return False
+    return bool(
+        existing.get("agentId")
+        or existing.get("agentInstanceId")
+        or existing.get("directSessionId")
+        or existing.get("roleKey")
+        or existing.get("promptTemplateId")
+    )
 
 
 def _copy_unified_agent_fields(target: dict[str, Any], source: dict[str, Any]) -> None:
