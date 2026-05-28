@@ -26,6 +26,7 @@ from core.evaluation.self_evolution_reflection import (
 )
 from core.infrastructure.agent_session import get_session_state
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
+from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
 from core.runtime_manager.command_queue import submit_command, wait_for_result
 from core.runtime_manager.evolution_store import (
     load_active_run_snapshot as load_manager_active_run_snapshot,
@@ -1430,8 +1431,6 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
     summary = ""
     tool_call_count = 0
     try:
-        from agent import SelfEvolvingAgent
-
         executor_binding = _self_role_binding(agent_bindings, "executor")
         executor_context = build_agent_context(
             str(executor_binding.get("agentId") or ""),
@@ -1443,23 +1442,20 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
             session_id=str(executor_binding.get("directSessionId") or ""),
             turn_id=run_id,
         )
+        prompt = goal if carryover else _build_web_run_prompt(goal)
         with runtime_context:
-            agent = SelfEvolvingAgent(
-                mode="self_evolution",
-                workspace_path=str(executor_binding.get("workspacePath") or "") or None,
-                config=_self_evolution_agent_config(executor_binding),
+            turn_result = run_agent_single_turn(
+                AgentSingleTurnRequest(
+                    mode="self_evolution",
+                    workspace_path=str(executor_binding.get("workspacePath") or "") or None,
+                    config=_self_evolution_agent_config(executor_binding),
+                    initial_prompt=prompt,
+                    carryover=carryover if isinstance(carryover, dict) else None,
+                    runtime_context=executor_context.context_block,
+                    interrupt_checker=lambda: _current_run_control_reason(run_id),
+                )
             )
-            seed_turn_carryover = getattr(agent, "seed_turn_carryover", None)
-            if callable(seed_turn_carryover) and carryover:
-                seed_turn_carryover(carryover)
-            seed_runtime_context = getattr(agent, "seed_runtime_context", None)
-            if callable(seed_runtime_context) and executor_context.context_block:
-                seed_runtime_context(executor_context.context_block)
-            stop_configurer = getattr(agent, "set_turn_interrupt_checker", None)
-            if callable(stop_configurer):
-                stop_configurer(lambda: _current_run_control_reason(run_id))
-            prompt = goal if carryover else _build_web_run_prompt(goal)
-            result = agent.run_single_turn(initial_prompt=prompt)
+        result = turn_result.result
         if executor_context.agent_id:
             record_agent_turn_result(
                 executor_context.agent_id,
@@ -1471,12 +1467,7 @@ def _run_self_evolution_turn(context: dict[str, Any]) -> None:
         summary = str(result.get("summary") or "").strip()
         tool_call_count = max(0, int(result.get("tool_call_count") or 0))
         total_tool_call_count += tool_call_count
-        carryover_payload: dict[str, Any] = {}
-        export_turn_carryover = getattr(agent, "export_turn_carryover", None)
-        if callable(export_turn_carryover):
-            exported = export_turn_carryover()
-            if isinstance(exported, dict):
-                carryover_payload = exported
+        carryover_payload: dict[str, Any] = turn_result.carryover if isinstance(turn_result.carryover, dict) else {}
         run_snapshot = get_self_evolution_run_snapshot(run_id) or {}
         control_action = str(run_snapshot.get("controlAction") or "").strip().lower()
         cancel_requested = bool(run_snapshot.get("cancelRequested"))
