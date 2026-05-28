@@ -32,6 +32,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUN_KIND = "chat_room_round"
 RUN_LEASES = [READONLY_CHAT_LEASE]
 DEFAULT_MODE = "round_robin"
+DEFAULT_PURPOSE = "discussion"
+CHAT_ROOM_PURPOSES = [
+    {
+        "id": "chat",
+        "label": "Chat",
+        "description": "Short, natural replies that follow the current topic and prior speaker.",
+    },
+    {
+        "id": "discussion",
+        "label": "Discussion",
+        "description": "Point-of-view exchange with tradeoffs, disagreement, and suggestions.",
+    },
+    {
+        "id": "meeting",
+        "label": "Meeting",
+        "description": "Structured meeting notes with decisions, risks, and action items.",
+    },
+]
 RUNNING_ROUND_STATUSES = {"queued", "running", "stopping"}
 _CHAT_ROOM_LOCK = threading.Lock()
 _CHAT_ROOM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="web-chat-room")
@@ -67,6 +85,10 @@ def list_chat_room_modes() -> list[dict[str, str]]:
     return get_scheduler_registry().list_modes()
 
 
+def list_chat_room_purposes() -> list[dict[str, str]]:
+    return [dict(item) for item in CHAT_ROOM_PURPOSES]
+
+
 def list_chat_rooms(
     *,
     session_summaries: dict[str, dict[str, Any]] | None = None,
@@ -95,6 +117,7 @@ def update_chat_room(
     title: str | None = None,
     participant_session_ids: list[str] | None = None,
     mode: str | None = None,
+    purpose: str | None = None,
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     lang = get_web_language()
@@ -114,6 +137,8 @@ def update_chat_room(
             normalized_mode = _normalize_mode(mode or room.get("mode") or DEFAULT_MODE)
             _require_ready_mode(normalized_mode)
             room["mode"] = normalized_mode
+        if purpose is not None:
+            room["purpose"] = _normalize_purpose(purpose or room.get("purpose") or DEFAULT_PURPOSE)
         if config is not None:
             room["config"] = _safe_config(config)
         if participant_session_ids is not None:
@@ -131,7 +156,11 @@ def update_chat_room(
         "room",
         "chat_room.updated",
         room,
-        fields={"participantCount": len(room.get("participants") or []), "mode": room.get("mode") or DEFAULT_MODE},
+        fields={
+            "participantCount": len(room.get("participants") or []),
+            "mode": room.get("mode") or DEFAULT_MODE,
+            "purpose": room.get("purpose") or DEFAULT_PURPOSE,
+        },
     )
     return _room_to_api(room)
 
@@ -314,10 +343,12 @@ def create_chat_room(
     participant_session_ids: list[str] | None = None,
     participant_agent_ids: list[str] | None = None,
     mode: str = DEFAULT_MODE,
+    purpose: str = DEFAULT_PURPOSE,
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     lang = get_web_language()
     normalized_mode = _normalize_mode(mode or DEFAULT_MODE)
+    normalized_purpose = _normalize_purpose(purpose or DEFAULT_PURPOSE)
     _require_ready_mode(normalized_mode)
     with _CHAT_ROOM_LOCK:
         state = _store().load()
@@ -342,6 +373,7 @@ def create_chat_room(
             "title": trim_lines(title or "", max_lines=1).strip()
             or text_for(lang, zh="Agent 群聊", en="Agent room"),
             "mode": normalized_mode,
+            "purpose": normalized_purpose,
             "config": _safe_config(config),
             "participants": participants,
             "rounds": [],
@@ -352,7 +384,12 @@ def create_chat_room(
         }
         state["rooms"] = list(state.get("rooms") or []) + [room]
         _store().save(state)
-    _record_room_event("room", "chat_room.created", room, fields={"participantCount": len(participants)})
+    _record_room_event(
+        "room",
+        "chat_room.created",
+        room,
+        fields={"participantCount": len(participants), "purpose": normalized_purpose},
+    )
     return _room_to_api(room)
 
 
@@ -361,6 +398,7 @@ def start_chat_room_round(
     topic: str,
     *,
     mode: str = "",
+    purpose: str = "",
     config: dict[str, Any] | None = None,
     agent_runner: AgentRunner | None = None,
     background: bool = False,
@@ -379,6 +417,7 @@ def start_chat_room_round(
             raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
         _raise_if_room_busy(room)
         round_mode = _normalize_mode(mode or room.get("mode") or DEFAULT_MODE)
+        round_purpose = _normalize_purpose(purpose or room.get("purpose") or DEFAULT_PURPOSE)
         scheduler = _require_ready_mode(round_mode)
         round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
         participants = _refresh_participants(
@@ -410,6 +449,7 @@ def start_chat_room_round(
             "roomId": normalized_room_id,
             "topic": normalized_topic,
             "mode": round_mode,
+            "purpose": round_purpose,
             "config": round_config,
             "status": "running",
             "speakerOrder": [item["participantId"] for item in speakers],
@@ -433,7 +473,7 @@ def start_chat_room_round(
         "chat_room.round.started",
         room,
         round_payload,
-        fields={"mode": round_mode, "participantCount": len(speakers)},
+        fields={"mode": round_mode, "purpose": round_purpose, "participantCount": len(speakers)},
         outcome="running",
         lifecycle=True,
     )
@@ -455,7 +495,7 @@ def start_chat_room_round(
             "chat_room.round.background_started",
             room,
             round_payload,
-            fields={"mode": round_mode, "participantCount": len(speakers)},
+            fields={"mode": round_mode, "purpose": round_purpose, "participantCount": len(speakers)},
             outcome="running",
             lifecycle=True,
         )
@@ -487,7 +527,7 @@ def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
         zh="用户请求停止当前群聊轮次。",
         en="The user requested the current chat room round to stop.",
     )
-    stopped_at = utc_now_iso()
+    stopping_at = utc_now_iso()
     with _CHAT_ROOM_LOCK:
         state = _store().load()
         room = _find_room(state, normalized_room_id)
@@ -502,17 +542,17 @@ def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
             raise ChatRoomBusyError(text_for(lang, zh="当前群聊没有正在运行的轮次。", en="No chat room round is running."))
         _request_chat_room_round_stop(active_round_id, stop_reason)
         session_service.cancel_agent_execution_reservation(active_round_id)
-        target_round["status"] = "stopped"
-        target_round["summary"] = _stopped_round_summary(
-            stop_reason,
-            message_count=len(list(target_round.get("messages") or [])),
-            speaker_count=len(list(target_round.get("speakerOrder") or [])),
+        target_round["status"] = "stopping"
+        target_round["summary"] = text_for(
+            lang,
+            zh="正在停止当前群聊轮次，等待正在发言的 Agent 收尾。",
+            en="Stopping this chat room round while the current agent finishes.",
         )
-        target_round["updatedAt"] = stopped_at
-        target_round["finishedAt"] = stopped_at
-        room["status"] = "ready"
-        room["activeRoundId"] = ""
-        room["updatedAt"] = stopped_at
+        target_round["updatedAt"] = stopping_at
+        target_round["finishedAt"] = ""
+        room["status"] = "stopping"
+        room["activeRoundId"] = active_round_id
+        room["updatedAt"] = stopping_at
         _store().save(state)
         room_payload = dict(room)
         round_payload = dict(target_round)
@@ -520,16 +560,16 @@ def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
     _persist_chat_room_work_run(
         room_payload,
         round_payload,
-        status="stopped",
+        status="stopping",
         summary=str(round_payload.get("summary") or stop_reason),
     )
     _record_room_event(
         "round",
-        "chat_room.round.user_stopped",
+        "chat_room.round.stop_requested",
         room_payload,
         round_payload,
         fields={"reason": trim_lines(stop_reason, max_lines=2)},
-        outcome="stopped",
+        outcome="stopping",
         lifecycle=True,
     )
     _publish_chat_room_detail_snapshot(normalized_room_id)
@@ -593,6 +633,7 @@ def _execute_chat_room_round(
     lang: str,
 ) -> dict[str, Any]:
     round_mode = str(round_payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
+    round_purpose = _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE)
     normalized_topic = str(round_payload.get("topic") or "").strip()
 
     messages: list[dict[str, Any]] = []
@@ -612,9 +653,14 @@ def _execute_chat_room_round(
             "roundId": round_id,
             "topic": normalized_topic,
             "mode": round_mode,
+            "purpose": round_purpose,
             "speakerIndex": index,
         }
         message = _run_one_speaker(participant, prompt, context, runner)
+        stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
+        if stopped_detail is not None:
+            _clear_chat_room_round_control(round_id)
+            return stopped_detail
         messages.append(message)
         message_time = utc_now_iso()
         with _CHAT_ROOM_LOCK:
@@ -658,6 +704,7 @@ def _execute_chat_room_round(
                 "sessionId": participant.get("sessionId") or "",
                 "speakerIndex": index,
                 "status": message["status"],
+                "purpose": round_purpose,
                 "contentChars": len(message.get("content") or ""),
                 "errorType": message.get("errorType") or "",
             },
@@ -698,6 +745,7 @@ def _execute_chat_room_round(
         target_round,
         fields={
             "mode": round_mode,
+            "purpose": round_purpose,
             "messageCount": len(messages),
             "completedCount": completed_count,
             "failedCount": len(messages) - completed_count,
@@ -999,12 +1047,15 @@ def _build_participant_prompt(
 ) -> str:
     recent_session_lines = _format_recent_session_messages(participant.get("recentMessages") or [])
     prior_lines = _format_prior_room_messages(prior_messages)
+    purpose = _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE)
+    purpose_lines = _purpose_prompt_lines(purpose)
     return "\n".join(
         [
             "你正在参加 Vibelution 的只读 Agent 群聊。",
             f"群聊: {room.get('title') or room.get('roomId')}",
             f"当前议题: {round_payload.get('topic') or ''}",
             f"调度模式: {round_payload.get('mode') or DEFAULT_MODE}",
+            f"对话目的: {purpose}",
             f"你的身份: {_participant_speaker_label(participant)}",
             f"来源会话: {participant.get('sessionId') or ''}",
             "",
@@ -1014,10 +1065,34 @@ def _build_participant_prompt(
             "本轮已经出现的群聊发言:",
             prior_lines or "- 你是本轮第一位发言者。",
             "",
+            "本轮发言风格:",
+            *purpose_lines,
+            "",
             "请给出一段紧凑、可读、只读的群聊发言。不要修改文件、不要提交、不要启动进化或部署。",
             "如果你没有新信息，请明确说明你的确认、保留意见或下一步建议。",
         ]
     )
+
+
+def _purpose_prompt_lines(purpose: str) -> list[str]:
+    normalized = _normalize_purpose(purpose)
+    if normalized == "chat":
+        return [
+            "- 像真实群聊一样回应当前用户话题，优先接住上一位发言者，不要写成任务报告。",
+            "- 用 1-3 句自然短句表达；除非用户明确要求，不要使用标题、列表、表格或会议纪要格式。",
+            "- 如果会话近况与当前话题无关，只保留一句必要背景，不要把旧任务上下文搬进来。",
+        ]
+    if normalized == "meeting":
+        return [
+            "- 按会议协作发言：聚焦议题、决策、风险和下一步行动。",
+            "- 可以使用简短项目符号，但每条都要服务于结论、责任或待确认事项。",
+            "- 明确指出需要谁确认、后续要做什么，避免闲聊式扩散。",
+        ]
+    return [
+        "- 按讨论模式发言：回应前文观点，给出一个清晰立场、补充角度、权衡或反对意见。",
+        "- 可以提出建议或分歧，但保持紧凑，不要写成长篇报告。",
+        "- 让发言接在上一位之后，避免孤立复述自己的会话近况。",
+    ]
 
 
 def _format_recent_session_messages(messages: list[dict[str, Any]]) -> str:
@@ -1530,15 +1605,32 @@ def _normalize_mode(mode: str) -> str:
     return normalized or DEFAULT_MODE
 
 
+def _normalize_purpose(purpose: Any) -> str:
+    normalized = str(purpose or DEFAULT_PURPOSE).strip().lower().replace("-", "_")
+    allowed = {str(item["id"]) for item in CHAT_ROOM_PURPOSES}
+    return normalized if normalized in allowed else DEFAULT_PURPOSE
+
+
 def _safe_config(config: Any) -> dict[str, Any]:
     return dict(config) if isinstance(config, dict) else {}
 
 
 def _room_to_api(room: dict[str, Any]) -> dict[str, Any]:
     payload = dict(room)
+    payload["mode"] = str(payload.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE
+    payload["purpose"] = _normalize_purpose(payload.get("purpose") or DEFAULT_PURPOSE)
     payload["participants"] = [dict(item) for item in list(room.get("participants") or []) if isinstance(item, dict)]
-    payload["rounds"] = [dict(item) for item in list(room.get("rounds") or []) if isinstance(item, dict)]
+    payload["rounds"] = [
+        {
+            **dict(item),
+            "mode": str(dict(item).get("mode") or payload["mode"] or DEFAULT_MODE).strip() or DEFAULT_MODE,
+            "purpose": _normalize_purpose(dict(item).get("purpose") or payload["purpose"] or DEFAULT_PURPOSE),
+        }
+        for item in list(room.get("rounds") or [])
+        if isinstance(item, dict)
+    ]
     payload["availableModes"] = list_chat_room_modes()
+    payload["availablePurposes"] = list_chat_room_purposes()
     return payload
 
 
@@ -1616,6 +1708,7 @@ def _chat_room_work_run_snapshot(
         "leases": list(RUN_LEASES),
         "topic": str(round_payload.get("topic") or "").strip(),
         "mode": str(round_payload.get("mode") or DEFAULT_MODE).strip(),
+        "purpose": _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE),
         "summary": str(round_payload.get("summary") or "").strip(),
         "startedAt": str(round_payload.get("startedAt") or "").strip(),
         "updatedAt": str(round_payload.get("updatedAt") or "").strip(),
@@ -1707,6 +1800,7 @@ def _persist_chat_room_work_run(
         "leases": list(RUN_LEASES),
         "topic": str(round_payload.get("topic") or "").strip(),
         "mode": str(round_payload.get("mode") or DEFAULT_MODE).strip(),
+        "purpose": _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE),
         "summary": str(summary or round_payload.get("summary") or "").strip(),
         "startedAt": str(round_payload.get("startedAt") or now).strip(),
         "updatedAt": now,
@@ -1732,12 +1826,14 @@ def _record_room_event(
     event_fields = {
         "roomId": str(room.get("roomId") or "").strip(),
         "roomTitle": str(room.get("title") or "").strip(),
+        "purpose": _normalize_purpose(room.get("purpose") or DEFAULT_PURPOSE),
     }
     if round_payload:
         event_fields.update(
             {
                 "roundId": str(round_payload.get("roundId") or "").strip(),
                 "topicLength": len(str(round_payload.get("topic") or "")),
+                "purpose": _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE),
             }
         )
     if fields:

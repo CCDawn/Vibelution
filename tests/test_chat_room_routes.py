@@ -22,6 +22,16 @@ def test_chat_room_modes_api_exposes_opportunistic_as_ready():
     assert modes["opportunistic"]["status"] == "ready"
 
 
+def test_chat_room_purposes_api_exposes_conversation_purpose_modes():
+    response = client.get("/api/chat-rooms/purposes")
+
+    assert response.status_code == 200
+    purposes = {item["id"]: item for item in response.json()}
+    assert list(purposes) == ["chat", "discussion", "meeting"]
+    assert purposes["chat"]["label"] == "Chat"
+    assert "natural replies" in purposes["chat"]["description"]
+
+
 def _wait_for_completed_room_round(room_id: str, *, timeout: float = 2.0) -> dict:
     deadline = time.monotonic() + timeout
     detail: dict = {}
@@ -79,17 +89,20 @@ def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
         json={
             "title": "项目群聊",
             "participantSessionIds": ["session-a", "session-b"],
+            "purpose": "chat",
         },
     )
 
     assert create_response.status_code == 201
     room = create_response.json()
     assert room["title"] == "项目群聊"
+    assert room["purpose"] == "chat"
+    assert [item["id"] for item in room["availablePurposes"]] == ["chat", "discussion", "meeting"]
     assert len(room["participants"]) == 2
 
     round_response = client.post(
         f"/api/chat-rooms/{room['roomId']}/rounds",
-        json={"topic": "确认第一版群聊行为"},
+        json={"topic": "确认第一版群聊行为", "purpose": "meeting"},
     )
 
     assert round_response.status_code == 202
@@ -100,6 +113,7 @@ def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
     detail = _wait_for_completed_room_round(room["roomId"])
     latest_round = detail["rounds"][-1]
     assert latest_round["topic"] == "确认第一版群聊行为"
+    assert latest_round["purpose"] == "meeting"
     assert latest_round["status"] == "completed"
     assert [message["content"] for message in latest_round["messages"]] == ["Agent A 发言", "Agent B 发言"]
 
@@ -117,12 +131,14 @@ def test_chat_room_api_creates_room_from_agent_ids(tmp_path, monkeypatch):
             "title": "动态群聊",
             "agentIds": [alpha["agentId"], beta["agentId"]],
             "mode": "round_robin",
+            "purpose": "discussion",
         },
     )
 
     assert response.status_code == 201, response.text
     room = response.json()
     assert room["title"] == "动态群聊"
+    assert room["purpose"] == "discussion"
     assert [participant["agentId"] for participant in room["participants"]] == [alpha["agentId"], beta["agentId"]]
 
 
@@ -162,12 +178,14 @@ def test_chat_room_api_updates_and_deletes_room(tmp_path, monkeypatch):
         json={
             "title": "已管理群聊",
             "participantSessionIds": ["session-b"],
+            "purpose": "meeting",
         },
     )
 
     assert update_response.status_code == 200
     updated = update_response.json()
     assert updated["title"] == "已管理群聊"
+    assert updated["purpose"] == "meeting"
     assert [participant["sessionId"] for participant in updated["participants"]] == ["session-b"]
 
     delete_response = client.delete(f"/api/chat-rooms/{room['roomId']}")
@@ -214,16 +232,21 @@ def test_chat_room_api_stops_active_round(tmp_path, monkeypatch):
         assert runner_started.wait(1.0)
 
         stop_response = client.post(f"/api/chat-rooms/{room['roomId']}/stop")
+        stopped = stop_response.json()
+        assert stop_response.status_code == 202
+        assert stopped["status"] == "stopping"
+        assert stopped["activeRoundId"] == round_id
+        assert stopped["rounds"][-1]["roundId"] == round_id
+        assert stopped["rounds"][-1]["status"] == "stopping"
     finally:
         release_runner.set()
         executor.shutdown(wait=True, cancel_futures=True)
 
-    assert stop_response.status_code == 202
-    stopped = stop_response.json()
-    assert stopped["status"] == "ready"
-    assert stopped["activeRoundId"] == ""
-    assert stopped["rounds"][-1]["roundId"] == round_id
-    assert stopped["rounds"][-1]["status"] == "stopped"
+    final_detail = client.get(f"/api/chat-rooms/{room['roomId']}").json()
+    assert final_detail["status"] == "ready"
+    assert final_detail["activeRoundId"] == ""
+    assert final_detail["rounds"][-1]["roundId"] == round_id
+    assert final_detail["rounds"][-1]["status"] == "stopped"
 
 
 def test_chat_room_api_rejects_stop_when_no_round_is_running(tmp_path, monkeypatch):

@@ -457,6 +457,56 @@
   gap: 3px;
 }
 
+.agentRoleTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: start;
+  min-height: 20px;
+  max-width: 100%;
+  padding: 0 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 740;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agentRoleTag_chat {
+  border-color: color-mix(in srgb, var(--accent-warm) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-warm) 12%, transparent);
+  color: var(--accent-warm-2);
+}
+
+.agentRoleTag_research {
+  border-color: color-mix(in srgb, var(--accent-cool) 36%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 13%, transparent);
+  color: var(--accent-cool-2);
+}
+
+.agentRoleTag_self {
+  border-color: color-mix(in srgb, var(--state-success) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-success) 12%, transparent);
+  color: var(--state-success);
+}
+
+.agentRoleTag_supervised {
+  border-color: color-mix(in srgb, var(--state-warning) 36%, var(--border-soft));
+  background: color-mix(in srgb, var(--state-warning) 12%, transparent);
+  color: var(--state-warning);
+}
+
+.agentRoleTag_tool,
+.agentRoleTag_memory,
+.agentRoleTag_general {
+  border-color: color-mix(in srgb, var(--fg-tertiary) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--fg-tertiary) 9%, transparent);
+  color: var(--fg-secondary);
+}
+
 .sessionActions {
   display: flex;
   align-items: center;

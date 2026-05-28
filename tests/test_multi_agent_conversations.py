@@ -81,8 +81,11 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     conversations = conversation_service.list_conversations()
     direct = [item for item in conversations if item["type"] == "direct_agent"]
     assert direct[0]["conversationId"] == detail["id"]
+    assert direct[0]["title"] == "配置 Agent"
     assert direct[0]["agentId"] == detail["agentId"]
     assert direct[0]["agentCode"] == "A001"
+    assert direct[0]["agentDisplayName"] == agent["displayName"]
+    assert direct[0]["agentDisplayName"] != direct[0]["title"]
 
 
 def test_legacy_session_is_repaired_with_agent_id_without_moving_session_workspace(tmp_path, monkeypatch):

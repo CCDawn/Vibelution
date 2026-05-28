@@ -5,14 +5,18 @@ import { useLocation } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
-import { ChatRoomDetail, ChatRoomMode, SessionDetail, SessionSummary } from "../api/types";
+import { AgentInstance, ChatRoomDetail, ChatRoomMode, SessionDetail, SessionSummary } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
+import { sessionAgentDisplayInfo } from "./agentDisplay";
 import styles from "./ChatRoomsRoute.module.css";
 
 function roomStatusLabel(status: string, lang: string) {
   const normalized = String(status || "").toLowerCase();
   if (normalized === "running") {
     return lang === "en" ? "Running" : "运行中";
+  }
+  if (normalized === "stopping") {
+    return lang === "en" ? "Stopping" : "停止中";
   }
   if (normalized === "failed") {
     return lang === "en" ? "Failed" : "失败";
@@ -46,6 +50,10 @@ function apiKeyMissingText(value: string) {
   return /api key|api_key|未设置\s*api\s*key/i.test(value);
 }
 
+function agentRoleClass(tone: string) {
+  return `agentRoleTag_${tone}`;
+}
+
 export function ChatRoomsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -74,6 +82,10 @@ export function ChatRoomsRoute() {
     queryKey: queryKeys.sessions(),
     queryFn: () => fetchJson<SessionSummary[]>("/api/sessions"),
   });
+  const agentsQuery = useQuery({
+    queryKey: queryKeys.agents(),
+    queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
+  });
   const detailQuery = useQuery({
     queryKey: queryKeys.chatRoom(selectedRoomId),
     queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${selectedRoomId}`),
@@ -82,6 +94,10 @@ export function ChatRoomsRoute() {
 
   const rooms = roomsQuery.data ?? [];
   const sessions = sessionsQuery.data ?? [];
+  const agentsById = useMemo(
+    () => new Map((agentsQuery.data ?? []).map((agent) => [agent.agentId, agent] as const)),
+    [agentsQuery.data],
+  );
   const modes = modesQuery.data ?? [];
   const activeRoom = detailQuery.data ?? rooms.find((room) => room.roomId === selectedRoomId) ?? rooms[0] ?? null;
   const readyModes = useMemo(() => modes.filter((mode) => mode.status === "ready"), [modes]);
@@ -307,8 +323,11 @@ export function ChatRoomsRoute() {
 
   const createDisabled = createRoomMutation.isPending || selectedSessionIds.length === 0 || !selectedModeReady;
   const updateDisabled = updateRoomMutation.isPending || !activeRoom || !activeRoomTitleDraft.trim() || selectedSessionIds.length === 0 || !selectedModeReady;
-  const roomRunning = String(activeRoom?.status ?? "").trim().toLowerCase() === "running";
-  const roundDisabled = startRoundMutation.isPending || !activeRoom || !topic.trim() || roomRunning || !selectedModeReady;
+  const activeRoomStatus = String(activeRoom?.status ?? "").trim().toLowerCase();
+  const roomRunning = activeRoomStatus === "running";
+  const roomStopping = activeRoomStatus === "stopping";
+  const roomActive = roomRunning || roomStopping;
+  const roundDisabled = startRoundMutation.isPending || !activeRoom || !topic.trim() || roomActive || !selectedModeReady;
   const stopRoundDisabled = stopRoundMutation.isPending || !activeRoom || !roomRunning;
   const selectedMembersDifferFromRoom = Boolean(
     activeRoom
@@ -462,9 +481,9 @@ export function ChatRoomsRoute() {
             />
             <button type="button" className={styles.primaryButton} disabled={roundDisabled} onClick={() => startRoundMutation.mutate()}>
               <Play size={15} />
-              <span>{startRoundMutation.isPending || roomRunning ? (lang === "en" ? "Running" : "讨论中") : (lang === "en" ? "Run round" : "启动讨论")}</span>
+              <span>{startRoundMutation.isPending || roomActive ? (roomStopping ? (lang === "en" ? "Stopping" : "停止中") : (lang === "en" ? "Running" : "讨论中")) : (lang === "en" ? "Run round" : "启动讨论")}</span>
             </button>
-            {roomRunning ? (
+            {roomActive ? (
               <button
                 type="button"
                 className={styles.stopButton}
@@ -575,7 +594,9 @@ export function ChatRoomsRoute() {
               <Plus size={15} />
               <span>{createSessionMutation.isPending ? (lang === "en" ? "Creating session" : "创建会话中") : (lang === "en" ? "New session agent" : "新建会话 Agent")}</span>
             </button>
-            {sessions.map((session) => (
+            {sessions.map((session) => {
+              const display = sessionAgentDisplayInfo(session, session.agentId ? agentsById.get(session.agentId) : undefined, lang);
+              return (
               <div key={session.id} className={styles.sessionItem}>
                 <label className={styles.sessionSelectLine}>
                   <input
@@ -602,9 +623,11 @@ export function ChatRoomsRoute() {
                         }}
                       />
                     ) : (
-                      <strong>{session.title}</strong>
+                      <strong>{display.name}</strong>
                     )}
-                    <small>{session.currentPhase || session.status}</small>
+                    <small className={`${styles.agentRoleTag} ${styles[agentRoleClass(display.tone)]}`}>
+                      {display.functionLabel}
+                    </small>
                   </span>
                 </label>
                 <div className={styles.sessionActions}>
@@ -662,7 +685,8 @@ export function ChatRoomsRoute() {
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
             {!sessions.length ? (
               <p className={styles.emptyText}>{lang === "en" ? "No chat sessions available." : "当前没有可加入群聊的会话。"}</p>
             ) : null}
