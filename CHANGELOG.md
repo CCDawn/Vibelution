@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 - 2026-05-28
+
+- Added the protected research Capability Steward Agent as the third default core role beside CEO and organization advisor.
+- Assigned role-specific tool policies, memory read/write groups, and graph communication edges so prompt, tool, and memory governance can start from a minimal ordered team.
+- Restored the built-in capability steward prompt template and updated the default research flow canvas to show the graph-shaped three-role opening structure.
+
 ## 0.4.2 - 2026-05-28
 
 - Changed the default research team entry to CEO Agent plus organization advisor only; specialist research Agents are now explicitly activated or created through CEO/advisor organization proposals instead of being auto-seeded.

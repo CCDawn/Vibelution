@@ -17,6 +17,7 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert {
         "prompt-research-ceo",
         "prompt-research-organization-advisor",
+        "prompt-research-capability-steward",
         "prompt-research-broad",
         "prompt-research-deep",
         "prompt-research-review",
@@ -40,9 +41,14 @@ def test_prompt_template_registry_repairs_research_defaults(tmp_path, monkeypatc
     assert advisor_detail is not None
     assert advisor_detail["metadata"]["roleKey"] == "research_organization_advisor"
     assert "组织顾问 agent" in advisor_detail["content"]
+    steward_detail = prompt_template_service.get_prompt_template("prompt-research-capability-steward")
+    assert steward_detail is not None
+    assert steward_detail["metadata"]["roleKey"] == "research_capability_steward"
+    assert "能力管家 agent" in steward_detail["content"]
     assert (tmp_path / "workspace" / "agent_config" / "prompt_templates.json").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "ceo.md").exists()
     assert (tmp_path / "workspace" / "prompts" / "research" / "organization_advisor.md").exists()
+    assert (tmp_path / "workspace" / "prompts" / "research" / "capability_steward.md").exists()
 
 
 def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monkeypatch):
