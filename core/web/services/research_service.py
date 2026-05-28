@@ -1117,7 +1117,7 @@ def save_research_agent_binding(
     deleted_default_agents.discard(normalized)
     existing_agent = next((agent for agent in agents if agent["key"] == normalized), None)
     existing_agent_id = str((existing_agent or {}).get("agentId") or (existing_agent or {}).get("agentInstanceId") or "").strip()
-    existing_instance = agent_directory_service.get_agent(existing_agent_id) if existing_agent_id else None
+    existing_instance = agent_directory_service.get_agent(existing_agent_id, include_archived=False) if existing_agent_id else None
 
     selected_profile_id = str(
         profile_id

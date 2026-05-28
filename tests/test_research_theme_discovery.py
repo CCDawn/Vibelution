@@ -647,6 +647,96 @@ def test_research_agent_binding_save_updates_unified_agent_stack(tmp_path, monke
     assert agent["agentId"] in bindings["pool"]
 
 
+def test_research_agent_binding_save_does_not_reactivate_archived_agent(tmp_path, monkeypatch):
+    class FakeWorkspace:
+        def __init__(self, root):
+            self.root = root / "workspace"
+
+        def research_prompts_dir(self):
+            return self.root / "prompts" / "research"
+
+        def get_research_prompt_path(self, filename):
+            return self.research_prompts_dir() / filename
+
+        def get_research_agent_config_path(self):
+            return self.research_prompts_dir() / "agents.json"
+
+        def read_research_agent_config(self):
+            path = self.get_research_agent_config_path()
+            return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+
+        def write_research_agent_config(self, data):
+            path = self.get_research_agent_config_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return True
+
+        def write_research_prompt(self, filename, content):
+            path = self.get_research_prompt_path(filename)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+            return True
+
+        def read_research_prompt(self, filename):
+            path = self.get_research_prompt_path(filename)
+            return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    workspace = FakeWorkspace(tmp_path)
+    monkeypatch.setattr(research_service, "get_workspace", lambda: workspace)
+    monkeypatch.setattr(research_service, "_list_llm_config_options", lambda: [{"configId": "research_broad"}])
+    monkeypatch.setattr(research_service, "record_research_scene_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
+
+    archived = agent_directory_service.create_agent_instance(
+        display_name="旧论文阅读 Agent",
+        profile_id="research_broad",
+        primary_mode="research",
+        role_key="research_paper_reader",
+        prompt_template_id="prompt-research-paper_reader",
+    )
+    agent_directory_service.archive_agent_instance(archived["agentId"])
+    workspace.write_research_agent_config(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "key": "paper_reader",
+                    "label": "旧论文阅读 Agent",
+                    "enabled": True,
+                    "activationSource": "manual_config",
+                    "templateId": "research_broad_explorer",
+                    "profileId": "research_broad",
+                    "promptFilename": "paper_reader.md",
+                    "agentId": archived["agentId"],
+                    "agentInstanceId": archived["agentId"],
+                    "roleKey": "research_paper_reader",
+                    "promptTemplateId": "prompt-research-paper_reader",
+                }
+            ],
+        }
+    )
+
+    payload = research_service.save_research_agent_binding(
+        "paper_reader",
+        "research_broad_explorer",
+        "research_broad",
+        label="论文阅读 Agent",
+        prompt_filename="paper_reader.md",
+    )
+
+    saved = next(agent for agent in payload["agents"] if agent["key"] == "paper_reader")
+    old_agent = agent_directory_service.get_agent(archived["agentId"], include_archived=True)
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["research"]
+
+    assert old_agent["status"] == "archived"
+    assert saved["agentId"] != archived["agentId"]
+    assert bindings["pool"] == [saved["agentId"]]
+    assert bindings["flowBindings"] == {"paper_reader": saved["agentId"]}
+
+
 def test_research_agent_instance_sync_skips_current_direct_session_update(tmp_path, monkeypatch):
     class FakeWorkspace:
         def __init__(self, root):
