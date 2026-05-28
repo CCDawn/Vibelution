@@ -20,6 +20,7 @@ from .agent_directory_service import (
     list_agent_inbox_messages_for_agent,
     list_agents,
     record_supervision_policy_decision,
+    resolve_memory_policy_for_agent,
     resolve_tool_policy_for_agent,
     resolve_supervision_policy_for_agent,
     update_agent_instance,
@@ -33,9 +34,20 @@ MAX_ORG_MESSAGES = 200
 MAX_AUDIT_EVENTS = 500
 MESSAGE_TYPES = {"notice", "request", "task", "report", "escalation", "decision"}
 DELIVERY_MODES = {"private", "broadcast", "zone"}
-PROTECTED_SYSTEM_ROLES = {"ceo", "organization_advisor"}
+PROTECTED_SYSTEM_ROLES = {"ceo", "organization_advisor", "capability_steward"}
 HIGH_RISK_ACTIONS = {"create_agent", "archive_agent", "update_tool_policy", "expand_tool_permissions"}
-CORE_AGENT_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
+CEO_AGENT_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
+ORGANIZATION_ADVISOR_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
+CAPABILITY_STEWARD_TOOLS = [
+    "agent_message_tool",
+    "web_search_tool",
+    "web_fetch_tool",
+    "read_memory_tool",
+    "get_memory_summary_tool",
+    "search_memory_tool",
+    "read_dynamic_prompt_tool",
+    "research_knowledge_query_tool",
+]
 DEFAULT_CREATED_AGENT_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
 RANK_WEIGHTS = {
     "ceo": 100,
@@ -436,6 +448,11 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
             "Turns research goals into organizational tasks.",
             "May approve recommendations, while high-risk changes stay user-gated.",
         ],
+        allowed_tools=CEO_AGENT_TOOLS,
+        memory_policy={
+            "readSharedGroups": ["project", "research", "agent_config"],
+            "writeSharedGroups": ["research"],
+        },
     )
     advisor = _ensure_core_agent(
         system_role="organization_advisor",
@@ -449,6 +466,29 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
             "Proposes Agent creation, permission changes, archives, and communication edges.",
             "Keeps former employee information preserved.",
         ],
+        allowed_tools=ORGANIZATION_ADVISOR_TOOLS,
+        memory_policy={
+            "readSharedGroups": ["project", "research", "agent_config"],
+            "writeSharedGroups": ["research"],
+        },
+    )
+    steward = _ensure_core_agent(
+        system_role="capability_steward",
+        display_name="能力管家 Agent",
+        role_key="research_capability_steward",
+        prompt_template_id="prompt-research-capability-steward",
+        employee_rank="advisor",
+        title="能力管家 Agent",
+        responsibilities=[
+            "Manages Agent prompt, tool, and memory policy boundaries.",
+            "Audits whether requested capabilities match task risk.",
+            "Coordinates policy changes through CEO approval and user gates.",
+        ],
+        allowed_tools=CAPABILITY_STEWARD_TOOLS,
+        memory_policy={
+            "readSharedGroups": ["project", "research", "agent_config"],
+            "writeSharedGroups": ["agent_config"],
+        },
     )
     nodes = [item for item in payload.get("agents") or [] if isinstance(item, dict)]
     nodes = _upsert_agent_node(
@@ -471,9 +511,19 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
         protected=True,
         zone_id="core",
     )
+    nodes = _upsert_agent_node(
+        nodes,
+        steward,
+        role="capability_steward",
+        employee_rank="advisor",
+        x=800,
+        y=120,
+        protected=True,
+        zone_id="core",
+    )
     payload["agents"] = nodes
     payload["zones"] = _ensure_core_zone(payload.get("zones") or [])
-    payload["edges"] = _ensure_core_edges(payload.get("edges") or [], ceo["agentId"], advisor["agentId"])
+    payload["edges"] = _ensure_core_edges(payload.get("edges") or [], ceo["agentId"], advisor["agentId"], steward["agentId"])
     payload["updatedAt"] = str(payload.get("updatedAt") or utc_now_iso())
     return payload
 
@@ -487,6 +537,8 @@ def _ensure_core_agent(
     employee_rank: str,
     title: str,
     responsibilities: list[str],
+    allowed_tools: list[str],
+    memory_policy: dict[str, Any],
 ) -> dict[str, Any]:
     agent = _find_active_core_agent(system_role)
     if not agent:
@@ -509,15 +561,20 @@ def _ensure_core_agent(
         "employeeRank": employee_rank,
         "responsibilities": responsibilities,
     }
-    desired_tools = CORE_AGENT_TOOLS
+    desired_tools = _normalize_allowed_tools(allowed_tools)
     current_policy = agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}
+    current_memory_policy = agent.get("memoryPolicy") if isinstance(agent.get("memoryPolicy"), dict) else {}
+    desired_read_groups = _normalize_allowed_tools(memory_policy.get("readSharedGroups") or [])
+    desired_write_groups = _normalize_allowed_tools(memory_policy.get("writeSharedGroups") or [])
     needs_update = (
         str(agent.get("displayName") or "") != display_name
         or str(agent.get("primaryMode") or "") != "research"
         or str(agent.get("roleKey") or "") != role_key
         or str(agent.get("promptTemplateId") or "") != prompt_template_id
         or any(metadata.get(key) != desired_metadata.get(key) for key in ("researchOrgRole", "systemRole", "protected", "employeeRank"))
-        or not list(current_policy.get("allowedTools") or [])
+        or list(current_policy.get("allowedTools") or []) != desired_tools
+        or list(current_memory_policy.get("readSharedGroups") or []) != desired_read_groups
+        or list(current_memory_policy.get("writeSharedGroups") or []) != desired_write_groups
     )
     if needs_update:
         agent = update_agent_instance(
@@ -528,6 +585,10 @@ def _ensure_core_agent(
             prompt_template_id=prompt_template_id,
             metadata=desired_metadata,
             tool_policy=_explicit_tool_policy_payload(desired_tools, preferred_tools=["agent_message_tool"]),
+            memory_policy={
+                "readSharedGroups": desired_read_groups,
+                "writeSharedGroups": desired_write_groups,
+            },
         )
     return agent
 
@@ -586,14 +647,19 @@ def _ensure_core_zone(zones: list[dict[str, Any]]) -> list[dict[str, Any]]:
         {
             "zoneId": "core",
             "label": "核心管理区",
-            "description": "CEO 与组织顾问所在的受保护默认区域。",
+            "description": "CEO、组织顾问与能力管家所在的受保护默认区域。",
             "agentIds": [],
             "createdAt": utc_now_iso(),
         },
     ]
 
 
-def _ensure_core_edges(edges: list[dict[str, Any]], ceo_agent_id: str, advisor_agent_id: str) -> list[dict[str, Any]]:
+def _ensure_core_edges(
+    edges: list[dict[str, Any]],
+    ceo_agent_id: str,
+    advisor_agent_id: str,
+    steward_agent_id: str,
+) -> list[dict[str, Any]]:
     result = [edge for edge in edges if isinstance(edge, dict)]
     result = _upsert_edge(
         result,
@@ -614,6 +680,22 @@ def _ensure_core_edges(edges: list[dict[str, Any]], ceo_agent_id: str, advisor_a
     result = _upsert_edge(
         result,
         {
+            "edgeId": f"edge-{ceo_agent_id}-{steward_agent_id}",
+            "fromAgentId": ceo_agent_id,
+            "toAgentId": steward_agent_id,
+            "label": "CEO 请求能力策略",
+            "communicationPolicy": {
+                "allowedMessageTypes": ["notice", "request", "task", "decision"],
+                "allowedIntents": ["capability_policy", "prompt_policy", "tool_policy", "memory_policy", "research_goal"],
+                "wakeStrategy": "immediate",
+                "maxForwardDepth": 2,
+            },
+            "status": "active",
+        },
+    )
+    result = _upsert_edge(
+        result,
+        {
             "edgeId": f"edge-{advisor_agent_id}-{ceo_agent_id}",
             "fromAgentId": advisor_agent_id,
             "toAgentId": ceo_agent_id,
@@ -621,6 +703,54 @@ def _ensure_core_edges(edges: list[dict[str, Any]], ceo_agent_id: str, advisor_a
             "communicationPolicy": {
                 "allowedMessageTypes": ["notice", "request", "report", "escalation"],
                 "allowedIntents": ["proposal", "report", "risk", "organization_design"],
+                "wakeStrategy": "mailbox_only",
+                "maxForwardDepth": 1,
+            },
+            "status": "active",
+        },
+    )
+    result = _upsert_edge(
+        result,
+        {
+            "edgeId": f"edge-{steward_agent_id}-{ceo_agent_id}",
+            "fromAgentId": steward_agent_id,
+            "toAgentId": ceo_agent_id,
+            "label": "能力管家向 CEO 汇报",
+            "communicationPolicy": {
+                "allowedMessageTypes": ["notice", "request", "report", "escalation"],
+                "allowedIntents": ["capability_report", "risk", "prompt_policy", "tool_policy", "memory_policy"],
+                "wakeStrategy": "mailbox_only",
+                "maxForwardDepth": 1,
+            },
+            "status": "active",
+        },
+    )
+    result = _upsert_edge(
+        result,
+        {
+            "edgeId": f"edge-{advisor_agent_id}-{steward_agent_id}",
+            "fromAgentId": advisor_agent_id,
+            "toAgentId": steward_agent_id,
+            "label": "组织顾问请求能力配置",
+            "communicationPolicy": {
+                "allowedMessageTypes": ["notice", "request", "task"],
+                "allowedIntents": ["capability_design", "role_setup", "permission_review", "memory_policy"],
+                "wakeStrategy": "conditional",
+                "maxForwardDepth": 1,
+            },
+            "status": "active",
+        },
+    )
+    result = _upsert_edge(
+        result,
+        {
+            "edgeId": f"edge-{steward_agent_id}-{advisor_agent_id}",
+            "fromAgentId": steward_agent_id,
+            "toAgentId": advisor_agent_id,
+            "label": "能力管家反馈组织配置",
+            "communicationPolicy": {
+                "allowedMessageTypes": ["notice", "request", "report"],
+                "allowedIntents": ["capability_plan", "permission_review", "risk", "policy_update"],
                 "wakeStrategy": "mailbox_only",
                 "maxForwardDepth": 1,
             },
@@ -685,6 +815,7 @@ def _agent_node_to_api(node: dict[str, Any]) -> dict[str, Any]:
         "y": _coerce_int(node.get("y"), 0),
         "agent": agent,
         "toolPolicy": tool_policy,
+        "memoryPolicy": resolve_memory_policy_for_agent(agent_id) if agent_id else {},
         "allowedTools": list(tool_policy.get("allowedTools") or []),
         "updatedAt": str((agent or {}).get("updatedAt") or node.get("updatedAt") or ""),
     }
@@ -1172,6 +1303,8 @@ def _explicit_tool_policy_payload(allowed_tools: list[str], *, preferred_tools: 
         "allowedTools": _normalize_allowed_tools(allowed_tools),
         "preferredTools": _normalize_allowed_tools(preferred_tools or []),
         "blockedTools": [],
+        "readScopes": ["private", "shared"],
+        "writeScopes": ["private"],
         "networkAccess": "controlled",
         "mutationAccess": "controlled",
     }

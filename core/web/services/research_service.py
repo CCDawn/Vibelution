@@ -80,6 +80,7 @@ _FLOW_CANVAS_EDGE_TEXT_FIELDS = ("label", "condition")
 _FLOW_NODE_ACTION_ALIASES = {
     "research_ceo_entry": "research_ceo",
     "organization_advisor_entry": "organization_advisor",
+    "capability_steward_entry": "capability_steward",
     "broad_search": "broad",
     "deep_search": "deep",
     "evidence_review": "review",
@@ -106,6 +107,14 @@ _RESEARCH_FLOW_MODULE_CONTRACTS: dict[str, dict[str, Any]] = {
         "inputs": [{"research_goal"}, {"organization_task"}, {"proposal_request"}],
         "outputs": {
             "completed": {"organization_proposal", "staffing_plan"},
+        },
+        "terminal": True,
+    },
+    "capability_steward": {
+        "label": "能力管家",
+        "inputs": [{"research_goal"}, {"organization_task"}, {"staffing_plan"}, {"policy_request"}],
+        "outputs": {
+            "completed": {"capability_policy", "prompt_policy", "tool_policy", "memory_policy"},
         },
         "terminal": True,
     },
@@ -354,6 +363,19 @@ def _legacy_research_flow_canvas() -> dict[str, Any]:
                 "description": "顾问根据 CEO 的组织任务设计临时科研组织，形成新增研究员、权限和通信边的提案。",
                 "routeCondition": "CEO 需要扩充科研团队时委托顾问",
             },
+            {
+                "id": "capability_steward_entry",
+                "label": "能力管家 Agent",
+                "type": "agent",
+                "status": "idle",
+                "x": 960,
+                "y": 160,
+                "agentKey": "capability_steward",
+                "promptKey": "capability_steward",
+                "llmConfigId": "",
+                "description": "能力管家统一审查科研 Agent 的提示词、工具权限和记忆策略，确保任务扩展时权限最小且沟通边正确。",
+                "routeCondition": "CEO 或顾问需要配置/审查 Agent 能力边界时触发",
+            },
         ],
         "edges": [
             {
@@ -361,6 +383,22 @@ def _legacy_research_flow_canvas() -> dict[str, Any]:
                 "source": "research_ceo_entry",
                 "target": "organization_advisor_entry",
                 "label": "组织设计请求",
+                "condition": "completed",
+                "type": "success",
+            },
+            {
+                "id": "edge_ceo_steward",
+                "source": "research_ceo_entry",
+                "target": "capability_steward_entry",
+                "label": "能力策略请求",
+                "condition": "completed",
+                "type": "success",
+            },
+            {
+                "id": "edge_advisor_steward",
+                "source": "organization_advisor_entry",
+                "target": "capability_steward_entry",
+                "label": "权限与记忆审查",
                 "condition": "completed",
                 "type": "success",
             },
