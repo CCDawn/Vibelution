@@ -47,6 +47,7 @@ from core.orchestration.output_boundary import (
     sanitize_assistant_visible_text,
 )
 from core.orchestration.context_engine import build_agent_context, record_agent_turn_result
+from core.orchestration.turn_runner import create_agent_runtime
 from core.runtime_manager.evolution_store import load_active_run_snapshot as load_evolution_active_run_snapshot
 from core.runtime_manager.work_run_leases import (
     MEMORY_WRITE_LEASE,
@@ -4422,9 +4423,11 @@ def _create_chat_agent_for_session(
 
 
 def create_chat_agent(workspace_path: str | Path | None = None, config: Any | None = None) -> Any:
-    from agent import SelfEvolvingAgent
-
-    return SelfEvolvingAgent(config=config, mode="chat", workspace_path=str(workspace_path) if workspace_path else None)
+    return create_agent_runtime(
+        mode="chat",
+        workspace_path=str(workspace_path) if workspace_path else None,
+        config=config,
+    )
 
 
 def _skill_invocation_payload(command: SkillSlashCommand | None) -> dict[str, Any] | None:

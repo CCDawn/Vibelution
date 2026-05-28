@@ -1,4 +1,27 @@
-from core.orchestration.turn_runner import AgentSingleTurnRequest, run_agent_single_turn
+from core.orchestration.turn_runner import AgentSingleTurnRequest, create_agent_runtime, run_agent_single_turn
+
+
+def test_create_agent_runtime_uses_shared_agent_factory():
+    captured = {}
+    agent = object()
+
+    def factory(**kwargs):
+        captured.update(kwargs)
+        return agent
+
+    created = create_agent_runtime(
+        mode="chat",
+        workspace_path="workspace/session",
+        config="config",
+        agent_factory=factory,
+    )
+
+    assert created is agent
+    assert captured == {
+        "mode": "chat",
+        "workspace_path": "workspace/session",
+        "config": "config",
+    }
 
 
 def test_run_agent_single_turn_seeds_context_and_exports_carryover():
