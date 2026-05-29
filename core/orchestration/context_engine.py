@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +15,14 @@ from core.web.services.runtime_scene_service import record_runtime_scene_event
 
 AGENT_RUN_KIND = agent_run_store.AGENT_RUN_KIND
 SUB_AGENT_RUN_KIND = agent_run_store.SUB_AGENT_RUN_KIND
+
+
+def _perf_counter() -> float:
+    return time.perf_counter()
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int(round((_perf_counter() - started_at) * 1000)))
 
 
 @dataclass(frozen=True)
@@ -32,6 +41,7 @@ class AgentContextPacket:
     group_context_events: list[dict[str, Any]] = field(default_factory=list)
     inbox_messages: list[dict[str, Any]] = field(default_factory=list)
     context_block: str = ""
+    timings: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -47,8 +57,12 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
 
     from core.web.services import agent_directory_service
 
+    context_started_at = _perf_counter()
+    timings: dict[str, Any] = {}
     normalized_agent_id = str(agent_id or "").strip()
+    stage_started_at = _perf_counter()
     agent = agent_directory_service.get_agent(normalized_agent_id)
+    timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     if not agent:
         _record_context_event(
             "agent_runtime.resolve_failed",
@@ -62,25 +76,43 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
                 "source": "ContextEngine",
             },
         )
-        return AgentContextPacket(agent_id=normalized_agent_id, session_id=session_id, run_id=run_id)
+        return AgentContextPacket(
+            agent_id=normalized_agent_id,
+            session_id=session_id,
+            run_id=run_id,
+            timings={
+                "reason": "missing_agent",
+                "totalDurationMs": _elapsed_ms(context_started_at),
+                **timings,
+            },
+        )
 
+    stage_started_at = _perf_counter()
     group_events = agent_directory_service.list_group_context_events_for_agent(
         normalized_agent_id,
         limit=limit,
         prompt_eligible_only=True,
     )
+    timings["groupContextEventsMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     inbox_messages = agent_directory_service.list_agent_inbox_messages_for_agent(
         normalized_agent_id,
         limit=limit,
         status="pending",
         prompt_eligible_only=True,
     )
+    timings["inboxMessagesMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     runtime_context_block = agent_directory_service.build_agent_runtime_context_block(normalized_agent_id, limit=limit)
+    timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     research_org_context_block = _build_research_organization_context_block(
         normalized_agent_id,
         limit=limit,
     )
+    timings["researchOrgContextMs"] = _elapsed_ms(stage_started_at)
     prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
+    stage_started_at = _perf_counter()
     prompt_context_block = _build_prompt_template_context_block(
         prompt_template_id,
         project_root=agent_directory_service.PROJECT_ROOT,
@@ -88,6 +120,7 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         session_id=str(session_id or "").strip(),
         run_id=str(run_id or "").strip(),
     )
+    timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
     if prompt_context_block:
         runtime_context_block = "\n\n".join(
             part
@@ -98,6 +131,13 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         runtime_context_block = "\n\n".join(
             part for part in (runtime_context_block, research_org_context_block) if str(part or "").strip()
         )
+    stage_started_at = _perf_counter()
+    memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
+    timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
+    tool_policy = agent_directory_service.resolve_tool_policy_for_agent(normalized_agent_id)
+    timings["toolPolicyMs"] = _elapsed_ms(stage_started_at)
+    timings["totalDurationMs"] = _elapsed_ms(context_started_at)
     packet = AgentContextPacket(
         agent_id=normalized_agent_id,
         agent_code=str(agent.get("agentCode") or "").strip(),
@@ -108,11 +148,12 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         profile_id=str(agent.get("profileId") or "").strip(),
         prompt_template_id=prompt_template_id,
         role_key=str(agent.get("roleKey") or "").strip(),
-        memory_policy=agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id),
-        tool_policy=agent_directory_service.resolve_tool_policy_for_agent(normalized_agent_id),
+        memory_policy=memory_policy,
+        tool_policy=tool_policy,
         group_context_events=group_events,
         inbox_messages=inbox_messages,
         context_block=runtime_context_block,
+        timings=dict(timings),
     )
     _record_context_event(
         "agent_runtime.resolved",

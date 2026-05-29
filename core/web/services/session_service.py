@@ -138,6 +138,23 @@ _SESSION_IMAGE_ARTIFACT_CONTENT_TYPES = {
     "webp": "image/webp",
 }
 _SESSION_USER_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _perf_counter() -> float:
+    return time.perf_counter()
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int(round((_perf_counter() - started_at) * 1000)))
+
+
+def _elapsed_ms_between(started_at: Any, ended_at: float | None = None) -> int:
+    try:
+        start_value = float(started_at)
+    except (TypeError, ValueError):
+        return 0
+    end_value = _perf_counter() if ended_at is None else float(ended_at)
+    return max(0, int(round((end_value - start_value) * 1000)))
 _IMAGE_ATTACHMENT_VISION_PATTERNS = (
     "分析",
     "识别",
@@ -1612,13 +1629,18 @@ def submit_session_message(
 ) -> dict:
     """Persist a user message and start a single web chat turn."""
 
+    submit_started_at = _perf_counter()
+    submit_timing_fields: dict[str, Any] = {}
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
     message = _resolve_user_message_content(content, content_utf8_base64=content_utf8_base64)
     if not conversation_id:
         raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
     _validate_user_message_not_encoding_replacement(message, lang=lang)
+    lock_wait_started_at = _perf_counter()
     with _CHAT_STATE_LOCK:
+        lock_acquired_at = _perf_counter()
+        submit_timing_fields["chatStateLockWaitMs"] = _elapsed_ms_between(lock_wait_started_at, lock_acquired_at)
         payload = load_chat_state(PROJECT_ROOT)
         _materialize_agent_directory_conversation_locked(payload, conversation_id, source="submit_session_message")
         conversation = _find_conversation_entry(payload, conversation_id)
@@ -1704,6 +1726,7 @@ def submit_session_message(
             started_at=user_entry["timestamp"],
             updated_at=user_entry["timestamp"],
         )
+        submit_timing_fields["chatStateLockedMs"] = _elapsed_ms_between(lock_acquired_at)
     _set_session_waiting_live_output(conversation_id, turn_id=turn_control.turn_id)
     _record_session_cycle_message(
         conversation_id,
@@ -1720,7 +1743,9 @@ def submit_session_message(
         user_message_source=str(message_source or "raw").strip() or "raw",
         attachments=attachments,
     )
+    publish_started_at = _perf_counter()
     _publish_session_detail_snapshot(conversation_id)
+    submit_timing_fields["initialSnapshotPublishMs"] = _elapsed_ms(publish_started_at)
 
     normalized_message_source = str(message_source or "").strip() or "raw"
     if attachments and normalized_message_source != "agent_inbox":
@@ -1798,6 +1823,8 @@ def submit_session_message(
                 "agent_id": agent_id,
                 "leases": requested_leases,
                 "skill_invocation": skill_invocation,
+                "submit_timing_fields": dict(submit_timing_fields),
+                "submit_started_at_monotonic": submit_started_at,
             }
             _record_image_attachment_router_event(
                 conversation_id,
@@ -1812,7 +1839,9 @@ def submit_session_message(
             )
             _record_session_turn_scheduled_event(context)
             try:
+                schedule_started_at = _perf_counter()
                 _schedule_image2_attachment_turn(context)
+                submit_timing_fields["scheduleSubmitMs"] = _elapsed_ms(schedule_started_at)
             except Exception as exc:
                 _persist_chat_turn_work_run(
                     session_id=conversation_id,
@@ -1892,10 +1921,14 @@ def submit_session_message(
         "profile_id": agent_profile_id,
         "agent_id": agent_id,
         "skill_invocation": skill_invocation,
+        "submit_timing_fields": dict(submit_timing_fields),
+        "submit_started_at_monotonic": submit_started_at,
     }
     _record_session_turn_scheduled_event(context)
     try:
+        schedule_started_at = _perf_counter()
         _schedule_session_turn(context)
+        submit_timing_fields["scheduleSubmitMs"] = _elapsed_ms(schedule_started_at)
     except Exception as exc:
         _persist_chat_turn_work_run(
             session_id=conversation_id,
@@ -3893,6 +3926,9 @@ def cancel_agent_execution_reservation(run_id: str) -> bool:
 
 def _schedule_session_turn(context: dict[str, Any]) -> None:
     job_context = dict(context)
+    scheduled_at = _perf_counter()
+    job_context["_scheduler_scheduled_at_monotonic"] = scheduled_at
+    context["_scheduler_scheduled_at_monotonic"] = scheduled_at
     agent_key = _session_scheduler_agent_key(job_context)
     job_context["_scheduler_agent_key"] = agent_key
     context["_scheduler_agent_key"] = agent_key
@@ -3912,6 +3948,7 @@ def _schedule_session_turn(context: dict[str, Any]) -> None:
         _mark_session_turn_queued(job_context, queue_position=queued_position)
         return
 
+    job_context["_scheduler_started_at_monotonic"] = _perf_counter()
     _record_session_scheduler_event(job_context, "started", outcome="running")
     try:
         _submit_scheduled_session_turn(job_context)
@@ -3921,6 +3958,7 @@ def _schedule_session_turn(context: dict[str, Any]) -> None:
 
 
 def _submit_scheduled_session_turn(context: dict[str, Any]) -> None:
+    context["_executor_submitted_at_monotonic"] = _perf_counter()
     _SESSION_EXECUTOR.submit(_execute_scheduled_session_turn, context)
 
 
@@ -4052,6 +4090,8 @@ def _execute_image2_attachment_turn(context: dict[str, Any]) -> None:
 
 
 def _execute_scheduled_session_turn(context: dict[str, Any]) -> None:
+    executor_started_at = _perf_counter()
+    context["_executor_started_at_monotonic"] = executor_started_at
     try:
         _run_session_turn(context)
     finally:
@@ -4172,6 +4212,7 @@ def _mark_session_turn_queued(context: dict[str, Any], *, queue_position: int) -
     turn_id = str(context.get("turn_id") or "").strip()
     if not session_id or not _is_session_turn_current(session_id, turn_id):
         return
+    context["_scheduler_queued_at_monotonic"] = _perf_counter()
     now = _now_timestamp()
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -4204,6 +4245,8 @@ def _mark_session_turn_dequeued(context: dict[str, Any]) -> None:
     turn_id = str(context.get("turn_id") or "").strip()
     if not session_id or not _is_session_turn_current(session_id, turn_id):
         return
+    dequeued_at = _perf_counter()
+    context["_scheduler_started_at_monotonic"] = dequeued_at
     now = _now_timestamp()
     with _CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
@@ -4221,7 +4264,15 @@ def _mark_session_turn_dequeued(context: dict[str, Any]) -> None:
         user_message=str(context.get("raw_user_message") or context.get("user_message") or "").strip(),
         updated_at=now,
     )
-    _record_session_scheduler_event(context, "dequeued", outcome="running")
+    _record_session_scheduler_event(
+        context,
+        "dequeued",
+        outcome="running",
+        fields={
+            "queueWaitMs": _elapsed_ms_between(context.get("_scheduler_queued_at_monotonic"), dequeued_at),
+            "scheduledToDequeueMs": _elapsed_ms_between(context.get("_scheduler_scheduled_at_monotonic"), dequeued_at),
+        },
+    )
     _publish_session_detail_snapshot(session_id)
 
 
@@ -4249,6 +4300,7 @@ def _record_session_scheduler_event(
 
 
 def _run_session_turn(context: dict[str, Any]) -> None:
+    prepare_started_at = _perf_counter()
     session_id = str(context.get("session_id") or "").strip()
     turn_id = str(context.get("turn_id") or "").strip()
     if turn_id and not _is_session_turn_current(session_id, turn_id):
@@ -4267,15 +4319,34 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         turn_control = _get_session_turn_control(session_id)
     turn_capture = SessionTurnCapture(session_id=session_id, turn_id=turn_id)
     mental_model_enabled = _normalize_optional_bool(context.get("mental_model_enabled"))
+    prepare_timings: dict[str, Any] = {}
+    stage_started_at = _perf_counter()
     session_workspace = _ensure_session_workspace(session_id)
+    prepare_timings["sessionWorkspaceMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     _sync_agent_directory_project_root()
+    prepare_timings["agentDirectorySyncMs"] = _elapsed_ms(stage_started_at)
     agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
+    stage_started_at = _perf_counter()
     agent = get_agent(agent_id) if agent_id else None
+    prepare_timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     agent_context_packet = (
         build_agent_context(agent_id, session_id=session_id, run_id=turn_id)
         if agent_id
         else None
     )
+    prepare_timings["agentContextBuildMs"] = _elapsed_ms(stage_started_at)
+    agent_context_timings = (
+        dict(getattr(agent_context_packet, "timings", {}) or {})
+        if agent_context_packet is not None
+        else {}
+    )
+    for timing_key, timing_value in agent_context_timings.items():
+        normalized_key = str(timing_key or "").strip()
+        if not normalized_key:
+            continue
+        prepare_timings[f"agentContext.{normalized_key}"] = timing_value
     agent_workspace = str((agent or {}).get("workspacePath") or "").strip()
     memory_policy = (
         agent_context_packet.memory_policy
@@ -4288,12 +4359,15 @@ def _run_session_turn(context: dict[str, Any]) -> None:
         if agent and str((agent or {}).get("workspacePath") or "").strip()
         else session_workspace
     )
+    stage_started_at = _perf_counter()
     workspace_decision = (
         evaluate_agent_workspace_write(agent_id, agent_workspace_path, purpose="chat_turn_tool_workspace")
         if agent_id
         else None
     )
+    prepare_timings["workspacePolicyMs"] = _elapsed_ms(stage_started_at)
     tool_workspace = agent_workspace_path if not workspace_decision or workspace_decision.allowed else session_workspace
+    prepare_timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
     _record_session_turn_lifecycle_event(
         session_id,
         "worker_started",
@@ -4311,6 +4385,13 @@ def _run_session_turn(context: dict[str, Any]) -> None:
             "agentMemoryRoot": memory_root,
             "toolWorkspacePath": str(tool_workspace),
             "toolWorkspaceScope": str(getattr(workspace_decision, "scope", "") or ""),
+            "executorWaitMs": _elapsed_ms_between(context.get("_executor_submitted_at_monotonic"), prepare_started_at),
+            "schedulerToWorkerStartedMs": _elapsed_ms_between(
+                context.get("_scheduler_started_at_monotonic") or context.get("_scheduler_scheduled_at_monotonic"),
+                _perf_counter(),
+            ),
+            "hasAgentContextPacket": agent_context_packet is not None,
+            **prepare_timings,
         },
     )
     effective_agent_profile_id = _normalize_session_agent_profile_id(
@@ -5530,6 +5611,10 @@ def _safe_attachment_log_summary(attachments: list[dict[str, Any]]) -> list[dict
 def _record_session_turn_scheduled_event(context: dict[str, Any]) -> None:
     session_id = str(context.get("session_id") or "").strip()
     turn_id = str(context.get("turn_id") or "").strip()
+    submit_timing_fields = dict(context.get("submit_timing_fields") or {})
+    submit_started_at = context.get("submit_started_at_monotonic")
+    if submit_started_at is not None:
+        submit_timing_fields["submitElapsedBeforeScheduleLogMs"] = _elapsed_ms_between(submit_started_at)
     _record_session_turn_lifecycle_event(
         session_id,
         "scheduled",
@@ -5542,6 +5627,7 @@ def _record_session_turn_scheduled_event(context: dict[str, Any]) -> None:
             "userMessageLength": len(str(context.get("user_message") or "")),
             "userMessageSource": str(context.get("user_message_source") or "").strip(),
             "attachmentCount": len(_normalize_message_attachments(context.get("attachments") or [])),
+            **submit_timing_fields,
         },
     )
 
