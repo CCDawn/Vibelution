@@ -118,7 +118,8 @@
 .inspectorBody input,
 .inspectorBody select,
 .inspectorBody textarea,
-.teamMessageForm textarea {
+.teamMessageForm textarea,
+.teamTaskForm textarea {
   min-height: 28px;
   width: 100%;
   border: 1px solid var(--border-soft);
@@ -134,7 +135,8 @@
   resize: vertical;
 }
 
-.teamMessageForm textarea {
+.teamMessageForm textarea,
+.teamTaskForm textarea {
   min-height: 74px;
   resize: vertical;
 }
@@ -370,7 +372,8 @@
   color: var(--fg-primary);
 }
 
-.teamMessageForm {
+.teamMessageForm,
+.teamTaskForm {
   display: grid;
   gap: 8px;
   padding-top: 10px;
@@ -406,7 +409,8 @@
   min-height: 14px;
 }
 
-.teamMessageForm button {
+.teamMessageForm button,
+.teamTaskForm button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -418,6 +422,11 @@
   color: var(--fg-primary);
   font-size: 0.78rem;
   font-weight: 750;
+}
+
+.teamTaskForm button {
+  border-color: color-mix(in srgb, var(--accent-success) 34%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-success) 9%, var(--surface-panel-strong));
 }
 
 .messageResult,
@@ -438,6 +447,13 @@
 
 .messageResult strong {
   color: var(--accent-success);
+}
+
+.messageResult a {
+  margin-left: auto;
+  color: var(--accent-cool-2);
+  font-weight: 760;
+  text-decoration: none;
 }
 
 .messageError {

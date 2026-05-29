@@ -24,12 +24,16 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("revokeProjectAgentBusMessage({");
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
     expect(routeSource).toContain("syncTeamChatRoomMutation");
+    expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`");
+    expect(routeSource).toContain('source: "team_workspace"');
+    expect(routeSource).toContain("teamId: payload.teamId");
+    expect(routeSource).toContain("startTeamRoundMutation");
     expect(routeSource).toContain("queryKeys.chatRooms()");
+    expect(routeSource).toContain("queryKeys.chatRoom(room.roomId)");
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas");
     expect(routeSource).toContain("Agent Center");
     expect(routeSource).toContain("team_organization_canvas");
     expect(routeSource).not.toContain("/api/research/flow-canvas");
-    expect(routeSource).not.toContain("/api/chat-rooms");
   });
 
   it("can deep-link from Agent references to a selected Team", () => {
@@ -48,6 +52,11 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("归档");
     expect(routeSource).toContain("解绑节点");
     expect(routeSource).toContain("删除节点");
+    expect(routeSource).toContain("团队任务");
+    expect(routeSource).toContain("启动团队讨论");
+    expect(routeSource).toContain("teamTaskTopic");
+    expect(routeSource).toContain("linkedRoomBusy");
+    expect(routeSource).toContain("styles.teamTaskForm");
     expect(routeSource).toContain("团队广播");
     expect(routeSource).toContain("发送给团队");
     expect(routeSource).toContain("最近团队广播");
