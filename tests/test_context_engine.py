@@ -35,15 +35,18 @@ def _use_tmp_research_org_workspace(tmp_path, monkeypatch):
     return workspace
 
 
-def test_build_agent_context_collects_isolated_agent_runtime_context(tmp_path, monkeypatch):
+def test_build_chat_agent_context_skips_research_org_context(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        context_engine,
+        "_build_research_organization_context_block",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("chat agents should not build research org context")),
+    )
     agent = agent_directory_service.create_agent_instance(
-        display_name="科研广搜 Agent",
-        profile_id="research_broad",
-        primary_mode="research",
-        role_key="research_broad",
-        prompt_template_id="prompt-research-broad",
-        direct_session_id="session-research",
+        display_name="普通会话 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-chat",
     )
     agent_directory_service.write_group_context_event(
         agent["agentId"],
@@ -63,13 +66,13 @@ def test_build_agent_context_collects_isolated_agent_runtime_context(tmp_path, m
         created_by="test",
     )
 
-    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-research", run_id="turn-1")
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-chat", run_id="turn-1")
 
     assert packet.agent_id == agent["agentId"]
     assert packet.agent_code == "A001"
-    assert packet.profile_id == "research_broad"
-    assert packet.prompt_template_id == "prompt-research-broad"
-    assert packet.role_key == "research_broad"
+    assert packet.profile_id == "primary"
+    assert packet.prompt_template_id == "prompt-chat-default"
+    assert packet.role_key == ""
     assert packet.workspace_path == agent["workspacePath"]
     assert packet.memory_policy["privateMemoryRoot"].endswith("/memory")
     assert packet.tool_policy["policyId"]
@@ -77,12 +80,36 @@ def test_build_agent_context_collects_isolated_agent_runtime_context(tmp_path, m
     assert len(packet.inbox_messages) == 1
     assert "Agent Runtime Context" in packet.context_block
     assert "检查 ModeBinding 旧字段" in packet.context_block
-    assert "Agent Prompt Template" in packet.context_block
-    assert "prompt-research-broad" in packet.context_block
-    assert "广撒网探索 agent" in packet.context_block
+    assert "Research Organization Context" not in packet.context_block
     assert packet.timings["totalDurationMs"] >= 0
     assert "runtimeContextBlockMs" in packet.timings
     assert "promptTemplateContextMs" in packet.timings
+    assert packet.timings["researchOrgContextSkipped"] is True
+
+
+def test_build_research_agent_context_still_loads_research_org_context(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="研究组织 Agent",
+        profile_id="research_broad",
+        primary_mode="research",
+        role_key="research_broad",
+        prompt_template_id="prompt-research-broad",
+        direct_session_id="session-research",
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        context_engine,
+        "_build_research_organization_context_block",
+        lambda agent_id, **kwargs: calls.append(agent_id) or "## Research Organization Context\nMembers: none",
+    )
+
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-research", run_id="turn-1")
+
+    assert calls == [agent["agentId"]]
+    assert "Research Organization Context" in packet.context_block
+    assert packet.timings["researchOrgContextMs"] >= 0
+    assert "researchOrgContextSkipped" not in packet.timings
 
 
 def test_build_agent_context_includes_project_memory_coordination_rules_from_agents_md(tmp_path, monkeypatch):
