@@ -67,6 +67,34 @@ def test_prompt_template_update_writes_source_and_refreshes_hash(tmp_path, monke
     assert (tmp_path / updated["sourcePath"]).read_text(encoding="utf-8") == "# 新广搜提示词\n\nhi"
 
 
+def test_build_agent_prompt_template_context_reports_block_and_missing_reasons(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    prompt_template_service.repair_prompt_templates()
+
+    block = prompt_template_service.build_agent_prompt_template_context(
+        "prompt-research-broad",
+        project_root=tmp_path,
+    )
+    empty = prompt_template_service.build_agent_prompt_template_context(
+        "prompt-supervised-baseline",
+        project_root=tmp_path,
+    )
+    missing = prompt_template_service.build_agent_prompt_template_context(
+        "prompt-missing-valid",
+        project_root=tmp_path,
+    )
+
+    assert block["reason"] == ""
+    assert "Agent Prompt Template" in block["contextBlock"]
+    assert "PromptTemplateId: prompt-research-broad" in block["contextBlock"]
+    assert "广撒网探索 agent" in block["contextBlock"]
+    assert empty["reason"] == "empty_template_content"
+    assert empty["sourcePath"] == ""
+    assert empty["sourceExists"] is False
+    assert missing["reason"] == "missing_template"
+    assert missing["promptTemplateId"] == "prompt-missing-valid"
+
+
 def test_prompt_template_rejects_unsafe_source_path(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     prompt_template_service.repair_prompt_templates()

@@ -240,6 +240,51 @@ def get_prompt_template(template_id: str) -> dict[str, Any] | None:
     return None
 
 
+def build_agent_prompt_template_context(
+    template_id: str,
+    *,
+    project_root: Path | None = None,
+) -> dict[str, Any]:
+    """Build the runtime context block for one Agent prompt template."""
+
+    normalized = str(template_id or "").strip()
+    if not normalized:
+        return {
+            "contextBlock": "",
+            "promptTemplateId": "",
+            "reason": "missing_template_id",
+        }
+    template = _get_prompt_template_for_project(normalized, project_root=project_root)
+    if not template:
+        return {
+            "contextBlock": "",
+            "promptTemplateId": normalized,
+            "reason": "missing_template",
+        }
+    content = str(template.get("content") or "").strip()
+    if not content:
+        return {
+            "contextBlock": "",
+            "promptTemplateId": normalized,
+            "sourcePath": str(template.get("sourcePath") or "").strip(),
+            "sourceExists": bool(template.get("sourceExists")),
+            "reason": "empty_template_content",
+        }
+    return {
+        "contextBlock": "\n".join(
+            [
+                "## Agent Prompt Template",
+                f"PromptTemplateId: {normalized}",
+                content,
+            ]
+        ).strip(),
+        "promptTemplateId": normalized,
+        "sourcePath": str(template.get("sourcePath") or "").strip(),
+        "sourceExists": bool(template.get("sourceExists")),
+        "reason": "",
+    }
+
+
 def update_prompt_template(
     template_id: str,
     *,
@@ -352,6 +397,18 @@ def repair_prompt_templates() -> dict[str, Any]:
 
 def prompt_template_path() -> Path:
     return PROJECT_ROOT / "workspace" / "agent_config" / "prompt_templates.json"
+
+
+def _get_prompt_template_for_project(template_id: str, *, project_root: Path | None = None) -> dict[str, Any] | None:
+    if project_root is None:
+        return get_prompt_template(template_id)
+    global PROJECT_ROOT
+    previous_root = PROJECT_ROOT
+    PROJECT_ROOT = Path(project_root)
+    try:
+        return get_prompt_template(template_id)
+    finally:
+        PROJECT_ROOT = previous_root
 
 
 def _load_prompt_templates() -> dict[str, Any]:

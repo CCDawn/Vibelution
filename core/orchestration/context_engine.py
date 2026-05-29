@@ -425,13 +425,12 @@ def _build_prompt_template_context_block(
         return ""
     from core.web.services import prompt_template_service
 
-    previous_root = prompt_template_service.PROJECT_ROOT
-    prompt_template_service.PROJECT_ROOT = Path(project_root)
-    try:
-        template = prompt_template_service.get_prompt_template(normalized)
-    finally:
-        prompt_template_service.PROJECT_ROOT = previous_root
-    if not template:
+    result = prompt_template_service.build_agent_prompt_template_context(
+        normalized,
+        project_root=project_root,
+    )
+    reason = str(result.get("reason") or "").strip()
+    if reason == "missing_template":
         _record_context_event(
             "agent_runtime.prompt_template_missing",
             outcome="missing_prompt_template",
@@ -446,8 +445,7 @@ def _build_prompt_template_context_block(
             },
         )
         return ""
-    content = str(template.get("content") or "").strip()
-    if not content:
+    if reason == "empty_template_content":
         _record_context_event(
             "agent_runtime.prompt_template_missing",
             outcome="missing_prompt_template",
@@ -457,20 +455,14 @@ def _build_prompt_template_context_block(
                 "sessionId": session_id,
                 "runId": run_id,
                 "promptTemplateId": normalized,
-                "sourcePath": str(template.get("sourcePath") or "").strip(),
-                "sourceExists": bool(template.get("sourceExists")),
+                "sourcePath": str(result.get("sourcePath") or "").strip(),
+                "sourceExists": bool(result.get("sourceExists")),
                 "reason": "empty_template_content",
                 "source": "ContextEngine",
             },
         )
         return ""
-    return "\n".join(
-        [
-            "## Agent Prompt Template",
-            f"PromptTemplateId: {normalized}",
-            content,
-        ]
-    ).strip()
+    return str(result.get("contextBlock") or "").strip()
 
 
 def _persist_agent_run_snapshot(
