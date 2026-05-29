@@ -456,6 +456,80 @@
   text-decoration: none;
 }
 
+.teamRoundPanel {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.teamRoundCard {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel-strong) 72%, transparent);
+}
+
+.teamRoundHeader,
+.teamRoundMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.teamRoundHeader {
+  justify-content: space-between;
+}
+
+.teamRoundHeader strong,
+.teamRoundCard p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.teamRoundHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.teamRoundHeader span {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: 0.66rem;
+  font-weight: 750;
+}
+
+.teamRoundCard p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  line-height: 1.32;
+  overflow-wrap: anywhere;
+}
+
+.teamRoundMeta {
+  flex-wrap: wrap;
+  color: var(--fg-muted);
+  font-size: 0.68rem;
+}
+
+.teamRoundCard a {
+  justify-self: start;
+  color: var(--accent-cool-2);
+  font-size: 0.72rem;
+  font-weight: 760;
+  text-decoration: none;
+}
+
 .messageError {
   background: color-mix(in srgb, var(--accent-danger) 10%, transparent);
   color: color-mix(in srgb, var(--accent-danger) 78%, var(--fg-primary));
