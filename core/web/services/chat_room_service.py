@@ -984,40 +984,60 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
     _sync_agent_directory_project_root()
     agent_id = str(participant.get("agentId") or "").strip()
     round_id = str(context.get("roundId") or "").strip()
-    agent_context = build_agent_context(agent_id, session_id=session_id, run_id=round_id) if agent_id else None
-    agent = agent_directory_service.get_agent(agent_id) if agent_id else None
-    agent_workspace = (
-        agent_directory_service._ensure_agent_workspace(str((agent or {}).get("workspacePath") or "")).resolve()
-        if agent and str((agent or {}).get("workspacePath") or "").strip()
-        else session_workspace
-    )
-    write_decision = evaluate_agent_workspace_write(agent_id, agent_workspace, purpose="chat_room_agent_workspace") if agent_id else None
-    workspace = agent_workspace if not write_decision or write_decision.allowed else session_workspace
-    agent_profile_id = (
-        str((agent_context.profile_id if agent_context is not None else "") or "").strip()
-        or str(participant.get("agentProfileId") or participant.get("agentTemplateId") or "primary").strip()
-        or "primary"
-    )
-    agent_config = session_service._session_agent_config_for_profile(agent_profile_id)
+    agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
+    if agent_id and not agent:
+        historical_agent = agent_directory_service.get_agent(agent_id, include_archived=True)
+        status = str((historical_agent or {}).get("status") or "").strip().lower()
+        reason = "archived_agent" if status == "archived" else "missing_agent"
+        _record_participant_agent_unavailable_event(
+            participant,
+            context,
+            reason=reason,
+            agent_status=status,
+        )
+        raise ChatRoomValidationError(
+            text_for(
+                get_web_language(),
+                zh="群聊成员引用的 Agent 已归档或不可用，不能继续作为发言者运行。",
+                en="This room participant references an archived or unavailable Agent and cannot run as a speaker.",
+            )
+        )
+    agent_context = None
+    result: dict[str, Any] | Any
     with session_service.reserve_agent_execution_slot(
         agent_id=agent_id,
         run_id=round_id,
         session_id=session_id,
         owner="chat_room_round",
-    ), active_agent_runtime(
-        agent_id,
-        session_id=session_id,
-        room_id=str(context.get("roomId") or "").strip(),
-        round_id=round_id,
-    ), session_service._session_tool_workspace_override(workspace):
-        agent = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
-        prepare_agent_turn(
-            agent,
-            interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
-            chat_history=participant.get("recentMessages") or [],
-            runtime_context=agent_context.context_block if agent_context is not None else "",
+    ):
+        agent_context = build_agent_context(agent_id, session_id=session_id, run_id=round_id) if agent_id else None
+        agent_workspace = (
+            agent_directory_service._ensure_agent_workspace(str((agent or {}).get("workspacePath") or "")).resolve()
+            if agent and str((agent or {}).get("workspacePath") or "").strip()
+            else session_workspace
         )
-        result = run_existing_agent_single_turn(agent, initial_prompt=prompt, disable_tools=True)
+        write_decision = evaluate_agent_workspace_write(agent_id, agent_workspace, purpose="chat_room_agent_workspace") if agent_id else None
+        workspace = agent_workspace if not write_decision or write_decision.allowed else session_workspace
+        agent_profile_id = (
+            str((agent_context.profile_id if agent_context is not None else "") or "").strip()
+            or str(participant.get("agentProfileId") or participant.get("agentTemplateId") or "primary").strip()
+            or "primary"
+        )
+        agent_config = session_service._session_agent_config_for_profile(agent_profile_id)
+        with active_agent_runtime(
+            agent_id,
+            session_id=session_id,
+            room_id=str(context.get("roomId") or "").strip(),
+            round_id=round_id,
+        ), session_service._session_tool_workspace_override(workspace):
+            agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
+            prepare_agent_turn(
+                agent_runtime,
+                interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
+                chat_history=participant.get("recentMessages") or [],
+                runtime_context=agent_context.context_block if agent_context is not None else "",
+            )
+            result = run_existing_agent_single_turn(agent_runtime, initial_prompt=prompt, disable_tools=True)
     if agent_context is not None and agent_context.agent_id:
         record_agent_turn_result(
             agent_context.agent_id,
@@ -1026,6 +1046,42 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
             run_id=round_id,
         )
     return result
+
+
+def _record_participant_agent_unavailable_event(
+    participant: dict[str, Any],
+    context: dict[str, Any],
+    *,
+    reason: str,
+    agent_status: str = "",
+) -> None:
+    normalized_reason = str(reason or "").strip() or "missing_agent"
+    event_code = (
+        "chat_room.participant_agent_archived"
+        if normalized_reason == "archived_agent"
+        else "chat_room.participant_agent_missing"
+    )
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "participant_agent",
+            event_code,
+            message="Chat room participant Agent is unavailable at execution time.",
+            level="warning",
+            outcome="blocked",
+            fields={
+                "roomId": str(context.get("roomId") or "").strip(),
+                "roundId": str(context.get("roundId") or "").strip(),
+                "participantId": str(participant.get("participantId") or "").strip(),
+                "agentId": str(participant.get("agentId") or "").strip(),
+                "sessionId": str(participant.get("sessionId") or "").strip(),
+                "reason": normalized_reason,
+                "agentStatus": str(agent_status or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _build_participant_prompt(
@@ -1240,6 +1296,7 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
     synced_count = 0
     skipped_count = 0
     missing_count = 0
+    materialized_count = 0
     with session_service._CHAT_STATE_LOCK:
         payload = load_chat_state(PROJECT_ROOT)
         conversations = payload.get("conversations")
@@ -1251,8 +1308,16 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
                 continue
             conversation = session_service._find_conversation_entry(payload, session_id)
             if conversation is None:
-                missing_count += 1
-                continue
+                if session_service._materialize_agent_directory_conversation_locked(
+                    payload,
+                    session_id,
+                    source="chat_room_round_sync",
+                ):
+                    materialized_count += 1
+                    conversation = session_service._find_conversation_entry(payload, session_id)
+                if conversation is None:
+                    missing_count += 1
+                    continue
             raw_messages = list(conversation.get("messages") or [])
             if _has_group_round_session_sync(raw_messages, room_id=room_id, round_id=round_id):
                 skipped_count += 1
@@ -1282,6 +1347,7 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
             "syncedSessionCount": synced_count,
             "skippedSessionCount": skipped_count,
             "missingSessionCount": missing_count,
+            "materializedSessionCount": materialized_count,
             "participantCount": len(participants),
         },
         outcome="written" if synced_count else "skipped",
@@ -1508,7 +1574,9 @@ def _refresh_participants(
     for item in participants:
         if not isinstance(item, dict):
             continue
-        session_id = str(item.get("sessionId") or "").strip()
+        active_agent = _active_agent_for_participant(item)
+        current_direct_session_id = str((active_agent or {}).get("directSessionId") or "").strip()
+        session_id = current_direct_session_id or str(item.get("sessionId") or item.get("directSessionId") or "").strip()
         summary = _session_summary(session_id, session_summaries=session_summaries)
         if summary:
             participant = _participant_from_session(
@@ -1518,12 +1586,29 @@ def _refresh_participants(
             )
             participant["participantId"] = str(item.get("participantId") or participant["participantId"])
             participant["enabled"] = False if participant.get("agentMissing") else bool(item.get("enabled", True))
-            participant["agentId"] = str(item.get("agentId") or participant.get("agentId") or "").strip()
-            participant["agentCode"] = str(item.get("agentCode") or participant.get("agentCode") or "").strip()
-            participant["directSessionId"] = str(item.get("directSessionId") or participant.get("directSessionId") or participant.get("sessionId") or "").strip()
+            participant["agentId"] = str(
+                (active_agent or {}).get("agentId") or item.get("agentId") or participant.get("agentId") or ""
+            ).strip()
+            participant["agentCode"] = str(
+                (active_agent or {}).get("agentCode") or item.get("agentCode") or participant.get("agentCode") or ""
+            ).strip()
+            participant["directSessionId"] = str(
+                current_direct_session_id
+                or item.get("directSessionId")
+                or participant.get("directSessionId")
+                or participant.get("sessionId")
+                or ""
+            ).strip()
+            participant["sessionId"] = str(current_direct_session_id or participant.get("sessionId") or "").strip()
             refreshed.append(participant)
         else:
             fallback = dict(item)
+            if current_direct_session_id:
+                fallback["sessionId"] = current_direct_session_id
+                fallback["directSessionId"] = current_direct_session_id
+            if active_agent:
+                fallback["agentId"] = str(active_agent.get("agentId") or fallback.get("agentId") or "").strip()
+                fallback["agentCode"] = str(active_agent.get("agentCode") or fallback.get("agentCode") or "").strip()
             session_id = str(fallback.get("sessionId") or fallback.get("directSessionId") or "").strip()
             if session_id and str(fallback.get("agentId") or "").strip():
                 detail = session_service.get_session_detail(session_id) or {}
@@ -1536,6 +1621,30 @@ def _refresh_participants(
                     fallback["enabled"] = False
             refreshed.append(fallback)
     return refreshed
+
+
+def _active_agent_for_participant(participant: dict[str, Any]) -> dict[str, Any] | None:
+    agent_id = str(participant.get("agentId") or "").strip()
+    if agent_id:
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+        return dict(agent) if isinstance(agent, dict) else None
+    session_ids = {
+        str(participant.get("sessionId") or "").strip(),
+        str(participant.get("directSessionId") or "").strip(),
+    }
+    session_ids.discard("")
+    if not session_ids:
+        return None
+    try:
+        agents = agent_directory_service.list_agents(include_archived=False)
+    except Exception:
+        return None
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("directSessionId") or "").strip() in session_ids:
+            return dict(agent)
+    return None
 
 
 def _repair_room_participants_in_state(

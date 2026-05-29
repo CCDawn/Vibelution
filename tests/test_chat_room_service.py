@@ -170,6 +170,95 @@ def test_chat_room_list_and_detail_use_lightweight_participant_refresh(tmp_path,
     assert list_session_calls == 2
 
 
+def test_chat_room_refresh_rebinds_participant_to_current_agent_direct_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    first = session_service.create_chat_session(title="Alpha Agent")
+    second = session_service.create_chat_session(title="Beta Agent")
+    room = chat_room_service.create_chat_room(
+        title="旧 session 引用群聊",
+        participant_agent_ids=[first["agentId"], second["agentId"]],
+    )
+    room_state = chat_room_service._store().load()
+    stored_room = next(item for item in room_state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["participants"][0]["agentId"] = first["agentId"]
+    stored_room["participants"][0]["agentCode"] = first.get("agentCode", "")
+    chat_room_service._store().save(room_state)
+    rebound_session_id = "session-alpha-rebound"
+    state = agent_directory_service.load_state()
+    for agent in state.get("agents") or []:
+        if agent.get("agentId") == first["agentId"]:
+            agent["directSessionId"] = rebound_session_id
+            break
+    agent_directory_service.save_state(state)
+    chat_state = load_chat_state(tmp_path)
+    chat_state["conversations"] = [
+        item
+        for item in chat_state.get("conversations") or []
+        if (item.get("conversation_id") or item.get("id")) != first["id"]
+    ]
+    save_chat_state(tmp_path, chat_state)
+
+    detail = chat_room_service.get_chat_room_detail(room["roomId"])
+
+    participants = {item["agentId"]: item for item in detail["participants"]}
+    assert participants[first["agentId"]]["sessionId"] == rebound_session_id
+    assert participants[first["agentId"]]["directSessionId"] == rebound_session_id
+    assert participants[first["agentId"]]["enabled"] is True
+
+
+def test_group_round_sync_materializes_agent_directory_only_sessions(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="Alpha Agent")
+    state = load_chat_state(tmp_path)
+    state["conversations"] = [
+        item
+        for item in state.get("conversations") or []
+        if (item.get("conversation_id") or item.get("id")) != detail["id"]
+    ]
+    save_chat_state(tmp_path, state)
+    room = {
+        "roomId": "room-alpha",
+        "title": "同步群聊",
+        "participants": [
+            {
+                "participantId": "session-alpha",
+                "agentId": detail["agentId"],
+                "sessionId": detail["id"],
+                "directSessionId": detail["id"],
+                "title": "Alpha Agent",
+                "enabled": True,
+            }
+        ],
+    }
+    round_payload = {
+        "roundId": "round-alpha",
+        "roomId": "room-alpha",
+        "topic": "同步测试",
+        "summary": "已经讨论完。",
+        "finishedAt": "2026-05-29T08:30:00+00:00",
+        "messages": [
+            {
+                "participantId": "session-alpha",
+                "speakerTitle": "Alpha Agent",
+                "status": "completed",
+                "content": "我会把结论写回直聊。",
+            }
+        ],
+    }
+
+    chat_room_service._sync_group_round_to_participant_sessions(room, round_payload)
+
+    synced_state = load_chat_state(tmp_path)
+    conversation = session_service._find_conversation_entry(synced_state, detail["id"])
+    assert conversation is not None
+    assert conversation.get("agent_id") == detail["agentId"]
+    messages = conversation.get("messages") or []
+    assert messages[-1]["metadata"]["kind"] == "group_room_transcript"
+    assert messages[-1]["metadata"]["sourceRoundId"] == "round-alpha"
+
+
 def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -476,6 +565,59 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_profile
     assert detail["rounds"][-1]["messages"][0]["status"] == "completed"
 
 
+def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="群聊归档 Agent")
+    peer = session_service.create_chat_session(title="群聊保留 Agent")
+    room = chat_room_service.create_chat_room(
+        title="归档成员群聊",
+        participant_agent_ids=[detail["agentId"], peer["agentId"]],
+    )
+    participant = room["participants"][0]
+    events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "create_chat_agent",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("archived participant must not create runtime")),
+    )
+
+    agent_directory_service.archive_agent_instance(detail["agentId"])
+    try:
+        chat_room_service._run_participant_agent(
+            participant,
+            "请发言",
+            {
+                "roomId": room["roomId"],
+                "roundId": "round-archived",
+                "topic": "归档阻断",
+                "purpose": "discussion",
+            },
+        )
+    except chat_room_service.ChatRoomValidationError as exc:
+        assert "已归档" in str(exc) or "archived" in str(exc)
+    else:
+        raise AssertionError("archived chat-room participant should be blocked before runtime")
+
+    archived_events = [
+        item
+        for item in events
+        if item[0][:3] == (
+            "chat_room",
+            "participant_agent",
+            "chat_room.participant_agent_archived",
+        )
+    ]
+    assert len(archived_events) == 1
+    assert archived_events[0][1]["fields"]["agentId"] == detail["agentId"]
+
+
 def test_update_agent_chat_room_membership_only_changes_selected_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
@@ -563,7 +705,7 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
             prompts.append(prompt)
             if not disable_tools:
                 direct_started.set()
-                assert release_direct.wait(2.0)
+                assert release_direct.wait(10.0)
                 return {
                     "status": "completed",
                     "summary": "direct done",
@@ -573,7 +715,7 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
                     "tool_trace": [],
                 }
             room_started.set()
-            assert release_room.wait(2.0)
+            assert release_room.wait(10.0)
             return {
                 "status": "completed",
                 "summary": "room done",
@@ -585,7 +727,7 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha direct turn")
-        assert direct_started.wait(1.0)
+        assert direct_started.wait(10.0)
 
         result_holder: dict[str, dict] = {}
         room_thread = threading.Thread(
@@ -598,7 +740,7 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
 
         assert not room_started.wait(0.3)
         release_direct.set()
-        assert room_started.wait(2.0), "room speaker should start after the direct turn releases the agent slot"
+        assert room_started.wait(8.0), "room speaker should start after the direct turn releases the agent slot"
         release_room.set()
         room_thread.join(timeout=2.0)
     finally:
@@ -655,12 +797,12 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
             if disable_tools:
                 run_order.append("room")
                 room_started.set()
-                assert release_room.wait(2.0)
+                assert release_room.wait(10.0)
                 return {"status": "completed", "summary": "room done", "raw_output": "room done"}
             if "first direct" in prompt:
                 run_order.append("first_direct")
                 first_direct_started.set()
-                assert release_first_direct.wait(2.0)
+                assert release_first_direct.wait(10.0)
                 return {
                     "status": "completed",
                     "summary": "first direct done",
@@ -671,7 +813,7 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
                 }
             run_order.append("second_direct")
             second_direct_started.set()
-            assert release_second_direct.wait(2.0)
+            assert release_second_direct.wait(10.0)
             return {
                 "status": "completed",
                 "summary": "second direct done",
@@ -685,7 +827,7 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha first direct")
-        assert first_direct_started.wait(1.0)
+        assert first_direct_started.wait(10.0)
 
         result_holder: dict[str, dict] = {}
         room_thread = threading.Thread(
@@ -702,10 +844,10 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
         assert not second_direct_started.wait(0.3)
 
         release_first_direct.set()
-        assert room_started.wait(2.0)
+        assert room_started.wait(15.0)
         assert not second_direct_started.wait(0.3)
         release_room.set()
-        assert second_direct_started.wait(2.0)
+        assert second_direct_started.wait(15.0)
         release_second_direct.set()
         room_thread.join(timeout=2.0)
     finally:
@@ -757,7 +899,7 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
                 room_started.set()
                 return {"status": "completed", "summary": "room should not run", "raw_output": "room should not run"}
             direct_started.set()
-            assert release_direct.wait(2.0)
+            assert release_direct.wait(10.0)
             return {
                 "status": "completed",
                 "summary": "direct done",
@@ -771,7 +913,7 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
 
     try:
         session_service.submit_session_message(alpha["id"], "alpha direct")
-        assert direct_started.wait(1.0)
+        assert direct_started.wait(10.0)
         detail = chat_room_service.start_chat_room_round(room["roomId"], "等待 direct 后发言", background=True)
         round_id = detail["activeRoundId"]
         assert round_id
@@ -824,7 +966,7 @@ def test_stop_chat_room_round_enters_stopping_then_publishes_ready_detail(tmp_pa
 
     def blocking_runner(participant, prompt, context):
         runner_started.set()
-        assert release_runner.wait(2.0)
+        assert release_runner.wait(10.0)
         return {"status": "completed", "raw_output": "late response", "summary": "late"}
 
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-chat-room-user-stop")

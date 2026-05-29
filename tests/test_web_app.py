@@ -3233,6 +3233,78 @@ def test_submit_session_message_rejects_archived_agent_without_mutating_session(
     assert blocked_events[0][1]["fields"]["agentId"] == detail["agentId"]
 
 
+def test_edit_resubmit_session_message_rejects_archived_agent_without_mutating_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="归档重发 Agent")
+    state = load_chat_state(tmp_path)
+    conversation = state["conversations"][0]
+    conversation["messages"] = [
+        {"role": "user", "content": "原始消息", "timestamp": "2026-05-29T08:40:00+00:00"}
+    ]
+    save_chat_state(tmp_path, state)
+    agent_directory_service.archive_agent_instance(detail["agentId"])
+    events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: pytest.fail("archived Agent edit-resubmit must not schedule turns"),
+    )
+
+    with pytest.raises(session_service.SessionValidationError, match="已归档|archived"):
+        session_service.edit_and_resubmit_session_message(
+            detail["id"],
+            f"{detail['id']}-message-1",
+            "编辑后的消息不应进入运行队列",
+        )
+
+    next_state = load_chat_state(tmp_path)
+    next_conversation = next_state["conversations"][0]
+    assert next_conversation["messages"][0]["content"] == "原始消息"
+    assert next_conversation.get("last_turn_status") != "running"
+    blocked_events = [item for item in events if item[0][2] == "conversation.turn.blocked_archived_agent"]
+    assert len(blocked_events) == 1
+    assert blocked_events[0][1]["fields"]["agentId"] == detail["agentId"]
+
+
+def test_run_session_turn_blocks_if_agent_archived_after_scheduling(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="排队后归档 Agent")
+    scheduled_contexts = []
+    events = []
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(context))
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "create_chat_agent",
+        lambda **_kwargs: pytest.fail("archived Agent worker must not create runtime"),
+    )
+
+    session_service.submit_session_message(detail["id"], "这条消息排队后 Agent 会被归档")
+    assert len(scheduled_contexts) == 1
+
+    agent_directory_service.archive_agent_instance(detail["agentId"])
+    session_service._run_session_turn(scheduled_contexts[0])
+
+    next_detail = session_service.get_session_detail(detail["id"])
+    assert next_detail["currentPhase"] == "failed"
+    assert next_detail["messages"][-1]["role"] == "assistant"
+    assert "已归档" in next_detail["messages"][-1]["content"]
+    blocked_events = [item for item in events if item[0][2] == "conversation.turn.blocked_archived_agent"]
+    assert len(blocked_events) == 1
+    assert blocked_events[0][1]["fields"]["agentId"] == detail["agentId"]
+
+
 def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypatch):
     (tmp_path / "web" / "src" / "routes").mkdir(parents=True, exist_ok=True)
     (tmp_path / "core" / "web" / "services").mkdir(parents=True, exist_ok=True)

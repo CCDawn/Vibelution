@@ -210,6 +210,39 @@ def test_build_agent_context_returns_empty_packet_for_missing_agent(tmp_path, mo
     assert packet.tool_policy == {}
 
 
+def test_build_agent_context_returns_empty_packet_for_archived_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="已归档上下文 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-archived",
+    )
+    events = []
+    monkeypatch.setattr(
+        context_engine,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    agent_directory_service.archive_agent_instance(agent["agentId"])
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-archived")
+
+    assert packet.agent_id == agent["agentId"]
+    assert packet.session_id == "session-archived"
+    assert packet.context_block == ""
+    assert packet.memory_policy == {}
+    assert packet.tool_policy == {}
+    assert packet.timings["reason"] == "archived_agent"
+    assert packet.timings["agentStatus"] == "archived"
+    assert any(
+        item[0][:3] == ("agent_context", "context_engine", "agent_runtime.resolve_failed")
+        and item[1]["fields"]["reason"] == "archived_agent"
+        and item[1]["fields"]["agentStatus"] == "archived"
+        for item in events
+    )
+
+
 def test_prepare_subagent_spawn_isolated_by_default_and_fork_is_explicit(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     parent = agent_directory_service.create_agent_instance(
