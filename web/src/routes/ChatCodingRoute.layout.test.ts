@@ -59,6 +59,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("keeps group settings in the left rail and moves member status into the right index", () => {
     expect(routeSource).toContain("expandedGroupAgentSessionId");
     expect(routeSource).toContain("expandedGroupAgentDetailQuery");
+    expect(routeSource).toContain("isAvailableGroupParticipant");
+    expect(routeSource).toContain("availableGroupParticipants");
     expect(routeSource).toContain("rightIndexPanel");
     expect(routeSource).toContain("setRightIndexPanel(\"members\")");
     expect(routeSource).toContain("latestMentalSnapshot");
@@ -66,8 +68,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.rightIndexTabs");
     expect(routeSource).toContain("styles.agentIndexRoster");
     expect(routeSource).toContain("styles.agentIndexHeader");
+    expect(routeSource).toContain("styles.agentIndexEmptyState");
+    expect(routeSource).toContain("styles.agentIndexEmptyAction");
     expect(routeSource).toContain("aria-expanded={expanded}");
-    expect(routeSource).toContain("展开成员查看该 Agent 自己的上下文、心智快照和会话状态。");
+    expect(routeSource).toContain("只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。");
+    expect(routeSource).toContain("暂无可用群成员。已失效的历史成员不会在这里显示。");
+    expect(routeSource).toContain("添加群成员");
+    expect(routeSource).not.toContain("已从群聊调度中停用");
     expect(routeSource.indexOf("styles.groupProfileBlock")).toBeLessThan(
       routeSource.indexOf("<aside className={rightPaneCollapsed"),
     );
@@ -86,6 +93,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.agentIndexHeader).toBeTypeOf("string");
     expect(routeStyles.agentIndexDetails).toBeTypeOf("string");
     expect(routeStyles.agentIndexMentalBlock).toBeTypeOf("string");
+    expect(routeStyles.agentIndexEmptyState).toBeTypeOf("string");
+    expect(routeStyles.agentIndexEmptyAction).toBeTypeOf("string");
   });
 
   it("keeps prompt cache observation visible in the current session status strip", () => {
