@@ -259,7 +259,7 @@ def update_agent_chat_room_membership(agent_id: str, room_ids: list[str] | None)
     }
 
 
-def remove_agent_from_chat_rooms(agent_id: str) -> dict[str, Any]:
+def remove_agent_from_chat_rooms(agent_id: str, *, allow_empty_rooms: bool = False) -> dict[str, Any]:
     """Remove one Agent from all chat room participant lists before safe archival."""
 
     lang = get_web_language()
@@ -275,6 +275,9 @@ def remove_agent_from_chat_rooms(agent_id: str) -> dict[str, Any]:
     now = utc_now_iso()
     with _CHAT_ROOM_LOCK:
         state = _store().load()
+        if _repair_room_participants_in_state(state, session_summaries=_session_summary_index()):
+            _store().save(state)
+            state = _store().load()
         rooms = [item for item in list(state.get("rooms") or []) if isinstance(item, dict)]
         for room in rooms:
             participants = [dict(item) for item in list(room.get("participants") or []) if isinstance(item, dict)]
@@ -285,7 +288,7 @@ def remove_agent_from_chat_rooms(agent_id: str) -> dict[str, Any]:
             ]
             if next_participants == participants:
                 continue
-            if not next_participants:
+            if not next_participants and not allow_empty_rooms:
                 raise ChatRoomValidationError(
                     text_for(
                         lang,

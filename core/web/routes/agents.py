@@ -18,9 +18,11 @@ from core.web.services.agent_directory_service import (
     archive_agent_instance,
     consume_agent_inbox_message,
     ensure_agent_archive_allowed,
+    ensure_agent_purge_allowed,
     get_agent,
     list_agent_inbox_messages_for_agent,
     list_agents,
+    purge_archived_agent_instance,
     update_agent_instance,
     write_agent_inbox_message,
 )
@@ -360,6 +362,29 @@ def agent_archive(agent_id: str) -> dict:
                 "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
                 "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
                 "dataRetention": "archived_only",
+            },
+        }
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChatRoomBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.delete("/agents/{agent_id}/purge")
+def agent_purge(agent_id: str) -> dict:
+    try:
+        ensure_agent_purge_allowed(agent_id)
+        room_cleanup = remove_agent_from_chat_rooms(agent_id, allow_empty_rooms=True)
+        mode_cleanup = remove_agent_from_mode_bindings(agent_id)
+        purge = purge_archived_agent_instance(agent_id)
+        return {
+            **purge,
+            "purgeSummary": {
+                "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
+                "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
+                "dataRetention": "purged",
             },
         }
     except AgentNotFoundError as exc:

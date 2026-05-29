@@ -225,6 +225,10 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("method: \"DELETE\"");
     expect(routeSource).toContain("window.confirm");
     expect(routeSource).toContain("copy.archiveAgent");
+    expect(routeSource).toContain("purgeAgentMutation");
+    expect(routeSource).toContain("/purge");
+    expect(routeSource).toContain("copy.purgeAgent");
+    expect(routeSource).toContain("selectedAgent.status === \"archived\"");
     expect(routeSource).toContain("styles.dangerZone");
     expect(routeSource).toContain("styles.dangerButton");
   });
