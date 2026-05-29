@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -634,8 +635,8 @@ def _ensure_project_agent_registry(
     if registry:
         return registry
     if registry_path.exists():
-        return _default_project_agent_registry(auto_initialized=False)
-    default_registry = _default_project_agent_registry()
+        return _default_project_agent_registry(registry_path.parent, auto_initialized=False)
+    default_registry = _default_project_agent_registry(registry_path.parent)
     try:
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         registry_path.write_text(
@@ -703,7 +704,11 @@ def _read_project_agent_registry(
     return payload if isinstance(payload, dict) else {}
 
 
-def _default_project_agent_registry(*, auto_initialized: bool = True) -> dict[str, Any]:
+def _default_project_agent_registry(
+    memory_dir: Path | None = None,
+    *,
+    auto_initialized: bool = True,
+) -> dict[str, Any]:
     return {
         "schemaVersion": 1,
         "updatedAt": datetime.now(UTC).isoformat(),
@@ -718,22 +723,93 @@ def _default_project_agent_registry(*, auto_initialized: bool = True) -> dict[st
             "memoryWriteMode": "serialized_single_writer",
             "autoInitialized": auto_initialized,
         },
-        "laneTerritories": _default_project_agent_lane_territories(),
+        "laneTerritories": _default_project_agent_lane_territories(memory_dir),
         "agents": [],
     }
 
 
-def _default_project_agent_lane_territories() -> dict[str, dict[str, Any]]:
+def _default_project_agent_lane_territories(memory_dir: Path | None = None) -> dict[str, dict[str, Any]]:
+    from_lanes = _project_agent_lane_territories_from_memory(memory_dir) if memory_dir else {}
+    return from_lanes or _fallback_project_agent_lane_territories()
+
+
+def _project_agent_lane_territories_from_memory(memory_dir: Path | None) -> dict[str, dict[str, Any]]:
+    if not memory_dir:
+        return {}
+    lane_dir = Path(memory_dir) / "lanes"
+    if not lane_dir.exists():
+        return {}
+    territories: dict[str, dict[str, Any]] = {}
+    for lane_path in sorted(lane_dir.glob("*.json")):
+        try:
+            lane = json.loads(lane_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(lane, dict):
+            continue
+        lane_id = str(lane.get("id") or lane_path.stem).strip()
+        if not lane_id:
+            continue
+        title = str(lane.get("title") or lane_id).strip()
+        focus = str(lane.get("focus") or "").strip()
+        summary = f"负责 {title}"
+        if focus:
+            summary = f"{summary}；当前焦点：{focus}"
+        territories[lane_id] = {
+            "managementScope": {
+                "summary": summary,
+                "files": _project_agent_lane_related_files(lane),
+                "taskTypes": _project_agent_lane_task_types(lane_id, title),
+            },
+            "handoffTargets": _default_handoff_targets_for_lane(lane_id),
+            "outOfScopePolicy": "recommend_handoff",
+        }
+    return territories
+
+
+def _project_agent_lane_related_files(lane: dict[str, Any]) -> list[str]:
+    files: list[str] = []
+    for module in list(lane.get("modules") or [])[:8]:
+        if not isinstance(module, dict):
+            continue
+        for item in list(module.get("relatedFiles") or []):
+            value = str(item or "").strip()
+            if value and value not in files:
+                files.append(value)
+            if len(files) >= 8:
+                return files
+    return files
+
+
+def _project_agent_lane_task_types(lane_id: str, title: str) -> list[str]:
+    task_types: list[str] = []
+    for part in re.split(r"[^A-Za-z0-9]+", f"{lane_id} {title}".lower()):
+        value = str(part or "").strip()
+        if value and value not in task_types:
+            task_types.append(value)
+        if len(task_types) >= 6:
+            break
+    return task_types
+
+
+def _default_handoff_targets_for_lane(lane_id: str) -> list[str]:
+    defaults = [
+        "agent-runtime-core",
+        "chat-coding-surface",
+        "web-workbench-surface",
+        "quality-and-operations",
+        "evolution-control-plane",
+        "self-evolution-loop",
+    ]
+    return [item for item in defaults if item != lane_id][:3]
+
+
+def _fallback_project_agent_lane_territories() -> dict[str, dict[str, Any]]:
     return {
         "agent-runtime-core": {
             "managementScope": {
-                "summary": "负责 Agent 运行主干、ContextEngine、AgentDirectory、工具/记忆/委托策略和运行时上下文装配。",
-                "files": [
-                    "core/orchestration/**",
-                    "core/web/services/agent_directory_service.py",
-                    "core/runtime_manager/**",
-                    "agent.py",
-                ],
+                "summary": "负责 Agent 运行主干、上下文装配、身份绑定、工具/记忆/委托策略。",
+                "files": ["core/orchestration/**", "core/runtime_manager/**", "agent.py"],
                 "taskTypes": [
                     "runtime-context",
                     "agent-directory",
@@ -742,21 +818,16 @@ def _default_project_agent_lane_territories() -> dict[str, dict[str, Any]]:
                     "delegation",
                 ],
             },
-            "handoffTargets": [
-                "chat-coding-surface",
-                "quality-and-operations",
-                "evolution-control-plane",
-            ],
+            "handoffTargets": ["chat-coding-surface", "quality-and-operations"],
             "outOfScopePolicy": "recommend_handoff",
         },
         "chat-coding-surface": {
             "managementScope": {
-                "summary": "负责 Chat/Coding 会话体验、直接会话、群聊、消息撤回/删除、进度反馈和前后端会话协同。",
+                "summary": "负责 Chat/Coding 会话、群聊、消息生命周期和前端对话体验。",
                 "files": [
                     "core/web/services/session_service.py",
                     "core/web/services/chat_room_service.py",
-                    "web/src/routes/ChatCodingRoute.tsx",
-                    "web/src/api/**",
+                    "web/src/routes/**",
                 ],
                 "taskTypes": [
                     "chat-session",
@@ -765,47 +836,13 @@ def _default_project_agent_lane_territories() -> dict[str, dict[str, Any]]:
                     "conversation-ui",
                 ],
             },
-            "handoffTargets": [
-                "agent-runtime-core",
-                "web-workbench-surface",
-                "quality-and-operations",
-            ],
-            "outOfScopePolicy": "recommend_handoff",
-        },
-        "web-workbench-surface": {
-            "managementScope": {
-                "summary": "负责 Web 工作台、Agent Center、Teams、Research Flow Canvas、配置页和前端信息架构。",
-                "files": [
-                    "web/src/routes/**",
-                    "web/src/components/**",
-                    "core/web/routes/**",
-                    "core/web/services/team_service.py",
-                ],
-                "taskTypes": [
-                    "frontend",
-                    "agent-center",
-                    "teams",
-                    "canvas",
-                    "web-api-adapter",
-                ],
-            },
-            "handoffTargets": [
-                "chat-coding-surface",
-                "agent-runtime-core",
-                "quality-and-operations",
-            ],
+            "handoffTargets": ["agent-runtime-core", "web-workbench-surface"],
             "outOfScopePolicy": "recommend_handoff",
         },
         "quality-and-operations": {
             "managementScope": {
-                "summary": "负责测试策略、日志证据、运行时场景诊断、发布收口、版本判断和工作树卫生。",
-                "files": [
-                    "tests/**",
-                    "logs/runtime_scenes/**",
-                    "CHANGELOG.md",
-                    "VERSION",
-                    ".docs/project-memory/**",
-                ],
+                "summary": "负责测试、日志、诊断、发布收口和工作树卫生。",
+                "files": ["tests/**", "logs/runtime_scenes/**", ".docs/project-memory/**"],
                 "taskTypes": [
                     "testing",
                     "logging",
@@ -814,57 +851,7 @@ def _default_project_agent_lane_territories() -> dict[str, dict[str, Any]]:
                     "git-hygiene",
                 ],
             },
-            "handoffTargets": [
-                "agent-runtime-core",
-                "chat-coding-surface",
-                "web-workbench-surface",
-            ],
-            "outOfScopePolicy": "recommend_handoff",
-        },
-        "evolution-control-plane": {
-            "managementScope": {
-                "summary": "负责监督进化、候选/基线对比、Gym 晋升、评审门禁和进化控制面。",
-                "files": [
-                    "core/evolution/**",
-                    "core/web/services/self_evolution_control_service.py",
-                    "workspace/evolution/**",
-                    ".docs/project-memory/lanes/evolution-control-plane.json",
-                ],
-                "taskTypes": [
-                    "supervised-evolution",
-                    "gym-promotion",
-                    "baseline-candidate",
-                    "review-gate",
-                ],
-            },
-            "handoffTargets": [
-                "self-evolution-loop",
-                "agent-runtime-core",
-                "quality-and-operations",
-            ],
-            "outOfScopePolicy": "recommend_handoff",
-        },
-        "self-evolution-loop": {
-            "managementScope": {
-                "summary": "负责自进化循环、反思、能力沉淀、提示词/技能改进和长期改进闭环。",
-                "files": [
-                    "core/self_evolution/**",
-                    "workspace/prompts/**",
-                    ".docs/project-memory/lanes/self-evolution-loop.json",
-                    "AGENTS.md",
-                ],
-                "taskTypes": [
-                    "self-evolution",
-                    "reflection",
-                    "prompt-improvement",
-                    "skill-improvement",
-                ],
-            },
-            "handoffTargets": [
-                "evolution-control-plane",
-                "agent-runtime-core",
-                "quality-and-operations",
-            ],
+            "handoffTargets": ["agent-runtime-core", "chat-coding-surface"],
             "outOfScopePolicy": "recommend_handoff",
         },
     }
