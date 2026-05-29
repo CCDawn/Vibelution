@@ -533,7 +533,7 @@ def _build_project_agent_registry_context_block(
     from core.web.services import agent_directory_service
 
     registry_path = Path(project_root) / ".docs" / "project-memory" / "agent-registry.json"
-    registry = _read_project_agent_registry(
+    registry = _ensure_project_agent_registry(
         registry_path,
         agent_id=agent_id,
         session_id=session_id,
@@ -587,12 +587,69 @@ def _build_project_agent_registry_context_block(
             "runId": run_id,
             "sourcePath": str(registry_path),
             "sourceExists": registry_path.exists(),
+            "autoInitialized": bool(registry.get("_autoInitialized")),
             "registryAgentCount": len(entries),
             "handoffTargetCount": len(handoff_entries),
             "source": "ContextEngine",
         },
     )
     return block
+
+
+def _ensure_project_agent_registry(
+    registry_path: Path,
+    *,
+    agent_id: str,
+    session_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    registry = _read_project_agent_registry(
+        registry_path,
+        agent_id=agent_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    if registry:
+        return registry
+    if registry_path.exists():
+        return _default_project_agent_registry(auto_initialized=False)
+    default_registry = _default_project_agent_registry()
+    try:
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        registry_path.write_text(
+            json.dumps(default_registry, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    except OSError as exc:
+        _record_context_event(
+            "agent_runtime.project_agent_registry_auto_init_failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "runId": run_id,
+                "sourcePath": str(registry_path),
+                "reason": type(exc).__name__,
+                "source": "ContextEngine",
+            },
+        )
+        return default_registry
+    default_registry["_autoInitialized"] = True
+    _record_context_event(
+        "agent_runtime.project_agent_registry_auto_initialized",
+        outcome="created",
+        fields={
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "runId": run_id,
+            "sourcePath": str(registry_path),
+            "laneTerritoryCount": len(default_registry.get("laneTerritories") or {}),
+            "source": "ContextEngine",
+        },
+    )
+    return default_registry
 
 
 def _read_project_agent_registry(
@@ -622,6 +679,173 @@ def _read_project_agent_registry(
         )
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _default_project_agent_registry(*, auto_initialized: bool = True) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "updatedAt": datetime.now(UTC).isoformat(),
+        "sourceOfTruth": {
+            "identityBinding": "AgentDirectory",
+            "territoryDefaults": ".docs/project-memory/agent-registry.json",
+            "runtimeInjection": "core/orchestration/context_engine.py",
+        },
+        "policy": {
+            "outOfScopeDefault": "recommend_handoff",
+            "automaticForwarding": False,
+            "memoryWriteMode": "serialized_single_writer",
+            "autoInitialized": auto_initialized,
+        },
+        "laneTerritories": _default_project_agent_lane_territories(),
+        "agents": [],
+    }
+
+
+def _default_project_agent_lane_territories() -> dict[str, dict[str, Any]]:
+    return {
+        "agent-runtime-core": {
+            "managementScope": {
+                "summary": "负责 Agent 运行主干、ContextEngine、AgentDirectory、工具/记忆/委托策略和运行时上下文装配。",
+                "files": [
+                    "core/orchestration/**",
+                    "core/web/services/agent_directory_service.py",
+                    "core/runtime_manager/**",
+                    "agent.py",
+                ],
+                "taskTypes": [
+                    "runtime-context",
+                    "agent-directory",
+                    "memory-policy",
+                    "tool-policy",
+                    "delegation",
+                ],
+            },
+            "handoffTargets": [
+                "chat-coding-surface",
+                "quality-and-operations",
+                "evolution-control-plane",
+            ],
+            "outOfScopePolicy": "recommend_handoff",
+        },
+        "chat-coding-surface": {
+            "managementScope": {
+                "summary": "负责 Chat/Coding 会话体验、直接会话、群聊、消息撤回/删除、进度反馈和前后端会话协同。",
+                "files": [
+                    "core/web/services/session_service.py",
+                    "core/web/services/chat_room_service.py",
+                    "web/src/routes/ChatCodingRoute.tsx",
+                    "web/src/api/**",
+                ],
+                "taskTypes": [
+                    "chat-session",
+                    "group-chat",
+                    "message-lifecycle",
+                    "conversation-ui",
+                ],
+            },
+            "handoffTargets": [
+                "agent-runtime-core",
+                "web-workbench-surface",
+                "quality-and-operations",
+            ],
+            "outOfScopePolicy": "recommend_handoff",
+        },
+        "web-workbench-surface": {
+            "managementScope": {
+                "summary": "负责 Web 工作台、Agent Center、Teams、Research Flow Canvas、配置页和前端信息架构。",
+                "files": [
+                    "web/src/routes/**",
+                    "web/src/components/**",
+                    "core/web/routes/**",
+                    "core/web/services/team_service.py",
+                ],
+                "taskTypes": [
+                    "frontend",
+                    "agent-center",
+                    "teams",
+                    "canvas",
+                    "web-api-adapter",
+                ],
+            },
+            "handoffTargets": [
+                "chat-coding-surface",
+                "agent-runtime-core",
+                "quality-and-operations",
+            ],
+            "outOfScopePolicy": "recommend_handoff",
+        },
+        "quality-and-operations": {
+            "managementScope": {
+                "summary": "负责测试策略、日志证据、运行时场景诊断、发布收口、版本判断和工作树卫生。",
+                "files": [
+                    "tests/**",
+                    "logs/runtime_scenes/**",
+                    "CHANGELOG.md",
+                    "VERSION",
+                    ".docs/project-memory/**",
+                ],
+                "taskTypes": [
+                    "testing",
+                    "logging",
+                    "diagnosis",
+                    "release",
+                    "git-hygiene",
+                ],
+            },
+            "handoffTargets": [
+                "agent-runtime-core",
+                "chat-coding-surface",
+                "web-workbench-surface",
+            ],
+            "outOfScopePolicy": "recommend_handoff",
+        },
+        "evolution-control-plane": {
+            "managementScope": {
+                "summary": "负责监督进化、候选/基线对比、Gym 晋升、评审门禁和进化控制面。",
+                "files": [
+                    "core/evolution/**",
+                    "core/web/services/self_evolution_control_service.py",
+                    "workspace/evolution/**",
+                    ".docs/project-memory/lanes/evolution-control-plane.json",
+                ],
+                "taskTypes": [
+                    "supervised-evolution",
+                    "gym-promotion",
+                    "baseline-candidate",
+                    "review-gate",
+                ],
+            },
+            "handoffTargets": [
+                "self-evolution-loop",
+                "agent-runtime-core",
+                "quality-and-operations",
+            ],
+            "outOfScopePolicy": "recommend_handoff",
+        },
+        "self-evolution-loop": {
+            "managementScope": {
+                "summary": "负责自进化循环、反思、能力沉淀、提示词/技能改进和长期改进闭环。",
+                "files": [
+                    "core/self_evolution/**",
+                    "workspace/prompts/**",
+                    ".docs/project-memory/lanes/self-evolution-loop.json",
+                    "AGENTS.md",
+                ],
+                "taskTypes": [
+                    "self-evolution",
+                    "reflection",
+                    "prompt-improvement",
+                    "skill-improvement",
+                ],
+            },
+            "handoffTargets": [
+                "evolution-control-plane",
+                "agent-runtime-core",
+                "quality-and-operations",
+            ],
+            "outOfScopePolicy": "recommend_handoff",
+        },
+    }
 
 
 def _merge_project_agent_registry_entries(

@@ -244,7 +244,7 @@ def test_build_agent_context_includes_project_agent_territory_registry(tmp_path,
     )
 
 
-def test_build_agent_context_uses_agent_directory_when_project_agent_registry_is_missing(tmp_path, monkeypatch):
+def test_build_agent_context_auto_initializes_project_agent_registry_when_missing(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     agent = agent_directory_service.create_agent_instance(
         display_name="孤立会话 Agent",
@@ -258,15 +258,76 @@ def test_build_agent_context_uses_agent_directory_when_project_agent_registry_is
         primary_mode="research",
         direct_session_id="session-peer",
     )
+    events = []
+    monkeypatch.setattr(
+        context_engine,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+    registry_path = tmp_path / ".docs" / "project-memory" / "agent-registry.json"
+    assert not registry_path.exists()
 
     packet = context_engine.build_agent_context(agent["agentId"], session_id="session-lonely", run_id="turn-1")
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
 
+    assert registry_path.exists()
+    assert registry["schemaVersion"] == 1
+    assert registry["policy"]["autoInitialized"] is True
+    assert "agent-runtime-core" in registry["laneTerritories"]
+    assert "chat-coding-surface" in registry["laneTerritories"]
     assert "Project Agent Territory Registry" in packet.context_block
     assert "sessionId=session-lonely" in packet.context_block
+    assert "conversation-ui" in packet.context_block
     assert f"agentId={agent['agentId']}" in packet.context_block
     assert "HandoffTargets:" in packet.context_block
     assert f"agentId={peer['agentId']}" in packet.context_block
     assert "sessionId=session-peer" in packet.context_block
+    assert any(
+        item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_agent_registry_auto_initialized")
+        and item[1]["fields"]["laneTerritoryCount"] == 6
+        for item in events
+    )
+    assert any(
+        item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_agent_registry_context_loaded")
+        and item[1]["fields"]["sourceExists"] is True
+        and item[1]["fields"]["autoInitialized"] is True
+        for item in events
+    )
+
+
+def test_build_agent_context_keeps_invalid_project_agent_registry_file(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    registry_path = tmp_path / ".docs" / "project-memory" / "agent-registry.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry_path.write_text("{invalid", encoding="utf-8")
+    agent = agent_directory_service.create_agent_instance(
+        display_name="坏配置兜底 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-invalid-registry",
+    )
+    events = []
+    monkeypatch.setattr(
+        context_engine,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-invalid-registry", run_id="turn-1")
+
+    assert registry_path.read_text(encoding="utf-8") == "{invalid"
+    assert "Project Agent Territory Registry" in packet.context_block
+    assert "sessionId=session-invalid-registry" in packet.context_block
+    assert "conversation-ui" in packet.context_block
+    assert any(
+        item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_agent_registry_context_failed")
+        and item[1]["fields"]["reason"] == "JSONDecodeError"
+        for item in events
+    )
+    assert not any(
+        item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_agent_registry_auto_initialized")
+        for item in events
+    )
 
 
 def test_build_agent_context_includes_research_org_member_and_edge_context(tmp_path, monkeypatch):
