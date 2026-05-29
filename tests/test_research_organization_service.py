@@ -73,6 +73,40 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
     assert (advisor["agentId"], steward["agentId"]) in {(edge["fromAgentId"], edge["toAgentId"]) for edge in org["edges"]}
 
 
+def test_research_organization_context_block_is_filtered_to_connected_subgraph(org_workspace):
+    org = research_organization_service.get_research_organization()
+    ceo, advisor, steward = _core_agents(org)
+    outsider = session_service.create_chat_session(title="断开研究员 Agent")
+    outsider_agent = agent_directory_service.update_agent_instance(
+        outsider["agentId"],
+        primary_mode="research",
+        role_key="research_specialist",
+        metadata={"researchOrgRole": "research_specialist", "employeeRank": "specialist"},
+    )
+    graph = org_workspace.read_research_organization()
+    graph["agents"].append(
+        {
+            "nodeId": outsider_agent["agentId"],
+            "agentId": outsider_agent["agentId"],
+            "role": "research_specialist",
+            "employeeRank": "specialist",
+            "status": "active",
+        }
+    )
+    org_workspace.write_research_organization(graph)
+
+    block = research_organization_service.build_research_organization_context_block(ceo["agentId"])
+
+    assert "Research Organization Context" in block
+    assert ceo["agentCode"] in block
+    assert advisor["agentCode"] in block
+    assert steward["agentCode"] in block
+    assert f"edge-{ceo['agentId']}-{advisor['agentId']}" in block
+    assert "allowedTypes=" in block
+    assert "Use AgentId or AgentCode with agent_message_tool" in block
+    assert f"agentId={outsider_agent['agentId']} " not in block
+
+
 def test_user_message_bypasses_edges_and_wakes_target(org_workspace, monkeypatch):
     org = research_organization_service.get_research_organization()
     _, advisor, _ = _core_agents(org)

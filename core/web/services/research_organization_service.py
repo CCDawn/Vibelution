@@ -95,6 +95,67 @@ def get_research_organization_canvas_graph() -> dict[str, Any]:
     return _organization_to_canvas_api(graph)
 
 
+def build_research_organization_context_block(agent_id: str, *, limit: int = 6) -> str:
+    """Return a compact read-only org view for Agents that belong to the research org graph."""
+
+    organization = get_research_organization()
+    normalized_agent_id = _clean_id(agent_id)
+    agents = [
+        item for item in list(organization.get("agents") or [])
+        if isinstance(item, dict) and _clean_id(item.get("agentId"))
+    ]
+    if not any(_clean_id(item.get("agentId")) == normalized_agent_id for item in agents):
+        return ""
+    active_agents = [
+        item for item in agents
+        if str(item.get("status") or "active").strip() != "archived"
+    ]
+    edges = [
+        item for item in list(organization.get("edges") or [])
+        if isinstance(item, dict) and str(item.get("status") or "active").strip() == "active"
+    ]
+    outbound_edges = [
+        edge for edge in edges
+        if _clean_id(edge.get("fromAgentId")) == normalized_agent_id
+    ]
+    inbound_edges = [
+        edge for edge in edges
+        if _clean_id(edge.get("toAgentId")) == normalized_agent_id
+    ]
+    connected_agent_ids = {normalized_agent_id}
+    for edge in [*outbound_edges, *inbound_edges]:
+        connected_agent_ids.add(_clean_id(edge.get("fromAgentId")))
+        connected_agent_ids.add(_clean_id(edge.get("toAgentId")))
+    if len(connected_agent_ids) > 1:
+        active_agents = [
+            item for item in active_agents
+            if _clean_id(item.get("agentId")) in connected_agent_ids
+        ]
+    agents_by_id = {_clean_id(item.get("agentId")): item for item in active_agents}
+    bounded_limit = max(1, int(limit or 1)) + 8
+    lines = [
+        "## Research Organization Context",
+        "This is a read-only snapshot of your current research organization membership and communication graph.",
+        "Use AgentId or AgentCode with agent_message_tool when contacting an Agent. Communication still follows edge policy, supervision policy, and wake rules.",
+        "Members:",
+    ]
+    for member in active_agents[:bounded_limit]:
+        lines.extend(_format_research_org_context_member_lines(member, self_agent_id=normalized_agent_id))
+    if outbound_edges:
+        lines.append("Directly reachable from you:")
+        for edge in outbound_edges[:bounded_limit]:
+            target = agents_by_id.get(_clean_id(edge.get("toAgentId")), {})
+            lines.append(_format_research_org_context_edge_line(edge, target=target, direction="to"))
+    else:
+        lines.append("Directly reachable from you: none declared")
+    if inbound_edges:
+        lines.append("Agents that can contact you:")
+        for edge in inbound_edges[:bounded_limit]:
+            source = agents_by_id.get(_clean_id(edge.get("fromAgentId")), {})
+            lines.append(_format_research_org_context_edge_line(edge, target=source, direction="from"))
+    return "\n".join(line for line in lines if str(line or "").strip()).strip()
+
+
 def save_research_organization(payload: dict[str, Any]) -> dict[str, Any]:
     """Persist a caller-provided organization graph after normalization."""
 
@@ -1351,6 +1412,57 @@ def _find_communication_edge(graph: dict[str, Any], source_agent_id: str, target
         if normalized["fromAgentId"] == source_agent_id and normalized["toAgentId"] == target_agent_id and normalized["status"] == "active":
             return normalized
     return None
+
+
+def _format_research_org_context_member_lines(member: dict[str, Any], *, self_agent_id: str) -> list[str]:
+    agent_id = _clean_id(member.get("agentId"))
+    agent = member.get("agent") if isinstance(member.get("agent"), dict) else {}
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    code = _clean_id(member.get("agentCode") or agent.get("agentCode"))
+    name = _clean_id(member.get("displayName") or agent.get("displayName"))
+    role = _clean_id(member.get("role") or metadata.get("researchOrgRole") or metadata.get("systemRole"))
+    rank = _clean_id(member.get("employeeRank") or metadata.get("employeeRank"))
+    functional_name = _clean_id(metadata.get("functionalDisplayName"))
+    suffix = " (you)" if agent_id == self_agent_id else ""
+    first_line = f"- {code or agent_id} · {name}{suffix}: agentId={agent_id} role={role or '-'} rank={rank or '-'}"
+    responsibilities = [
+        trim_lines(str(item or ""), max_lines=1)
+        for item in list(metadata.get("responsibilities") or [])[:3]
+        if str(item or "").strip()
+    ]
+    lines = [first_line]
+    if functional_name:
+        lines.append(f"  function: {functional_name}")
+    if responsibilities:
+        lines.append(f"  responsibilities: {'; '.join(responsibilities)}")
+    return lines
+
+
+def _format_research_org_context_edge_line(edge: dict[str, Any], *, target: dict[str, Any], direction: str) -> str:
+    agent = target.get("agent") if isinstance(target.get("agent"), dict) else {}
+    code = _clean_id(target.get("agentCode") or agent.get("agentCode"))
+    name = _clean_id(target.get("displayName") or agent.get("displayName"))
+    agent_id = _clean_id(target.get("agentId") or agent.get("agentId"))
+    policy = edge.get("communicationPolicy") if isinstance(edge.get("communicationPolicy"), dict) else {}
+    message_types = ", ".join(
+        _clean_id(item)
+        for item in list(policy.get("allowedMessageTypes") or [])
+        if _clean_id(item)
+    ) or "notice/request/report"
+    intents = ", ".join(
+        _clean_id(item)
+        for item in list(policy.get("allowedIntents") or [])[:6]
+        if _clean_id(item)
+    ) or "any"
+    wake = _clean_id(policy.get("wakeStrategy") or "conditional") or "conditional"
+    label = trim_lines(str(edge.get("label") or ""), max_lines=1)
+    prefix = "to" if direction == "to" else "from"
+    return (
+        f"- {prefix} {code or agent_id} · {name}: agentId={agent_id} "
+        f"edgeId={edge.get('edgeId') or ''} allowedTypes={message_types} "
+        f"allowedIntents={intents} wake={wake}"
+        + (f" label={label}" if label else "")
+    )
 
 
 def _rank_weight(node: dict[str, Any]) -> int:
