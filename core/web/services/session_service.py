@@ -7126,38 +7126,42 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
     labels = {
         "context_prepare": text_for(
             language,
-            zh="正在准备对话上下文...",
-            en="Preparing the conversation context...",
+            zh="正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。",
+            en="Preparing the conversation context...\nReading the current session, bound Agent, tool policy, and any resumable turn state.",
         ),
         "queued": text_for(
             language,
-            zh="当前 Agent 正在处理上一项任务，本轮已进入队列...",
-            en="The agent is handling another task. This turn is queued...",
+            zh="当前 Agent 正在处理上一项任务，本轮已进入队列...\n会在前一轮释放会话锁后继续执行。",
+            en="The agent is handling another task. This turn is queued...\nIt will continue after the previous turn releases the session lock.",
         ),
         "agent_prepare": text_for(
             language,
-            zh="正在唤起对话 agent...",
-            en="Preparing the conversation agent...",
+            zh="正在唤起对话 agent...\n正在绑定 Agent 实例、私有工作区、记忆根和工具工作区。",
+            en="Preparing the conversation agent...\nBinding the Agent instance, private workspace, memory root, and tool workspace.",
         ),
         "history_restore": text_for(
             language,
-            zh="正在恢复上一轮对话记忆...",
-            en="Restoring the previous conversation memory...",
+            zh="正在恢复上一轮对话记忆...\n会把可继续的任务现场接回本轮上下文。",
+            en="Restoring the previous conversation memory...\nReattaching resumable task state to this turn context.",
         ),
         "model_request": text_for(
             language,
-            zh="正在请求模型，等待首个响应片段...",
-            en="Requesting the model and waiting for the first response chunk...",
+            zh="正在请求模型，等待首个响应片段...\n上下文已组装完成，正在进入 LLM 调用。",
+            en="Requesting the model and waiting for the first response chunk...\nThe context is assembled and the LLM call is starting.",
         ),
         "followup_prepare": text_for(
             language,
-            zh="正在准备继续推进下一步...",
-            en="Preparing the next continuation step...",
+            zh="正在准备继续推进下一步...\n会沿用上一轮 active task 继续收口。",
+            en="Preparing the next continuation step...\nContinuing from the previous active task.",
         ),
     }
     content = labels.get(
         stage_key,
-        text_for(language, zh="正在等待模型响应...", en="Waiting for the model response..."),
+        text_for(
+            language,
+            zh="正在等待模型响应...\n当前阶段还没有更细的前端状态说明。",
+            en="Waiting for the model response...\nNo more detailed frontend progress is available for this stage yet.",
+        ),
     )
     _set_session_live_output(session_id, turn_id=turn_id, stage=stage_key, content=content)
     _record_session_turn_lifecycle_event(

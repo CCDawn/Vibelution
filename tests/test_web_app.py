@@ -3080,7 +3080,7 @@ def test_session_detail_exposes_pre_model_progress_stage(tmp_path, monkeypatch):
     live_message = payload["messages"][-1]
     assert live_message["streaming"] is True
     assert live_message["streamStage"] == "context_prepare"
-    assert live_message["content"] == "正在准备对话上下文..."
+    assert live_message["content"] == "正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。"
 
 
 def test_session_detail_hydrates_file_context_from_saved_active_task(tmp_path, monkeypatch):
