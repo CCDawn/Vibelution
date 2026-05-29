@@ -273,6 +273,47 @@ def test_build_agent_context_includes_project_agent_territory_registry(tmp_path,
 
 def test_build_agent_context_auto_initializes_project_agent_registry_when_missing(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    lane_dir = tmp_path / ".docs" / "project-memory" / "lanes"
+    lane_dir.mkdir(parents=True, exist_ok=True)
+    (lane_dir / "chat-coding-surface.json").write_text(
+        json.dumps(
+            {
+                "id": "chat-coding-surface",
+                "title": "Chat Coding Surface",
+                "focus": "真实群聊体验",
+                "modules": [
+                    {
+                        "title": "Chat UI",
+                        "relatedFiles": [
+                            "web/src/routes/ChatCodingRoute.tsx",
+                            "core/web/services/session_service.py",
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (lane_dir / "agent-runtime-core.json").write_text(
+        json.dumps(
+            {
+                "id": "agent-runtime-core",
+                "title": "Agent Runtime Core",
+                "focus": "上下文装配",
+                "modules": [
+                    {
+                        "title": "ContextEngine",
+                        "relatedFiles": ["core/orchestration/context_engine.py"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     agent = agent_directory_service.create_agent_instance(
         display_name="孤立会话 Agent",
         profile_id="primary",
@@ -302,16 +343,24 @@ def test_build_agent_context_auto_initializes_project_agent_registry_when_missin
     assert registry["policy"]["autoInitialized"] is True
     assert "agent-runtime-core" in registry["laneTerritories"]
     assert "chat-coding-surface" in registry["laneTerritories"]
+    assert len(registry["laneTerritories"]) == 2
+    assert registry["laneTerritories"]["chat-coding-surface"]["managementScope"]["summary"] == (
+        "负责 Chat Coding Surface；当前焦点：真实群聊体验"
+    )
+    assert (
+        "web/src/routes/ChatCodingRoute.tsx"
+        in registry["laneTerritories"]["chat-coding-surface"]["managementScope"]["files"]
+    )
     assert "Project Agent Territory Registry" in packet.context_block
     assert "sessionId=session-lonely" in packet.context_block
-    assert "conversation-ui" in packet.context_block
+    assert "真实群聊体验" in packet.context_block
     assert f"agentId={agent['agentId']}" in packet.context_block
     assert "HandoffTargets:" in packet.context_block
     assert f"agentId={peer['agentId']}" in packet.context_block
     assert "sessionId=session-peer" in packet.context_block
     assert any(
         item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_agent_registry_auto_initialized")
-        and item[1]["fields"]["laneTerritoryCount"] == 6
+        and item[1]["fields"]["laneTerritoryCount"] == 2
         for item in events
     )
     assert any(
@@ -320,6 +369,27 @@ def test_build_agent_context_auto_initializes_project_agent_registry_when_missin
         and item[1]["fields"]["autoInitialized"] is True
         for item in events
     )
+
+
+def test_build_agent_context_auto_initializes_project_agent_registry_without_memory_lanes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="无记忆泳道 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-no-lanes",
+    )
+
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-no-lanes", run_id="turn-1")
+    registry = json.loads((tmp_path / ".docs" / "project-memory" / "agent-registry.json").read_text(encoding="utf-8"))
+
+    assert set(registry["laneTerritories"]) == {
+        "agent-runtime-core",
+        "chat-coding-surface",
+        "quality-and-operations",
+    }
+    assert "Project Agent Territory Registry" in packet.context_block
+    assert "conversation-ui" in packet.context_block
 
 
 def test_build_agent_context_keeps_invalid_project_agent_registry_file(tmp_path, monkeypatch):
