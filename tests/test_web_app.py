@@ -2965,10 +2965,13 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
     ]
     assert [event["eventCode"] for event in events] == [
         "session.delete.requested",
+        "session.delete.agent_rebound",
         "session.delete.deleted",
     ]
     assert events[0]["fields"]["phase"] == "ready"
-    assert events[1]["fields"]["nextActiveSessionId"] == "session-newer"
+    assert events[1]["fields"]["previousDirectSessionId"] == "session-live"
+    assert events[1]["fields"]["replacementDirectSessionId"] != "session-live"
+    assert events[2]["fields"]["nextActiveSessionId"] == "session-newer"
 
 
 def test_delete_session_keeps_bound_agent_active(tmp_path, monkeypatch):
@@ -2993,6 +2996,54 @@ def test_delete_session_keeps_bound_agent_active(tmp_path, monkeypatch):
     kept_agent = agent_directory_service.get_agent(agent["agentId"], include_archived=True)
     assert kept_agent is not None
     assert kept_agent["status"] == "active"
+
+
+def test_delete_bound_direct_session_rebinds_agent_without_reviving_old_session(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    events = []
+    agent = agent_directory_service.ensure_agent_for_session(
+        "session-live",
+        display_name="科研复核 Agent",
+        primary_mode="research",
+        role_key="research_review",
+        prompt_template_id="prompt-research-review",
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["agent_id"] = agent["agentId"]
+    state["conversations"][0]["agentId"] = agent["agentId"]
+    save_chat_state(tmp_path, state)
+
+    def capture_session_delete_event(component, phase, event_code, **kwargs):
+        if str(event_code).startswith("session.delete."):
+            events.append(
+                {
+                    "component": component,
+                    "phase": phase,
+                    "eventCode": event_code,
+                    **kwargs,
+                }
+            )
+
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", capture_session_delete_event)
+
+    response = client.delete("/api/sessions/session-live")
+
+    assert response.status_code == 200
+    rebound_agent = agent_directory_service.get_agent(agent["agentId"], include_archived=True)
+    assert rebound_agent is not None
+    assert rebound_agent["status"] == "active"
+    assert rebound_agent["directSessionId"]
+    assert rebound_agent["directSessionId"] != "session-live"
+    assert session_service.get_session_detail("session-live") is None
+    sessions = session_service.list_sessions()
+    assert "session-live" not in {item["id"] for item in sessions}
+    assert rebound_agent["directSessionId"] in {item["id"] for item in sessions}
+    rebound_events = [event for event in events if event["eventCode"] == "session.delete.agent_rebound"]
+    assert len(rebound_events) == 1
+    assert rebound_events[0]["fields"]["agentId"] == agent["agentId"]
+    assert rebound_events[0]["fields"]["replacementDirectSessionId"] == rebound_agent["directSessionId"]
 
 
 def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):

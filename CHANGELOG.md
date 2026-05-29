@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.17 - 2026-05-29
+
+- Fixed Chat/Coding direct session deletion so deleted Agent-bound session ids no longer reappear from the AgentDirectory direct-session index.
+- Rebind the active Agent to a fresh empty direct session after deleting its old conversation record, while keeping the Agent active and adding `session.delete.agent_rebound` lifecycle diagnostics.
+
 ## 0.4.13 - 2026-05-29
 
 - Reworked Agent Center filters into status, runtime mode, and reference sections so active Agents, archived records, mode membership, group-chat references, and team references are no longer mixed in one flat list.
