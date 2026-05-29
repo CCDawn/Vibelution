@@ -1595,6 +1595,16 @@ export type Team = {
   status: "active" | "archived" | string;
   members: TeamMember[];
   memberCount: number;
+  linkedChatRoomId?: string;
+  linkedChatRoom?: {
+    roomId: string;
+    title: string;
+    status: string;
+    mode: string;
+    purpose: string;
+    participantCount: number;
+    updatedAt: string;
+  } | null;
   canvasPath: string;
   createdAt: string;
   updatedAt: string;

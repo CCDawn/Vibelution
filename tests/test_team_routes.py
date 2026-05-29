@@ -2,7 +2,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import agent_directory_service, project_agent_bus_service, session_service, team_service
+from core.web.services import agent_directory_service, chat_room_service, project_agent_bus_service, session_service, team_service
 
 
 def _client() -> TestClient:
@@ -11,6 +11,7 @@ def _client() -> TestClient:
 
 def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
@@ -25,6 +26,8 @@ def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
     assert create_response.status_code == 201, create_response.text
     team = create_response.json()
     assert team["members"][0]["agentId"] == agent["agentId"]
+    assert team["linkedChatRoomId"]
+    assert team["linkedChatRoom"]["participantCount"] == 1
     assert client.get(f"/api/teams/{team['teamId']}").status_code == 200
     canvas_response = client.get(f"/api/teams/{team['teamId']}/canvas")
     assert canvas_response.status_code == 200
@@ -33,6 +36,7 @@ def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
 
 def test_team_routes_save_canvas(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
@@ -60,8 +64,29 @@ def test_team_routes_save_canvas(tmp_path, monkeypatch):
     assert len(response.json()["nodes"]) == 2
 
 
+def test_team_routes_sync_linked_chat_room(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    client = _client()
+    team = client.post("/api/teams", json={"name": "同步团队", "members": [{"agentId": agent["agentId"]}]}).json()
+
+    response = client.post(f"/api/teams/{team['teamId']}/chat-room/sync")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["linkedChatRoomId"] == team["linkedChatRoomId"]
+    room = client.get(f"/api/chat-rooms/{payload['linkedChatRoomId']}").json()
+    assert room["config"]["source"] == "team"
+    assert room["config"]["teamId"] == team["teamId"]
+
+
 def test_team_routes_send_message_to_team_members(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)

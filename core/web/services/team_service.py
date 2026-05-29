@@ -11,7 +11,7 @@ from typing import Any
 
 from core.chat.chat_task_types import trim_lines
 
-from . import agent_directory_service, project_agent_bus_service
+from . import agent_directory_service, chat_room_service, project_agent_bus_service
 from .runtime_scene_service import record_runtime_scene_event
 
 
@@ -85,6 +85,7 @@ def create_team(
             "purpose": trim_lines(purpose or "", max_lines=4).strip(),
             "status": DEFAULT_TEAM_STATUS,
             "members": normalized_members,
+            "linkedChatRoomId": "",
             "canvasPath": _relative_path(_team_canvas_path(team_id)),
             "createdAt": now,
             "updatedAt": now,
@@ -94,6 +95,9 @@ def create_team(
         _save_index(state)
         canvas = _default_canvas_for_team(team)
         _write_json(_team_canvas_path(team_id), canvas)
+        _ensure_team_chat_room_link(team)
+        state["updatedAt"] = team["updatedAt"]
+        _save_index(state)
     _record_team_event("team.created", team, fields={"memberCount": len(normalized_members)})
     return get_team(team_id)
 
@@ -201,6 +205,21 @@ def send_team_message(
     return event
 
 
+def sync_team_chat_room(team_id: str) -> dict[str, Any]:
+    normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
+    with _TEAM_LOCK:
+        state = _load_index()
+        team = _find_team(state, normalized_team_id)
+        if team is None:
+            raise TeamNotFoundError("Team not found.")
+        if _repair_team(team):
+            state["updatedAt"] = utc_now_iso()
+        _ensure_team_chat_room_link(team)
+        state["updatedAt"] = team["updatedAt"]
+        _save_index(state)
+    return get_team(normalized_team_id)
+
+
 def get_team_canvas(team_id: str) -> dict[str, Any]:
     team = _get_team_record(team_id)
     canvas_path = _team_canvas_path(team["teamId"])
@@ -227,6 +246,7 @@ def save_team_canvas(team_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             stored["updatedAt"] = canvas["updatedAt"]
             stored["canvasPath"] = _relative_path(_team_canvas_path(team["teamId"]))
             stored["members"] = _sync_members_from_canvas(stored.get("members") or [], canvas)
+            _ensure_team_chat_room_link(stored)
             state["updatedAt"] = canvas["updatedAt"]
             _save_index(state)
     _record_team_event(
@@ -435,14 +455,86 @@ def _active_member_agent_ids(team: dict[str, Any]) -> list[str]:
     return ids
 
 
+def _active_member_session_ids(team: dict[str, Any]) -> list[str]:
+    session_ids: list[str] = []
+    seen: set[str] = set()
+    for agent_id in _active_member_agent_ids(team):
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+        session_id = str((agent or {}).get("directSessionId") or "").strip()
+        if not session_id or session_id in seen:
+            continue
+        seen.add(session_id)
+        session_ids.append(session_id)
+    return session_ids
+
+
+def _team_chat_room_title(team: dict[str, Any]) -> str:
+    name = str(team.get("name") or team.get("teamId") or "Team").strip()
+    return f"{name} 团队群聊"
+
+
+def _sync_chat_room_root() -> None:
+    if chat_room_service.PROJECT_ROOT != PROJECT_ROOT:
+        chat_room_service.PROJECT_ROOT = PROJECT_ROOT
+
+
+def _ensure_team_chat_room_link(team: dict[str, Any]) -> str:
+    if str(team.get("status") or DEFAULT_TEAM_STATUS).strip() == "archived":
+        return str(team.get("linkedChatRoomId") or "").strip()
+    session_ids = _active_member_session_ids(team)
+    if not session_ids:
+        team["linkedChatRoomId"] = ""
+        return ""
+    _sync_chat_room_root()
+    linked_room_id = str(team.get("linkedChatRoomId") or "").strip()
+    title = _team_chat_room_title(team)
+    config = {
+        "source": "team",
+        "teamId": str(team.get("teamId") or "").strip(),
+        "teamName": str(team.get("name") or "").strip(),
+    }
+    if linked_room_id and chat_room_service.get_chat_room_detail(linked_room_id):
+        room = chat_room_service.update_chat_room(
+            linked_room_id,
+            title=title,
+            participant_session_ids=session_ids,
+            purpose="discussion",
+            config=config,
+        )
+    else:
+        room = chat_room_service.create_chat_room(
+            title=title,
+            participant_session_ids=session_ids,
+            mode="round_robin",
+            purpose="discussion",
+            config=config,
+        )
+    team["linkedChatRoomId"] = str(room.get("roomId") or "").strip()
+    team["updatedAt"] = utc_now_iso()
+    _record_team_event(
+        "team.chat_room.synced",
+        team,
+        fields={
+            "linkedChatRoomId": team["linkedChatRoomId"],
+            "memberSessionCount": len(session_ids),
+        },
+    )
+    return team["linkedChatRoomId"]
+
+
 def _team_to_api(team: dict[str, Any]) -> dict[str, Any]:
     repaired = dict(team)
     _repair_team(repaired)
     canvas_summary = _canvas_summary_for_team(repaired)
+    linked_room_id = str(repaired.get("linkedChatRoomId") or "").strip()
+    _sync_chat_room_root()
+    linked_room = chat_room_service.get_chat_room_detail(linked_room_id) if linked_room_id else None
     return {
         **repaired,
         "memberCount": len(repaired.get("members") or []),
         "canvas": canvas_summary,
+        "linkedChatRoomId": linked_room_id if linked_room else "",
+        "linkedChatRoom": _compact_chat_room(linked_room),
     }
 
 
@@ -516,6 +608,9 @@ def _repair_team(team: dict[str, Any]) -> bool:
     expected_path = _relative_path(_team_canvas_path(team_id)) if team_id else ""
     if team.get("canvasPath") != expected_path:
         team["canvasPath"] = expected_path
+        changed = True
+    if "linkedChatRoomId" not in team:
+        team["linkedChatRoomId"] = ""
         changed = True
     members = team.get("members") if isinstance(team.get("members"), list) else []
     repaired_members = _repair_members(members)
@@ -738,6 +833,20 @@ def _summary(teams: list[dict[str, Any]]) -> dict[str, Any]:
             for member in list(team.get("members") or [])
             if isinstance(member, dict) and str(member.get("agentStatus") or "") != "active"
         ),
+    }
+
+
+def _compact_chat_room(room: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not room:
+        return None
+    return {
+        "roomId": str(room.get("roomId") or "").strip(),
+        "title": str(room.get("title") or "").strip(),
+        "status": str(room.get("status") or "").strip(),
+        "mode": str(room.get("mode") or "").strip(),
+        "purpose": str(room.get("purpose") or "").strip(),
+        "participantCount": len(list(room.get("participants") or [])),
+        "updatedAt": str(room.get("updatedAt") or "").strip(),
     }
 
 

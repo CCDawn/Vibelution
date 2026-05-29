@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.18 - 2026-05-29
+
+- Linked Agent Center Teams to Chat/Coding group rooms: teams with active Agent members now create and maintain a linked group chat, and canvas member changes sync that room's participants.
+- Added a Teams page control to open or sync the linked group chat, plus `/chat?room=...` deep-link support so team, canvas, Agent members, and group-chat execution share one navigation path.
+
 ## 0.4.17 - 2026-05-29
 
 - Fixed Chat/Coding direct session deletion so deleted Agent-bound session ids no longer reappear from the AgentDirectory direct-session index.
