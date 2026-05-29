@@ -192,12 +192,15 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
 
 
 def _build_research_organization_context_block(agent_id: str, *, limit: int = 6) -> str:
-    """Return a compact read-only org view for Agents that belong to the research org graph."""
+    """Return the research organization context block, logging service failures at the turn seam."""
 
     try:
         from core.web.services import research_organization_service
 
-        organization = research_organization_service.get_research_organization()
+        return research_organization_service.build_research_organization_context_block(
+            agent_id,
+            limit=limit,
+        )
     except Exception as exc:
         _record_context_event(
             "agent_runtime.research_org_context_failed",
@@ -210,106 +213,6 @@ def _build_research_organization_context_block(agent_id: str, *, limit: int = 6)
             },
         )
         return ""
-
-    normalized_agent_id = str(agent_id or "").strip()
-    agents = [
-        item for item in list(organization.get("agents") or [])
-        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
-    ]
-    if not any(str(item.get("agentId") or "").strip() == normalized_agent_id for item in agents):
-        return ""
-    active_agents = [
-        item for item in agents
-        if str(item.get("status") or "active").strip() != "archived"
-    ]
-    edges = [
-        item for item in list(organization.get("edges") or [])
-        if isinstance(item, dict) and str(item.get("status") or "active").strip() == "active"
-    ]
-    outbound_edges = [
-        edge for edge in edges
-        if str(edge.get("fromAgentId") or "").strip() == normalized_agent_id
-    ]
-    inbound_edges = [
-        edge for edge in edges
-        if str(edge.get("toAgentId") or "").strip() == normalized_agent_id
-    ]
-    connected_agent_ids = {normalized_agent_id}
-    for edge in [*outbound_edges, *inbound_edges]:
-        connected_agent_ids.add(str(edge.get("fromAgentId") or "").strip())
-        connected_agent_ids.add(str(edge.get("toAgentId") or "").strip())
-    if len(connected_agent_ids) > 1:
-        active_agents = [
-            item for item in active_agents
-            if str(item.get("agentId") or "").strip() in connected_agent_ids
-        ]
-    agents_by_id = {str(item.get("agentId") or "").strip(): item for item in active_agents}
-    lines = [
-        "## Research Organization Context",
-        "This is a read-only snapshot of your current research organization membership and communication graph.",
-        "Use AgentId or AgentCode with agent_message_tool when contacting an Agent. Communication still follows edge policy, supervision policy, and wake rules.",
-        "Members:",
-    ]
-    for member in active_agents[: max(1, int(limit or 1)) + 8]:
-        lines.extend(_format_research_org_member_lines(member, self_agent_id=normalized_agent_id))
-    if outbound_edges:
-        lines.append("Directly reachable from you:")
-        for edge in outbound_edges[: max(1, int(limit or 1)) + 8]:
-            target_id = str(edge.get("toAgentId") or "").strip()
-            target = agents_by_id.get(target_id, {})
-            lines.append(_format_research_org_edge_line(edge, target=target, direction="to"))
-    else:
-        lines.append("Directly reachable from you: none declared")
-    if inbound_edges:
-        lines.append("Agents that can contact you:")
-        for edge in inbound_edges[: max(1, int(limit or 1)) + 8]:
-            source_id = str(edge.get("fromAgentId") or "").strip()
-            source = agents_by_id.get(source_id, {})
-            lines.append(_format_research_org_edge_line(edge, target=source, direction="from"))
-    return "\n".join(line for line in lines if str(line or "").strip()).strip()
-
-
-def _format_research_org_member_lines(member: dict[str, Any], *, self_agent_id: str) -> list[str]:
-    agent_id = str(member.get("agentId") or "").strip()
-    agent = member.get("agent") if isinstance(member.get("agent"), dict) else {}
-    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-    code = str(member.get("agentCode") or agent.get("agentCode") or "").strip()
-    name = str(member.get("displayName") or agent.get("displayName") or "").strip()
-    role = str(member.get("role") or metadata.get("researchOrgRole") or metadata.get("systemRole") or "").strip()
-    rank = str(member.get("employeeRank") or metadata.get("employeeRank") or "").strip()
-    functional_name = str(metadata.get("functionalDisplayName") or "").strip()
-    suffix = " (you)" if agent_id == self_agent_id else ""
-    first_line = f"- {code or agent_id} · {name}{suffix}: agentId={agent_id} role={role or '-'} rank={rank or '-'}"
-    responsibilities = [
-        trim_lines(str(item or ""), max_lines=1)
-        for item in list(metadata.get("responsibilities") or [])[:3]
-        if str(item or "").strip()
-    ]
-    lines = [first_line]
-    if functional_name:
-        lines.append(f"  function: {functional_name}")
-    if responsibilities:
-        lines.append(f"  responsibilities: {'; '.join(responsibilities)}")
-    return lines
-
-
-def _format_research_org_edge_line(edge: dict[str, Any], *, target: dict[str, Any], direction: str) -> str:
-    agent = target.get("agent") if isinstance(target.get("agent"), dict) else {}
-    code = str(target.get("agentCode") or agent.get("agentCode") or "").strip()
-    name = str(target.get("displayName") or agent.get("displayName") or "").strip()
-    agent_id = str(target.get("agentId") or agent.get("agentId") or "").strip()
-    policy = edge.get("communicationPolicy") if isinstance(edge.get("communicationPolicy"), dict) else {}
-    message_types = ", ".join(str(item or "").strip() for item in list(policy.get("allowedMessageTypes") or []) if str(item or "").strip()) or "notice/request/report"
-    intents = ", ".join(str(item or "").strip() for item in list(policy.get("allowedIntents") or [])[:6] if str(item or "").strip()) or "any"
-    wake = str(policy.get("wakeStrategy") or "conditional").strip() or "conditional"
-    label = trim_lines(str(edge.get("label") or ""), max_lines=1)
-    prefix = "to" if direction == "to" else "from"
-    return (
-        f"- {prefix} {code or agent_id} · {name}: agentId={agent_id} "
-        f"edgeId={edge.get('edgeId') or ''} allowedTypes={message_types} "
-        f"allowedIntents={intents} wake={wake}"
-        + (f" label={label}" if label else "")
-    )
 
 
 def prepare_subagent_spawn(
