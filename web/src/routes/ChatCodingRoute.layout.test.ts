@@ -194,9 +194,13 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("@全体成员");
     expect(routeSource).toContain("不带 @ 默认投递全体");
     expect(routeSource).toContain("打断目标 Agent");
+    expect(routeSource).toContain("buildChatMentionTargets(agentsQuery.data ?? [])");
+    expect(routeSource).toContain("tokenizeChatMentions(text, chatMentionTargets)");
+    expect(routeSource).toContain("handleOpenMentionTarget(segment.target)");
     expect(routeSource).toContain("styles.projectBusEvent");
     expect(routeSource).toContain("styles.projectBusEventRevoked");
     expect(routeSource).toContain("styles.projectBusEventActions");
+    expect(routeSource).toContain("styles.agentMention");
     expect(routeSource).toContain("styles.projectBusInterruptToggle");
 
     expect(routeStyles.projectBusEvent).toBeTypeOf("string");
@@ -204,6 +208,7 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeStyles.projectBusEventHeader).toBeTypeOf("string");
     expect(routeStyles.projectBusEventActions).toBeTypeOf("string");
     expect(routeStyles.projectBusEventBody).toBeTypeOf("string");
+    expect(routeStyles.agentMention).toBeTypeOf("string");
     expect(routeStyles.projectBusEventMeta).toBeTypeOf("string");
     expect(routeStyles.projectBusInterruptToggle).toBeTypeOf("string");
   });

@@ -2591,6 +2591,32 @@
   white-space: pre-wrap;
 }
 
+.agentMention {
+  display: inline;
+  margin: 0;
+  padding: 0 1px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-warm-2);
+  font: inherit;
+  font-weight: 650;
+  text-align: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.agentMention:hover {
+  color: var(--accent-warm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.agentMention:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-warm) 58%, transparent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 .projectBusEventMeta {
   display: flex;
   flex-wrap: wrap;
