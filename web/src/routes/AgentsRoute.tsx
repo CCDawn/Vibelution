@@ -33,6 +33,7 @@ import {
   AgentSupervisionPolicy,
   AgentConfigWorkspace,
   AgentConfigWorkspaceAgent,
+  AgentConfigWorkspaceGroup,
   MemoryPolicy,
   ToolPolicy,
   ToolRegistryPayload,
@@ -496,6 +497,22 @@ function selectedAgentFromList(
   );
 }
 
+function groupDisplayLabel(group: AgentConfigWorkspaceGroup | undefined, copy: ReturnType<typeof agentsRouteCopy>) {
+  if (!group) {
+    return copy.activeAgents;
+  }
+  return copy.groupLabels[group.id] ?? group.label;
+}
+
+function groupSectionId(group: AgentConfigWorkspaceGroup) {
+  const section = String(group.section || "").trim();
+  return section === "mode" || section === "reference" ? section : "status";
+}
+
+function groupDescription(group: AgentConfigWorkspaceGroup, copy: ReturnType<typeof agentsRouteCopy>) {
+  return copy.groupDescriptions[group.id] ?? group.description ?? "";
+}
+
 function draftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentConfigDraft {
   return {
     displayName: agent?.displayName ?? "",
@@ -839,8 +856,32 @@ function agentsRouteCopy(lang: "zh" | "en") {
         loading: "正在整理 Agent 配置...",
         loadFailed: "Agent 配置加载失败",
         search: "搜索 Agent、模型、提示词、模式或引用",
+        agentFilters: "Agent 筛选",
         allAgents: "全部 Agent",
         activeAgents: "活跃 Agent",
+        filterSections: {
+          status: "状态",
+          mode: "运行模式",
+          reference: "引用关系",
+        },
+        groupLabels: {
+          active: "活跃 Agent",
+          needs_review: "需要处理",
+          archived: "已归档",
+          chat: "会话模式",
+          research: "科研模式",
+          supervised_evolution: "监督进化模式",
+          self_evolution: "自进化模式",
+          group_chat: "群聊引用",
+          team: "团队引用",
+        } as Record<string, string>,
+        groupDescriptions: {
+          active: "当前可被业务页面引用或调度的 Agent。",
+          needs_review: "存在阻塞或警告健康项的活跃 Agent。",
+          archived: "只保留历史数据、不再进入可用池的 Agent。",
+          group_chat: "被一个或多个群聊引用的 Agent。",
+          team: "被一个或多个团队画布引用的 Agent。",
+        } as Record<string, string>,
         createAgent: "新增 Agent",
         createAgentTitle: "新增长期 Agent",
         createAgentHint: "新 Agent 会创建一个直连会话，并保留独立工作区、记忆策略和工具策略。",
@@ -977,8 +1018,32 @@ function agentsRouteCopy(lang: "zh" | "en") {
         loading: "Loading Agent config...",
         loadFailed: "Agent config failed to load",
         search: "Search agents, models, prompts, modes, or references",
+        agentFilters: "Agent filters",
         allAgents: "All Agents",
         activeAgents: "Active Agents",
+        filterSections: {
+          status: "Status",
+          mode: "Runtime mode",
+          reference: "References",
+        },
+        groupLabels: {
+          active: "Active Agents",
+          needs_review: "Needs Review",
+          archived: "Archived",
+          chat: "Chat mode",
+          research: "Research mode",
+          supervised_evolution: "Supervised evolution mode",
+          self_evolution: "Self-evolution mode",
+          group_chat: "Group chat references",
+          team: "Team references",
+        } as Record<string, string>,
+        groupDescriptions: {
+          active: "Agents currently available for business pages and routing.",
+          needs_review: "Active Agents with blocking or warning health issues.",
+          archived: "Historical records that no longer enter the available pool.",
+          group_chat: "Agents referenced by one or more group chats.",
+          team: "Agents referenced by one or more team canvases.",
+        } as Record<string, string>,
         createAgent: "New Agent",
         createAgentTitle: "Create persistent Agent",
         createAgentHint: "A new Agent gets a direct chat session plus its own workspace, memory policy, and tool policy.",
@@ -1115,7 +1180,7 @@ export function AgentsRoute() {
   const navigate = useNavigate();
   const pageVisible = usePageVisibility();
   const copy = useMemo(() => agentsRouteCopy(lang), [lang]);
-  const [activeFilter, setActiveFilter] = useState<FilterId>("all");
+  const [activeFilter, setActiveFilter] = useState<FilterId>("active");
   const [searchText, setSearchText] = useState("");
   const [selectedAgentId, setSelectedAgentId] = useState("");
   const [activePane, setActivePane] = useState<AgentConfigPaneId>("overview");
@@ -1148,6 +1213,19 @@ export function AgentsRoute() {
 
   const workspace = workspaceQuery.data;
   const tools = toolsQuery.data?.tools ?? [];
+  const groups = workspace?.groups ?? [];
+  const groupedFilters = useMemo(() => {
+    const sectionOrder = ["status", "mode", "reference"] as const;
+    return sectionOrder
+      .map((section) => ({
+        id: section,
+        label: copy.filterSections[section],
+        groups: groups.filter((group) => groupSectionId(group) === section),
+      }))
+      .filter((section) => section.groups.length > 0);
+  }, [copy, groups]);
+  const activeGroup = groups.find((group) => group.id === activeFilter);
+  const activeGroupLabel = groupDisplayLabel(activeGroup, copy);
   const visibleAgents = useMemo(
     () => filterAgents(workspace, activeFilter, searchText),
     [activeFilter, searchText, workspace],
@@ -1198,7 +1276,6 @@ export function AgentsRoute() {
     () => findRuntimeFocusEvidence(selectedAgent, agentRuntimeEvidenceQuery.data),
     [agentRuntimeEvidenceQuery.data, selectedAgent],
   );
-  const groups = workspace?.groups ?? [];
   const summary = workspace?.summary;
   const healthStatus = workspace?.health.status ?? "ok";
   const refresh = () => {
@@ -1786,25 +1863,34 @@ export function AgentsRoute() {
             <Search size={15} />
             <input value={searchText} placeholder={copy.search} onChange={(event) => setSearchText(event.target.value)} />
           </label>
-          <nav className={styles.groupList} aria-label={copy.allAgents}>
-            {groups.map((group) => {
-              const active = activeFilter === group.id;
-              return (
-                <button
-                  key={group.id}
-                  type="button"
-                  className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
-                  onClick={() => setActiveFilter(group.id)}
-                >
-                  <span>
-                    <Bot size={15} />
-                    {group.label}
-                  </span>
-                  <strong>{group.count}</strong>
-                  {group.healthCount ? <em>{group.healthCount}</em> : null}
-                </button>
-              );
-            })}
+          <nav className={styles.groupList} aria-label={copy.agentFilters}>
+            {groupedFilters.map((section) => (
+              <section key={section.id} className={styles.groupSection}>
+                <p className={styles.groupSectionTitle}>{section.label}</p>
+                <div className={styles.groupSectionItems}>
+                  {section.groups.map((group) => {
+                    const active = activeFilter === group.id;
+                    const description = groupDescription(group, copy);
+                    return (
+                      <button
+                        key={group.id}
+                        type="button"
+                        className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
+                        onClick={() => setActiveFilter(group.id)}
+                        title={description}
+                      >
+                        <span>
+                          {section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
+                          {groupDisplayLabel(group, copy)}
+                        </span>
+                        <strong>{group.count}</strong>
+                        {group.healthCount ? <em>{group.healthCount}</em> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </nav>
           <section className={styles.storagePanel}>
             <p className={styles.panelEyebrow}>{copy.readOnly}</p>
@@ -1816,8 +1902,8 @@ export function AgentsRoute() {
         <main className={styles.agentPanel}>
           <div className={styles.panelHeader}>
             <div>
-              <p className={styles.panelEyebrow}>{copy.allAgents}</p>
-              <h2>{groups.find((group) => group.id === activeFilter)?.label ?? copy.allAgents}</h2>
+              <p className={styles.panelEyebrow}>{copy.agentFilters}</p>
+              <h2>{activeGroupLabel}</h2>
             </div>
             <div className={styles.panelHeaderActions}>
               <button

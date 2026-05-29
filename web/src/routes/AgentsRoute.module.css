@@ -323,9 +323,32 @@
 .groupList {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 10px;
   min-height: 0;
   overflow: auto;
+}
+
+.groupSection {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.groupSectionTitle {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--fg-tertiary);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.groupSectionItems {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
 }
 
 .groupButton {

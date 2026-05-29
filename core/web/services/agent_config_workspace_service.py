@@ -411,23 +411,25 @@ def _derive_health(
 
 def _derive_groups(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     group_ids = [
-        ("all", "全部 Agent"),
-        ("chat", "会话 Agent"),
-        ("group_chat", "群聊成员"),
-        ("team", "团队成员"),
-        ("research", "科研团队"),
-        ("supervised_evolution", "监督进化"),
-        ("self_evolution", "自进化"),
-        ("needs_review", "需要处理"),
-        ("archived", "已归档"),
+        ("active", "活跃 Agent", "status", "当前可被业务页面引用或调度的 Agent。"),
+        ("needs_review", "需要处理", "status", "存在阻塞或警告健康项的活跃 Agent。"),
+        ("archived", "已归档", "status", "只保留历史数据、不再进入可用池的 Agent。"),
+        ("chat", "会话模式", "mode", "属于 Chat 运行模式或会话可用池的 Agent。"),
+        ("research", "科研模式", "mode", "属于 Research 运行模式或科研池的 Agent。"),
+        ("supervised_evolution", "监督进化模式", "mode", "占用监督进化模式引用的 Agent。"),
+        ("self_evolution", "自进化模式", "mode", "占用自进化模式引用的 Agent。"),
+        ("group_chat", "群聊引用", "reference", "被一个或多个群聊引用的 Agent。"),
+        ("team", "团队引用", "reference", "被一个或多个团队画布引用的 Agent。"),
     ]
     groups: list[dict[str, Any]] = []
-    for group_id, label in group_ids:
+    for group_id, label, section, description in group_ids:
         agent_ids = [agent["agentId"] for agent in agents if _agent_in_group(agent, group_id)]
         groups.append(
             {
                 "id": group_id,
                 "label": label,
+                "section": section,
+                "description": description,
                 "agentIds": agent_ids,
                 "count": len(agent_ids),
                 "healthCount": sum(
@@ -443,6 +445,8 @@ def _derive_groups(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _agent_in_group(agent: dict[str, Any], group_id: str) -> bool:
     status = str(agent.get("status") or "active").strip()
+    if group_id == "active":
+        return status != "archived"
     if group_id == "all":
         return True
     if group_id == "archived":

@@ -1439,6 +1439,8 @@ export type AgentMemoryPolicyOption = {
 export type AgentConfigWorkspaceGroup = {
   id: string;
   label: string;
+  section?: "status" | "mode" | "reference" | string;
+  description?: string;
   agentIds: string[];
   count: number;
   healthCount: number;

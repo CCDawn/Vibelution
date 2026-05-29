@@ -33,6 +33,18 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).not.toContain("agentCardGrid");
   });
 
+  it("separates Agent filters into status, mode, and reference sections", () => {
+    expect(routeSource).toContain('useState<FilterId>("active")');
+    expect(routeSource).toContain("groupedFilters");
+    expect(routeSource).toContain("copy.filterSections");
+    expect(routeSource).toContain("copy.groupLabels");
+    expect(routeSource).toContain("styles.groupSection");
+    expect(routeSource).toContain("styles.groupSectionTitle");
+    expect(routeSource).toContain("groupDisplayLabel(group, copy)");
+    expect(styles.groupSection).toBeTruthy();
+    expect(styles.groupSectionTitle).toBeTruthy();
+  });
+
   it("shows the unified Agent card sections needed by later editing phases", () => {
     expect(routeSource).toContain("copy.model");
     expect(routeSource).toContain("copy.prompt");

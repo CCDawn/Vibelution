@@ -86,6 +86,8 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
         title="研究群聊",
         participant_agent_ids=[chat_agent["agentId"], research_agent["agentId"]],
     )
+    archived_agent = agent_directory_service.create_agent_instance(display_name="旧 Agent")
+    agent_directory_service.archive_agent_instance(archived_agent["agentId"])
 
     payload = agent_config_workspace_service.get_agent_config_workspace()
 
@@ -98,6 +100,19 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert any(item["kind"] == "flow_binding" and item["field"] == "broad_search" for item in research_refs)
     assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "研究群聊" for item in research_refs)
     groups = {item["id"]: item for item in payload["groups"]}
+    assert "all" not in groups
+    assert groups["active"]["section"] == "status"
+    assert groups["active"]["label"] == "活跃 Agent"
+    assert groups["active"]["count"] == 2
+    assert archived_agent["agentId"] not in groups["active"]["agentIds"]
+    assert groups["needs_review"]["section"] == "status"
+    assert groups["archived"]["section"] == "status"
+    assert archived_agent["agentId"] in groups["archived"]["agentIds"]
+    assert groups["research"]["section"] == "mode"
+    assert groups["research"]["label"] == "科研模式"
+    assert groups["group_chat"]["section"] == "reference"
+    assert groups["group_chat"]["label"] == "群聊引用"
+    assert groups["team"]["section"] == "reference"
     assert research_agent["agentId"] in groups["research"]["agentIds"]
     assert research_agent["agentId"] in groups["group_chat"]["agentIds"]
 
