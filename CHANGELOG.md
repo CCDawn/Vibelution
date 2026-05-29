@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.13 - 2026-05-29
+
+- Reworked Agent Center filters into status, runtime mode, and reference sections so active Agents, archived records, mode membership, group-chat references, and team references are no longer mixed in one flat list.
+- Changed the default Agent Center filter to active Agents so archived records no longer inflate the primary available-Agent view.
+
 ## 0.4.12 - 2026-05-29
 
 - Made direct chat session deletion diagnosable by logging requested, busy-blocked, and deleted lifecycle events into runtime scene conversation logs.
