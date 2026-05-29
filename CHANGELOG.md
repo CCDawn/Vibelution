@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.23 - 2026-05-29
+
+- Retired the duplicate `/chat-rooms` group-chat workspace route and kept it as a compatibility redirect into `/chat`.
+- Preserved `/chat-rooms?room=...` deep links by redirecting them to `/chat?room=...`, so Chat/Coding remains the single group-chat user surface while `/api/chat-rooms` stays as the backend contract.
+
 ## 0.4.22 - 2026-05-29
 
 - Bound the Research Flow Canvas to the stable `research-team` Team entity while keeping `research_organization` as the live organization source.
