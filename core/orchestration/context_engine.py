@@ -138,6 +138,14 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         run_id=str(run_id or "").strip(),
     )
     timings["projectRulesContextMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
+    project_agent_registry_context_block = _build_project_agent_registry_context_block(
+        agent_directory_service.PROJECT_ROOT,
+        current_agent=agent,
+        session_id=str(session_id or "").strip(),
+        run_id=str(run_id or "").strip(),
+    )
+    timings["projectAgentRegistryContextMs"] = _elapsed_ms(stage_started_at)
     runtime_context_block = "\n\n".join(
         part
         for part in (
@@ -145,6 +153,7 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
             research_org_context_block,
             prompt_context_block,
             project_rules_context_block,
+            project_agent_registry_context_block,
         )
         if str(part or "").strip()
     )
@@ -187,6 +196,7 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
             "inboxMessageCount": len(packet.inbox_messages),
             "researchOrgContextIncluded": bool(research_org_context_block),
             "projectRulesContextIncluded": bool(project_rules_context_block),
+            "projectAgentRegistryContextIncluded": bool(project_agent_registry_context_block),
             "source": "ContextEngine",
         },
     )
@@ -474,14 +484,22 @@ def _build_project_rules_context_block(
             },
         )
         return ""
-    section = _extract_markdown_section(content, "Session-Level Agent Memory Coordination")
-    if not section:
+    section_names = (
+        "Session-Level Agent Memory Coordination",
+        "Session Agent Territory And Handoff",
+    )
+    sections = [(name, _extract_markdown_section(content, name)) for name in section_names]
+    included_sections = [(name, section) for name, section in sections if section]
+    if not included_sections:
         return ""
     block = "\n".join(
         [
             "## Project Operating Rules",
-            "Source: AGENTS.md#Session-Level Agent Memory Coordination",
-            section,
+            "Source: AGENTS.md#Session-Level Agent Memory Coordination + #Session Agent Territory And Handoff",
+            *(
+                "\n".join([f"### {name}", section]).strip()
+                for name, section in included_sections
+            ),
         ]
     ).strip()
     _record_context_event(
@@ -492,12 +510,326 @@ def _build_project_rules_context_block(
             "sessionId": session_id,
             "runId": run_id,
             "sourcePath": str(agents_path),
-            "section": "Session-Level Agent Memory Coordination",
+            "section": ",".join(name for name, _section in included_sections),
             "characterCount": len(block),
             "source": "ContextEngine",
         },
     )
     return block
+
+
+def _build_project_agent_registry_context_block(
+    project_root: Path,
+    *,
+    current_agent: dict[str, Any],
+    session_id: str,
+    run_id: str,
+) -> str:
+    """Return project-local Agent territory and handoff context for a session Agent."""
+
+    agent_id = str(current_agent.get("agentId") or "").strip()
+    if not agent_id:
+        return ""
+    from core.web.services import agent_directory_service
+
+    registry_path = Path(project_root) / ".docs" / "project-memory" / "agent-registry.json"
+    registry = _read_project_agent_registry(
+        registry_path,
+        agent_id=agent_id,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    active_agents = [
+        item
+        for item in agent_directory_service.list_agents(include_archived=False)
+        if isinstance(item, dict) and str(item.get("agentId") or "").strip()
+    ]
+    entries = _merge_project_agent_registry_entries(registry, active_agents)
+    current_entry = _find_project_agent_registry_entry(
+        entries,
+        agent_id=agent_id,
+        session_id=session_id or str(current_agent.get("directSessionId") or "").strip(),
+    )
+    if not current_entry:
+        return ""
+    handoff_entries = _project_agent_handoff_entries(current_entry, entries, limit=8)
+    lines = [
+        "## Project Agent Territory Registry",
+        "Source: .docs/project-memory/agent-registry.json + active AgentDirectory",
+        "Contract:",
+        "- You are bound to the sessionId and management territory listed below.",
+        (
+            "- If a user request is outside your management scope, say it is out of scope "
+            "and recommend a matching Agent/session from HandoffTargets."
+        ),
+        (
+            "- Do not silently take over another Agent's territory; recommend handoff "
+            "unless the user explicitly asks you to coordinate."
+        ),
+        "CurrentAgent:",
+        _format_project_agent_registry_entry(current_entry, include_scope=True),
+    ]
+    if handoff_entries:
+        lines.append("HandoffTargets:")
+        lines.extend(
+            _format_project_agent_registry_entry(entry, include_scope=True, prefix="- ")
+            for entry in handoff_entries
+        )
+    else:
+        lines.append("HandoffTargets: none")
+    block = "\n".join(line for line in lines if str(line or "").strip()).strip()
+    _record_context_event(
+        "agent_runtime.project_agent_registry_context_loaded",
+        outcome="included",
+        fields={
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "runId": run_id,
+            "sourcePath": str(registry_path),
+            "sourceExists": registry_path.exists(),
+            "registryAgentCount": len(entries),
+            "handoffTargetCount": len(handoff_entries),
+            "source": "ContextEngine",
+        },
+    )
+    return block
+
+
+def _read_project_agent_registry(
+    registry_path: Path,
+    *,
+    agent_id: str,
+    session_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    if not registry_path.exists():
+        return {}
+    try:
+        payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _record_context_event(
+            "agent_runtime.project_agent_registry_context_failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "runId": run_id,
+                "sourcePath": str(registry_path),
+                "reason": type(exc).__name__,
+                "source": "ContextEngine",
+            },
+        )
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _merge_project_agent_registry_entries(
+    registry: dict[str, Any],
+    active_agents: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    registry_entries = [
+        item
+        for item in registry.get("agents") or []
+        if isinstance(item, dict) and str(item.get("status") or "active").strip().lower() != "archived"
+    ]
+    entries_by_agent_id: dict[str, dict[str, Any]] = {}
+    entries_by_session_id: dict[str, dict[str, Any]] = {}
+    for entry in registry_entries:
+        agent_id = str(entry.get("agentId") or "").strip()
+        session_id = str(entry.get("sessionId") or entry.get("directSessionId") or "").strip()
+        if agent_id:
+            entries_by_agent_id[agent_id] = entry
+        if session_id:
+            entries_by_session_id[session_id] = entry
+
+    lane_defaults = _project_agent_registry_lane_defaults(registry)
+    merged: list[dict[str, Any]] = []
+    seen_agent_ids: set[str] = set()
+    for agent in active_agents:
+        agent_id = str(agent.get("agentId") or "").strip()
+        session_id = str(agent.get("directSessionId") or "").strip()
+        explicit = entries_by_agent_id.get(agent_id) or entries_by_session_id.get(session_id) or {}
+        merged.append(_project_agent_registry_entry_from_sources(agent, explicit, lane_defaults=lane_defaults))
+        seen_agent_ids.add(agent_id)
+
+    for entry in registry_entries:
+        agent_id = str(entry.get("agentId") or "").strip()
+        if agent_id and agent_id in seen_agent_ids:
+            continue
+        if str(entry.get("status") or "active").strip().lower() != "active":
+            continue
+        merged.append(_project_agent_registry_entry_from_sources({}, entry, lane_defaults=lane_defaults))
+    return merged
+
+
+def _project_agent_registry_entry_from_sources(
+    agent: dict[str, Any],
+    explicit: dict[str, Any],
+    *,
+    lane_defaults: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    responsibility_lane = str(
+        explicit.get("responsibilityLane")
+        or metadata.get("responsibilityLane")
+        or _infer_project_agent_responsibility_lane(agent)
+    ).strip()
+    lane_default = lane_defaults.get(responsibility_lane) or {}
+    management_scope = explicit.get("managementScope")
+    if not isinstance(management_scope, dict):
+        management_scope = (
+            metadata.get("managementScope")
+            if isinstance(metadata.get("managementScope"), dict)
+            else {}
+        )
+    if not management_scope and isinstance(lane_default.get("managementScope"), dict):
+        management_scope = lane_default.get("managementScope") or {}
+    return {
+        "agentId": str(explicit.get("agentId") or agent.get("agentId") or "").strip(),
+        "agentCode": str(explicit.get("agentCode") or agent.get("agentCode") or "").strip(),
+        "sessionId": str(
+            explicit.get("sessionId") or explicit.get("directSessionId") or agent.get("directSessionId") or ""
+        ).strip(),
+        "displayName": str(explicit.get("displayName") or agent.get("displayName") or "").strip(),
+        "responsibilityLane": responsibility_lane,
+        "managementScope": {
+            "summary": str(management_scope.get("summary") or "").strip(),
+            "files": [
+                str(item or "").strip()
+                for item in list(management_scope.get("files") or [])[:8]
+                if str(item or "").strip()
+            ],
+            "taskTypes": [
+                str(item or "").strip()
+                for item in list(management_scope.get("taskTypes") or [])[:8]
+                if str(item or "").strip()
+            ],
+        },
+        "handoffTargets": [
+            str(item or "").strip()
+            for item in list(
+                explicit.get("handoffTargets")
+                or metadata.get("handoffTargets")
+                or lane_default.get("handoffTargets")
+                or []
+            )[:8]
+            if str(item or "").strip()
+        ],
+        "outOfScopePolicy": str(
+            explicit.get("outOfScopePolicy")
+            or metadata.get("outOfScopePolicy")
+            or lane_default.get("outOfScopePolicy")
+            or "recommend_handoff"
+        ).strip(),
+        "status": str(explicit.get("status") or agent.get("status") or "active").strip() or "active",
+    }
+
+
+def _project_agent_registry_lane_defaults(registry: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw = registry.get("laneTerritories") if isinstance(registry.get("laneTerritories"), dict) else {}
+    defaults: dict[str, dict[str, Any]] = {}
+    for lane_id, value in raw.items():
+        normalized_lane = str(lane_id or "").strip()
+        if not normalized_lane or not isinstance(value, dict):
+            continue
+        defaults[normalized_lane] = value
+    return defaults
+
+
+def _find_project_agent_registry_entry(
+    entries: list[dict[str, Any]],
+    *,
+    agent_id: str,
+    session_id: str,
+) -> dict[str, Any] | None:
+    normalized_agent_id = str(agent_id or "").strip()
+    normalized_session_id = str(session_id or "").strip()
+    for entry in entries:
+        if normalized_agent_id and str(entry.get("agentId") or "").strip() == normalized_agent_id:
+            return entry
+    for entry in entries:
+        if normalized_session_id and str(entry.get("sessionId") or "").strip() == normalized_session_id:
+            return entry
+    return None
+
+
+def _project_agent_handoff_entries(
+    current_entry: dict[str, Any],
+    entries: list[dict[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    current_agent_id = str(current_entry.get("agentId") or "").strip()
+    targets = [
+        str(item or "").strip()
+        for item in list(current_entry.get("handoffTargets") or [])
+        if str(item or "").strip()
+    ]
+    active_entries = [
+        item
+        for item in entries
+        if str(item.get("status") or "active").strip().lower() == "active"
+        and str(item.get("agentId") or "").strip() != current_agent_id
+    ]
+    if targets:
+        matched = [
+            item
+            for item in active_entries
+            if str(item.get("agentId") or "").strip() in targets
+            or str(item.get("sessionId") or "").strip() in targets
+            or str(item.get("responsibilityLane") or "").strip() in targets
+        ]
+        if matched:
+            return matched[:limit]
+    return active_entries[:limit]
+
+
+def _format_project_agent_registry_entry(
+    entry: dict[str, Any],
+    *,
+    include_scope: bool,
+    prefix: str = "",
+) -> str:
+    scope = entry.get("managementScope") if isinstance(entry.get("managementScope"), dict) else {}
+    parts = [
+        f"agentId={entry.get('agentId') or ''}",
+        f"sessionId={entry.get('sessionId') or ''}",
+        f"agentCode={entry.get('agentCode') or ''}",
+        f"name={entry.get('displayName') or ''}",
+        f"lane={entry.get('responsibilityLane') or 'unassigned'}",
+        f"outOfScopePolicy={entry.get('outOfScopePolicy') or 'recommend_handoff'}",
+    ]
+    if include_scope:
+        summary = str(scope.get("summary") or "").strip()
+        files = ", ".join(str(item or "").strip() for item in list(scope.get("files") or [])[:4] if str(item or "").strip())
+        task_types = ", ".join(
+            str(item or "").strip() for item in list(scope.get("taskTypes") or [])[:4] if str(item or "").strip()
+        )
+        if summary:
+            parts.append(f"scope={summary}")
+        if files:
+            parts.append(f"files={files}")
+        if task_types:
+            parts.append(f"taskTypes={task_types}")
+    return prefix + "; ".join(parts)
+
+
+def _infer_project_agent_responsibility_lane(agent: dict[str, Any]) -> str:
+    primary_mode = str(agent.get("primaryMode") or "").strip()
+    role_key = str(agent.get("roleKey") or "").strip()
+    prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
+    profile_id = str(agent.get("profileId") or "").strip()
+    haystack = " ".join([primary_mode, role_key, prompt_template_id, profile_id]).lower()
+    if "self_evolution" in haystack or "self-evolution" in haystack:
+        return "self-evolution-loop"
+    if "supervised_evolution" in haystack or "supervised-evolution" in haystack:
+        return "evolution-control-plane"
+    if "research" in haystack:
+        return "agent-runtime-core"
+    if "chat" in haystack:
+        return "chat-coding-surface"
+    return "agent-runtime-core"
 
 
 def _extract_markdown_section(content: str, heading: str) -> str:

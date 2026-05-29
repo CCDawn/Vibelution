@@ -98,6 +98,11 @@ def test_build_agent_context_includes_project_memory_coordination_rules_from_age
                 "- Project memory is a single-writer shared record.",
                 "- AGENTS.md is the default contract for this behavior.",
                 "",
+                "## Session Agent Territory And Handoff",
+                "",
+                "- Every session-level Agent must treat its agentId and sessionId as its runtime identity.",
+                "- If the user asks outside scope, recommend a matching handoff target.",
+                "",
                 "## Unrelated Section",
                 "",
                 "- This line must not enter the runtime context.",
@@ -124,13 +129,144 @@ def test_build_agent_context_includes_project_memory_coordination_rules_from_age
     assert "Session-level Agents may process project work in parallel." in packet.context_block
     assert "Project memory is a single-writer shared record." in packet.context_block
     assert "AGENTS.md is the default contract for this behavior." in packet.context_block
+    assert "Session Agent Territory And Handoff" in packet.context_block
+    assert "recommend a matching handoff target" in packet.context_block
     assert "This line must not enter the runtime context." not in packet.context_block
     assert "projectRulesContextMs" in packet.timings
     assert any(
         item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_rules_context_loaded")
-        and item[1]["fields"]["section"] == "Session-Level Agent Memory Coordination"
+        and "Session-Level Agent Memory Coordination" in item[1]["fields"]["section"]
+        and "Session Agent Territory And Handoff" in item[1]["fields"]["section"]
         for item in events
     )
+
+
+def test_build_agent_context_includes_project_agent_territory_registry(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    registry_path = tmp_path / ".docs" / "project-memory" / "agent-registry.json"
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    runtime_agent = agent_directory_service.create_agent_instance(
+        display_name="运行主干 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-runtime",
+    )
+    qa_agent = agent_directory_service.create_agent_instance(
+        display_name="质量运维 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-quality",
+    )
+    archived_agent = agent_directory_service.create_agent_instance(
+        display_name="旧前端 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-archived-territory",
+    )
+    agent_directory_service.archive_agent_instance(archived_agent["agentId"])
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "laneTerritories": {
+                    "agent-runtime-core": {
+                        "managementScope": {
+                            "summary": "默认负责 Agent 运行主干",
+                            "taskTypes": ["runtime"],
+                        },
+                        "handoffTargets": ["quality-and-operations"],
+                    }
+                },
+                "agents": [
+                    {
+                        "agentId": runtime_agent["agentId"],
+                        "sessionId": "session-runtime",
+                        "displayName": "运行主干 Agent",
+                        "responsibilityLane": "agent-runtime-core",
+                        "managementScope": {
+                            "summary": "负责 ContextEngine、AgentDirectory 与运行上下文",
+                            "files": ["core/orchestration/**", "core/web/services/agent_directory_service.py"],
+                            "taskTypes": ["runtime-context", "agent-directory"],
+                        },
+                        "handoffTargets": ["quality-and-operations"],
+                        "outOfScopePolicy": "recommend_handoff",
+                        "status": "active",
+                    },
+                    {
+                        "agentId": qa_agent["agentId"],
+                        "sessionId": "session-quality",
+                        "displayName": "质量运维 Agent",
+                        "responsibilityLane": "quality-and-operations",
+                        "managementScope": {
+                            "summary": "负责测试、日志与发布收口",
+                            "files": ["tests/**", "logs/runtime_scenes/**"],
+                            "taskTypes": ["qa", "logging"],
+                        },
+                        "status": "active",
+                    },
+                    {
+                        "agentId": archived_agent["agentId"],
+                        "sessionId": "session-archived-territory",
+                        "displayName": "旧前端 Agent",
+                        "responsibilityLane": "web-workbench-surface",
+                        "status": "archived",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    events = []
+    monkeypatch.setattr(
+        context_engine,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    packet = context_engine.build_agent_context(runtime_agent["agentId"], session_id="session-runtime", run_id="turn-1")
+
+    assert "Project Agent Territory Registry" in packet.context_block
+    assert "sessionId=session-runtime" in packet.context_block
+    assert "lane=agent-runtime-core" in packet.context_block
+    assert "负责 ContextEngine、AgentDirectory 与运行上下文" in packet.context_block
+    assert "If a user request is outside your management scope" in packet.context_block
+    assert "sessionId=session-quality" in packet.context_block
+    assert "lane=quality-and-operations" in packet.context_block
+    assert "session-archived-territory" not in packet.context_block
+    assert "projectAgentRegistryContextMs" in packet.timings
+    assert any(
+        item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_agent_registry_context_loaded")
+        and item[1]["fields"]["sourceExists"] is True
+        and item[1]["fields"]["handoffTargetCount"] == 1
+        for item in events
+    )
+
+
+def test_build_agent_context_uses_agent_directory_when_project_agent_registry_is_missing(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="孤立会话 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-lonely",
+    )
+    peer = agent_directory_service.create_agent_instance(
+        display_name="同项目可推荐 Agent",
+        profile_id="primary",
+        primary_mode="research",
+        direct_session_id="session-peer",
+    )
+
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-lonely", run_id="turn-1")
+
+    assert "Project Agent Territory Registry" in packet.context_block
+    assert "sessionId=session-lonely" in packet.context_block
+    assert f"agentId={agent['agentId']}" in packet.context_block
+    assert "HandoffTargets:" in packet.context_block
+    assert f"agentId={peer['agentId']}" in packet.context_block
+    assert "sessionId=session-peer" in packet.context_block
 
 
 def test_build_agent_context_includes_research_org_member_and_edge_context(tmp_path, monkeypatch):
