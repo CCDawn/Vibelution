@@ -574,6 +574,22 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).not.toContain("执行了 1 个操作");
   });
 
+  it("renders captured thought text in the folded thought summary", () => {
+    const html = renderConversation([
+      {
+        id: "message-thought",
+        role: "assistant",
+        content: "我会先检查日志。",
+        timestamp: "2026-05-29T09:35:18Z",
+        thought: "先确认后端是否捕获 thought，再看前端是否把它渲染出来。",
+      },
+    ]);
+
+    expect(html).toContain("思考过程");
+    expect(html).toContain("先确认后端是否捕获 thought，再看前端是否把它渲染出来。");
+    expect(html).toContain('title="展开思考过程"');
+  });
+
   it("renders expandable tool call details when the backend provides them", () => {
     const html = renderConversation([
       {

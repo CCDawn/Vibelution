@@ -638,7 +638,10 @@ export function ConversationView({
       rows.push({ label: t("toolCallArguments"), value: JSON.stringify(args, null, 2) });
     }
     if (operation.resultPreview) {
-      rows.push({ label: t("toolCallResult"), value: operation.resultPreview });
+      rows.push({
+        label: operation.kind === "thought" ? t("thoughtProcess") : t("toolCallResult"),
+        value: operation.resultPreview,
+      });
     }
     if (operation.error) {
       rows.push({ label: t("toolCallError"), value: operation.error });
@@ -663,7 +666,10 @@ export function ConversationView({
           const detailsId = `operation-detail-${operation.id}`;
           const detailsExpanded = getExpansionState(operation.id, "details", false);
           const detailRows = operationDetailRows(operation);
-          const canExpandDetails = operation.kind === "tool" && detailRows.length > 0;
+          const canExpandDetails = detailRows.length > 0;
+          const detailToggleTitle = operation.kind === "thought"
+            ? detailsExpanded ? t("thoughtProcessVisible") : t("thoughtProcessHidden")
+            : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
           return (
             <div key={operation.id} className={styles.operationItemWrap}>
               <div className={styles.operationItem}>
@@ -688,7 +694,7 @@ export function ConversationView({
                     aria-expanded={detailsExpanded}
                     aria-controls={detailsId}
                     onClick={() => toggleSection(operation.id, "details", false)}
-                    title={detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden")}
+                    title={detailToggleTitle}
                   >
                     {detailsExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                   </button>
@@ -699,7 +705,14 @@ export function ConversationView({
                 )}
               </div>
               {canExpandDetails && detailsExpanded ? (
-                <div id={detailsId} className={styles.operationDetails}>
+                <div
+                  id={detailsId}
+                  className={
+                    operation.kind === "thought"
+                      ? `${styles.operationDetails} ${styles.operationDetails_thought}`
+                      : styles.operationDetails
+                  }
+                >
                   {detailRows.map((row) => (
                     <div key={`${operation.id}-${row.label}`} className={styles.operationDetailRow}>
                       <span className={styles.operationDetailLabel}>{row.label}</span>
@@ -753,6 +766,9 @@ export function ConversationView({
         >
           {operationIcon(kind, title)}
           <span>{title}</span>
+          {!expanded && operations[0]?.summary ? (
+            <span className={styles.operationSummaryPreview}>{operations[0].summary}</span>
+          ) : null}
           {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
           {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>

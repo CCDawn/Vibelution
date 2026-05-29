@@ -42,13 +42,15 @@ export function buildConversationOperations(
   const resolvedStatus = message.streaming ? "running" : "done";
 
   if (hasThoughtBlock(message)) {
+    const thought = message.thought?.trim() ?? "";
     operations.push({
       id: `${message.id}-thought`,
       kind: "thought",
       label: labels.thought,
       status: resolvedStatus,
-      summary: "",
+      summary: compactPreview(thought),
       durationSeconds: null,
+      resultPreview: thought,
     });
   }
 
@@ -125,6 +127,17 @@ function mentalSnapshotSummary(snapshot: ConversationMessage["mentalSnapshot"]) 
   ]
     .map((item) => String(item ?? "").trim())
     .find(Boolean) ?? "";
+}
+
+function compactPreview(value: string, maxLength = 180) {
+  const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!normalized) {
+    return "";
+  }
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}...`;
 }
 
 function numberOrNull(value: unknown) {
