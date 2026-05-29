@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import tempfile
 import threading
 import time
@@ -585,6 +586,80 @@ def archive_agent_instance(agent_id: str) -> dict[str, Any]:
         save_state(state)
     _record_agent_event("agent.archived", agent, lifecycle=True)
     return _agent_to_api(agent)
+
+
+def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
+    """Physically remove an archived AgentInstance and its private workspace."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise AgentDirectoryError("Agent id is required.")
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, normalized_agent_id)
+        if agent is None:
+            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+        if str(agent.get("status") or "active").strip() != "archived":
+            raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
+        if _agent_archive_protected(agent):
+            raise AgentDirectoryError("Protected core Agent cannot be purged.")
+        agent_snapshot = dict(agent)
+        agents = [
+            item
+            for item in state.get("agents") or []
+            if not (
+                isinstance(item, dict)
+                and str(item.get("agentId") or "").strip() == normalized_agent_id
+            )
+        ]
+        state["agents"] = agents
+        tool_policy_id = str(agent.get("toolPolicyId") or "").strip()
+        memory_policy_id = str(agent.get("memoryPolicyId") or "").strip()
+        removed_tool_policy = False
+        removed_memory_policy = False
+        if tool_policy_id and tool_policy_id != DEFAULT_TOOL_POLICY_ID and _count_policy_refs(agents, "toolPolicyId", tool_policy_id) == 0:
+            policies = _tool_policies(state)
+            removed_tool_policy = policies.pop(tool_policy_id, None) is not None
+            state["toolPolicies"] = policies
+        if memory_policy_id and _count_policy_refs(agents, "memoryPolicyId", memory_policy_id) == 0:
+            policies = _memory_policies(state)
+            removed_memory_policy = policies.pop(memory_policy_id, None) is not None
+            state["memoryPolicies"] = policies
+        save_state(state)
+
+    workspace_result = _delete_purged_agent_workspace(agent_snapshot)
+    result = {
+        "agentId": normalized_agent_id,
+        "status": "purged",
+        "deleted": True,
+        "workspaceDeleted": bool(workspace_result.get("deleted")),
+        "deletedPaths": list(workspace_result.get("deletedPaths") or []),
+        "skippedPaths": list(workspace_result.get("skippedPaths") or []),
+        "removedToolPolicy": removed_tool_policy,
+        "removedMemoryPolicy": removed_memory_policy,
+        "toolPolicyId": tool_policy_id,
+        "memoryPolicyId": memory_policy_id,
+    }
+    _record_agent_purged_event(agent_snapshot, result)
+    return result
+
+
+def ensure_agent_purge_allowed(agent_id: str) -> dict[str, Any]:
+    """Validate permanent deletion before callers mutate external Agent references."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise AgentDirectoryError("Agent id is required.")
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, normalized_agent_id)
+        if agent is None:
+            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+        if str(agent.get("status") or "active").strip() != "archived":
+            raise AgentDirectoryError("Only archived Agents can be permanently deleted.")
+        if _agent_archive_protected(agent):
+            raise AgentDirectoryError("Protected core Agent cannot be purged.")
+        return _agent_to_api(agent)
 
 
 def reactivate_agent_instance(agent_id: str, *, reason: str = "", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -2052,6 +2127,34 @@ def _ensure_agent_workspace(path_value: str) -> Path:
     return path
 
 
+def _delete_purged_agent_workspace(agent: dict[str, Any]) -> dict[str, Any]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
+    if not workspace_path:
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": []}
+    try:
+        resolved = _resolve_project_path(workspace_path)
+        agents_root = (_project_root() / "workspace" / "agents").resolve()
+    except Exception:
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": [workspace_path]}
+    expected_private = _resolve_project_path(_agent_workspace_relative_path(agent_id))
+    if resolved != expected_private:
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
+    try:
+        if not resolved.is_relative_to(agents_root):
+            return {"deleted": False, "deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
+    except ValueError:
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
+    if not resolved.exists():
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": []}
+    relative_path = _relative_project_path(resolved)
+    try:
+        shutil.rmtree(resolved)
+    except Exception as exc:
+        return {"deleted": False, "deletedPaths": [], "skippedPaths": [f"{relative_path} ({type(exc).__name__})"]}
+    return {"deleted": True, "deletedPaths": [relative_path], "skippedPaths": []}
+
+
 def _resolve_project_path(path_value: str) -> Path:
     raw = str(path_value or "").strip()
     path = Path(raw)
@@ -2235,6 +2338,32 @@ def _record_agent_event(event_code: str, agent: dict[str, Any], *, lifecycle: bo
                 "status": str(agent.get("status") or "").strip(),
             },
             lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_purged_event(agent: dict[str, Any], result: dict[str, Any]) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent",
+            "agent.purged",
+            message="Archived Agent was permanently deleted.",
+            level="warning",
+            outcome="deleted",
+            fields={
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "directSessionId": str(agent.get("directSessionId") or "").strip(),
+                "workspaceDeleted": bool(result.get("workspaceDeleted")),
+                "deletedPaths": list(result.get("deletedPaths") or []),
+                "skippedPaths": list(result.get("skippedPaths") or []),
+                "removedToolPolicy": bool(result.get("removedToolPolicy")),
+                "removedMemoryPolicy": bool(result.get("removedMemoryPolicy")),
+                "source": "AgentDirectory",
+            },
+            lifecycle=True,
         )
     except Exception:
         return

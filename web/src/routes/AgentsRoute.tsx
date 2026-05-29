@@ -896,6 +896,11 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archiveAgentTitle: "安全删减",
         archiveAgentHint: "归档会从默认模式、群聊成员和可选池中移除该 Agent，但保留会话、记忆、日志和工作区。",
         archiveConfirm: "确认归档 {name}？这会隐藏该 Agent 并清理模式/群聊引用，但不会物理删除数据。",
+        purgeAgent: "彻底删除",
+        purgingAgent: "删除中...",
+        purgeAgentTitle: "彻底删除",
+        purgeAgentHint: "只对已归档 Agent 开放；会从 AgentDirectory 删除记录，并移除该 Agent 的私有工作区、记忆、inbox 和事件文件。",
+        purgeConfirm: "彻底删除 {name}？这个操作不可恢复，会删除该 Agent 的私有工作区和历史文件。",
         protectedAgent: "受保护 Agent 不能归档",
         archiveProtection: "归档保护",
         archiveProtectionTitle: "核心保护",
@@ -1058,6 +1063,11 @@ function agentsRouteCopy(lang: "zh" | "en") {
         archiveAgentTitle: "Safe removal",
         archiveAgentHint: "Archiving removes this Agent from defaults, rooms, and pools while keeping sessions, memory, logs, and workspace data.",
         archiveConfirm: "Archive {name}? This hides the Agent and cleans mode/room references, but does not physically delete data.",
+        purgeAgent: "Permanently delete",
+        purgingAgent: "Deleting...",
+        purgeAgentTitle: "Permanent deletion",
+        purgeAgentHint: "Only archived Agents can be purged. This removes the AgentDirectory record plus its private workspace, memory, inbox, and event files.",
+        purgeConfirm: "Permanently delete {name}? This cannot be undone and will delete the Agent private workspace and history files.",
         protectedAgent: "Protected Agents cannot be archived",
         archiveProtection: "Archive protected",
         archiveProtectionTitle: "Core protection",
@@ -1324,6 +1334,7 @@ export function AgentsRoute() {
   const canCreateAgent = createDraftReady(createDraft);
   const selectedAgentProtected = agentArchiveProtected(selectedAgent);
   const canArchiveAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived" && !selectedAgentProtected);
+  const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected);
 
   const createAgentMutation = useMutation({
     mutationFn: (draft: AgentCreateDraft) =>
@@ -1395,6 +1406,31 @@ export function AgentsRoute() {
       setNotice({
         tone: "success",
         text: lang === "zh" ? `已安全归档 ${agentLabel(agent)}` : `Archived ${agentLabel(agent)}`,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentModeBindings() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const purgeAgentMutation = useMutation({
+    mutationFn: (payload: { agentId: string }) =>
+      fetchJson<{ agentId: string; status: string; deleted: boolean; purgeSummary?: { dataRetention?: string } }>(
+        `/api/agents/${encodeURIComponent(payload.agentId)}/purge`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      setSelectedAgentId("");
+      setActivePane("overview");
+      setNotice({
+        tone: "success",
+        text: lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent",
       });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
@@ -1752,6 +1788,17 @@ export function AgentsRoute() {
       return;
     }
     archiveAgentMutation.mutate({ agentId: selectedAgent.agentId });
+  };
+
+  const purgeSelectedAgent = () => {
+    if (!selectedAgent || !canPurgeAgent || purgeAgentMutation.isPending) {
+      return;
+    }
+    const confirmed = window.confirm(copy.purgeConfirm.replace("{name}", agentLabel(selectedAgent)));
+    if (!confirmed) {
+      return;
+    }
+    purgeAgentMutation.mutate({ agentId: selectedAgent.agentId });
   };
 
   const consumeInboxMessage = (message: AgentInboxMessage) => {
@@ -2308,25 +2355,55 @@ export function AgentsRoute() {
               <section className={selectedAgentProtected ? styles.protectedZone : styles.dangerZone}>
                 <div className={styles.panelHeader}>
                   <div>
-                    <p className={styles.panelEyebrow}>{selectedAgentProtected ? copy.archiveProtectionTitle : copy.archiveAgentTitle}</p>
-                    <h3>{selectedAgentProtected ? copy.archiveProtection : copy.archiveAgent}</h3>
+                    <p className={styles.panelEyebrow}>
+                      {selectedAgentProtected
+                        ? copy.archiveProtectionTitle
+                        : selectedAgent.status === "archived"
+                          ? copy.purgeAgentTitle
+                          : copy.archiveAgentTitle}
+                    </p>
+                    <h3>
+                      {selectedAgentProtected
+                        ? copy.archiveProtection
+                        : selectedAgent.status === "archived"
+                          ? copy.purgeAgent
+                          : copy.archiveAgent}
+                    </h3>
                   </div>
                   {selectedAgentProtected ? <ShieldCheck size={16} /> : <Trash2 size={16} />}
                 </div>
-                <p>{selectedAgentProtected ? copy.archiveProtectionHint : copy.archiveAgentHint}</p>
+                <p>
+                  {selectedAgentProtected
+                    ? copy.archiveProtectionHint
+                    : selectedAgent.status === "archived"
+                      ? copy.purgeAgentHint
+                      : copy.archiveAgentHint}
+                </p>
                 {selectedAgentProtected ? (
                   <span className={styles.cleanPill}>{copy.protectedAgent}</span>
                 ) : (
                   <div className={styles.editorActions}>
-                    <button
-                      type="button"
-                      className={styles.dangerButton}
-                      disabled={!canArchiveAgent || archiveAgentMutation.isPending}
-                      onClick={archiveSelectedAgent}
-                    >
-                      <Trash2 size={15} />
-                      {archiveAgentMutation.isPending ? copy.archivingAgent : copy.archiveAgent}
-                    </button>
+                    {selectedAgent.status === "archived" ? (
+                      <button
+                        type="button"
+                        className={styles.dangerButton}
+                        disabled={!canPurgeAgent || purgeAgentMutation.isPending}
+                        onClick={purgeSelectedAgent}
+                      >
+                        <Trash2 size={15} />
+                        {purgeAgentMutation.isPending ? copy.purgingAgent : copy.purgeAgent}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className={styles.dangerButton}
+                        disabled={!canArchiveAgent || archiveAgentMutation.isPending}
+                        onClick={archiveSelectedAgent}
+                      >
+                        <Trash2 size={15} />
+                        {archiveAgentMutation.isPending ? copy.archivingAgent : copy.archiveAgent}
+                      </button>
+                    )}
                   </div>
                 )}
               </section>

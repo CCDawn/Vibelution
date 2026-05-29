@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.24 - 2026-05-29
+
+- Added permanent purge for already archived Agents: Agent Center now exposes a separate irreversible delete action for archived Agents, backed by `DELETE /api/agents/{agent_id}/purge`.
+- Purging removes the AgentDirectory record, unreferenced private tool/memory policies, stale mode/group-room references, and the Agent private workspace while logging `agent.purged`; active and protected Agents remain blocked from physical deletion.
+- Group-room cleanup now repairs legacy session-only participants before Agent removal, so archived/direct-session Agents cannot slip past unique-member guards because of stale participant shape.
+
 ## 0.4.23 - 2026-05-29
 
 - Retired the duplicate `/chat-rooms` group-chat workspace route and kept it as a compatibility redirect into `/chat`.
