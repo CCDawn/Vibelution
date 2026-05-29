@@ -69,8 +69,8 @@
 .metaPill {
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 26px;
+  padding: 0 8px;
   border-radius: var(--radius-control);
   border: 1px solid var(--border-soft);
   background: var(--surface-panel);
@@ -81,11 +81,11 @@
 .rootButton {
   display: grid;
   grid-template-rows: auto auto auto auto auto;
-  gap: 7px;
+  gap: 5px;
   width: 100%;
   min-width: 0;
   min-height: 0;
-  padding: 10px 11px;
+  padding: 8px 9px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-panel);
   background: var(--surface-panel);
@@ -95,7 +95,7 @@
 
 .rootButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
-  box-shadow: inset 2px 0 0 var(--accent-warm);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 18%, transparent);
   background: var(--surface-panel-strong);
 }
 
@@ -112,7 +112,7 @@
   min-width: 0;
   font-family: var(--font-body);
   font-weight: 760;
-  font-size: 0.98rem;
+  font-size: 0.9rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -120,7 +120,7 @@
 
 .rootButtonPath {
   color: var(--fg-secondary);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -130,7 +130,7 @@
 .rootButtonGuide,
 .rootButtonStats {
   color: var(--fg-secondary);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   line-height: 1.35;
 }
 
@@ -180,7 +180,7 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 12px var(--logs-right-rail-width, 260px);
+  grid-template-columns: minmax(0, 1fr) 10px var(--logs-right-rail-width, 250px);
   min-height: 0;
 }
 
@@ -207,17 +207,17 @@
 .sidebar {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px;
   border-right: 1px solid var(--border-soft);
   background: var(--surface-panel-muted);
 }
 
 .resizableLayout > .sidebar {
-  flex: 0 0 var(--logs-sidebar-width, 320px);
-  width: var(--logs-sidebar-width, 320px);
-  min-width: var(--logs-sidebar-width, 320px);
-  max-width: var(--logs-sidebar-width, 320px);
+  flex: 0 0 var(--logs-sidebar-width, 300px);
+  width: var(--logs-sidebar-width, 300px);
+  min-width: var(--logs-sidebar-width, 300px);
+  max-width: var(--logs-sidebar-width, 300px);
   border-right: 0;
 }
 
@@ -230,8 +230,8 @@
 
 .sidebarHeader {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -239,7 +239,7 @@
 
 .selectionToolbar {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .selectionPill {
@@ -247,13 +247,13 @@
   align-items: center;
   justify-content: center;
   width: fit-content;
-  min-height: 28px;
-  padding: 0 10px;
+  min-height: 24px;
+  padding: 0 8px;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .selectionActions {
@@ -361,7 +361,7 @@
 .panelSearch {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--fg-tertiary);
 }
 
@@ -418,7 +418,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  padding: 12px 14px;
+  padding: 10px 12px;
   background: var(--surface-panel-strong);
 }
 
@@ -607,8 +607,8 @@
 .rightRail {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 10px;
   border-left: 1px solid var(--border-soft);
   background: var(--surface-panel-muted);
 }
@@ -620,8 +620,8 @@
 
 .railHeader {
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  gap: 5px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -654,10 +654,10 @@
 
 .packageButton {
   display: grid;
-  gap: 6px;
+  gap: 5px;
   width: 100%;
   min-width: 0;
-  padding: 9px;
+  padding: 8px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -674,7 +674,7 @@
 .packageButtonActive {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: var(--surface-panel-strong);
-  box-shadow: inset 2px 0 0 var(--accent-warm);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 18%, transparent);
 }
 
 .packageButtonHeader,
@@ -715,12 +715,12 @@
 
 .packageFilesPanel {
   display: grid;
-  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr);
+  grid-template-columns: minmax(110px, 170px) minmax(0, 1fr);
   align-items: stretch;
-  gap: 8px;
+  gap: 6px;
   min-height: 0;
-  max-height: 78px;
-  padding: 8px;
+  max-height: 72px;
+  padding: 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-input);
@@ -749,7 +749,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: 6px;
   align-items: stretch;
-  flex: 0 0 clamp(220px, 24vw, 320px);
+  flex: 0 0 clamp(200px, 22vw, 300px);
   min-width: 0;
 }
 
@@ -781,8 +781,8 @@
   display: grid;
   gap: 3px;
   width: 100%;
-  min-height: 50px;
-  padding: 7px 10px;
+  min-height: 46px;
+  padding: 6px 8px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: var(--surface-panel-strong);
