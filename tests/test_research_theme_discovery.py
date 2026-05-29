@@ -27,6 +27,7 @@ from core.web.services import (
     research_service,
     runtime_scene_service,
     session_service,
+    team_service,
 )
 from core.ui.chat_state import save_chat_state
 
@@ -1125,14 +1126,16 @@ def test_research_flow_canvas_is_locked_to_research_organization_graph(tmp_path,
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
-
     default_canvas = research_service.get_research_flow_canvas()
     assert default_canvas["path"].endswith("flow_canvas.json")
     assert default_canvas["organizationPath"].replace("\\", "/").endswith("workspace/research/organization_graph.json")
     assert default_canvas["projectBinding"] == {
-        "projectKind": "research",
+        "projectKind": "team",
         "projectId": "research-team",
-        "source": "research_organization",
+        "teamId": "research-team",
+        "teamName": "科研团队",
+        "source": "team",
+        "organizationSource": "research_organization",
         "locked": True,
     }
     assert default_canvas["canvasKind"] == "research_flow_canvas"
@@ -1144,6 +1147,10 @@ def test_research_flow_canvas_is_locked_to_research_organization_graph(tmp_path,
     active_org_agent_ids = {node["agentId"] for node in organization["agents"] if node["status"] != "archived"}
     assert {node["agentId"] for node in default_canvas["nodes"]} == active_org_agent_ids
     assert {node["agentId"] for node in canvas_graph["agents"]} == active_org_agent_ids
+    research_team = team_service.get_team("research-team")
+    assert research_team["teamId"] == "research-team"
+    assert {member["agentId"] for member in research_team["members"]} == active_org_agent_ids
+    assert {node["agentId"] for node in research_team["canvas"]["nodes"]} == active_org_agent_ids
     assert all(node["displayName"] != "CEO Agent" for node in canvas_graph["agents"])
     assert all("agentInboxMessages" not in (node.get("agent") or {}) for node in canvas_graph["agents"])
     assert all("workspaceTerritory" not in (node.get("agent") or {}) for node in canvas_graph["agents"])
@@ -1184,7 +1191,9 @@ def test_research_flow_canvas_is_locked_to_research_organization_graph(tmp_path,
     flow_events = [event for event in events if event[0][0] == "research.flow_canvas.updated"]
     assert flow_events[-1][1]["fields"]["nodeCount"] >= 2
     assert flow_events[-1][1]["fields"]["locked"] is True
-    assert flow_events[-1][1]["fields"]["source"] == "research_organization"
+    assert flow_events[-1][1]["fields"]["source"] == "team"
+    assert flow_events[-1][1]["fields"]["organizationSource"] == "research_organization"
+    assert flow_events[-1][1]["fields"]["teamId"] == "research-team"
     assert flow_events[-1][1]["fields"]["organizationPath"].replace("\\", "/").endswith(
         "workspace/research/organization_graph.json"
     )
@@ -1502,7 +1511,6 @@ def test_research_flow_canvas_saved_default_positions_do_not_override_locked_org
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
-
     payload = research_service._default_research_flow_canvas()
     expected_positions = {
         "research_ceo_entry": {"x": 24.5, "y": 221.25},
@@ -1527,7 +1535,8 @@ def test_research_flow_canvas_saved_default_positions_do_not_override_locked_org
     }
 
     assert saved_positions == expected_positions
-    assert reloaded["projectBinding"]["source"] == "research_organization"
+    assert reloaded["projectBinding"]["source"] == "team"
+    assert reloaded["projectBinding"]["teamId"] == "research-team"
     assert reloaded_positions == {}
 
 
@@ -1602,11 +1611,11 @@ def test_research_flow_canvas_legacy_untyped_process_does_not_pollute_locked_org
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
-
     canvas = research_service.get_research_flow_canvas()
 
     assert canvas["canvasKind"] == "research_flow_canvas"
-    assert canvas["projectBinding"]["source"] == "research_organization"
+    assert canvas["projectBinding"]["source"] == "team"
+    assert canvas["projectBinding"]["teamId"] == "research-team"
     assert {node["type"] for node in canvas["nodes"]} == {"agent"}
     assert "nslb_context_snapshot" not in {node["id"] for node in canvas["nodes"]}
     assert "nslb_harness_doctor" not in {node["id"] for node in canvas["nodes"]}
@@ -1679,11 +1688,11 @@ def test_research_flow_canvas_legacy_agent_graph_does_not_pollute_locked_organiz
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
-
     canvas = research_service.get_research_flow_canvas()
 
     assert canvas["canvasKind"] == "research_flow_canvas"
-    assert canvas["projectBinding"]["source"] == "research_organization"
+    assert canvas["projectBinding"]["source"] == "team"
+    assert canvas["projectBinding"]["teamId"] == "research-team"
     assert {node["type"] for node in canvas["nodes"]} == {"agent"}
     assert "ceo_agent" not in {node["id"] for node in canvas["nodes"]}
     assert "research_worker" not in {node["id"] for node in canvas["nodes"]}
@@ -2659,7 +2668,9 @@ def test_research_flow_canvas_api_declares_utf8_json(tmp_path, monkeypatch):
     assert response.headers["content-type"].lower().startswith("application/json")
     assert "charset=utf-8" in response.headers["content-type"].lower()
     assert response.json()["canvasKind"] == "research_flow_canvas"
-    assert response.json()["projectBinding"]["source"] == "research_organization"
+    assert response.json()["projectBinding"]["source"] == "team"
+    assert response.json()["projectBinding"]["teamId"] == "research-team"
+    assert response.json()["projectBinding"]["organizationSource"] == "research_organization"
     assert response.json()["nodes"][0]["label"]
     assert response.json()["nodes"][0]["label"] != "CEO Agent"
 

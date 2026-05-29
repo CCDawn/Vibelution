@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.22 - 2026-05-29
+
+- Bound the Research Flow Canvas to the stable `research-team` Team entity while keeping `research_organization` as the live organization source.
+- Added research-Team synchronization from the active organization graph so Team members, Team canvas nodes, and communication edges stay aligned with the locked research canvas.
+- Pruned unresolvable active Research Organization nodes during canvas repair so embedded stale Agent snapshots cannot drift the locked canvas away from AgentDirectory.
+
 ## 0.4.21 - 2026-05-29
 
 - Added a Teams inspector task kickoff form that starts the linked Chat/Coding group-room round directly from a selected Team, carrying `source=team_workspace` and `teamId` metadata.

@@ -102,6 +102,61 @@ def create_team(
     return get_team(team_id)
 
 
+def ensure_research_team_from_organization(organization: dict[str, Any]) -> dict[str, Any]:
+    """Ensure the locked research organization has a stable Team reference."""
+
+    team_id = "research-team"
+    now = utc_now_iso()
+    members = _members_from_research_organization(organization)
+    with _TEAM_LOCK:
+        state = _load_index()
+        if _repair_index_state(state):
+            state["updatedAt"] = now
+        team = _find_team(state, team_id)
+        created = team is None
+        if team is None:
+            team = {
+                "teamId": team_id,
+                "name": "科研团队",
+                "description": "由科研组织架构自动同步的系统团队。",
+                "purpose": "实时展示科研团队成员、职能与组织通信关系。",
+                "status": DEFAULT_TEAM_STATUS,
+                "members": members,
+                "linkedChatRoomId": "",
+                "canvasPath": _relative_path(_team_canvas_path(team_id)),
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            state.setdefault("teams", []).append(team)
+        else:
+            team["name"] = "科研团队"
+            team["description"] = "由科研组织架构自动同步的系统团队。"
+            team["purpose"] = "实时展示科研团队成员、职能与组织通信关系。"
+            team["status"] = DEFAULT_TEAM_STATUS
+            team["members"] = members
+            team["canvasPath"] = _relative_path(_team_canvas_path(team_id))
+            team["updatedAt"] = now
+        state["updatedAt"] = str(team.get("updatedAt") or now)
+        _save_index(state)
+        canvas = _canvas_from_research_organization(organization, team)
+        _write_json(_team_canvas_path(team_id), canvas)
+        _ensure_team_chat_room_link(team)
+        state["updatedAt"] = str(team.get("updatedAt") or now)
+        _save_index(state)
+    _record_team_event(
+        "team.research_organization_synced",
+        team,
+        fields={
+            "created": created,
+            "memberCount": len(members),
+            "nodeCount": len(canvas.get("nodes") or []),
+            "edgeCount": len(canvas.get("edges") or []),
+            "source": "research_organization",
+        },
+    )
+    return get_team(team_id)
+
+
 def get_team(team_id: str) -> dict[str, Any]:
     normalized_team_id = _normalize_required_id(team_id, "Team id is required.")
     with _TEAM_LOCK:
@@ -314,8 +369,8 @@ def _normalize_canvas(raw: dict[str, Any], team: dict[str, Any]) -> dict[str, An
 def _normalize_node(item: Any, index: int) -> dict[str, Any]:
     if not isinstance(item, dict):
         raise TeamServiceError("Team canvas node must be an object.")
-    node_id = _safe_token(item.get("id"), default=f"node-{index + 1}", max_length=96)
     agent_id = _safe_token(item.get("agentId"), default="", max_length=128)
+    node_id = _safe_token(item.get("id") or agent_id, default=f"node-{index + 1}", max_length=128)
     agent = agent_directory_service.get_agent(agent_id, include_archived=True) if agent_id else None
     active_agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
     node_type = _safe_token(item.get("type"), default="role", max_length=40)
@@ -439,6 +494,109 @@ def _sync_members_from_canvas(current_members: list[dict[str, Any]], canvas: dic
     return list(by_agent.values())
 
 
+def _members_from_research_organization(organization: dict[str, Any]) -> list[dict[str, Any]]:
+    members: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(list(organization.get("agents") or [])[:120]):
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("agentId") or "").strip()
+        if not agent_id or agent_id in seen or str(item.get("status") or "active").strip() == "archived":
+            continue
+        agent = agent_directory_service.get_agent(agent_id, include_archived=False)
+        if not agent:
+            continue
+        seen.add(agent_id)
+        function_label = _research_member_function_label(item, agent)
+        members.append(
+            {
+                "memberId": _safe_token(item.get("nodeId") or agent_id, default=f"member-{index + 1}", max_length=96),
+                "agentId": agent_id,
+                "agentCode": str(agent.get("agentCode") or item.get("agentCode") or "").strip(),
+                "agentName": str(agent.get("displayName") or item.get("displayName") or "").strip(),
+                "role": str(item.get("role") or ((agent.get("metadata") or {}) if isinstance(agent.get("metadata"), dict) else {}).get("researchOrgRole") or "").strip(),
+                "purpose": function_label,
+                "agentStatus": "active",
+            }
+        )
+    return members
+
+
+def _canvas_from_research_organization(organization: dict[str, Any], team: dict[str, Any]) -> dict[str, Any]:
+    members_by_agent_id = {
+        str(member.get("agentId") or "").strip(): member
+        for member in list(team.get("members") or [])
+        if isinstance(member, dict) and str(member.get("agentId") or "").strip()
+    }
+    nodes: list[dict[str, Any]] = []
+    for index, item in enumerate(list(organization.get("agents") or [])[:120]):
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("agentId") or "").strip()
+        member = members_by_agent_id.get(agent_id)
+        if not member:
+            continue
+        nodes.append(
+            {
+                "id": _safe_token(agent_id, default=f"node-{index + 1}", max_length=96),
+                "label": str(item.get("displayName") or member.get("agentName") or agent_id).strip(),
+                "type": "agent",
+                "status": "bound",
+                "x": _safe_float(item.get("x"), 120.0 + index * 220.0),
+                "y": _safe_float(item.get("y"), 120.0),
+                "agentId": agent_id,
+                "agentCode": str(item.get("agentCode") or member.get("agentCode") or "").strip(),
+                "agentName": str(member.get("agentName") or item.get("displayName") or "").strip(),
+                "role": str(member.get("role") or "").strip(),
+                "purpose": str(member.get("purpose") or "").strip(),
+            }
+        )
+    node_ids = {str(node.get("id") or "") for node in nodes}
+    edges: list[dict[str, Any]] = []
+    for index, item in enumerate(list(organization.get("edges") or [])[:240]):
+        if not isinstance(item, dict) or str(item.get("status") or "active").strip() == "archived":
+            continue
+        source = _safe_token(item.get("fromAgentId") or item.get("source"), default="", max_length=96)
+        target = _safe_token(item.get("toAgentId") or item.get("target"), default="", max_length=96)
+        if source not in node_ids or target not in node_ids:
+            continue
+        edges.append(
+            {
+                "id": _safe_token(item.get("edgeId") or item.get("id"), default=f"edge-{index + 1}", max_length=96),
+                "source": source,
+                "target": target,
+                "label": trim_lines(item.get("label") or "组织通信", max_lines=1).strip(),
+                "type": "collaborates_with",
+            }
+        )
+    return _normalize_canvas(
+        {
+            "schemaVersion": SCHEMA_VERSION,
+            "canvasKind": CANVAS_KIND,
+            "teamId": team["teamId"],
+            "updatedAt": str(organization.get("updatedAt") or team.get("updatedAt") or utc_now_iso()),
+            "path": _relative_path(_team_canvas_path(team["teamId"])),
+            "viewport": {"x": 40, "y": 80, "zoom": 1},
+            "nodes": nodes,
+            "edges": edges,
+        },
+        team,
+    )
+
+
+def _research_member_function_label(item: dict[str, Any], agent: dict[str, Any]) -> str:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    label = str(metadata.get("functionalDisplayName") or "").strip()
+    if label:
+        return trim_lines(label, max_lines=1).strip()
+    responsibilities = metadata.get("responsibilities")
+    if isinstance(responsibilities, list):
+        joined = "；".join(str(value).strip() for value in responsibilities[:2] if str(value).strip())
+        if joined:
+            return trim_lines(joined, max_lines=1).strip()
+    return trim_lines(item.get("role") or "科研协作", max_lines=1).strip()
+
+
 def _active_member_agent_ids(team: dict[str, Any]) -> list[str]:
     ids: list[str] = []
     seen: set[str] = set()
@@ -502,14 +660,25 @@ def _ensure_team_chat_room_link(team: dict[str, Any]) -> str:
             config=config,
         )
     else:
-        room = chat_room_service.create_chat_room(
-            title=title,
-            participant_session_ids=session_ids,
-            mode="round_robin",
-            purpose="discussion",
-            config=config,
-        )
+        reusable_room_id = _find_existing_team_chat_room_id(str(team.get("teamId") or "").strip())
+        if reusable_room_id:
+            room = chat_room_service.update_chat_room(
+                reusable_room_id,
+                title=title,
+                participant_session_ids=session_ids,
+                purpose="discussion",
+                config=config,
+            )
+        else:
+            room = chat_room_service.create_chat_room(
+                title=title,
+                participant_session_ids=session_ids,
+                mode="round_robin",
+                purpose="discussion",
+                config=config,
+            )
     team["linkedChatRoomId"] = str(room.get("roomId") or "").strip()
+    _archive_duplicate_team_chat_rooms(team["linkedChatRoomId"], str(team.get("teamId") or "").strip())
     team["updatedAt"] = utc_now_iso()
     _record_team_event(
         "team.chat_room.synced",
@@ -520,6 +689,47 @@ def _ensure_team_chat_room_link(team: dict[str, Any]) -> str:
         },
     )
     return team["linkedChatRoomId"]
+
+
+def _find_existing_team_chat_room_id(team_id: str) -> str:
+    normalized_team_id = str(team_id or "").strip()
+    if not normalized_team_id:
+        return ""
+    rooms = [
+        room for room in chat_room_service.list_chat_rooms()
+        if str((room.get("config") or {}).get("source") or "").strip() == "team"
+        and str((room.get("config") or {}).get("teamId") or "").strip() == normalized_team_id
+    ]
+    rooms.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    return str((rooms[0] if rooms else {}).get("roomId") or "").strip()
+
+
+def _archive_duplicate_team_chat_rooms(keep_room_id: str, team_id: str) -> None:
+    normalized_keep_room_id = str(keep_room_id or "").strip()
+    normalized_team_id = str(team_id or "").strip()
+    if not normalized_keep_room_id or not normalized_team_id:
+        return
+    duplicates = [
+        room for room in chat_room_service.list_chat_rooms()
+        if str(room.get("roomId") or "").strip() != normalized_keep_room_id
+        and str((room.get("config") or {}).get("source") or "").strip() == "team"
+        and str((room.get("config") or {}).get("teamId") or "").strip() == normalized_team_id
+        and str(room.get("status") or "").strip() not in {"running", "stopping"}
+    ]
+    for room in duplicates:
+        try:
+            chat_room_service.delete_chat_room(str(room.get("roomId") or ""))
+        except Exception:
+            continue
+    if duplicates:
+        _record_team_event(
+            "team.chat_room.duplicates_archived",
+            {"teamId": normalized_team_id, "linkedChatRoomId": normalized_keep_room_id},
+            fields={
+                "linkedChatRoomId": normalized_keep_room_id,
+                "duplicateRoomCount": len(duplicates),
+            },
+        )
 
 
 def _team_to_api(team: dict[str, Any]) -> dict[str, Any]:

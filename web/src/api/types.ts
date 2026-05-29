@@ -3219,7 +3219,10 @@ export type ResearchFlowCanvas = {
   projectBinding?: {
     projectKind?: string;
     projectId?: string;
+    teamId?: string;
+    teamName?: string;
     source?: string;
+    organizationSource?: string;
     locked?: boolean;
     [key: string]: unknown;
   };

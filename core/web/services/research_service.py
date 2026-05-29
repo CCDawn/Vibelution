@@ -25,7 +25,7 @@ from core.infrastructure.workspace_manager import get_workspace
 from core.chat.chat_task_types import trim_lines
 from core.ui.chat_state import load_chat_state
 from config.public_config import build_effective_config, load_public_config
-from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, research_organization_service, session_service
+from . import agent_directory_service, agent_mode_binding_service, prompt_template_service, research_organization_service, session_service, team_service
 from .config_service import _profile_label
 from .runtime_scene_service import record_research_scene_event
 
@@ -408,6 +408,8 @@ def _legacy_research_flow_canvas() -> dict[str, Any]:
 
 def _research_organization_flow_canvas() -> dict[str, Any]:
     organization = research_organization_service.get_research_organization_canvas_graph()
+    team = team_service.ensure_research_team_from_organization(organization)
+    team_id = str(team.get("teamId") or "research-team").strip() or "research-team"
     agents = [
         item
         for item in organization.get("agents") or []
@@ -432,9 +434,12 @@ def _research_organization_flow_canvas() -> dict[str, Any]:
             "updatedAt": str(organization.get("updatedAt") or _utc_now()),
             "organizationPath": str(organization.get("path") or ""),
             "projectBinding": {
-                "projectKind": "research",
-                "projectId": "research-team",
-                "source": "research_organization",
+                "projectKind": "team",
+                "projectId": team_id,
+                "teamId": team_id,
+                "teamName": str(team.get("name") or "科研团队"),
+                "source": "team",
+                "organizationSource": "research_organization",
                 "locked": True,
             },
             "viewport": {"x": 40, "y": 80, "zoom": 1},
@@ -1494,7 +1499,11 @@ def save_research_flow_canvas(
                 "agentBindingResolvedCount": int(agent_binding_stats.get("resolvedCount") or 0),
                 "flowBindingSyncCount": int(mode_binding_stats.get("updatedCount") or 0),
                 "locked": True,
-                "source": "research_organization",
+                "source": "team",
+                "organizationSource": "research_organization",
+                "teamId": str((canvas.get("projectBinding") or {}).get("teamId") or "research-team")
+                if isinstance(canvas.get("projectBinding"), dict)
+                else "research-team",
                 "lockedSaveReceived": True,
                 "layoutOverriddenByOrganization": True,
                 **_flow_canvas_mojibake_log_fields(mojibake_report),
@@ -2545,7 +2554,11 @@ def _validate_research_flow_canvas(canvas: dict[str, Any]) -> dict[str, Any]:
     nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
     edges = canvas.get("edges") if isinstance(canvas.get("edges"), list) else []
     issues: list[dict[str, Any]] = []
-    organization_locked = isinstance(canvas.get("projectBinding"), dict) and canvas["projectBinding"].get("source") == "research_organization"
+    organization_locked = (
+        isinstance(canvas.get("projectBinding"), dict)
+        and canvas["projectBinding"].get("locked") is True
+        and canvas["projectBinding"].get("organizationSource") == "research_organization"
+    )
     node_by_id = {str(node.get("id") or ""): node for node in nodes if isinstance(node, dict)}
     incoming: dict[str, list[dict[str, Any]]] = {node_id: [] for node_id in node_by_id}
     outgoing: dict[str, list[dict[str, Any]]] = {node_id: [] for node_id in node_by_id}
