@@ -4419,6 +4419,16 @@ def test_different_agent_sessions_run_chat_turns_concurrently(tmp_path, monkeypa
 def test_same_agent_sessions_queue_chat_turns_serially(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})
+    monkeypatch.setattr(
+        "core.orchestration.context_engine.record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "build_agent_context",
+        lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
+    )
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     state = load_chat_state(tmp_path)
@@ -4488,6 +4498,11 @@ def test_same_agent_sessions_queue_chat_turns_serially(tmp_path, monkeypatch):
 def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "build_agent_context",
+        lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
+    )
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     state = load_chat_state(tmp_path)
@@ -4562,6 +4577,11 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
 def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "build_agent_context",
+        lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
+    )
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     state = load_chat_state(tmp_path)
@@ -4684,6 +4704,11 @@ def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monke
 def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "build_agent_context",
+        lambda agent_id, **kwargs: SimpleNamespace(memory_policy={}, context_block="", timings={}),
+    )
     monkeypatch.setattr(runtime_service, "get_active_session_detail", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_state", lambda: {})
     monkeypatch.setattr(runtime_service, "_load_runtime_manager_snapshot", lambda: {})
@@ -4777,6 +4802,17 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
     assert fields["sessionId"] == "session-live"
     assert fields["turnId"] == active_chat["runId"]
     assert fields["leaseCount"] == 1
+    scheduled_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn_scheduled", "conversation.turn.scheduled")
+    ]
+    assert scheduled_events
+    scheduled_fields = scheduled_events[-1][1]["fields"]
+    assert scheduled_fields["sessionId"] == "session-live"
+    assert scheduled_fields["turnId"] == active_chat["runId"]
+    assert scheduled_fields["chatStateLockedMs"] >= 0
+    assert scheduled_fields["submitElapsedBeforeScheduleLogMs"] >= 0
 
 
 def test_edit_resubmit_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
@@ -4860,6 +4896,16 @@ def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatc
     assert fields["sessionId"] == "session-live"
     assert fields["turnId"] == turn_control.turn_id
     assert fields["agentType"] == "DummyAgent"
+    worker_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn_worker_started", "conversation.turn.worker_started")
+    ]
+    assert worker_events
+    worker_fields = worker_events[-1][1]["fields"]
+    assert worker_fields["totalPrepareMs"] >= 0
+    assert "agentContextBuildMs" in worker_fields
+    assert "executorWaitMs" in worker_fields
 
 
 def test_runtime_summary_exposes_work_run_kinds(monkeypatch):

@@ -80,6 +80,9 @@ def test_build_agent_context_collects_isolated_agent_runtime_context(tmp_path, m
     assert "Agent Prompt Template" in packet.context_block
     assert "prompt-research-broad" in packet.context_block
     assert "广撒网探索 agent" in packet.context_block
+    assert packet.timings["totalDurationMs"] >= 0
+    assert "runtimeContextBlockMs" in packet.timings
+    assert "promptTemplateContextMs" in packet.timings
 
 
 def test_build_agent_context_includes_research_org_member_and_edge_context(tmp_path, monkeypatch):
