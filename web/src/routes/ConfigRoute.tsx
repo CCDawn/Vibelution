@@ -3950,23 +3950,10 @@ export function ConfigRoute() {
             </div>
           </div>
           <p className={styles.sectionText}>{copy.profilesBody}</p>
-          <div className={styles.profileTableWrap}>
-            <table className={styles.profileTable}>
-              <thead>
-                <tr>
-                  <th>{copy.profiles}</th>
-                  <th>{copy.profileTableModel}</th>
-                  <th>{copy.profileTableProvider}</th>
-                  <th>{copy.profileTableKey}</th>
-                  <th>{copy.profileTableActions}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {profileModeGroups.flatMap((group) => [
-                  <tr key={`group-${group.id}`} className={styles.profileGroupRow}>
-                    <td colSpan={5}>{group.label}</td>
-                  </tr>,
-                  ...group.profiles.map((profile) => {
+          <div className={styles.profileCardGroups}>
+            <div className={styles.profileCardGrid}>
+              {profileModeGroups.flatMap((group) =>
+                group.profiles.map((profile) => {
                     const profileEditor = profileEditors[profile.profileId];
                     const isEditingProfile = profilesEditing && Boolean(profileEditor);
                     const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
@@ -3984,16 +3971,20 @@ export function ConfigRoute() {
                           ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
                           : `${styles.inlineBadge} ${styles.inlineBadgeMuted}`;
                     return (
-                      <tr key={profile.profileId}>
-                        <td className={styles.profileTaskCell}>
-                          <strong>{profile.label}</strong>
-                          <span>{profile.profileId}</span>
-                          <span className={styles.inlineBadge}>{group.label}</span>
-                          {displayState.selectionDirty ? <span className={styles.inlineBadge}>{copy.profileTableStaged}</span> : null}
-                        </td>
-                        <td>
+                      <article key={profile.profileId} className={styles.profileConfigCard}>
+                        <div className={styles.profileConfigCardHeader}>
+                          <div className={styles.profileTaskCell}>
+                            <strong>{profile.label}</strong>
+                            <span>{profile.profileId}</span>
+                          </div>
+                          <div className={styles.profileConfigBadges}>
+                            <span className={styles.inlineBadge}>{group.label}</span>
+                            {displayState.selectionDirty ? <span className={styles.inlineBadge}>{copy.profileTableStaged}</span> : null}
+                          </div>
+                        </div>
+                        <div className={styles.profileConfigCardBody}>
                           {isEditingProfile ? (
-                            <label className={`${styles.field} ${styles.profileTableSelect}`}>
+                            <label className={`${styles.field} ${styles.profileCardSelect}`}>
                               <span>{copy.selectedModel}</span>
                               <select
                                 value={selectedModelId}
@@ -4010,54 +4001,56 @@ export function ConfigRoute() {
                             </label>
                           ) : (
                             <div className={styles.profileModelCell}>
+                              <span>{copy.profileTableModel}</span>
                               <strong>{profile.requiredModelMissing ? copy.requiredModelMissing : displayState.selectedModelLabel}</strong>
                               <span>{displayState.model || "-"}</span>
                             </div>
                           )}
-                        </td>
-                        <td className={styles.profileMetaCell}>
-                          <strong>{displayState.providerKind || "-"}</strong>
-                          <span>{displayState.baseUrl || "-"}</span>
-                        </td>
-                        <td className={styles.profileMetaCell}>
-                          <span className={keyStateClassName}>{keyStateLabel(displayState.apiKeyState)}</span>
-                          <span className={imageInputBadgeClassName} title={imageInputCheck?.message || copy.imageInputUnsupportedHint}>
-                            {imageInputStatusLabel(imageInputCheck)}
-                          </span>
-                          {imageInputCheck?.status === "unsupported" ? <span>{copy.imageInputUnsupportedHint}</span> : null}
-                        </td>
-                        <td>
-                          <div className={styles.profileTableActions}>
-                            <button
-                              type="button"
-                              className={`${styles.actionButton} ${styles.compactButton}`}
-                              disabled={structuredActionsDisabled || !selectedModelId}
-                              onClick={() =>
-                                isEditingProfile
-                                  ? handleTestSelectedProfile(profile.profileId, profile.selectedModelId)
-                                  : handleTestProfile(profile.profileId)
-                              }
-                            >
-                              <Play size={14} />
-                              {isEditingProfile ? copy.testSelectedModel : copy.testConnection}
-                            </button>
-                            <button
-                              type="button"
-                              className={`${styles.actionButton} ${styles.compactButton}`}
-                              disabled={structuredActionsDisabled || !selectedModelId}
-                              onClick={() => handleTestProfileImageInput(profile.profileId, profile.selectedModelId)}
-                            >
-                              <ImageIcon size={14} />
-                              {busyAction === copy.imageInputTestPending ? copy.imageInputTestPending : copy.testImageInputShort}
-                            </button>
+                          <div className={styles.profileMetaCell}>
+                            <span>{copy.profileTableProvider}</span>
+                            <strong>{displayState.providerKind || "-"}</strong>
+                            <span>{displayState.baseUrl || "-"}</span>
                           </div>
-                        </td>
-                      </tr>
+                          <div className={styles.profileMetaCell}>
+                            <span>{copy.profileTableKey}</span>
+                            <div className={styles.profileStatusBadges}>
+                              <span className={keyStateClassName}>{keyStateLabel(displayState.apiKeyState)}</span>
+                              <span className={imageInputBadgeClassName} title={imageInputCheck?.message || copy.imageInputUnsupportedHint}>
+                                {imageInputStatusLabel(imageInputCheck)}
+                              </span>
+                            </div>
+                            {imageInputCheck?.status === "unsupported" ? <span>{copy.imageInputUnsupportedHint}</span> : null}
+                          </div>
+                        </div>
+                        <div className={styles.profileCardActions}>
+                          <button
+                            type="button"
+                            className={`${styles.actionButton} ${styles.compactButton}`}
+                            disabled={structuredActionsDisabled || !selectedModelId}
+                            onClick={() =>
+                              isEditingProfile
+                                ? handleTestSelectedProfile(profile.profileId, profile.selectedModelId)
+                                : handleTestProfile(profile.profileId)
+                            }
+                          >
+                            <Play size={14} />
+                            {isEditingProfile ? copy.testSelectedModel : copy.testConnection}
+                          </button>
+                          <button
+                            type="button"
+                            className={`${styles.actionButton} ${styles.compactButton}`}
+                            disabled={structuredActionsDisabled || !selectedModelId}
+                            onClick={() => handleTestProfileImageInput(profile.profileId, profile.selectedModelId)}
+                          >
+                            <ImageIcon size={14} />
+                            {busyAction === copy.imageInputTestPending ? copy.imageInputTestPending : copy.testImageInputShort}
+                          </button>
+                        </div>
+                      </article>
                     );
                   }),
-                ])}
-              </tbody>
-            </table>
+                )}
+            </div>
           </div>
           <div className={styles.researchAgentPool}>
             <div className={styles.formHeader}>
