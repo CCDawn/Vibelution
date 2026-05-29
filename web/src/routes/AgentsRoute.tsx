@@ -476,6 +476,14 @@ function filterAgents(
   const group = (workspace?.groups ?? []).find((item) => item.id === activeFilter);
   const groupIds = new Set(group?.agentIds ?? []);
   return agents.filter((agent) => {
+    const archived = agent.status === "archived";
+    if (activeFilter === "archived") {
+      if (!archived) {
+        return false;
+      }
+    } else if (archived) {
+      return false;
+    }
     if (group && !groupIds.has(agent.agentId)) {
       return false;
     }
@@ -487,14 +495,68 @@ function selectedAgentFromList(
   agents: AgentConfigWorkspaceAgent[],
   selectedAgentId: string,
   fallbackAgents: AgentConfigWorkspaceAgent[],
+  activeFilter: FilterId,
 ) {
+  const fallbackCandidates = activeFilter === "archived"
+    ? fallbackAgents.filter((agent) => agent.status === "archived")
+    : fallbackAgents.filter((agent) => agent.status !== "archived");
   return (
     agents.find((agent) => agent.agentId === selectedAgentId) ??
-    fallbackAgents.find((agent) => agent.agentId === selectedAgentId) ??
     agents[0] ??
-    fallbackAgents[0] ??
+    fallbackCandidates[0] ??
     null
   );
+}
+
+function archivedWorkspaceCache(
+  workspace: AgentConfigWorkspace | undefined,
+  archivedAgent: AgentConfigWorkspaceAgent,
+): AgentConfigWorkspace | undefined {
+  if (!workspace) {
+    return workspace;
+  }
+  const agentId = archivedAgent.agentId;
+  const cachedAgent = workspace.agents.find((agent) => agent.agentId === agentId);
+  const wasActive = cachedAgent ? cachedAgent.status !== "archived" : false;
+  const nextAgents = workspace.agents.map((agent) =>
+    agent.agentId === agentId
+      ? {
+          ...agent,
+          ...archivedAgent,
+          status: "archived",
+          runtimeStatus: {
+            state: "archived",
+            label: archivedAgent.runtimeStatus?.label || "Archived",
+            reason: archivedAgent.runtimeStatus?.reason || "agent_archived",
+            runId: archivedAgent.runtimeStatus?.runId || agent.runtimeStatus?.runId || "",
+            runKind: archivedAgent.runtimeStatus?.runKind || agent.runtimeStatus?.runKind || "",
+            sessionId: archivedAgent.runtimeStatus?.sessionId || agent.runtimeStatus?.sessionId || agent.directSessionId || "",
+            summary: archivedAgent.runtimeStatus?.summary || "",
+            updatedAt: archivedAgent.runtimeStatus?.updatedAt || archivedAgent.updatedAt || agent.updatedAt || "",
+          },
+        }
+      : agent,
+  );
+  const nextGroups = workspace.groups.map((group) => {
+    const agentIds = group.id === "archived"
+      ? Array.from(new Set([...group.agentIds, agentId]))
+      : group.agentIds.filter((id) => id !== agentId);
+    return {
+      ...group,
+      agentIds,
+      count: agentIds.length,
+    };
+  });
+  return {
+    ...workspace,
+    agents: nextAgents,
+    groups: nextGroups,
+    summary: {
+      ...workspace.summary,
+      activeAgentCount: wasActive ? Math.max(0, workspace.summary.activeAgentCount - 1) : workspace.summary.activeAgentCount,
+      archivedAgentCount: wasActive ? workspace.summary.archivedAgentCount + 1 : workspace.summary.archivedAgentCount,
+    },
+  };
 }
 
 function groupDisplayLabel(group: AgentConfigWorkspaceGroup | undefined, copy: ReturnType<typeof agentsRouteCopy>) {
@@ -1252,7 +1314,7 @@ export function AgentsRoute() {
       return normalizeText(`${tool.name} ${tool.description} ${tool.source} ${tool.status}`).includes(query);
     });
   }, [toolSearchText, tools]);
-  const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? []);
+  const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter);
   const memoryGroupOptions = useMemo(() => sharedGroupCandidates(workspace, selectedAgent), [selectedAgent?.agentId, workspace?.generatedAt]);
   const panes = useMemo(() => agentConfigPanes(copy, selectedAgent), [copy, selectedAgent]);
   const agentRunsQuery = useQuery({
@@ -1401,6 +1463,10 @@ export function AgentsRoute() {
         method: "DELETE",
       }),
     onSuccess: (agent) => {
+      queryClient.setQueryData<AgentConfigWorkspace | undefined>(
+        queryKeys.agentConfigWorkspace(),
+        (current) => archivedWorkspaceCache(current, agent),
+      );
       setSelectedAgentId("");
       setActivePane("overview");
       setNotice({
