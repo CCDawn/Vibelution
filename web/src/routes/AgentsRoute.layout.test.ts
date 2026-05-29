@@ -225,12 +225,21 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("method: \"DELETE\"");
     expect(routeSource).toContain("window.confirm");
     expect(routeSource).toContain("copy.archiveAgent");
+    expect(routeSource).toContain("archivedWorkspaceCache");
+    expect(routeSource).toContain("queryClient.setQueryData<AgentConfigWorkspace | undefined>");
     expect(routeSource).toContain("purgeAgentMutation");
     expect(routeSource).toContain("/purge");
     expect(routeSource).toContain("copy.purgeAgent");
     expect(routeSource).toContain("selectedAgent.status === \"archived\"");
     expect(routeSource).toContain("styles.dangerZone");
     expect(routeSource).toContain("styles.dangerButton");
+  });
+
+  it("keeps archived Agents out of non-archived filter lists immediately", () => {
+    expect(routeSource).toContain('if (activeFilter === "archived")');
+    expect(routeSource).toContain('} else if (archived) {');
+    expect(routeSource).toContain("fallbackAgents.filter((agent) => agent.status !== \"archived\")");
+    expect(routeSource).toContain("selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter)");
   });
 
   it("separates protected core Agents from the destructive archive zone", () => {

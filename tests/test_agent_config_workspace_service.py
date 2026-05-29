@@ -492,6 +492,13 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
     assert alpha["agentId"] not in bindings["research"]["flowBindings"].values()
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [participant["agentId"] for participant in room_detail["participants"]] == [beta["agentId"]]
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    groups = {group["id"]: group for group in workspace["groups"]}
+    assert alpha["agentId"] in groups["archived"]["agentIds"]
+    assert alpha["agentId"] not in groups["active"]["agentIds"]
+    assert alpha["agentId"] not in groups["chat"]["agentIds"]
+    assert alpha["agentId"] not in groups["research"]["agentIds"]
+    assert alpha["agentId"] not in groups["group_chat"]["agentIds"]
 
 
 def test_agent_delete_api_rejects_only_group_member_without_partial_archive(tmp_path, monkeypatch):
