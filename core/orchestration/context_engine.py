@@ -114,12 +114,17 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
     stage_started_at = _perf_counter()
     runtime_context_block = agent_directory_service.build_agent_runtime_context_block(normalized_agent_id, limit=limit)
     timings["runtimeContextBlockMs"] = _elapsed_ms(stage_started_at)
-    stage_started_at = _perf_counter()
-    research_org_context_block = _build_research_organization_context_block(
-        normalized_agent_id,
-        limit=limit,
-    )
-    timings["researchOrgContextMs"] = _elapsed_ms(stage_started_at)
+    research_org_context_block = ""
+    if _agent_needs_research_organization_context(agent):
+        stage_started_at = _perf_counter()
+        research_org_context_block = _build_research_organization_context_block(
+            normalized_agent_id,
+            limit=limit,
+        )
+        timings["researchOrgContextMs"] = _elapsed_ms(stage_started_at)
+    else:
+        timings["researchOrgContextMs"] = 0
+        timings["researchOrgContextSkipped"] = True
     prompt_template_id = str(agent.get("promptTemplateId") or "").strip()
     stage_started_at = _perf_counter()
     prompt_context_block = _build_prompt_template_context_block(
@@ -225,6 +230,23 @@ def _build_research_organization_context_block(agent_id: str, *, limit: int = 6)
             },
         )
         return ""
+
+
+def _agent_needs_research_organization_context(agent: dict[str, Any]) -> bool:
+    """Return true only for Agents that can reasonably belong to the research org graph."""
+
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    primary_mode = str(agent.get("primaryMode") or metadata.get("primaryMode") or "").strip().lower()
+    if primary_mode == "research":
+        return True
+    role_key = str(agent.get("roleKey") or metadata.get("roleKey") or "").strip().lower()
+    if role_key.startswith("research_") or role_key in {"ceo", "organization_advisor", "capability_steward"}:
+        return True
+    prompt_template_id = str(agent.get("promptTemplateId") or metadata.get("promptTemplateId") or "").strip().lower()
+    if prompt_template_id.startswith("prompt-research"):
+        return True
+    research_role = str(metadata.get("researchOrgRole") or metadata.get("systemRole") or "").strip()
+    return bool(research_role)
 
 
 def prepare_subagent_spawn(
