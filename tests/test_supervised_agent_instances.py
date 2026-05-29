@@ -65,6 +65,12 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
 
 def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_metadata(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
 
     first = supervised_agent_service.ensure_supervised_agent_instances()
     baseline = next(agent for agent in first if agent["metadata"]["supervisedRole"] == "baseline")
@@ -86,6 +92,8 @@ def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_metadata(tm
     assert repaired["status"] == "active"
     assert repaired["metadata"]["supervisedRoleLabel"] == "监督进化基线 Agent"
     assert repaired["metadata"]["functionalDisplayName"] == "监督进化基线 Agent"
+    reactivated_events = [item for item in events if item[0][2] == "agent.reactivated"]
+    assert reactivated_events[-1][1]["fields"]["agentId"] == baseline["agentId"]
 
 
 def test_agents_api_auto_syncs_supervised_agent_instances(tmp_path, monkeypatch):

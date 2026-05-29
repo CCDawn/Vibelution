@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.19 - 2026-05-29
+
+- Tightened AgentDirectory as the Agent availability source: archived or missing Agents now block chat turn scheduling and inbox wake delivery instead of being runnable through stale direct-session references.
+- Split silent ensure from explicit restore semantics: `ensure_agent_for_session` no longer reactivates archived Agents, while fixed supervised/self-evolution role bootstrap uses explicit `agent.reactivated` diagnostics.
+
 ## 0.4.18 - 2026-05-29
 
 - Linked Agent Center Teams to Chat/Coding group rooms: teams with active Agent members now create and maintain a linked group chat, and canvas member changes sync that room's participants.

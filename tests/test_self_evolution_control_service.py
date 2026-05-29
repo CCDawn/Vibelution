@@ -620,6 +620,32 @@ def test_self_evolution_agent_repair_preserves_all_fixed_roles(tmp_path, monkeyp
     }
 
 
+def test_self_evolution_agent_repair_reactivates_fixed_role_explicitly(tmp_path, monkeypatch):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    first = service.ensure_self_evolution_agent_instances()
+    executor = next(agent for agent in first if agent["roleKey"] == "executor")
+    agent_directory_service.archive_agent_instance(executor["agentId"])
+
+    second = service.ensure_self_evolution_agent_instances()
+
+    repaired = next(agent for agent in second if agent["roleKey"] == "executor")
+    assert repaired["agentId"] == executor["agentId"]
+    assert repaired["status"] == "active"
+    reactivated_events = [item for item in events if item[0][2] == "agent.reactivated"]
+    assert reactivated_events[-1][1]["fields"]["agentId"] == executor["agentId"]
+
+
 def test_self_evolution_agent_bindings_block_archived_slot_replacement(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")

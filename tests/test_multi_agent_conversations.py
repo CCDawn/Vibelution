@@ -1,6 +1,7 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from core.infrastructure.tool_executor import ToolExecutor
@@ -777,6 +778,50 @@ def test_agent_inbox_wake_respects_target_delegation_policy(tmp_path, monkeypatc
     assert started == []
     pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
     assert [item["messageId"] for item in pending] == [message["messageId"]]
+
+
+def test_agent_inbox_wake_skips_archived_target_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    started = []
+    events = []
+    monkeypatch.setattr(session_service, "submit_session_message", lambda *args, **kwargs: started.append((args, kwargs)))
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="这条消息在目标归档后不应唤醒。",
+    )
+    agent_directory_service.archive_agent_instance(beta["agentId"])
+
+    delivery = session_service.wake_agent_for_inbox_message(message)
+
+    assert delivery["wakeStatus"] == "skipped_archived_agent"
+    assert delivery["reason"] == "target_agent_archived"
+    assert started == []
+    assert any(item[0][2] == "agent_inbox.wake_skipped_archived_agent" for item in events)
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert [item["messageId"] for item in pending] == [message["messageId"]]
+
+
+def test_ensure_agent_for_session_does_not_reactivate_archived_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="旧会话 Agent",
+        direct_session_id="session-archived",
+    )
+    agent_directory_service.archive_agent_instance(agent["agentId"])
+
+    with pytest.raises(agent_directory_service.AgentArchivedError):
+        agent_directory_service.ensure_agent_for_session("session-archived", display_name="旧会话 Agent")
+
+    archived = agent_directory_service.get_agent(agent["agentId"], include_archived=True)
+    assert archived["status"] == "archived"
 
 
 def test_agent_inbox_message_can_be_consumed_idempotently(tmp_path, monkeypatch):

@@ -254,6 +254,12 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any], 
         or str(existing.get("status") or "active").strip() == "archived"
     )
     if needs_update:
+        if str(existing.get("status") or "active").strip() == "archived":
+            existing = agent_directory_service.reactivate_agent_instance(
+                str(existing.get("agentId") or ""),
+                reason="supervised_fixed_role_bootstrap",
+                metadata={"fixedRole": True, "supervisedRole": role.role},
+            )
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             profile_id=role.profile_id,

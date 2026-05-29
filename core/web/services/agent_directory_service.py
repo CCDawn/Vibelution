@@ -115,6 +115,10 @@ class AgentNotFoundError(AgentDirectoryError):
     """Raised when an AgentInstance does not exist."""
 
 
+class AgentArchivedError(AgentDirectoryError):
+    """Raised when an archived AgentInstance would be silently reactivated."""
+
+
 class AgentMessageNotFoundError(AgentDirectoryError):
     """Raised when an Agent inbox message does not exist."""
 
@@ -358,8 +362,8 @@ def ensure_agent_for_session(
             agent["templateId"] = normalized_profile
             changed = True
         if str(agent.get("status") or "active").strip() == "archived":
-            agent["status"] = "active"
-            changed = True
+            _record_agent_event("agent.ensure.skipped_archived", agent, lifecycle=True)
+            raise AgentArchivedError(f"Archived Agent cannot be ensured for session: {agent.get('agentId') or ''}")
         metadata = dict(agent.get("metadata") or {})
         legacy_path = str(session_workspace_path or "").strip()
         if legacy_path and metadata.get("legacySessionWorkspacePath") != legacy_path:
@@ -580,6 +584,29 @@ def archive_agent_instance(agent_id: str) -> dict[str, Any]:
         agent["updatedAt"] = utc_now_iso()
         save_state(state)
     _record_agent_event("agent.archived", agent, lifecycle=True)
+    return _agent_to_api(agent)
+
+
+def reactivate_agent_instance(agent_id: str, *, reason: str = "", metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Explicitly restore an archived AgentInstance to active status."""
+
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, agent_id)
+        if agent is None:
+            raise AgentNotFoundError(f"Agent not found: {agent_id}")
+        if str(agent.get("status") or "active").strip() != "archived":
+            return _agent_to_api(agent)
+        current_metadata = dict(agent.get("metadata") or {})
+        if metadata:
+            current_metadata.update(dict(metadata))
+        if reason:
+            current_metadata["reactivatedReason"] = trim_lines(str(reason or ""), max_lines=2)
+        agent["metadata"] = current_metadata
+        agent["status"] = "active"
+        agent["updatedAt"] = utc_now_iso()
+        save_state(state)
+    _record_agent_event("agent.reactivated", agent, lifecycle=True)
     return _agent_to_api(agent)
 
 
