@@ -332,14 +332,21 @@ class WorkRunStore:
             if payload is not None:
                 return payload
 
-        candidates: list[dict[str, Any]] = []
-        for path in sorted(self.runs_dir(run_kind).glob("*.json")):
-            payload = _load_json(path)
-            if payload:
-                candidates.append(payload)
+        candidates = self.list_snapshots(run_kind)
         if not candidates:
             return None
         return max(candidates, key=_run_sort_key)
+
+    def list_snapshots(self, run_kind: str) -> list[dict[str, Any]]:
+        runs_dir = self.runs_dir(run_kind)
+        if not runs_dir.exists():
+            return []
+        snapshots: list[dict[str, Any]] = []
+        for path in sorted(runs_dir.glob("*.json")):
+            payload = _load_json(path)
+            if payload:
+                snapshots.append(payload)
+        return snapshots
 
     def delete_snapshot(self, run_kind: str, run_id: str) -> dict[str, Any]:
         normalized = normalize_run_id(run_id)
