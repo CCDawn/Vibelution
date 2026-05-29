@@ -2492,6 +2492,11 @@ export function ChatCodingRoute() {
 
   function handleDeleteSession(session: SessionSummary) {
     if (isBusyPhase(session.currentPhase || session.status)) {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [session.id]: t("deleteSessionBusy"),
+        __sessions__: "",
+      }));
       return;
     }
     const sessionTitle = (session.title || session.agentDisplayName || session.id).trim();
@@ -3991,20 +3996,25 @@ export function ChatCodingRoute() {
                   updatedAt: conversation.updatedAt,
                   currentPhase: conversation.status,
                 };
+                const sessionIsBusy = isBusyPhase(session.currentPhase || session.status);
                 const deletePending =
                   deleteSessionMutation.isPending &&
                   deleteSessionMutation.variables?.sessionId === session.id;
-                const deleteDisabled = deletePending || isBusyPhase(session.currentPhase || session.status);
+                const deleteDisabled = deletePending || sessionIsBusy;
                 const addToReviewPending =
                   addSessionToReviewMutation.isPending &&
                   addSessionToReviewMutation.variables?.sessionId === session.id;
-                const addToReviewDisabled = addToReviewPending || isBusyPhase(session.currentPhase || session.status);
+                const addToReviewDisabled = addToReviewPending || sessionIsBusy;
                 const renamePending =
                   renameSessionMutation.isPending &&
                   renameSessionMutation.variables?.sessionId === session.id;
                 const isEditingTitle = editingSessionId === session.id;
                 const itemError = sessionComposerErrors[session.id] ?? "";
-                const itemIsNotice = itemError.startsWith(t("addSessionToReviewSucceeded"));
+                const deleteBusyReason = sessionIsBusy ? t("deleteSessionBusy") : "";
+                const itemMessage = itemError || deleteBusyReason;
+                const itemIsNotice = itemError
+                  ? itemError.startsWith(t("addSessionToReviewSucceeded"))
+                  : Boolean(deleteBusyReason);
                 const sessionAgent = session.agentId ? agentsById.get(session.agentId) : undefined;
                 const sessionDisplay = sessionAgentDisplayInfo(session, sessionAgent, lang);
                 const sessionAgentName =
@@ -4171,9 +4181,9 @@ export function ChatCodingRoute() {
                         </button>
                       </div>
                     )}
-                    {itemError ? (
+                    {itemMessage ? (
                       <p className={itemIsNotice ? styles.sessionItemNotice : styles.sessionItemError}>
-                        {itemError}
+                        {itemMessage}
                       </p>
                     ) : null}
                   </div>

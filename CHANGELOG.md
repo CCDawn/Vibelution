@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.12 - 2026-05-29
+
+- Made direct chat session deletion diagnosable by logging requested, busy-blocked, and deleted lifecycle events into runtime scene conversation logs.
+- Show a visible busy-delete reason in the Chat/Coding session list when a direct session is still running or stopping instead of relying only on a disabled delete button.
+
 ## 0.4.11 - 2026-05-29
 
 - Added QQ-like blue clickable `@` mentions in the Chat/Coding project bus and group-chat timelines, resolving active Agent code/name/id mentions to their direct conversation index and `@全体成员`/`@all` to the project bus index.
