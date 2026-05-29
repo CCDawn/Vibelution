@@ -262,6 +262,26 @@ def test_image2_tool_uses_global_default_model_ref(tmp_path, monkeypatch):
             }
         )
 
+    def fake_get(url, headers, timeout):
+        captured["discovery"] = {"url": url, "headers": headers, "timeout": timeout}
+
+        class Response:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def json():
+                return {
+                    "data": [
+                        {"id": "chat-model"},
+                        {"id": "gpt-image-1"},
+                        {"id": "gpt-image-1.5"},
+                        {"id": "gpt-image-2"},
+                    ]
+                }
+
+        return Response()
+
     def fake_post(url, headers, json, timeout):
         captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
 
@@ -281,7 +301,11 @@ def test_image2_tool_uses_global_default_model_ref(tmp_path, monkeypatch):
     monkeypatch.setattr(image2_tools, "_record_image2_event", lambda *args, **kwargs: None)
     monkeypatch.setattr(image2_tools, "_safe_current_runtime", lambda: {})
     monkeypatch.setattr(image2_tools, "_read_config_env_var", lambda name: "image-secret" if name == "GLOBAL_IMAGE2_KEY" else "")
-    monkeypatch.setitem(__import__("sys").modules, "requests", type("Requests", (), {"post": staticmethod(fake_post)}))
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "requests",
+        type("Requests", (), {"get": staticmethod(fake_get), "post": staticmethod(fake_post)}),
+    )
 
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-image", turn_id="turn-image"):
         result = json.loads(image2_tools.image2_generate_tool(prompt="一张透明玻璃小屋"))
@@ -344,6 +368,26 @@ def test_image2_tool_uses_relay_image2_root_base_url(tmp_path, monkeypatch):
             }
         )
 
+    def fake_get(url, headers, timeout):
+        captured["discovery"] = {"url": url, "headers": headers, "timeout": timeout}
+
+        class Response:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def json():
+                return {
+                    "data": [
+                        {"id": "chat-model"},
+                        {"id": "gpt-image-1"},
+                        {"id": "gpt-image-1.5"},
+                        {"id": "gpt-image-2"},
+                    ]
+                }
+
+        return Response()
+
     def fake_post(url, headers, json, timeout):
         captured.update({"url": url, "headers": headers, "json": json, "timeout": timeout})
 
@@ -367,17 +411,25 @@ def test_image2_tool_uses_relay_image2_root_base_url(tmp_path, monkeypatch):
         "_read_config_env_var",
         lambda name: "image-secret" if name == "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY" else "",
     )
-    monkeypatch.setitem(__import__("sys").modules, "requests", type("Requests", (), {"post": staticmethod(fake_post)}))
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "requests",
+        type("Requests", (), {"get": staticmethod(fake_get), "post": staticmethod(fake_post)}),
+    )
 
     with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-image", turn_id="turn-image"):
         result = json.loads(image2_tools.image2_generate_tool(prompt="一张赛博风格城市海报"))
 
     assert result["ok"] is True
-    assert result["model"] == "image2"
+    assert result["model"] == "gpt-image-1.5", result.get("modelDiscovery")
+    assert result["configuredModel"] == "image2"
     assert result["modelRef"] == "relay_image2"
+    assert result["modelDiscovery"]["status"] == "succeeded"
+    assert result["modelDiscovery"]["model_count"] == 3
+    assert captured["discovery"]["url"] == "https://ai-pixel.online/v1/models"
     assert captured["url"] == "https://ai-pixel.online/images/generations"
     assert "/v1/" not in captured["url"]
-    assert captured["json"]["model"] == "image2"
+    assert captured["json"]["model"] == "gpt-image-1.5"
     assert captured["headers"]["Authorization"] == "Bearer image-secret"
     assert captured["timeout"] == 180
 
@@ -388,10 +440,12 @@ def test_image2_target_falls_back_to_env_model_when_global_ref_empty(monkeypatch
     monkeypatch.setenv("VIBELUTION_IMAGE2_MODEL", "env-image-model")
     config = AppConfig.model_validate({"tools": {"image2": {"default_model_ref": ""}}})
 
-    assert image2_tools._resolve_image2_target(config, profile_id="primary") == {
-        "model": "env-image-model",
-        "modelRef": "",
-    }
+    target = image2_tools._resolve_image2_target(config, profile_id="primary")
+
+    assert target["model"] == "env-image-model"
+    assert target["configuredModel"] == "env-image-model"
+    assert target["modelRef"] == ""
+    assert target["modelDiscovery"]["status"] == "skipped"
 
 
 def test_image2_tool_appends_failure_message_for_invalid_args(tmp_path, monkeypatch):

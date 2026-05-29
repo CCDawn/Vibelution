@@ -58,7 +58,70 @@ def test_tools_api_exposes_image2_model_selector(monkeypatch):
     assert payload["defaultModelRef"] == "image_model"
     assert payload["selectedModel"]["modelRef"] == "image_model"
     assert payload["selectedModel"]["model"] == "gpt-image-1.5"
+    assert payload["selectedModel"]["resolvedModel"] == "gpt-image-1.5"
+    assert payload["selectedModel"]["modelDiscoveryStatus"] == "skipped"
     assert "apiKey" not in payload["selectedModel"]
+
+
+def test_tools_api_discovers_relay_image2_request_model(monkeypatch):
+    captured = {}
+    public_config = {
+        "llm": {
+            "model_library": {
+                "relay_image2": {
+                    "provider": {
+                        "kind": "relay",
+                        "api_key_env": "OPENAI_API_KEY",
+                        "base_url": "https://ai-pixel.online",
+                        "compat_mode": "openai",
+                        "requires_api_key": True,
+                        "context_window": 128000,
+                    },
+                    "model": "image2",
+                    "label": "Image2 via relay",
+                    "api_key_env": "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY",
+                    "transport": "responses",
+                    "contract": "tool_chat",
+                    "tool_calling_mode": "disabled",
+                    "streaming": False,
+                    "strict_compatibility": False,
+                }
+            }
+        },
+        "tools": {"image2": {"default_model_ref": "relay_image2"}},
+    }
+
+    def fake_get(url, headers, timeout):
+        captured.update({"url": url, "headers": headers, "timeout": timeout})
+
+        class Response:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def json():
+                return {"data": [{"id": "chat-model"}, {"id": "gpt-image-1.5"}, {"id": "gpt-image-2"}]}
+
+        return Response()
+
+    monkeypatch.setattr(registry, "load_public_config", lambda: public_config)
+    monkeypatch.setattr(registry, "_read_registry_env_var", lambda name: "image-secret")
+    monkeypatch.setitem(__import__("sys").modules, "requests", type("Requests", (), {"get": staticmethod(fake_get)}))
+
+    response = _client().get("/api/tools/image2/models")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    selected = payload["selectedModel"]
+    assert selected["modelRef"] == "relay_image2"
+    assert selected["configuredModel"] == "image2"
+    assert selected["resolvedModel"] == "gpt-image-1.5"
+    assert selected["model"] == "gpt-image-1.5"
+    assert selected["discoveredModels"] == ["gpt-image-1.5", "gpt-image-2"]
+    assert selected["modelDiscoveryStatus"] == "succeeded"
+    assert captured["url"] == "https://ai-pixel.online/v1/models"
+    assert captured["headers"]["Authorization"] == "Bearer image-secret"
+    assert "apiKey" not in selected
 
 
 def test_tools_api_updates_image2_default_model(monkeypatch):

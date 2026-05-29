@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import queue
 import re
 import time
@@ -20,6 +21,7 @@ from config.public_config import (
     save_public_config,
 )
 from config.settings import reload_config
+from core.infrastructure.image_model_discovery import resolve_image_model, should_discover_image_model
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
 
@@ -87,6 +89,7 @@ SAFE_BUILTIN_TEST_REASONS: dict[str, str] = {
 }
 IMAGE2_TOOL_NAME = "image2_generate_tool"
 IMAGE2_FALLBACK_MODEL = "gpt-image-1.5"
+IMAGE2_MODEL_DISCOVERY_TIMEOUT_SECONDS = 5
 DEFAULT_PERMISSION_POLICY = {
     "requiresExplicitAllow": False,
     "reason": "",
@@ -1309,17 +1312,29 @@ def _image2_model_config_payload(public_config: dict[str, Any]) -> dict[str, Any
     tools_config = public_config.get("tools", {})
     image2_config = tools_config.get("image2", {}) if isinstance(tools_config, dict) else {}
     default_model_ref = str(image2_config.get("default_model_ref") or "").strip() if isinstance(image2_config, dict) else ""
-    models = [_image2_model_option_payload(option) for option in list_llm_model_options(public_config)]
+    models = [
+        _image2_model_option_payload(
+            option,
+            discover=_should_discover_image2_option(option, default_model_ref=default_model_ref),
+        )
+        for option in list_llm_model_options(public_config)
+    ]
     models = [model for model in models if model]
     selected = next((model for model in models if model["modelRef"] == default_model_ref), None)
     fallback = {
         "modelRef": "",
         "label": "Environment / built-in fallback",
         "model": IMAGE2_FALLBACK_MODEL,
+        "configuredModel": IMAGE2_FALLBACK_MODEL,
+        "resolvedModel": IMAGE2_FALLBACK_MODEL,
         "providerKind": "",
         "source": "fallback",
         "apiKeyEnv": "",
         "apiKeyConfigured": False,
+        "discoveredModels": [],
+        "modelDiscoveryStatus": "skipped",
+        "modelDiscoveryError": "",
+        "modelDiscoveryUrl": "",
     }
     return {
         "schemaVersion": 1,
@@ -1331,19 +1346,72 @@ def _image2_model_config_payload(public_config: dict[str, Any]) -> dict[str, Any
     }
 
 
-def _image2_model_option_payload(option: dict[str, Any]) -> dict[str, Any]:
+def _image2_model_option_payload(option: dict[str, Any], *, discover: bool = False) -> dict[str, Any]:
     model_ref = str(option.get("model_id") or "").strip()
     if not model_ref or str(option.get("source") or "") != "model_library":
         return {}
+    configured_model = str(option.get("model") or "").strip()
+    discovery = _discover_image2_option_model(option) if discover else {}
+    resolved_model = str(discovery.get("model") or configured_model).strip() or configured_model
+    discovery_payload = discovery.get("discovery") if isinstance(discovery.get("discovery"), dict) else {}
     return {
         "modelRef": model_ref,
-        "label": str(option.get("label") or option.get("model") or model_ref).strip() or model_ref,
-        "model": str(option.get("model") or "").strip(),
+        "label": str(option.get("label") or configured_model or model_ref).strip() or model_ref,
+        "model": resolved_model,
+        "configuredModel": configured_model,
+        "resolvedModel": resolved_model,
         "providerKind": str(option.get("provider_kind") or "").strip(),
         "source": str(option.get("source") or "model_library").strip(),
         "apiKeyEnv": str(option.get("api_key_env") or "").strip(),
         "apiKeyConfigured": bool(option.get("api_key_configured")),
+        "discoveredModels": list(discovery_payload.get("models") or []),
+        "modelDiscoveryStatus": str(discovery_payload.get("status") or ("not_requested" if not discover else "")),
+        "modelDiscoveryError": str(discovery_payload.get("error") or ""),
+        "modelDiscoveryUrl": str(discovery_payload.get("url") or ""),
     }
+
+
+def _should_discover_image2_option(option: dict[str, Any], *, default_model_ref: str) -> bool:
+    model_ref = str(option.get("model_id") or "").strip()
+    configured_model = str(option.get("model") or "").strip()
+    label = str(option.get("label") or "").strip().lower()
+    if model_ref == default_model_ref:
+        return True
+    if model_ref == "relay_image2":
+        return True
+    if "image2" in model_ref.lower() or "image2" in label:
+        return True
+    return should_discover_image_model(configured_model) and ("image" in model_ref.lower() or "image" in label)
+
+
+def _discover_image2_option_model(option: dict[str, Any]) -> dict[str, Any]:
+    provider = option.get("provider") if isinstance(option.get("provider"), dict) else {}
+    api_key_env = str(option.get("api_key_env") or "").strip()
+    provider_api_key_env = str(provider.get("api_key_env") or "").strip() if isinstance(provider, dict) else ""
+    api_key = _read_registry_env_var(api_key_env) if api_key_env else ""
+    if not api_key and provider_api_key_env:
+        api_key = _read_registry_env_var(provider_api_key_env)
+    extra_headers = provider.get("extra_headers") if isinstance(provider, dict) else {}
+    headers = {str(key): str(value) for key, value in extra_headers.items()} if isinstance(extra_headers, dict) else {}
+    return resolve_image_model(
+        configured_model=str(option.get("model") or "").strip(),
+        base_url=str(provider.get("base_url") or "").strip() if isinstance(provider, dict) else "",
+        api_key=api_key,
+        headers=headers,
+        timeout=IMAGE2_MODEL_DISCOVERY_TIMEOUT_SECONDS,
+    )
+
+
+def _read_registry_env_var(name: str) -> str:
+    token = str(name or "").strip()
+    if not token:
+        return ""
+    try:
+        from config.models import _read_env_var
+
+        return str(_read_env_var(token) or "")
+    except Exception:
+        return str(os.environ.get(token) or "")
 
 
 def _normalize_schema(value: object) -> dict[str, Any]:

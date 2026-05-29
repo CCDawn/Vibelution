@@ -697,10 +697,16 @@ export type ToolImage2ModelOption = {
   modelRef: string;
   label: string;
   model: string;
+  configuredModel: string;
+  resolvedModel: string;
   providerKind: string;
   source: string;
   apiKeyEnv: string;
   apiKeyConfigured: boolean;
+  discoveredModels: string[];
+  modelDiscoveryStatus: string;
+  modelDiscoveryError: string;
+  modelDiscoveryUrl: string;
 };
 
 export type ToolImage2ModelConfig = {

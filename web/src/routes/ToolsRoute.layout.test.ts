@@ -86,7 +86,9 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("fetchJson<ToolImage2ModelConfig>(\"/api/tools/image2/default-model\"");
     expect(routeSource).toContain("activeIsImage2Tool ? (");
     expect(routeSource).toContain("styles.image2ModelPanel");
-    expect(routeSource).toContain("API Key、base_url 和 provider 仍在设置页维护");
+    expect(routeSource).toContain("模型名会在调用前按远端 /v1/models 发现结果解析");
+    expect(routeSource).toContain("image2DiscoveryStateLabel");
+    expect(routeSource).toContain("selectedModel.resolvedModel");
     expect(routeSource).not.toContain("apiKeyValue");
     expect(routeSource).not.toContain("baseUrlInput");
   });
