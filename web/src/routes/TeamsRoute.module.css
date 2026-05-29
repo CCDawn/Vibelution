@@ -33,6 +33,7 @@
 
 .iconButton,
 .toolbarActions button,
+.toolbarActions .toolbarLink,
 .createForm button,
 .actionRow button {
   display: inline-flex;
@@ -46,6 +47,7 @@
   color: var(--fg-primary);
   font-size: 0.78rem;
   font-weight: 750;
+  text-decoration: none;
 }
 
 .toolbarActions .dangerButton,
@@ -204,6 +206,16 @@
   overflow: hidden;
   color: var(--fg-muted);
   font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linkedRoomLine {
+  display: block;
+  overflow: hidden;
+  color: var(--accent-cool-2);
+  font-size: 0.71rem;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

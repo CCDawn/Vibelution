@@ -1,10 +1,18 @@
 import pytest
 
-from core.web.services import agent_config_workspace_service, agent_directory_service, project_agent_bus_service, session_service, team_service
+from core.web.services import (
+    agent_config_workspace_service,
+    agent_directory_service,
+    chat_room_service,
+    project_agent_bus_service,
+    session_service,
+    team_service,
+)
 
 
 def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
@@ -24,7 +32,43 @@ def test_create_team_with_active_agent_writes_default_canvas(tmp_path, monkeypat
     assert team["members"][0]["agentId"] == agent["agentId"]
     assert team["canvas"]["canvasKind"] == team_service.CANVAS_KIND
     assert team["canvas"]["nodes"][0]["agentId"] == agent["agentId"]
+    assert team["linkedChatRoomId"]
+    assert team["linkedChatRoom"]["participantCount"] == 1
+    assert chat_room_service.get_chat_room_detail(team["linkedChatRoomId"])["participants"][0]["agentId"] == agent["agentId"]
     assert team_service.list_teams()["summary"]["activeTeamCount"] == 1
+
+
+def test_team_canvas_save_syncs_linked_chat_room_members(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    team = team_service.create_team(name="Sync Team", members=[{"agentId": alpha["agentId"], "role": "lead"}])
+    linked_room_id = team["linkedChatRoomId"]
+    canvas = team_service.get_team_canvas(team["teamId"])
+    canvas["nodes"].append(
+        {
+            "id": "node-beta",
+            "label": "Beta reviewer",
+            "type": "agent",
+            "status": "bound",
+            "x": 420,
+            "y": 120,
+            "agentId": beta["agentId"],
+            "agentCode": beta["agentCode"],
+            "agentName": beta["displayName"],
+            "role": "reviewer",
+            "purpose": "检查输出",
+        }
+    )
+
+    updated_canvas = team_service.save_team_canvas(team["teamId"], canvas)
+    updated_team = team_service.get_team(team["teamId"])
+    linked_room = chat_room_service.get_chat_room_detail(updated_team["linkedChatRoomId"])
+
+    assert updated_canvas["validation"]["valid"] is True
+    assert updated_team["linkedChatRoomId"] == linked_room_id
+    assert [member["agentId"] for member in updated_team["members"]] == [alpha["agentId"], beta["agentId"]]
+    assert [participant["agentId"] for participant in linked_room["participants"]] == [alpha["agentId"], beta["agentId"]]
 
 
 def test_team_rejects_archived_member_at_create(tmp_path, monkeypatch):

@@ -22,6 +22,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("sendTeamProjectBusMessage(payload)");
     expect(routeSource).toContain("listProjectAgentBusTimeline(PROJECT_AGENT_BUS_TEAM_TIMELINE_LIMIT)");
     expect(routeSource).toContain("revokeProjectAgentBusMessage({");
+    expect(routeSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
+    expect(routeSource).toContain("syncTeamChatRoomMutation");
+    expect(routeSource).toContain("queryKeys.chatRooms()");
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(nextCanvas.teamId)}/canvas");
     expect(routeSource).toContain("Agent Center");
     expect(routeSource).toContain("team_organization_canvas");
@@ -48,6 +51,10 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("团队广播");
     expect(routeSource).toContain("发送给团队");
     expect(routeSource).toContain("最近团队广播");
+    expect(routeSource).toContain("已衔接群聊");
+    expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(selectedTeam.linkedChatRoomId)}`}");
+    expect(routeSource).toContain("styles.linkedRoomLine");
+    expect(routeSource).toContain("styles.toolbarLink");
     expect(routeSource).toContain("teamBusEvents");
     expect(routeSource).toContain("isProjectAgentBusEventRevoked");
     expect(routeSource).toContain("projectAgentBusEventsForTeam");

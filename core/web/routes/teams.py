@@ -17,6 +17,7 @@ from core.web.services.team_service import (
     list_teams,
     save_team_canvas,
     send_team_message,
+    sync_team_chat_room,
     update_team,
 )
 
@@ -149,6 +150,16 @@ def team_message_create(team_id: str, payload: TeamMessagePayload) -> dict:
             created_by="user",
             metadata=payload.metadata,
         )
+    except TeamNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TeamServiceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/teams/{team_id}/chat-room/sync")
+def team_chat_room_sync(team_id: str) -> dict:
+    try:
+        return sync_team_chat_room(team_id)
     except TeamNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TeamServiceError as exc:

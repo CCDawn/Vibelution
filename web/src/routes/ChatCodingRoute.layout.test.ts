@@ -128,6 +128,8 @@ describe("ChatCodingRoute layout contract", () => {
   it("opens group conversations inside the chat page instead of navigating away", () => {
     expect(routeSource).toContain("activeGroupRoomId");
     expect(routeSource).toContain("handleOpenGroupRoom");
+    expect(routeSource).toContain('new URLSearchParams(location.search).get("room")');
+    expect(routeSource).toContain("requestedRoomId && activeGroupRoomId !== requestedRoomId");
     expect(routeSource).toContain("setRightPaneCollapsed(false)");
     expect(routeSource).toContain("chatRoomModeLabel(mode, lang)");
     expect(routeSource).toContain("chatRoomPurposeLabel(purpose, lang)");

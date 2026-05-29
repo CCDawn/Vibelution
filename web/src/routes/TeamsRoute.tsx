@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Archive, Bot, Link2, Plus, RefreshCw, Save, Send, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import {
@@ -222,6 +222,20 @@ export function TeamsRoute() {
     },
   });
 
+  const syncTeamChatRoomMutation = useMutation({
+    mutationFn: (teamId: string) =>
+      fetchJson<Team>(`/api/teams/${encodeURIComponent(teamId)}/chat-room/sync`, {
+        method: "POST",
+      }),
+    onSuccess: (team) => {
+      queryClient.setQueryData(queryKeys.team(team.teamId), team);
+      queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+    },
+  });
+
   function saveCanvas(nextCanvas: TeamOrganizationCanvas | null) {
     if (!nextCanvas || saveCanvasMutation.isPending) {
       return;
@@ -412,9 +426,40 @@ export function TeamsRoute() {
             <div>
               <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
               <span>{canvas ? `${canvas.path} · ${TEAM_ORGANIZATION_CANVAS_KIND}` : "workspace/teams"}</span>
+              {selectedTeam?.linkedChatRoom ? (
+                <small className={styles.linkedRoomLine}>
+                  {lang === "zh" ? "已衔接群聊" : "Linked room"}
+                  {" · "}
+                  {selectedTeam.linkedChatRoom.title}
+                  {" · "}
+                  {selectedTeam.linkedChatRoom.participantCount} agents
+                </small>
+              ) : selectedTeam ? (
+                <small className={styles.linkedRoomLine}>
+                  {activeTeamMemberCount > 0
+                    ? (lang === "zh" ? "尚未衔接群聊，可同步创建。" : "No linked room yet. Sync to create one.")
+                    : (lang === "zh" ? "绑定 active Agent 后可衔接群聊。" : "Bind active agents before linking a room.")}
+                </small>
+              ) : null}
             </div>
             <div className={styles.toolbarActions}>
               {saveLabel ? <span className={styles.saveState}>{saveLabel}</span> : null}
+              {selectedTeam?.linkedChatRoomId ? (
+                <Link className={styles.toolbarLink} to={`/chat?room=${encodeURIComponent(selectedTeam.linkedChatRoomId)}`}>
+                  {lang === "zh" ? "打开群聊" : "Open room"}
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => selectedTeam?.teamId && syncTeamChatRoomMutation.mutate(selectedTeam.teamId)}
+                  disabled={!selectedTeam || activeTeamMemberCount === 0 || syncTeamChatRoomMutation.isPending}
+                >
+                  <Link2 size={14} />
+                  {syncTeamChatRoomMutation.isPending
+                    ? (lang === "zh" ? "同步中" : "Syncing")
+                    : (lang === "zh" ? "同步群聊" : "Sync room")}
+                </button>
+              )}
               <button type="button" onClick={addNode} disabled={!canvas}>
                 <Plus size={14} />
                 {lang === "zh" ? "节点" : "Node"}

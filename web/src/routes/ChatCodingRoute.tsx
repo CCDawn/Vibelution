@@ -625,6 +625,9 @@ export function ChatCodingRoute() {
   const requestedSessionId = useMemo(() => {
     return new URLSearchParams(location.search).get("session") ?? "";
   }, [location.search]);
+  const requestedRoomId = useMemo(() => {
+    return new URLSearchParams(location.search).get("room") ?? "";
+  }, [location.search]);
   const pageVisible = usePageVisibility();
   const projectBusActive = activeGroupRoomId === "__project_agent_bus__";
   const groupPanelActive = Boolean(activeGroupRoomId);
@@ -718,8 +721,16 @@ export function ChatCodingRoute() {
     [queryClient],
   );
   useEffect(() => {
+    if (requestedRoomId && activeGroupRoomId !== requestedRoomId) {
+      setActiveGroupRoomId(requestedRoomId);
+      setRightIndexPanel("members");
+      setRightPaneCollapsed(false);
+      setGroupRoomActionError("");
+      return;
+    }
     if (
       requestedSessionId
+      && !requestedRoomId
       && sessionsQuery.data?.some((session) => session.id === requestedSessionId)
       && activeSessionId !== requestedSessionId
     ) {
@@ -730,7 +741,7 @@ export function ChatCodingRoute() {
     if (!activeSessionId && sessionsQuery.data && sessionsQuery.data.length > 0) {
       setActiveSession(sessionsQuery.data[0].id);
     }
-  }, [activeSessionId, requestedSessionId, sessionsQuery.data, setActiveSession]);
+  }, [activeGroupRoomId, activeSessionId, requestedRoomId, requestedSessionId, sessionsQuery.data, setActiveSession]);
 
   useEffect(() => {
     const pendingHandoff = loadPendingSelfEvolutionHandoff();
