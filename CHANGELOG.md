@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.11 - 2026-05-29
+
+- Added QQ-like blue clickable `@` mentions in the Chat/Coding project bus and group-chat timelines, resolving active Agent code/name/id mentions to their direct conversation index and `@全体成员`/`@all` to the project bus index.
+- Added focused mention tokenization coverage so unknown mentions remain plain text while recognized Agent mentions preserve the original message content around them.
+
 ## 0.4.10 - 2026-05-29
 
 - Added read-only research organization context to persistent Research Agent turns so a CEO/advisor/steward can see connected team members, Agent IDs/codes, roles, responsibilities, communication edges, allowed message types/intents, and wake policy before using `agent_message_tool`.

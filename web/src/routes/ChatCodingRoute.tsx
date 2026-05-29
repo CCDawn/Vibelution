@@ -98,6 +98,11 @@ import {
   participantAgentDisplayInfo,
   sessionAgentDisplayInfo,
 } from "./agentDisplay";
+import {
+  buildChatMentionTargets,
+  tokenizeChatMentions,
+  type ChatMentionTarget,
+} from "./chatMentionTokens";
 import styles from "./ChatCodingRoute.module.css";
 
 function encodeUtf8Base64(value: string): string {
@@ -2002,6 +2007,10 @@ export function ChatCodingRoute() {
     return new Map((agentsQuery.data ?? []).map((agent) => [agent.agentId, agent]));
   }, [agentsQuery.data]);
 
+  const chatMentionTargets = useMemo(() => {
+    return buildChatMentionTargets(agentsQuery.data ?? []);
+  }, [agentsQuery.data]);
+
   const visibleSessions = useMemo(() => {
     return (sessionsQuery.data ?? []).filter(isVisibleDirectSession);
   }, [sessionsQuery.data]);
@@ -2302,6 +2311,53 @@ export function ChatCodingRoute() {
     setRightIndexPanel("conversations");
     setGroupRoomActionError("");
     setActiveSession(sessionId);
+  }
+
+  function handleOpenMentionTarget(target: ChatMentionTarget) {
+    setRightPaneCollapsed(false);
+    setGroupRoomActionError("");
+    if (target.kind === "all") {
+      setActiveGroupRoomId("__project_agent_bus__");
+      setRightIndexPanel("conversations");
+      setSessionFilter("");
+      void queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
+      return;
+    }
+    if (target.directSessionId) {
+      setSessionFilter("");
+      handleOpenDirectSession(target.directSessionId);
+      return;
+    }
+    const fallbackFilter = target.agentCode || target.displayName || target.agentId || "";
+    if (fallbackFilter) {
+      setActiveGroupRoomId("");
+      setRightIndexPanel("conversations");
+      setSessionFilter(fallbackFilter);
+    }
+  }
+
+  function renderMentionedText(content: string, fallback = "") {
+    const text = content || fallback;
+    return tokenizeChatMentions(text, chatMentionTargets).map((segment, index) => {
+      if (segment.type === "text") {
+        return <span key={`text-${index}`}>{segment.text}</span>;
+      }
+      const mentionLabel = segment.target.kind === "all"
+        ? (lang === "zh" ? "全体成员" : "All agents")
+        : [segment.target.displayName, segment.target.agentCode].filter(Boolean).join(" · ");
+      return (
+        <button
+          key={`mention-${index}-${segment.text}`}
+          type="button"
+          className={styles.agentMention}
+          onClick={() => handleOpenMentionTarget(segment.target)}
+          aria-label={lang === "zh" ? `打开 ${mentionLabel} 的索引` : `Open ${mentionLabel} index`}
+          title={lang === "zh" ? "打开对应 Agent 索引" : "Open the matching agent index"}
+        >
+          {segment.text}
+        </button>
+      );
+    });
   }
 
   function handleOpenGroupRoom(roomId: string) {
@@ -3126,7 +3182,9 @@ export function ChatCodingRoute() {
                           </div>
                         </header>
                         <p className={styles.projectBusEventBody}>
-                          {revoked ? (lang === "zh" ? "这条消息已撤回，相关 Agent 已请求停止。" : "This message was recalled. Target agents were asked to stop.") : event.content}
+                          {revoked
+                            ? (lang === "zh" ? "这条消息已撤回，相关 Agent 已请求停止。" : "This message was recalled. Target agents were asked to stop.")
+                            : renderMentionedText(event.content)}
                         </p>
                         <div className={styles.projectBusEventMeta}>
                           <span>{revoked ? (lang === "zh" ? "已撤回" : "revoked") : event.messageType}</span>
@@ -3166,7 +3224,7 @@ export function ChatCodingRoute() {
                       <article className={styles.groupTopicMessage}>
                         <div className={styles.groupTopicBubble}>
                           <span>{runtime?.userName || (lang === "zh" ? "我" : "Me")}</span>
-                          <p>{round.topic}</p>
+                          <p>{renderMentionedText(round.topic)}</p>
                         </div>
                       </article>
                       <div className={styles.groupMessageList}>
@@ -3188,7 +3246,7 @@ export function ChatCodingRoute() {
                                 <span>{statusLabel(message.status)}</span>
                               </header>
                               <p className={styles.groupBubbleBody}>
-                                {message.content || message.summary || (lang === "zh" ? "暂无内容" : "No content yet")}
+                                {renderMentionedText(message.content || message.summary, lang === "zh" ? "暂无内容" : "No content yet")}
                               </p>
                               <time className={styles.groupBubbleMeta}>{formatTime(message.timestamp || round.updatedAt)}</time>
                             </div>
@@ -3320,7 +3378,7 @@ export function ChatCodingRoute() {
                       <article className={styles.groupTopicMessage}>
                         <div className={styles.groupTopicBubble}>
                           <span>{runtime?.userName || (lang === "zh" ? "我" : "Me")}</span>
-                          <p>{round.topic}</p>
+                          <p>{renderMentionedText(round.topic)}</p>
                         </div>
                       </article>
                       <div className={styles.groupMessageList}>
@@ -3342,7 +3400,7 @@ export function ChatCodingRoute() {
                                 <span>{statusLabel(message.status)}</span>
                               </header>
                               <p className={styles.groupBubbleBody}>
-                                {message.content || message.summary || (lang === "zh" ? "暂无内容" : "No content yet")}
+                                {renderMentionedText(message.content || message.summary, lang === "zh" ? "暂无内容" : "No content yet")}
                               </p>
                               <time className={styles.groupBubbleMeta}>{formatTime(message.timestamp || round.updatedAt)}</time>
                             </div>
