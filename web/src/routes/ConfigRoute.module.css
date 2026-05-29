@@ -521,6 +521,7 @@
   .logHelperGrid,
   .toggleGrid,
   .healthWorkbenchGrid,
+  .profileCardGroups,
   .profileTableWrap,
   .agentCardGrid,
   .bindingCardGrid,
@@ -543,6 +544,7 @@
   .logHelperGrid,
   .toggleGrid,
   .healthWorkbenchGrid,
+  .profileCardGroups,
   .profileTableWrap,
   .agentCardGrid,
   .bindingCardGrid,
@@ -652,6 +654,85 @@
 
 .toggleGrid {
   grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+}
+
+.profileCardGroups {
+  display: grid;
+  gap: 8px;
+}
+
+.profileCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.profileConfigCard {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: 8px;
+  min-width: 0;
+  min-height: 214px;
+  padding: 9px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-muted);
+}
+
+.profileConfigCard:hover {
+  background: var(--surface-card-hover);
+}
+
+.profileConfigCardHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  align-items: start;
+}
+
+.profileConfigBadges,
+.profileStatusBadges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.profileConfigBadges {
+  justify-content: flex-end;
+  max-width: 112px;
+}
+
+.profileConfigCardBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  min-width: 0;
+}
+
+.profileConfigCardBody > .profileModelCell,
+.profileConfigCardBody > .profileMetaCell,
+.profileCardSelect {
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  background: var(--surface-card-subtle);
+}
+
+.profileCardSelect {
+  gap: 5px;
+}
+
+.profileCardActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .profileTableWrap {

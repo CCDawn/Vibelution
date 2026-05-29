@@ -76,15 +76,25 @@ describe("ConfigRoute content experience contract", () => {
     expect(configRouteSource).toContain("setModelEditorError(markError(error))");
   });
 
-  it("uses a dense table for task model and key scanning", () => {
-    expect(configRouteSource).toContain("styles.profileTableWrap");
-    expect(configRouteSource).toContain("<table className={styles.profileTable}>");
+  it("uses compact cards for LLM config model and key scanning", () => {
+    const profilesStart = configRouteSource.indexOf("copy.profilesBody");
+    const researchPoolStart = configRouteSource.indexOf("styles.researchAgentPool");
+    const profilesSection = configRouteSource.slice(profilesStart, researchPoolStart);
+
+    expect(profilesSection).toContain("styles.profileCardGroups");
+    expect(profilesSection).toContain("styles.profileCardGrid");
+    expect(profilesSection).toContain("styles.profileConfigCard");
+    expect(profilesSection).toContain("styles.profileCardActions");
+    expect(profilesSection).not.toContain("styles.profileTableWrap");
+    expect(profilesSection).not.toContain("<table");
     expect(configRouteSource).toContain("copy.profileTableModel");
     expect(configRouteSource).toContain("resolveProfileDisplayState");
+    expect(configRouteSource).toContain("handleTestProfileImageInput");
 
-    expect(configRouteCss).toContain(".profileTable");
-    expect(cssRule(".profileTable")).toContain("min-width: 900px");
-    expect(cssRule(".profileTable th")).toContain("text-transform: none");
+    expect(cssRule(".profileCardGrid")).toContain("repeat(auto-fill, minmax(260px, 1fr))");
+    expect(cssRule(".profileConfigCard")).toContain("min-height: 214px");
+    expect(cssRule(".profileConfigCardBody")).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(configRouteCss).toContain(".profileStatusBadges");
   });
 
   it("keeps model-library advanced transport fields behind a disclosure", () => {
