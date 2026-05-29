@@ -538,6 +538,12 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any]:
         or str(existing.get("status") or "active").strip() == "archived"
         or any(metadata.get(key) != value for key, value in expected_metadata.items())
     ):
+        if str(existing.get("status") or "active").strip() == "archived":
+            existing = agent_directory_service.reactivate_agent_instance(
+                str(existing.get("agentId") or ""),
+                reason="self_evolution_fixed_role_bootstrap",
+                metadata={"fixedRole": True, "selfEvolutionRole": role_key},
+            )
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             display_name=label,

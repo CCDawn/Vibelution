@@ -702,6 +702,27 @@ def _ensure_conversation_agent_metadata(
             agent_profile_id=agent_profile_id,
         ) or changed
         return changed
+    archived_direct_agent = _archived_agent_for_direct_session(conversation_id) if not existing_agent_id else None
+    if archived_direct_agent:
+        archived_agent_id = str(archived_direct_agent.get("agentId") or "").strip()
+        archived_profile_id = _normalize_session_agent_profile_id(
+            archived_direct_agent.get("profileId") or agent_profile_id
+        )
+        changed = False
+        if conversation.get("agent_id") != archived_agent_id:
+            conversation["agent_id"] = archived_agent_id
+            changed = True
+        if conversation.get("agentId") != archived_agent_id:
+            conversation["agentId"] = archived_agent_id
+            changed = True
+        changed = _repair_conversation_agent_profile_from_instance(
+            conversation,
+            conversation_id=conversation_id,
+            agent_id=archived_agent_id,
+            agent=archived_direct_agent,
+            agent_profile_id=archived_profile_id,
+        ) or changed
+        return changed
     agent = ensure_agent_for_session(
         conversation_id,
         display_name=title,
@@ -759,6 +780,24 @@ def _agent_from_lookup(
         agent = agent_by_id.get(normalized)
         return agent if isinstance(agent, dict) else None
     return get_agent(normalized)
+
+
+def _archived_agent_for_direct_session(session_id: str) -> dict[str, Any] | None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+    try:
+        agents = agent_directory_service.list_agents(include_archived=True)
+    except Exception:
+        return None
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        if str(agent.get("directSessionId") or "").strip() != normalized_session_id:
+            continue
+        if str(agent.get("status") or "active").strip().lower() == "archived":
+            return agent
+    return None
 
 
 def _session_agent_status_payload(
@@ -1748,7 +1787,18 @@ def submit_session_message(
 
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        agent = get_agent(agent_id) if agent_id else None
+        active_agent = get_agent(agent_id, include_archived=False) if agent_id else None
+        agent = active_agent or (get_agent(agent_id, include_archived=True) if agent_id else None)
+        if not active_agent:
+            status = str((agent or {}).get("status") or "").strip().lower()
+            reason = "archived_agent" if status == "archived" else "missing_agent"
+            _record_session_agent_unavailable_event(
+                conversation_id,
+                agent_id=agent_id,
+                reason=reason,
+                agent_status=status,
+            )
+            raise SessionValidationError(_session_agent_unavailable_message(reason, lang=lang))
         agent_profile_id = _normalize_session_agent_profile_id(
             (agent or {}).get("profileId")
             or conversation.get("agent_profile_id")
@@ -2021,8 +2071,11 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
 
     message_id = str(message.get("messageId") or message.get("eventId") or "").strip()
     target_agent_id = str(message.get("targetAgentId") or "").strip()
-    target_agent = get_agent(target_agent_id) if target_agent_id else None
-    target_session_id = str(message.get("targetSessionId") or (target_agent or {}).get("directSessionId") or "").strip()
+    target_agent = get_agent(target_agent_id, include_archived=False) if target_agent_id else None
+    archived_target_agent = None if target_agent else (get_agent(target_agent_id, include_archived=True) if target_agent_id else None)
+    target_session_id = str(
+        message.get("targetSessionId") or (target_agent or archived_target_agent or {}).get("directSessionId") or ""
+    ).strip()
     delivery = {
         "wakeRequested": True,
         "wakeStatus": "skipped",
@@ -2033,9 +2086,15 @@ def wake_agent_for_inbox_message(message: dict[str, Any]) -> dict[str, Any]:
         "reason": "",
     }
     if not target_agent:
-        delivery["wakeStatus"] = "skipped_missing_agent"
-        delivery["reason"] = "target_agent_not_found"
-        _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
+        archived_status = str((archived_target_agent or {}).get("status") or "").strip().lower()
+        if archived_status == "archived":
+            delivery["wakeStatus"] = "skipped_archived_agent"
+            delivery["reason"] = "target_agent_archived"
+            _record_agent_inbox_wake_event("agent_inbox.wake_skipped_archived_agent", message, delivery, level="warning")
+        else:
+            delivery["wakeStatus"] = "skipped_missing_agent"
+            delivery["reason"] = "target_agent_not_found"
+            _record_agent_inbox_wake_event("agent_inbox.wake_skipped", message, delivery, level="warning")
         return delivery
     target_metadata = target_agent.get("metadata") if isinstance(target_agent.get("metadata"), dict) else {}
     delegation_decision = evaluate_delegation_wake_policy(target_metadata.get("delegationPolicy"), agent_id=target_agent_id)
@@ -5631,6 +5690,56 @@ def _record_session_turn_started_event(
     except Exception as exc:
         _debug_logger.warning(
             f"runtime scene chat turn start log skipped: {type(exc).__name__}: {exc}",
+            tag="LOGS",
+        )
+
+
+def _session_agent_unavailable_message(reason: str, *, lang: str) -> str:
+    if str(reason or "").strip() == "archived_agent":
+        return text_for(
+            lang,
+            zh="当前会话引用的 Agent 已归档，不能继续运行。请在 Agent 管理中心选择 active Agent 或显式恢复后再发送。",
+            en="This session references an archived Agent and cannot run. Choose an active Agent in Agent Center or explicitly restore it first.",
+        )
+    return text_for(
+        lang,
+        zh="当前会话缺少有效 Agent，不能继续运行。请在 Agent 管理中心选择 active Agent 后再发送。",
+        en="This session has no valid Agent and cannot run. Choose an active Agent in Agent Center first.",
+    )
+
+
+def _record_session_agent_unavailable_event(
+    session_id: str,
+    *,
+    agent_id: str,
+    reason: str,
+    agent_status: str = "",
+) -> None:
+    normalized_reason = str(reason or "").strip() or "missing_agent"
+    event_code = (
+        "conversation.turn.blocked_archived_agent"
+        if normalized_reason == "archived_agent"
+        else "conversation.turn.blocked_missing_agent"
+    )
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "turn_blocked",
+            event_code,
+            message="Web chat turn blocked because the session Agent is unavailable.",
+            level="warning",
+            outcome="blocked",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "reason": normalized_reason,
+                "agentStatus": str(agent_status or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(
+            f"runtime scene unavailable agent log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
 

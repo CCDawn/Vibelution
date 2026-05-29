@@ -3205,6 +3205,34 @@ def test_session_events_stream_rejects_missing_session():
     assert response.json()["detail"] == "Session not found"
 
 
+def test_submit_session_message_rejects_archived_agent_without_mutating_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    detail = session_service.create_chat_session(title="归档 Agent")
+    agent_directory_service.archive_agent_instance(detail["agentId"])
+    events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: pytest.fail("archived Agent sessions must not schedule turns"),
+    )
+
+    with pytest.raises(session_service.SessionValidationError, match="已归档|archived"):
+        session_service.submit_session_message(detail["id"], "这条消息不应该进入运行队列")
+
+    state = load_chat_state(tmp_path)
+    conversation = state["conversations"][0]
+    assert conversation["messages"] == []
+    blocked_events = [item for item in events if item[0][2] == "conversation.turn.blocked_archived_agent"]
+    assert len(blocked_events) == 1
+    assert blocked_events[0][1]["fields"]["agentId"] == detail["agentId"]
+
+
 def test_submit_session_message_runs_turn_and_persists_reply(tmp_path, monkeypatch):
     (tmp_path / "web" / "src" / "routes").mkdir(parents=True, exist_ok=True)
     (tmp_path / "core" / "web" / "services").mkdir(parents=True, exist_ok=True)
