@@ -99,6 +99,8 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert any(item["kind"] == "mode_pool" and item["mode"] == "research" for item in research_refs)
     assert any(item["kind"] == "flow_binding" and item["field"] == "broad_search" for item in research_refs)
     assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "研究群聊" for item in research_refs)
+    chat_room_ref = next(item for item in research_refs if item["kind"] == "chat_room")
+    assert chat_room_ref["route"].startswith("/chat?room=")
     groups = {item["id"]: item for item in payload["groups"]}
     assert "all" not in groups
     assert groups["active"]["section"] == "status"

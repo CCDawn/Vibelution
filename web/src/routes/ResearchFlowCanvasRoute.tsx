@@ -1825,7 +1825,7 @@ export function ResearchFlowCanvasRoute() {
   const canvasObservationActive = canvasLocked;
   const organization = organizationQuery.data;
   const projectBinding = draft?.projectBinding;
-  const canvasProjectLabel = projectBinding?.projectId === "research-team" ? "科研团队" : String(projectBinding?.projectId || "科研项目");
+  const canvasProjectLabel = String(projectBinding?.teamName || (projectBinding?.teamId === "research-team" ? "科研团队" : projectBinding?.projectId || "科研团队"));
   const organizationSourcePath = draft?.organizationPath || organization?.path || "workspace/research/organization_graph.json";
   const validationIssues = draftValidation?.issues ?? [];
   const validationErrors = validationIssues.filter((issue) => issue.severity === "error");
@@ -2270,7 +2270,7 @@ export function ResearchFlowCanvasRoute() {
 
       <section className={styles.executionBar} aria-label="科研组织画布观察状态">
         <div className={styles.executionGroup}>
-          <span>绑定项目</span>
+          <span>绑定团队</span>
           <strong>{canvasProjectLabel}</strong>
         </div>
         <div className={canvasObservationActive ? `${styles.observerStatus} ${styles.observerStatusActive}` : styles.observerStatus}>

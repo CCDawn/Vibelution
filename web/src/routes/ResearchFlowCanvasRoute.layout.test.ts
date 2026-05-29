@@ -33,7 +33,7 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).not.toContain("activeExecutionSessionId");
     expect(routeSource).toContain("持续锁定");
     expect(routeSource).toContain("useState(true)");
-    expect(routeSource).toContain("绑定项目");
+    expect(routeSource).toContain("绑定团队");
     expect(routeSource).toContain("科研团队");
     expect(routeSource).toContain("刷新组织图");
     expect(routeSource).not.toContain("执行下一节点");

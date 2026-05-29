@@ -204,7 +204,7 @@ def _derive_references(
                     source_id=room_id,
                     source_label=room_title,
                     field=str(participant.get("participantId") or ""),
-                    route="/chat-rooms",
+                    route=f"/chat?room={room_id}" if room_id else "/chat",
                     status="active" if agent_id in active_agent_ids else "stale",
                 )
             )

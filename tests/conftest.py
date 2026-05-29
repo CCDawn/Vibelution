@@ -119,6 +119,7 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     from core.web.services import agent_mode_binding_service
     from core.web.services import prompt_template_service
     from core.web.services import supervised_agent_service
+    from core.web.services import team_service
     try:
         from core.web.services import session_service
     except Exception:
@@ -143,6 +144,7 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     if session_service is not None:
         previous_executor = session_service._SESSION_EXECUTOR
         isolated_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="pytest-web-chat-turn")

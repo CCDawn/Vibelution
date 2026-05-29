@@ -92,7 +92,13 @@ def get_research_organization_canvas_graph() -> dict[str, Any]:
     if not graph.get("agents"):
         graph = _ensure_default_organization(graph)
         _write_organization(graph)
-    return _organization_to_canvas_api(graph)
+    canvas = _organization_to_canvas_api(graph)
+    if not canvas.get("agents"):
+        graph = _prune_unresolvable_active_nodes(graph)
+        graph = _ensure_default_organization(graph)
+        _write_organization(graph)
+        canvas = _organization_to_canvas_api(graph)
+    return canvas
 
 
 def build_research_organization_context_block(agent_id: str, *, limit: int = 6) -> str:
@@ -533,6 +539,40 @@ def _organization_to_canvas_api(graph: dict[str, Any]) -> dict[str, Any]:
         if _clean_id(edge.get("fromAgentId") or edge.get("source")) in active_node_ids
         and _clean_id(edge.get("toAgentId") or edge.get("target")) in active_node_ids
     ]
+    return payload
+
+
+def _prune_unresolvable_active_nodes(graph: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_organization(graph)
+    active_agent_ids = {
+        _clean_id(agent.get("agentId"))
+        for agent in list_agents(include_archived=False)
+        if isinstance(agent, dict) and _clean_id(agent.get("agentId"))
+    }
+    stale_agent_ids = {
+        _clean_id(node.get("agentId"))
+        for node in list(payload.get("agents") or [])
+        if isinstance(node, dict)
+        and _clean_id(node.get("agentId"))
+        and str(node.get("status") or "active").strip() == "active"
+        and _clean_id(node.get("agentId")) not in active_agent_ids
+    }
+    if not stale_agent_ids:
+        return payload
+    payload["agents"] = [
+        node for node in list(payload.get("agents") or [])
+        if isinstance(node, dict) and _clean_id(node.get("agentId")) not in stale_agent_ids
+    ]
+    payload["edges"] = _drop_edges_for_agents(payload.get("edges") or [], agent_ids=stale_agent_ids)
+    _record_org_event(
+        "research.organization.unresolvable_active_nodes_pruned",
+        outcome="pruned",
+        level="warning",
+        fields={
+            "staleActiveNodeCount": len(stale_agent_ids),
+            "activeAgentDirectoryCount": len(active_agent_ids),
+        },
+    )
     return payload
 
 

@@ -116,6 +116,102 @@ def test_research_organization_archives_duplicate_core_nodes_and_marks_missing_a
     assert missing_specialist["missingAgent"] is True
 
 
+def test_research_organization_canvas_repairs_when_active_canvas_agents_are_empty(org_workspace):
+    org_workspace.write_research_organization(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "nodeId": "stale-ceo",
+                    "agentId": "agent-missing-ceo",
+                    "displayName": "旧 CEO",
+                    "role": "ceo",
+                    "employeeRank": "ceo",
+                    "protected": True,
+                    "status": "active",
+                }
+            ],
+            "edges": [],
+        }
+    )
+
+    canvas = research_organization_service.get_research_organization_canvas_graph()
+
+    assert len(canvas["agents"]) >= 3
+    assert {node["role"] for node in canvas["agents"]} >= {"ceo", "organization_advisor", "capability_steward"}
+    assert all(node["agentId"] != "agent-missing-ceo" for node in canvas["agents"])
+    assert all(node["status"] == "active" for node in canvas["agents"])
+
+
+def test_research_organization_canvas_prunes_unresolvable_embedded_core_snapshots(org_workspace):
+    ceo_detail = session_service.create_chat_session(title="绑定 CEO")
+    advisor_detail = session_service.create_chat_session(title="绑定组织顾问")
+    steward_detail = session_service.create_chat_session(title="绑定能力管家")
+    ceo = agent_directory_service.update_agent_instance(
+        ceo_detail["agentId"],
+        primary_mode="research",
+        role_key="research_ceo",
+        metadata={"systemRole": "ceo", "researchOrgRole": "ceo", "protected": True},
+    )
+    advisor = agent_directory_service.update_agent_instance(
+        advisor_detail["agentId"],
+        primary_mode="research",
+        role_key="research_organization_advisor",
+        metadata={
+            "systemRole": "organization_advisor",
+            "researchOrgRole": "organization_advisor",
+            "protected": True,
+        },
+    )
+    steward = agent_directory_service.update_agent_instance(
+        steward_detail["agentId"],
+        primary_mode="research",
+        role_key="research_capability_steward",
+        metadata={"systemRole": "capability_steward", "researchOrgRole": "capability_steward", "protected": True},
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "research",
+        default_agent_id=steward["agentId"],
+        available_agent_ids=[steward["agentId"], advisor["agentId"], ceo["agentId"]],
+        pool=[steward["agentId"], advisor["agentId"], ceo["agentId"]],
+    )
+    org_workspace.write_research_organization(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "nodeId": "embedded-ceo",
+                    "agentId": "agent-embedded-missing-ceo",
+                    "displayName": "嵌入快照 CEO",
+                    "role": "ceo",
+                    "employeeRank": "ceo",
+                    "protected": True,
+                    "status": "active",
+                    "agent": {"agentId": "agent-embedded-missing-ceo", "status": "active"},
+                }
+            ],
+            "edges": [
+                {
+                    "edgeId": "edge-embedded",
+                    "fromAgentId": "agent-embedded-missing-ceo",
+                    "toAgentId": "agent-embedded-missing-advisor",
+                    "status": "active",
+                }
+            ],
+        }
+    )
+
+    canvas = research_organization_service.get_research_organization_canvas_graph()
+
+    assert {node["agentId"] for node in canvas["agents"]} == {
+        ceo["agentId"],
+        advisor["agentId"],
+        steward["agentId"],
+    }
+    assert "agent-embedded-missing-ceo" not in {node["agentId"] for node in canvas["agents"]}
+    assert all("embedded" not in edge["edgeId"] for edge in canvas["edges"])
+
+
 def test_research_organization_prefers_research_mode_binding_when_repairing_core_nodes(org_workspace):
     ceo_detail = session_service.create_chat_session(title="绑定 CEO")
     advisor_detail = session_service.create_chat_session(title="绑定组织顾问")

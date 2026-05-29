@@ -38,6 +38,71 @@ def test_create_team_with_active_agent_writes_default_canvas(tmp_path, monkeypat
     assert team_service.list_teams()["summary"]["activeTeamCount"] == 1
 
 
+def test_ensure_research_team_from_organization_uses_stable_team_id(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    organization = {
+        "updatedAt": "2026-05-29T00:00:00Z",
+        "agents": [
+            {"nodeId": "alpha-node", "agentId": alpha["agentId"], "displayName": "Alpha", "role": "lead", "status": "active", "x": 240, "y": 160},
+            {"nodeId": "beta-node", "agentId": beta["agentId"], "displayName": "Beta", "role": "reviewer", "status": "active", "x": 520, "y": 260},
+        ],
+        "edges": [
+            {"edgeId": "edge-alpha-beta", "fromAgentId": alpha["agentId"], "toAgentId": beta["agentId"], "label": "同步证据", "status": "active"}
+        ],
+    }
+
+    first = team_service.ensure_research_team_from_organization(organization)
+    second = team_service.ensure_research_team_from_organization(organization)
+    canvas = team_service.get_team_canvas("research-team")
+    teams = team_service.list_teams()["teams"]
+
+    assert first["teamId"] == "research-team"
+    assert second["teamId"] == "research-team"
+    assert [team["teamId"] for team in teams] == ["research-team"]
+    assert first["linkedChatRoomId"] == second["linkedChatRoomId"]
+    assert team_service.list_teams()["summary"]["activeTeamCount"] == 1
+    assert len(chat_room_service.list_chat_rooms()) == 1
+    assert [member["agentId"] for member in second["members"]] == [alpha["agentId"], beta["agentId"]]
+    assert {node["agentId"] for node in canvas["nodes"]} == {alpha["agentId"], beta["agentId"]}
+    assert {node["id"] for node in canvas["nodes"]} == {alpha["agentId"], beta["agentId"]}
+    assert canvas["edges"] == [
+        {
+            "id": "edge-alpha-beta",
+            "source": alpha["agentId"],
+            "target": beta["agentId"],
+            "label": "同步证据",
+            "type": "collaborates_with",
+        }
+    ]
+
+
+def test_research_team_sync_reuses_existing_team_chat_room(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    organization = {
+        "agents": [
+            {"nodeId": "alpha-node", "agentId": alpha["agentId"], "displayName": "Alpha", "role": "lead", "status": "active"},
+            {"nodeId": "beta-node", "agentId": beta["agentId"], "displayName": "Beta", "role": "reviewer", "status": "active"},
+        ],
+        "edges": [],
+    }
+    existing_room = chat_room_service.create_chat_room(
+        title="旧科研团队群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+        config={"source": "team", "teamId": "research-team", "teamName": "科研团队"},
+    )
+
+    team = team_service.ensure_research_team_from_organization(organization)
+
+    rooms = chat_room_service.list_chat_rooms()
+    assert team["linkedChatRoomId"] == existing_room["roomId"]
+    assert [room["roomId"] for room in rooms] == [existing_room["roomId"]]
+    assert {participant["agentId"] for participant in rooms[0]["participants"]} == {alpha["agentId"], beta["agentId"]}
+
+
 def test_team_canvas_save_syncs_linked_chat_room_members(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
