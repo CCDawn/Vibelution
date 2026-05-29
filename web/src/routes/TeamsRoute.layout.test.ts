@@ -25,6 +25,9 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("/api/teams/${encodeURIComponent(teamId)}/chat-room/sync");
     expect(routeSource).toContain("syncTeamChatRoomMutation");
     expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`");
+    expect(routeSource).toContain("fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`)");
+    expect(routeSource).toContain("refetchInterval: 5000");
+    expect(routeSource).toContain("latestChatRoomRound(linkedRoomDetail)");
     expect(routeSource).toContain('source: "team_workspace"');
     expect(routeSource).toContain("teamId: payload.teamId");
     expect(routeSource).toContain("startTeamRoundMutation");
@@ -56,12 +59,17 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("启动团队讨论");
     expect(routeSource).toContain("teamTaskTopic");
     expect(routeSource).toContain("linkedRoomBusy");
+    expect(routeSource).toContain("最近团队任务");
+    expect(routeSource).toContain("styles.teamRoundPanel");
+    expect(routeSource).toContain("styles.teamRoundCard");
+    expect(routeSource).toContain("查看完整群聊");
     expect(routeSource).toContain("styles.teamTaskForm");
     expect(routeSource).toContain("团队广播");
     expect(routeSource).toContain("发送给团队");
     expect(routeSource).toContain("最近团队广播");
     expect(routeSource).toContain("已衔接群聊");
-    expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(selectedTeam.linkedChatRoomId)}`}");
+    expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(startTeamRoundMutation.data.roomId)}`}");
+    expect(routeSource).toContain("to={`/chat?room=${encodeURIComponent(latestTeamRound.roomId)}`}");
     expect(routeSource).toContain("styles.linkedRoomLine");
     expect(routeSource).toContain("styles.toolbarLink");
     expect(routeSource).toContain("teamBusEvents");

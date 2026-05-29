@@ -89,6 +89,25 @@ function nodeTone(node: TeamCanvasNode) {
   return styles.nodeOpen;
 }
 
+function latestChatRoomRound(room: ChatRoomDetail | null | undefined) {
+  const rounds = room?.rounds ?? [];
+  return rounds.length ? rounds[rounds.length - 1] : null;
+}
+
+function chatRoomStatusLabel(status: string, lang: "zh" | "en") {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized === "running") {
+    return lang === "zh" ? "运行中" : "Running";
+  }
+  if (normalized === "stopping") {
+    return lang === "zh" ? "停止中" : "Stopping";
+  }
+  if (normalized === "failed") {
+    return lang === "zh" ? "失败" : "Failed";
+  }
+  return lang === "zh" ? "就绪" : "Ready";
+}
+
 export function TeamsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -126,6 +145,13 @@ export function TeamsRoute() {
     enabled: Boolean(effectiveTeamId),
   });
   const selectedTeam = teamDetailQuery.data ?? teams.find((team) => team.teamId === effectiveTeamId) ?? null;
+  const linkedChatRoomId = selectedTeam?.linkedChatRoomId ?? "";
+  const linkedChatRoomQuery = useQuery({
+    queryKey: queryKeys.chatRoom(linkedChatRoomId || "none"),
+    queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`),
+    enabled: Boolean(linkedChatRoomId),
+    refetchInterval: 5000,
+  });
   const canvas = canvasFromTeam(selectedTeam);
   const selectedNode = canvas?.nodes.find((node) => node.id === selectedNodeId) ?? canvas?.nodes[0] ?? null;
   const teamBusEvents = useMemo(
@@ -383,9 +409,11 @@ export function TeamsRoute() {
   const validation = canvas?.validation;
   const saveLabel = saveCanvasMutation.isPending ? (lang === "zh" ? "保存中" : "Saving") : saveCanvasMutation.isSuccess ? (lang === "zh" ? "已保存" : "Saved") : "";
   const activeTeamMemberCount = selectedTeam?.members.filter((member) => member.agentStatus === "active").length ?? 0;
-  const linkedRoomStatus = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
+  const linkedRoomDetail = linkedChatRoomQuery.data ?? null;
+  const latestTeamRound = latestChatRoomRound(linkedRoomDetail);
+  const linkedRoomStatus = String(linkedRoomDetail?.status || selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
   const linkedRoomBusy = linkedRoomStatus === "running" || linkedRoomStatus === "stopping";
-  const canStartTeamRound = Boolean(selectedTeam?.teamId && selectedTeam.linkedChatRoomId && activeTeamMemberCount > 0 && teamTaskTopic.trim() && !linkedRoomBusy);
+  const canStartTeamRound = Boolean(selectedTeam?.teamId && linkedChatRoomId && activeTeamMemberCount > 0 && teamTaskTopic.trim() && !linkedRoomBusy);
 
   return (
     <section className={styles.route}>
@@ -474,8 +502,8 @@ export function TeamsRoute() {
             </div>
             <div className={styles.toolbarActions}>
               {saveLabel ? <span className={styles.saveState}>{saveLabel}</span> : null}
-              {selectedTeam?.linkedChatRoomId ? (
-                <Link className={styles.toolbarLink} to={`/chat?room=${encodeURIComponent(selectedTeam.linkedChatRoomId)}`}>
+              {linkedChatRoomId ? (
+                <Link className={styles.toolbarLink} to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
                   {lang === "zh" ? "打开群聊" : "Open room"}
                 </Link>
               ) : (
@@ -607,15 +635,15 @@ export function TeamsRoute() {
                 className={styles.teamTaskForm}
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (!selectedTeam?.teamId || !selectedTeam.linkedChatRoomId || !teamTaskTopic.trim() || linkedRoomBusy) {
+                  if (!selectedTeam?.teamId || !linkedChatRoomId || !teamTaskTopic.trim() || linkedRoomBusy) {
                     return;
                   }
                   startTeamRoundMutation.mutate({
-                    roomId: selectedTeam.linkedChatRoomId,
+                    roomId: linkedChatRoomId,
                     teamId: selectedTeam.teamId,
                     topic: teamTaskTopic.trim(),
-                    mode: selectedTeam.linkedChatRoom?.mode || "round_robin",
-                    purpose: selectedTeam.linkedChatRoom?.purpose || "discussion",
+                    mode: linkedRoomDetail?.mode || selectedTeam.linkedChatRoom?.mode || "round_robin",
+                    purpose: linkedRoomDetail?.purpose || selectedTeam.linkedChatRoom?.purpose || "discussion",
                   });
                 }}
               >
@@ -655,6 +683,40 @@ export function TeamsRoute() {
                 {startTeamRoundMutation.error instanceof Error ? (
                   <div className={styles.messageError}>{startTeamRoundMutation.error.message}</div>
                 ) : null}
+                <section className={styles.teamRoundPanel}>
+                  <div className={styles.sectionTitle}>
+                    <strong>{lang === "zh" ? "最近团队任务" : "Latest team task"}</strong>
+                    <span>{linkedRoomDetail ? chatRoomStatusLabel(linkedRoomDetail.status, lang) : (lang === "zh" ? "未读取" : "not loaded")}</span>
+                  </div>
+                  {linkedChatRoomQuery.isPending && linkedChatRoomId ? (
+                    <div className={styles.empty}>{lang === "zh" ? "正在读取关联群聊..." : "Loading linked room..."}</div>
+                  ) : latestTeamRound ? (
+                    <article className={styles.teamRoundCard}>
+                      <div className={styles.teamRoundHeader}>
+                        <strong>{latestTeamRound.topic || (lang === "zh" ? "未命名任务" : "Untitled task")}</strong>
+                        <span>{latestTeamRound.status}</span>
+                      </div>
+                      <p>{latestTeamRound.summary || (lang === "zh" ? "任务仍在等待成员输出。" : "Waiting for participant output.")}</p>
+                      <div className={styles.teamRoundMeta}>
+                        <span>{latestTeamRound.messages.length} messages</span>
+                        <span>{latestTeamRound.mode}</span>
+                        <span>{formatTime(latestTeamRound.updatedAt || latestTeamRound.startedAt, lang)}</span>
+                      </div>
+                      <Link to={`/chat?room=${encodeURIComponent(latestTeamRound.roomId)}`}>
+                        {lang === "zh" ? "查看完整群聊" : "View full room"}
+                      </Link>
+                    </article>
+                  ) : (
+                    <div className={styles.empty}>
+                      {linkedChatRoomId
+                        ? (lang === "zh" ? "关联群聊还没有团队任务记录。" : "No team task rounds in the linked room yet.")
+                        : (lang === "zh" ? "同步群聊后可查看团队任务状态。" : "Sync a room to view team task status.")}
+                    </div>
+                  )}
+                  {linkedChatRoomQuery.error instanceof Error ? (
+                    <div className={styles.messageError}>{linkedChatRoomQuery.error.message}</div>
+                  ) : null}
+                </section>
               </form>
               <form
                 className={styles.teamMessageForm}
