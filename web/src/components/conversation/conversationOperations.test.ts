@@ -40,8 +40,9 @@ describe("conversationOperations", () => {
         kind: "thought",
         label: "Deep thinking",
         status: "done",
-        summary: "",
+        summary: "Check plan",
         durationSeconds: null,
+        resultPreview: "Check plan",
       },
       {
         id: "message-1-mental",
@@ -114,8 +115,9 @@ describe("conversationOperations", () => {
         kind: "thought",
         label: "Deep thinking",
         status: "running",
-        summary: "",
+        summary: "Reading files",
         durationSeconds: null,
+        resultPreview: "Reading files",
       },
       {
         id: "message-3-mental",
@@ -171,6 +173,21 @@ describe("conversationOperations", () => {
     expect(grouped.thoughts.map((item) => item.kind)).toEqual(["thought"]);
     expect(grouped.mental.map((item) => item.kind)).toEqual(["mental"]);
     expect(grouped.tools.map((item) => item.kind)).toEqual(["tool"]);
+  });
+
+  it("keeps captured thought text available as expandable operation detail", () => {
+    const message: ConversationMessage = {
+      id: "message-thought-detail",
+      role: "assistant",
+      content: "Done",
+      timestamp: "2026-05-29T09:35:18Z",
+      thought: "先看日志。\n然后确认前端有没有渲染 thought 字段。",
+    };
+
+    const thought = buildConversationOperationGroups(message, labels).thoughts[0];
+
+    expect(thought.summary).toBe("先看日志。 然后确认前端有没有渲染 thought 字段。");
+    expect(thought.resultPreview).toBe("先看日志。\n然后确认前端有没有渲染 thought 字段。");
   });
 
   it("uses diagnosis summary when mental state details are otherwise empty", () => {

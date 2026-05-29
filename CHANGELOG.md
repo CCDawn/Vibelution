@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.25 - 2026-05-29
+
+- Fixed Chat/Coding thought visibility: captured assistant `thought` text now appears as a folded summary on the “思考过程” row, and the same text is available as the thought operation detail instead of being stored but visually empty.
+
 ## 0.4.24 - 2026-05-29
 
 - Added permanent purge for already archived Agents: Agent Center now exposes a separate irreversible delete action for archived Agents, backed by `DELETE /api/agents/{agent_id}/purge`.

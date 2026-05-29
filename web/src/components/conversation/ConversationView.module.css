@@ -486,6 +486,17 @@
   background: color-mix(in srgb, var(--surface-card) 68%, var(--accent-warm) 5%);
 }
 
+.operationSummaryPreview {
+  min-width: 0;
+  max-width: min(46vw, 420px);
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  font-weight: 450;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .operationTimeline {
   position: relative;
   display: grid;
@@ -637,6 +648,11 @@
   border: 1px solid color-mix(in srgb, var(--fg-tertiary) 12%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--surface-card) 62%, transparent);
+}
+
+.operationDetails_thought {
+  border-color: color-mix(in srgb, var(--accent-warm) 22%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-card));
 }
 
 .operationDetailRow {
