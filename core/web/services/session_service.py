@@ -842,6 +842,28 @@ def _session_agent_is_available(summary: dict[str, Any]) -> bool:
     return bool(str(summary.get("agentId") or "").strip()) and not bool(summary.get("agentMissing"))
 
 
+def _resolve_active_agent_for_turn(
+    session_id: str,
+    agent_id: str,
+    *,
+    lang: str,
+) -> dict[str, Any]:
+    normalized_agent_id = str(agent_id or "").strip()
+    active_agent = get_agent(normalized_agent_id, include_archived=False) if normalized_agent_id else None
+    if active_agent:
+        return active_agent
+    historical_agent = get_agent(normalized_agent_id, include_archived=True) if normalized_agent_id else None
+    status = str((historical_agent or {}).get("status") or "").strip().lower()
+    reason = "archived_agent" if status == "archived" else "missing_agent"
+    _record_session_agent_unavailable_event(
+        session_id,
+        agent_id=normalized_agent_id,
+        reason=reason,
+        agent_status=status,
+    )
+    raise SessionValidationError(_session_agent_unavailable_message(reason, lang=lang))
+
+
 def _session_agent_visible_in_indexes(summary: dict[str, Any]) -> bool:
     if not bool(str(summary.get("agentId") or "").strip()):
         return True
@@ -1787,18 +1809,7 @@ def submit_session_message(
 
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        active_agent = get_agent(agent_id, include_archived=False) if agent_id else None
-        agent = active_agent or (get_agent(agent_id, include_archived=True) if agent_id else None)
-        if not active_agent:
-            status = str((agent or {}).get("status") or "").strip().lower()
-            reason = "archived_agent" if status == "archived" else "missing_agent"
-            _record_session_agent_unavailable_event(
-                conversation_id,
-                agent_id=agent_id,
-                reason=reason,
-                agent_status=status,
-            )
-            raise SessionValidationError(_session_agent_unavailable_message(reason, lang=lang))
+        agent = _resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
         agent_profile_id = _normalize_session_agent_profile_id(
             (agent or {}).get("profileId")
             or conversation.get("agent_profile_id")
@@ -2246,7 +2257,7 @@ def edit_and_resubmit_session_message(
 
         _ensure_conversation_agent_metadata(conversation)
         agent_id = str(conversation.get("agent_id") or conversation.get("agentId") or "").strip()
-        agent = get_agent(agent_id) if agent_id else None
+        agent = _resolve_active_agent_for_turn(conversation_id, agent_id, lang=lang)
         agent_profile_id = _normalize_session_agent_profile_id(
             (agent or {}).get("profileId")
             or conversation.get("agent_profile_id")
@@ -4454,7 +4465,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     prepare_timings["agentDirectorySyncMs"] = _elapsed_ms(stage_started_at)
     agent_id = str(context.get("agent_id") or context.get("agentId") or "").strip()
     stage_started_at = _perf_counter()
-    agent = get_agent(agent_id) if agent_id else None
+    agent = get_agent(agent_id, include_archived=False) if agent_id else None
+    historical_agent = None if agent else (get_agent(agent_id, include_archived=True) if agent_id else None)
     prepare_timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     stage_started_at = _perf_counter()
     agent_context_packet = (
@@ -4564,6 +4576,32 @@ def _run_session_turn(context: dict[str, Any]) -> None:
     )
     _set_session_turn_progress_live_output(session_id, "agent_prepare", turn_id=turn_id)
     try:
+        if agent_id and not agent:
+            status = str((historical_agent or {}).get("status") or "").strip().lower()
+            reason = "archived_agent" if status == "archived" else "missing_agent"
+            visible = _session_agent_unavailable_message(reason, lang=get_web_language())
+            _record_session_agent_unavailable_event(
+                session_id,
+                agent_id=agent_id,
+                reason=reason,
+                agent_status=status,
+            )
+            _persist_session_turn_result(
+                session_id,
+                {
+                    "status": "failed_runtime",
+                    "summary": visible,
+                    "raw_output": visible,
+                    "error": visible,
+                    "outcome": "blocked",
+                    "metadata": {"reason": reason},
+                },
+                mental_model_enabled=mental_model_enabled,
+                session_workspace=session_workspace,
+                active_task_hint=context.get("active_task"),
+                turn_id=turn_id,
+            )
+            return
         with (
             active_agent_runtime(agent_id, session_id=session_id, turn_id=turn_id),
             mental_model_enabled_override(mental_model_enabled),
@@ -4614,7 +4652,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "toolWorkspacePath": str(tool_workspace),
                         "agentProfileId": agent_profile_id,
                         "agentId": agent_id,
-                        "promptTemplateId": str((get_agent(agent_id) or {}).get("promptTemplateId") or "").strip() if agent_id else "",
+                        "promptTemplateId": str((get_agent(agent_id, include_archived=False) or {}).get("promptTemplateId") or "").strip() if agent_id else "",
                         "attachmentCount": len(attachments),
                     },
                 )

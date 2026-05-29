@@ -5,7 +5,12 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import agent_directory_service, research_organization_service, session_service
+from core.web.services import (
+    agent_directory_service,
+    agent_mode_binding_service,
+    research_organization_service,
+    session_service,
+)
 
 
 class FakeWorkspace:
@@ -71,6 +76,153 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
     assert (ceo["agentId"], advisor["agentId"]) in {(edge["fromAgentId"], edge["toAgentId"]) for edge in org["edges"]}
     assert (ceo["agentId"], steward["agentId"]) in {(edge["fromAgentId"], edge["toAgentId"]) for edge in org["edges"]}
     assert (advisor["agentId"], steward["agentId"]) in {(edge["fromAgentId"], edge["toAgentId"]) for edge in org["edges"]}
+
+
+def test_research_organization_archives_duplicate_core_nodes_and_marks_missing_agents_stale(org_workspace):
+    org = research_organization_service.get_research_organization()
+    ceo, _, _ = _core_agents(org)
+    graph = org_workspace.read_research_organization()
+    graph["agents"].extend(
+        [
+            {
+                "nodeId": "duplicate-ceo",
+                "agentId": "agent-missing-duplicate-ceo",
+                "displayName": "旧 CEO Agent",
+                "role": "ceo",
+                "employeeRank": "ceo",
+                "protected": True,
+                "status": "active",
+            },
+            {
+                "nodeId": "missing-specialist",
+                "agentId": "agent-missing-specialist",
+                "displayName": "缺失研究员",
+                "role": "research_specialist",
+                "employeeRank": "specialist",
+                "status": "active",
+            },
+        ]
+    )
+    org_workspace.write_research_organization(graph)
+
+    repaired = research_organization_service.get_research_organization()
+
+    ceo_nodes = [node for node in repaired["agents"] if node["role"] == "ceo"]
+    active_ceo_nodes = [node for node in ceo_nodes if node["status"] == "active"]
+    missing_specialist = next(node for node in repaired["agents"] if node["agentId"] == "agent-missing-specialist")
+    assert [node["agentId"] for node in active_ceo_nodes] == [ceo["agentId"]]
+    assert "agent-missing-duplicate-ceo" not in {node["agentId"] for node in repaired["agents"]}
+    assert missing_specialist["status"] == "stale"
+    assert missing_specialist["missingAgent"] is True
+
+
+def test_research_organization_prefers_research_mode_binding_when_repairing_core_nodes(org_workspace):
+    ceo_detail = session_service.create_chat_session(title="绑定 CEO")
+    advisor_detail = session_service.create_chat_session(title="绑定组织顾问")
+    steward_detail = session_service.create_chat_session(title="绑定能力管家")
+    ceo = agent_directory_service.update_agent_instance(
+        ceo_detail["agentId"],
+        primary_mode="research",
+        role_key="research_ceo",
+        metadata={"systemRole": "ceo", "researchOrgRole": "ceo", "protected": True},
+    )
+    advisor = agent_directory_service.update_agent_instance(
+        advisor_detail["agentId"],
+        primary_mode="research",
+        role_key="research_organization_advisor",
+        metadata={
+            "systemRole": "organization_advisor",
+            "researchOrgRole": "organization_advisor",
+            "protected": True,
+        },
+    )
+    steward = agent_directory_service.update_agent_instance(
+        steward_detail["agentId"],
+        primary_mode="research",
+        role_key="research_capability_steward",
+        metadata={
+            "systemRole": "capability_steward",
+            "researchOrgRole": "capability_steward",
+            "protected": True,
+        },
+    )
+    duplicate_detail = session_service.create_chat_session(title="误建 CEO")
+    duplicate = agent_directory_service.update_agent_instance(
+        duplicate_detail["agentId"],
+        primary_mode="research",
+        role_key="research_ceo",
+        metadata={"systemRole": "ceo", "researchOrgRole": "ceo", "protected": True},
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "research",
+        default_agent_id=steward["agentId"],
+        available_agent_ids=[steward["agentId"], advisor["agentId"], ceo["agentId"]],
+        pool=[steward["agentId"], advisor["agentId"], ceo["agentId"]],
+    )
+    org_workspace.write_research_organization(
+        {
+            "schemaVersion": 1,
+            "agents": [
+                {
+                    "nodeId": duplicate["agentId"],
+                    "agentId": duplicate["agentId"],
+                    "displayName": "误建 CEO",
+                    "role": "ceo",
+                    "employeeRank": "ceo",
+                    "protected": True,
+                    "status": "active",
+                    "agent": duplicate,
+                },
+                {
+                    "nodeId": ceo["agentId"],
+                    "agentId": ceo["agentId"],
+                    "displayName": "绑定 CEO",
+                    "role": "ceo",
+                    "employeeRank": "ceo",
+                    "protected": True,
+                    "status": "active",
+                    "agent": ceo,
+                },
+            ],
+            "edges": [
+                {
+                    "edgeId": f"edge-{duplicate['agentId']}-{advisor['agentId']}",
+                    "fromAgentId": duplicate["agentId"],
+                    "toAgentId": advisor["agentId"],
+                    "label": "误建核心边",
+                    "communicationPolicy": {},
+                    "status": "active",
+                }
+            ],
+        }
+    )
+
+    repaired = research_organization_service.get_research_organization()
+
+    active_ids_by_role = {
+        role: [
+            node["agentId"]
+            for node in repaired["agents"]
+            if node["role"] == role and node["status"] == "active"
+        ]
+        for role in ("ceo", "organization_advisor", "capability_steward")
+    }
+    active_edge_endpoints = {
+        (edge["fromAgentId"], edge["toAgentId"])
+        for edge in repaired["edges"]
+        if edge["status"] == "active"
+    }
+    assert active_ids_by_role == {
+        "ceo": [ceo["agentId"]],
+        "organization_advisor": [advisor["agentId"]],
+        "capability_steward": [steward["agentId"]],
+    }
+    assert duplicate["agentId"] not in {node["agentId"] for node in repaired["agents"]}
+    assert all(duplicate["agentId"] not in endpoints for endpoints in active_edge_endpoints)
+    assert all(
+        duplicate["agentId"] not in {edge["fromAgentId"], edge["toAgentId"]}
+        for edge in repaired["edges"]
+    )
 
 
 def test_research_organization_context_block_is_filtered_to_connected_subgraph(org_workspace):

@@ -10,7 +10,7 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 from core.infrastructure.workspace_manager import get_workspace
 
-from . import session_service
+from . import agent_mode_binding_service, session_service
 from .agent_directory_service import (
     AgentDirectoryError,
     AgentNotFoundError,
@@ -524,6 +524,7 @@ def _organization_to_canvas_api(graph: dict[str, Any]) -> dict[str, Any]:
         _agent_node_to_canvas_api(node, active_agents_by_id.get(_clean_id(node.get("agentId"))))
         for node in payload.get("agents") or []
         if _clean_id(node.get("agentId")) in active_agents_by_id
+        and str(node.get("status") or "active").strip() == "active"
     ]
     active_node_ids = {_clean_id(node.get("agentId")) for node in payload["agents"]}
     payload["edges"] = [
@@ -537,8 +538,10 @@ def _organization_to_canvas_api(graph: dict[str, Any]) -> dict[str, Any]:
 
 def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
     payload = _normalize_organization(graph)
+    nodes = [item for item in payload.get("agents") or [] if isinstance(item, dict)]
     ceo = _ensure_core_agent(
         system_role="ceo",
+        preferred_agent_ids=_preferred_core_agent_ids("ceo", nodes),
         display_name="CEO Agent",
         role_key="research_ceo",
         prompt_template_id="prompt-research-ceo",
@@ -557,6 +560,7 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
     )
     advisor = _ensure_core_agent(
         system_role="organization_advisor",
+        preferred_agent_ids=_preferred_core_agent_ids("organization_advisor", nodes),
         display_name="组织顾问 Agent",
         role_key="research_organization_advisor",
         prompt_template_id="prompt-research-organization-advisor",
@@ -575,6 +579,7 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
     )
     steward = _ensure_core_agent(
         system_role="capability_steward",
+        preferred_agent_ids=_preferred_core_agent_ids("capability_steward", nodes),
         display_name="能力管家 Agent",
         role_key="research_capability_steward",
         prompt_template_id="prompt-research-capability-steward",
@@ -591,7 +596,11 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
             "writeSharedGroups": ["agent_config"],
         },
     )
-    nodes = [item for item in payload.get("agents") or [] if isinstance(item, dict)]
+    current_core_agent_ids = {ceo["agentId"], advisor["agentId"], steward["agentId"]}
+    dropped_core_agent_ids = _stale_core_agent_ids(nodes, current_agent_ids=current_core_agent_ids)
+    if dropped_core_agent_ids:
+        _record_stale_core_pruned_event(dropped_core_agent_ids, current_agent_ids=current_core_agent_ids)
+    nodes = _drop_stale_core_nodes(nodes, stale_core_agent_ids=dropped_core_agent_ids)
     nodes = _upsert_agent_node(
         nodes,
         ceo,
@@ -622,16 +631,46 @@ def _ensure_default_organization(graph: dict[str, Any]) -> dict[str, Any]:
         protected=True,
         zone_id="core",
     )
+    previously_archived_core_agent_ids = {
+        _clean_id(node.get("agentId"))
+        for node in nodes
+        if str(node.get("archiveReason") or "") == "duplicate_research_core_role"
+    }
+    nodes = _archive_stale_core_nodes(
+        nodes,
+        current_agent_ids_by_role={
+            "ceo": _clean_id(ceo.get("agentId")),
+            "organization_advisor": _clean_id(advisor.get("agentId")),
+            "capability_steward": _clean_id(steward.get("agentId")),
+        },
+    )
+    stale_core_agent_ids = {
+        _clean_id(node.get("agentId"))
+        for node in nodes
+        if str(node.get("archiveReason") or "") == "duplicate_research_core_role"
+        and str(node.get("status") or "active").strip() == "archived"
+    }
+    newly_archived_core_agent_ids = stale_core_agent_ids - previously_archived_core_agent_ids
     payload["agents"] = nodes
     payload["zones"] = _ensure_core_zone(payload.get("zones") or [])
-    payload["edges"] = _ensure_core_edges(payload.get("edges") or [], ceo["agentId"], advisor["agentId"], steward["agentId"])
+    edges = _drop_edges_for_agents(payload.get("edges") or [], agent_ids=dropped_core_agent_ids)
+    edges = _ensure_core_edges(edges, ceo["agentId"], advisor["agentId"], steward["agentId"])
+    previously_archived_core_edge_count = _stale_core_edge_count(edges)
+    payload["edges"] = _archive_stale_core_edges(edges, stale_core_agent_ids=stale_core_agent_ids)
+    newly_archived_core_edge_count = max(0, _stale_core_edge_count(payload["edges"]) - previously_archived_core_edge_count)
     payload["updatedAt"] = str(payload.get("updatedAt") or utc_now_iso())
+    _record_core_repair_event(
+        payload,
+        newly_archived_core_agent_ids=newly_archived_core_agent_ids,
+        newly_archived_core_edge_count=newly_archived_core_edge_count,
+    )
     return payload
 
 
 def _ensure_core_agent(
     *,
     system_role: str,
+    preferred_agent_ids: list[str],
     display_name: str,
     role_key: str,
     prompt_template_id: str,
@@ -641,7 +680,7 @@ def _ensure_core_agent(
     allowed_tools: list[str],
     memory_policy: dict[str, Any],
 ) -> dict[str, Any]:
-    agent = _find_active_core_agent(system_role)
+    agent = _find_active_core_agent(system_role, preferred_agent_ids=preferred_agent_ids)
     if not agent:
         detail = session_service.create_chat_session(
             title=display_name,
@@ -668,8 +707,7 @@ def _ensure_core_agent(
     desired_read_groups = _normalize_allowed_tools(memory_policy.get("readSharedGroups") or [])
     desired_write_groups = _normalize_allowed_tools(memory_policy.get("writeSharedGroups") or [])
     needs_update = (
-        str(agent.get("displayName") or "") != display_name
-        or str(agent.get("primaryMode") or "") != "research"
+        str(agent.get("primaryMode") or "") != "research"
         or str(agent.get("roleKey") or "") != role_key
         or str(agent.get("promptTemplateId") or "") != prompt_template_id
         or any(metadata.get(key) != desired_metadata.get(key) for key in ("researchOrgRole", "systemRole", "protected", "employeeRank"))
@@ -680,7 +718,6 @@ def _ensure_core_agent(
     if needs_update:
         agent = update_agent_instance(
             agent["agentId"],
-            display_name=display_name,
             primary_mode="research",
             role_key=role_key,
             prompt_template_id=prompt_template_id,
@@ -694,15 +731,71 @@ def _ensure_core_agent(
     return agent
 
 
-def _find_active_core_agent(system_role: str) -> dict[str, Any] | None:
-    for agent in list_agents(include_archived=True):
-        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
-        if str(metadata.get("systemRole") or metadata.get("researchOrgRole") or "").strip() != system_role:
+def _find_active_core_agent(system_role: str, *, preferred_agent_ids: list[str] | None = None) -> dict[str, Any] | None:
+    candidates = [
+        agent for agent in list_agents(include_archived=False)
+        if _agent_core_role(agent) == system_role
+    ]
+    candidates_by_id = {_clean_id(agent.get("agentId")): agent for agent in candidates}
+    for agent_id in _dedupe_ids(list(preferred_agent_ids or []) + _research_mode_agent_ids()):
+        agent = candidates_by_id.get(agent_id)
+        if agent:
+            return agent
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda item: str(item.get("createdAt") or item.get("updatedAt") or ""))[0]
+
+
+def _preferred_core_agent_ids(system_role: str, nodes: list[dict[str, Any]]) -> list[str]:
+    active_graph_ids = [
+        _clean_id(node.get("agentId"))
+        for node in nodes
+        if _core_role_for_node(node) == system_role
+        and str(node.get("status") or "active").strip() == "active"
+    ]
+    return _dedupe_ids([*_research_mode_agent_ids(), *active_graph_ids])
+
+
+def _research_mode_agent_ids() -> list[str]:
+    try:
+        path = agent_mode_binding_service.mode_binding_path()
+        if not path.exists():
+            return []
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    binding = next(
+        (
+            item for item in list(payload.get("bindings") or [])
+            if isinstance(item, dict) and str(item.get("mode") or "").strip() == "research"
+        ),
+        {},
+    )
+    ids: list[str] = []
+    ids.append(_clean_id(binding.get("defaultAgentId")))
+    ids.extend(_clean_id(item) for item in list(binding.get("pool") or []))
+    ids.extend(_clean_id(item) for item in list(binding.get("availableAgentIds") or []))
+    flow_bindings = binding.get("flowBindings") if isinstance(binding.get("flowBindings"), dict) else {}
+    ids.extend(_clean_id(item) for item in flow_bindings.values())
+    return _dedupe_ids(ids)
+
+
+def _agent_core_role(agent: dict[str, Any]) -> str:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    role = str(metadata.get("systemRole") or metadata.get("researchOrgRole") or "").strip()
+    return role if role in PROTECTED_SYSTEM_ROLES else ""
+
+
+def _dedupe_ids(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        agent_id = _clean_id(value)
+        if not agent_id or agent_id in seen:
             continue
-        if str(agent.get("status") or "active").strip() == "archived":
-            continue
-        return agent
-    return None
+        seen.add(agent_id)
+        result.append(agent_id)
+    return result
 
 
 def _upsert_agent_node(
@@ -736,8 +829,177 @@ def _upsert_agent_node(
         "toolPolicy": resolve_tool_policy_for_agent(agent_id),
         "updatedAt": str(agent.get("updatedAt") or base.get("updatedAt") or ""),
     }
+    if node["status"] != "archived":
+        node.pop("stale", None)
+        node.pop("missingAgent", None)
+        node.pop("archiveReason", None)
+        node.pop("archivedAt", None)
     others = [item for item in nodes if _clean_id(item.get("agentId")) != agent_id]
     return [*others, node]
+
+
+def _archive_stale_core_nodes(
+    nodes: list[dict[str, Any]],
+    *,
+    current_agent_ids_by_role: dict[str, str],
+) -> list[dict[str, Any]]:
+    now = utc_now_iso()
+    archived: list[dict[str, Any]] = []
+    for item in nodes:
+        if not isinstance(item, dict):
+            continue
+        node = dict(item)
+        role = _core_role_for_node(node)
+        agent_id = _clean_id(node.get("agentId"))
+        current_agent_id = _clean_id(current_agent_ids_by_role.get(role))
+        if (
+            role in PROTECTED_SYSTEM_ROLES
+            and agent_id
+            and current_agent_id
+            and agent_id != current_agent_id
+            and str(node.get("status") or "active").strip() != "archived"
+        ):
+            node["status"] = "archived"
+            node["stale"] = True
+            node["missingAgent"] = get_agent(agent_id, include_archived=True) is None
+            node["archivedAt"] = str(node.get("archivedAt") or now)
+            node["updatedAt"] = now
+            node["archiveReason"] = "duplicate_research_core_role"
+        archived.append(node)
+    return archived
+
+
+def _stale_core_agent_ids(nodes: list[dict[str, Any]], *, current_agent_ids: set[str]) -> set[str]:
+    current_ids = {_clean_id(item) for item in current_agent_ids if _clean_id(item)}
+    dropped_ids: set[str] = set()
+    for item in nodes:
+        if not isinstance(item, dict):
+            continue
+        role = _core_role_for_node(item)
+        agent_id = _clean_id(item.get("agentId"))
+        if role in PROTECTED_SYSTEM_ROLES and agent_id and agent_id not in current_ids:
+            dropped_ids.add(agent_id)
+    return dropped_ids
+
+
+def _drop_stale_core_nodes(nodes: list[dict[str, Any]], *, stale_core_agent_ids: set[str]) -> list[dict[str, Any]]:
+    stale_ids = {_clean_id(item) for item in stale_core_agent_ids if _clean_id(item)}
+    if not stale_ids:
+        return nodes
+    return [
+        item for item in nodes
+        if isinstance(item, dict) and _clean_id(item.get("agentId")) not in stale_ids
+    ]
+
+
+def _drop_edges_for_agents(edges: list[dict[str, Any]], *, agent_ids: set[str]) -> list[dict[str, Any]]:
+    stale_ids = {_clean_id(item) for item in agent_ids if _clean_id(item)}
+    if not stale_ids:
+        return edges
+    return [
+        edge for edge in edges
+        if isinstance(edge, dict)
+        and _clean_id(edge.get("fromAgentId") or edge.get("source")) not in stale_ids
+        and _clean_id(edge.get("toAgentId") or edge.get("target")) not in stale_ids
+    ]
+
+
+def _record_stale_core_pruned_event(stale_core_agent_ids: set[str], *, current_agent_ids: set[str]) -> None:
+    current_ids = {_clean_id(item) for item in current_agent_ids if _clean_id(item)}
+    if stale_core_agent_ids:
+        _record_org_event(
+            "research.organization.stale_core_nodes_pruned",
+            outcome="pruned",
+            level="warning",
+            fields={
+                "staleCoreNodeCount": len(stale_core_agent_ids),
+                "currentCoreAgentIds": sorted(current_ids),
+            },
+        )
+
+
+def _archive_stale_core_edges(
+    edges: list[dict[str, Any]],
+    *,
+    stale_core_agent_ids: set[str],
+) -> list[dict[str, Any]]:
+    if not stale_core_agent_ids:
+        return edges
+    now = utc_now_iso()
+    result: list[dict[str, Any]] = []
+    for item in edges:
+        if not isinstance(item, dict):
+            continue
+        edge = dict(item)
+        from_agent_id = _clean_id(edge.get("fromAgentId") or edge.get("source"))
+        to_agent_id = _clean_id(edge.get("toAgentId") or edge.get("target"))
+        if (
+            (from_agent_id in stale_core_agent_ids or to_agent_id in stale_core_agent_ids)
+            and str(edge.get("status") or "active").strip() != "archived"
+        ):
+            edge["status"] = "archived"
+            edge["stale"] = True
+            edge["archivedAt"] = str(edge.get("archivedAt") or now)
+            edge["updatedAt"] = now
+            edge["archiveReason"] = "stale_research_core_endpoint"
+        result.append(edge)
+    return result
+
+
+def _stale_core_edge_count(edges: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for edge in edges
+        if isinstance(edge, dict) and str(edge.get("archiveReason") or "") == "stale_research_core_endpoint"
+    )
+
+
+def _record_core_repair_event(
+    payload: dict[str, Any],
+    *,
+    newly_archived_core_agent_ids: set[str],
+    newly_archived_core_edge_count: int,
+) -> None:
+    if not newly_archived_core_agent_ids and newly_archived_core_edge_count <= 0:
+        return
+    active_core_ids_by_role = {
+        role: [
+            _clean_id(node.get("agentId"))
+            for node in list(payload.get("agents") or [])
+            if isinstance(node, dict)
+            and _core_role_for_node(node) == role
+            and str(node.get("status") or "active").strip() == "active"
+        ]
+        for role in sorted(PROTECTED_SYSTEM_ROLES)
+    }
+    archived_edge_count = sum(
+        1
+        for edge in list(payload.get("edges") or [])
+        if isinstance(edge, dict) and str(edge.get("archiveReason") or "") == "stale_research_core_endpoint"
+    )
+    _record_org_event(
+        "research.organization.core_repaired",
+        outcome="repaired",
+        level="warning",
+        fields={
+            "newlyArchivedStaleCoreNodeCount": len(newly_archived_core_agent_ids),
+            "newlyArchivedStaleCoreEdgeCount": newly_archived_core_edge_count,
+            "totalArchivedStaleCoreEdgeCount": archived_edge_count,
+            "activeCoreIdsByRole": active_core_ids_by_role,
+        },
+    )
+
+
+def _core_role_for_node(node: dict[str, Any]) -> str:
+    agent = node.get("agent") if isinstance(node.get("agent"), dict) else {}
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    role = str(
+        node.get("role")
+        or metadata.get("systemRole")
+        or metadata.get("researchOrgRole")
+        or ""
+    ).strip()
+    return role if role in PROTECTED_SYSTEM_ROLES else ""
 
 
 def _ensure_core_zone(zones: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -874,6 +1136,10 @@ def _upsert_edge(edges: list[dict[str, Any]], edge: dict[str, Any]) -> list[dict
         None,
     )
     normalized = _edge_to_api({**(edges[existing_index] if existing_index is not None else {}), **edge, "edgeId": edge_id})
+    if normalized["status"] != "archived":
+        normalized["stale"] = False
+        normalized["archiveReason"] = ""
+        normalized["archivedAt"] = ""
     if existing_index is None:
         return [*edges, normalized]
     next_edges = list(edges)
@@ -893,7 +1159,10 @@ def _edge_to_api(edge: dict[str, Any]) -> dict[str, Any]:
         "label": trim_lines(str(edge.get("label") or ""), max_lines=1),
         "communicationPolicy": _normalize_communication_policy(policy),
         "status": str(edge.get("status") or "active").strip() or "active",
+        "stale": bool(edge.get("stale")),
+        "archiveReason": str(edge.get("archiveReason") or ""),
         "createdAt": str(edge.get("createdAt") or now),
+        "archivedAt": str(edge.get("archivedAt") or ""),
         "updatedAt": str(edge.get("updatedAt") or now),
     }
 
@@ -902,6 +1171,14 @@ def _agent_node_to_api(node: dict[str, Any]) -> dict[str, Any]:
     agent_id = _clean_id(node.get("agentId"))
     agent = get_agent(agent_id, include_archived=True) if agent_id else None
     tool_policy = resolve_tool_policy_for_agent(agent_id) if agent_id else {}
+    missing_agent = bool(agent_id and agent is None)
+    node_status = str(node.get("status") or "active").strip() or "active"
+    if node_status == "archived":
+        status = "archived"
+    elif missing_agent:
+        status = "stale"
+    else:
+        status = str((agent or {}).get("status") or node_status)
     return {
         "nodeId": _clean_id(node.get("nodeId")) or agent_id,
         "agentId": agent_id,
@@ -911,7 +1188,10 @@ def _agent_node_to_api(node: dict[str, Any]) -> dict[str, Any]:
         "employeeRank": str(node.get("employeeRank") or ((agent or {}).get("metadata") or {}).get("employeeRank") or "member"),
         "protected": bool(node.get("protected") or ((agent or {}).get("metadata") or {}).get("protected")),
         "zoneId": str(node.get("zoneId") or ""),
-        "status": str((agent or {}).get("status") or node.get("status") or "active"),
+        "status": status,
+        "stale": bool(node.get("stale") or missing_agent or status == "stale"),
+        "missingAgent": missing_agent,
+        "archiveReason": str(node.get("archiveReason") or ""),
         "x": _coerce_int(node.get("x"), 0),
         "y": _coerce_int(node.get("y"), 0),
         "agent": agent,
@@ -935,7 +1215,7 @@ def _agent_node_to_canvas_api(node: dict[str, Any], active_agent: dict[str, Any]
         "employeeRank": str(node.get("employeeRank") or metadata.get("employeeRank") or "member"),
         "protected": bool(node.get("protected") or metadata.get("protected")),
         "zoneId": str(node.get("zoneId") or ""),
-        "status": str(agent.get("status") or node.get("status") or "active"),
+        "status": str(node.get("status") or agent.get("status") or "active"),
         "x": _coerce_int(node.get("x"), 0),
         "y": _coerce_int(node.get("y"), 0),
         "agent": {

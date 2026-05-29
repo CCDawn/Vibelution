@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.20 - 2026-05-29
+
+- Closed archived-Agent execution gaps across edit-resubmit, queued chat workers, chat-room speakers, and ContextEngine context lookup so AgentDirectory active Agents remain the runtime source of truth.
+- Fixed chat-room speaker reservation order so a waiting group speaker reserves the Agent execution slot before expensive context preparation, preventing later direct turns from cutting ahead.
+
 ## 0.4.19 - 2026-05-29
 
 - Tightened AgentDirectory as the Agent availability source: archived or missing Agents now block chat turn scheduling and inbox wake delivery instead of being runnable through stale direct-session references.

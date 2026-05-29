@@ -61,9 +61,16 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
     timings: dict[str, Any] = {}
     normalized_agent_id = str(agent_id or "").strip()
     stage_started_at = _perf_counter()
-    agent = agent_directory_service.get_agent(normalized_agent_id)
+    agent = agent_directory_service.get_agent(normalized_agent_id, include_archived=False)
+    historical_agent = (
+        None
+        if agent
+        else agent_directory_service.get_agent(normalized_agent_id, include_archived=True)
+    )
     timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     if not agent:
+        status = str((historical_agent or {}).get("status") or "").strip().lower()
+        reason = "archived_agent" if status == "archived" else "missing_agent"
         _record_context_event(
             "agent_runtime.resolve_failed",
             outcome="failed",
@@ -72,7 +79,8 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
                 "agentId": normalized_agent_id,
                 "sessionId": str(session_id or "").strip(),
                 "runId": str(run_id or "").strip(),
-                "reason": "missing_agent",
+                "reason": reason,
+                "agentStatus": status,
                 "source": "ContextEngine",
             },
         )
@@ -81,7 +89,8 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
             session_id=session_id,
             run_id=run_id,
             timings={
-                "reason": "missing_agent",
+                "reason": reason,
+                "agentStatus": status,
                 "totalDurationMs": _elapsed_ms(context_started_at),
                 **timings,
             },
