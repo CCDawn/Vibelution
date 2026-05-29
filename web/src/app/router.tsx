@@ -3,10 +3,10 @@ import { createBrowserRouter } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { AgentsRoute } from "../routes/AgentsRoute";
 import { ChatCodingRoute } from "../routes/ChatCodingRoute";
-import { ChatRoomsRoute } from "../routes/ChatRoomsRoute";
 import { ConfigRoute } from "../routes/ConfigRoute";
 import { EvolutionRoute } from "../routes/EvolutionRoute";
 import { GitRoute } from "../routes/GitRoute";
+import { LegacyChatRoomsRedirect } from "../routes/LegacyChatRoomsRedirect";
 import { HomeRedirect } from "../routes/HomeRedirect";
 import { LegacyEvolutionRedirect } from "../routes/LegacyEvolutionRedirect";
 import { LogsRoute } from "../routes/LogsRoute";
@@ -39,11 +39,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "chat-rooms",
-        element: (
-          <WorkbenchDomainRoute domain="chat">
-            <ChatRoomsRoute />
-          </WorkbenchDomainRoute>
-        ),
+        element: <LegacyChatRoomsRedirect />,
       },
       {
         path: "supervised-evolution",
