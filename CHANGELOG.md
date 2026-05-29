@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.21 - 2026-05-29
+
+- Added a Teams inspector task kickoff form that starts the linked Chat/Coding group-room round directly from a selected Team, carrying `source=team_workspace` and `teamId` metadata.
+- Blocks task kickoff until the Team has a linked room, active members, and no busy linked-room round, then refreshes team, chat-room, and conversation caches with an open-group-chat handoff link.
+
 ## 0.4.20 - 2026-05-29
 
 - Closed archived-Agent execution gaps across edit-resubmit, queued chat workers, chat-room speakers, and ContextEngine context lookup so AgentDirectory active Agents remain the runtime source of truth.

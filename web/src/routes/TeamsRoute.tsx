@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Archive, Bot, Link2, Plus, RefreshCw, Save, Send, Trash2, Unlink, Users } from "lucide-react";
+import { AlertTriangle, Archive, Bot, Link2, Play, Plus, RefreshCw, Save, Send, Trash2, Unlink, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -13,7 +13,7 @@ import {
   sendTeamProjectBusMessage,
 } from "../api/projectAgentBus";
 import { queryKeys } from "../api/queryKeys";
-import { AgentConfigWorkspace, Team, TeamCanvasNode, TeamListPayload, TeamOrganizationCanvas } from "../api/types";
+import { AgentConfigWorkspace, ChatRoomDetail, Team, TeamCanvasNode, TeamListPayload, TeamOrganizationCanvas } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { agentDisplayInfo } from "./agentDisplay";
@@ -99,6 +99,7 @@ export function TeamsRoute() {
   const [nodeDraft, setNodeDraft] = useState<NodeDraft>({ label: "", role: "", purpose: "", agentId: "" });
   const [teamMessage, setTeamMessage] = useState("");
   const [teamInterrupt, setTeamInterrupt] = useState(false);
+  const [teamTaskTopic, setTeamTaskTopic] = useState("");
 
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
@@ -236,6 +237,32 @@ export function TeamsRoute() {
     },
   });
 
+  const startTeamRoundMutation = useMutation({
+    mutationFn: (payload: { roomId: string; teamId: string; topic: string; mode: string; purpose: string }) =>
+      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${payload.roomId}/rounds`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: payload.topic,
+          mode: payload.mode,
+          purpose: payload.purpose,
+          config: {
+            source: "team_workspace",
+            teamId: payload.teamId,
+          },
+        }),
+      }),
+    onSuccess: (room, variables) => {
+      setTeamTaskTopic("");
+      queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(room.roomId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.team(variables.teamId) });
+    },
+  });
+
   function saveCanvas(nextCanvas: TeamOrganizationCanvas | null) {
     if (!nextCanvas || saveCanvasMutation.isPending) {
       return;
@@ -356,6 +383,9 @@ export function TeamsRoute() {
   const validation = canvas?.validation;
   const saveLabel = saveCanvasMutation.isPending ? (lang === "zh" ? "保存中" : "Saving") : saveCanvasMutation.isSuccess ? (lang === "zh" ? "已保存" : "Saved") : "";
   const activeTeamMemberCount = selectedTeam?.members.filter((member) => member.agentStatus === "active").length ?? 0;
+  const linkedRoomStatus = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
+  const linkedRoomBusy = linkedRoomStatus === "running" || linkedRoomStatus === "stopping";
+  const canStartTeamRound = Boolean(selectedTeam?.teamId && selectedTeam.linkedChatRoomId && activeTeamMemberCount > 0 && teamTaskTopic.trim() && !linkedRoomBusy);
 
   return (
     <section className={styles.route}>
@@ -573,6 +603,59 @@ export function TeamsRoute() {
                   <span>{lang === "zh" ? "画布校验通过" : "Canvas validation passed"}</span>
                 )}
               </div>
+              <form
+                className={styles.teamTaskForm}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!selectedTeam?.teamId || !selectedTeam.linkedChatRoomId || !teamTaskTopic.trim() || linkedRoomBusy) {
+                    return;
+                  }
+                  startTeamRoundMutation.mutate({
+                    roomId: selectedTeam.linkedChatRoomId,
+                    teamId: selectedTeam.teamId,
+                    topic: teamTaskTopic.trim(),
+                    mode: selectedTeam.linkedChatRoom?.mode || "round_robin",
+                    purpose: selectedTeam.linkedChatRoom?.purpose || "discussion",
+                  });
+                }}
+              >
+                <div className={styles.sectionTitle}>
+                  <strong>{lang === "zh" ? "团队任务" : "Team task"}</strong>
+                  <span>
+                    {selectedTeam?.linkedChatRoomId
+                      ? linkedRoomBusy
+                        ? (lang === "zh" ? "群聊运行中" : "room running")
+                        : (lang === "zh" ? "发送到群聊 round" : "starts a room round")
+                      : (lang === "zh" ? "需要先同步群聊" : "sync room first")}
+                  </span>
+                </div>
+                <textarea
+                  value={teamTaskTopic}
+                  onChange={(event) => setTeamTaskTopic(event.target.value)}
+                  placeholder={lang === "zh" ? "输入团队要协作处理的议题或任务" : "Enter a topic or task for this team"}
+                />
+                <button
+                  type="submit"
+                  disabled={!canStartTeamRound || startTeamRoundMutation.isPending}
+                >
+                  <Play size={14} />
+                  {startTeamRoundMutation.isPending
+                    ? (lang === "zh" ? "启动中" : "Starting")
+                    : (lang === "zh" ? "启动团队讨论" : "Start team round")}
+                </button>
+                {startTeamRoundMutation.data ? (
+                  <div className={styles.messageResult}>
+                    <strong>{startTeamRoundMutation.data.rounds.length}</strong>
+                    <span>{lang === "zh" ? "轮讨论已写入关联群聊" : "rounds now recorded in the linked room"}</span>
+                    <Link to={`/chat?room=${encodeURIComponent(startTeamRoundMutation.data.roomId)}`}>
+                      {lang === "zh" ? "打开群聊" : "Open room"}
+                    </Link>
+                  </div>
+                ) : null}
+                {startTeamRoundMutation.error instanceof Error ? (
+                  <div className={styles.messageError}>{startTeamRoundMutation.error.message}</div>
+                ) : null}
+              </form>
               <form
                 className={styles.teamMessageForm}
                 onSubmit={(event) => {
