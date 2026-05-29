@@ -19,6 +19,18 @@ def test_work_run_store_tracks_active_and_latest_per_kind(tmp_path):
     assert store.load_latest_snapshot("chat_turn")["status"] == "running"
 
 
+def test_work_run_store_lists_snapshots_for_kind(tmp_path):
+    store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
+
+    store.persist_snapshot("chat_turn", {"runId": "chat_1", "status": "completed"})
+    store.persist_snapshot("chat_turn", {"runId": "chat_2", "status": "running"})
+    store.persist_snapshot("self_evolution_run", {"runId": "self_1", "status": "running"})
+
+    snapshots = store.list_snapshots("chat_turn")
+
+    assert [item["runId"] for item in snapshots] == ["chat_1", "chat_2"]
+
+
 def test_work_run_store_rejects_unsafe_kind_and_run_id(tmp_path):
     store = WorkRunStore(root=tmp_path / ".runtime" / "work_runs")
 
