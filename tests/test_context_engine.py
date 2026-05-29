@@ -85,6 +85,54 @@ def test_build_agent_context_collects_isolated_agent_runtime_context(tmp_path, m
     assert "promptTemplateContextMs" in packet.timings
 
 
+def test_build_agent_context_includes_project_memory_coordination_rules_from_agents_md(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    (tmp_path / "AGENTS.md").write_text(
+        "\n".join(
+            [
+                "# Test Rules",
+                "",
+                "## Session-Level Agent Memory Coordination",
+                "",
+                "- Session-level Agents may process project work in parallel.",
+                "- Project memory is a single-writer shared record.",
+                "- AGENTS.md is the default contract for this behavior.",
+                "",
+                "## Unrelated Section",
+                "",
+                "- This line must not enter the runtime context.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="并行处理 Agent",
+        profile_id="primary",
+        primary_mode="chat",
+        direct_session_id="session-parallel-memory",
+    )
+    events = []
+    monkeypatch.setattr(
+        context_engine,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    packet = context_engine.build_agent_context(agent["agentId"], session_id="session-parallel-memory", run_id="turn-1")
+
+    assert "Project Operating Rules" in packet.context_block
+    assert "Session-level Agents may process project work in parallel." in packet.context_block
+    assert "Project memory is a single-writer shared record." in packet.context_block
+    assert "AGENTS.md is the default contract for this behavior." in packet.context_block
+    assert "This line must not enter the runtime context." not in packet.context_block
+    assert "projectRulesContextMs" in packet.timings
+    assert any(
+        item[0][:3] == ("agent_context", "context_engine", "agent_runtime.project_rules_context_loaded")
+        and item[1]["fields"]["section"] == "Session-Level Agent Memory Coordination"
+        for item in events
+    )
+
+
 def test_build_agent_context_includes_research_org_member_and_edge_context(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_tmp_research_org_workspace(tmp_path, monkeypatch)

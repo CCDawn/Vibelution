@@ -121,16 +121,24 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
         run_id=str(run_id or "").strip(),
     )
     timings["promptTemplateContextMs"] = _elapsed_ms(stage_started_at)
-    if prompt_context_block:
-        runtime_context_block = "\n\n".join(
-            part
-            for part in (runtime_context_block, research_org_context_block, prompt_context_block)
-            if str(part or "").strip()
+    stage_started_at = _perf_counter()
+    project_rules_context_block = _build_project_rules_context_block(
+        agent_directory_service.PROJECT_ROOT,
+        agent_id=normalized_agent_id,
+        session_id=str(session_id or "").strip(),
+        run_id=str(run_id or "").strip(),
+    )
+    timings["projectRulesContextMs"] = _elapsed_ms(stage_started_at)
+    runtime_context_block = "\n\n".join(
+        part
+        for part in (
+            runtime_context_block,
+            research_org_context_block,
+            prompt_context_block,
+            project_rules_context_block,
         )
-    elif research_org_context_block:
-        runtime_context_block = "\n\n".join(
-            part for part in (runtime_context_block, research_org_context_block) if str(part or "").strip()
-        )
+        if str(part or "").strip()
+    )
     stage_started_at = _perf_counter()
     memory_policy = agent_directory_service.resolve_memory_policy_for_agent(normalized_agent_id)
     timings["memoryPolicyMs"] = _elapsed_ms(stage_started_at)
@@ -169,6 +177,7 @@ def build_agent_context(agent_id: str, *, session_id: str = "", run_id: str = ""
             "groupContextEventCount": len(packet.group_context_events),
             "inboxMessageCount": len(packet.inbox_messages),
             "researchOrgContextIncluded": bool(research_org_context_block),
+            "projectRulesContextIncluded": bool(project_rules_context_block),
             "source": "ContextEngine",
         },
     )
@@ -427,6 +436,77 @@ def _build_prompt_template_context_block(
         )
         return ""
     return str(result.get("contextBlock") or "").strip()
+
+
+def _build_project_rules_context_block(
+    project_root: Path,
+    *,
+    agent_id: str,
+    session_id: str,
+    run_id: str,
+) -> str:
+    agents_path = Path(project_root) / "AGENTS.md"
+    if not agents_path.exists():
+        return ""
+    try:
+        content = agents_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        _record_context_event(
+            "agent_runtime.project_rules_context_failed",
+            outcome="failed",
+            level="warning",
+            fields={
+                "agentId": agent_id,
+                "sessionId": session_id,
+                "runId": run_id,
+                "sourcePath": str(agents_path),
+                "reason": type(exc).__name__,
+                "source": "ContextEngine",
+            },
+        )
+        return ""
+    section = _extract_markdown_section(content, "Session-Level Agent Memory Coordination")
+    if not section:
+        return ""
+    block = "\n".join(
+        [
+            "## Project Operating Rules",
+            "Source: AGENTS.md#Session-Level Agent Memory Coordination",
+            section,
+        ]
+    ).strip()
+    _record_context_event(
+        "agent_runtime.project_rules_context_loaded",
+        outcome="included",
+        fields={
+            "agentId": agent_id,
+            "sessionId": session_id,
+            "runId": run_id,
+            "sourcePath": str(agents_path),
+            "section": "Session-Level Agent Memory Coordination",
+            "characterCount": len(block),
+            "source": "ContextEngine",
+        },
+    )
+    return block
+
+
+def _extract_markdown_section(content: str, heading: str) -> str:
+    target = f"## {heading}".strip()
+    lines = str(content or "").splitlines()
+    captured: list[str] = []
+    in_section = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            if in_section:
+                break
+            if stripped == target:
+                in_section = True
+            continue
+        if in_section:
+            captured.append(line.rstrip())
+    return "\n".join(captured).strip()
 
 
 def _record_context_event(event_code: str, *, outcome: str, fields: dict[str, Any], level: str = "info") -> None:
