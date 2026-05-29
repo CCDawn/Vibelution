@@ -64,13 +64,13 @@
 .selectionPill {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
+  min-height: 28px;
+  padding: 0 9px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 22%, transparent);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
   color: var(--accent-cool);
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   white-space: nowrap;
 }
 
@@ -82,7 +82,7 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 34px;
+  min-height: 32px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
@@ -97,8 +97,8 @@
 .secondaryButton,
 .previewButton,
 .executeButton {
-  padding: 7px 12px;
-  font-size: 0.82rem;
+  padding: 6px 10px;
+  font-size: 0.8rem;
 }
 
 .iconButton:hover,
@@ -153,7 +153,8 @@
 .workspace {
   display: grid;
   grid-template-columns: minmax(520px, 1fr) minmax(340px, 430px);
-  gap: 16px;
+  align-items: start;
+  gap: 10px;
   min-height: 0;
   padding: var(--route-workspace-padding);
 }
@@ -166,8 +167,9 @@
 
 .inventoryPanel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 14px;
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  gap: 10px;
 }
 
 .panelHeader,
@@ -181,14 +183,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 14px;
+  gap: 8px;
+  padding: 10px;
 }
 
 .panelHeader h2,
 .card h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.94rem;
   font-weight: 760;
 }
 
@@ -196,24 +198,25 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
 }
 
 .itemList {
   display: grid;
   align-content: start;
-  gap: 10px;
-  min-height: 0;
+  gap: 7px;
+  min-height: 96px;
+  max-height: calc(100vh - 260px);
   overflow: auto;
   padding-right: 4px;
 }
 
 .itemRow {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) minmax(128px, 160px);
-  gap: 10px;
+  grid-template-columns: 24px minmax(0, 1fr) minmax(118px, 150px);
+  gap: 8px;
   width: 100%;
-  padding: 13px;
+  padding: 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel-muted);
@@ -228,7 +231,7 @@
 
 .itemRowSelected {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
-  box-shadow: inset 3px 0 0 var(--accent-warm);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-warm) 22%, transparent);
   background: var(--surface-active-neutral);
 }
 
@@ -248,7 +251,7 @@
 }
 
 .itemMain {
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -256,7 +259,7 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .riskBadge {
@@ -291,8 +294,8 @@
 .protectedItem span,
 .pathRow span {
   color: var(--fg-secondary);
-  font-size: 0.82rem;
-  line-height: 1.38;
+  font-size: 0.78rem;
+  line-height: 1.34;
 }
 
 .itemDetail,
@@ -308,15 +311,15 @@
 
 .itemStats {
   align-content: start;
-  gap: 5px;
+  gap: 4px;
   text-align: right;
 }
 
 .actionBar {
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-panel);
@@ -325,31 +328,31 @@
 .sidePanel {
   display: grid;
   align-content: start;
-  gap: 14px;
+  gap: 10px;
   overflow: auto;
 }
 
 .card {
-  padding: 14px;
+  padding: 10px;
 }
 
 .cardTitleRow {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: 6px;
+  margin-bottom: 8px;
   color: var(--fg-primary);
 }
 
 .resultContent {
-  gap: 10px;
+  gap: 8px;
 }
 
 .resultSummary {
   margin: 0;
   color: var(--fg-secondary);
-  font-size: 0.86rem;
-  line-height: 1.45;
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .warningLine {
@@ -376,10 +379,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   cursor: pointer;
   color: var(--fg-primary);
-  font-size: 0.88rem;
+  font-size: 0.84rem;
 }
 
 .resultItem summary em {
@@ -390,8 +393,8 @@
 
 .resultGroups {
   display: grid;
-  gap: 10px;
-  padding: 0 12px 12px;
+  gap: 8px;
+  padding: 0 10px 10px;
 }
 
 .pathGroup {

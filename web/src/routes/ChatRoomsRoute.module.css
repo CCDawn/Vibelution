@@ -10,7 +10,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--route-topbar-gap);
   padding: var(--route-topbar-padding);
   border-bottom: 1px solid var(--border-strong);
   background: var(--surface-header, rgba(22, 25, 28, 0.78));
@@ -20,7 +20,7 @@
 .panelHeader h2,
 .discussionHeader h2 {
   margin: 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
   line-height: 1.15;
 }
 
@@ -62,7 +62,7 @@
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 34px;
+  min-height: 32px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card, rgba(20, 23, 26, 0.72));
@@ -70,7 +70,7 @@
 }
 
 .iconButton {
-  width: 36px;
+  width: 34px;
 }
 
 .primaryButton {
@@ -98,11 +98,7 @@
 .applyButton {
   border-color: color-mix(in srgb, var(--accent-cool) 45%, var(--border-soft));
   color: var(--fg-primary);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent-cool) 30%, var(--surface-card)),
-    color-mix(in srgb, var(--accent-cool) 16%, var(--surface-card))
-  );
+  background: color-mix(in srgb, var(--accent-cool) 16%, var(--surface-card));
 }
 
 .emptyActionButton {
@@ -155,7 +151,9 @@
 
 .summaryCard {
   display: grid;
-  gap: 4px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
   min-width: 0;
   padding: var(--route-summary-padding);
 }
@@ -171,17 +169,17 @@
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
-  font-size: 0.92rem;
+  font-size: 0.86rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(230px, 0.8fr) minmax(360px, 1.6fr) minmax(260px, 0.9fr);
-  gap: 10px;
+  grid-template-columns: minmax(220px, 0.76fr) minmax(380px, 1.7fr) minmax(250px, 0.84fr);
+  gap: 8px;
   min-height: 0;
-  padding: 10px 12px 12px;
+  padding: var(--route-workspace-padding);
 }
 
 .panel,
@@ -202,10 +200,10 @@
 .panelHeader,
 .discussionHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 12px;
+  gap: 8px;
+  padding: 9px 10px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -250,7 +248,7 @@
 
 .panelHeader h2,
 .discussionHeader h2 {
-  font-size: 0.95rem;
+  font-size: 0.9rem;
 }
 
 .roomList,
@@ -258,7 +256,7 @@
 .messageList {
   min-height: 0;
   overflow: auto;
-  padding: 10px;
+  padding: 8px;
 }
 
 .roomButton,
@@ -271,10 +269,10 @@
 
 .roomButton {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   width: 100%;
-  margin-bottom: 8px;
-  padding: 10px;
+  margin-bottom: 6px;
+  padding: 8px;
   color: var(--fg-secondary);
   text-align: left;
 }
@@ -311,8 +309,8 @@
 .modePlanned {
   display: inline-flex;
   align-items: center;
-  min-height: 26px;
-  padding: 0 9px;
+  min-height: 24px;
+  padding: 0 8px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   color: var(--fg-secondary);
@@ -348,8 +346,8 @@
 .topicBar,
 .createBox {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border-soft);
 }
 
@@ -388,8 +386,8 @@
 .roomManageField input,
 .createBox input {
   min-width: 0;
-  min-height: 34px;
-  padding: 0 10px;
+  min-height: 32px;
+  padding: 0 9px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
@@ -399,11 +397,11 @@
 .messageList {
   display: grid;
   align-content: start;
-  gap: 9px;
+  gap: 7px;
 }
 
 .messageCard {
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .messageCard header {
@@ -414,10 +412,10 @@
 }
 
 .messageCard p {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--fg-secondary);
-  font-size: 0.86rem;
-  line-height: 1.5;
+  font-size: 0.82rem;
+  line-height: 1.42;
   overflow-wrap: anywhere;
 }
 
@@ -428,8 +426,8 @@
 .emptyState {
   display: grid;
   place-items: center;
-  gap: 10px;
-  min-height: 220px;
+  gap: 8px;
+  min-height: 160px;
   color: var(--fg-tertiary);
   text-align: center;
 }
@@ -438,9 +436,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
-  gap: 8px;
-  margin-bottom: 8px;
-  padding: 9px 10px;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 8px;
 }
 
 .sessionSelectLine {
@@ -518,8 +516,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   color: var(--fg-secondary);
@@ -546,8 +544,8 @@
   justify-content: center;
   gap: 7px;
   width: 100%;
-  min-height: 34px;
-  margin-bottom: 8px;
+  min-height: 32px;
+  margin-bottom: 6px;
   border: 1px dashed color-mix(in srgb, var(--accent-cool) 45%, var(--border-soft));
   border-radius: 8px;
   color: var(--fg-primary);
@@ -557,8 +555,8 @@
 .modeList {
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  padding: 10px;
+  gap: 6px;
+  padding: 8px;
   border-top: 1px solid var(--border-soft);
 }
 
