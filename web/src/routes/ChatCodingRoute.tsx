@@ -392,6 +392,10 @@ function avatarInitials(agentCode?: string, name?: string, fallback = "AI") {
   return title.slice(0, 2) || fallback;
 }
 
+function isAvailableGroupParticipant(participant: ChatRoomParticipant) {
+  return !participant.agentMissing && participant.enabled !== false;
+}
+
 function sessionToConversationSummary(session: SessionSummary): ConversationSummary {
   return {
     conversationId: session.id,
@@ -1302,6 +1306,11 @@ export function ChatCodingRoute() {
   });
 
   const activeGroupRoom = activeGroupRoomQuery.data;
+  const availableGroupParticipants = useMemo(
+    () => (activeGroupRoom?.participants ?? []).filter(isAvailableGroupParticipant),
+    [activeGroupRoom?.participants],
+  );
+  const availableGroupParticipantCount = availableGroupParticipants.length;
 
   useEffect(() => {
     if (activeSessionId && sessionDetailQuery.data) {
@@ -1666,8 +1675,8 @@ export function ChatCodingRoute() {
   }, [activeGroupRoom?.participants]);
   const groupManageSessionSet = useMemo(() => new Set(groupManageSessionIds), [groupManageSessionIds]);
   const activeGroupParticipantSessionSet = useMemo(
-    () => new Set((activeGroupRoom?.participants ?? []).map((participant) => participant.sessionId)),
-    [activeGroupRoom?.participants],
+    () => new Set(availableGroupParticipants.map((participant) => participant.sessionId)),
+    [availableGroupParticipants],
   );
   useEffect(() => {
     if (!groupPanelActive) {
@@ -1736,7 +1745,7 @@ export function ChatCodingRoute() {
         ? `${projectBusTimeline?.activeAgentCount ?? 0} ${lang === "zh" ? "位 active Agent" : "active agents"} · @全体成员 / @AgentCode`
         : (
           activeGroupRound?.summary
-          || `${activeGroupRoom?.participants?.length ?? 0} ${lang === "zh" ? "位 Agent" : "agents"} · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`
+          || `${availableGroupParticipantCount} ${lang === "zh" ? "位可用 Agent" : "available agents"} · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`
         )
     )
     : "";
@@ -2680,8 +2689,8 @@ export function ChatCodingRoute() {
             </p>
             <div className={styles.resourceSplit}>
               <div className={styles.resourceMetric}>
-                <span>{lang === "zh" ? "成员" : "Members"}</span>
-                <strong>{numberFormatter.format(activeGroupRoom?.participants?.length ?? 0)}</strong>
+                <span>{lang === "zh" ? "可用成员" : "Available"}</span>
+                <strong>{numberFormatter.format(availableGroupParticipantCount)}</strong>
               </div>
               <div className={styles.resourceMetric}>
                 <span>{lang === "zh" ? "调度" : "Mode"}</span>
@@ -3140,7 +3149,7 @@ export function ChatCodingRoute() {
                   </p>
                   <h2>{lang === "zh" ? "项目总群" : "Project bus"}</h2>
                   <span>
-                    {projectBusTimeline?.activeAgentCount ?? (activeGroupRoom?.participants ?? []).length} {lang === "zh" ? "位 active Agent" : "active agents"}
+                    {projectBusTimeline?.activeAgentCount ?? availableGroupParticipantCount} {lang === "zh" ? "位 active Agent" : "active agents"}
                     {" · "}
                     {lang === "zh" ? "观察与投递" : "observe and deliver"}
                   </span>
@@ -3347,7 +3356,7 @@ export function ChatCodingRoute() {
                   </p>
                   <h2>{activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")}</h2>
                   <span>
-                    {(activeGroupRoom?.participants ?? []).length} {lang === "zh" ? "位 Agent" : "agents"}
+                    {availableGroupParticipantCount} {lang === "zh" ? "位可用 Agent" : "available agents"}
                     {" · "}
                     {statusLabel(activeGroupRoom?.status ?? "ready")}
                   </span>
@@ -3630,7 +3639,7 @@ export function ChatCodingRoute() {
           <div className={styles.memberIndexSummary}>
             <UsersRound size={15} />
             <span>
-              {activeGroupRoom?.participants?.length ?? 0} {lang === "zh" ? "位 Agent" : "agents"}
+              {availableGroupParticipantCount} {lang === "zh" ? "位可用 Agent" : "available agents"}
             </span>
             <strong>{statusLabel(activeGroupRoom?.status ?? "ready")}</strong>
           </div>
@@ -3658,11 +3667,12 @@ export function ChatCodingRoute() {
               </div>
               <p className={styles.contextLineCompact}>
                 {lang === "zh"
-                  ? "展开成员查看该 Agent 自己的上下文、心智快照和会话状态。"
-                  : "Expand a member to inspect that agent's context, mental snapshot, and session status."}
+                  ? "只展示可用成员；已归档或断链的历史成员保留在日志里，不在这里打扰。"
+                  : "Only available members are shown here; archived or broken historical members stay in diagnostics."}
               </p>
-              <div className={styles.agentIndexList}>
-                {(activeGroupRoom?.participants ?? []).map((participant: ChatRoomParticipant) => {
+              {availableGroupParticipants.length ? (
+                <div className={styles.agentIndexList}>
+                  {availableGroupParticipants.map((participant: ChatRoomParticipant) => {
                   const expanded = expandedGroupAgentSessionId === participant.sessionId;
                   const participantSession = sessionsById.get(participant.sessionId);
                   const memberDetail = expanded ? expandedGroupAgentDetailQuery.data : undefined;
@@ -3677,9 +3687,7 @@ export function ChatCodingRoute() {
                   const memberMentalSummary = memberMental?.feeling?.trim()
                     || memberMental?.summary?.trim()
                     || (lang === "zh" ? "该 Agent 尚未形成可展示的心智快照。" : "This agent has no visible mental snapshot yet.");
-                  const participantMissingMessage = participant.agentMissing
-                    ? participant.agentStatusMessage || (lang === "zh" ? "缺少有效 Agent，已从群聊调度中停用。" : "Missing valid Agent. This member is disabled for group scheduling.")
-                    : "";
+
                   const participantAgent = participant.agentId ? agentsById.get(participant.agentId) : undefined;
                   const participantDisplay = participantAgentDisplayInfo(participant, participantAgent, lang);
                   const memberUpdated = formatRelativeTime(
@@ -3705,13 +3713,10 @@ export function ChatCodingRoute() {
                             {participantDisplay.functionLabel}
                           </em>
                         </span>
-                        <span className={participant.agentMissing ? styles.agentIndexWarning : styles.agentIndexStatus}>
-                          {participant.agentMissing ? (lang === "zh" ? "缺少 Agent" : "Missing") : statusLabel(participant.status || participantSession?.status || "ready")}
+                        <span className={styles.agentIndexStatus}>
+                          {statusLabel(participant.status || participantSession?.status || "ready")}
                         </span>
                       </button>
-                      {participantMissingMessage ? (
-                        <p className={styles.agentMissingNotice}>{participantMissingMessage}</p>
-                      ) : null}
                       {expanded ? (
                         <div className={styles.agentIndexDetails}>
                           {expandedGroupAgentDetailQuery.isPending ? (
@@ -3759,8 +3764,26 @@ export function ChatCodingRoute() {
                       ) : null}
                     </article>
                   );
-                })}
-              </div>
+                  })}
+                </div>
+              ) : (
+                <div className={styles.agentIndexEmptyState}>
+                  <UsersRound size={24} />
+                  <p>
+                    {lang === "zh"
+                      ? "暂无可用群成员。已失效的历史成员不会在这里显示。"
+                      : "No available group members. Historical unavailable members are hidden here."}
+                  </p>
+                  <button
+                    type="button"
+                    className={styles.agentIndexEmptyAction}
+                    onClick={() => setLeftRailCollapsed(false)}
+                  >
+                    <Plus size={14} />
+                    <span>{lang === "zh" ? "添加群成员" : "Add members"}</span>
+                  </button>
+                </div>
+              )}
             </section>
           ) : (
             <>

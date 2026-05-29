@@ -612,6 +612,49 @@
   overflow-wrap: anywhere;
 }
 
+.agentIndexEmptyState {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  min-height: 150px;
+  padding: 18px 10px;
+  border: 1px dashed color-mix(in srgb, var(--fg-tertiary) 18%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 52%, transparent);
+  color: var(--fg-tertiary);
+  text-align: center;
+}
+
+.agentIndexEmptyState p {
+  max-width: 25ch;
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.agentIndexEmptyAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
+  color: var(--accent-cool-2);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.agentIndexEmptyAction:hover,
+.agentIndexEmptyAction:focus-visible {
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
+  outline: none;
+}
+
 .agentIndexDetails {
   display: grid;
   gap: 7px;
