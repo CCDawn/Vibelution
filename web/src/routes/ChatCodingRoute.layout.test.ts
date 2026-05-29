@@ -289,6 +289,8 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("title={deleteDisabled ? t(\"deleteSessionBusy\") : t(\"deleteSession\")}");
     expect(routeSource).toContain("if (!window.confirm(sessionConfirmMessage))");
     expect(routeSource).toContain("if (!window.confirm(groupConfirmMessage))");
+    expect(routeSource).toContain("[session.id]: t(\"deleteSessionBusy\")");
+    expect(routeSource).toContain("const deleteBusyReason = sessionIsBusy ? t(\"deleteSessionBusy\") : \"\"");
     expect(routeSource.indexOf("window.confirm(sessionConfirmMessage)")).toBeLessThan(
       routeSource.indexOf("deleteSessionMutation.mutate({ sessionId: session.id })"),
     );

@@ -1242,7 +1242,29 @@ def delete_chat_session(session_id: str) -> dict:
         target_agent_id = str(target_conversation.get("agent_id") or target_conversation.get("agentId") or "").strip()
 
         normalized_target = _normalize_conversation(target_conversation) or {}
-        if _is_session_busy_for_delete(conversation_id, normalized_target):
+        target_phase = _conversation_phase(conversation_id, normalized_target)
+        _record_session_delete_event(
+            "requested",
+            session_id=conversation_id,
+            outcome="requested",
+            fields={
+                "phase": target_phase,
+                "agentId": target_agent_id,
+                "messageCount": len(normalize_chat_messages(target_conversation.get("messages") or [])),
+            },
+        )
+        if target_phase in {"running", "stopping"}:
+            _record_session_delete_event(
+                "blocked",
+                session_id=conversation_id,
+                outcome="busy",
+                level="warning",
+                fields={
+                    "reason": "busy",
+                    "phase": target_phase,
+                    "agentId": target_agent_id,
+                },
+            )
             raise SessionBusyError(
                 text_for(
                     lang,
@@ -1288,6 +1310,16 @@ def delete_chat_session(session_id: str) -> dict:
         payload["conversations"] = remaining
         save_chat_state(PROJECT_ROOT, payload)
 
+    _record_session_delete_event(
+        "deleted",
+        session_id=conversation_id,
+        outcome="deleted",
+        fields={
+            "nextActiveSessionId": next_active_id,
+            "agentId": target_agent_id,
+            "remainingCount": len(remaining),
+        },
+    )
     _set_session_running(conversation_id, False)
     _clear_session_turn_control(conversation_id)
     _clear_session_live_output(conversation_id)
@@ -5586,6 +5618,42 @@ def _record_session_turn_lifecycle_event(
             f"runtime scene turn lifecycle log skipped: {type(exc).__name__}: {exc}",
             tag="LOGS",
         )
+
+
+def _record_session_delete_event(
+    phase: str,
+    *,
+    session_id: str,
+    outcome: str,
+    level: str = "info",
+    fields: dict[str, Any] | None = None,
+) -> None:
+    normalized_session_id = str(session_id or "").strip()
+    normalized_phase = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(phase or "event").strip()).strip("._-") or "event"
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            f"session_delete_{normalized_phase}",
+            f"session.delete.{normalized_phase}",
+            level=level,
+            outcome=outcome,
+            message="Session delete lifecycle event.",
+            fields={
+                "sessionId": normalized_session_id,
+                "source": "manual_session_action",
+                **(fields or {}),
+            },
+            child_log_path=f"conversations/{_safe_session_workspace_token(normalized_session_id)}-delete.jsonl",
+            child_log_payload={
+                "session_id": normalized_session_id,
+                "phase": normalized_phase,
+                "outcome": outcome,
+                **(fields or {}),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _record_session_agent_binding_updated_event(

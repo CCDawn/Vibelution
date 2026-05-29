@@ -2936,6 +2936,20 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
         },
     )
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    events = []
+
+    def capture_session_delete_event(component, phase, event_code, **kwargs):
+        if str(event_code).startswith("session.delete."):
+            events.append(
+                {
+                    "component": component,
+                    "phase": phase,
+                    "eventCode": event_code,
+                    **kwargs,
+                }
+            )
+
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", capture_session_delete_event)
 
     response = client.delete("/api/sessions/session-live")
 
@@ -2949,6 +2963,12 @@ def test_delete_session_switches_to_latest_remaining_session(tmp_path, monkeypat
         "session-older",
         "session-newer",
     ]
+    assert [event["eventCode"] for event in events] == [
+        "session.delete.requested",
+        "session.delete.deleted",
+    ]
+    assert events[0]["fields"]["phase"] == "ready"
+    assert events[1]["fields"]["nextActiveSessionId"] == "session-newer"
 
 
 def test_delete_session_keeps_bound_agent_active(tmp_path, monkeypatch):
@@ -2995,6 +3015,20 @@ def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):
 def test_delete_session_rejects_running_turn(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    events = []
+
+    def capture_session_delete_event(component, phase, event_code, **kwargs):
+        if str(event_code).startswith("session.delete."):
+            events.append(
+                {
+                    "component": component,
+                    "phase": phase,
+                    "eventCode": event_code,
+                    **kwargs,
+                }
+            )
+
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", capture_session_delete_event)
 
     session_service._set_session_running("session-live", True)
     try:
@@ -3006,6 +3040,12 @@ def test_delete_session_rejects_running_turn(tmp_path, monkeypatch):
     assert "运行" in response.json()["detail"]
     state = load_chat_state(tmp_path)
     assert [item["conversation_id"] for item in state["conversations"]] == ["session-live"]
+    assert [event["eventCode"] for event in events] == [
+        "session.delete.requested",
+        "session.delete.blocked",
+    ]
+    assert events[0]["fields"]["phase"] == "running"
+    assert events[1]["fields"]["reason"] == "busy"
 
 
 def test_session_detail_uses_live_phase_while_turn_is_running(tmp_path, monkeypatch):
