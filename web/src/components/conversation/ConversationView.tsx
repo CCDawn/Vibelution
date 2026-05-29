@@ -34,6 +34,8 @@ import {
 } from "./conversationOperations";
 import {
   hasResponseBlock,
+  hasThoughtBlock,
+  hasMentalBlock,
   hasUserContent,
 } from "./messageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
@@ -514,6 +516,20 @@ export function ConversationView({
     return key ? t(key) : snapshot?.cognitiveState ?? "";
   }
 
+  function mentalSourceLabel(source: string | undefined) {
+    const value = String(source ?? "").trim().toLowerCase();
+    if (value === "state") {
+      return t("mentalSourceState");
+    }
+    if (value === "diagnosis") {
+      return t("mentalSourceDiagnosis");
+    }
+    if (value === "runtime") {
+      return t("runtime");
+    }
+    return source ?? "";
+  }
+
   function getExpansionState(messageId: string, section: string, defaultExpanded: boolean) {
     if (section === "response") {
       return sectionExpansion[messageId]?.[section] ?? defaultExpanded;
@@ -774,6 +790,127 @@ export function ConversationView({
         </button>
         {expanded ? renderOperationTimeline(operations) : null}
       </section>
+    );
+  }
+
+  function mentalSnapshotPreview(snapshot: MentalStateSnapshot | undefined) {
+    if (!snapshot) {
+      return "";
+    }
+    return compactPreview(
+      [
+        snapshot.feeling,
+        snapshot.summary,
+        snapshot.whisper,
+        snapshot.intervention,
+        snapshot.cognitiveState ? cognitiveStateLabel(snapshot) : "",
+      ].map((item) => String(item ?? "").trim()).find(Boolean) ?? "",
+    );
+  }
+
+  function renderAuxiliaryToggle(
+    messageId: string,
+    section: "thought" | "mental",
+    title: string,
+    preview: string,
+    defaultExpanded: boolean,
+    isRunning: boolean,
+    children: ReactNode,
+  ) {
+    const expanded = getExpansionState(messageId, section, defaultExpanded);
+    const toggleTitle = expanded
+      ? section === "thought" ? t("thoughtProcessVisible") : t("mentalProcessVisible")
+      : section === "thought" ? t("thoughtProcessHidden") : t("mentalProcessHidden");
+    return (
+      <section className={`${styles.auxiliaryBlock} ${styles[`auxiliaryBlock_${section}`]}`}>
+        <button
+          type="button"
+          className={styles.operationSummary}
+          aria-expanded={expanded}
+          onClick={() => toggleSection(messageId, section, defaultExpanded)}
+          title={toggleTitle}
+        >
+          {section === "thought" ? <Sparkles size={17} /> : <BrainCircuit size={17} />}
+          <span>{title}</span>
+          {!expanded && preview ? (
+            <span className={styles.operationSummaryPreview}>{preview}</span>
+          ) : null}
+          {isRunning ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+        </button>
+        {expanded ? children : null}
+      </section>
+    );
+  }
+
+  function renderThoughtPanel(message: ConversationMessage) {
+    if (!hasThoughtBlock(message)) {
+      return null;
+    }
+    const thought = message.thought?.trim() ?? "";
+    return renderAuxiliaryToggle(
+      message.id,
+      "thought",
+      t("thoughtProcess"),
+      compactPreview(thought),
+      Boolean(message.streaming),
+      Boolean(message.streaming),
+      <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_thought}`}>
+        <p className={styles.thoughtText}>{thought}</p>
+      </div>,
+    );
+  }
+
+  function renderMentalPanel(message: ConversationMessage) {
+    if (!hasMentalBlock(message)) {
+      return null;
+    }
+    const snapshot = message.mentalSnapshot;
+    const metaRows = [
+      snapshot?.mood ? { label: t("mentalMood"), value: snapshot.mood } : null,
+      snapshot?.cognitiveState ? { label: t("mentalCognitiveState"), value: cognitiveStateLabel(snapshot) } : null,
+      snapshot?.source ? { label: t("mentalSource"), value: mentalSourceLabel(snapshot.source) } : null,
+      Number.isFinite(snapshot?.confidence) && Number(snapshot?.confidence) > 0
+        ? { label: t("mentalConfidence"), value: `${Math.round(Number(snapshot?.confidence) * 100)}%` }
+        : null,
+      Number(snapshot?.sampleSize) > 0 ? { label: t("mentalSamples"), value: String(snapshot?.sampleSize) } : null,
+      snapshot?.updatedAt ? { label: t("mentalLastUpdated"), value: formatTimestamp(snapshot.updatedAt) } : null,
+    ].filter(Boolean) as Array<{ label: string; value: string }>;
+    const bodyRows = [
+      snapshot?.feeling ? { label: t("mentalFeeling"), value: snapshot.feeling } : null,
+      snapshot?.summary ? { label: t("mentalSummary"), value: snapshot.summary } : null,
+      snapshot?.whisper ? { label: t("mentalWhisper"), value: snapshot.whisper } : null,
+      snapshot?.intervention ? { label: t("mentalIntervention"), value: snapshot.intervention } : null,
+    ].filter(Boolean) as Array<{ label: string; value: string }>;
+    return renderAuxiliaryToggle(
+      message.id,
+      "mental",
+      t("mentalProcess"),
+      mentalSnapshotPreview(snapshot),
+      true,
+      Boolean(message.streaming),
+      <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_mental}`}>
+        {metaRows.length ? (
+          <div className={styles.mentalMetaGrid}>
+            {metaRows.map((row) => (
+              <span key={row.label} className={styles.mentalMetaItem}>
+                <small>{row.label}</small>
+                <strong>{row.value}</strong>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {bodyRows.length ? (
+          <div className={styles.mentalBodyList}>
+            {bodyRows.map((row) => (
+              <p key={row.label} className={styles.mentalBodyRow}>
+                <span>{row.label}</span>
+                {row.value}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      </div>,
     );
   }
 
@@ -1170,8 +1307,8 @@ export function ConversationView({
                   ) : null}
                   {renderUserAttachments(message)}
 
-                  {renderOperationGroup(message.id, "thought", operationGroups.thoughts, Boolean(message.streaming))}
-                  {renderOperationGroup(message.id, "mental", operationGroups.mental, Boolean(message.streaming))}
+                  {renderThoughtPanel(message)}
+                  {renderMentalPanel(message)}
                   {renderOperationGroup(message.id, "tools", operationGroups.tools, Boolean(message.streaming))}
                   {renderImageArtifact(message)}
 

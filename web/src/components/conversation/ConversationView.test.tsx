@@ -551,7 +551,14 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("心智模型");
+    expect(html).toContain("认知态");
+    expect(html).toContain("顺畅");
+    expect(html).toContain("来源");
+    expect(html).toContain("运行时");
+    expect(html).toContain("样本数");
+    expect(html).toContain("摘要");
     expect(html).toContain("tracking state");
+    expect(html).toContain("No tool call happened.");
     expect(html).not.toContain("执行了 1 个操作");
     expect(html).not.toContain("工具调用 1");
   });
@@ -672,7 +679,10 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("心智模型");
-    expect(html.match(/statusSpinner/g)?.length).toBe(2);
+    expect(html).toContain("Following the active turn");
+    expect(html).toContain("tracking state");
+    expect(html).toContain("运行时");
+    expect(html.match(/statusSpinner/g)?.length).toBe(1);
   });
 });
 
