@@ -388,6 +388,24 @@ function image2KeyStateLabel(config: ToolImage2ModelConfig | undefined, lang: st
     : lang === "zh" ? "密钥未配置" : "Key missing";
 }
 
+function image2DiscoveryStateLabel(config: ToolImage2ModelConfig | undefined, lang: string) {
+  const status = config?.selectedModel.modelDiscoveryStatus || "";
+  const count = config?.selectedModel.discoveredModels?.length ?? 0;
+  if (status === "succeeded") {
+    return lang === "zh" ? `已发现 ${count} 个图片模型` : `${count} image models`;
+  }
+  if (status === "empty") {
+    return lang === "zh" ? "未发现图片模型" : "No image models found";
+  }
+  if (status === "failed") {
+    return lang === "zh" ? "发现失败" : "Discovery failed";
+  }
+  if (status === "skipped") {
+    return lang === "zh" ? "无需发现" : "Discovery skipped";
+  }
+  return lang === "zh" ? "未请求发现" : "Discovery not requested";
+}
+
 function scopeLabel(scope: ToolAgentScopeSummary, lang: string, t: Translate) {
   if (scope.id === "main_agent") {
     return t("toolsMainAgent");
@@ -1281,7 +1299,7 @@ export function ToolsRoute() {
                     </label>
                     <div className={styles.image2ModelSummary}>
                       <strong>{image2ModelLabel(image2ModelConfig, lang)}</strong>
-                      <span>{image2ModelConfig?.selectedModel.model || image2ModelConfig?.fallbackModel.model || "-"}</span>
+                      <span>{image2ModelConfig?.selectedModel.resolvedModel || image2ModelConfig?.fallbackModel.resolvedModel || "-"}</span>
                     </div>
                   </div>
                   <div className={styles.policyMeta}>
@@ -1298,12 +1316,27 @@ export function ToolsRoute() {
                       {lang === "zh" ? "密钥状态" : "key"}:{" "}
                       <strong>{image2KeyStateLabel(image2ModelConfig, lang)}</strong>
                     </span>
+                    <span>
+                      {lang === "zh" ? "配置模型" : "configured"}:{" "}
+                      <strong>{image2ModelConfig?.selectedModel.configuredModel || "-"}</strong>
+                    </span>
+                    <span>
+                      {lang === "zh" ? "实际请求" : "request model"}:{" "}
+                      <strong>{image2ModelConfig?.selectedModel.resolvedModel || "-"}</strong>
+                    </span>
+                    <span>
+                      {lang === "zh" ? "远端发现" : "discovery"}:{" "}
+                      <strong>{image2DiscoveryStateLabel(image2ModelConfig, lang)}</strong>
+                    </span>
                   </div>
                   <p>
                     {lang === "zh"
-                      ? "这里只选择设置页模型库中已经配置好的 image 模型；API Key、base_url 和 provider 仍在设置页维护。"
-                      : "This only selects an already configured image model from Settings. API key, base_url, and provider stay in Settings."}
+                      ? "这里只选择设置页模型库条目；生成请求仍使用配置的根 base_url，模型名会在调用前按远端 /v1/models 发现结果解析。"
+                      : "This selects a Settings model entry. Generation still uses the configured root base_url, while the request model is resolved from remote /v1/models when needed."}
                   </p>
+                  {image2ModelConfig?.selectedModel.modelDiscoveryError ? (
+                    <p className={styles.noticeError}>{image2ModelConfig.selectedModel.modelDiscoveryError}</p>
+                  ) : null}
                   {image2ModelsQuery.isError ? (
                     <p className={styles.noticeError}>
                       {image2ModelsQuery.error instanceof Error ? image2ModelsQuery.error.message : String(image2ModelsQuery.error)}

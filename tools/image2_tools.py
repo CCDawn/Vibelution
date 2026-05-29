@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
+from core.infrastructure.image_model_discovery import resolve_image_model
 
 
 IMAGE2_TOOL_NAME = "image2_generate_tool"
@@ -111,6 +112,8 @@ def image2_generate_tool(
         image2_target = _resolve_image2_target(config, profile_id=profile_id)
         model = image2_target["model"]
         model_ref = image2_target["modelRef"]
+        configured_model = image2_target.get("configuredModel", model)
+        model_discovery = image2_target.get("modelDiscovery", {})
         input_image = (
             _load_session_input_image(session_service, session_id, normalized_input_artifact_id)
             if normalized_input_artifact_id
@@ -125,7 +128,10 @@ def image2_generate_tool(
                 "sessionId": session_id,
                 "profileId": profile_id,
                 "model": model,
+                "configuredModel": configured_model,
                 "modelRef": model_ref,
+                "modelDiscoveryStatus": str(model_discovery.get("status") or ""),
+                "discoveredModelCount": len(model_discovery.get("models") or []),
                 "size": normalized_size,
                 "quality": normalized_quality,
                 "outputFormat": normalized_format,
@@ -139,7 +145,9 @@ def image2_generate_tool(
                 "agent_id": agent_id,
                 "profile_id": profile_id,
                 "model": model,
+                "configured_model": configured_model,
                 "model_ref": model_ref,
+                "model_discovery": _image2_discovery_log_payload(model_discovery),
                 "size": normalized_size,
                 "quality": normalized_quality,
                 "output_format": normalized_format,
@@ -175,7 +183,9 @@ def image2_generate_tool(
             "inputArtifactId": normalized_input_artifact_id,
             "hasInputImage": input_image is not None,
             "model": model,
+            "configuredModel": configured_model,
             "modelRef": model_ref,
+            "modelDiscovery": _image2_discovery_log_payload(model_discovery),
             "size": normalized_size,
             "quality": normalized_quality,
             "outputFormat": normalized_format,
@@ -202,7 +212,9 @@ def image2_generate_tool(
             "agentId": agent_id,
             "profileId": profile_id,
             "model": model,
+            "configuredModel": configured_model,
             "modelRef": model_ref,
+            "modelDiscovery": _image2_discovery_log_payload(model_discovery),
             "size": normalized_size,
             "quality": normalized_quality,
             "outputFormat": normalized_format,
@@ -225,7 +237,10 @@ def image2_generate_tool(
                 "sessionId": session_id,
                 "profileId": profile_id,
                 "model": model,
+                "configuredModel": configured_model,
                 "modelRef": model_ref,
+                "modelDiscoveryStatus": str(model_discovery.get("status") or ""),
+                "discoveredModelCount": len(model_discovery.get("models") or []),
                 "size": normalized_size,
                 "quality": normalized_quality,
                 "outputFormat": normalized_format,
@@ -242,7 +257,9 @@ def image2_generate_tool(
                 "agent_id": agent_id,
                 "profile_id": profile_id,
                 "model": model,
+                "configured_model": configured_model,
                 "model_ref": model_ref,
+                "model_discovery": _image2_discovery_log_payload(model_discovery),
                 "artifact_id": artifact["artifactId"],
                 "artifact_path": artifact["artifactPath"],
                 "provider_response_id": metadata["providerResponseId"],
@@ -336,7 +353,7 @@ def _resolve_image2_model() -> str:
         return DEFAULT_IMAGE2_MODEL
 
 
-def _resolve_image2_target(config: Any, *, profile_id: str) -> dict[str, str]:
+def _resolve_image2_target(config: Any, *, profile_id: str) -> dict[str, Any]:
     model_ref = _configured_image2_model_ref(config)
     if model_ref:
         item = _model_library_item(config, model_ref)
@@ -345,9 +362,35 @@ def _resolve_image2_target(config: Any, *, profile_id: str) -> dict[str, str]:
         model = str(item.get("model") or "").strip()
         if not model:
             raise RuntimeError(f"全局 image2 模型引用缺少模型名：{model_ref}。")
-        return {"model": model, "modelRef": model_ref}
+        return _with_resolved_image2_model(config, profile_id=profile_id, model_ref=model_ref, configured_model=model)
 
-    return {"model": _resolve_image2_model(), "modelRef": ""}
+    return _with_resolved_image2_model(
+        config,
+        profile_id=profile_id,
+        model_ref="",
+        configured_model=_resolve_image2_model(),
+    )
+
+
+def _with_resolved_image2_model(config: Any, *, profile_id: str, model_ref: str, configured_model: str) -> dict[str, Any]:
+    binding = _resolve_image2_request_binding(config, profile_id, model_ref)
+    provider = binding["provider"]
+    api_key = str(binding.get("apiKey") or "")
+    base_url = _image2_provider_base_url(provider)
+    headers = _image2_request_headers(provider, api_key=api_key, content_type="")
+    resolved = resolve_image_model(
+        configured_model=configured_model,
+        base_url=base_url,
+        api_key=api_key,
+        headers=headers,
+        timeout=min(10, max(3, int(binding.get("timeout") or 8))),
+    )
+    return {
+        "model": str(resolved.get("model") or configured_model).strip() or configured_model,
+        "configuredModel": str(resolved.get("configuredModel") or configured_model).strip() or configured_model,
+        "modelRef": model_ref,
+        "modelDiscovery": resolved.get("discovery") if isinstance(resolved.get("discovery"), dict) else {},
+    }
 
 
 def _configured_image2_model_ref(config: Any) -> str:
@@ -413,6 +456,25 @@ def _resolve_image2_request_binding(config: Any, profile_id: str, model_ref: str
     }
 
 
+def _image2_provider_base_url(provider: Any) -> str:
+    base_url = str(getattr(provider, "base_url", "") or "").strip()
+    if not base_url and str(getattr(provider, "kind", "") or "").strip().lower() == "openai":
+        return "https://api.openai.com/v1"
+    return base_url
+
+
+def _image2_request_headers(provider: Any, *, api_key: str, content_type: str = "") -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    extra_headers = getattr(provider, "extra_headers", None)
+    if isinstance(extra_headers, dict):
+        headers.update({str(key): str(value) for key, value in extra_headers.items() if str(key).strip()})
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
+
+
 def _load_session_input_image(session_service: Any, session_id: str, artifact_id: str) -> dict[str, Any]:
     attachment = session_service.resolve_session_image_attachment_data_url(session_id, artifact_id)
     data_url = str(attachment.get("dataUrl") or "").strip()
@@ -458,21 +520,13 @@ def _request_image2_generation(
     except Exception as exc:  # pragma: no cover
         raise RuntimeError("requests 未安装，无法调用 image2 服务。") from exc
 
-    base_url = str(getattr(provider, "base_url", "") or "").strip()
-    if not base_url and str(getattr(provider, "kind", "") or "").strip().lower() == "openai":
-        base_url = "https://api.openai.com/v1"
+    base_url = _image2_provider_base_url(provider)
     if not base_url:
         raise RuntimeError("当前 Agent 的模型配置没有 base_url，无法调用 image2 服务。")
 
-    headers = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    extra_headers = getattr(provider, "extra_headers", None)
-    if isinstance(extra_headers, dict):
-        headers.update({str(key): str(value) for key, value in extra_headers.items() if str(key).strip()})
-
     timeout = max(30, int(binding.get("timeout") or 60))
     if input_image:
+        headers = _image2_request_headers(provider, api_key=api_key)
         fields = {
             "model": model,
             "prompt": prompt,
@@ -498,7 +552,7 @@ def _request_image2_generation(
             timeout=timeout,
         )
     else:
-        headers = {**headers, "Content-Type": "application/json"}
+        headers = _image2_request_headers(provider, api_key=api_key, content_type="application/json")
         body = {
             "model": model,
             "prompt": prompt,
@@ -645,6 +699,17 @@ def _record_image2_event(
         )
     except Exception:
         return
+
+
+def _image2_discovery_log_payload(discovery: Any) -> dict[str, Any]:
+    payload = discovery if isinstance(discovery, dict) else {}
+    return {
+        "status": str(payload.get("status") or ""),
+        "url": str(payload.get("url") or ""),
+        "selected_model": str(payload.get("selectedModel") or ""),
+        "model_count": len(payload.get("models") or []),
+        "error": trim_lines(str(payload.get("error") or ""), max_lines=2)[:300],
+    }
 
 
 def _safe_log_token(value: str) -> str:
