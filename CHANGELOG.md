@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.26 - 2026-05-29
+
+- Simplified Chat/Coding auxiliary message rendering: “思考过程” and “心智模型” now render as compact dedicated panels instead of duplicated operation-timeline rows.
+- Expanded the mental model panel so mood, cognitive state, source, confidence, samples, timestamp, feeling, summary, whisper, and intervention can be inspected from the conversation itself.
+
 ## 0.4.25 - 2026-05-29
 
 - Fixed Chat/Coding thought visibility: captured assistant `thought` text now appears as a folded summary on the “思考过程” row, and the same text is available as the thought operation detail instead of being stored but visually empty.
