@@ -454,6 +454,13 @@ def test_build_agent_context_includes_research_org_member_and_edge_context(tmp_p
     assert f"edge-{ceo['agentId']}-{steward['agentId']}" in packet.context_block
     assert "allowedTypes=" in packet.context_block
     assert "Use AgentId or AgentCode with agent_message_tool" in packet.context_block
+    assert "Organization Governance Protocol:" in packet.context_block
+    assert "Organization Advisor can propose new Agents" in packet.context_block
+    assert "Capability Steward manages prompt/tool/memory policy recommendations" in packet.context_block
+    assert "Organization Capability Roster:" in packet.context_block
+    assert "proposalActions=propose_create_agent" in packet.context_block
+    assert "Team Onboarding Context:" in packet.context_block
+    assert "You may treat other members' roster entries as their responsibilities, not as tools you can call." in packet.context_block
 
 
 def test_build_agent_context_filters_research_org_context_to_connected_subgraph(tmp_path, monkeypatch):
@@ -490,6 +497,55 @@ def test_build_agent_context_filters_research_org_context_to_connected_subgraph(
     assert ceo["agentId"] in packet.context_block
     assert advisor["agentId"] in packet.context_block
     assert f"agentId={disconnected['agentId']} " not in packet.context_block
+
+
+def test_created_research_agent_context_includes_role_contract_and_escalation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+
+    proposal = research_organization_service.create_research_org_proposal(
+        {
+            "riskLevel": "medium",
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "知识库管理员",
+                    "role": "research_knowledge_steward",
+                    "roleKey": "research_knowledge_steward",
+                    "promptTemplateId": "prompt-research-broad",
+                    "responsibilities": [
+                        "Maintains research database schemas and memory cleanup queues.",
+                        "Reports storage risks before changing shared knowledge.",
+                    ],
+                    "allowedTools": ["agent_message_tool", "research_knowledge_query_tool"],
+                    "readSharedGroups": ["project", "research", "agent_config"],
+                    "writeSharedGroups": ["research"],
+                    "communicationTargets": ["CEO", "Capability Steward"],
+                }
+            ],
+        }
+    )
+    applied = research_organization_service.apply_research_org_proposal(proposal["proposal"]["proposalId"])
+    created_agent_id = applied["results"][0]["agentId"]
+
+    packet = context_engine.build_agent_context(
+        created_agent_id,
+        session_id=agent_directory_service.get_agent(created_agent_id)["directSessionId"],
+        run_id="turn-created-agent",
+    )
+
+    created_agent = agent_directory_service.get_agent(created_agent_id)
+    role_contract = created_agent["metadata"]["roleContract"]
+    assert role_contract["teamId"] == "research-team"
+    assert role_contract["role"] == "research_knowledge_steward"
+    assert role_contract["onboardingRequired"] is True
+    assert role_contract["allowedTools"] == ["agent_message_tool", "research_knowledge_query_tool"]
+    assert "Team Onboarding Context:" in packet.context_block
+    assert "Your role: research_knowledge_steward" in packet.context_block
+    assert "Maintains research database schemas and memory cleanup queues." in packet.context_block
+    assert "Escalation path: CEO -> Organization Advisor -> Capability Steward -> User gate" in packet.context_block
+    assert "Do not expand your own tools" in packet.context_block
+    assert "Organization Capability Roster:" in packet.context_block
 
 
 def test_build_agent_context_returns_empty_packet_for_missing_agent(tmp_path, monkeypatch):
