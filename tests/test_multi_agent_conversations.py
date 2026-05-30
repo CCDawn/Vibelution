@@ -1125,6 +1125,75 @@ def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp
     assert pending[0]["metadata"]["researchOrgIntent"] == "tool_policy"
 
 
+def test_agent_message_tool_blocks_research_core_message_without_intent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    org = research_organization_service.get_research_organization()
+    ceo = next(node for node in org["agents"] if node["role"] == "ceo")
+    steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
+
+    with agent_directory_service.active_agent_runtime(ceo["agentId"], session_id=ceo["agent"]["directSessionId"]):
+        result, action = ToolExecutor().execute(
+            "agent_message_tool",
+            {
+                "target_agent": steward["agent"]["agentCode"],
+                "content": "请审查数据库试水团队的工具权限。",
+                "summary": "能力权限审查",
+                "wake_target": True,
+                "metadata_json": json.dumps(
+                    {
+                        "researchOrgMessageType": "task",
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["ok"] is False
+    assert payload["status"] == "blocked"
+    assert payload["route"] == "research_org"
+    assert payload["reason"] == "research_org_intent_required"
+    assert payload["wakeStatus"] == "blocked"
+    assert "researchOrgIntent" in payload["message"]
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(steward["agentId"], status="pending") == []
+
+
+def test_research_org_report_intent_forces_mailbox_only_even_when_wake_requested(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    org = research_organization_service.get_research_organization()
+    steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
+    ceo = next(node for node in org["agents"] if node["role"] == "ceo")
+
+    result = research_organization_service.send_research_org_message(
+        {
+            "sourceType": "agent",
+            "sourceAgentId": steward["agentId"],
+            "sourceSessionId": steward["agent"]["directSessionId"],
+            "targetAgentId": ceo["agentId"],
+            "messageType": "report",
+            "intent": "status_report",
+            "content": "知识库权限审查已完成，暂无需 CEO 立即处理。",
+            "summary": "知识库权限审查状态",
+            "wakeTarget": True,
+            "createdBy": "agent_tool",
+        }
+    )
+
+    message = result["message"]
+    delivery = message["deliveries"][0]
+    assert message["intent"] == "status_report"
+    assert message["wakeTarget"] is False
+    assert delivery["allowed"] is True
+    assert delivery["wakeRequested"] is False
+    assert delivery["wakeStatus"] == "not_requested"
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(ceo["agentId"], status="pending")
+    assert [item["messageId"] for item in pending] == [delivery["inboxMessageId"]]
+    assert pending[0]["metadata"]["researchOrgIntent"] == "status_report"
+
+
 def test_agent_message_tool_blocks_research_core_messages_without_allowed_policy(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _use_tmp_research_org_workspace(tmp_path, monkeypatch)
