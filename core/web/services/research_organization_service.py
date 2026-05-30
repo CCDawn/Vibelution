@@ -49,6 +49,28 @@ CAPABILITY_STEWARD_TOOLS = [
     "research_knowledge_query_tool",
 ]
 DEFAULT_CREATED_AGENT_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
+ROLE_GOVERNANCE_BOUNDARIES = {
+    "ceo": {
+        "authority": "decides research priorities, delegates work, and may approve organization recommendations",
+        "must_not": "must not apply high-risk organization changes without the user gate",
+        "proposal_actions": ["approve_recommendation", "request_create_agent", "request_permission_change", "request_edge_change"],
+    },
+    "organization_advisor": {
+        "authority": "designs organization structure, role boundaries, communication edges, and staffing changes",
+        "must_not": "must not directly apply new Agent creation, archives, or permission expansion",
+        "proposal_actions": ["propose_create_agent", "propose_archive_agent", "propose_permission_change", "propose_edge_change"],
+    },
+    "capability_steward": {
+        "authority": "audits prompt, tool, and memory policy boundaries for each Agent",
+        "must_not": "must not grant high-risk tools or rewrite core roles without CEO/user approval",
+        "proposal_actions": ["propose_prompt_policy", "propose_tool_policy", "propose_memory_policy", "report_capability_gap"],
+    },
+    "research_specialist": {
+        "authority": "executes the specific research or engineering responsibility assigned in its role contract",
+        "must_not": "must not expand its own team membership, tools, memory writes, or communication edges",
+        "proposal_actions": ["report_gap", "request_help", "request_permission_review"],
+    },
+}
 RANK_WEIGHTS = {
     "ceo": 100,
     "advisor": 80,
@@ -143,10 +165,17 @@ def build_research_organization_context_block(agent_id: str, *, limit: int = 6) 
         "## Research Organization Context",
         "This is a read-only snapshot of your current research organization membership and communication graph.",
         "Use AgentId or AgentCode with agent_message_tool when contacting an Agent. Communication still follows edge policy, supervision policy, and wake rules.",
+        "Organization Governance Protocol:",
+        "- CEO decides priorities and may approve recommendations; high-risk changes still require the user gate before application.",
+        "- Organization Advisor can propose new Agents, archives, permission changes, and communication edges, but does not directly apply them.",
+        "- Capability Steward manages prompt/tool/memory policy recommendations and audits least-privilege boundaries; it does not grant hidden tools by itself.",
+        "- Created specialist Agents must follow their role contract and request changes through CEO/Advisor/Capability Steward instead of self-expanding.",
         "Members:",
     ]
     for member in active_agents[:bounded_limit]:
         lines.extend(_format_research_org_context_member_lines(member, self_agent_id=normalized_agent_id))
+    lines.extend(_format_organization_capability_roster(active_agents[:bounded_limit], self_agent_id=normalized_agent_id))
+    lines.extend(_format_team_onboarding_context(agents_by_id.get(normalized_agent_id, {})))
     if outbound_edges:
         lines.append("Directly reachable from you:")
         for edge in outbound_edges[:bounded_limit]:
@@ -1567,19 +1596,49 @@ def _apply_create_agent_action(graph: dict[str, Any], action: dict[str, Any]) ->
         raise ResearchOrganizationError("Failed to create Agent for organization proposal.")
     employee_rank = str(action.get("employeeRank") or "specialist").strip() or "specialist"
     allowed_tools = _normalize_allowed_tools(action.get("allowedTools") or DEFAULT_CREATED_AGENT_TOOLS)
+    research_role = str(action.get("role") or "research_specialist").strip() or "research_specialist"
+    role_key = str(action.get("roleKey") or research_role).strip() or research_role
+    prompt_template_id = str(action.get("promptTemplateId") or "").strip()
+    responsibilities = _normalize_contract_lines(action.get("responsibilities") or action.get("deliverables") or [])
+    forbidden = _normalize_contract_lines(
+        action.get("forbidden")
+        or [
+            "Do not expand your own tools, memory writes, team membership, or communication edges.",
+            "Do not claim direct organization-change authority; request CEO/Advisor/Capability Steward review.",
+        ]
+    )
     metadata = {
         **(action.get("metadata") if isinstance(action.get("metadata"), dict) else {}),
-        "researchOrgRole": str(action.get("role") or "research_specialist").strip() or "research_specialist",
+        "researchOrgRole": research_role,
         "employeeRank": employee_rank,
         "protected": False,
+        "roleContract": {
+            "teamId": str(action.get("teamId") or "research-team").strip() or "research-team",
+            "role": research_role,
+            "roleKey": role_key,
+            "promptTemplateId": prompt_template_id,
+            "reportTo": str(action.get("reportTo") or "CEO").strip() or "CEO",
+            "responsibilities": responsibilities,
+            "forbidden": forbidden,
+            "allowedTools": allowed_tools,
+            "readSharedGroups": _normalize_allowed_tools(action.get("readSharedGroups") or ["project", "research"]),
+            "writeSharedGroups": _normalize_allowed_tools(action.get("writeSharedGroups") or []),
+            "communicationTargets": _normalize_contract_lines(action.get("communicationTargets") or ["CEO", "Organization Advisor", "Capability Steward"]),
+            "escalationPath": str(action.get("escalationPath") or "CEO -> Organization Advisor -> Capability Steward -> User gate").strip(),
+            "onboardingRequired": True,
+        },
     }
     agent = update_agent_instance(
         agent_id,
         primary_mode=str(action.get("primaryMode") or "research").strip() or "research",
-        role_key=str(action.get("roleKey") or metadata["researchOrgRole"]).strip() or metadata["researchOrgRole"],
-        prompt_template_id=str(action.get("promptTemplateId") or "").strip(),
+        role_key=role_key,
+        prompt_template_id=prompt_template_id,
         metadata=metadata,
         tool_policy=_explicit_tool_policy_payload(allowed_tools, preferred_tools=["agent_message_tool"]),
+        memory_policy={
+            "readSharedGroups": metadata["roleContract"]["readSharedGroups"],
+            "writeSharedGroups": metadata["roleContract"]["writeSharedGroups"],
+        },
     )
     nodes = graph.get("agents") or []
     graph["agents"] = _upsert_agent_node(
@@ -1758,6 +1817,77 @@ def _format_research_org_context_member_lines(member: dict[str, Any], *, self_ag
     return lines
 
 
+def _format_organization_capability_roster(members: list[dict[str, Any]], *, self_agent_id: str) -> list[str]:
+    lines = ["Organization Capability Roster:"]
+    for member in members:
+        agent_id = _clean_id(member.get("agentId"))
+        agent = member.get("agent") if isinstance(member.get("agent"), dict) else {}
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        role = _clean_id(member.get("role") or metadata.get("researchOrgRole") or metadata.get("systemRole"))
+        boundary = _role_governance_boundary(role)
+        code = _clean_id(member.get("agentCode") or agent.get("agentCode")) or agent_id
+        name = _clean_id(member.get("displayName") or agent.get("displayName"))
+        own = " (you)" if agent_id == self_agent_id else ""
+        proposal_actions = ", ".join(boundary.get("proposal_actions") or [])
+        allowed_tools = ", ".join(
+            _normalize_allowed_tools(
+                (member.get("toolPolicy") if isinstance(member.get("toolPolicy"), dict) else {}).get("allowedTools")
+                or (agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}).get("allowedTools")
+                or []
+            )[:8]
+        ) or "none"
+        lines.append(
+            f"- {code} · {name}{own}: role={role or 'research_specialist'} "
+            f"authority={boundary['authority']} proposalActions={proposal_actions} visibleTools={allowed_tools}"
+        )
+        lines.append(f"  boundary: {boundary['must_not']}")
+    return lines
+
+
+def _format_team_onboarding_context(member: dict[str, Any]) -> list[str]:
+    agent_id = _clean_id(member.get("agentId"))
+    if not agent_id:
+        return []
+    agent = member.get("agent") if isinstance(member.get("agent"), dict) else {}
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    role_contract = metadata.get("roleContract") if isinstance(metadata.get("roleContract"), dict) else {}
+    role = _clean_id(member.get("role") or metadata.get("researchOrgRole") or metadata.get("systemRole"))
+    boundary = _role_governance_boundary(role)
+    lines = [
+        "Team Onboarding Context:",
+        f"- Your teamId: {role_contract.get('teamId') or 'research-team'}",
+        f"- Your role: {role_contract.get('role') or role or 'research_specialist'}",
+        f"- Your reportTo: {role_contract.get('reportTo') or 'CEO'}",
+        "- Before first execution or after role changes, self-check: identity, responsibility boundary, visible tools, memory scope, communication targets, and escalation path.",
+        f"- If blocked: report the gap instead of inventing tools or changing your own permissions. Escalation path: {role_contract.get('escalationPath') or 'CEO -> Organization Advisor -> Capability Steward -> User gate'}.",
+        f"- You may treat other members' roster entries as their responsibilities, not as tools you can call. Your own boundary: {boundary['must_not']}",
+    ]
+    responsibilities = [
+        trim_lines(str(item or ""), max_lines=1)
+        for item in list(role_contract.get("responsibilities") or metadata.get("responsibilities") or [])[:5]
+        if str(item or "").strip()
+    ]
+    if responsibilities:
+        lines.append(f"- Your responsibilities: {'; '.join(responsibilities)}")
+    forbidden = [
+        trim_lines(str(item or ""), max_lines=1)
+        for item in list(role_contract.get("forbidden") or [])[:5]
+        if str(item or "").strip()
+    ]
+    if forbidden:
+        lines.append(f"- Forbidden without approval: {'; '.join(forbidden)}")
+    return lines
+
+
+def _role_governance_boundary(role: str) -> dict[str, Any]:
+    normalized = _clean_id(role) or "research_specialist"
+    if normalized in ROLE_GOVERNANCE_BOUNDARIES:
+        return ROLE_GOVERNANCE_BOUNDARIES[normalized]
+    if normalized.startswith("research_") and normalized != "research_ceo":
+        return ROLE_GOVERNANCE_BOUNDARIES["research_specialist"]
+    return ROLE_GOVERNANCE_BOUNDARIES["research_specialist"]
+
+
 def _format_research_org_context_edge_line(edge: dict[str, Any], *, target: dict[str, Any], direction: str) -> str:
     agent = target.get("agent") if isinstance(target.get("agent"), dict) else {}
     code = _clean_id(target.get("agentCode") or agent.get("agentCode"))
@@ -1803,6 +1933,18 @@ def _normalize_delivery_mode(value: Any) -> str:
 def _normalize_allowed_tools(values: Any) -> list[str]:
     items = [str(item or "").strip() for item in list(values or []) if str(item or "").strip()]
     return list(dict.fromkeys(items))
+
+
+def _normalize_contract_lines(values: Any) -> list[str]:
+    if isinstance(values, str):
+        raw_items = [values]
+    else:
+        raw_items = list(values or [])
+    return [
+        trim_lines(str(item or ""), max_lines=1)
+        for item in raw_items
+        if str(item or "").strip()
+    ][:12]
 
 
 def _explicit_tool_policy_payload(allowed_tools: list[str], *, preferred_tools: list[str] | None = None) -> dict[str, Any]:
