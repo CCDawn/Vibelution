@@ -34,6 +34,37 @@ MAX_ORG_MESSAGES = 200
 MAX_AUDIT_EVENTS = 500
 MESSAGE_TYPES = {"notice", "request", "task", "report", "escalation", "decision"}
 DELIVERY_MODES = {"private", "broadcast", "zone"}
+RESEARCH_COMMUNICATION_INTENTS = {
+    "research_goal",
+    "task_assignment",
+    "evidence_request",
+    "knowledge_update",
+    "validation_plan",
+    "permission_review",
+    "organization_design",
+    "decision_request",
+    "risk_escalation",
+    "status_report",
+    "final_report",
+    "capability_report",
+    "capability_policy",
+    "capability_design",
+    "prompt_policy",
+    "tool_policy",
+    "memory_policy",
+    "role_setup",
+    "proposal",
+    "report",
+    "risk",
+    "organize",
+    "delegate",
+    "review",
+    "approve",
+    "capability_plan",
+    "policy_update",
+}
+IMMEDIATE_WAKE_INTENTS = {"decision_request", "risk_escalation"}
+MAILBOX_ONLY_INTENTS = {"status_report", "knowledge_update", "final_report", "capability_report", "report"}
 PROTECTED_SYSTEM_ROLES = {"ceo", "organization_advisor", "capability_steward"}
 HIGH_RISK_ACTIONS = {"create_agent", "archive_agent", "update_tool_policy", "expand_tool_permissions"}
 CEO_AGENT_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
@@ -170,6 +201,12 @@ def build_research_organization_context_block(agent_id: str, *, limit: int = 6) 
         "- Organization Advisor can propose new Agents, archives, permission changes, and communication edges, but does not directly apply them.",
         "- Capability Steward manages prompt/tool/memory policy recommendations and audits least-privilege boundaries; it does not grant hidden tools by itself.",
         "- Created specialist Agents must follow their role contract and request changes through CEO/Advisor/Capability Steward instead of self-expanding.",
+        "Research Communication Protocol:",
+        "- Every research_org message from an Agent must include metadata_json.researchOrgIntent; empty intent is blocked so messages stay routable.",
+        "- Use only the relevant recipient; do not broadcast or use the group room for routine task handoff, evidence requests, knowledge updates, or permission reviews.",
+        "- Reply format: Conclusion; Evidence; Risk; Decision needed; Next step. Do not send receipt-only acknowledgements.",
+        "- Wake policy by intent: decision_request/risk_escalation wake immediately; status_report/knowledge_update/final_report/capability_report/report stay mailbox-only; task/evidence/validation/permission/organization requests wake only when the edge policy allows it.",
+        f"- Standard intents: {', '.join(sorted(RESEARCH_COMMUNICATION_INTENTS))}.",
         "Members:",
     ]
     for member in active_agents[:bounded_limit]:
@@ -225,7 +262,9 @@ def send_research_org_message(payload: dict[str, Any]) -> dict[str, Any]:
     content = trim_lines(str(payload.get("content") or ""), max_lines=30).strip()
     if not content:
         raise ResearchOrganizationError("Research organization message content is required.")
-    intent = trim_lines(str(payload.get("intent") or ""), max_lines=1).strip()
+    intent = _normalize_research_org_intent(payload.get("intent"))
+    if source_type == "agent" and not intent:
+        raise ResearchOrganizationError("Research organization Agent messages require a researchOrgIntent.")
     recipients = _resolve_message_recipients(graph, payload, delivery_mode, source_agent_id)
     if not recipients:
         raise ResearchOrganizationError("Research organization message target is required.")
@@ -247,7 +286,7 @@ def send_research_org_message(payload: dict[str, Any]) -> dict[str, Any]:
         "summary": trim_lines(str(payload.get("summary") or content), max_lines=4),
         "threadId": _clean_id(payload.get("threadId")) or message_id,
         "humanOverride": human_override,
-        "wakeTarget": bool(payload.get("wakeTarget", source_type == "user")),
+        "wakeTarget": _coerce_wake_target(payload, source_type=source_type, intent=intent),
         "createdBy": str(payload.get("createdBy") or source_type).strip() or source_type,
         "createdAt": now,
         "deliveries": [],
@@ -1102,7 +1141,16 @@ def _ensure_core_edges(
             "label": "CEO 下达组织调整任务",
             "communicationPolicy": {
                 "allowedMessageTypes": ["notice", "request", "task", "decision"],
-                "allowedIntents": ["organize", "delegate", "review", "approve", "research_goal"],
+                "allowedIntents": [
+                    "organize",
+                    "delegate",
+                    "review",
+                    "approve",
+                    "research_goal",
+                    "task_assignment",
+                    "organization_design",
+                    "decision_request",
+                ],
                 "wakeStrategy": "immediate",
                 "maxForwardDepth": 2,
             },
@@ -1118,7 +1166,16 @@ def _ensure_core_edges(
             "label": "CEO 请求能力策略",
             "communicationPolicy": {
                 "allowedMessageTypes": ["notice", "request", "task", "decision"],
-                "allowedIntents": ["capability_policy", "prompt_policy", "tool_policy", "memory_policy", "research_goal"],
+                "allowedIntents": [
+                    "capability_policy",
+                    "prompt_policy",
+                    "tool_policy",
+                    "memory_policy",
+                    "research_goal",
+                    "permission_review",
+                    "task_assignment",
+                    "decision_request",
+                ],
                 "wakeStrategy": "immediate",
                 "maxForwardDepth": 2,
             },
@@ -1134,7 +1191,16 @@ def _ensure_core_edges(
             "label": "组织顾问向 CEO 汇报",
             "communicationPolicy": {
                 "allowedMessageTypes": ["notice", "request", "report", "escalation"],
-                "allowedIntents": ["proposal", "report", "risk", "organization_design"],
+                "allowedIntents": [
+                    "proposal",
+                    "report",
+                    "risk",
+                    "organization_design",
+                    "decision_request",
+                    "risk_escalation",
+                    "status_report",
+                    "final_report",
+                ],
                 "wakeStrategy": "mailbox_only",
                 "maxForwardDepth": 1,
             },
@@ -1150,7 +1216,17 @@ def _ensure_core_edges(
             "label": "能力管家向 CEO 汇报",
             "communicationPolicy": {
                 "allowedMessageTypes": ["notice", "request", "report", "escalation"],
-                "allowedIntents": ["capability_report", "risk", "prompt_policy", "tool_policy", "memory_policy"],
+                "allowedIntents": [
+                    "capability_report",
+                    "risk",
+                    "prompt_policy",
+                    "tool_policy",
+                    "memory_policy",
+                    "decision_request",
+                    "risk_escalation",
+                    "status_report",
+                    "final_report",
+                ],
                 "wakeStrategy": "mailbox_only",
                 "maxForwardDepth": 1,
             },
@@ -1166,7 +1242,14 @@ def _ensure_core_edges(
             "label": "组织顾问请求能力配置",
             "communicationPolicy": {
                 "allowedMessageTypes": ["notice", "request", "task"],
-                "allowedIntents": ["capability_design", "role_setup", "permission_review", "memory_policy"],
+                "allowedIntents": [
+                    "capability_design",
+                    "role_setup",
+                    "permission_review",
+                    "memory_policy",
+                    "task_assignment",
+                    "organization_design",
+                ],
                 "wakeStrategy": "conditional",
                 "maxForwardDepth": 1,
             },
@@ -1182,7 +1265,14 @@ def _ensure_core_edges(
             "label": "能力管家反馈组织配置",
             "communicationPolicy": {
                 "allowedMessageTypes": ["notice", "request", "report"],
-                "allowedIntents": ["capability_plan", "permission_review", "risk", "policy_update"],
+                "allowedIntents": [
+                    "capability_plan",
+                    "permission_review",
+                    "risk",
+                    "policy_update",
+                    "status_report",
+                    "final_report",
+                ],
                 "wakeStrategy": "mailbox_only",
                 "maxForwardDepth": 1,
             },
@@ -1412,6 +1502,7 @@ def _deliver_message_to_agent(
     wake_requested = _should_wake_target(
         policy=policy_result.get("policy") or {},
         message_type=message_type,
+        intent=str(message.get("intent") or ""),
         source_type=str(message.get("sourceType") or ""),
         requested=bool(message.get("wakeTarget")),
         mailbox_only=bool(payload.get("mailboxOnly")),
@@ -1526,11 +1617,19 @@ def _should_wake_target(
     *,
     policy: dict[str, Any],
     message_type: str,
+    intent: str = "",
     source_type: str,
     requested: bool,
     mailbox_only: bool,
 ) -> bool:
-    if mailbox_only or not requested:
+    if mailbox_only:
+        return False
+    normalized_intent = _normalize_research_org_intent(intent)
+    if normalized_intent in IMMEDIATE_WAKE_INTENTS:
+        return True
+    if normalized_intent in MAILBOX_ONLY_INTENTS:
+        return False
+    if not requested:
         return False
     if source_type == "user":
         return True
@@ -1928,6 +2027,24 @@ def _normalize_message_type(value: Any) -> str:
 def _normalize_delivery_mode(value: Any) -> str:
     normalized = str(value or "private").strip().lower()
     return normalized if normalized in DELIVERY_MODES else "private"
+
+
+def _normalize_research_org_intent(value: Any) -> str:
+    normalized = trim_lines(str(value or ""), max_lines=1).strip()
+    if not normalized:
+        return ""
+    folded = normalized.casefold()
+    allowed = {item.casefold(): item for item in RESEARCH_COMMUNICATION_INTENTS}
+    return allowed.get(folded, normalized)
+
+
+def _coerce_wake_target(payload: dict[str, Any], *, source_type: str, intent: str) -> bool:
+    normalized_intent = _normalize_research_org_intent(intent)
+    if normalized_intent in IMMEDIATE_WAKE_INTENTS:
+        return True
+    if normalized_intent in MAILBOX_ONLY_INTENTS:
+        return False
+    return bool(payload.get("wakeTarget", source_type == "user"))
 
 
 def _normalize_allowed_tools(values: Any) -> list[str]:

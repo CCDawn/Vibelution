@@ -455,6 +455,9 @@ def test_build_agent_context_includes_research_org_member_and_edge_context(tmp_p
     assert "allowedTypes=" in packet.context_block
     assert "Use AgentId or AgentCode with agent_message_tool" in packet.context_block
     assert "Organization Governance Protocol:" in packet.context_block
+    assert "Research Communication Protocol:" in packet.context_block
+    assert "Every research_org message from an Agent must include metadata_json.researchOrgIntent" in packet.context_block
+    assert "Reply format: Conclusion; Evidence; Risk; Decision needed; Next step." in packet.context_block
     assert "Organization Advisor can propose new Agents" in packet.context_block
     assert "Capability Steward manages prompt/tool/memory policy recommendations" in packet.context_block
     assert "Organization Capability Roster:" in packet.context_block

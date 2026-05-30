@@ -241,6 +241,32 @@ def _try_send_research_org_message(
 
     message_type = _metadata_text(metadata, "researchOrgMessageType", "messageType") or "request"
     intent = _metadata_text(metadata, "researchOrgIntent", "intent")
+    if not intent:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "route": "research_org",
+            "error": "research_org_intent_required",
+            "reason": "research_org_intent_required",
+            "message": (
+                "科研组织消息必须在 metadata_json 中提供 researchOrgIntent。"
+                "可用示例: research_goal, task_assignment, evidence_request, knowledge_update, "
+                "validation_plan, permission_review, organization_design, decision_request, "
+                "risk_escalation, status_report, final_report。"
+            ),
+            "sourceAgentId": source_agent_id,
+            "sourceSessionId": source_session_id,
+            "targetAgentId": target_agent_id,
+            "targetAgentCode": target_agent.get("agentCode") or "",
+            "targetSessionId": target_agent.get("directSessionId") or "",
+            "wakeStatus": "blocked",
+            "delivery": {
+                "allowed": False,
+                "reason": "research_org_intent_required",
+                "inboxMessageId": "",
+                "wakeStatus": "blocked",
+            },
+        }
     delivery_mode = _metadata_text(metadata, "researchOrgDeliveryMode", "deliveryMode") or "private"
     mailbox_only = _metadata_bool(metadata, "researchOrgMailboxOnly", "mailboxOnly")
     result = research_organization_service.send_research_org_message(
