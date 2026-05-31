@@ -37,6 +37,7 @@ import {
   KnowledgeReviewResponse,
   KnowledgeSearchPayload,
   KnowledgeSourceArtifact,
+  KnowledgeStewardOverview,
   KnowledgeTracePayload,
   MemoryItem,
   MemoryMutationResponse,
@@ -263,6 +264,16 @@ type Copy = {
   sourceChain: string;
   outputContract: string;
   createsKnowledgeItem: string;
+  knowledgeSteward: string;
+  stewardMission: string;
+  stewardDirectChat: string;
+  stewardBoundary: string;
+  protectedAgent: string;
+  allowedTools: string;
+  preferredTools: string;
+  openGovernanceTasks: string;
+  noDirectApply: string;
+  reviewerRequired: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
@@ -564,6 +575,16 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourceChain: "来源链路",
     outputContract: "输出合同",
     createsKnowledgeItem: "生成正式知识",
+    knowledgeSteward: "知识库管理员",
+    stewardMission: "治理职责",
+    stewardDirectChat: "打开管理员",
+    stewardBoundary: "权限边界",
+    protectedAgent: "受保护 Agent",
+    allowedTools: "允许工具",
+    preferredTools: "优先工具",
+    openGovernanceTasks: "待处理治理任务",
+    noDirectApply: "不直接落正式知识",
+    reviewerRequired: "正式知识需要审核角色确认",
   },
   en: {
     eyebrow: "Memory Library",
@@ -779,6 +800,16 @@ const COPY: Record<"zh" | "en", Copy> = {
     sourceChain: "Source chain",
     outputContract: "Output contract",
     createsKnowledgeItem: "Creates formal item",
+    knowledgeSteward: "Knowledge Steward",
+    stewardMission: "Governance mission",
+    stewardDirectChat: "Open steward",
+    stewardBoundary: "Permission boundary",
+    protectedAgent: "Protected Agent",
+    allowedTools: "Allowed tools",
+    preferredTools: "Preferred tools",
+    openGovernanceTasks: "Open governance tasks",
+    noDirectApply: "No direct formal write",
+    reviewerRequired: "Formal knowledge requires reviewer confirmation",
   },
 };
 
@@ -1394,6 +1425,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     enabled: forcedView === "knowledge",
   });
 
+  const knowledgeStewardQuery = useQuery({
+    queryKey: queryKeys.knowledgeStewardOverview(),
+    queryFn: () => fetchJson<KnowledgeStewardOverview>("/api/knowledge/steward/overview"),
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
+    refetchIntervalInBackground: false,
+    enabled: forcedView === "knowledge",
+  });
+
   const memoryMutation = useMutation({
     mutationFn: async (draft: EditDraft) => {
       const body = JSON.stringify({
@@ -1651,6 +1690,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const overview = overviewQuery.data;
   const sections = overview?.sections ?? [];
   const knowledgeOverview = knowledgeOverviewQuery.data;
+  const knowledgeSteward = knowledgeStewardQuery.data;
   const knowledgeBases = knowledgeOverview?.knowledgeBases ?? [];
   const activeKnowledgeBase: TeamKnowledgeBase | null =
     knowledgeBases.find((base) => base.knowledgeBaseId === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
@@ -3240,6 +3280,50 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <span>{step.label}</span>
             </div>
           ))}
+        </div>
+      </section>
+      <section className={styles.knowledgeStewardPanel} aria-label={copy.knowledgeSteward}>
+        <div className={styles.managementHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.knowledgeSteward}</p>
+            <h2>{knowledgeSteward?.steward.functionalDisplayName || copy.knowledgeSteward}</h2>
+          </div>
+          <div className={styles.managementActions}>
+            <span className={knowledgeSteward?.steward.protected ? styles.statusPill : styles.statusPillMuted}>
+              {knowledgeSteward?.steward.protected ? copy.protectedAgent : knowledgeSteward?.steward.status || copy.missing}
+            </span>
+            <NavLink className={styles.detailActionButton} to={knowledgeSteward?.steward.directChatPath || "/chat"}>
+              <Link2 size={14} />
+              <span>{copy.stewardDirectChat}</span>
+            </NavLink>
+          </div>
+        </div>
+        <div className={styles.stewardGrid}>
+          <div className={styles.stewardMission}>
+            <span>{copy.stewardMission}</span>
+            <strong>{knowledgeSteward?.steward.taskProfile.mission || knowledgeSteward?.steward.displayName || copy.loading}</strong>
+            <small>{knowledgeSteward?.steward.taskProfile.avoidTasks || copy.noDirectApply}</small>
+          </div>
+          <div className={styles.stewardMetric}>
+            <span>{copy.openGovernanceTasks}</span>
+            <strong>{knowledgeSteward?.governance.summary.openTaskCount ?? 0}</strong>
+            <small>
+              {copy.pendingProposals}: {knowledgeSteward?.governance.summary.proposalReviewCount ?? 0} · {copy.ratingSuggestions}: {knowledgeSteward?.governance.summary.ratingReviewCount ?? 0}
+            </small>
+          </div>
+          <div className={styles.stewardMetric}>
+            <span>{copy.stewardBoundary}</span>
+            <strong>{knowledgeSteward?.steward.permissionBoundary || "proposal_and_rating_suggestion_only"}</strong>
+            <small>{knowledgeSteward?.operatingBoundary.formalKnowledgeRequiresReviewer ? copy.reviewerRequired : copy.noDirectApply}</small>
+          </div>
+        </div>
+        <div className={styles.stewardToolRows}>
+          <span>{copy.preferredTools}</span>
+          {(knowledgeSteward?.steward.toolPolicy.preferredTools ?? []).slice(0, 4).map((tool) => (
+            <code key={`preferred:${tool}`}>{tool}</code>
+          ))}
+          <span>{copy.allowedTools}</span>
+          <small>{(knowledgeSteward?.steward.toolPolicy.allowedTools ?? []).join(", ") || "-"}</small>
         </div>
       </section>
       {knowledgeFeedback.tone !== "idle" ? (

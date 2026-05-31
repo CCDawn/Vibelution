@@ -13,7 +13,7 @@ from typing import Any
 
 from core.chat.chat_task_types import trim_lines
 
-from . import chat_room_service, team_service
+from . import agent_directory_service, chat_room_service, team_service
 from .runtime_scene_service import record_runtime_scene_event
 
 
@@ -131,6 +131,91 @@ def list_knowledge_overview(*, agent_id: str = "") -> dict[str, Any]:
         "knowledgeBases": visible_bases,
         "updatedAt": utc_now_iso(),
     }
+
+
+def get_knowledge_steward_overview() -> dict[str, Any]:
+    """Return the default knowledge steward Agent and its read-only governance posture."""
+
+    _sync_roots()
+    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    steward_id = str((steward or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID).strip()
+    governance_tasks = list_knowledge_governance_tasks(agent_id="", status="all")
+    task_summary = dict(governance_tasks.get("summary") or {})
+    open_tasks = [task for task in list(governance_tasks.get("tasks") or []) if str(task.get("status") or "") == "open"]
+    open_tasks.sort(
+        key=lambda item: (
+            _priority_rank(str(item.get("priority") or "")),
+            str(item.get("updatedAt") or item.get("createdAt") or ""),
+        ),
+        reverse=True,
+    )
+    permission_boundary = "proposal_and_rating_suggestion_only"
+    metadata = dict((steward or {}).get("metadata") or {}) if isinstance((steward or {}).get("metadata"), dict) else {}
+    if metadata.get("permissionBoundary"):
+        permission_boundary = str(metadata.get("permissionBoundary") or permission_boundary).strip() or permission_boundary
+    tool_policy = dict((steward or {}).get("toolPolicy") or {}) if isinstance((steward or {}).get("toolPolicy"), dict) else {}
+    memory_policy = dict((steward or {}).get("memoryPolicy") or {}) if isinstance((steward or {}).get("memoryPolicy"), dict) else {}
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "steward": {
+            "agentId": steward_id,
+            "agentCode": str((steward or {}).get("agentCode") or "").strip(),
+            "displayName": str((steward or {}).get("displayName") or "").strip() or "Knowledge Steward",
+            "functionalDisplayName": str(metadata.get("functionalDisplayName") or "知识库管理员").strip(),
+            "status": str((steward or {}).get("status") or "missing").strip(),
+            "directSessionId": str((steward or {}).get("directSessionId") or "").strip(),
+            "directChatPath": f"/chat?session={str((steward or {}).get('directSessionId') or '').strip()}" if str((steward or {}).get("directSessionId") or "").strip() else "/chat",
+            "managedDomain": str(metadata.get("managedDomain") or "team_knowledge").strip(),
+            "permissionBoundary": permission_boundary,
+            "protected": bool(metadata.get("protected")),
+            "taskProfile": (steward or {}).get("taskProfile") if isinstance((steward or {}).get("taskProfile"), dict) else {},
+            "toolPolicy": {
+                "policyId": str(tool_policy.get("policyId") or (steward or {}).get("toolPolicyId") or "").strip(),
+                "allowedTools": list(tool_policy.get("allowedTools") or []),
+                "preferredTools": list(tool_policy.get("preferredTools") or []),
+                "networkAccess": str(tool_policy.get("networkAccess") or "none").strip(),
+                "mutationAccess": str(tool_policy.get("mutationAccess") or "restricted").strip(),
+                "maxCallsPerTurn": int(tool_policy.get("maxCallsPerTurn") or 0),
+            },
+            "memoryPolicy": {
+                "policyId": str(memory_policy.get("policyId") or (steward or {}).get("memoryPolicyId") or "").strip(),
+                "readSharedGroups": list(memory_policy.get("readSharedGroups") or []),
+                "writeSharedGroups": list(memory_policy.get("writeSharedGroups") or []),
+                "readKnowledgeBaseIds": list(memory_policy.get("readKnowledgeBaseIds") or []),
+                "proposeKnowledgeBaseIds": list(memory_policy.get("proposeKnowledgeBaseIds") or []),
+                "reviewKnowledgeBaseIds": list(memory_policy.get("reviewKnowledgeBaseIds") or []),
+                "rateKnowledgeBaseIds": list(memory_policy.get("rateKnowledgeBaseIds") or []),
+            },
+        },
+        "governance": {
+            "summary": {
+                **task_summary,
+                "openTaskCount": sum(1 for task in list(governance_tasks.get("tasks") or []) if str(task.get("status") or "") == "open"),
+            },
+            "openTasks": open_tasks[:8],
+        },
+        "operatingBoundary": {
+            "canDirectlyApplyKnowledge": False,
+            "canDeleteKnowledge": False,
+            "canChangeAcl": False,
+            "canBypassReviewer": False,
+            "formalKnowledgeRequiresReviewer": True,
+            "knowledgeBodiesInPrompt": False,
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_event(
+        "knowledge.steward.overview.viewed",
+        "",
+        "",
+        actor_agent_id=steward_id,
+        fields={
+            "stewardAgentId": steward_id,
+            "openTaskCount": int((payload["governance"]["summary"] or {}).get("openTaskCount") or 0),
+            "permissionBoundary": permission_boundary,
+        },
+    )
+    return payload
 
 
 def list_ingestion_adapters() -> dict[str, Any]:
