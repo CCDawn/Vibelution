@@ -58,6 +58,8 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert all(agent["directSessionId"] for agent in agents)
     assert all(agent["metadata"]["agentMode"] == "supervised_evolution" for agent in agents)
     assert all(agent["metadata"]["configSurface"] == "model_config" for agent in agents)
+    assert by_role["judge"]["metadata"]["protected"] is True
+    assert by_role["baseline"]["metadata"]["protected"] is False
 
     state = load_chat_state(tmp_path)
     assert state["active_conversation_id"] == "session-user"
@@ -120,6 +122,39 @@ def test_ensure_supervised_agent_instances_does_not_reactivate_archived_fixed_ro
         item for item in events if item[0][2] == "supervised.agent_instance.sync_skipped_excluded_slot"
     ]
     assert skipped_events[-1][1]["fields"]["agentId"] == baseline["agentId"]
+
+
+def test_ensure_supervised_agent_instances_restores_core_judge_without_duplicates(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    first = supervised_agent_service.ensure_supervised_agent_instances()
+    judge = next(agent for agent in first if agent["metadata"]["supervisedRole"] == "judge")
+    agent_mode_binding_service.remove_agent_from_mode_bindings(judge["agentId"])
+    state = agent_directory_service.load_state()
+    for item in state["agents"]:
+        if item["agentId"] == judge["agentId"]:
+            item["status"] = "archived"
+            item["metadata"]["protected"] = False
+    agent_directory_service.save_state(state)
+    tombstoned = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert tombstoned["slots"]["judge"] == ""
+    assert "judge" in tombstoned["excludedSlots"]
+
+    second = supervised_agent_service.ensure_supervised_agent_instances()
+
+    judges = [
+        agent
+        for agent in agent_directory_service.list_agents(include_archived=True)
+        if agent.get("metadata", {}).get("supervisedRole") == "judge"
+    ]
+    assert [agent["agentId"] for agent in judges] == [judge["agentId"]]
+    restored = next(agent for agent in second if agent["metadata"]["supervisedRole"] == "judge")
+    assert restored["agentId"] == judge["agentId"]
+    assert restored["status"] == "active"
+    assert restored["metadata"]["protected"] is True
+    payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert payload["slots"]["judge"] == judge["agentId"]
+    assert "judge" not in payload["excludedSlots"]
 
 
 def test_agents_api_auto_syncs_supervised_agent_instances(tmp_path, monkeypatch):
