@@ -15,6 +15,15 @@ from typing import Any, Callable
 from .supervised_artifacts import load_project_json_artifact, load_project_json_object
 from .lineage import summarize_lineage
 
+_HIDDEN_WORKBENCH_BUNDLE_NAMES = {
+    "chat_reviewed_multiturn_v1",
+    "custom_prompt_jsonl_v1",
+    "generated_cases_v1",
+    "supervised_evolution_dry_run_v1_limit_1",
+    "supervised_evolution_dry_run_v1_limit_5",
+    "supervised_fixture_smoke_v1",
+}
+
 
 @dataclass(frozen=True)
 class DecisionHistoryRecord:
@@ -534,6 +543,8 @@ def list_available_workbench_bundles(project_root: Path) -> list[dict[str, Any]]
             cases = payload.get("cases")
             if isinstance(cases, list):
                 case_count = len(cases)
+        if case_count <= 0 or name in _HIDDEN_WORKBENCH_BUNDLE_NAMES or declared_name in _HIDDEN_WORKBENCH_BUNDLE_NAMES:
+            continue
         rows.append(
             {
                 "name": name,

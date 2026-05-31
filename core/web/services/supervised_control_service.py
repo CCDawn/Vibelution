@@ -218,11 +218,12 @@ class _SupervisedRunController:
 def get_supervised_workbench() -> dict[str, Any]:
     """Return workbench defaults, datasets, and current live run when present."""
 
+    datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"]
     return {
         "defaultBundleName": default_bundle_name(),
         "savedState": get_workbench_state_payload(project_root=PROJECT_ROOT),
         "bundles": list_available_workbench_bundles(PROJECT_ROOT),
-        "datasets": [_dataset_payload(item) for item in list_dataset_choices(PROJECT_ROOT)],
+        "datasets": [_dataset_payload(item) for item in datasets],
         "activeRun": get_active_supervised_run(),
     }
 
@@ -1872,6 +1873,7 @@ def _dataset_payload(item: dict[str, Any]) -> dict[str, Any]:
         "visibilityReason": str(item.get("visibility_reason") or "").strip(),
         "selectable": bool(item.get("selectable", item.get("effective"))),
         "noiseLevel": str(item.get("noise_level") or "").strip(),
+        "workbenchVisible": bool(item.get("workbench_visible", True)),
         "adapterStatus": str(item.get("adapter_status") or "").strip(),
         "description": str(item.get("description") or "").strip(),
         "sourcePath": str(item.get("source_path") or "").strip(),
@@ -2345,11 +2347,12 @@ def _submit_supervised_runtime_manager_command(command_type: str, *, run_id: str
 
 def get_supervised_workbench() -> dict[str, Any]:
     if _runtime_manager_live_control_enabled():
+        datasets = [item for item in list_dataset_choices(PROJECT_ROOT) if item.get("visibility") == "primary"]
         return {
             "defaultBundleName": default_bundle_name(),
             "savedState": get_workbench_state_payload(project_root=PROJECT_ROOT),
             "bundles": list_available_workbench_bundles(PROJECT_ROOT),
-            "datasets": [_dataset_payload(item) for item in list_dataset_choices(PROJECT_ROOT)],
+            "datasets": [_dataset_payload(item) for item in datasets],
             "activeRun": get_active_supervised_run(),
         }
     return _LOCAL_GET_SUPERVISED_WORKBENCH()

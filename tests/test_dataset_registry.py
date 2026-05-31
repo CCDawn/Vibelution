@@ -24,6 +24,8 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
 
     assert by_name["supervised_dry_run"]["runnable"] is True
     assert by_name["chat_reviewed_multiturn"]["runnable"] is True
+    assert by_name["chat_reviewed_multiturn"]["workbench_visible"] is False
+    assert by_name["chat_reviewed_multiturn"]["visibility"] == "hidden"
     assert by_name["chat_reviewed_multiturn"]["review_required"] is True
     assert by_name["chat_reviewed_multiturn"]["source_track"] == "dialogue"
     assert by_name["chat_reviewed_multiturn"]["holdout_allowed"] is False
@@ -32,6 +34,8 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
     assert by_name["chat_reviewed_multiturn"]["intake_boundary"]["contract"] == "reviewed_chat_case"
     assert by_name["chat_reviewed_multiturn"]["formal_supervised_evaluation_allowed"] is True
     assert by_name["generated_cases"]["source_track"] == "generated"
+    assert by_name["generated_cases"]["workbench_visible"] is False
+    assert by_name["generated_cases"]["visibility"] == "hidden"
     assert by_name["generated_cases"]["holdout_allowed"] is False
     assert by_name["generated_cases"]["raw_chat_direct_training_allowed"] is False
     assert by_name["generated_cases"]["intake_boundary"]["contract"] == "generated_case"
