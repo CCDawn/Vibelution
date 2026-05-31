@@ -934,6 +934,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   }, [availableBundles, lang, primaryDatasets]);
   const selectedSourceValue = sourceKind === "bundle" ? `bundle:${bundleNameInput}` : `dataset:${datasetName}`;
   const selectedSourceOption = supervisedSourceOptions.find((item) => item.value === selectedSourceValue) ?? null;
+  const selectedSourceKindLabel = selectedSourceOption?.kind === "dataset"
+    ? sourceKindLabel("dataset")
+    : sourceKindLabel("bundle");
+  const selectedSourceCaseText = `${selectedSourceOption?.caseCount ?? "--"} cases`;
+  const selectedSourceStatusText =
+    selectedSourceOption?.kind === "dataset"
+      ? (selectedSourceOption.dataset.usabilityReason || selectedSourceOption.dataset.description || "--")
+      : (selectedSourceOption?.bundle.benchmark || selectedSourceOption?.bundle.declaredName || "--");
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
   const filterLibraryEntries = (entries: EvolutionLibraryEntry[]) =>
     entries.filter((item) => {
@@ -2254,8 +2262,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </select>
                     <span className={styles.formHint}>
                       {lang === "zh"
-                        ? "数据集是原始任务来源；评测包是已经物化好的可执行 case 包。"
-                        : "A dataset is the source; a bundle is the materialized executable case package."}
+                        ? "数据集会先物化，评测包可直接运行。"
+                        : "A dataset is materialized first; a bundle runs directly."}
                     </span>
                   </div>
                   {sourceKind === "dataset" ? (
@@ -2275,21 +2283,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
                 {selectedSourceOption ? (
                   <div className={styles.sourceMetaCompact}>
-                    <div>
+                    <div className={styles.sourceMetaMain}>
                       <strong>{selectedSourceOption.label}</strong>
-                      <span>{selectedSourceOption.detail}</span>
+                      <span>{selectedSourceStatusText}</span>
                     </div>
-                    <span className={styles.secondaryPill}>
-                      {selectedSourceOption.kind === "dataset" ? sourceKindLabel("dataset") : sourceKindLabel("bundle")}
-                      {" · "}
-                      {selectedSourceOption.caseCount ?? "--"} cases
+                    <span className={styles.sourceMetaSide}>
+                      {selectedSourceKindLabel} · {selectedSourceCaseText}
                     </span>
-                  </div>
-                ) : null}
-                {sourceKind === "dataset" && selectedDataset ? (
-                  <div className={styles.sourceDetailGrid}>
-                    <span>{selectedDataset.description}</span>
-                    <span>{selectedDataset.usabilityReason || "--"}</span>
                   </div>
                 ) : null}
                 {sourceKind === "bundle" && !selectedBundleExists ? (
@@ -2358,7 +2358,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <span>{worktreeRuns.length}</span>
                     </div>
                     <div className={styles.worktreeRunList}>
-                      {worktreeRuns.slice(0, 6).map((run) => {
+                      {worktreeRuns.slice(0, 4).map((run) => {
                         const selected = highlightedWorktreeRun?.runId === run.runId;
                         const runReviewGate = worktreeReviewGate(run);
                         const runReviewPending = isSelfEvolutionWorktreeRun(run)
