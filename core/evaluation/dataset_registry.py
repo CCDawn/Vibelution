@@ -92,6 +92,114 @@ TERMINAL_BENCH_SMOKE_ROWS: List[Dict[str, Any]] = [
         },
     },
 ]
+TERMINAL_BENCH_CORE_REPO = "https://github.com/harbor-framework/terminal-bench-2"
+TERMINAL_BENCH_CORE_REVISION = "2fd12b88aafdd04a52c298e3940bcb189f9766d6"
+TERMINAL_BENCH_CORE_ROWS: List[Dict[str, Any]] = [
+    {
+        "case_id": "tb2_fix_code_vulnerability",
+        "task_slug": "fix-code-vulnerability",
+        "official_task_name": "terminal-bench/fix-code-vulnerability",
+        "instruction": (
+            "Identify and fix a CRLF injection vulnerability (CWE-93) in the /app Bottle "
+            "repository. Analyze /app/bottle.py, write /app/report.jsonl with the vulnerable "
+            "file path and CWE id, patch the code so invalid header inputs raise the correct "
+            "error, and verify with pytest -rA."
+        ),
+        "training_tier": "coordination",
+        "difficulty": "hard",
+        "category": "security",
+        "tags": ["security", "code-vulnerability", "common-weakness-enumeration"],
+        "docker_image": "alexgshaw/fix-code-vulnerability:20251031",
+        "agent_timeout_seconds": 900,
+        "verifier": {
+            "kind": "harbor_terminal_bench",
+            "command": "uv run harbor run --dataset terminal-bench@2.0 --task fix-code-vulnerability",
+            "success_marker": "task passed",
+        },
+    },
+    {
+        "case_id": "tb2_cancel_async_tasks",
+        "task_slug": "cancel-async-tasks",
+        "official_task_name": "terminal-bench/cancel-async-tasks",
+        "instruction": (
+            "Implement async run_tasks(tasks, max_concurrent) in /app/run.py. The function must "
+            "limit concurrency and still allow queued/running tasks to execute cleanup code when "
+            "the run is cancelled."
+        ),
+        "training_tier": "coordination",
+        "difficulty": "hard",
+        "category": "software-engineering",
+        "tags": ["async", "concurrency", "python"],
+        "docker_image": "alexgshaw/cancel-async-tasks:20251031",
+        "agent_timeout_seconds": 900,
+        "verifier": {
+            "kind": "harbor_terminal_bench",
+            "command": "uv run harbor run --dataset terminal-bench@2.0 --task cancel-async-tasks",
+            "success_marker": "task passed",
+        },
+    },
+    {
+        "case_id": "tb2_fix_git",
+        "task_slug": "fix-git",
+        "official_task_name": "terminal-bench/fix-git",
+        "instruction": (
+            "Recover lost commits from a detached HEAD state in a personal-site git repository "
+            "and merge the recovered changes back into master."
+        ),
+        "training_tier": "coordination",
+        "difficulty": "easy",
+        "category": "software-engineering",
+        "tags": ["coding", "version-control"],
+        "docker_image": "alexgshaw/fix-git:20251031",
+        "agent_timeout_seconds": 900,
+        "verifier": {
+            "kind": "harbor_terminal_bench",
+            "command": "uv run harbor run --dataset terminal-bench@2.0 --task fix-git",
+            "success_marker": "task passed",
+        },
+    },
+    {
+        "case_id": "tb2_multi_source_data_merger",
+        "task_slug": "multi-source-data-merger",
+        "official_task_name": "terminal-bench/multi-source-data-merger",
+        "instruction": (
+            "Merge /data/source_a/users.json, /data/source_b/users.csv, and "
+            "/data/source_c/users.parquet into /app/merged_users.parquet. Normalize user fields, "
+            "resolve conflicts by source priority, and write /app/conflicts.json."
+        ),
+        "training_tier": "coordination",
+        "difficulty": "medium",
+        "category": "data-processing",
+        "tags": ["data-processing", "etl", "schema-mapping", "conflict-resolution", "pandas", "parquet"],
+        "docker_image": "alexgshaw/multi-source-data-merger:20251031",
+        "agent_timeout_seconds": 900,
+        "verifier": {
+            "kind": "harbor_terminal_bench",
+            "command": "uv run harbor run --dataset terminal-bench@2.0 --task multi-source-data-merger",
+            "success_marker": "task passed",
+        },
+    },
+    {
+        "case_id": "tb2_sqlite_db_truncate",
+        "task_slug": "sqlite-db-truncate",
+        "official_task_name": "terminal-bench/sqlite-db-truncate",
+        "instruction": (
+            "Recover as many rows as possible from the binary-truncated SQLite database "
+            "/app/trunc.db and write /app/recover.json as a list of word/value objects."
+        ),
+        "training_tier": "coordination",
+        "difficulty": "medium",
+        "category": "debugging",
+        "tags": ["file-operations", "sqlite", "recovery"],
+        "docker_image": "alexgshaw/sqlite-db-truncate:20251031",
+        "agent_timeout_seconds": 900,
+        "verifier": {
+            "kind": "harbor_terminal_bench",
+            "command": "uv run harbor run --dataset terminal-bench@2.0 --task sqlite-db-truncate",
+            "success_marker": "task passed",
+        },
+    },
+]
 
 
 @dataclass
@@ -236,6 +344,26 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "raw_chat_direct_training_allowed": False,
             },
             {
+                "name": "terminal_bench_core",
+                "kind": "terminal_bench_jsonl",
+                "description": (
+                    "Terminal-Bench 2.0 官方任务子集，来自 harbor-framework/terminal-bench-2；"
+                    "用于真实多步终端/harness 评测，官方 Harbor sandbox 判分器后续接入。"
+                ),
+                "source_path": "workspace/evaluation/datasets/terminal_bench_core.jsonl",
+                "bundle_name": "terminal_bench_core_v1",
+                "scenario": "transaction",
+                "mode": "multi_step_react",
+                "timeout_seconds": 1800,
+                "runnable": True,
+                "adapter_status": "ready_official_seed",
+                "tags": ["terminal-bench", "tb2", "react", "harness", "official-seed"],
+                "source_track": "benchmark",
+                "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
+                "holdout_allowed": False,
+                "raw_chat_direct_training_allowed": False,
+            },
+            {
                 "name": "generated_cases",
                 "kind": "generated_case_jsonl",
                 "description": "Gym 依据 Trace、Harness Gap 或 Improvement Episode 生成的训练压力，不可自动进入 holdout。",
@@ -354,7 +482,7 @@ def _merge_registry_payload(existing: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSpec]) -> None:
-    bootstrap_names = {"generated_cases", "chat_reviewed_multiturn", "terminal_bench_smoke"}
+    bootstrap_names = {"generated_cases", "chat_reviewed_multiturn", "terminal_bench_smoke", "terminal_bench_core"}
     for spec in specs:
         if spec.name not in bootstrap_names or not spec.source_path:
             continue
@@ -365,6 +493,11 @@ def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSp
         if spec.name == "terminal_bench_smoke":
             source.write_text(
                 "\n".join(json.dumps(row, ensure_ascii=False) for row in TERMINAL_BENCH_SMOKE_ROWS) + "\n",
+                encoding="utf-8",
+            )
+        elif spec.name == "terminal_bench_core":
+            source.write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in TERMINAL_BENCH_CORE_ROWS) + "\n",
                 encoding="utf-8",
             )
         else:
@@ -807,9 +940,19 @@ def _build_terminal_bench_prompt(row: Dict[str, Any], *, case_id: str) -> str:
     verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
     allowed_tools = _text_list(row.get("allowed_tools"))
     max_steps = int(row.get("max_steps") or 8)
+    official_task_name = str(row.get("official_task_name") or "").strip()
+    docker_image = str(row.get("docker_image") or "").strip()
     verifier_command = str(verifier.get("command") or "").strip()
     success_marker = str(verifier.get("success_marker") or "").strip()
     tool_line = ", ".join(allowed_tools) if allowed_tools else "project-approved terminal and evolution tools"
+    official_lines = []
+    if official_task_name:
+        official_lines.append(f"- Official task: {official_task_name}")
+    if docker_image:
+        official_lines.append(f"- Docker image: {docker_image}")
+    if official_lines:
+        official_lines.append(f"- Official dataset: {TERMINAL_BENCH_CORE_REPO}@{TERMINAL_BENCH_CORE_REVISION}")
+    official_block = "\n".join(official_lines)
     verifier_lines = []
     if verifier_command:
         verifier_lines.append(f"- Verifier command: {verifier_command}")
@@ -821,6 +964,8 @@ def _build_terminal_bench_prompt(row: Dict[str, Any], *, case_id: str) -> str:
         f"Case: {case_id}\n\n"
         "Task:\n"
         f"{instruction}\n\n"
+        + (f"Official metadata:\n{official_block}\n\n" if official_block else "")
+        +
         "Harness contract:\n"
         "1. Open an evolution transaction before doing meaningful work.\n"
         "2. Use a multi-step ReAct loop: inspect evidence, choose a tool action, observe, adjust, then verify.\n"
@@ -842,6 +987,17 @@ def _build_terminal_bench_case(spec: DatasetSpec, row: Dict[str, Any], index: in
     verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
     allowed_tools = _text_list(row.get("allowed_tools"))
     max_steps = int(row.get("max_steps") or 8)
+    adapter = "official_seed" if spec.name == "terminal_bench_core" else "local_smoke"
+    official_metadata = {
+        "dataset": "terminal-bench@2.0",
+        "repo": TERMINAL_BENCH_CORE_REPO,
+        "revision": TERMINAL_BENCH_CORE_REVISION,
+        "task_slug": str(row.get("task_slug") or case_id).strip(),
+        "task_name": str(row.get("official_task_name") or "").strip(),
+        "docker_image": str(row.get("docker_image") or "").strip(),
+        "difficulty": str(row.get("difficulty") or "").strip(),
+        "category": str(row.get("category") or "").strip(),
+    }
     case = {
         "case_id": case_id,
         "case_type": STATIC_CASE_TYPE,
@@ -858,10 +1014,11 @@ def _build_terminal_bench_case(spec: DatasetSpec, row: Dict[str, Any], index: in
             **_dataset_ref_from_row(row),
         },
         "benchmark_family": "terminal_bench",
-        "terminal_bench_adapter": "local_smoke",
+        "terminal_bench_adapter": adapter,
         "requires_react_trace": True,
         "requires_terminal_harness": True,
-        "official_runner": "pending",
+        "official_runner": "harbor_pending" if adapter == "official_seed" else "pending",
+        "official_metadata": official_metadata,
         "allowed_tools": allowed_tools,
         "max_steps": max_steps,
         "verifier": verifier,
