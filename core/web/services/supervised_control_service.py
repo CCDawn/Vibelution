@@ -273,7 +273,7 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
         dataset_limit = None
 
     _raise_if_supervised_lease_conflict(lang=lang)
-    agent_bindings = supervised_agent_bindings(repair_excluded_slots=True)
+    agent_bindings = supervised_agent_bindings()
 
     context = {
         "runId": f"web-supervised-{uuid4().hex[:12]}",

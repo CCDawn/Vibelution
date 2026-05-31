@@ -37,7 +37,7 @@ SUPERVISED_AGENT_ROLES: tuple[SupervisedAgentRole, ...] = (
 )
 
 
-def ensure_supervised_agent_instances(*, reactivate_archived_roles: bool = False) -> list[dict[str, Any]]:
+def ensure_supervised_agent_instances() -> list[dict[str, Any]]:
     """Ensure supervised evolution roles are visible as persistent AgentInstances."""
 
     project_root = Path(PROJECT_ROOT).resolve()
@@ -53,7 +53,7 @@ def ensure_supervised_agent_instances(*, reactivate_archived_roles: bool = False
     try:
         for role in SUPERVISED_AGENT_ROLES:
             try:
-                agent, changed = _ensure_supervised_role(role, reactivate_archived=reactivate_archived_roles)
+                agent, changed = _ensure_supervised_role(role)
             except Exception as exc:
                 _record_supervised_agent_event(
                     "supervised.agent_instance.sync_failed",
@@ -95,13 +95,11 @@ def ensure_supervised_agent_instances(*, reactivate_archived_roles: bool = False
     return ensured
 
 
-def supervised_agent_bindings(*, repair_excluded_slots: bool = False) -> dict[str, dict[str, Any]]:
+def supervised_agent_bindings() -> dict[str, dict[str, Any]]:
     """Return run-safe AgentInstance bindings keyed by supervised role."""
 
     raw_slots = _raw_supervised_mode_slots()
-    if repair_excluded_slots:
-        _clear_supervised_fixed_role_exclusions()
-    ensure_supervised_agent_instances(reactivate_archived_roles=repair_excluded_slots)
+    ensure_supervised_agent_instances()
     bindings: dict[str, dict[str, Any]] = {}
     mode_payload = agent_mode_binding_service.get_mode_bindings_payload()
     supervised_mode = (mode_payload.get("modes") or {}).get("supervised_evolution")
@@ -198,48 +196,6 @@ def _record_supervised_binding_failure(role: str, *, agent_id: str, reason: str)
         )
     except Exception:
         return
-
-
-def _clear_supervised_fixed_role_exclusions() -> None:
-    try:
-        mode_payload = agent_mode_binding_service.get_mode_bindings_payload()
-    except Exception:
-        return
-    supervised_mode = (mode_payload.get("modes") or {}).get("supervised_evolution")
-    if not isinstance(supervised_mode, dict):
-        return
-    required_roles = {item.role for item in SUPERVISED_AGENT_ROLES}
-    current_excluded = [
-        str(item or "").strip()
-        for item in supervised_mode.get("excludedSlots") or []
-        if str(item or "").strip()
-    ]
-    next_excluded = [item for item in current_excluded if item not in required_roles]
-    if next_excluded == current_excluded:
-        return
-    try:
-        agent_mode_binding_service.update_mode_binding(
-            "supervised_evolution",
-            excluded_slots=next_excluded,
-        )
-        record_runtime_scene_event(
-            "agent_directory",
-            "agent",
-            "supervised.agent_instance.required_slots_repaired",
-            message="Supervised evolution required role exclusions cleared for run startup",
-            level="warning",
-            outcome="repaired",
-            fields={
-                "mode": "supervised_evolution",
-                "clearedSlots": [item for item in current_excluded if item in required_roles],
-                "remainingExcludedSlotCount": len(next_excluded),
-            },
-            lifecycle=True,
-        )
-    except Exception:
-        return
-
-
 def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_existing_slots: bool = False) -> None:
     active_agents = [
         agent
@@ -276,7 +232,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
         return
 
 
-def _ensure_supervised_role(role: SupervisedAgentRole, *, reactivate_archived: bool = False) -> tuple[dict[str, Any] | None, bool]:
+def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] | None, bool]:
     existing = _find_agent_by_supervised_role(role.role)
     changed = False
     if _supervised_role_slot_excluded(role.role):
@@ -302,31 +258,6 @@ def _ensure_supervised_role(role: SupervisedAgentRole, *, reactivate_archived: b
         if not existing:
             raise RuntimeError(f"Supervised agent was not created for role: {role.role}")
         changed = True
-    if str(existing.get("status") or "active").strip() == "archived":
-        if reactivate_archived:
-            existing = agent_directory_service.reactivate_agent_instance(
-                str(existing.get("agentId") or ""),
-                reason="supervised_evolution_run_required_role",
-                metadata={
-                    "agentMode": "supervised_evolution",
-                    "fixedRole": True,
-                    "supervisedRole": role.role,
-                    "supervisedRoleLabel": role.label,
-                },
-            )
-            changed = True
-        else:
-            _record_supervised_agent_event(
-                "supervised.agent_instance.sync_skipped_archived",
-                role=role,
-                level="info",
-                outcome="skipped",
-                fields={
-                    "reason": "agent_archived",
-                    "agentId": str(existing.get("agentId") or "").strip(),
-                },
-            )
-            return None, False
     if str(existing.get("status") or "active").strip() == "archived":
         _record_supervised_agent_event(
             "supervised.agent_instance.sync_skipped_archived",
