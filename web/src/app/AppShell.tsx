@@ -334,6 +334,7 @@ export function AppShell() {
   const [shutdownRequested, setShutdownRequested] = useState(false);
   const [restartRequested, setRestartRequested] = useState(false);
   const [utilityOpen, setUtilityOpen] = useState(false);
+  const [lifecycleMenuOpen, setLifecycleMenuOpen] = useState(false);
   const [utilityFileFilter, setUtilityFileFilter] = useState("");
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [theme, setTheme] = useState(() => readStoredWorkbenchTheme());
@@ -346,6 +347,7 @@ export function AppShell() {
   const shutdownPromiseRef = useRef<Promise<void> | null>(null);
   const restartPromiseRef = useRef<Promise<void> | null>(null);
   const utilityMenuRef = useRef<HTMLDivElement | null>(null);
+  const lifecycleMenuRef = useRef<HTMLDivElement | null>(null);
   const shutdownLocalCompletionLoggedRef = useRef(false);
   const telemetrySeqRef = useRef(0);
   const pageInstanceIdRef = useRef(`page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
@@ -406,6 +408,8 @@ export function AppShell() {
   const chatEnabled = isWorkbenchDomainEnabled(configQuery.data, "chat");
   const supervisedEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "supervised_evolution");
   const selfEvolutionEnabled = isWorkbenchModeEnabled(configQuery.data, "self_evolution");
+  const refreshFrontendLabel = lang === "en" ? "Refresh frontend" : "刷新前端";
+  const lifecycleMenuLabel = lang === "en" ? "Workbench power actions" : "工作台电源操作";
   const closeWorkbenchLabel = lang === "en" ? "Close workbench" : "关闭工作台";
   const restartWorkbenchLabel = lang === "en" ? "Restart workbench" : "重启工作台";
   const themeToggleLabel = theme === "dark" ? t("switchToLightTheme") : t("switchToDarkTheme");
@@ -645,6 +649,21 @@ export function AppShell() {
     return task;
   }, [emitBrowserTelemetry, restartBody, restartHeading, restartUnconfirmedBody, shutdownRequested]);
 
+  const refreshFrontend = useCallback(() => {
+    emitBrowserTelemetry(
+      {
+        phase: "refresh",
+        eventCode: "browser.user_action.frontend_refresh_requested",
+        message: "User requested frontend refresh.",
+        fields: {
+          action: "frontend_refresh",
+        },
+      },
+      { preferBeacon: true },
+    );
+    window.setTimeout(() => window.location.reload(), 0);
+  }, [emitBrowserTelemetry]);
+
   const toggleTheme = useCallback(() => {
     setTheme((current) => {
       const next = nextWorkbenchTheme(current);
@@ -684,6 +703,33 @@ export function AppShell() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [utilityOpen]);
+
+  useEffect(() => {
+    if (!lifecycleMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && lifecycleMenuRef.current?.contains(target)) {
+        return;
+      }
+      setLifecycleMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setLifecycleMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [lifecycleMenuOpen]);
 
   useEffect(() => {
     setFetchJsonFailureReporter((failure) => {
@@ -1565,37 +1611,77 @@ export function AppShell() {
           <button
             type="button"
             className={styles.actionIconButton}
-            aria-label={restartWorkbenchLabel}
-            title={restartWorkbenchLabel}
-            onClick={() => {
-              const proceed = () => {
-                void beginRestart();
-              };
-              if (requestWorkbenchExitGuard("restart", proceed)) {
-                proceed();
-              }
-            }}
+            aria-label={refreshFrontendLabel}
+            title={refreshFrontendLabel}
+            onClick={refreshFrontend}
             disabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
           >
             <RefreshCw size={16} />
           </button>
-          <button
-            type="button"
-            className={styles.actionIconButton}
-            aria-label={closeWorkbenchLabel}
-            title={closeWorkbenchLabel}
-            onClick={() => {
-              const proceed = () => {
-                void beginShutdown();
-              };
-              if (requestWorkbenchExitGuard("shutdown", proceed)) {
-                proceed();
-              }
-            }}
-            disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+          <div
+            ref={lifecycleMenuRef}
+            className={
+              lifecycleMenuOpen
+                ? `${styles.lifecycleMenuCluster} ${styles.lifecycleMenuClusterOpen}`
+                : styles.lifecycleMenuCluster
+            }
           >
-            <Power size={16} />
-          </button>
+            <button
+              type="button"
+              className={styles.actionIconButton}
+              aria-label={lifecycleMenuLabel}
+              title={lifecycleMenuLabel}
+              aria-haspopup="menu"
+              aria-expanded={lifecycleMenuOpen}
+              onClick={() => setLifecycleMenuOpen((current) => !current)}
+              disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+            >
+              <Power size={16} />
+            </button>
+            <div
+              className={styles.lifecycleMenuPanel}
+              role="menu"
+              aria-label={lifecycleMenuLabel}
+              hidden={!lifecycleMenuOpen}
+            >
+              <button
+                type="button"
+                className={styles.lifecycleMenuItem}
+                role="menuitem"
+                onClick={() => {
+                  setLifecycleMenuOpen(false);
+                  const proceed = () => {
+                    void beginShutdown();
+                  };
+                  if (requestWorkbenchExitGuard("shutdown", proceed)) {
+                    proceed();
+                  }
+                }}
+                disabled={restartRequested || (shutdownInFlight && !shutdownSettled)}
+              >
+                <Power size={15} />
+                <span>{closeWorkbenchLabel}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.lifecycleMenuItem}
+                role="menuitem"
+                onClick={() => {
+                  setLifecycleMenuOpen(false);
+                  const proceed = () => {
+                    void beginRestart();
+                  };
+                  if (requestWorkbenchExitGuard("restart", proceed)) {
+                    proceed();
+                  }
+                }}
+                disabled={restartRequested || shutdownRequested || (shutdownInFlight && !shutdownSettled)}
+              >
+                <RefreshCw size={15} />
+                <span>{restartWorkbenchLabel}</span>
+              </button>
+            </div>
+          </div>
           <NavLink
             to="/config"
             className={styles.actionIconButton}
