@@ -23,7 +23,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 
@@ -31,6 +31,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REPORT_DIR = PROJECT_ROOT / "log_info" / "harness_reports"
 LIVE_CASE_TRANSCRIPT_LIMIT = 8
 LIVE_CASE_TEXT_LIMIT = 4000
+UNTRACKED_SNAPSHOT_EXCLUDED_PREFIXES = (
+    ".codex/",
+    ".runtime/",
+    "log_info/",
+    "logs/",
+    "workspace/logs/",
+    "workspace/edge-headless-profile/",
+)
+UNTRACKED_SNAPSHOT_EXCLUDED_NAMES = {".codex", ".runtime", "log_info", "logs"}
 PROVIDER_TRANSPORT_ERROR_MARKERS = (
     "unexpected_eof_while_reading",
     "eof occurred in violation of protocol",
@@ -218,14 +227,64 @@ def run_git(repo_root: Path, *args: str) -> str:
     return proc.stdout.strip()
 
 
+def run_git_bytes(repo_root: Path, *args: str) -> bytes:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=str(repo_root),
+        capture_output=True,
+        text=False,
+        check=False,
+        **_subprocess_no_window_kwargs(),
+    )
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+        stdout = proc.stdout.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"git {' '.join(args)} failed ({proc.returncode}): "
+            f"{stderr or stdout}"
+        )
+    return proc.stdout
+
+
 def git_status_porcelain(repo_root: Path) -> List[str]:
     text = run_git(repo_root, "status", "--porcelain")
     return [line for line in text.splitlines() if line.strip()]
 
 
+def _untracked_policy_path(rel: str) -> str:
+    return rel.replace("\\", "/").lstrip("\ufeff")
+
+
+def should_copy_untracked_file(rel: str) -> bool:
+    if rel.startswith("\ufeff"):
+        return False
+    policy_path = _untracked_policy_path(rel)
+    if not policy_path or "\x00" in policy_path:
+        return False
+    if policy_path.startswith(("'", '"')) or '"' in policy_path:
+        return False
+    if os.path.isabs(policy_path) or PurePosixPath(policy_path).is_absolute():
+        return False
+    if policy_path in UNTRACKED_SNAPSHOT_EXCLUDED_NAMES:
+        return False
+    if any(policy_path.startswith(prefix) for prefix in UNTRACKED_SNAPSHOT_EXCLUDED_PREFIXES):
+        return False
+    parts = PurePosixPath(policy_path).parts
+    if any(part in {"", ".", ".."} for part in parts):
+        return False
+    if any(part.endswith("-profile") or part.endswith("_profile") for part in parts):
+        return False
+    return True
+
+
 def collect_untracked_files(repo_root: Path) -> List[str]:
-    text = run_git(repo_root, "ls-files", "--others", "--exclude-standard")
-    return [line.strip() for line in text.splitlines() if line.strip()]
+    data = run_git_bytes(repo_root, "ls-files", "--others", "--exclude-standard", "-z")
+    paths = [
+        raw.decode("utf-8", errors="replace")
+        for raw in data.split(b"\0")
+        if raw
+    ]
+    return [path for path in paths if should_copy_untracked_file(path)]
 
 
 def create_checkpoint_snapshot(repo_root: Path, harness_id: str) -> SnapshotInfo:
@@ -257,6 +316,8 @@ def create_checkpoint_snapshot(repo_root: Path, harness_id: str) -> SnapshotInfo
 
 def copy_untracked_files(repo_root: Path, worktree_path: Path, files: Iterable[str]) -> None:
     for rel in files:
+        if not should_copy_untracked_file(rel):
+            continue
         src = repo_root / rel
         dst = worktree_path / rel
         if src.is_dir():

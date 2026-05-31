@@ -12,6 +12,8 @@ from scripts.evolution_harness import (
     build_agent_command,
     build_synthetic_venv,
     classify_tool_event_phase,
+    collect_untracked_files,
+    copy_untracked_files,
     create_harness_config,
     DEFAULT_DYNAMIC_REPLANNING_FIXTURE_PROMPT,
     DEFAULT_FULL_EVOLUTION_PROMPT,
@@ -35,6 +37,7 @@ from scripts.evolution_harness import (
     resolve_python_executable,
     resolve_run_options,
     select_observation_files,
+    should_copy_untracked_file,
     should_finish_post_restart_observation,
     SAFE_MODIFY_MARKER,
     SAFE_MODIFY_PROBE_CONTENT,
@@ -82,6 +85,59 @@ def test_run_git_hides_console_windows_on_windows(monkeypatch, tmp_path: Path):
     assert evolution_harness.run_git(tmp_path, "rev-parse", "HEAD") == "abc123"
     assert calls[0][0] == ["git", "rev-parse", "HEAD"]
     assert calls[0][1]["creationflags"] & 0x08000000
+
+
+def test_collect_untracked_files_uses_z_output_and_filters_runtime_noise(monkeypatch, tmp_path: Path):
+    raw_paths = b"\0".join(
+        [
+            b"\xef\xbb\xbf.codex/edge-profile-memory-cdp/Default/Cache/file",
+            b'".codex/edge-profile-memory-cdp/Default/Extensions/file',
+            b"logs/runtime_scenes/latest/timeline.jsonl",
+            b"workspace/edge-headless-profile/Default/Preferences",
+            b"workspace/evaluation/bundles/terminal_bench_core_v1.json",
+            b"workspace/evaluation/datasets/terminal_bench_core.jsonl",
+        ]
+    ) + b"\0"
+    monkeypatch.setattr(evolution_harness, "run_git_bytes", lambda *_: raw_paths)
+
+    assert collect_untracked_files(tmp_path) == [
+        "workspace/evaluation/bundles/terminal_bench_core_v1.json",
+        "workspace/evaluation/datasets/terminal_bench_core.jsonl",
+    ]
+
+
+def test_copy_untracked_files_skips_runtime_noise_and_preserves_dataset_files(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    worktree = tmp_path / "worktree"
+    dataset = repo_root / "workspace" / "evaluation" / "bundles" / "terminal_bench_core_v1.json"
+    codex_noise = repo_root / ".codex" / "edge-profile-memory-cdp" / "Default" / "Cache" / "file"
+    dataset.parent.mkdir(parents=True)
+    codex_noise.parent.mkdir(parents=True)
+    dataset.write_text('{"bundle_name":"terminal_bench_core_v1"}', encoding="utf-8")
+    codex_noise.write_text("cache", encoding="utf-8")
+    worktree.mkdir()
+
+    copy_untracked_files(
+        repo_root,
+        worktree,
+        [
+            "workspace/evaluation/bundles/terminal_bench_core_v1.json",
+            ".codex/edge-profile-memory-cdp/Default/Cache/file",
+            '".codex/edge-profile-memory-cdp/Default/Cache/file',
+        ],
+    )
+
+    assert (worktree / "workspace" / "evaluation" / "bundles" / "terminal_bench_core_v1.json").exists()
+    assert not (worktree / ".codex").exists()
+
+
+def test_should_copy_untracked_file_rejects_unsafe_snapshot_paths():
+    assert should_copy_untracked_file("workspace/evaluation/bundles/case.json")
+    assert not should_copy_untracked_file("\ufeff.codex/edge-profile-memory-cdp/Default/Cache/file")
+    assert not should_copy_untracked_file("\ufeffworkspace/evaluation/bundles/case.json")
+    assert not should_copy_untracked_file('".codex/edge-profile-memory-cdp/Default/Cache/file')
+    assert not should_copy_untracked_file("../outside.py")
+    assert not should_copy_untracked_file("C:/tmp/outside.py")
 
 
 def test_build_agent_command_for_single_turn_prompt():

@@ -60,6 +60,7 @@ log_info/
 
 # Root-level review artifacts
 /.codex-temp/
+/.codex/
 /tmp-*.png
 /tmp-*.html
 /edge-*.png
