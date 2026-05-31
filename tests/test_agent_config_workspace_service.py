@@ -634,11 +634,11 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
     assert alpha["agentId"] not in groups["group_chat"]["agentIds"]
 
 
-def test_agent_delete_api_does_not_reactivate_archived_supervised_fixed_role(tmp_path, monkeypatch):
+def test_agent_delete_api_does_not_reactivate_archived_supervised_non_core_fixed_role(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     supervised = supervised_agent_service.ensure_supervised_agent_instances()
-    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+    baseline = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "baseline")
     events = []
     monkeypatch.setattr(
         supervised_agent_service,
@@ -646,37 +646,53 @@ def test_agent_delete_api_does_not_reactivate_archived_supervised_fixed_role(tmp
         lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
     )
 
-    response = client.delete(f"/api/agents/{judge['agentId']}")
+    response = client.delete(f"/api/agents/{baseline['agentId']}")
     assert response.status_code == 200, response.text
 
     workspace_response = client.get("/api/agents/config-workspace")
     assert workspace_response.status_code == 200, workspace_response.text
-    archived = agent_directory_service.get_agent(judge["agentId"], include_archived=True)
+    archived = agent_directory_service.get_agent(baseline["agentId"], include_archived=True)
     assert archived["status"] == "archived"
     payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
-    assert payload["slots"]["judge"] == ""
-    assert "judge" in payload["excludedSlots"]
-    assert judge["agentId"] not in payload["availableAgentIds"]
+    assert payload["slots"]["baseline"] == ""
+    assert "baseline" in payload["excludedSlots"]
+    assert baseline["agentId"] not in payload["availableAgentIds"]
     workspace = workspace_response.json()
-    assert judge["agentId"] in {item["agentId"] for item in workspace["agents"] if item["status"] == "archived"}
-    assert judge["agentId"] not in workspace["modeBindings"]["supervised_evolution"]["availableAgentIds"]
+    assert baseline["agentId"] in {item["agentId"] for item in workspace["agents"] if item["status"] == "archived"}
+    assert baseline["agentId"] not in workspace["modeBindings"]["supervised_evolution"]["availableAgentIds"]
     assert not any(item[0][2] == "agent.reactivated" for item in events)
+
+
+def test_agent_delete_api_blocks_core_supervised_judge(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    supervised = supervised_agent_service.ensure_supervised_agent_instances()
+    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+
+    response = client.delete(f"/api/agents/{judge['agentId']}")
+
+    assert response.status_code == 422
+    assert "Protected core Agent" in response.json()["detail"]
+    active = agent_directory_service.get_agent(judge["agentId"], include_archived=False)
+    assert active["metadata"]["protected"] is True
+    payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert payload["slots"]["judge"] == judge["agentId"]
 
 
 def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     supervised = supervised_agent_service.ensure_supervised_agent_instances()
-    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+    reviewer = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "reviewer")
     peer = session_service.create_chat_session(title="Peer Agent")
     room = chat_room_service.create_chat_room(
         title="PATCH 归档群聊",
-        participant_agent_ids=[judge["agentId"], peer["agentId"]],
+        participant_agent_ids=[reviewer["agentId"], peer["agentId"]],
     )
 
     response = client.patch(
-        f"/api/agents/{judge['agentId']}",
-        json={"displayName": judge["displayName"], "profileId": judge["profileId"], "status": "archived"},
+        f"/api/agents/{reviewer['agentId']}",
+        json={"displayName": reviewer["displayName"], "profileId": reviewer["profileId"], "status": "archived"},
     )
 
     assert response.status_code == 200, response.text
@@ -684,12 +700,12 @@ def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeyp
     assert payload["status"] == "archived"
     assert payload["archiveSummary"]["source"] == "patch_status"
     assert payload["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
-    archived = agent_directory_service.get_agent(judge["agentId"], include_archived=True)
+    archived = agent_directory_service.get_agent(reviewer["agentId"], include_archived=True)
     assert archived["status"] == "archived"
     bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
-    assert bindings["slots"]["judge"] == ""
-    assert "judge" in bindings["excludedSlots"]
-    assert judge["agentId"] not in bindings["availableAgentIds"]
+    assert bindings["slots"]["reviewer"] == ""
+    assert "reviewer" in bindings["excludedSlots"]
+    assert reviewer["agentId"] not in bindings["availableAgentIds"]
     room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert [participant["agentId"] for participant in room_detail["participants"]] == [peer["agentId"]]
 
@@ -698,25 +714,25 @@ def test_agent_purge_api_does_not_recreate_deleted_supervised_fixed_role(tmp_pat
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     supervised = supervised_agent_service.ensure_supervised_agent_instances()
-    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+    auditor = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "auditor")
 
-    archive_response = client.delete(f"/api/agents/{judge['agentId']}")
+    archive_response = client.delete(f"/api/agents/{auditor['agentId']}")
     assert archive_response.status_code == 200, archive_response.text
-    purge_response = client.delete(f"/api/agents/{judge['agentId']}/purge")
+    purge_response = client.delete(f"/api/agents/{auditor['agentId']}/purge")
     assert purge_response.status_code == 200, purge_response.text
 
     workspace_response = client.get("/api/agents/config-workspace")
     assert workspace_response.status_code == 200, workspace_response.text
-    assert agent_directory_service.get_agent(judge["agentId"], include_archived=True) is None
+    assert agent_directory_service.get_agent(auditor["agentId"], include_archived=True) is None
     payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
-    assert payload["slots"]["judge"] == ""
-    assert "judge" in payload["excludedSlots"]
+    assert payload["slots"]["auditor"] == ""
+    assert "auditor" in payload["excludedSlots"]
     workspace = workspace_response.json()
     supervised_agents = [
         item
         for item in workspace["agents"]
         if item.get("primaryMode") == "supervised_evolution"
-        and item.get("roleKey") == "judge"
+        and item.get("roleKey") == "auditor"
     ]
     assert supervised_agents == []
 

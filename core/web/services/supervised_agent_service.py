@@ -35,6 +35,7 @@ SUPERVISED_AGENT_ROLES: tuple[SupervisedAgentRole, ...] = (
     SupervisedAgentRole("auditor", "监督进化审计 Agent", "primary"),
     SupervisedAgentRole("judge", "监督进化裁决 Agent", "primary"),
 )
+CORE_SUPERVISED_AGENT_ROLES = {"judge"}
 
 
 def ensure_supervised_agent_instances() -> list[dict[str, Any]]:
@@ -205,14 +206,22 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
     ]
     active_agent_ids = [str(agent.get("agentId") or "").strip() for agent in active_agents]
     slots = {}
+    excluded_slots: list[str] | None = None
     if preserve_existing_slots:
         try:
             payload = agent_mode_binding_service.get_mode_bindings_payload()
-            existing = ((payload.get("modes") or {}).get("supervised_evolution") or {}).get("slots")
+            mode = (payload.get("modes") or {}).get("supervised_evolution") or {}
+            existing = mode.get("slots")
             if isinstance(existing, dict):
                 slots.update({str(key): str(value or "").strip() for key, value in existing.items()})
+            excluded_slots = [
+                str(item or "").strip()
+                for item in mode.get("excludedSlots") or []
+                if str(item or "").strip() and str(item or "").strip() not in CORE_SUPERVISED_AGENT_ROLES
+            ]
         except Exception:
             slots = {}
+            excluded_slots = None
     for agent in active_agents:
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         role = str(metadata.get("supervisedRole") or agent.get("roleKey") or "").strip()
@@ -227,6 +236,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
             default_agent_id=active_agent_ids[0],
             available_agent_ids=active_agent_ids,
             slots=slots,
+            excluded_slots=excluded_slots,
         )
     except Exception:
         return
@@ -235,7 +245,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
 def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] | None, bool]:
     existing = _find_agent_by_supervised_role(role.role)
     changed = False
-    if _supervised_role_slot_excluded(role.role):
+    if role.role not in CORE_SUPERVISED_AGENT_ROLES and _supervised_role_slot_excluded(role.role):
         _record_supervised_agent_event(
             "supervised.agent_instance.sync_skipped_excluded_slot",
             role=role,
@@ -259,6 +269,26 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
             raise RuntimeError(f"Supervised agent was not created for role: {role.role}")
         changed = True
     if str(existing.get("status") or "active").strip() == "archived":
+        if role.role in CORE_SUPERVISED_AGENT_ROLES:
+            existing = agent_directory_service.reactivate_agent_instance(
+                str(existing.get("agentId") or ""),
+                reason="core_supervised_role_required",
+                metadata={"protected": True},
+            )
+            changed = True
+        else:
+            _record_supervised_agent_event(
+                "supervised.agent_instance.sync_skipped_archived",
+                role=role,
+                level="info",
+                outcome="skipped",
+                fields={
+                    "reason": "agent_archived",
+                    "agentId": str(existing.get("agentId") or "").strip(),
+                },
+            )
+            return None, False
+    if str(existing.get("status") or "active").strip() == "archived":
         _record_supervised_agent_event(
             "supervised.agent_instance.sync_skipped_archived",
             role=role,
@@ -276,6 +306,7 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] |
         "agentMode": "supervised_evolution",
         "configSurface": "model_config",
         "fixedRole": True,
+        "protected": role.role in CORE_SUPERVISED_AGENT_ROLES,
         "supervisedRole": role.role,
         "supervisedRoleLabel": role.label,
         "functionalDisplayName": role.label,
