@@ -266,6 +266,65 @@ def test_merge_analysis_blocks_when_main_workspace_touched_same_file(tmp_path):
     assert updated["mergeAnalysis"]["overlapFiles"] == ["agent.py"]
 
 
+def test_merge_analysis_ignores_untracked_noise_from_worktree_baseline(tmp_path):
+    project_root = tmp_path / "project"
+    _init_repo(project_root)
+    (project_root / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    tests_keep = project_root / "tests" / ".keep"
+    tests_keep.parent.mkdir(parents=True, exist_ok=True)
+    tests_keep.write_text("", encoding="utf-8")
+    noise_path = project_root / ".codex" / "visual-checks" / "noise.png"
+    noise_path.parent.mkdir(parents=True, exist_ok=True)
+    noise_path.write_bytes(b"preexisting visual check")
+    _write_bundle(project_root)
+    _run_git(project_root, "add", "agent.py", "tests/.keep", "workspace/evaluation/bundles/closed_loop_v1.json")
+    _run_git(project_root, "commit", "-m", "init")
+
+    candidate = tmp_path / "candidate-noise"
+    _init_repo(candidate)
+    (candidate / "agent.py").write_text("print('base')\n", encoding="utf-8")
+    candidate_tests_keep = candidate / "tests" / ".keep"
+    candidate_tests_keep.parent.mkdir(parents=True, exist_ok=True)
+    candidate_tests_keep.write_text("", encoding="utf-8")
+    candidate_bundle = candidate / "workspace" / "evaluation" / "bundles" / "closed_loop_v1.json"
+    candidate_bundle.parent.mkdir(parents=True, exist_ok=True)
+    candidate_bundle.write_bytes((project_root / "workspace" / "evaluation" / "bundles" / "closed_loop_v1.json").read_bytes())
+    _run_git(candidate, "add", "agent.py", "tests/.keep", "workspace/evaluation/bundles/closed_loop_v1.json")
+    _run_git(candidate, "commit", "-m", "base")
+    candidate_noise = candidate / ".codex" / "visual-checks" / "noise.png"
+    candidate_noise.parent.mkdir(parents=True, exist_ok=True)
+    candidate_noise.write_bytes(b"preexisting visual check")
+    marker = candidate / "tests" / "supervised_worktree_candidate_marker.py"
+    marker.write_text("CANDIDATE_SELF_EDITED = True\n", encoding="utf-8")
+    snapshot = {
+        "runId": "swte-noise",
+        "runKind": service.RUN_KIND,
+        "status": "done",
+        "projectRoot": str(project_root),
+        "candidateWorktree": {
+            "path": str(candidate),
+            "preserved": True,
+            "untrackedFiles": [".codex/visual-checks/noise.png"],
+        },
+    }
+    service._persist_snapshot(snapshot, active_run_id="")
+
+    updated = service.execute_supervised_worktree_action("swte-noise", "analyze_merge")
+
+    assert updated["mergeAnalysis"]["status"] == "ready"
+    assert updated["mergeAnalysis"]["mergeAllowed"] is True
+    assert updated["mergeAnalysis"]["changedFiles"] == [
+        {
+            "path": "tests/supervised_worktree_candidate_marker.py",
+            "status": "??",
+            "changeType": "added",
+            "highRisk": False,
+        }
+    ]
+    assert updated["mergeAnalysis"]["overlapFiles"] == []
+    assert "main_workspace_overlap" not in updated["mergeAnalysis"]["blockers"]
+
+
 def test_force_merge_creates_rollback_manifest_and_rollback_restores_file(tmp_path):
     project_root = tmp_path / "project"
     _init_repo(project_root)
