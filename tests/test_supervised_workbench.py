@@ -275,7 +275,7 @@ def test_format_bundle_preview_renders_case_summary(tmp_path: Path):
     assert "- case_1 [transaction/single_turn] run lint" in rendered
 
 
-def test_list_available_workbench_bundles_uses_launchable_file_stem(tmp_path: Path):
+def test_list_available_workbench_bundles_only_lists_launchable_case_bundles(tmp_path: Path):
     bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
     bundle_dir.mkdir(parents=True)
     (bundle_dir / "alpha_bundle.json").write_text(
@@ -304,21 +304,7 @@ def test_list_available_workbench_bundles_uses_launchable_file_stem(tmp_path: Pa
             "path": str(bundle_dir / "alpha_bundle.json"),
             "caseCount": 2,
             "benchmark": "dry",
-        },
-        {
-            "name": "broken_bundle",
-            "declaredName": "",
-            "path": str(bundle_dir / "broken_bundle.json"),
-            "caseCount": 0,
-            "benchmark": "",
-        },
-        {
-            "name": "missing_cases",
-            "declaredName": "declared_without_cases",
-            "path": str(bundle_dir / "missing_cases.json"),
-            "caseCount": 0,
-            "benchmark": "empty",
-        },
+        }
     ]
 
 

@@ -10654,6 +10654,7 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
         "caseCount": 1,
         "benchmark": "dry",
     } in payload["bundles"]
+    assert {item["name"] for item in payload["datasets"]} == {"supervised_dry_run", "terminal_bench_smoke"}
     dry_run = next(item for item in payload["datasets"] if item["name"] == "supervised_dry_run")
     assert dry_run["effective"] is True
     assert dry_run["caseCount"] >= 1
@@ -10665,10 +10666,6 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert terminal_smoke["selectable"] is True
     assert terminal_smoke["adapterStatus"] == "ready_local_smoke"
     assert "terminal-bench" in terminal_smoke["tags"]
-    humaneval = next(item for item in payload["datasets"] if item["name"] == "humaneval_jsonl")
-    assert humaneval["effective"] is False
-    assert humaneval["visibility"] == "hidden"
-    assert humaneval["selectable"] is False
     assert payload["activeRun"] is None
 
 
@@ -11060,16 +11057,11 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
 
     assert response.status_code == 200
     rows = response.json()["datasets"]
-    assert any(item["name"] == "generated_cases" for item in rows)
+    names = {item["name"] for item in rows}
+    assert names == {"supervised_dry_run", "terminal_bench_smoke"}
+    assert not any(item["name"] == "generated_cases" for item in rows)
+    assert not any(item["name"] == "chat_reviewed_multiturn" for item in rows)
     assert any(item["name"] == "terminal_bench_smoke" for item in rows)
-    chat_row = next(item for item in rows if item["name"] == "chat_reviewed_multiturn")
-    assert chat_row["reviewRequired"] is True
-    assert chat_row["sourceTrack"] == "dialogue"
-    assert chat_row["holdoutAllowed"] is False
-    assert chat_row["effective"] is False
-    assert chat_row["caseCount"] == 0
-    assert chat_row["usabilityStatus"] == "empty"
-    assert chat_row["selectable"] is False
     terminal_row = next(item for item in rows if item["name"] == "terminal_bench_smoke")
     assert terminal_row["effective"] is True
     assert terminal_row["selectable"] is True

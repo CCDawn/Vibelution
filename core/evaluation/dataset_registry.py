@@ -112,6 +112,7 @@ class DatasetSpec:
     allowed_downstream_uses: List[str] = None
     holdout_allowed: bool = True
     raw_chat_direct_training_allowed: bool = True
+    workbench_visible: bool = True
 
     def __post_init__(self) -> None:
         if self.tags is None:
@@ -212,6 +213,7 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "runnable": True,
                 "adapter_status": "ready",
                 "tags": ["local", "jsonl"],
+                "workbench_visible": False,
             },
             {
                 "name": "terminal_bench_smoke",
@@ -245,6 +247,7 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "runnable": True,
                 "adapter_status": "ready",
                 "tags": ["generated", "gym"],
+                "workbench_visible": False,
                 **generated_case_dataset_metadata(),
             },
             {
@@ -259,6 +262,7 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "runnable": True,
                 "adapter_status": "ready",
                 "tags": ["chat", "multiturn", "reviewed"],
+                "workbench_visible": False,
                 **chat_reviewed_dataset_metadata(),
             },
             {
@@ -409,6 +413,7 @@ def _dataset_specs_from_payload(payload: Dict[str, Any]) -> List[DatasetSpec]:
                 ],
                 holdout_allowed=bool(item.get("holdout_allowed", True)),
                 raw_chat_direct_training_allowed=bool(item.get("raw_chat_direct_training_allowed", True)),
+                workbench_visible=bool(item.get("workbench_visible", True)),
             )
         )
     return [item for item in specs if item.name and item.kind and item.bundle_name]
@@ -483,8 +488,10 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
             usability_status = "ready"
             usability_reason = "数据集已有可运行 case。"
         effective = usability_status == "ready"
-        visibility = "primary" if effective else "hidden"
-        if usability_status == "empty":
+        visibility = "primary" if effective and spec.workbench_visible else "hidden"
+        if not spec.workbench_visible:
+            visibility_reason = "底层数据池不直接作为工作台评测入口展示。"
+        elif usability_status == "empty":
             visibility_reason = "空数据集已从主选择器隐藏。"
         elif usability_status == "missing_source":
             visibility_reason = "缺少本地源文件，已从主选择器隐藏。"
@@ -517,7 +524,8 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 "visibility": visibility,
                 "visibility_reason": visibility_reason,
                 "selectable": effective,
-                "noise_level": "low" if effective else "hidden",
+                "noise_level": "low" if visibility == "primary" else "hidden",
+                "workbench_visible": spec.workbench_visible,
                 "adapter_status": spec.adapter_status,
                 "source_path": str(source) if source else None,
                 "source_exists": bool(source and source.exists()),
