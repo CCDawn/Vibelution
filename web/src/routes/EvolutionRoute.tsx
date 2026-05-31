@@ -92,6 +92,25 @@ type EvolutionRouteProps = {
   forcedTrack?: EvolutionRouteTrack;
   forcedView?: SupervisedRouteView;
 };
+type SupervisedSourceOption =
+  | {
+      value: string;
+      kind: "dataset";
+      name: string;
+      label: string;
+      detail: string;
+      caseCount: number | null;
+      dataset: NonNullable<EvolutionWorkbench["datasets"]>[number];
+    }
+  | {
+      value: string;
+      kind: "bundle";
+      name: string;
+      label: string;
+      detail: string;
+      caseCount: number;
+      bundle: EvolutionWorkbench["bundles"][number];
+    };
 
 const LIBRARY_STATUS_FILTERS: LibraryStatusFilter[] = [
   "all",
@@ -892,6 +911,29 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const hiddenDatasetCount = Math.max(0, (workbenchControl?.datasets ?? []).length - primaryDatasets.length);
   const availableBundles = workbenchControl?.bundles ?? [];
   const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
+  const supervisedSourceOptions = useMemo<SupervisedSourceOption[]>(() => {
+    const datasetOptions: SupervisedSourceOption[] = primaryDatasets.map((item) => ({
+      value: `dataset:${item.name}`,
+      kind: "dataset",
+      name: item.name,
+      label: item.name,
+      detail: `${item.bundleName || "--"} · ${lang === "zh" ? "数据集，运行前物化" : "dataset, materialized before run"}`,
+      caseCount: item.caseCount,
+      dataset: item,
+    }));
+    const bundleOptions: SupervisedSourceOption[] = availableBundles.map((item) => ({
+      value: `bundle:${item.name}`,
+      kind: "bundle",
+      name: item.name,
+      label: item.name,
+      detail: `${item.benchmark || item.declaredName || "--"} · ${lang === "zh" ? "评测包，直接运行" : "bundle, run directly"}`,
+      caseCount: item.caseCount,
+      bundle: item,
+    }));
+    return [...datasetOptions, ...bundleOptions];
+  }, [availableBundles, lang, primaryDatasets]);
+  const selectedSourceValue = sourceKind === "bundle" ? `bundle:${bundleNameInput}` : `dataset:${datasetName}`;
+  const selectedSourceOption = supervisedSourceOptions.find((item) => item.value === selectedSourceValue) ?? null;
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
   const filterLibraryEntries = (entries: EvolutionLibraryEntry[]) =>
     entries.filter((item) => {
@@ -2158,153 +2200,103 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 <h2 className={styles.sectionTitle}>{t("launchSupervisedRun")}</h2>
               </div>
               <span className={styles.secondaryPill}>
-                {sourceKindLabel(sourceKind)}
+                {lang === "zh" ? "评测来源" : "Evaluation source"}
               </span>
             </div>
             <p className={styles.noticeText}>{t("launchSupervisedRunHint")}</p>
 
-            <div className={styles.metricStrip}>
-              <article className={styles.stripItem}>
-                <span>{t("availableDatasets")}</span>
-                <strong>{workbenchState?.availableDatasets ?? 0}</strong>
-              </article>
-              <article className={styles.stripItem}>
-                <span>{t("runnableDatasets")}</span>
-                <strong>{workbenchState?.runnableDatasets ?? 0}</strong>
-              </article>
-              <article className={styles.stripItem}>
-                <span>{t("blockedDatasets")}</span>
-                <strong>{workbenchState?.blockedDatasets ?? 0}</strong>
-              </article>
+            <div className={styles.sourceInventoryBar}>
+              <span>{lang === "zh" ? "可运行数据集" : "Runnable datasets"} <strong>{primaryDatasets.length}</strong></span>
+              <span>{lang === "zh" ? "已有评测包" : "Bundles"} <strong>{availableBundles.length}</strong></span>
+              {hiddenDatasetCount > 0 ? (
+                <span>{lang === "zh" ? "已隐藏噪声项" : "Hidden noisy sources"} <strong>{hiddenDatasetCount}</strong></span>
+              ) : null}
             </div>
 
-              <div className={styles.segmented}>
-                {(["dataset", "bundle"] as const).map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={
-                      sourceKind === value
-                        ? `${styles.segmentButton} ${styles.segmentButtonActive}`
-                        : styles.segmentButton
-                    }
-                    onClick={() => setSourceKind(value)}
-                  >
-                    {sourceKindLabel(value)}
-                  </button>
-                ))}
-              </div>
-
               <div className={styles.formGrid}>
-                {sourceKind === "dataset" ? (
-                  <>
-                    <div className={styles.compactFieldGrid}>
-                      <div className={styles.formField}>
-                        <label htmlFor="supervised-dataset">{t("selectedDataset")}</label>
-                        <select
-                          id="supervised-dataset"
-                          className={styles.selectInput}
-                          value={datasetName}
-                          onChange={(event) => setDatasetName(event.target.value)}
-                        >
+                <div className={sourceKind === "dataset" ? styles.compactFieldGrid : styles.formGrid}>
+                  <div className={styles.formField}>
+                    <label htmlFor="supervised-source">{lang === "zh" ? "选择评测来源" : "Evaluation source"}</label>
+                    <select
+                      id="supervised-source"
+                      className={styles.selectInput}
+                      value={selectedSourceValue}
+                      onChange={(event) => {
+                        const [nextKind, ...nameParts] = event.target.value.split(":");
+                        const nextName = nameParts.join(":");
+                        if (nextKind === "bundle") {
+                          setSourceKind("bundle");
+                          setBundleNameInput(nextName);
+                          return;
+                        }
+                        setSourceKind("dataset");
+                        setDatasetName(nextName);
+                      }}
+                    >
+                      {primaryDatasets.length > 0 ? (
+                        <optgroup label={lang === "zh" ? "可运行数据集：运行前自动物化为评测包" : "Runnable datasets: materialized before run"}>
                           {primaryDatasets.map((item) => (
-                            <option key={item.name} value={item.name}>
+                            <option key={`dataset:${item.name}`} value={`dataset:${item.name}`}>
                               {item.name} [{datasetUsabilityLabel(item, lang)}]
                             </option>
                           ))}
-                        </select>
-                        {hiddenDatasetCount > 0 ? (
-                          <span className={styles.formHint}>
-                            {lang === "zh"
-                              ? `已隐藏 ${hiddenDatasetCount} 个空数据、缺源文件或需外部 harness 的数据集`
-                              : `${hiddenDatasetCount} empty, missing-source, or external-harness datasets hidden`}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className={styles.formField}>
-                        <label htmlFor="supervised-limit">{t("caseLimit")}</label>
-                        <input
-                          id="supervised-limit"
-                          className={styles.textInput}
-                          type="number"
-                          min={1}
-                          placeholder="all"
-                          value={datasetLimitInput}
-                          onChange={(event) => setDatasetLimitInput(event.target.value)}
-                        />
-                      </div>
-                    </div>
-                    {selectedDataset ? (
-                      <div className={styles.datasetMetaCompact}>
-                        <div className={styles.listRowTop}>
-                          <strong>{selectedDataset.bundleName}</strong>
-                          <span className={styles.secondaryPill}>
-                            {datasetUsabilityLabel(selectedDataset, lang)}
-                          </span>
-                        </div>
-                        <p>{selectedDataset.description}</p>
-                        <div className={styles.metaRow}>
-                          <span>{lang === "zh" ? "样本数" : "Cases"}</span>
-                          <span>{selectedDataset.caseCount ?? "--"}</span>
-                        </div>
-                        {selectedDataset.usabilityReason ? (
-                          <div className={styles.metaRow}>
-                            <span>{lang === "zh" ? "状态" : "Status"}</span>
-                            <span>{selectedDataset.usabilityReason}</span>
-                          </div>
-                        ) : null}
-                        <div className={styles.metaRow}>
-                          <span>{lang === "zh" ? "来源" : "Source"}</span>
-                          <span>{selectedDataset.sourceTrack || "--"}</span>
-                        </div>
-                        <div className={styles.signalRow}>
-                          {selectedDataset.reviewRequired ? (
-                            <span className={styles.secondaryPill}>
-                              {lang === "zh" ? "需审核" : "review required"}
-                            </span>
-                          ) : null}
-                          {!selectedDataset.holdoutAllowed ? (
-                            <span className={styles.secondaryPill}>
-                              {lang === "zh" ? "不进 holdout" : "no holdout"}
-                            </span>
-                          ) : null}
-                          {!selectedDataset.rawChatDirectTrainingAllowed ? (
-                            <span className={styles.secondaryPill}>
-                              {lang === "zh" ? "raw chat 不直训" : "no raw-chat training"}
-                            </span>
-                          ) : null}
-                        </div>
-                        {selectedDataset.allowedDownstreamUses.length > 0 ? (
-                          <div className={styles.metaRow}>
-                            <span>{lang === "zh" ? "下游用途" : "Downstream"}</span>
-                            <span>{selectedDataset.allowedDownstreamUses.join(", ")}</span>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className={styles.formField}>
-                    <label htmlFor="supervised-bundle">{t("selectedBundle")}</label>
-                    <select
-                      id="supervised-bundle"
-                      className={styles.selectInput}
-                      value={bundleNameInput}
-                      onChange={(event) => setBundleNameInput(event.target.value)}
-                    >
-                      {availableBundles.map((item) => (
-                        <option key={item.name} value={item.name}>
-                          {item.name} [{item.caseCount} cases]
-                        </option>
-                      ))}
+                        </optgroup>
+                      ) : null}
+                      {availableBundles.length > 0 ? (
+                        <optgroup label={lang === "zh" ? "已有评测包：直接运行" : "Existing bundles: run directly"}>
+                          {availableBundles.map((item) => (
+                            <option key={`bundle:${item.name}`} value={`bundle:${item.name}`}>
+                              {item.name} [{item.caseCount} cases]
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : null}
                     </select>
-                    {!selectedBundleExists ? (
-                      <p className={styles.errorTextCompact}>
-                        {lang === "zh" ? "请选择一个存在的监督 bundle。" : "Choose an existing supervised bundle."}
-                      </p>
-                    ) : null}
+                    <span className={styles.formHint}>
+                      {lang === "zh"
+                        ? "数据集是原始任务来源；评测包是已经物化好的可执行 case 包。"
+                        : "A dataset is the source; a bundle is the materialized executable case package."}
+                    </span>
                   </div>
-                )}
+                  {sourceKind === "dataset" ? (
+                    <div className={styles.formField}>
+                      <label htmlFor="supervised-limit">{t("caseLimit")}</label>
+                      <input
+                        id="supervised-limit"
+                        className={styles.textInput}
+                        type="number"
+                        min={1}
+                        placeholder="all"
+                        value={datasetLimitInput}
+                        onChange={(event) => setDatasetLimitInput(event.target.value)}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                {selectedSourceOption ? (
+                  <div className={styles.sourceMetaCompact}>
+                    <div>
+                      <strong>{selectedSourceOption.label}</strong>
+                      <span>{selectedSourceOption.detail}</span>
+                    </div>
+                    <span className={styles.secondaryPill}>
+                      {selectedSourceOption.kind === "dataset" ? sourceKindLabel("dataset") : sourceKindLabel("bundle")}
+                      {" · "}
+                      {selectedSourceOption.caseCount ?? "--"} cases
+                    </span>
+                  </div>
+                ) : null}
+                {sourceKind === "dataset" && selectedDataset ? (
+                  <div className={styles.sourceDetailGrid}>
+                    <span>{selectedDataset.description}</span>
+                    <span>{selectedDataset.usabilityReason || "--"}</span>
+                  </div>
+                ) : null}
+                {sourceKind === "bundle" && !selectedBundleExists ? (
+                  <p className={styles.errorTextCompact}>
+                    {lang === "zh" ? "请选择一个存在的监督评测包。" : "Choose an existing supervised bundle."}
+                  </p>
+                ) : null}
 
                 <label className={styles.checkboxRow}>
                   <input
@@ -2325,6 +2317,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       runLocked
                       || worktreeRunLocked
                       || startRunMutation.isPending
+                      || (sourceKind === "dataset" && !datasetName)
                       || (sourceKind === "bundle" && !selectedBundleExists)
                     }
                     onClick={() => startRunMutation.mutate()}
@@ -2339,6 +2332,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       runLocked
                       || worktreeRunLocked
                       || startWorktreeRunMutation.isPending
+                      || (sourceKind === "dataset" && !datasetName)
                       || (sourceKind === "bundle" && !selectedBundleExists)
                     }
                     onClick={() => startWorktreeRunMutation.mutate()}

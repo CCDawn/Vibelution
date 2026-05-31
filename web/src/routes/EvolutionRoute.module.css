@@ -587,6 +587,70 @@
   border: 1px solid var(--border-hairline);
 }
 
+.sourceInventoryBar,
+.sourceMetaCompact,
+.sourceDetailGrid {
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--surface-card-subtle);
+}
+
+.sourceInventoryBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.sourceInventoryBar span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-tertiary);
+  font-size: 0.82rem;
+}
+
+.sourceInventoryBar strong,
+.sourceMetaCompact strong {
+  color: var(--fg-primary);
+}
+
+.sourceMetaCompact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.sourceMetaCompact div,
+.sourceDetailGrid {
+  min-width: 0;
+}
+
+.sourceMetaCompact div {
+  display: grid;
+  gap: 3px;
+}
+
+.sourceMetaCompact span,
+.sourceDetailGrid span {
+  color: var(--fg-tertiary);
+  font-size: 0.82rem;
+}
+
+.sourceMetaCompact strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceDetailGrid {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
 .sourceSummary {
   display: grid;
   gap: 10px;

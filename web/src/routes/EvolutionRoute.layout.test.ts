@@ -81,11 +81,15 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("onClick={() => setSelectedWorktreeRunId(run.runId)}");
   });
 
-  it("hides noisy unavailable datasets from the supervised dataset picker", () => {
+  it("merges supervised datasets and bundles into one source picker", () => {
     expect(routeSource).toContain("primaryDatasets");
     expect(routeSource).toContain("item.selectable !== false && item.effective");
     expect(routeSource).toContain("hiddenDatasetCount");
-    expect(routeSource).toContain("empty, missing-source, or external-harness datasets hidden");
+    expect(routeSource).toContain("supervisedSourceOptions");
+    expect(routeSource).toContain('value: `dataset:${item.name}`');
+    expect(routeSource).toContain('value: `bundle:${item.name}`');
+    expect(routeSource).toContain("数据集是原始任务来源；评测包是已经物化好的可执行 case 包。");
+    expect(routeSource).toContain("sourceInventoryBar");
     expect(routeSource).toContain("primaryDatasets.map((item)");
   });
 });
