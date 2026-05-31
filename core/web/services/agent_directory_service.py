@@ -31,6 +31,12 @@ DEFAULT_AGENT_KIND = "persistent"
 DEFAULT_TOOL_POLICY_ID = "default"
 DEFAULT_MEMORY_POLICY_ID = "private"
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
+KNOWLEDGE_STEWARD_AGENT_ID = "agent-knowledge-steward"
+KNOWLEDGE_STEWARD_TOOL_POLICY_ID = "tool-knowledge-steward"
+KNOWLEDGE_STEWARD_MEMORY_POLICY_ID = "memory-knowledge-steward"
+KNOWLEDGE_STEWARD_ROLE_KEY = "knowledge_steward"
+KNOWLEDGE_STEWARD_FUNCTIONAL_NAME = "知识库管理员"
+KNOWLEDGE_STEWARD_DIRECT_SESSION_ID = "agent-knowledge-steward-direct"
 AGENT_CODE_PREFIX = "A"
 AGENT_SHARED_WORKSPACE_PATH = "workspace/shared"
 AGENT_AVATAR_RELATIVE_DIR = PurePosixPath("workspace/avatars")
@@ -125,8 +131,11 @@ AGENT_TERRITORY_WRITE_SCOPES = ("private",)
 AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
 TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
 EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
+    "knowledge_governance_tasks_tool",
+    "knowledge_ingestion_tool",
     "knowledge_proposal_tool",
     "knowledge_query_tool",
+    "knowledge_rating_suggestion_tool",
     "research_knowledge_query_tool",
     "research_agent_creation_proposal_tool",
     "research_communication_edge_proposal_tool",
@@ -942,6 +951,9 @@ def repair_agent_directory() -> dict[str, Any]:
     with _STATE_LOCK:
         state = load_state()
         changed = False
+        knowledge_steward_result = _ensure_knowledge_steward_agent(state)
+        if knowledge_steward_result.get("changed"):
+            changed = True
         display_name_repaired_agents: list[dict[str, Any]] = []
         avatar_defaulted_agents: list[dict[str, Any]] = []
         territory_repaired_agents: list[dict[str, Any]] = []
@@ -1055,6 +1067,12 @@ def repair_agent_directory() -> dict[str, Any]:
                 _record_agent_event("agent.display_name_repaired", repaired_agent)
             if avatar_defaulted_agents:
                 _record_agent_avatar_defaults_event(avatar_defaulted_agents)
+            if knowledge_steward_result.get("changed"):
+                _record_knowledge_steward_repaired_event(
+                    knowledge_steward_result.get("agent") or {},
+                    created=bool(knowledge_steward_result.get("created")),
+                    repaired_fields=list(knowledge_steward_result.get("repairedFields") or []),
+                )
             for repaired_agent in territory_repaired_agents:
                 _record_agent_territory_event("agent_territory.resolved", repaired_agent, outcome="repaired")
         return state
@@ -2431,6 +2449,215 @@ def agent_avatar_filename(avatar_image_path: object) -> str:
     return filename
 
 
+def _ensure_knowledge_steward_agent(state: dict[str, Any]) -> dict[str, Any]:
+    agents = list(state.get("agents") or [])
+    tool_policies = _tool_policies(state)
+    memory_policies = _memory_policies(state)
+    now = utc_now_iso()
+    agent = _find_agent(state, KNOWLEDGE_STEWARD_AGENT_ID)
+    created = False
+    changed = False
+    repaired_fields: list[str] = []
+    workspace_path = _agent_workspace_relative_path(KNOWLEDGE_STEWARD_AGENT_ID)
+
+    if agent is None:
+        metadata = _knowledge_steward_metadata()
+        agent = {
+            "agentId": KNOWLEDGE_STEWARD_AGENT_ID,
+            "agentCode": _next_agent_code(agents),
+            "displayName": _agent_public_display_name(
+                KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+                existing_agents=agents,
+                agent_id=KNOWLEDGE_STEWARD_AGENT_ID,
+                metadata=metadata,
+            ),
+            "kind": DEFAULT_AGENT_KIND,
+            "primaryMode": "general",
+            "roleKey": KNOWLEDGE_STEWARD_ROLE_KEY,
+            "templateId": "primary",
+            "profileId": "primary",
+            "promptTemplateId": "prompt-chat-default",
+            "directSessionId": KNOWLEDGE_STEWARD_DIRECT_SESSION_ID,
+            "workspacePath": workspace_path,
+            "toolPolicyId": KNOWLEDGE_STEWARD_TOOL_POLICY_ID,
+            "memoryPolicyId": KNOWLEDGE_STEWARD_MEMORY_POLICY_ID,
+            "createdBy": "system_repair",
+            "status": "active",
+            "metadata": metadata,
+            "createdAt": now,
+            "updatedAt": now,
+        }
+        _ensure_agent_default_avatar(agent)
+        agents.append(agent)
+        state["agents"] = agents
+        created = True
+        changed = True
+        repaired_fields.append("agent")
+
+    if not isinstance(agent, dict):
+        return {"changed": False, "created": False, "agent": {}, "repairedFields": []}
+
+    expected = {
+        "kind": DEFAULT_AGENT_KIND,
+        "primaryMode": "general",
+        "roleKey": KNOWLEDGE_STEWARD_ROLE_KEY,
+        "templateId": "primary",
+        "profileId": "primary",
+        "promptTemplateId": "prompt-chat-default",
+        "directSessionId": KNOWLEDGE_STEWARD_DIRECT_SESSION_ID,
+        "workspacePath": workspace_path,
+        "toolPolicyId": KNOWLEDGE_STEWARD_TOOL_POLICY_ID,
+        "memoryPolicyId": KNOWLEDGE_STEWARD_MEMORY_POLICY_ID,
+        "status": "active",
+    }
+    for key, value in expected.items():
+        if str(agent.get(key) or "").strip() != value:
+            agent[key] = value
+            changed = True
+            repaired_fields.append(key)
+
+    if not _normalize_agent_code(agent.get("agentCode")):
+        agent["agentCode"] = _next_agent_code(agents, exclude_agent_id=KNOWLEDGE_STEWARD_AGENT_ID)
+        changed = True
+        repaired_fields.append("agentCode")
+
+    metadata = dict(agent.get("metadata") or {})
+    merged_metadata = _merge_system_agent_metadata(metadata, _knowledge_steward_metadata())
+    if metadata != merged_metadata:
+        agent["metadata"] = merged_metadata
+        changed = True
+        repaired_fields.append("metadata")
+
+    title = str(agent.get("displayName") or "").strip()
+    if not title or _display_name_is_functional_or_machine(title, agent):
+        agent["displayName"] = _agent_public_display_name(
+            KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+            existing_agents=agents,
+            agent_id=KNOWLEDGE_STEWARD_AGENT_ID,
+            metadata=dict(agent.get("metadata") or {}),
+        )
+        changed = True
+        repaired_fields.append("displayName")
+
+    avatar_changed = _ensure_agent_default_avatar(agent)
+    if avatar_changed:
+        changed = True
+        repaired_fields.append("avatar")
+
+    _ensure_agent_workspace(workspace_path)
+    tool_policy = _knowledge_steward_tool_policy()
+    memory_policy = _knowledge_steward_memory_policy(workspace_path)
+    if tool_policies.get(KNOWLEDGE_STEWARD_TOOL_POLICY_ID) != tool_policy:
+        tool_policies[KNOWLEDGE_STEWARD_TOOL_POLICY_ID] = tool_policy
+        changed = True
+        repaired_fields.append("toolPolicy")
+    if memory_policies.get(KNOWLEDGE_STEWARD_MEMORY_POLICY_ID) != memory_policy:
+        memory_policies[KNOWLEDGE_STEWARD_MEMORY_POLICY_ID] = memory_policy
+        changed = True
+        repaired_fields.append("memoryPolicy")
+    state["toolPolicies"] = tool_policies
+    state["memoryPolicies"] = memory_policies
+    if changed:
+        agent["updatedAt"] = now
+    return {
+        "changed": changed,
+        "created": created,
+        "agent": dict(agent),
+        "repairedFields": sorted(set(repaired_fields)),
+    }
+
+
+def _knowledge_steward_tool_policy() -> dict[str, Any]:
+    return normalize_tool_policy(
+        {
+            **default_tool_policy(KNOWLEDGE_STEWARD_TOOL_POLICY_ID),
+            "allowedTools": [
+                "agent_message_tool",
+                "knowledge_query_tool",
+                "knowledge_proposal_tool",
+                "knowledge_ingestion_tool",
+                "knowledge_governance_tasks_tool",
+                "knowledge_rating_suggestion_tool",
+            ],
+            "preferredTools": [
+                "knowledge_governance_tasks_tool",
+                "knowledge_query_tool",
+                "knowledge_rating_suggestion_tool",
+            ],
+            "readScopes": ["private", "shared"],
+            "writeScopes": ["private"],
+            "networkAccess": "none",
+            "mutationAccess": "restricted",
+            "maxCallsPerTurn": 12,
+        },
+        KNOWLEDGE_STEWARD_TOOL_POLICY_ID,
+    )
+
+
+def _knowledge_steward_memory_policy(workspace_path: str) -> dict[str, Any]:
+    return normalize_memory_policy(
+        {
+            **default_memory_policy(KNOWLEDGE_STEWARD_MEMORY_POLICY_ID, workspace_path),
+            "readSharedGroups": ["project"],
+            "writeSharedGroups": [],
+            "readKnowledgeBaseIds": [],
+            "proposeKnowledgeBaseIds": [],
+            "reviewKnowledgeBaseIds": [],
+            "rateKnowledgeBaseIds": [],
+        },
+        KNOWLEDGE_STEWARD_MEMORY_POLICY_ID,
+        workspace_path,
+    )
+
+
+def _knowledge_steward_metadata() -> dict[str, Any]:
+    return {
+        "systemRole": KNOWLEDGE_STEWARD_ROLE_KEY,
+        "fixedRole": True,
+        "protected": True,
+        "functionalDisplayName": KNOWLEDGE_STEWARD_FUNCTIONAL_NAME,
+        "displayNameSource": "generated_person_name",
+        "agentMode": "general",
+        "managedDomain": "team_knowledge",
+        "governanceRole": "knowledge_steward",
+        "phaseIntroduced": "memory_platform_phase3",
+        "permissionBoundary": "proposal_and_rating_suggestion_only",
+        "personaProfile": {
+            "personality": "审慎、耐心、重视证据链和权限边界。",
+            "communicationStyle": "先给治理结论，再列来源、风险和需要审核的动作。",
+            "background": "长期维护团队知识库、来源登记、精炼提案、评级建议和复审队列。",
+            "collaborationPreference": "向 owner、lead、steward 或 coordinator 提交可审核建议，不绕过正式审核。",
+            "expertise": ["团队知识治理", "来源溯源", "知识评级", "治理任务队列"],
+        },
+        "taskProfile": {
+            "mission": "维护团队知识库质量，推动来源证据、精炼候选和评级建议进入可审核状态。",
+            "responsibilities": (
+                "查看知识治理任务；整理来源摄取包；提交精炼提案；提交评级建议；"
+                "生成复审摘要；发现权限或证据缺口时上报。"
+            ),
+            "preferredTasks": "来源登记、候选知识整理、评级建议、证据链追踪、治理队列巡检。",
+            "avoidTasks": "不要直接应用正式知识、删除知识、跨团队授权、修改 ACL 或绕过 reviewer。",
+            "successCriteria": "每条建议都有来源、时间戳、目标知识库、理由和可审核状态。",
+            "deliverables": "治理任务摘要、摄取包、精炼提案、评级建议、复审风险清单。",
+            "constraints": "正式 KnowledgeItem 落盘仍必须由具备审核权限的角色或用户确认。",
+            "handoffNotes": "需要最终审核时交给 Team owner/lead/steward/coordinator 或用户。",
+            "taskTypes": ["knowledge_governance", "source_ingestion", "rating_suggestion", "review_preparation"],
+        },
+    }
+
+
+def _merge_system_agent_metadata(current: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current or {})
+    for key, value in defaults.items():
+        if isinstance(value, dict):
+            nested = dict(merged.get(key) or {}) if isinstance(merged.get(key), dict) else {}
+            nested.update(value)
+            merged[key] = nested
+        else:
+            merged[key] = value
+    return merged
+
+
 def resolve_agent_avatar_file(filename: str) -> Path:
     safe_filename = agent_avatar_filename(str(AGENT_AVATAR_RELATIVE_DIR / str(filename or "")))
     if not safe_filename:
@@ -2682,7 +2909,7 @@ def _count_policy_refs(agents: list[dict[str, Any]], field: str, policy_id: str)
 def _agent_archive_protected(agent: dict[str, Any]) -> bool:
     metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
     system_role = str(metadata.get("systemRole") or metadata.get("researchOrgRole") or "").strip()
-    return bool(metadata.get("protected")) or system_role in {"ceo", "organization_advisor"}
+    return bool(metadata.get("protected")) or system_role in {"ceo", "organization_advisor", KNOWLEDGE_STEWARD_ROLE_KEY}
 
 
 def _find_agent(state: dict[str, Any], agent_id: str) -> dict[str, Any] | None:
@@ -3484,6 +3711,36 @@ def _record_agent_memory_policy_event(agent: dict[str, Any], policy: dict[str, A
                 "proposeKnowledgeBaseCount": len(list(policy.get("proposeKnowledgeBaseIds") or [])),
                 "reviewKnowledgeBaseCount": len(list(policy.get("reviewKnowledgeBaseIds") or [])),
                 "hasPrivateMemoryRoot": bool(str(policy.get("privateMemoryRoot") or "").strip()),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_knowledge_steward_repaired_event(
+    agent: dict[str, Any],
+    *,
+    created: bool = False,
+    repaired_fields: list[str] | None = None,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent",
+            "agent.knowledge_steward.repaired",
+            message="Knowledge Steward Agent was created or repaired.",
+            level="info",
+            outcome="created" if created else "repaired",
+            fields={
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "roleKey": _normalize_role_key(agent.get("roleKey")),
+                "toolPolicyId": str(agent.get("toolPolicyId") or "").strip(),
+                "memoryPolicyId": str(agent.get("memoryPolicyId") or "").strip(),
+                "directSessionId": str(agent.get("directSessionId") or "").strip(),
+                "repairedFields": list(repaired_fields or []),
+                "permissionBoundary": "proposal_and_rating_suggestion_only",
             },
             lifecycle=True,
         )
