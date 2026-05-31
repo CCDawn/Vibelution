@@ -1234,6 +1234,77 @@
   background: var(--shell-surface-hover);
 }
 
+.lifecycleMenuCluster {
+  position: relative;
+  display: flex;
+  outline: none;
+}
+
+.lifecycleMenuPanel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 5px;
+  min-width: 178px;
+  padding: 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--shell-panel);
+  box-shadow: 0 16px 32px var(--shell-shadow);
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+
+.lifecycleMenuPanel[hidden] {
+  display: none;
+}
+
+.lifecycleMenuClusterOpen .lifecycleMenuPanel {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.lifecycleMenuItem {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lifecycleMenuItem:hover:not(:disabled),
+.lifecycleMenuItem:focus-visible {
+  border-color: var(--border-soft);
+  background: var(--shell-surface-hover);
+  color: var(--fg-primary);
+}
+
+.lifecycleMenuItem:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.lifecycleMenuItem span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mainArea {
   height: 100%;
   min-height: 0;

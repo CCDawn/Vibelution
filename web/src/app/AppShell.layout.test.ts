@@ -74,14 +74,23 @@ describe("AppShell layout contract", () => {
     expect(shellSource).not.toContain("shutdownFailed");
   });
 
-  it("exposes a managed restart control beside the close control", () => {
+  it("turns the top refresh icon into a frontend refresh and keeps restart inside the power menu", () => {
     expect(shellSource).toContain("RefreshCw");
+    expect(shellSource).toContain("refreshFrontendLabel");
+    expect(shellSource).toContain("browser.user_action.frontend_refresh_requested");
+    expect(shellSource).toContain("window.location.reload()");
+    expect(shellSource).toContain("lifecycleMenuCluster");
+    expect(shellSource).toContain("lifecycleMenuPanel");
+    expect(shellSource).toContain("lifecycleMenuOpen");
     expect(shellSource).toContain('"/api/runtime/restart"');
     expect(shellSource).toContain("restartWorkbenchLabel");
     expect(shellSource).toContain("beginRestart");
     expect(shellSource).toContain("requestWorkbenchExitGuard");
     expect(shellSource).toContain('requestWorkbenchExitGuard("restart"');
     expect(shellSource).toContain('requestWorkbenchExitGuard("shutdown"');
+    expect(styles.lifecycleMenuCluster).toBeTypeOf("string");
+    expect(styles.lifecycleMenuPanel).toBeTypeOf("string");
+    expect(styles.lifecycleMenuItem).toBeTypeOf("string");
   });
 
   it("renders a startup progress overlay from loading and lifecycle state", () => {
