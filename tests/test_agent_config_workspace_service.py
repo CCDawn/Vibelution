@@ -130,7 +130,8 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert "all" not in groups
     assert groups["active"]["section"] == "status"
     assert groups["active"]["label"] == "活跃 Agent"
-    assert groups["active"]["count"] == 2
+    assert groups["active"]["count"] == 3
+    assert agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID in groups["active"]["agentIds"]
     assert archived_agent["agentId"] not in groups["active"]["agentIds"]
     assert groups["needs_review"]["section"] == "status"
     assert groups["archived"]["section"] == "status"
@@ -252,7 +253,7 @@ def test_repair_agent_directory_moves_legacy_workspace_into_private_territory(tm
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
     agent = agent_directory_service.create_agent_instance(display_name="旧会话 Agent")
     state = agent_directory_service.load_state()
-    raw = state["agents"][0]
+    raw = next(item for item in state["agents"] if item["agentId"] == agent["agentId"])
     raw["workspacePath"] = "workspace/sessions/session-legacy"
     policy_id = raw["memoryPolicyId"]
     state["memoryPolicies"][policy_id] = {
@@ -313,9 +314,10 @@ def test_agent_config_workspace_logs_stage_timings_and_reuses_loaded_agents(tmp_
 
     payload = agent_config_workspace_service.get_agent_config_workspace()
 
-    assert captured_bindings["agentOptions"][0]["agentId"] == agent["agentId"]
-    assert captured_bindings["agentOptions"][0]["primaryMode"] == "research"
-    assert payload["summary"]["agentCount"] == 1
+    captured_agents = {item["agentId"]: item for item in captured_bindings["agentOptions"]}
+    assert captured_agents[agent["agentId"]]["primaryMode"] == "research"
+    assert agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID in captured_agents
+    assert payload["summary"]["agentCount"] == 2
     loaded_events = [
         event for event in recorded_events if event[0][:3] == ("agent_configuration", "workspace", "agent_config.workspace.loaded")
     ]
@@ -1537,6 +1539,107 @@ def test_agent_patch_runtime_policies_updates_metadata_and_logs(tmp_path, monkey
         and event[1]["fields"]["evidenceLevel"] == "strict"
         for event in recorded_events
     )
+
+
+def test_repair_agent_directory_creates_protected_knowledge_steward_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+
+    state = agent_directory_service.repair_agent_directory()
+    agents = {
+        item["agentId"]: item
+        for item in state["agents"]
+        if isinstance(item, dict)
+    }
+    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+
+    assert agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID in agents
+    assert steward["roleKey"] == "knowledge_steward"
+    assert steward["primaryMode"] == "general"
+    assert steward["directSessionId"] == "agent-knowledge-steward-direct"
+    assert steward["toolPolicyId"] == "tool-knowledge-steward"
+    assert steward["memoryPolicyId"] == "memory-knowledge-steward"
+    assert steward["metadata"]["systemRole"] == "knowledge_steward"
+    assert steward["metadata"]["protected"] is True
+    assert steward["metadata"]["permissionBoundary"] == "proposal_and_rating_suggestion_only"
+    assert steward["metadata"]["managedDomain"] == "team_knowledge"
+    assert "维护团队知识库质量" in steward["taskProfile"]["mission"]
+    assert "直接应用正式知识" in steward["taskProfile"]["avoidTasks"]
+    assert "knowledge_governance" in steward["taskProfile"]["taskTypes"]
+
+    tool_policy = steward["toolPolicy"]
+    assert tool_policy["allowedTools"] == [
+        "agent_message_tool",
+        "knowledge_query_tool",
+        "knowledge_proposal_tool",
+        "knowledge_ingestion_tool",
+        "knowledge_governance_tasks_tool",
+        "knowledge_rating_suggestion_tool",
+    ]
+    assert tool_policy["preferredTools"] == [
+        "knowledge_governance_tasks_tool",
+        "knowledge_query_tool",
+        "knowledge_rating_suggestion_tool",
+    ]
+    assert tool_policy["networkAccess"] == "none"
+    assert tool_policy["mutationAccess"] == "restricted"
+    assert tool_policy["maxCallsPerTurn"] == 12
+    assert "research_proposal_apply_tool" not in tool_policy["allowedTools"]
+    assert "cli_tool" not in tool_policy["allowedTools"]
+    assert "apply_patch_tool" not in tool_policy["allowedTools"]
+
+    memory_policy = steward["memoryPolicy"]
+    assert memory_policy["readSharedGroups"] == ["project"]
+    assert memory_policy["writeSharedGroups"] == []
+    assert memory_policy["readKnowledgeBaseIds"] == []
+    assert memory_policy["proposeKnowledgeBaseIds"] == []
+    assert memory_policy["reviewKnowledgeBaseIds"] == []
+    assert memory_policy["rateKnowledgeBaseIds"] == []
+
+    context_block = agent_directory_service.build_agent_runtime_context_block(steward["agentId"])
+    assert "knowledge_governance" in context_block
+    assert "Knowledge bodies are tool-readable only" in context_block
+    assert "ToolPolicy: tool-knowledge-steward" in context_block
+    assert "knowledge_governance_tasks_tool" in context_block
+    assert "research_proposal_apply_tool" not in context_block
+
+
+def test_knowledge_steward_agent_is_archive_protected(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+
+    response = client.delete(f"/api/agents/{steward['agentId']}")
+
+    assert response.status_code == 422
+    assert "Protected core Agent" in response.json()["detail"]
+    assert agent_directory_service.get_agent(steward["agentId"])["status"] == "active"
+
+
+def test_repair_agent_directory_logs_knowledge_steward_creation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    agent_directory_service.repair_agent_directory()
+
+    event = next(
+        (
+            item
+            for item in recorded_events
+            if item[0][:3] == ("agent_directory", "agent", "agent.knowledge_steward.repaired")
+        ),
+        None,
+    )
+    assert event is not None
+    assert event[1]["outcome"] == "created"
+    assert event[1]["fields"]["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert event[1]["fields"]["toolPolicyId"] == "tool-knowledge-steward"
+    assert event[1]["fields"]["memoryPolicyId"] == "memory-knowledge-steward"
+    assert event[1]["fields"]["permissionBoundary"] == "proposal_and_rating_suggestion_only"
+    assert "agent" in event[1]["fields"]["repairedFields"]
 
 
 def test_agent_patch_persona_profile_updates_api_context_and_logs(tmp_path, monkeypatch):
