@@ -11357,6 +11357,59 @@ def test_start_supervised_run_reports_stale_agent_slot_as_validation_error(tmp_p
     assert replacement["agentId"] in detail
 
 
+def test_start_supervised_run_repairs_excluded_required_judge_slot(tmp_path, monkeypatch):
+    dataset_path = tmp_path / "workspace" / "evaluation" / "datasets" / "custom_prompt_tasks.jsonl"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
+    dataset_path.write_text(
+        json.dumps({"case_id": "case_1", "prompt": "fix bug"}) + "\n",
+        encoding="utf-8",
+    )
+    _reset_supervised_live_state()
+    monkeypatch.setattr(evolution_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_control_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        supervised_control_service._RUN_EXECUTOR,
+        "submit",
+        lambda fn, *args, **kwargs: object(),
+    )
+    supervised = supervised_agent_service.ensure_supervised_agent_instances()
+    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+    agent_directory_service.archive_agent_instance(judge["agentId"])
+    current = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    slots = dict(current["slots"])
+    slots["judge"] = ""
+    agent_mode_binding_service.update_mode_binding(
+        "supervised_evolution",
+        slots=slots,
+        excluded_slots=[*current["excludedSlots"], "judge"],
+    )
+    current = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert current["slots"]["judge"] == ""
+    assert "judge" in current["excludedSlots"]
+
+    response = client.post(
+        "/api/evolution/runs",
+        json={
+            "sourceKind": "dataset",
+            "datasetName": "custom_prompt_jsonl",
+            "datasetLimit": 1,
+            "keepWorktree": True,
+        },
+    )
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["agentBindings"]["judge"]["agentId"]
+    repaired = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert repaired["slots"]["judge"] == payload["agentBindings"]["judge"]["agentId"]
+    assert "judge" not in repaired["excludedSlots"]
+    _reset_supervised_live_state()
+
+
 def test_start_supervised_run_from_web_does_not_write_real_runtime_manager_store(tmp_path, monkeypatch):
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "manual_bundle.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
