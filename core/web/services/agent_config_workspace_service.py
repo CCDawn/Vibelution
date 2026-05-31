@@ -24,6 +24,7 @@ def get_agent_config_workspace() -> dict[str, Any]:
     """Return a read-only workspace that explains every persistent Agent once."""
 
     timings: dict[str, float] = {}
+    load_modes: dict[str, str] = {}
     total_started = perf_counter()
     agents = _timed_stage(timings, "list_agents", lambda: list_agents(include_archived=True))
     active_agent_options = [_agent_option(agent) for agent in agents if str(agent.get("status") or "active").strip() != "archived"]
@@ -120,7 +121,9 @@ def get_agent_config_workspace() -> dict[str, Any]:
             "promptTemplates": list(prompt_workspace.get("repairWarnings") or []),
         },
     }
-    _record_workspace_loaded(summary, timings=timings)
+    load_modes["chatRooms"] = "compact"
+    load_modes["teams"] = "compact"
+    _record_workspace_loaded(summary, timings=timings, load_modes=load_modes)
     return payload
 
 
@@ -225,7 +228,7 @@ def _derive_references(
                     source_id=team_id,
                     source_label=team_name,
                     field=str(member.get("role") or member.get("memberId") or ""),
-                    route="/agents/teams",
+                    route="/teams",
                     status="active" if team_status != "archived" and agent_id in active_agent_ids else "stale",
                 )
             )
@@ -668,7 +671,7 @@ def _safe_config_workspace() -> dict[str, Any]:
 
 def _safe_chat_rooms() -> list[dict[str, Any]]:
     try:
-        return chat_room_service.list_chat_rooms()
+        return chat_room_service.list_chat_rooms_compact()
     except Exception as exc:
         _record_workspace_error("agent_config.chat_rooms.load_failed", exc)
         return []
@@ -678,7 +681,7 @@ def _safe_teams() -> list[dict[str, Any]]:
     try:
         from . import team_service
 
-        return list(team_service.list_teams(include_archived=True).get("teams") or [])
+        return list(team_service.list_teams_compact(include_archived=True).get("teams") or [])
     except Exception as exc:
         _record_workspace_error("agent_config.teams.load_failed", exc)
         return []
@@ -810,7 +813,12 @@ def _relative_path(path_func: Any) -> str:
         return str(path)
 
 
-def _record_workspace_loaded(summary: dict[str, Any], *, timings: dict[str, float] | None = None) -> None:
+def _record_workspace_loaded(
+    summary: dict[str, Any],
+    *,
+    timings: dict[str, float] | None = None,
+    load_modes: dict[str, str] | None = None,
+) -> None:
     try:
         record_runtime_scene_event(
             "agent_configuration",
@@ -826,6 +834,7 @@ def _record_workspace_loaded(summary: dict[str, Any], *, timings: dict[str, floa
                 "chatRoomCount": summary.get("chatRoomCount", 0),
                 "healthIssueCount": summary.get("healthIssueCount", 0),
                 "timingsMs": dict(timings or {}),
+                "loadModes": dict(load_modes or {}),
             },
             lifecycle=False,
         )

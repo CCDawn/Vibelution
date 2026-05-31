@@ -1,27 +1,45 @@
+import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { createBrowserRouter } from "react-router-dom";
 
 import { AppShell } from "./AppShell";
-import { AgentsRoute } from "../routes/AgentsRoute";
-import { ChatCodingRoute } from "../routes/ChatCodingRoute";
-import { ConfigRoute } from "../routes/ConfigRoute";
-import { EvolutionRoute } from "../routes/EvolutionRoute";
-import { GitRoute } from "../routes/GitRoute";
 import { LegacyChatRoomsRedirect } from "../routes/LegacyChatRoomsRedirect";
+import { LegacyTeamsRedirect } from "../routes/LegacyTeamsRedirect";
 import { HomeRedirect } from "../routes/HomeRedirect";
 import { LegacyEvolutionRedirect } from "../routes/LegacyEvolutionRedirect";
-import { LogsRoute } from "../routes/LogsRoute";
-import { MemoryRoute } from "../routes/MemoryRoute";
-import { PetRoute } from "../routes/PetRoute";
-import { PromptTemplatesRoute } from "../routes/PromptTemplatesRoute";
-import { ResetRoute } from "../routes/ResetRoute";
-import { ResearchFlowCanvasRoute } from "../routes/ResearchFlowCanvasRoute";
-import { ResearchRoute } from "../routes/ResearchRoute";
-import { SkillsRoute } from "../routes/SkillsRoute";
-import { SupervisedReviewRoute } from "../routes/SupervisedReviewRoute";
-import { TeamsRoute } from "../routes/TeamsRoute";
-import { ToolsRoute } from "../routes/ToolsRoute";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
 import { WorkbenchModeRoute } from "../routes/WorkbenchModeRoute";
+import { recoverFromDynamicImportFetchError } from "./routeChunkRecovery";
+
+const AgentsRoute = lazyRoute(() => import("../routes/AgentsRoute").then((module) => ({ default: module.AgentsRoute })));
+const ChatCodingRoute = lazyRoute(() => import("../routes/ChatCodingRoute").then((module) => ({ default: module.ChatCodingRoute })));
+const ConfigRoute = lazyRoute(() => import("../routes/ConfigRoute").then((module) => ({ default: module.ConfigRoute })));
+const EvolutionRoute = lazyRoute(() => import("../routes/EvolutionRoute").then((module) => ({ default: module.EvolutionRoute })));
+const GitRoute = lazyRoute(() => import("../routes/GitRoute").then((module) => ({ default: module.GitRoute })));
+const LogsRoute = lazyRoute(() => import("../routes/LogsRoute").then((module) => ({ default: module.LogsRoute })));
+const MemoryRoute = lazyRoute(() => import("../routes/MemoryRoute").then((module) => ({ default: module.MemoryRoute })));
+const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
+const PromptTemplatesRoute = lazyRoute(() => import("../routes/PromptTemplatesRoute").then((module) => ({ default: module.PromptTemplatesRoute })));
+const ResetRoute = lazyRoute(() => import("../routes/ResetRoute").then((module) => ({ default: module.ResetRoute })));
+const ResearchFlowCanvasRoute = lazyRoute(() => import("../routes/ResearchFlowCanvasRoute").then((module) => ({ default: module.ResearchFlowCanvasRoute })));
+const SkillsRoute = lazyRoute(() => import("../routes/SkillsRoute").then((module) => ({ default: module.SkillsRoute })));
+const SupervisedReviewRoute = lazyRoute(() => import("../routes/SupervisedReviewRoute").then((module) => ({ default: module.SupervisedReviewRoute })));
+const TeamsRoute = lazyRoute(() => import("../routes/TeamsRoute").then((module) => ({ default: module.TeamsRoute })));
+const ToolsRoute = lazyRoute(() => import("../routes/ToolsRoute").then((module) => ({ default: module.ToolsRoute })));
+
+function lazyRoute<T extends ComponentType<any>>(loader: () => Promise<{ default: T }>) {
+  return lazy(() =>
+    loader().catch((error) => {
+      if (recoverFromDynamicImportFetchError(error)) {
+        return new Promise<{ default: T }>(() => undefined);
+      }
+      throw error;
+    }),
+  );
+}
+
+function lazyElement(element: ReactNode) {
+  return <Suspense fallback={null}>{element}</Suspense>;
+}
 
 export const router = createBrowserRouter([
   {
@@ -31,10 +49,10 @@ export const router = createBrowserRouter([
       { index: true, element: <HomeRedirect /> },
       {
         path: "chat",
-        element: (
+        element: lazyElement(
           <WorkbenchDomainRoute domain="chat">
             <ChatCodingRoute />
-          </WorkbenchDomainRoute>
+          </WorkbenchDomainRoute>,
         ),
       },
       {
@@ -43,61 +61,62 @@ export const router = createBrowserRouter([
       },
       {
         path: "supervised-evolution",
-        element: (
+        element: lazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="live" />
-          </WorkbenchModeRoute>
+          </WorkbenchModeRoute>,
         ),
       },
       {
         path: "supervised-evolution/runs",
-        element: (
+        element: lazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="runs" />
-          </WorkbenchModeRoute>
+          </WorkbenchModeRoute>,
         ),
       },
       {
         path: "supervised-evolution/library",
-        element: (
+        element: lazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
             <EvolutionRoute forcedTrack="supervised" forcedView="library" />
-          </WorkbenchModeRoute>
+          </WorkbenchModeRoute>,
         ),
       },
       {
         path: "supervised-evolution/review",
-        element: (
+        element: lazyElement(
           <WorkbenchModeRoute mode="supervised_evolution">
             <SupervisedReviewRoute />
-          </WorkbenchModeRoute>
+          </WorkbenchModeRoute>,
         ),
       },
       {
         path: "self-evolution",
-        element: (
+        element: lazyElement(
           <WorkbenchModeRoute mode="self_evolution">
             <EvolutionRoute forcedTrack="self" />
-          </WorkbenchModeRoute>
+          </WorkbenchModeRoute>,
         ),
       },
       { path: "evolution", element: <LegacyEvolutionRedirect /> },
-      { path: "agents", element: <AgentsRoute /> },
-      { path: "agents/teams", element: <TeamsRoute /> },
-      { path: "agents/prompts", element: <PromptTemplatesRoute /> },
-      { path: "agents/tools", element: <ToolsRoute /> },
-      { path: "agents/skills", element: <SkillsRoute /> },
-      { path: "agents/memory", element: <MemoryRoute forcedView="overview" /> },
-      { path: "agents/memory/effective", element: <MemoryRoute forcedView="effective" /> },
-      { path: "agents/memory/manage", element: <MemoryRoute forcedView="manage" /> },
-      { path: "agents/memory/sources", element: <MemoryRoute forcedView="sources" /> },
-      { path: "git", element: <GitRoute /> },
-      { path: "logs", element: <LogsRoute /> },
-      { path: "research", element: <ResearchRoute /> },
-      { path: "research/flow-canvas", element: <ResearchFlowCanvasRoute /> },
-      { path: "pet", element: <PetRoute /> },
-      { path: "reset", element: <ResetRoute /> },
-      { path: "config", element: <ConfigRoute /> },
+      { path: "agents", element: lazyElement(<AgentsRoute />) },
+      { path: "agents/teams", element: <LegacyTeamsRedirect /> },
+      { path: "agents/prompts", element: lazyElement(<PromptTemplatesRoute />) },
+      { path: "agents/tools", element: lazyElement(<ToolsRoute />) },
+      { path: "agents/skills", element: lazyElement(<SkillsRoute />) },
+      { path: "agents/memory", element: lazyElement(<MemoryRoute forcedView="overview" />) },
+      { path: "agents/memory/effective", element: lazyElement(<MemoryRoute forcedView="effective" />) },
+      { path: "agents/memory/manage", element: lazyElement(<MemoryRoute forcedView="manage" />) },
+      { path: "agents/memory/sources", element: lazyElement(<MemoryRoute forcedView="sources" />) },
+      { path: "teams", element: lazyElement(<TeamsRoute />) },
+      { path: "git", element: lazyElement(<GitRoute />) },
+      { path: "logs", element: lazyElement(<LogsRoute />) },
+      { path: "research", element: <LegacyTeamsRedirect /> },
+      { path: "research/flow-canvas", element: lazyElement(<ResearchFlowCanvasRoute />) },
+      { path: "pet", element: lazyElement(<PetRoute />) },
+      { path: "reset", element: lazyElement(<ResetRoute />) },
+      { path: "config", element: lazyElement(<ConfigRoute />) },
     ],
   },
 ]);

@@ -254,6 +254,16 @@ def _open_request_ready(observation: dict[str, Any], *, no_browser: bool) -> boo
     return bool(observation.get("browserWindowAlive"))
 
 
+def _restart_should_preserve_visible_browser(observation: dict[str, Any]) -> bool:
+    if str(observation.get("observedState") or "closed") != "open":
+        return False
+    if not bool(observation.get("browserManaged")):
+        return False
+    if not bool(observation.get("browserWindowAlive")):
+        return False
+    return int(observation.get("browserWindowPid") or 0) > 0
+
+
 def _open_verification_failure_message(observation: dict[str, Any], *, no_browser: bool) -> str:
     backend_ready = (
         bool(observation.get("backendHealthy"))
@@ -1072,7 +1082,7 @@ class RuntimeManagerDaemon:
                 "requestedBy": requested_by,
                 "startedAt": now_iso(),
                 "stopManager": command_type == "close_workbench" and bool(args.get("stopManager")),
-                "noBrowser": command_type == "open_workbench" and bool(args.get("noBrowser")),
+                "noBrowser": command_type in {"open_workbench", "restart_workbench"} and bool(args.get("noBrowser")),
             }
         )
         state = self._reconcile_observation(state)
@@ -1617,6 +1627,7 @@ class RuntimeManagerDaemon:
     def _handle_restart_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
         workbench = state.setdefault("workbench", {})
+        requested_no_browser = bool(args.get("noBrowser"))
         workbench.update(
             {
                 "desiredState": "open",
@@ -1627,8 +1638,26 @@ class RuntimeManagerDaemon:
                 "failureMessage": "",
             }
         )
-        save_state(self._reconcile_observation(state))
-        result = restart_workbench(no_browser=bool(args.get("noBrowser")))
+        state = save_state(self._reconcile_observation(state))
+        workbench = state.setdefault("workbench", {})
+        effective_no_browser = requested_no_browser
+        if requested_no_browser and _restart_should_preserve_visible_browser(workbench):
+            effective_no_browser = False
+            _append_event(
+                "workbench.restart.no_browser_overridden",
+                {
+                    "commandId": command_id,
+                    "requestedNoBrowser": True,
+                    "effectiveNoBrowser": False,
+                    "reason": "preserve_existing_managed_browser_window",
+                    "browserWindowPid": int(workbench.get("browserWindowPid") or 0),
+                    "browserManaged": bool(workbench.get("browserManaged")),
+                    "browserWindowAlive": bool(workbench.get("browserWindowAlive")),
+                    "requestedReason": str(args.get("reason") or ""),
+                    "requestedSource": str(args.get("source") or ""),
+                },
+            )
+        result = restart_workbench(no_browser=effective_no_browser)
         if result.returncode != 0:
             raise RuntimeError(_launcher_error_detail(result, "Restarting the workbench failed."))
         return self._finish_command(command_id, ok=True, message="Workbench restarted.")

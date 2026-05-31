@@ -6,6 +6,8 @@ import { ChatNextStateSignalSummary, ConversationMessage } from "../../api/types
 import {
   buildTimelineScrollSignal,
   ConversationView,
+  extractComposerImageDropFiles,
+  hasComposerImageDragPayload,
   shouldShowNextStateSignalInConversation,
 } from "./ConversationView";
 
@@ -96,6 +98,182 @@ describe("ConversationView edit resend affordance", () => {
 
     expect(html).toContain(">C</div>");
     expect(html).toContain("Vibe Owner");
+  });
+
+  it("renders Agent inbox messages as inbound private messages instead of operator turns", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "agent-inbox",
+          role: "user",
+          content: "[Agent 私信]\n来源 Agent: A011 · 夏予安\n\n消息内容:\n请从组织设计角度回复。",
+          timestamp: "2026-05-29T14:13:33Z",
+          metadata: {
+            kind: "agent_inbox_message",
+            sourceAgentCode: "A011",
+            sourceAgentName: "夏予安",
+          },
+        },
+      ],
+      { userAvatarPreset: "codex", userDisplayName: "Vibe Owner" },
+    );
+
+    expect(html).toContain("agentInboxTurn");
+    expect(html).toContain("Agent 私信 · A011 · 夏予安");
+    expect(html).toContain("私信内容");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("请从组织设计角度回复");
+    expect(html).not.toContain("Vibe Owner");
+    expect(html).not.toContain("aria-label=\"Edit and resend\"");
+    expect(html).not.toContain("消息内容:");
+  });
+
+  it("renders research organization intent and wake chips on Agent inbox messages", () => {
+    const html = renderConversation(
+      [
+        {
+          id: "research-org-inbox",
+          role: "user",
+          content: "[Agent 私信]\n来源 Agent: A014 · 能力管家\n\n消息内容:\n权限审查已完成。",
+          timestamp: "2026-05-30T14:13:33Z",
+          metadata: {
+            kind: "agent_inbox_message",
+            inboxKind: "research_org_report",
+            sourceAgentCode: "A014",
+            sourceAgentName: "能力管家",
+            researchOrgIntent: "status_report",
+            researchOrgMessageType: "report",
+            researchOrgDeliveryMode: "private",
+            wakeStatus: "not_requested",
+          },
+        },
+      ],
+      { userAvatarPreset: "codex", userDisplayName: "Vibe Owner" },
+    );
+
+    expect(html).toContain("科研组织消息标签");
+    expect(html).toContain("intent: status report");
+    expect(html).toContain("type: report");
+    expect(html).toContain("delivery: private");
+    expect(html).toContain("wake: not requested");
+    expect(html).toContain("Agent 私信 · A014 · 能力管家");
+  });
+
+  it("renders group-room transcripts as sync records instead of assistant answers", () => {
+    const html = renderConversation([
+      {
+        id: "group-transcript",
+        role: "assistant",
+        content: [
+          "[群聊同步]",
+          "群聊: 科研团队 团队群聊",
+          "议题: 同步研究方向",
+          "",
+          "你的发言:",
+          "- 本轮你没有发言。",
+          "",
+          "其他 Agent 发言:",
+          "- A012: 建议优先药物-靶点预测。",
+        ].join("\n"),
+        timestamp: "2026-05-29T14:08:04Z",
+        metadata: {
+          kind: "group_room_transcript",
+          sourceRoomTitle: "科研团队 团队群聊",
+        },
+      },
+    ]);
+
+    expect(html).toContain("groupTranscriptTurn");
+    expect(html).toContain("群聊同步记录 · 科研团队 团队群聊");
+    expect(html).toContain("建议优先药物-靶点预测");
+    expect(html).not.toContain("回答</span>");
+  });
+
+  it("does not render runtime recovery notices as assistant replies", () => {
+    const html = renderConversation([
+      {
+        id: "runtime-notice",
+        role: "assistant",
+        content: "上一轮运行已被中断，当前会话已恢复为可继续状态。",
+        timestamp: "2026-05-29T10:15:27Z",
+      },
+      {
+        id: "assistant-answer",
+        role: "assistant",
+        content: "我已经恢复上下文，继续检查日志。",
+        timestamp: "2026-05-29T10:16:32Z",
+      },
+    ]);
+
+    expect(html).not.toContain("上一轮运行已被中断");
+    expect(html).toContain("我已经恢复上下文，继续检查日志。");
+  });
+
+  it("renders generated-image markdown as an inline preview instead of raw syntax", () => {
+    const html = renderConversation([
+      {
+        id: "assistant-image-markdown",
+        role: "assistant",
+        content: [
+          "海报生成完成！",
+          "",
+          "### AI 特色海报",
+          "",
+          "![AI 特色海报](/api/sessions/session-b/artifacts/image2-demo.png?download=1)",
+          "",
+          "| 元素 | 含义 |",
+          "|------|------|",
+          "| AI 芯片 | 算力之源 |",
+          "",
+          "下载链接：[点击下载](/api/sessions/session-b/artifacts/image2-demo.png?download=1)",
+        ].join("\n"),
+        timestamp: "2026-05-29T11:16:08Z",
+      },
+    ]);
+
+    expect(html).toContain('src="/api/sessions/session-b/artifacts/image2-demo.png"');
+    expect(html).toContain('href="/api/sessions/session-b/artifacts/image2-demo.png?download=1"');
+    expect(html).toContain('aria-label="预览图片"');
+    expect(html).toContain("<table");
+    expect(html).toContain("AI 芯片");
+    expect(html).not.toContain("![AI 特色海报]");
+    expect(html).not.toContain("[点击下载]");
+  });
+
+  it("suppresses a duplicate generated-image markdown preview when an artifact already rendered it", () => {
+    const html = renderConversation([
+      {
+        id: "message-image-artifact",
+        role: "assistant",
+        content: "已生成图片。",
+        timestamp: "2026-05-29T11:16:06Z",
+        metadata: {
+          kind: "image2_generation",
+          status: "succeeded",
+          prompt: "AI 特色海报",
+          artifactId: "image2-demo.png",
+          imageUrl: "/api/sessions/session-b/artifacts/image2-demo.png",
+          downloadUrl: "/api/sessions/session-b/artifacts/image2-demo.png?download=1",
+        },
+      },
+      {
+        id: "message-image-answer",
+        role: "assistant",
+        content: [
+          "海报生成完成！",
+          "",
+          "![AI 特色海报](/api/sessions/session-b/artifacts/image2-demo.png?download=1)",
+          "",
+          "下载链接：[点击下载](/api/sessions/session-b/artifacts/image2-demo.png?download=1)",
+        ].join("\n"),
+        timestamp: "2026-05-29T11:16:08Z",
+      },
+    ]);
+
+    expect(html.match(/src="\/api\/sessions\/session-b\/artifacts\/image2-demo\.png"/g)?.length).toBe(1);
+    expect(html).toContain("海报生成完成");
+    expect(html).toContain("点击下载");
+    expect(html).not.toContain("![AI 特色海报]");
   });
 
   it("prefers the configured user avatar image for user turns", () => {
@@ -222,6 +400,7 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain('src="/api/sessions/session-1/artifacts/image2-test.png"');
     expect(html).toContain('href="/api/sessions/session-1/artifacts/image2-test.png?download=1"');
     expect(html).toContain('download="image2-test.png"');
+    expect(html).toContain('aria-label="预览图片"');
     expect(html).toContain("下载图片");
     expect(html).toContain("一间雨夜里的工作室");
   });
@@ -268,6 +447,22 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("blob:pending-image");
   });
 
+  it("filters composer drag payloads down to image files", () => {
+    const png = { name: "sketch.png", type: "image/png" } as File;
+    const text = { name: "notes.txt", type: "text/plain" } as File;
+
+    expect(extractComposerImageDropFiles({ files: [png, text] })).toEqual([png]);
+    expect(
+      hasComposerImageDragPayload({
+        items: [
+          { kind: "file", type: "text/plain" } as DataTransferItem,
+          { kind: "file", type: "image/webp" } as DataTransferItem,
+        ],
+      }),
+    ).toBe(true);
+    expect(hasComposerImageDragPayload({ files: [text] })).toBe(false);
+  });
+
   it("renders assistant responses as semantic labeled blocks", () => {
     const html = renderConversation([
       {
@@ -293,6 +488,7 @@ describe("ConversationView edit resend affordance", () => {
     ]);
 
     expect(html).toContain("状态");
+    expect(html).toContain("responseSegment_status");
     expect(html).toContain("提交");
     expect(html).toContain("验证");
     expect(html).toContain("8697ecf fix(chat): keep bookkeeping guard resumable");
@@ -478,6 +674,69 @@ describe("ConversationView edit resend affordance", () => {
     );
   });
 
+  it("renders turn errors as timeline notices instead of assistant replies", () => {
+    const html = renderConversation([
+      {
+        id: "message-turn-error",
+        role: "assistant",
+        content: "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志。",
+        timestamp: "2026-05-22T00:01:00Z",
+        thought: "The generation failed with a 502 upstream error.",
+        toolCalls: [{ name: "image2_generate_tool", status: "done", summary: "failed" }],
+        metadata: {
+          kind: "turn_error",
+          errorType: "RuntimeError",
+          providerFailure: true,
+        },
+      },
+    ]);
+
+    expect(html).toContain("turnErrorNotice");
+    expect(html).toContain("运行提示");
+    expect(html).toContain("RuntimeError");
+    expect(html).toContain("模型服务上游暂时失败");
+    expect(html).toContain("assistantTurn");
+    expect(html).toContain("思考过程");
+    expect(html).toContain("工具调用");
+    expect(html).toContain("The generation failed with a 502 upstream error.");
+    expect(html).not.toContain("回答");
+  });
+
+  it("renders legacy provider-failure summaries as a single timeline notice", () => {
+    const failureText = "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。";
+    const html = renderConversation([
+      {
+        id: "message-image2-failed",
+        role: "assistant",
+        content: failureText,
+        timestamp: "2026-05-22T00:01:00Z",
+        toolCalls: [{ name: "image2_generate_tool", status: "done", summary: "failed" }],
+        metadata: {
+          kind: "image2_generation",
+          status: "failed",
+          errorType: "RuntimeError",
+        },
+      },
+      {
+        id: "message-provider-summary",
+        role: "assistant",
+        content: failureText,
+        timestamp: "2026-05-22T00:01:03Z",
+        thought: "The generation failed with a 502 upstream error.",
+        toolCalls: [{ name: "image2_generate_tool", status: "done", summary: "failed" }],
+      },
+    ]);
+
+    expect(html.match(/role="status"/g)?.length).toBe(1);
+    expect(html).toContain("运行提示");
+    expect(html).toContain("RuntimeError");
+    expect(html).toContain("模型服务上游暂时失败");
+    expect(html).toContain("思考过程");
+    expect(html).toContain("工具调用");
+    expect(html).toContain("The generation failed with a 502 upstream error.");
+    expect(html).not.toContain("回答");
+  });
+
   it("does not render the next-state signal panel when no signals exist", () => {
     const html = renderConversation([]);
 
@@ -578,6 +837,8 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("工具调用 1");
     expect(html).toContain("read_file");
     expect(html).toContain("opened session_service.py");
+    expect(html).toContain("operationItemTool");
+    expect(html).not.toContain("operationIcon_tool");
     expect(html).not.toContain("执行了 1 个操作");
   });
 
@@ -650,9 +911,43 @@ describe("ConversationView edit resend affordance", () => {
       },
     ]);
 
-    expect(html.match(/statusSpinner/g)?.length).toBe(3);
+    expect(html.match(/statusSpinner/g)?.length).toBe(2);
     expect(html).toContain("opening session_service.py");
     expect(html).toContain("已读取文件。");
+  });
+
+  it("does not keep completed auxiliary sections spinning while a later tool is active", () => {
+    const html = renderConversation([
+      {
+        id: "message-tool-running",
+        role: "assistant",
+        content: "好的，我直接生成方案二！",
+        timestamp: "2026-05-29T19:39:00Z",
+        streaming: true,
+        thought: "The user wants me to try generating the image again.",
+        mentalSnapshot: {
+          mood: "focused",
+          feeling: "目标很明确，继续尝试方案二的生成。",
+          whisper: "稍等片刻，让速率限制冷却一下再重试。",
+          summary: "目标很明确，继续尝试方案二的生成。",
+          cognitiveState: "productive",
+          confidence: 0.7,
+          sampleSize: 1,
+          interventionCount: 0,
+          updatedAt: "2026-05-29T19:39:05Z",
+          source: "runtime",
+        },
+        toolCalls: [
+          { name: "spawn_agent_tool", status: "done", summary: "delegation policy blocked" },
+          { name: "image2_generate_tool", status: "running", summary: "生成方案二" },
+        ],
+      },
+    ]);
+
+    expect(html).toContain("思考过程");
+    expect(html).toContain("心智模型");
+    expect(html).toContain("工具调用 2");
+    expect(html.match(/statusSpinner/g)?.length).toBe(2);
   });
 
   it("shows a spinner for an active mental model section", () => {
@@ -683,6 +978,34 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("tracking state");
     expect(html).toContain("运行时");
     expect(html.match(/statusSpinner/g)?.length).toBe(1);
+  });
+
+  it("deduplicates matching mental feeling and summary rows", () => {
+    const html = renderConversation([
+      {
+        id: "message-mental-deduped",
+        role: "assistant",
+        content: "继续。",
+        timestamp: "2026-05-29T22:45:00Z",
+        mentalSnapshot: {
+          mood: "专注",
+          feeling: "规则感知: normal",
+          whisper: "继续",
+          summary: "规则感知: normal",
+          cognitiveState: "normal",
+          confidence: 0,
+          sampleSize: 0,
+          interventionCount: 0,
+          updatedAt: "2026-05-29T22:45:00Z",
+          source: "state",
+        },
+      },
+    ]);
+
+    expect(html.match(/规则感知: normal/g)?.length).toBe(1);
+    expect(html).toContain("感受");
+    expect(html).not.toContain("摘要");
+    expect(html).toContain("低语");
   });
 });
 

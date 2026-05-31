@@ -46,6 +46,8 @@ export type ConfigLeaveGuardInput = {
   nextPathname: string;
 };
 
+export type ConfigInvalidationDomain = "config" | "runtime" | "sessions" | "reset" | "evolution";
+
 export type ProfileDisplayState = {
   selectedModelId: string;
   selectedModelLabel: string;
@@ -79,6 +81,7 @@ export const MODEL_SCENARIOS: ModelScenarioId[] = ["chat", "relay", "image", "lo
 
 export type ModelCenterLabels = ConfigProfileModeGroupLabels & {
   image2Tool: string;
+  gitCommitModel: string;
 };
 
 export type ModelCenterAccount = {
@@ -97,7 +100,7 @@ export type ModelCenterAccount = {
 
 export type ModelCenterUsage = {
   id: string;
-  kind: "profile" | "tool";
+  kind: "profile" | "tool" | "feature";
   modelId: string;
   label: string;
   groupLabel: string;
@@ -120,12 +123,35 @@ export type ModelCenterInventoryRow = {
   model: string;
   apiKeyEnv: string;
   apiKeyState: string;
+  supportsImageInput: boolean | null;
+  capabilityStatus: string;
+  imageInputStatus: "supported" | "unsupported" | "unknown";
+  capabilitySource: string;
+  capabilityCheckedAt: string;
+  capabilityError: string;
   source: ConfigModelOption["source"];
   usages: ModelCenterUsage[];
   usageCount: number;
   editable: boolean;
   deletable: boolean;
 };
+
+export function resolveImageInputCapabilityStatus(input: {
+  supportsImageInput?: boolean | null;
+  capabilityStatus?: string | null;
+}): "supported" | "unsupported" | "unknown" {
+  if (input.supportsImageInput === true) {
+    return "supported";
+  }
+  if (input.supportsImageInput === false) {
+    return "unsupported";
+  }
+  const capabilityStatus = String(input.capabilityStatus || "").trim().toLowerCase();
+  if (capabilityStatus === "unsupported") {
+    return "unsupported";
+  }
+  return "unknown";
+}
 
 export function resolveResearchAgentInstance(
   researchAgent: Pick<ResearchAgentConfig, "key" | "agentId" | "agentInstanceId" | "roleKey">,
@@ -281,6 +307,14 @@ export function resolveConfigSectionUiStateOnSelect<T extends ConfigSectionExpan
 
 export function shouldBlockConfigLeave(input: ConfigLeaveGuardInput): boolean {
   return input.hasPendingApply && !input.busy && input.currentPathname === "/config" && input.nextPathname !== "/config";
+}
+
+export function configInvalidationDomainsForApply(config: PublicConfigShape | null | undefined): ConfigInvalidationDomain[] {
+  const domains = new Set<ConfigInvalidationDomain>(["config", "runtime", "sessions", "reset"]);
+  if (config && typeof config === "object" && "evolution" in config) {
+    domains.add("evolution");
+  }
+  return [...domains];
 }
 
 export function resolveProfileDisplayState(
@@ -597,6 +631,23 @@ export function deriveModelCenterSummary(input: {
     });
   }
 
+  const git = asRecord(input.publicConfig.git);
+  const gitCommitProfileId = getString(git.commit_message_profile);
+  const gitCommitProfile = gitCommitProfileId
+    ? input.profiles.find((profile) => profile.profileId === gitCommitProfileId)
+    : null;
+  const gitCommitModelId = gitCommitProfile?.selectedModelId || gitCommitProfile?.modelRef || "";
+  if (gitCommitProfileId && gitCommitModelId && !gitCommitProfile?.requiredModelMissing) {
+    usages.push({
+      id: "feature:git_commit_message",
+      kind: "feature",
+      modelId: gitCommitModelId,
+      label: input.labels.gitCommitModel,
+      groupLabel: input.labels.gitCommitModel,
+      detail: gitCommitProfileId,
+    });
+  }
+
   const modelIds = new Set(input.modelOptions.map((option) => option.model_id));
   const usagesByModelId: Record<string, ModelCenterUsage[]> = {};
   let unresolvedUsageCount = 0;
@@ -636,6 +687,13 @@ export function deriveModelCenterInventoryRows(
   return modelOptions.map((option) => {
     const provider = asRecord(option.provider);
     const editability = resolveModelEditability(option);
+    const supportsImageInput =
+      typeof option.supports_image_input === "boolean"
+        ? option.supports_image_input
+        : typeof asRecord(option.details).supports_image_input === "boolean"
+          ? (asRecord(option.details).supports_image_input as boolean)
+          : null;
+    const capabilityStatus = option.capability_status || getString(asRecord(option.details).capability_status) || "unknown";
     return {
       modelId: option.model_id,
       label: option.label,
@@ -644,6 +702,12 @@ export function deriveModelCenterInventoryRows(
       model: option.model,
       apiKeyEnv: option.api_key_env || getString(provider.api_key_env),
       apiKeyState: option.api_key_state,
+      supportsImageInput,
+      capabilityStatus,
+      imageInputStatus: resolveImageInputCapabilityStatus({ supportsImageInput, capabilityStatus }),
+      capabilitySource: option.capability_source || getString(asRecord(option.details).capability_source),
+      capabilityCheckedAt: option.capability_checked_at || getString(asRecord(option.details).capability_checked_at),
+      capabilityError: option.capability_error || getString(asRecord(option.details).capability_error),
       source: option.source,
       usages: summary.usagesByModelId[option.model_id] ?? [],
       usageCount: summary.usageCountsByModelId[option.model_id] ?? 0,

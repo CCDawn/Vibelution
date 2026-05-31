@@ -22,7 +22,7 @@ from core.pet_system import get_pet_system
 from core.pet_system.pet_system import reset_pet_system
 
 from core.infrastructure import evolution_governor as governor_module
-from core.infrastructure.tool_executor import ToolExecutor, get_tool_executor
+from core.infrastructure.tool_executor import IMAGE2_TOOL_TIMEOUT_SECONDS, ToolExecutor, get_tool_executor
 from core.infrastructure.agent_session import get_session_state, reset_session_state
 from tools.Key_Tools import create_key_tools, create_llm_facing_tools
 
@@ -141,6 +141,59 @@ class TestToolExecutorInit:
         assert result == "[搜索] ok"
         assert seen == {"query": "latest ai news", "max_results": 3}
 
+    def test_tool_error_text_is_recorded_as_failed_scene_event(self, monkeypatch):
+        """Tools returning an agent-readable error string should not be logged as succeeded."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_error_tool",
+            lambda: "[错误] 本地 token 服务不可用",
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_error_tool", {})
+
+        assert action is None
+        assert str(result).startswith("[错误]")
+        assert events[-1][0][1] == "tool.execute.failed"
+        assert events[-1][1]["outcome"] == "failed"
+        assert events[-1][1]["fields"]["semanticStatus"] == "failed"
+
+    def test_tool_json_blocked_result_is_recorded_as_blocked_scene_event(self, monkeypatch):
+        """Tools returning structured blocked JSON should not be logged as succeeded."""
+        from core.infrastructure import tool_executor as tool_executor_module
+
+        events = []
+        monkeypatch.setattr(
+            tool_executor_module,
+            "_record_tool_scene_event",
+            lambda *args, **kwargs: events.append((args, kwargs)),
+        )
+
+        executor = ToolExecutor()
+        executor.register_tool(
+            "fake_blocked_tool",
+            lambda: json.dumps({"ok": False, "status": "blocked", "error": "target_not_found"}),
+            timeout=5,
+        )
+
+        result, action = executor.execute("fake_blocked_tool", {})
+
+        assert action is None
+        assert json.loads(result)["status"] == "blocked"
+        assert events[-1][0][1] == "tool.execute.blocked"
+        assert events[-1][1]["outcome"] == "blocked"
+        assert events[-1][1]["fields"]["semanticStatus"] == "blocked"
+        assert events[-1][1]["fields"]["toolResultError"] == "target_not_found"
+
     def test_default_timeouts_configured(self):
         """测试默认超时配置"""
         executor = ToolExecutor()
@@ -149,6 +202,7 @@ class TestToolExecutorInit:
         assert executor._timeout_map["cli_tool"] == 60
         assert executor._timeout_map["python_lint_tool"] == 60
         assert executor._timeout_map["spawn_agent_tool"] == 150
+        assert executor._timeout_map["image2_generate_tool"] == IMAGE2_TOOL_TIMEOUT_SECONDS == 300
         assert not (LEGACY_AGENT_TOOL_NAMES & set(executor._timeout_map))
 
 
@@ -298,6 +352,11 @@ class TestToolExecutorTimeout:
 
         assert timeout == 600
 
+    def test_image2_tool_default_timeout_matches_slow_generation_budget(self, executor):
+        timeout = executor._resolve_timeout("image2_generate_tool", {})
+
+        assert timeout == 300
+
     def test_spawn_agent_tool_is_registered_for_internal_governor(self, executor):
         assert "spawn_agent_tool" in executor._tool_map
 
@@ -358,6 +417,34 @@ class TestToolExecutorTimeout:
 
         assert action is None
         assert str(result) == "delegated:分析重复调用"
+
+    def test_spawn_agent_tool_internal_delegate_bypasses_llm_tool_policy(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-policy",
+            "toolPolicy": {
+                "policyId": "tool-agent-policy",
+                "allowedTools": ["agent_message_tool"],
+                "blockedTools": [],
+            },
+            "delegationPolicy": {
+                "allowSubagents": True,
+                "allowedContextModes": ["isolated"],
+                "maxDepth": 1,
+                "maxConcurrent": 1,
+                "allowWakeMessages": True,
+            },
+        })
+        executor.register_tool("spawn_agent_tool", lambda **kwargs: "delegated", timeout=5)
+
+        result, action = executor.execute(
+            "spawn_agent_tool",
+            {"goal": "分析重复调用", "_internal_delegate": True},
+        )
+
+        assert action is None
+        assert str(result) == "delegated"
 
     def test_spawn_agent_tool_respects_current_agent_delegation_policy(self, executor, monkeypatch):
         from core.web.services import agent_directory_service

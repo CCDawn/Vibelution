@@ -12,9 +12,11 @@ from core.web.services.team_service import (
     TeamServiceError,
     archive_team,
     create_team,
+    ensure_evolution_system_teams,
+    evolution_system_teams_missing,
     get_team,
     get_team_canvas,
-    list_teams,
+    list_teams_compact,
     save_team_canvas,
     send_team_message,
     sync_team_chat_room,
@@ -65,7 +67,9 @@ class TeamMessagePayload(BaseModel):
 
 @router.get("/teams")
 def team_list(includeArchived: bool = False) -> dict:
-    return list_teams(include_archived=includeArchived)
+    if evolution_system_teams_missing():
+        ensure_evolution_system_teams()
+    return list_teams_compact(include_archived=includeArchived)
 
 
 @router.post("/teams", status_code=status.HTTP_201_CREATED)

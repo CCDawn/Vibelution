@@ -406,6 +406,31 @@ class TestMentalModel:
         assert context["turn_count"] == 2
         assert context["last_mental_state"]["mood"] == "沉思"
 
+    def test_seed_conversation_context_keeps_prior_mental_state_historical(self, mental_model):
+        """Restored mental state should not become the current live state."""
+        mental_model._last_state_output = {
+            "mood": "焦虑",
+            "feeling": "上一段任务已经失败。",
+            "whisper": "先处理旧问题。",
+        }
+
+        mental_model.seed_conversation_context([
+            {"role": "user", "content": "图片已经生成好了"},
+            {
+                "role": "assistant",
+                "content": "图片生成失败。",
+                "mental_snapshot": {
+                    "mood": "焦虑",
+                    "feeling": "旧的图片生成失败状态。",
+                    "whisper": "先检查 API 密钥。",
+                },
+            },
+        ])
+
+        context = mental_model.get_conversation_context()
+        assert context["last_mental_state"]["mood"] == "焦虑"
+        assert mental_model.get_last_state() == {}
+
     def test_clear_conversation_context_removes_session_continuity(self, mental_model):
         mental_model.seed_conversation_context([
             {"role": "user", "content": "继续上一段"},

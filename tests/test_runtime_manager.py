@@ -3002,6 +3002,116 @@ def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
         runtime_daemon._handle_restart_workbench(command_id="cmd-restart", args={})
 
 
+def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_forwarded(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    restart_calls: list[bool] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T09:00:00+00:00")
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "launcherStatePresent": True,
+            "browserManaged": True,
+            "browserWindowAlive": True,
+            "backendPid": 28888,
+            "browserLaunchPid": 29999,
+            "browserWindowPid": 29999,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 28888,
+            "sessionId": "managed-session",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "restart_workbench",
+        lambda *, no_browser: restart_calls.append(no_browser)
+        or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_restart_workbench(
+        command_id="cmd-restart",
+        args={"reason": "launcher_restart", "noBrowser": True},
+    )
+
+    assert result["ok"] is True
+    assert restart_calls == [False]
+    assert events[0][0] == "workbench.restart.no_browser_overridden"
+    assert events[0][1]["browserWindowPid"] == 29999
+    assert events[0][1]["effectiveNoBrowser"] is False
+
+
+def test_handle_restart_workbench_keeps_headless_restart_headless(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    restart_calls: list[bool] = []
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-05-19T09:00:00+00:00")
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(
+        daemon,
+        "observe_workbench",
+        lambda: {
+            "observedState": "open",
+            "launcherStatePresent": True,
+            "browserManaged": False,
+            "browserWindowAlive": False,
+            "backendPid": 28888,
+            "browserLaunchPid": 0,
+            "browserWindowPid": 0,
+            "backendAlive": True,
+            "backendHealthy": True,
+            "backendObserved": True,
+            "backendPortListening": True,
+            "backendPortOwnerPid": 28888,
+            "sessionId": "headless-session",
+            "url": "http://127.0.0.1:8000",
+        },
+    )
+    monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        daemon,
+        "restart_workbench",
+        lambda *, no_browser: restart_calls.append(no_browser)
+        or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_restart_workbench(
+        command_id="cmd-restart",
+        args={"reason": "launcher_restart", "noBrowser": True},
+    )
+
+    assert result["ok"] is True
+    assert restart_calls == [True]
+
+
 def test_handle_close_workbench_records_shutdown_source(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     saved_states: list[dict] = []

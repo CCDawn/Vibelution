@@ -204,11 +204,38 @@
 .itemList {
   display: grid;
   align-content: start;
-  gap: 7px;
+  gap: 10px;
   min-height: 96px;
   max-height: calc(100vh - 260px);
   overflow: auto;
   padding-right: 4px;
+}
+
+.itemGroup {
+  display: grid;
+  gap: 6px;
+}
+
+.itemGroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+  color: var(--fg-tertiary);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.itemGroupHeader span {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.groupRows {
+  display: grid;
+  gap: 7px;
 }
 
 .itemRow {

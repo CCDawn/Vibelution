@@ -240,17 +240,19 @@ def make_codebase_map_section() -> SystemPromptSection:
 
 
 def make_tools_index_section(project_root: Path) -> SystemPromptSection:
-    """工具索引 — 只列出默认暴露给 LLM 的 canonical 工具。"""
+    """工具索引 — 只列出当前 Agent 实际可见的 LLM 工具。"""
 
     def compute() -> Optional[str]:
         try:
             from tools.Key_Tools import create_llm_facing_tools
-            tools = create_llm_facing_tools()
+            from core.web.services.agent_directory_service import filter_llm_tools_for_current_agent
+
+            tools = filter_llm_tools_for_current_agent(create_llm_facing_tools())
             if not tools:
                 return None
             lines = [
                 "## 工具索引",
-                f"共 {len(tools)} 个可直接调用工具：",
+                f"当前 Agent 共 {len(tools)} 个可直接调用工具：",
                 "",
                 "工具使用原则：工具错误是可观察反馈；参数错误时按返回的必填/可选参数和示例修正后重试；",
                 "工具结果和用户目标不一致时，换用更匹配的工具或收窄参数；只有安全、权限、停止和事务类拦截属于硬边界。",
@@ -270,9 +272,9 @@ def make_tools_index_section(project_root: Path) -> SystemPromptSection:
     return SystemPromptSection(
         name="TOOLS_INDEX",
         compute=compute,
-        cache_break=False,
+        cache_break=True,
         priority=90,
-        description="LLM 可调用工具索引（动态生成）",
+        description="当前 Agent 可调用工具索引（按 ToolPolicy 动态生成）",
     )
 
 

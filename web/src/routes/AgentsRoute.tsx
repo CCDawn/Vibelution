@@ -14,10 +14,11 @@ import {
   ShieldCheck,
   ExternalLink,
   Trash2,
+  UserRound,
   Users,
   Wrench,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -25,10 +26,15 @@ import { queryKeys } from "../api/queryKeys";
 import {
   AgentDelegationPolicy,
   AgentInboxMessage,
+  AgentAvatarOptionsPayload,
+  AgentAvatarUploadResponse,
   AgentRuntimeEvidence,
   AgentRuntimeEvidenceMatch,
   AgentRunHistory,
   AgentConfigHealthIssue,
+  AgentPersonaProfile,
+  AgentTaskProfile,
+  AgentToolGovernanceRequest,
   AgentConfigReference,
   AgentSupervisionPolicy,
   AgentConfigWorkspace,
@@ -36,12 +42,15 @@ import {
   AgentConfigWorkspaceGroup,
   MemoryPolicy,
   ToolPolicy,
+  ToolBundle,
+  ToolRegistryItem,
   ToolRegistryPayload,
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { AgentManagementNav } from "./AgentManagementNav";
 import { agentDisplayInfo } from "./agentDisplay";
+import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./AgentsRoute.module.css";
 
 type FilterId = string;
@@ -53,6 +62,14 @@ type AgentConfigDraft = {
   toolPolicyId: string;
   memoryPolicyId: string;
   status: string;
+};
+
+type AgentPersonaDraft = Omit<AgentPersonaProfile, "expertise"> & {
+  expertise: string;
+};
+
+type AgentTaskDraft = Omit<AgentTaskProfile, "taskTypes"> & {
+  taskTypes: string;
 };
 
 type AgentCreateDraft = {
@@ -71,15 +88,18 @@ type AgentModeMembershipDraft = {
   selfEvolutionSlot: string;
 };
 
-type AgentChatRoomMembershipDraft = {
-  roomIds: string[];
-};
-
 type AgentToolPolicyDraft = {
   allowedTools: string[];
+  preferredTools: string[];
   blockedTools: string[];
   readScopes: string[];
   writeScopes: string[];
+};
+
+type AgentToolGovernanceDraft = {
+  proposedByAgentId: string;
+  reason: string;
+  applyMode: "auto" | "review";
 };
 
 type AgentMemoryPolicyDraft = {
@@ -92,8 +112,30 @@ type AgentMemoryPolicyDraft = {
 type AgentDelegationPolicyDraft = AgentDelegationPolicy;
 type AgentSupervisionPolicyDraft = AgentSupervisionPolicy;
 
+type AgentDraftSyncSource = {
+  agentId: string;
+  config: AgentConfigDraft;
+  membership: AgentModeMembershipDraft;
+  persona: AgentPersonaDraft;
+  task: AgentTaskDraft;
+  toolPolicy: AgentToolPolicyDraft;
+  memoryPolicy: AgentMemoryPolicyDraft;
+  delegationPolicy: AgentDelegationPolicyDraft;
+  supervisionPolicy: AgentSupervisionPolicyDraft;
+};
+
 type ToolPolicyMode = "inherited" | "allowed" | "blocked" | "excluded";
 type AgentConfigPaneId = "overview" | "config" | "policies" | "membership" | "activity";
+type ToolPermissionGroup = {
+  category: string;
+  label: string;
+  tools: ToolRegistryItem[];
+  allowedCount: number;
+  blockedCount: number;
+  inheritedCount: number;
+  highRiskCount: number;
+};
+type ToolBundleApplyMode = "merge" | "replace";
 type AgentActivityTimelineItem = {
   id: string;
   kind: "run" | "sub_run" | "inbox" | "context";
@@ -146,6 +188,37 @@ function agentLabel(agent: AgentConfigWorkspaceAgent | null | undefined) {
   return agentDisplayInfo(agent, "zh").name || agent.agentId || "-";
 }
 
+function avatarInitials(agentCode?: string, name?: string, fallback = "AI") {
+  const code = String(agentCode ?? "").trim();
+  const numericTail = code.match(/\d{2,}$/)?.[0];
+  if (numericTail) {
+    return numericTail.slice(-2);
+  }
+  const compactCode = code.replace(/[^A-Za-z0-9]/g, "");
+  if (compactCode && compactCode.length <= 3) {
+    return compactCode.slice(0, 2).toUpperCase();
+  }
+  const title = String(name ?? "").trim();
+  return title.slice(0, 2) || fallback;
+}
+
+function renderAgentAvatar(className: string, imageUrl: string | undefined, fallback: string) {
+  return (
+    <span className={className} aria-hidden="true">
+      {imageUrl ? <img src={imageUrl} alt="" className={styles.agentAvatarImage} /> : fallback}
+    </span>
+  );
+}
+
+function encodeArrayBufferBase64(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary);
+}
+
 function agentFunctionalLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en" = "zh") {
   if (!agent) {
     return "-";
@@ -177,6 +250,44 @@ function agentSearchText(agent: AgentConfigWorkspaceAgent) {
   );
 }
 
+function promptTemplateDisplayName(
+  template: { name?: string; promptTemplateId?: string; templateId?: string; category?: string } | null | undefined,
+  fallbackId: string | undefined,
+  lang: "zh" | "en",
+) {
+  const templateId = String(template?.promptTemplateId || template?.templateId || fallbackId || "").trim();
+  const name = String(template?.name || "").trim();
+  if (lang !== "zh") {
+    return name || templateId || "-";
+  }
+  const normalized = (name || templateId).trim().toLowerCase();
+  const zhNames: Record<string, string> = {
+    "research capability steward": "科研能力管理员",
+    "research organization advisor": "科研组织顾问",
+    "research ceo": "科研负责人",
+    "chat default": "会话默认",
+    "supervised judge": "监督裁判",
+    "supervised auditor": "监督审计员",
+    "supervised reviewer": "监督评审员",
+    "supervised candidate": "监督候选",
+    "supervised baseline": "监督基线",
+    "self-evolution executor": "自进化执行者",
+    "self-evolution summarizer": "自进化总结者",
+    "self-evolution reviewer": "自进化审查者",
+  };
+  return zhNames[normalized] ?? (name || templateId || "-");
+}
+
+function promptTemplateOptionLabel(
+  template: { name?: string; promptTemplateId?: string; templateId?: string; category?: string },
+  lang: "zh" | "en",
+) {
+  const id = String(template.promptTemplateId || template.templateId || "").trim();
+  const category = String(template.category || "").trim();
+  const name = promptTemplateDisplayName(template, id, lang);
+  return category ? `${name} · ${category}` : name;
+}
+
 function issueTone(issues: AgentConfigHealthIssue[]) {
   if (issues.some((item) => item.severity === "blocking")) {
     return "blocking";
@@ -199,9 +310,37 @@ function issueLabel(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
     return lang === "zh" ? "需处理" : "Review";
   }
   if (tone === "info") {
-    return lang === "zh" ? "提示" : "Info";
+    return lang === "zh" ? "可优化" : "Optional";
   }
   return lang === "zh" ? "正常" : "OK";
+}
+
+function sortedHealthIssues(issues: AgentConfigHealthIssue[]) {
+  const order: Record<string, number> = { blocking: 0, warning: 1, info: 2 };
+  return [...issues].sort((left, right) => (order[left.severity] ?? 3) - (order[right.severity] ?? 3));
+}
+
+function issueSummary(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
+  const [first] = sortedHealthIssues(issues);
+  if (!first) {
+    return lang === "zh" ? "配置完整，可直接引用" : "Ready to use";
+  }
+  const rest = issues.length > 1 ? (lang === "zh" ? `，另有 ${issues.length - 1} 项` : `, +${issues.length - 1} more`) : "";
+  return `${first.title}${rest}`;
+}
+
+function issueNextStep(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
+  const tone = issueTone(issues);
+  if (tone === "blocking") {
+    return lang === "zh" ? "先补齐阻塞项，否则不要加入可调度池。" : "Fix blocking items before routing this Agent.";
+  }
+  if (tone === "warning") {
+    return lang === "zh" ? "建议在基础配置或归属页处理，避免运行时缺上下文。" : "Review base config or membership to avoid missing runtime context.";
+  }
+  if (tone === "info") {
+    return lang === "zh" ? "不影响使用，但补齐后更容易被团队和群聊理解。" : "Usable now; completing it improves team and room clarity.";
+  }
+  return lang === "zh" ? "当前没有需要处理的健康项。" : "No health action is needed.";
 }
 
 function runtimeStatusLabel(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
@@ -332,7 +471,7 @@ function referenceLabel(reference: AgentConfigReference, lang: "zh" | "en") {
 
 function referenceRoute(reference: AgentConfigReference) {
   if (reference.kind === "team" && reference.sourceId) {
-    return `/agents/teams?team=${encodeURIComponent(reference.sourceId)}`;
+    return `/teams?team=${encodeURIComponent(reference.sourceId)}`;
   }
   return reference.route || "";
 }
@@ -508,6 +647,23 @@ function selectedAgentFromList(
   );
 }
 
+function draftSyncSourceFromAgent(
+  workspace: AgentConfigWorkspace | undefined,
+  agent: AgentConfigWorkspaceAgent | null | undefined,
+): AgentDraftSyncSource {
+  return {
+    agentId: agent?.agentId ?? "",
+    config: draftFromAgent(agent),
+    membership: membershipDraftFromWorkspace(workspace, agent),
+    persona: personaDraftFromAgent(agent),
+    task: taskDraftFromAgent(agent),
+    toolPolicy: toolPolicyDraftFromAgent(agent),
+    memoryPolicy: memoryPolicyDraftFromAgent(agent),
+    delegationPolicy: delegationPolicyDraftFromAgent(agent),
+    supervisionPolicy: supervisionPolicyDraftFromAgent(agent),
+  };
+}
+
 function archivedWorkspaceCache(
   workspace: AgentConfigWorkspace | undefined,
   archivedAgent: AgentConfigWorkspaceAgent,
@@ -594,6 +750,192 @@ function draftEqualsAgent(draft: AgentConfigDraft, agent: AgentConfigWorkspaceAg
   return (Object.keys(base) as Array<keyof AgentConfigDraft>).every((key) => draft[key] === base[key]);
 }
 
+function defaultPersonaProfile(): AgentPersonaProfile {
+  return {
+    gender: "",
+    age: "",
+    pronouns: "",
+    personality: "",
+    communicationStyle: "",
+    background: "",
+    expertise: [],
+    collaborationPreference: "",
+    identityNotes: "",
+  };
+}
+
+function normalizePersonaProfile(profile: Partial<AgentPersonaProfile> | null | undefined): AgentPersonaProfile {
+  const base = defaultPersonaProfile();
+  return {
+    ...base,
+    ...(profile ?? {}),
+    gender: String(profile?.gender ?? "").trim(),
+    age: String(profile?.age ?? "").trim(),
+    pronouns: String(profile?.pronouns ?? "").trim(),
+    personality: String(profile?.personality ?? "").trim(),
+    communicationStyle: String(profile?.communicationStyle ?? "").trim(),
+    background: String(profile?.background ?? "").trim(),
+    expertise: sortedIds((profile?.expertise ?? []).map((item) => String(item || "").trim()).filter(Boolean)),
+    collaborationPreference: String(profile?.collaborationPreference ?? "").trim(),
+    identityNotes: String(profile?.identityNotes ?? "").trim(),
+  };
+}
+
+function personaDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentPersonaDraft {
+  const profile = normalizePersonaProfile(agent?.personaProfile);
+  return {
+    ...profile,
+    expertise: profile.expertise.join(", "),
+  };
+}
+
+function expertiseFromDraft(value: string) {
+  return sortedIds(String(value || "").split(/[,，;；\n]+/).map((item) => item.trim()).filter(Boolean));
+}
+
+function personaProfileFromDraft(draft: AgentPersonaDraft): AgentPersonaProfile {
+  return normalizePersonaProfile({
+    ...draft,
+    expertise: expertiseFromDraft(draft.expertise),
+  });
+}
+
+function personaDraftEqualsAgent(draft: AgentPersonaDraft, agent: AgentConfigWorkspaceAgent | null | undefined) {
+  const current = normalizePersonaProfile(agent?.personaProfile);
+  const next = personaProfileFromDraft(draft);
+  return (
+    current.gender === next.gender
+    && current.age === next.age
+    && current.pronouns === next.pronouns
+    && current.personality === next.personality
+    && current.communicationStyle === next.communicationStyle
+    && current.background === next.background
+    && sameStringSet(current.expertise, next.expertise)
+    && current.collaborationPreference === next.collaborationPreference
+    && current.identityNotes === next.identityNotes
+  );
+}
+
+function personaProfileSummary(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
+  const profile = normalizePersonaProfile(agent?.personaProfile);
+  const parts = [profile.gender, profile.age, profile.personality].filter(Boolean);
+  if (parts.length) {
+    return parts.slice(0, 3).join(" / ");
+  }
+  return lang === "zh" ? "未设置人物档案" : "No persona profile";
+}
+
+function defaultTaskProfile(): AgentTaskProfile {
+  return {
+    mission: "",
+    taskTypes: [],
+    responsibilities: "",
+    preferredTasks: "",
+    avoidTasks: "",
+    successCriteria: "",
+    deliverables: "",
+    constraints: "",
+    handoffNotes: "",
+  };
+}
+
+function normalizeTaskProfile(profile: Partial<AgentTaskProfile> | null | undefined): AgentTaskProfile {
+  const base = defaultTaskProfile();
+  return {
+    ...base,
+    ...(profile ?? {}),
+    mission: String(profile?.mission ?? "").trim(),
+    taskTypes: sortedIds((profile?.taskTypes ?? []).map((item) => String(item || "").trim()).filter(Boolean)),
+    responsibilities: String(profile?.responsibilities ?? "").trim(),
+    preferredTasks: String(profile?.preferredTasks ?? "").trim(),
+    avoidTasks: String(profile?.avoidTasks ?? "").trim(),
+    successCriteria: String(profile?.successCriteria ?? "").trim(),
+    deliverables: String(profile?.deliverables ?? "").trim(),
+    constraints: String(profile?.constraints ?? "").trim(),
+    handoffNotes: String(profile?.handoffNotes ?? "").trim(),
+  };
+}
+
+function taskDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentTaskDraft {
+  const profile = normalizeTaskProfile(agent?.taskProfile);
+  return {
+    ...profile,
+    taskTypes: profile.taskTypes.join(", "),
+  };
+}
+
+function taskProfileFromDraft(draft: AgentTaskDraft): AgentTaskProfile {
+  return normalizeTaskProfile({
+    ...draft,
+    taskTypes: expertiseFromDraft(draft.taskTypes),
+  });
+}
+
+function taskDraftEqualsAgent(draft: AgentTaskDraft, agent: AgentConfigWorkspaceAgent | null | undefined) {
+  const current = normalizeTaskProfile(agent?.taskProfile);
+  const next = taskProfileFromDraft(draft);
+  return (
+    current.mission === next.mission
+    && sameStringSet(current.taskTypes, next.taskTypes)
+    && current.responsibilities === next.responsibilities
+    && current.preferredTasks === next.preferredTasks
+    && current.avoidTasks === next.avoidTasks
+    && current.successCriteria === next.successCriteria
+    && current.deliverables === next.deliverables
+    && current.constraints === next.constraints
+    && current.handoffNotes === next.handoffNotes
+  );
+}
+
+function taskProfileSummary(agent: AgentConfigWorkspaceAgent | null | undefined, lang: "zh" | "en") {
+  const profile = normalizeTaskProfile(agent?.taskProfile);
+  const parts = [profile.mission, profile.preferredTasks, profile.successCriteria].filter(Boolean);
+  if (parts.length) {
+    return parts[0];
+  }
+  return lang === "zh" ? "未设置任务档案" : "No task profile";
+}
+
+function configDraftEqualsDraft(left: AgentConfigDraft, right: AgentConfigDraft) {
+  return (Object.keys(right) as Array<keyof AgentConfigDraft>).every((key) => left[key] === right[key]);
+}
+
+function membershipDraftEqualsDraft(left: AgentModeMembershipDraft, right: AgentModeMembershipDraft) {
+  return (Object.keys(right) as Array<keyof AgentModeMembershipDraft>).every((key) => left[key] === right[key]);
+}
+
+function personaDraftEqualsDraft(left: AgentPersonaDraft, right: AgentPersonaDraft) {
+  const leftProfile = personaProfileFromDraft(left);
+  const rightProfile = personaProfileFromDraft(right);
+  return (
+    leftProfile.gender === rightProfile.gender
+    && leftProfile.age === rightProfile.age
+    && leftProfile.pronouns === rightProfile.pronouns
+    && leftProfile.personality === rightProfile.personality
+    && leftProfile.communicationStyle === rightProfile.communicationStyle
+    && leftProfile.background === rightProfile.background
+    && sameStringSet(leftProfile.expertise, rightProfile.expertise)
+    && leftProfile.collaborationPreference === rightProfile.collaborationPreference
+    && leftProfile.identityNotes === rightProfile.identityNotes
+  );
+}
+
+function taskDraftEqualsDraft(left: AgentTaskDraft, right: AgentTaskDraft) {
+  const leftProfile = taskProfileFromDraft(left);
+  const rightProfile = taskProfileFromDraft(right);
+  return (
+    leftProfile.mission === rightProfile.mission
+    && sameStringSet(leftProfile.taskTypes, rightProfile.taskTypes)
+    && leftProfile.responsibilities === rightProfile.responsibilities
+    && leftProfile.preferredTasks === rightProfile.preferredTasks
+    && leftProfile.avoidTasks === rightProfile.avoidTasks
+    && leftProfile.successCriteria === rightProfile.successCriteria
+    && leftProfile.deliverables === rightProfile.deliverables
+    && leftProfile.constraints === rightProfile.constraints
+    && leftProfile.handoffNotes === rightProfile.handoffNotes
+  );
+}
+
 function createDraftFromWorkspace(workspace: AgentConfigWorkspace | undefined): AgentCreateDraft {
   const firstProfile = workspace?.modelProfiles?.[0]?.profileId ?? "primary";
   const firstPrompt = workspace?.promptTemplates?.find((item) => item.category === "chat") ?? workspace?.promptTemplates?.[0];
@@ -659,18 +1001,6 @@ function membershipDraftEqualsWorkspace(
   return (Object.keys(base) as Array<keyof AgentModeMembershipDraft>).every((key) => draft[key] === base[key]);
 }
 
-function chatRoomDraftFromWorkspace(
-  workspace: AgentConfigWorkspace | undefined,
-  agent: AgentConfigWorkspaceAgent | null | undefined,
-): AgentChatRoomMembershipDraft {
-  const agentId = agent?.agentId ?? "";
-  return {
-    roomIds: (workspace?.chatRooms ?? [])
-      .filter((room) => agentId && room.agentIds.includes(agentId))
-      .map((room) => room.roomId),
-  };
-}
-
 function sortedIds(values: string[]) {
   return Array.from(new Set(values.map((item) => String(item || "").trim()).filter(Boolean))).sort();
 }
@@ -679,14 +1009,6 @@ function sameStringSet(left: string[], right: string[]) {
   const leftSorted = sortedIds(left);
   const rightSorted = sortedIds(right);
   return leftSorted.length === rightSorted.length && leftSorted.every((value, index) => value === rightSorted[index]);
-}
-
-function chatRoomDraftEqualsWorkspace(
-  draft: AgentChatRoomMembershipDraft,
-  workspace: AgentConfigWorkspace | undefined,
-  agent: AgentConfigWorkspaceAgent | null | undefined,
-) {
-  return sameStringSet(draft.roomIds, chatRoomDraftFromWorkspace(workspace, agent).roomIds);
 }
 
 function defaultToolPolicy(policyId = "default"): ToolPolicy {
@@ -709,9 +1031,18 @@ function defaultToolPolicy(policyId = "default"): ToolPolicy {
 function toolPolicyDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentToolPolicyDraft {
   return {
     allowedTools: sortedIds(agent?.toolPolicy?.allowedTools ?? []),
+    preferredTools: sortedIds(agent?.toolPolicy?.preferredTools ?? []),
     blockedTools: sortedIds(agent?.toolPolicy?.blockedTools ?? []),
     readScopes: sortedIds(agent?.toolPolicy?.readScopes ?? []),
     writeScopes: sortedIds(agent?.toolPolicy?.writeScopes ?? []),
+  };
+}
+
+function toolGovernanceDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | undefined): AgentToolGovernanceDraft {
+  return {
+    proposedByAgentId: agent?.agentId ?? "",
+    reason: "",
+    applyMode: "auto",
   };
 }
 
@@ -719,10 +1050,49 @@ function toolPolicyDraftEqualsAgent(draft: AgentToolPolicyDraft, agent: AgentCon
   const base = toolPolicyDraftFromAgent(agent);
   return (
     sameStringSet(draft.allowedTools, base.allowedTools)
+    && sameStringSet(draft.preferredTools, base.preferredTools)
     && sameStringSet(draft.blockedTools, base.blockedTools)
     && sameStringSet(draft.readScopes, base.readScopes)
     && sameStringSet(draft.writeScopes, base.writeScopes)
   );
+}
+
+function toolPolicyDraftEqualsDraft(left: AgentToolPolicyDraft, right: AgentToolPolicyDraft) {
+  return (
+    sameStringSet(left.allowedTools, right.allowedTools)
+    && sameStringSet(left.preferredTools, right.preferredTools)
+    && sameStringSet(left.blockedTools, right.blockedTools)
+    && sameStringSet(left.readScopes, right.readScopes)
+    && sameStringSet(left.writeScopes, right.writeScopes)
+  );
+}
+
+function toolPolicyDeltaFromDraft(draft: AgentToolPolicyDraft, agent: AgentConfigWorkspaceAgent | null | undefined) {
+  const base = toolPolicyDraftFromAgent(agent);
+  return {
+    grantTools: draft.allowedTools.filter((tool) => !base.allowedTools.includes(tool)),
+    revokeTools: base.allowedTools.filter((tool) => !draft.allowedTools.includes(tool)),
+    blockTools: draft.blockedTools.filter((tool) => !base.blockedTools.includes(tool)),
+    unblockTools: base.blockedTools.filter((tool) => !draft.blockedTools.includes(tool)),
+  };
+}
+
+function toolPolicyDeltaCount(delta: ReturnType<typeof toolPolicyDeltaFromDraft>) {
+  return delta.grantTools.length + delta.revokeTools.length + delta.blockTools.length + delta.unblockTools.length;
+}
+
+function toolBundleMeta(bundle: ToolBundle, lang: "zh" | "en") {
+  const parts = [
+    lang === "zh" ? `${bundle.toolCount} 个工具` : `${bundle.toolCount} tools`,
+    lang === "zh" ? `${bundle.preferredToolCount} 个优先` : `${bundle.preferredToolCount} preferred`,
+  ];
+  if (bundle.highRiskToolCount > 0) {
+    parts.push(lang === "zh" ? `${bundle.highRiskToolCount} 个高风险` : `${bundle.highRiskToolCount} high risk`);
+  }
+  if (bundle.explicitAllowToolCount > 0) {
+    parts.push(lang === "zh" ? `${bundle.explicitAllowToolCount} 个需显式允许` : `${bundle.explicitAllowToolCount} explicit allow`);
+  }
+  return parts.join(" · ");
 }
 
 function toolPolicyMode(draft: AgentToolPolicyDraft, toolName: string): ToolPolicyMode {
@@ -736,6 +1106,50 @@ function toolPolicyMode(draft: AgentToolPolicyDraft, toolName: string): ToolPoli
     return "excluded";
   }
   return "inherited";
+}
+
+function governanceRiskLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  const zh: Record<string, string> = {
+    low: "低风险",
+    medium: "中风险",
+    high: "高风险",
+  };
+  const en: Record<string, string> = {
+    low: "Low risk",
+    medium: "Medium risk",
+    high: "High risk",
+  };
+  return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
+}
+
+function governanceStatusLabel(value: string, lang: "zh" | "en") {
+  const normalized = String(value || "").trim();
+  const zh: Record<string, string> = {
+    pending_review: "待审批",
+    applied: "已应用",
+    rejected: "已拒绝",
+  };
+  const en: Record<string, string> = {
+    pending_review: "Pending review",
+    applied: "Applied",
+    rejected: "Rejected",
+  };
+  return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
+}
+
+function governanceDeltaSummary(request: AgentToolGovernanceRequest | undefined, lang: "zh" | "en") {
+  const delta = request?.policyDelta;
+  if (!delta) {
+    return "-";
+  }
+  const parts = [
+    `${lang === "zh" ? "授权" : "Grant"} ${delta.grantTools?.length ?? 0}`,
+    `${lang === "zh" ? "撤销" : "Revoke"} ${delta.revokeTools?.length ?? 0}`,
+    `${lang === "zh" ? "禁用" : "Block"} ${delta.blockTools?.length ?? 0}`,
+    `${lang === "zh" ? "解除禁用" : "Unblock"} ${delta.unblockTools?.length ?? 0}`,
+  ];
+  return parts.join(" · ");
 }
 
 function toolPolicyModeLabel(mode: ToolPolicyMode, lang: "zh" | "en") {
@@ -752,6 +1166,100 @@ function toolPolicyModeLabel(mode: ToolPolicyMode, lang: "zh" | "en") {
     excluded: "Excluded",
   };
   return (lang === "zh" ? zh : en)[mode];
+}
+
+function toolCategoryLabel(category: string, fallback: string | undefined, lang: "zh" | "en") {
+  const normalized = String(category || "").trim();
+  const zh: Record<string, string> = {
+    workspace_read: "工作区读取",
+    workspace_write: "工作区写入",
+    code_quality: "代码质量",
+    web_research: "网络与检索",
+    git_evolution: "Git 与进化",
+    task_runtime: "任务运行",
+    agent_collaboration: "Agent 协作",
+    memory_context: "记忆与上下文",
+    self_model: "自我模型",
+    media_research: "媒体与科研",
+    custom_generated: "自定义工具",
+    uncategorized: "未分类",
+  };
+  const en: Record<string, string> = {
+    workspace_read: "Workspace read",
+    workspace_write: "Workspace write",
+    code_quality: "Code quality",
+    web_research: "Web and research",
+    git_evolution: "Git and evolution",
+    task_runtime: "Task runtime",
+    agent_collaboration: "Agent collaboration",
+    memory_context: "Memory and context",
+    self_model: "Self model",
+    media_research: "Media and research",
+    custom_generated: "Custom tools",
+    uncategorized: "Uncategorized",
+  };
+  return ((lang === "zh" ? zh : en)[normalized] ?? fallback ?? normalized) || (lang === "zh" ? "未分类" : "Uncategorized");
+}
+
+function toolTierLabel(tier: string, lang: "zh" | "en") {
+  const normalized = String(tier || "").trim();
+  const zh: Record<string, string> = {
+    low: "低风险",
+    medium: "中风险",
+    high: "高风险",
+    generated: "自定义",
+  };
+  const en: Record<string, string> = {
+    low: "Low risk",
+    medium: "Medium risk",
+    high: "High risk",
+    generated: "Generated",
+  };
+  return ((lang === "zh" ? zh : en)[normalized] ?? normalized) || "-";
+}
+
+function groupPolicyToolsByCategory(
+  tools: ToolRegistryItem[],
+  draft: AgentToolPolicyDraft,
+  lang: "zh" | "en",
+): ToolPermissionGroup[] {
+  const groups = new Map<string, ToolPermissionGroup>();
+  for (const tool of tools) {
+    const category = String(tool.category || "uncategorized").trim() || "uncategorized";
+    let group = groups.get(category);
+    if (!group) {
+      group = {
+        category,
+        label: toolCategoryLabel(category, tool.categoryLabel, lang),
+        tools: [],
+        allowedCount: 0,
+        blockedCount: 0,
+        inheritedCount: 0,
+        highRiskCount: 0,
+      };
+      groups.set(category, group);
+    }
+    const mode = toolPolicyMode(draft, tool.name);
+    group.tools.push(tool);
+    if (mode === "allowed") {
+      group.allowedCount += 1;
+    } else if (mode === "blocked") {
+      group.blockedCount += 1;
+    } else {
+      group.inheritedCount += 1;
+    }
+    if (tool.permissionTier === "high" || tool.permissionPolicy?.requiresExplicitAllow) {
+      group.highRiskCount += 1;
+    }
+  }
+  return Array.from(groups.values()).sort((left, right) => {
+    const leftTouched = left.allowedCount + left.blockedCount;
+    const rightTouched = right.allowedCount + right.blockedCount;
+    if (leftTouched !== rightTouched) {
+      return rightTouched - leftTouched;
+    }
+    return left.label.localeCompare(right.label);
+  });
 }
 
 function defaultMemoryPolicy(policyId = ""): MemoryPolicy {
@@ -780,6 +1288,10 @@ function memoryPolicyDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | un
 function memoryPolicyDraftEqualsAgent(draft: AgentMemoryPolicyDraft, agent: AgentConfigWorkspaceAgent | null | undefined) {
   const base = memoryPolicyDraftFromAgent(agent);
   return sameStringSet(draft.readSharedGroups, base.readSharedGroups) && sameStringSet(draft.writeSharedGroups, base.writeSharedGroups);
+}
+
+function memoryPolicyDraftEqualsDraft(left: AgentMemoryPolicyDraft, right: AgentMemoryPolicyDraft) {
+  return sameStringSet(left.readSharedGroups, right.readSharedGroups) && sameStringSet(left.writeSharedGroups, right.writeSharedGroups);
 }
 
 function sharedGroupCandidates(workspace: AgentConfigWorkspace | undefined, selectedAgent: AgentConfigWorkspaceAgent | null | undefined) {
@@ -859,6 +1371,25 @@ function supervisionPolicyDraftEqualsAgent(draft: AgentSupervisionPolicyDraft, a
     draft.requiresReview === base.requiresReview &&
     draft.reviewMode === base.reviewMode &&
     draft.evidenceLevel === base.evidenceLevel
+  );
+}
+
+function delegationPolicyDraftEqualsDraft(left: AgentDelegationPolicyDraft, right: AgentDelegationPolicyDraft) {
+  return (
+    left.allowSubagents === right.allowSubagents &&
+    left.maxConcurrent === right.maxConcurrent &&
+    left.maxDepth === right.maxDepth &&
+    left.allowWakeMessages === right.allowWakeMessages &&
+    sameStringSet(left.allowedContextModes, right.allowedContextModes)
+  );
+}
+
+function supervisionPolicyDraftEqualsDraft(left: AgentSupervisionPolicyDraft, right: AgentSupervisionPolicyDraft) {
+  return (
+    left.supervisionEnabled === right.supervisionEnabled &&
+    left.requiresReview === right.requiresReview &&
+    left.reviewMode === right.reviewMode &&
+    left.evidenceLevel === right.evidenceLevel
   );
 }
 
@@ -997,6 +1528,58 @@ function agentsRouteCopy(lang: "zh" | "en") {
         policyPending: "策略注册表待接入",
         noIssues: "当前没有明显健康问题。",
         routeHint: "这张卡片是 Agent 的唯一配置点；业务页面只引用这里的 Agent。",
+        healthReason: "原因",
+        healthNextStep: "下一步",
+        configGuideTitle: "这页先回答三个问题",
+        configGuideIdentity: "它是谁",
+        configGuideIdentityHint: "名称、状态、人物档案决定用户和其他 Agent 如何称呼它。",
+        configGuideRuntime: "它用什么脑子",
+        configGuideRuntimeHint: "模型模板和提示词模板决定每次会话的基础能力与说话方式。",
+        configGuideBoundary: "它能碰哪里",
+        configGuideBoundaryHint: "工具和记忆只在这里选择模板；细粒度授权到策略页调整。",
+        toolPolicyPickerHint: "选择工具权限模板；具体允许、优先、禁用哪些工具，请到“策略”页调整。",
+        memoryPolicyPickerHint: "选择记忆边界模板；具体可读/可写共享组，请到“策略”页调整。",
+        editAvatar: "编辑头像",
+        avatarEditorTitle: "Agent 头像",
+        avatarEditorHint: "头像写入 AgentDirectory，Chat、团队和群聊引用会同步使用。",
+        uploadAvatar: "上传新头像",
+        uploadingAvatar: "上传中...",
+        resetDefaultAvatar: "使用默认头像",
+        resettingAvatar: "恢复中...",
+        avatarLibrary: "头像库",
+        avatarLibraryLoading: "正在读取头像库...",
+        avatarLibraryEmpty: "workspace/avatars 暂无可用头像。",
+        avatarUpdateSuccess: "已更新 Agent 头像",
+        personaTitle: "人物档案",
+        personaHint: "人物档案写入 AgentDirectory，并进入 Agent 运行上下文；顾问 Agent 可按说明自行设计团队人选。",
+        savePersona: "保存人物",
+        savingPersona: "保存人物中...",
+        personaUpdateSuccess: "已保存 Agent 人物档案",
+        taskTitle: "任务档案",
+        taskHint: "任务档案写入 AgentDirectory，并进入 Agent 运行上下文；它只描述适配任务和职责边界，不自动推荐或调度。",
+        saveTask: "保存任务",
+        savingTask: "保存任务中...",
+        taskUpdateSuccess: "已保存 Agent 任务档案",
+        mission: "任务使命",
+        taskTypes: "任务类型",
+        taskTypesPlaceholder: "用逗号分隔，例如 文献审查, 实验设计, 代码评审",
+        responsibilities: "职责范围",
+        preferredTasks: "适合任务",
+        avoidTasks: "不适合任务",
+        successCriteria: "完成标准",
+        deliverables: "交付物",
+        constraints: "约束条件",
+        handoffNotes: "交接说明",
+        gender: "性别",
+        age: "年龄",
+        pronouns: "称谓",
+        personality: "性格",
+        communicationStyle: "沟通风格",
+        background: "背景",
+        expertise: "专长",
+        collaborationPreference: "协作偏好",
+        identityNotes: "人物说明",
+        expertisePlaceholder: "用逗号分隔，例如 规划, 统计, 评审",
         overviewPane: "总览",
         policiesPane: "策略",
         membershipPane: "归属",
@@ -1010,14 +1593,36 @@ function agentsRouteCopy(lang: "zh" | "en") {
         saveMembership: "保存归属",
         savingMembership: "保存归属中...",
         chatRoomMembership: "群聊成员",
-        saveChatRooms: "保存群聊",
-        savingChatRooms: "保存群聊中...",
         noChatRooms: "还没有可配置的群聊。",
         toolPolicyTitle: "工具权限",
         saveToolPolicy: "保存权限",
         savingToolPolicy: "保存权限中...",
+        toolBundlesTitle: "工具包快速配置",
+        toolBundlesHint: "工具包会写入允许工具和优先工具；叠加会保留手动调整，重置会把草稿改为该工具包。",
+        applyBundle: "叠加",
+        replaceWithBundle: "重置为此包",
+        preferredTools: "优先",
+        toolGovernanceTitle: "顾问权限治理",
+        toolGovernanceHint: "把当前工具草稿作为受控治理请求提交；低风险可自动应用，高风险会进入待审批。",
+        toolGovernanceSubmit: "提交治理请求",
+        toolGovernanceSubmitting: "提交中...",
+        toolGovernanceReason: "变更理由",
+        toolGovernanceReasonPlaceholder: "说明为什么这个 Agent 需要这些工具权限",
+        toolGovernanceApplyAuto: "低风险自动应用",
+        toolGovernanceApplyReview: "全部走审批",
+        toolGovernancePending: "待审批请求",
+        toolGovernanceHistory: "最近治理记录",
+        toolGovernanceApprove: "批准",
+        toolGovernanceReject: "拒绝",
+        toolGovernanceNoDelta: "先调整工具权限草稿，再提交治理请求。",
+        toolGovernanceEmpty: "还没有工具治理记录。",
+        toolGovernanceSuccess: "工具治理请求已记录",
+        toolGovernanceResolved: "工具治理请求已处理",
         toolSearch: "筛选工具",
         noTools: "当前没有可配置的工具。",
+        toolCategoryCount: "工具分类",
+        toolHighRisk: "高风险",
+        toolTags: "能力标签",
         allowedTools: "允许",
         blockedTools: "禁用",
         inheritedTools: "默认",
@@ -1164,6 +1769,58 @@ function agentsRouteCopy(lang: "zh" | "en") {
         policyPending: "Policy registry pending",
         noIssues: "No obvious health issues.",
         routeHint: "This card is the single Agent config point. Product pages should only reference Agents from here.",
+        healthReason: "Reason",
+        healthNextStep: "Next step",
+        configGuideTitle: "This page answers three questions first",
+        configGuideIdentity: "Who it is",
+        configGuideIdentityHint: "Name, status, and persona decide how users and other Agents address it.",
+        configGuideRuntime: "Which brain it uses",
+        configGuideRuntimeHint: "Model and prompt templates define baseline capability and voice for every turn.",
+        configGuideBoundary: "What it can touch",
+        configGuideBoundaryHint: "Pick tool and memory templates here; tune exact permissions in Policies.",
+        toolPolicyPickerHint: "Choose the tool-permission template. Use Policies for allowed, preferred, or blocked tools.",
+        memoryPolicyPickerHint: "Choose the memory-boundary template. Use Policies for readable and writable shared groups.",
+        editAvatar: "Edit avatar",
+        avatarEditorTitle: "Agent avatar",
+        avatarEditorHint: "Avatar state is stored in AgentDirectory and reused by chat, teams, and rooms.",
+        uploadAvatar: "Upload avatar",
+        uploadingAvatar: "Uploading...",
+        resetDefaultAvatar: "Use default avatar",
+        resettingAvatar: "Resetting...",
+        avatarLibrary: "Avatar library",
+        avatarLibraryLoading: "Loading avatar library...",
+        avatarLibraryEmpty: "No avatars are available in workspace/avatars.",
+        avatarUpdateSuccess: "Agent avatar updated",
+        personaTitle: "Persona profile",
+        personaHint: "Persona state is stored in AgentDirectory and injected into runtime context. Advisor Agents can use it as design material.",
+        savePersona: "Save persona",
+        savingPersona: "Saving persona...",
+        personaUpdateSuccess: "Agent persona profile saved",
+        taskTitle: "Task profile",
+        taskHint: "Task state is stored in AgentDirectory and injected into runtime context. It describes task fit and scope without automatic recommendation or scheduling.",
+        saveTask: "Save task",
+        savingTask: "Saving task...",
+        taskUpdateSuccess: "Agent task profile saved",
+        mission: "Mission",
+        taskTypes: "Task types",
+        taskTypesPlaceholder: "Comma-separated, e.g. literature review, experiment design, code review",
+        responsibilities: "Responsibilities",
+        preferredTasks: "Preferred tasks",
+        avoidTasks: "Avoid tasks",
+        successCriteria: "Success criteria",
+        deliverables: "Deliverables",
+        constraints: "Constraints",
+        handoffNotes: "Handoff notes",
+        gender: "Gender",
+        age: "Age",
+        pronouns: "Pronouns",
+        personality: "Personality",
+        communicationStyle: "Communication style",
+        background: "Background",
+        expertise: "Expertise",
+        collaborationPreference: "Collaboration preference",
+        identityNotes: "Identity notes",
+        expertisePlaceholder: "Comma-separated, e.g. planning, statistics, review",
         overviewPane: "Overview",
         policiesPane: "Policies",
         membershipPane: "Membership",
@@ -1177,14 +1834,36 @@ function agentsRouteCopy(lang: "zh" | "en") {
         saveMembership: "Save membership",
         savingMembership: "Saving membership...",
         chatRoomMembership: "Group room membership",
-        saveChatRooms: "Save rooms",
-        savingChatRooms: "Saving rooms...",
         noChatRooms: "No group rooms available.",
         toolPolicyTitle: "Tool permissions",
         saveToolPolicy: "Save permissions",
         savingToolPolicy: "Saving permissions...",
+        toolBundlesTitle: "Tool package presets",
+        toolBundlesHint: "Packages fill allowed and preferred tools. Merge preserves manual edits; reset replaces the draft with the selected package.",
+        applyBundle: "Merge",
+        replaceWithBundle: "Reset to package",
+        preferredTools: "Preferred",
+        toolGovernanceTitle: "Advisor governance",
+        toolGovernanceHint: "Submit the current tool draft as a governed change. Low-risk changes may auto-apply; high-risk changes wait for review.",
+        toolGovernanceSubmit: "Submit governance request",
+        toolGovernanceSubmitting: "Submitting...",
+        toolGovernanceReason: "Change reason",
+        toolGovernanceReasonPlaceholder: "Explain why this Agent needs these tool permissions",
+        toolGovernanceApplyAuto: "Auto-apply low risk",
+        toolGovernanceApplyReview: "Review everything",
+        toolGovernancePending: "Pending requests",
+        toolGovernanceHistory: "Recent governance records",
+        toolGovernanceApprove: "Approve",
+        toolGovernanceReject: "Reject",
+        toolGovernanceNoDelta: "Adjust the tool permission draft before submitting a governance request.",
+        toolGovernanceEmpty: "No tool governance records yet.",
+        toolGovernanceSuccess: "Tool governance request recorded",
+        toolGovernanceResolved: "Tool governance request resolved",
         toolSearch: "Filter tools",
         noTools: "No configurable tools are available.",
+        toolCategoryCount: "Tool categories",
+        toolHighRisk: "High risk",
+        toolTags: "Capability tags",
         allowedTools: "Allowed",
         blockedTools: "Blocked",
         inheritedTools: "Default",
@@ -1249,6 +1928,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
 export function AgentsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
+  const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const navigate = useNavigate();
   const pageVisible = usePageVisibility();
   const copy = useMemo(() => agentsRouteCopy(lang), [lang]);
@@ -1260,14 +1940,18 @@ export function AgentsRoute() {
   const [createDraft, setCreateDraft] = useState<AgentCreateDraft>(() => createDraftFromWorkspace(undefined));
   const [configDraft, setConfigDraft] = useState<AgentConfigDraft>(() => draftFromAgent(null));
   const [membershipDraft, setMembershipDraft] = useState<AgentModeMembershipDraft>(() => membershipDraftFromWorkspace(undefined, null));
-  const [chatRoomDraft, setChatRoomDraft] = useState<AgentChatRoomMembershipDraft>(() => chatRoomDraftFromWorkspace(undefined, null));
+  const [personaDraft, setPersonaDraft] = useState<AgentPersonaDraft>(() => personaDraftFromAgent(null));
+  const [taskDraft, setTaskDraft] = useState<AgentTaskDraft>(() => taskDraftFromAgent(null));
   const [toolPolicyDraft, setToolPolicyDraft] = useState<AgentToolPolicyDraft>(() => toolPolicyDraftFromAgent(null));
+  const [toolGovernanceDraft, setToolGovernanceDraft] = useState<AgentToolGovernanceDraft>(() => toolGovernanceDraftFromAgent(null));
   const [memoryPolicyDraft, setMemoryPolicyDraft] = useState<AgentMemoryPolicyDraft>(() => memoryPolicyDraftFromAgent(null));
   const [delegationPolicyDraft, setDelegationPolicyDraft] = useState<AgentDelegationPolicyDraft>(() => delegationPolicyDraftFromAgent(null));
   const [supervisionPolicyDraft, setSupervisionPolicyDraft] = useState<AgentSupervisionPolicyDraft>(() => supervisionPolicyDraftFromAgent(null));
   const [toolSearchText, setToolSearchText] = useState("");
   const [focusedMessageId, setFocusedMessageId] = useState("");
+  const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const draftSyncSourceRef = useRef<AgentDraftSyncSource | null>(null);
 
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
@@ -1281,6 +1965,14 @@ export function AgentsRoute() {
     queryFn: () => fetchJson<ToolRegistryPayload>("/api/tools"),
     refetchInterval: resolvePollingInterval(pageVisible, 15_000),
     refetchIntervalInBackground: false,
+  });
+  const toolBundles = toolsQuery.data?.toolBundles ?? [];
+
+  const avatarOptionsQuery = useQuery({
+    queryKey: ["agent-avatar-options"],
+    queryFn: () => fetchJson<AgentAvatarOptionsPayload>("/api/agents/avatar-options"),
+    enabled: avatarEditorOpen,
+    staleTime: 30_000,
   });
 
   const workspace = workspaceQuery.data;
@@ -1311,9 +2003,23 @@ export function AgentsRoute() {
       if (!query) {
         return true;
       }
-      return normalizeText(`${tool.name} ${tool.description} ${tool.source} ${tool.status}`).includes(query);
+      return normalizeText([
+        tool.name,
+        tool.description,
+        tool.source,
+        tool.status,
+        tool.category,
+        tool.categoryLabel,
+        tool.permissionTier,
+        ...(tool.capabilityTags ?? []),
+        ...(tool.riskTags ?? []),
+      ].join(" ")).includes(query);
     });
   }, [toolSearchText, tools]);
+  const visiblePolicyToolGroups = useMemo(
+    () => groupPolicyToolsByCategory(visiblePolicyTools, toolPolicyDraft, lang),
+    [lang, toolPolicyDraft, visiblePolicyTools],
+  );
   const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter);
   const memoryGroupOptions = useMemo(() => sharedGroupCandidates(workspace, selectedAgent), [selectedAgent?.agentId, workspace?.generatedAt]);
   const panes = useMemo(() => agentConfigPanes(copy, selectedAgent), [copy, selectedAgent]);
@@ -1351,21 +2057,46 @@ export function AgentsRoute() {
   const summary = workspace?.summary;
   const healthStatus = workspace?.health.status ?? "ok";
   const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+    void chatWorkspaceCache.afterAgentWorkspaceChanged();
   };
 
   useEffect(() => {
-    setConfigDraft(draftFromAgent(selectedAgent));
-    setMembershipDraft(membershipDraftFromWorkspace(workspace, selectedAgent));
-    setChatRoomDraft(chatRoomDraftFromWorkspace(workspace, selectedAgent));
-    setToolPolicyDraft(toolPolicyDraftFromAgent(selectedAgent));
-    setMemoryPolicyDraft(memoryPolicyDraftFromAgent(selectedAgent));
-    setDelegationPolicyDraft(delegationPolicyDraftFromAgent(selectedAgent));
-    setSupervisionPolicyDraft(supervisionPolicyDraftFromAgent(selectedAgent));
-    setToolSearchText("");
-    setFocusedMessageId("");
-    setNotice(null);
-  }, [selectedAgent?.agentId, workspace?.generatedAt]);
+    const nextSource = draftSyncSourceFromAgent(workspace, selectedAgent);
+    const previousSource = draftSyncSourceRef.current;
+    const agentChanged = previousSource?.agentId !== nextSource.agentId;
+
+    if (!previousSource || agentChanged) {
+      setConfigDraft(nextSource.config);
+      setMembershipDraft(nextSource.membership);
+      setPersonaDraft(nextSource.persona);
+      setTaskDraft(nextSource.task);
+      setToolPolicyDraft(nextSource.toolPolicy);
+      setToolGovernanceDraft(toolGovernanceDraftFromAgent(selectedAgent));
+      setMemoryPolicyDraft(nextSource.memoryPolicy);
+      setDelegationPolicyDraft(nextSource.delegationPolicy);
+      setSupervisionPolicyDraft(nextSource.supervisionPolicy);
+      setToolSearchText("");
+      setFocusedMessageId("");
+      setAvatarEditorOpen(false);
+      setNotice(null);
+      draftSyncSourceRef.current = nextSource;
+      return;
+    }
+
+    setConfigDraft((current) => configDraftEqualsDraft(current, previousSource.config) ? nextSource.config : current);
+    setMembershipDraft((current) => membershipDraftEqualsDraft(current, previousSource.membership) ? nextSource.membership : current);
+    setPersonaDraft((current) => personaDraftEqualsDraft(current, previousSource.persona) ? nextSource.persona : current);
+    setTaskDraft((current) => taskDraftEqualsDraft(current, previousSource.task) ? nextSource.task : current);
+    setToolPolicyDraft((current) => toolPolicyDraftEqualsDraft(current, previousSource.toolPolicy) ? nextSource.toolPolicy : current);
+    setMemoryPolicyDraft((current) => memoryPolicyDraftEqualsDraft(current, previousSource.memoryPolicy) ? nextSource.memoryPolicy : current);
+    setDelegationPolicyDraft((current) =>
+      delegationPolicyDraftEqualsDraft(current, previousSource.delegationPolicy) ? nextSource.delegationPolicy : current,
+    );
+    setSupervisionPolicyDraft((current) =>
+      supervisionPolicyDraftEqualsDraft(current, previousSource.supervisionPolicy) ? nextSource.supervisionPolicy : current,
+    );
+    draftSyncSourceRef.current = nextSource;
+  }, [selectedAgent, workspace]);
 
   useEffect(() => {
     setActivePane("overview");
@@ -1382,14 +2113,19 @@ export function AgentsRoute() {
 
   const configDirty = !draftEqualsAgent(configDraft, selectedAgent);
   const membershipDirty = !membershipDraftEqualsWorkspace(membershipDraft, workspace, selectedAgent);
-  const chatRoomDirty = !chatRoomDraftEqualsWorkspace(chatRoomDraft, workspace, selectedAgent);
+  const personaDirty = !personaDraftEqualsAgent(personaDraft, selectedAgent);
+  const taskDirty = !taskDraftEqualsAgent(taskDraft, selectedAgent);
   const toolPolicyDirty = !toolPolicyDraftEqualsAgent(toolPolicyDraft, selectedAgent);
   const memoryPolicyDirty = !memoryPolicyDraftEqualsAgent(memoryPolicyDraft, selectedAgent);
   const runtimePolicyDirty = !delegationPolicyDraftEqualsAgent(delegationPolicyDraft, selectedAgent)
     || !supervisionPolicyDraftEqualsAgent(supervisionPolicyDraft, selectedAgent);
+  const toolGovernanceDelta = toolPolicyDeltaFromDraft(toolPolicyDraft, selectedAgent);
+  const toolGovernanceDeltaTotal = toolPolicyDeltaCount(toolGovernanceDelta);
+  const canSubmitToolGovernance = Boolean(selectedAgent?.agentId && toolGovernanceDeltaTotal > 0);
   const canSaveConfig = Boolean(selectedAgent?.agentId && configDraft.displayName.trim() && configDirty);
   const canSaveMembership = Boolean(selectedAgent?.agentId && membershipDirty);
-  const canSaveChatRooms = Boolean(selectedAgent?.agentId && chatRoomDirty);
+  const canSavePersona = Boolean(selectedAgent?.agentId && personaDirty);
+  const canSaveTask = Boolean(selectedAgent?.agentId && taskDirty);
   const canSaveToolPolicy = Boolean(selectedAgent?.agentId && toolPolicyDirty);
   const canSaveMemoryPolicy = Boolean(selectedAgent?.agentId && memoryPolicyDirty);
   const canSaveRuntimePolicy = Boolean(selectedAgent?.agentId && runtimePolicyDirty);
@@ -1420,10 +2156,7 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已新增 ${agentLabel(agent)}` : `Created ${agentLabel(agent)}`,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1449,8 +2182,43 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的 Agent 配置` : `Saved config for ${agentLabel(agent)}`,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const updatePersonaMutation = useMutation({
+    mutationFn: (payload: { agentId: string; draft: AgentPersonaDraft }) =>
+      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          personaProfile: personaProfileFromDraft(payload.draft),
+        }),
+      }),
+    onSuccess: () => {
+      setNotice({ tone: "success", text: copy.personaUpdateSuccess });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const updateTaskMutation = useMutation({
+    mutationFn: (payload: { agentId: string; draft: AgentTaskDraft }) =>
+      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          taskProfile: taskProfileFromDraft(payload.draft),
+        }),
+      }),
+    onSuccess: () => {
+      setNotice({ tone: "success", text: copy.taskUpdateSuccess });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1473,12 +2241,7 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已安全归档 ${agentLabel(agent)}` : `Archived ${agentLabel(agent)}`,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentModeBindings() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      void chatWorkspaceCache.afterAgentArchived();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1498,12 +2261,47 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent",
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentModeBindings() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.sessions() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
+      void chatWorkspaceCache.afterAgentArchived();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const updateAvatarMutation = useMutation({
+    mutationFn: (payload: { agentId: string; avatarImagePath?: string; resetToDefault?: boolean }) =>
+      fetchJson<AgentConfigWorkspaceAgent>(`/api/agents/${encodeURIComponent(payload.agentId)}/avatar`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          avatarImagePath: payload.avatarImagePath ?? "",
+          resetToDefault: Boolean(payload.resetToDefault),
+        }),
+      }),
+    onSuccess: () => {
+      setNotice({ tone: "success", text: copy.avatarUpdateSuccess });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const uploadAvatarMutation = useMutation({
+    mutationFn: async (payload: { agentId: string; file: File }) =>
+      fetchJson<AgentAvatarUploadResponse>(`/api/agents/${encodeURIComponent(payload.agentId)}/avatar-image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: payload.file.name,
+          contentType: payload.file.type || "image/png",
+          dataBase64: encodeArrayBufferBase64(await payload.file.arrayBuffer()),
+        }),
+      }),
+    onSuccess: () => {
+      setNotice({ tone: "success", text: copy.avatarUpdateSuccess });
+      void queryClient.invalidateQueries({ queryKey: ["agent-avatar-options"] });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1522,28 +2320,7 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? "已保存 Agent 模式归属" : "Saved Agent mode membership",
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentModeBindings() });
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
-  const updateChatRoomsMutation = useMutation({
-    mutationFn: (payload: { agentId: string; draft: AgentChatRoomMembershipDraft }) =>
-      fetchJson(`/api/agents/${encodeURIComponent(payload.agentId)}/chat-rooms`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomIds: sortedIds(payload.draft.roomIds) }),
-      }),
-    onSuccess: () => {
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? "已保存 Agent 群聊成员关系" : "Saved Agent group room membership",
-      });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1560,6 +2337,7 @@ export function AgentsRoute() {
             ...defaultToolPolicy(payload.basePolicy?.policyId || "default"),
             ...(payload.basePolicy ?? {}),
             allowedTools: sortedIds(payload.draft.allowedTools),
+            preferredTools: sortedIds(payload.draft.preferredTools),
             blockedTools: sortedIds(payload.draft.blockedTools),
             readScopes: sortedIds(payload.draft.readScopes),
             writeScopes: sortedIds(payload.draft.writeScopes),
@@ -1571,8 +2349,62 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的工具权限` : `Saved tool permissions for ${agentLabel(agent)}`,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const createToolGovernanceMutation = useMutation({
+    mutationFn: (payload: {
+      agentId: string;
+      draft: AgentToolGovernanceDraft;
+      delta: ReturnType<typeof toolPolicyDeltaFromDraft>;
+    }) =>
+      fetchJson<AgentToolGovernanceRequest>(`/api/agents/${encodeURIComponent(payload.agentId)}/tool-governance-requests`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proposedByAgentId: payload.draft.proposedByAgentId,
+          grantTools: sortedIds(payload.delta.grantTools),
+          revokeTools: sortedIds(payload.delta.revokeTools),
+          blockTools: sortedIds(payload.delta.blockTools),
+          unblockTools: sortedIds(payload.delta.unblockTools),
+          reason: payload.draft.reason,
+          applyMode: payload.draft.applyMode,
+        }),
+      }),
+    onSuccess: (request) => {
+      setNotice({
+        tone: "success",
+        text: `${copy.toolGovernanceSuccess}: ${governanceStatusLabel(request.status, lang)}`,
+      });
+      setToolGovernanceDraft(toolGovernanceDraftFromAgent(selectedAgent));
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const resolveToolGovernanceMutation = useMutation({
+    mutationFn: (payload: { agentId: string; requestId: string; decision: "approve" | "reject" }) =>
+      fetchJson<AgentToolGovernanceRequest>(
+        `/api/agents/${encodeURIComponent(payload.agentId)}/tool-governance-requests/${encodeURIComponent(payload.requestId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            decision: payload.decision,
+            resolvedBy: "user",
+            resolutionNote: payload.decision,
+          }),
+        },
+      ),
+    onSuccess: () => {
+      setNotice({ tone: "success", text: copy.toolGovernanceResolved });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1598,8 +2430,7 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的记忆策略` : `Saved memory policy for ${agentLabel(agent)}`,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1636,8 +2467,7 @@ export function AgentsRoute() {
         tone: "success",
         text: lang === "zh" ? `已保存 ${agentLabel(agent)} 的运行策略` : `Saved runtime policy for ${agentLabel(agent)}`,
       });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
       void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuns(agent.agentId) });
     },
     onError: (error) => {
@@ -1666,8 +2496,7 @@ export function AgentsRoute() {
       if (selectedAgent?.agentId) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(selectedAgent.agentId, "pending") });
       }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -1686,23 +2515,21 @@ export function AgentsRoute() {
     setMembershipDraft((current) => ({ ...current, ...patch }));
   };
 
-  const toggleChatRoomDraft = (roomId: string, selected: boolean) => {
-    setChatRoomDraft((current) => {
-      const roomIds = new Set(current.roomIds);
-      if (selected) {
-        roomIds.add(roomId);
-      } else {
-        roomIds.delete(roomId);
-      }
-      return { roomIds: Array.from(roomIds) };
-    });
+  const updatePersonaDraft = (patch: Partial<AgentPersonaDraft>) => {
+    setPersonaDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const updateTaskDraft = (patch: Partial<AgentTaskDraft>) => {
+    setTaskDraft((current) => ({ ...current, ...patch }));
   };
 
   const updateToolPolicyMode = (toolName: string, mode: Exclude<ToolPolicyMode, "excluded">) => {
     setToolPolicyDraft((current) => {
       const allowed = new Set(current.allowedTools);
+      const preferred = new Set(current.preferredTools);
       const blocked = new Set(current.blockedTools);
       allowed.delete(toolName);
+      preferred.delete(toolName);
       blocked.delete(toolName);
       if (mode === "allowed") {
         allowed.add(toolName);
@@ -1713,9 +2540,45 @@ export function AgentsRoute() {
       return {
         ...current,
         allowedTools: sortedIds(Array.from(allowed)),
+        preferredTools: sortedIds(Array.from(preferred)),
         blockedTools: sortedIds(Array.from(blocked)),
       };
     });
+  };
+
+  const applyToolBundle = (bundle: ToolBundle, mode: ToolBundleApplyMode) => {
+    setToolPolicyDraft((current) => {
+      const bundleTools = sortedIds(bundle.toolNames ?? []);
+      const bundlePreferred = sortedIds((bundle.preferredToolNames ?? []).filter((tool) => bundleTools.includes(tool)));
+      if (mode === "replace") {
+        return {
+          ...current,
+          allowedTools: bundleTools,
+          preferredTools: bundlePreferred,
+          blockedTools: [],
+        };
+      }
+      const allowed = new Set(current.allowedTools);
+      const preferred = new Set(current.preferredTools);
+      const blocked = new Set(current.blockedTools);
+      for (const tool of bundleTools) {
+        allowed.add(tool);
+        blocked.delete(tool);
+      }
+      for (const tool of bundlePreferred) {
+        preferred.add(tool);
+      }
+      return {
+        ...current,
+        allowedTools: sortedIds(Array.from(allowed)),
+        preferredTools: sortedIds(Array.from(preferred).filter((tool) => allowed.has(tool))),
+        blockedTools: sortedIds(Array.from(blocked)),
+      };
+    });
+  };
+
+  const updateToolGovernanceDraft = (patch: Partial<AgentToolGovernanceDraft>) => {
+    setToolGovernanceDraft((current) => ({ ...current, ...patch }));
   };
 
   const toggleToolPolicyScope = (field: "readScopes" | "writeScopes", scope: string, selected: boolean) => {
@@ -1798,11 +2661,18 @@ export function AgentsRoute() {
     updateMembershipMutation.mutate({ agentId: selectedAgent.agentId, draft: membershipDraft });
   };
 
-  const saveChatRoomMembership = () => {
-    if (!selectedAgent || !canSaveChatRooms) {
+  const savePersonaProfile = () => {
+    if (!selectedAgent || !canSavePersona) {
       return;
     }
-    updateChatRoomsMutation.mutate({ agentId: selectedAgent.agentId, draft: chatRoomDraft });
+    updatePersonaMutation.mutate({ agentId: selectedAgent.agentId, draft: personaDraft });
+  };
+
+  const saveTaskProfile = () => {
+    if (!selectedAgent || !canSaveTask) {
+      return;
+    }
+    updateTaskMutation.mutate({ agentId: selectedAgent.agentId, draft: taskDraft });
   };
 
   const saveToolPolicy = () => {
@@ -1813,6 +2683,29 @@ export function AgentsRoute() {
       agentId: selectedAgent.agentId,
       draft: toolPolicyDraft,
       basePolicy: selectedAgent.toolPolicy,
+    });
+  };
+
+  const submitToolGovernanceRequest = () => {
+    if (!selectedAgent || !canSubmitToolGovernance) {
+      setNotice({ tone: "error", text: copy.toolGovernanceNoDelta });
+      return;
+    }
+    createToolGovernanceMutation.mutate({
+      agentId: selectedAgent.agentId,
+      draft: toolGovernanceDraft,
+      delta: toolGovernanceDelta,
+    });
+  };
+
+  const resolveToolGovernanceRequest = (request: AgentToolGovernanceRequest, decision: "approve" | "reject") => {
+    if (!request.targetAgentId || !request.requestId || resolveToolGovernanceMutation.isPending) {
+      return;
+    }
+    resolveToolGovernanceMutation.mutate({
+      agentId: request.targetAgentId,
+      requestId: request.requestId,
+      decision,
     });
   };
 
@@ -1865,6 +2758,27 @@ export function AgentsRoute() {
       return;
     }
     purgeAgentMutation.mutate({ agentId: selectedAgent.agentId });
+  };
+
+  const resetSelectedAgentAvatar = () => {
+    if (!selectedAgent?.agentId || updateAvatarMutation.isPending) {
+      return;
+    }
+    updateAvatarMutation.mutate({ agentId: selectedAgent.agentId, resetToDefault: true });
+  };
+
+  const selectAgentAvatar = (avatarImagePath: string) => {
+    if (!selectedAgent?.agentId || updateAvatarMutation.isPending) {
+      return;
+    }
+    updateAvatarMutation.mutate({ agentId: selectedAgent.agentId, avatarImagePath });
+  };
+
+  const uploadSelectedAgentAvatar = (file: File | undefined) => {
+    if (!selectedAgent?.agentId || !file || uploadAvatarMutation.isPending) {
+      return;
+    }
+    uploadAvatarMutation.mutate({ agentId: selectedAgent.agentId, file });
   };
 
   const consumeInboxMessage = (message: AgentInboxMessage) => {
@@ -2083,7 +2997,7 @@ export function AgentsRoute() {
                     <option value="">-</option>
                     {workspace?.promptTemplates.map((template) => (
                       <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
-                        {template.name || template.promptTemplateId} · {template.category}
+                        {promptTemplateOptionLabel(template, lang)}
                       </option>
                     ))}
                   </select>
@@ -2154,13 +3068,20 @@ export function AgentsRoute() {
                     onClick={() => setSelectedAgentId(agent.agentId)}
                   >
                     <span className={styles.agentIdentity}>
-                      <strong>{display.name}</strong>
-                      <em className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${display.tone}`]}`}>
-                        {display.functionLabel}
-                      </em>
+                      {renderAgentAvatar(
+                        styles.agentAvatar,
+                        agent.avatarImageUrl,
+                        avatarInitials(agent.agentCode, display.name),
+                      )}
+                      <span className={styles.agentIdentityCopy}>
+                        <strong>{display.name}</strong>
+                        <em className={`${styles.agentRoleTag} ${styles[`agentRoleTag_${display.tone}`]}`}>
+                          {display.functionLabel}
+                        </em>
+                      </span>
                     </span>
                     <span>{agent.modelProfile?.label || agent.profileId || "-"}</span>
-                    <span>{agent.promptTemplate?.name || agent.promptTemplateId || "-"}</span>
+                    <span>{promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)}</span>
                     <span className={`${styles.runtimePill} ${styles[`runtime_${runtimeStatusTone(agent)}`]}`}>
                       {runtimeStatusLabel(agent, lang)}
                     </span>
@@ -2169,8 +3090,11 @@ export function AgentsRoute() {
                         <em key={`${agent.agentId}:${mode}`}>{modeLabel(mode, lang)}</em>
                       ))}
                     </span>
-                    <span className={`${styles.issuePill} ${styles[`issue_${tone}`]}`}>
-                      {issueLabel(agent.health, lang)}
+                    <span className={styles.healthCell}>
+                      <span className={`${styles.issuePill} ${styles[`issue_${tone}`]}`}>
+                        {issueLabel(agent.health, lang)}
+                      </span>
+                      <small>{issueSummary(agent.health, lang)}</small>
                     </span>
                   </button>
                 );
@@ -2183,6 +3107,79 @@ export function AgentsRoute() {
           {selectedAgent ? (
             <>
               <section className={styles.detailHeader}>
+                <div className={styles.avatarEditorAnchor}>
+                  <button
+                    type="button"
+                    className={styles.detailAvatarButton}
+                    onClick={() => setAvatarEditorOpen((current) => !current)}
+                    aria-expanded={avatarEditorOpen}
+                    title={copy.editAvatar}
+                  >
+                    {renderAgentAvatar(
+                      styles.detailAvatar,
+                      selectedAgent.avatarImageUrl,
+                      avatarInitials(selectedAgent.agentCode, agentLabel(selectedAgent)),
+                    )}
+                  </button>
+                  {avatarEditorOpen ? (
+                    <section className={styles.avatarEditorPanel}>
+                      <div className={styles.avatarEditorHeader}>
+                        <div>
+                          <p className={styles.panelEyebrow}>{copy.avatarEditorTitle}</p>
+                          <strong>{copy.editAvatar}</strong>
+                        </div>
+                        <button type="button" className={styles.iconButton} onClick={() => setAvatarEditorOpen(false)} aria-label={lang === "zh" ? "关闭" : "Close"}>
+                          ×
+                        </button>
+                      </div>
+                      <p>{copy.avatarEditorHint}</p>
+                      <div className={styles.avatarEditorActions}>
+                        <label className={styles.secondaryButton}>
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            disabled={uploadAvatarMutation.isPending}
+                            onChange={(event) => {
+                              uploadSelectedAgentAvatar(event.target.files?.[0]);
+                              event.currentTarget.value = "";
+                            }}
+                          />
+                          <span>{uploadAvatarMutation.isPending ? copy.uploadingAvatar : copy.uploadAvatar}</span>
+                        </label>
+                        <button type="button" className={styles.secondaryButton} disabled={updateAvatarMutation.isPending} onClick={resetSelectedAgentAvatar}>
+                          {updateAvatarMutation.isPending ? copy.resettingAvatar : copy.resetDefaultAvatar}
+                        </button>
+                      </div>
+                      <div className={styles.avatarLibraryHeader}>
+                        <span>{copy.avatarLibrary}</span>
+                        <small>{avatarOptionsQuery.data?.count ?? 0}</small>
+                      </div>
+                      {avatarOptionsQuery.isPending ? (
+                        <p className={styles.contextLine}>{copy.avatarLibraryLoading}</p>
+                      ) : avatarOptionsQuery.data?.options.length ? (
+                        <div className={styles.avatarOptionGrid}>
+                          {avatarOptionsQuery.data.options.map((option) => {
+                            const selected = option.path === selectedAgent.avatarImagePath;
+                            return (
+                              <button
+                                key={option.path}
+                                type="button"
+                                className={selected ? `${styles.avatarOption} ${styles.avatarOptionSelected}` : styles.avatarOption}
+                                onClick={() => selectAgentAvatar(option.path)}
+                                disabled={updateAvatarMutation.isPending}
+                                title={option.filename}
+                              >
+                                <img src={option.url} alt="" />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className={styles.contextLine}>{copy.avatarLibraryEmpty}</p>
+                      )}
+                    </section>
+                  ) : null}
+                </div>
                 <div>
                   <p className={styles.panelEyebrow}>{agentFunctionalLabel(selectedAgent, lang)}</p>
                   <h2>{agentLabel(selectedAgent)}</h2>
@@ -2191,8 +3188,11 @@ export function AgentsRoute() {
                   </span>
                   <p>{copy.routeHint}</p>
                 </div>
-                <span className={`${styles.issuePill} ${styles[`issue_${issueTone(selectedAgent.health)}`]}`}>
-                  {issueLabel(selectedAgent.health, lang)}
+                <span className={styles.detailHealthStatus}>
+                  <span className={`${styles.issuePill} ${styles[`issue_${issueTone(selectedAgent.health)}`]}`}>
+                    {issueLabel(selectedAgent.health, lang)}
+                  </span>
+                  <small>{issueSummary(selectedAgent.health, lang)}</small>
                 </span>
               </section>
 
@@ -2228,7 +3228,7 @@ export function AgentsRoute() {
                     <section>
                       <Brain size={16} />
                       <span>{copy.prompt}</span>
-                      <strong>{selectedAgent.promptTemplate?.name || selectedAgent.promptTemplateId || "-"}</strong>
+                      <strong>{promptTemplateDisplayName(selectedAgent.promptTemplate, selectedAgent.promptTemplateId, lang)}</strong>
                       <small>{selectedAgent.promptTemplate?.sourcePath || "-"}</small>
                     </section>
                     <section>
@@ -2242,6 +3242,18 @@ export function AgentsRoute() {
                       <span>{copy.memory}</span>
                       <strong>{selectedAgent.memoryPolicyId || "-"}</strong>
                       <small>{selectedAgent.memoryPolicy?.privateMemoryRoot || "-"}</small>
+                    </section>
+                    <section>
+                      <UserRound size={16} />
+                      <span>{copy.personaTitle}</span>
+                      <strong>{personaProfileSummary(selectedAgent, lang)}</strong>
+                      <small>{(selectedAgent.personaProfile?.expertise ?? []).join(" / ") || copy.expertise}</small>
+                    </section>
+                    <section>
+                      <CheckCircle2 size={16} />
+                      <span>{copy.taskTitle}</span>
+                      <strong>{taskProfileSummary(selectedAgent, lang)}</strong>
+                      <small>{(selectedAgent.taskProfile?.taskTypes ?? []).join(" / ") || copy.taskTypes}</small>
                     </section>
                     <section>
                       <FolderTree size={16} />
@@ -2326,6 +3338,33 @@ export function AgentsRoute() {
                     {configDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
                   </span>
                 </div>
+                <section className={`${styles.healthGuidePanel} ${styles[`healthGuide_${issueTone(selectedAgent.health)}`]}`}>
+                  <div>
+                    <span>{copy.healthIssues}</span>
+                    <strong>{issueLabel(selectedAgent.health, lang)} · {issueSummary(selectedAgent.health, lang)}</strong>
+                  </div>
+                  <p><strong>{copy.healthNextStep}</strong>{issueNextStep(selectedAgent.health, lang)}</p>
+                </section>
+                <section className={styles.configGuidePanel}>
+                  <div className={styles.configGuideHeader}>
+                    <Brain size={15} />
+                    <strong>{copy.configGuideTitle}</strong>
+                  </div>
+                  <div className={styles.configGuideGrid}>
+                    <span>
+                      <strong>{copy.configGuideIdentity}</strong>
+                      <small>{copy.configGuideIdentityHint}</small>
+                    </span>
+                    <span>
+                      <strong>{copy.configGuideRuntime}</strong>
+                      <small>{copy.configGuideRuntimeHint}</small>
+                    </span>
+                    <span>
+                      <strong>{copy.configGuideBoundary}</strong>
+                      <small>{copy.configGuideBoundaryHint}</small>
+                    </span>
+                  </div>
+                </section>
                 <div className={styles.editorGrid}>
                   <label className={styles.field}>
                     <span>Agent</span>
@@ -2357,7 +3396,7 @@ export function AgentsRoute() {
                       <option value="">-</option>
                       {workspace?.promptTemplates.map((template) => (
                         <option key={template.promptTemplateId || template.templateId} value={template.promptTemplateId || template.templateId || ""}>
-                          {template.name || template.promptTemplateId} · {template.category}
+                          {promptTemplateOptionLabel(template, lang)}
                         </option>
                       ))}
                     </select>
@@ -2371,6 +3410,7 @@ export function AgentsRoute() {
                         </option>
                       ))}
                     </select>
+                    <small>{copy.toolPolicyPickerHint}</small>
                   </label>
                   <label className={styles.field}>
                     <span>{copy.memory}</span>
@@ -2381,6 +3421,7 @@ export function AgentsRoute() {
                         </option>
                       ))}
                     </select>
+                    <small>{copy.memoryPolicyPickerHint}</small>
                   </label>
                 </div>
                 {notice ? (
@@ -2396,14 +3437,248 @@ export function AgentsRoute() {
                 </div>
               </section>
 
+              <section className={styles.configEditor}>
+                <div className={styles.panelHeader}>
+                  <div>
+                    <p className={styles.panelEyebrow}>{copy.personaTitle}</p>
+                    <h3>{personaProfileSummary(selectedAgent, lang)}</h3>
+                  </div>
+                  <span className={personaDirty ? styles.dirtyPill : styles.cleanPill}>
+                    {personaDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
+                  </span>
+                </div>
+                <p className={styles.contextLine}>{copy.personaHint}</p>
+                <div className={styles.editorGrid}>
+                  <label className={styles.field}>
+                    <span>{copy.gender}</span>
+                    <input value={personaDraft.gender} onChange={(event) => updatePersonaDraft({ gender: event.target.value })} />
+                  </label>
+                  <label className={styles.field}>
+                    <span>{copy.age}</span>
+                    <input value={personaDraft.age} onChange={(event) => updatePersonaDraft({ age: event.target.value })} />
+                  </label>
+                  <label className={styles.field}>
+                    <span>{copy.pronouns}</span>
+                    <input value={personaDraft.pronouns} onChange={(event) => updatePersonaDraft({ pronouns: event.target.value })} />
+                  </label>
+                  <label className={styles.field}>
+                    <span>{copy.expertise}</span>
+                    <input
+                      value={personaDraft.expertise}
+                      placeholder={copy.expertisePlaceholder}
+                      onChange={(event) => updatePersonaDraft({ expertise: event.target.value })}
+                    />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.personality}</span>
+                    <textarea value={personaDraft.personality} onChange={(event) => updatePersonaDraft({ personality: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.communicationStyle}</span>
+                    <textarea
+                      value={personaDraft.communicationStyle}
+                      onChange={(event) => updatePersonaDraft({ communicationStyle: event.target.value })}
+                    />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.background}</span>
+                    <textarea value={personaDraft.background} onChange={(event) => updatePersonaDraft({ background: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.collaborationPreference}</span>
+                    <textarea
+                      value={personaDraft.collaborationPreference}
+                      onChange={(event) => updatePersonaDraft({ collaborationPreference: event.target.value })}
+                    />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.identityNotes}</span>
+                    <textarea value={personaDraft.identityNotes} onChange={(event) => updatePersonaDraft({ identityNotes: event.target.value })} />
+                  </label>
+                </div>
+                <div className={styles.editorActions}>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    disabled={!personaDirty || updatePersonaMutation.isPending}
+                    onClick={() => setPersonaDraft(personaDraftFromAgent(selectedAgent))}
+                  >
+                    {copy.resetConfig}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    disabled={!canSavePersona || updatePersonaMutation.isPending}
+                    onClick={savePersonaProfile}
+                  >
+                    {updatePersonaMutation.isPending ? copy.savingPersona : copy.savePersona}
+                  </button>
+                </div>
+              </section>
+
+              <section className={styles.configEditor}>
+                <div className={styles.panelHeader}>
+                  <div>
+                    <p className={styles.panelEyebrow}>{copy.toolGovernanceTitle}</p>
+                    <h3>{copy.toolGovernancePending}: {(selectedAgent.toolGovernanceRequests ?? []).filter((item) => item.status === "pending_review").length}</h3>
+                  </div>
+                  <ShieldCheck size={16} />
+                </div>
+                <p className={styles.policyHint}>{copy.toolGovernanceHint}</p>
+                <div className={styles.policySummaryGrid}>
+                  <span>{lang === "zh" ? "新增授权" : "Grant"}: <strong>{toolGovernanceDelta.grantTools.length}</strong></span>
+                  <span>{lang === "zh" ? "撤销授权" : "Revoke"}: <strong>{toolGovernanceDelta.revokeTools.length}</strong></span>
+                  <span>{lang === "zh" ? "禁用变化" : "Block changes"}: <strong>{toolGovernanceDelta.blockTools.length + toolGovernanceDelta.unblockTools.length}</strong></span>
+                </div>
+                <div className={styles.governanceEditorGrid}>
+                  <label className={styles.field}>
+                    <span>{copy.toolGovernanceReason}</span>
+                    <input
+                      value={toolGovernanceDraft.reason}
+                      placeholder={copy.toolGovernanceReasonPlaceholder}
+                      onChange={(event) => updateToolGovernanceDraft({ reason: event.target.value })}
+                    />
+                  </label>
+                  <label className={styles.field}>
+                    <span>Apply mode</span>
+                    <select
+                      value={toolGovernanceDraft.applyMode}
+                      onChange={(event) => updateToolGovernanceDraft({ applyMode: event.target.value === "review" ? "review" : "auto" })}
+                    >
+                      <option value="auto">{copy.toolGovernanceApplyAuto}</option>
+                      <option value="review">{copy.toolGovernanceApplyReview}</option>
+                    </select>
+                  </label>
+                </div>
+                <div className={styles.toolGovernanceList}>
+                  {(selectedAgent.toolGovernanceRequests ?? []).length ? (
+                    (selectedAgent.toolGovernanceRequests ?? []).map((request) => (
+                      <article key={request.requestId} className={styles.toolGovernanceItem}>
+                        <div>
+                          <strong>{governanceStatusLabel(request.status, lang)} · {governanceRiskLabel(request.riskLevel, lang)}</strong>
+                          <span>{governanceDeltaSummary(request, lang)}</span>
+                          <small>{request.reason || request.approvalReason || request.requestId}</small>
+                        </div>
+                        {request.status === "pending_review" ? (
+                          <div className={styles.governanceActions}>
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              disabled={resolveToolGovernanceMutation.isPending}
+                              onClick={() => resolveToolGovernanceRequest(request, "reject")}
+                            >
+                              {copy.toolGovernanceReject}
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.primaryButton}
+                              disabled={resolveToolGovernanceMutation.isPending}
+                              onClick={() => resolveToolGovernanceRequest(request, "approve")}
+                            >
+                              {copy.toolGovernanceApprove}
+                            </button>
+                          </div>
+                        ) : null}
+                      </article>
+                    ))
+                  ) : (
+                    <p className={styles.emptyText}>{copy.toolGovernanceEmpty}</p>
+                  )}
+                </div>
+                <div className={styles.editorActions}>
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    disabled={!canSubmitToolGovernance || createToolGovernanceMutation.isPending}
+                    onClick={submitToolGovernanceRequest}
+                  >
+                    {createToolGovernanceMutation.isPending ? copy.toolGovernanceSubmitting : copy.toolGovernanceSubmit}
+                  </button>
+                </div>
+              </section>
+
+              <section className={styles.configEditor}>
+                <div className={styles.panelHeader}>
+                  <div>
+                    <p className={styles.panelEyebrow}>{copy.taskTitle}</p>
+                    <h3>{taskProfileSummary(selectedAgent, lang)}</h3>
+                  </div>
+                  <span className={taskDirty ? styles.dirtyPill : styles.cleanPill}>
+                    {taskDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
+                  </span>
+                </div>
+                <p className={styles.contextLine}>{copy.taskHint}</p>
+                <div className={styles.editorGrid}>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.mission}</span>
+                    <textarea value={taskDraft.mission} onChange={(event) => updateTaskDraft({ mission: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.taskTypes}</span>
+                    <input
+                      value={taskDraft.taskTypes}
+                      placeholder={copy.taskTypesPlaceholder}
+                      onChange={(event) => updateTaskDraft({ taskTypes: event.target.value })}
+                    />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.responsibilities}</span>
+                    <textarea value={taskDraft.responsibilities} onChange={(event) => updateTaskDraft({ responsibilities: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.preferredTasks}</span>
+                    <textarea value={taskDraft.preferredTasks} onChange={(event) => updateTaskDraft({ preferredTasks: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.avoidTasks}</span>
+                    <textarea value={taskDraft.avoidTasks} onChange={(event) => updateTaskDraft({ avoidTasks: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.successCriteria}</span>
+                    <textarea value={taskDraft.successCriteria} onChange={(event) => updateTaskDraft({ successCriteria: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.deliverables}</span>
+                    <textarea value={taskDraft.deliverables} onChange={(event) => updateTaskDraft({ deliverables: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.constraints}</span>
+                    <textarea value={taskDraft.constraints} onChange={(event) => updateTaskDraft({ constraints: event.target.value })} />
+                  </label>
+                  <label className={styles.fieldWide}>
+                    <span>{copy.handoffNotes}</span>
+                    <textarea value={taskDraft.handoffNotes} onChange={(event) => updateTaskDraft({ handoffNotes: event.target.value })} />
+                  </label>
+                </div>
+                <div className={styles.editorActions}>
+                  <button
+                    type="button"
+                    className={styles.secondaryButton}
+                    disabled={!taskDirty || updateTaskMutation.isPending}
+                    onClick={() => setTaskDraft(taskDraftFromAgent(selectedAgent))}
+                  >
+                    {copy.resetConfig}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.primaryButton}
+                    disabled={!canSaveTask || updateTaskMutation.isPending}
+                    onClick={saveTaskProfile}
+                  >
+                    {updateTaskMutation.isPending ? copy.savingTask : copy.saveTask}
+                  </button>
+                </div>
+              </section>
+
               <section className={styles.detailSection}>
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.healthIssues}</p>
-                    <h3>{selectedAgent.health.length || copy.noIssues}</h3>
+                    <h3>{issueLabel(selectedAgent.health, lang)} · {issueSummary(selectedAgent.health, lang)}</h3>
                   </div>
                   {selectedAgent.health.length ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
                 </div>
+                <p className={styles.contextLine}>{issueNextStep(selectedAgent.health, lang)}</p>
                 {selectedAgent.health.length ? (
                   <div className={styles.issueList}>
                     {selectedAgent.health.map((issue) => (
@@ -2490,9 +3765,40 @@ export function AgentsRoute() {
                 </div>
                 <div className={styles.policySummaryGrid}>
                   <span>{copy.allowedTools}: <strong>{toolPolicyDraft.allowedTools.length}</strong></span>
+                  <span>{copy.preferredTools}: <strong>{toolPolicyDraft.preferredTools.length}</strong></span>
                   <span>{copy.blockedTools}: <strong>{toolPolicyDraft.blockedTools.length}</strong></span>
                   <span>{copy.inheritedTools}: <strong>{Math.max(0, visiblePolicyTools.length - toolPolicyDraft.allowedTools.length - toolPolicyDraft.blockedTools.length)}</strong></span>
+                  <span>{copy.toolCategoryCount}: <strong>{visiblePolicyToolGroups.length}</strong></span>
                 </div>
+                {toolBundles.length ? (
+                  <section className={styles.toolBundlePanel}>
+                    <div className={styles.toolBundlePanelHeader}>
+                      <div>
+                        <strong>{copy.toolBundlesTitle}</strong>
+                        <span>{copy.toolBundlesHint}</span>
+                      </div>
+                    </div>
+                    <div className={styles.toolBundleList}>
+                      {toolBundles.map((bundle) => (
+                        <div key={bundle.bundleId} className={styles.toolBundleItem}>
+                          <span>
+                            <strong>{bundle.label}</strong>
+                            <small>{toolBundleMeta(bundle, lang)}</small>
+                          </span>
+                          <p>{bundle.description}</p>
+                          <div className={styles.toolBundleActions}>
+                            <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "merge")}>
+                              {copy.applyBundle}
+                            </button>
+                            <button type="button" className={styles.secondaryButton} onClick={() => applyToolBundle(bundle, "replace")}>
+                              {copy.replaceWithBundle}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
                 <section className={styles.workspaceScopePanel}>
                   <div>
                     <span>{copy.workspaceWriteScopes}</span>
@@ -2518,40 +3824,62 @@ export function AgentsRoute() {
                 </label>
                 {visiblePolicyTools.length ? (
                   <div className={styles.toolPermissionList}>
-                    {visiblePolicyTools.map((tool) => {
-                      const mode = toolPolicyMode(toolPolicyDraft, tool.name);
-                      return (
-                        <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
-                          <span>
-                            <strong>{tool.name}</strong>
-                            <small>{tool.description || tool.source}</small>
-                          </span>
-                          <div className={styles.segmentedControl} aria-label={tool.name}>
-                            <button
-                              type="button"
-                              className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
-                              onClick={() => updateToolPolicyMode(tool.name, "inherited")}
-                            >
-                              {toolPolicyModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
-                            </button>
-                            <button
-                              type="button"
-                              className={mode === "allowed" ? styles.segmentActive : styles.segmentButton}
-                              onClick={() => updateToolPolicyMode(tool.name, "allowed")}
-                            >
-                              {toolPolicyModeLabel("allowed", lang)}
-                            </button>
-                            <button
-                              type="button"
-                              className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
-                              onClick={() => updateToolPolicyMode(tool.name, "blocked")}
-                            >
-                              {toolPolicyModeLabel("blocked", lang)}
-                            </button>
+                    {visiblePolicyToolGroups.map((group) => (
+                      <section key={group.category} className={styles.toolPermissionGroup}>
+                        <header className={styles.toolPermissionGroupHeader}>
+                          <div>
+                            <strong>{group.label}</strong>
+                            <span>
+                              {group.tools.length} tools · {copy.allowedTools} {group.allowedCount} · {copy.blockedTools} {group.blockedCount} · {copy.inheritedTools} {group.inheritedCount}
+                            </span>
                           </div>
+                          {group.highRiskCount ? (
+                            <small>{copy.toolHighRisk} {group.highRiskCount}</small>
+                          ) : null}
+                        </header>
+                        <div className={styles.toolPermissionGroupList}>
+                          {group.tools.map((tool) => {
+                            const mode = toolPolicyMode(toolPolicyDraft, tool.name);
+                            const tags = [...(tool.capabilityTags ?? []), ...(tool.riskTags ?? [])].slice(0, 4);
+                            return (
+                              <div key={`${tool.source}:${tool.id}`} className={styles.toolPermissionRow}>
+                                <span>
+                                  <strong>{tool.name}</strong>
+                                  <small>{tool.description || tool.source}</small>
+                                  <span className={styles.toolPermissionMeta}>
+                                    <em>{toolTierLabel(tool.permissionTier, lang)}</em>
+                                    {tags.length ? <small>{copy.toolTags}: {tags.join(" / ")}</small> : null}
+                                  </span>
+                                </span>
+                                <div className={styles.segmentedControl} aria-label={tool.name}>
+                                  <button
+                                    type="button"
+                                    className={mode === "inherited" || mode === "excluded" ? styles.segmentActive : styles.segmentButton}
+                                    onClick={() => updateToolPolicyMode(tool.name, "inherited")}
+                                  >
+                                    {toolPolicyModeLabel(mode === "excluded" ? "excluded" : "inherited", lang)}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={mode === "allowed" ? styles.segmentActive : styles.segmentButton}
+                                    onClick={() => updateToolPolicyMode(tool.name, "allowed")}
+                                  >
+                                    {toolPolicyModeLabel("allowed", lang)}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={mode === "blocked" ? styles.segmentActiveDanger : styles.segmentButton}
+                                    onClick={() => updateToolPolicyMode(tool.name, "blocked")}
+                                  >
+                                    {toolPolicyModeLabel("blocked", lang)}
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
-                      );
-                    })}
+                      </section>
+                    ))}
                   </div>
                 ) : (
                   <p className={styles.emptyText}>{copy.noTools}</p>
@@ -2740,52 +4068,43 @@ export function AgentsRoute() {
                 <div className={styles.panelHeader}>
                   <div>
                     <p className={styles.panelEyebrow}>{copy.chatRoomMembership}</p>
-                    <h3>{chatRoomDraft.roomIds.length} / {workspace?.chatRooms.length ?? 0}</h3>
+                    <h3>{selectedAgent.references.filter((reference) => reference.kind === "chat_room").length} / {workspace?.chatRooms.length ?? 0}</h3>
                   </div>
-                  <span className={chatRoomDirty ? styles.dirtyPill : styles.cleanPill}>
-                    {chatRoomDirty ? (lang === "zh" ? "未保存" : "Unsaved") : (lang === "zh" ? "已同步" : "Synced")}
-                  </span>
+                  <span className={styles.cleanPill}>{lang === "zh" ? "只读引用" : "Read-only"}</span>
                 </div>
                 {(workspace?.chatRooms.length ?? 0) > 0 ? (
                   <div className={styles.roomMembershipList}>
                     {workspace?.chatRooms.map((room) => {
-                      const selected = chatRoomDraft.roomIds.includes(room.roomId);
+                      const selected = room.agentIds.includes(selectedAgent.agentId);
                       return (
-                        <label key={room.roomId} className={styles.roomCheckField}>
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={(event) => toggleChatRoomDraft(room.roomId, event.target.checked)}
-                          />
+                        <div key={room.roomId} className={styles.roomCheckField}>
+                          <span className={selected ? styles.referenceStatusActive : styles.referenceStatusStale}>
+                            {selected ? (lang === "zh" ? "已加入" : "Joined") : (lang === "zh" ? "未加入" : "Not joined")}
+                          </span>
                           <span>
                             <strong>{room.title || room.roomId}</strong>
                             <small>{room.mode || "-"} · {room.participantCount} members · {formatTimestamp(room.updatedAt, lang)}</small>
                           </span>
-                        </label>
+                          <button
+                            type="button"
+                            className={styles.referenceRouteButton}
+                            onClick={() => navigate(`/chat?room=${encodeURIComponent(room.roomId)}`)}
+                          >
+                            <ExternalLink size={12} />
+                            {lang === "zh" ? "打开群聊" : "Open room"}
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
                 ) : (
                   <p className={styles.emptyText}>{copy.noChatRooms}</p>
                 )}
-                <div className={styles.editorActions}>
-                  <button
-                    type="button"
-                    className={styles.secondaryButton}
-                    disabled={!chatRoomDirty || updateChatRoomsMutation.isPending}
-                    onClick={() => setChatRoomDraft(chatRoomDraftFromWorkspace(workspace, selectedAgent))}
-                  >
-                    {copy.resetConfig}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.primaryButton}
-                    disabled={!canSaveChatRooms || updateChatRoomsMutation.isPending}
-                    onClick={saveChatRoomMembership}
-                  >
-                    {updateChatRoomsMutation.isPending ? copy.savingChatRooms : copy.saveChatRooms}
-                  </button>
-                </div>
+                <p className={styles.emptyText}>
+                  {lang === "zh"
+                    ? "群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。这里仅展示引用，避免多处写同一份成员状态。"
+                    : "Group membership is edited from Chat group settings, while Team-owned rooms sync from Teams. This Agent view is read-only to avoid duplicate writers."}
+                </p>
               </section>
 
               <section className={styles.detailSection}>

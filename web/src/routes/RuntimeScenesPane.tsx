@@ -24,7 +24,7 @@ import {
   RuntimeSceneListItem,
   RuntimeSceneWorkRunItem,
 } from "../api/types";
-import { FilePreview } from "../components/preview/FilePreview";
+import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { TranslationKey } from "../i18n/dictionary";
@@ -1383,13 +1383,14 @@ export function RuntimeScenesPane({ activeRoot, lang, t, statusLabel, initialSce
               ) : sceneContentQuery.data ? (
                 <div className={styles.logPreviewStack}>
                   {renderDiagnosticsPanel(sceneContentQuery.data.diagnostics, lang)}
-                  <FilePreview
+                  <LazyFilePreview
                     file={sceneContentQuery.data}
                     changed={false}
                     sourceLabel={activeRoot.path}
                     headerActions={null}
                     highlightAsLog
                     severityFilter={severityFilter}
+                    fallback={<div className={styles.panelState}>{t("loadingFilePreview")}</div>}
                   />
                 </div>
               ) : (

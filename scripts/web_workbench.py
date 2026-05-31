@@ -22,6 +22,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from config.workbench import DEFAULT_WORKBENCH_HOST, configured_backend_port  # noqa: E402
 
 
+USER_ENV_FALLBACK_ENV = "VIBELUTION_ENABLE_USER_ENV_FALLBACK"
+
+
 class WorkbenchAccessLogFilter(logging.Filter):
     """Suppress high-frequency workbench access lines while keeping diagnostic requests."""
 
@@ -62,6 +65,17 @@ class WorkbenchAccessLogFilter(logging.Filter):
 
 
 HealthAccessLogFilter = WorkbenchAccessLogFilter
+
+
+def enable_user_env_fallback_for_workbench() -> None:
+    """Let Windows launcher-started backends resolve user-scoped API keys."""
+
+    if os.name != "nt":
+        return
+    if os.environ.get(USER_ENV_FALLBACK_ENV):
+        return
+    os.environ[USER_ENV_FALLBACK_ENV] = "1"
+    logging.getLogger("uvicorn.error").info("Enabled Windows user environment fallback for workbench API key lookup.")
 
 
 def default_port() -> int:
@@ -105,6 +119,7 @@ def main() -> None:
     url = f"http://{args.host}:{args.port}"
     if args.open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    enable_user_env_fallback_for_workbench()
     install_access_log_filters()
     uvicorn.run("core.web.app:app", host=args.host, port=args.port, reload=args.reload)
 

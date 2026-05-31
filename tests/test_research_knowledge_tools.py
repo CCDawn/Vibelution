@@ -1,6 +1,7 @@
 import json
 
 from core.web.services import agent_directory_service
+from core.prompt_manager.sections import make_tools_index_section
 from core.research import knowledge_base
 from tools import research_knowledge_tools
 from tools.Key_Tools import create_llm_facing_tools
@@ -132,3 +133,23 @@ def test_research_knowledge_tool_is_llm_facing_but_hidden_without_explicit_allow
         visible = agent_directory_service.filter_llm_tools_for_current_agent(tools)
 
     assert [tool.name for tool in visible] == ["research_knowledge_query_tool"]
+
+
+def test_tools_index_section_uses_current_agent_tool_policy(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="受限工具 Agent")
+    agent_directory_service.update_agent_instance(
+        agent["agentId"],
+        tool_policy={"allowedTools": ["agent_message_tool"]},
+    )
+
+    section = make_tools_index_section(tmp_path)
+
+    with agent_directory_service.active_agent_runtime(agent["agentId"], session_id="session-tools"):
+        content = section.compute()
+
+    assert section.cache_break is True
+    assert "当前 Agent 共 1 个可直接调用工具" in content
+    assert "`agent_message_tool`" in content
+    assert "`web_search_tool`" not in content
+    assert "`research_knowledge_query_tool`" not in content

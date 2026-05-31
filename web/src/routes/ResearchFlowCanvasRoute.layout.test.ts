@@ -25,7 +25,12 @@ describe("ResearchFlowCanvasRoute layout contract", () => {
     expect(routeSource).toContain("科研组织通信");
     expect(routeSource).toContain("提案面板");
     expect(routeSource).toContain("审计流");
-    expect(routeSource).toContain("human_override");
+    expect(routeSource).toContain("仅用于科研组织上下文消息");
+    expect(routeSource).toContain("通用项目总群、@Agent 和撤回仍在对话页处理");
+    expect(routeSource).toContain("这里只确认科研组织提案");
+    expect(routeSource).toContain("通用 Agent 配置和工具权限仍由 Agent 管理承接");
+    expect(routeSource).toContain("成员/角色回团队页，工具权限回 Agent 管理");
+    expect(routeSource).not.toContain("工具权限来自每个 Agent 的 ToolPolicy");
     expect(routeSource).toContain("inspectorView");
     expect(routeSource).toContain("同步检查");
     expect(routeSource).toContain("错误与警告");

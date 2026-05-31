@@ -845,10 +845,12 @@ class UIManager:
         saved_tokens: int,
         iteration: int,
         summary_written: bool,
+        trigger_source: str = "",
     ):
         event = {
             "level": str(level or "").strip(),
             "reason": str(reason or "").strip(),
+            "triggerSource": str(trigger_source or "").strip(),
             "beforeTokens": max(0, int(before_tokens or 0)),
             "afterTokens": max(0, int(after_tokens or 0)),
             "savedTokens": max(0, int(saved_tokens or 0)),

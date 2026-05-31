@@ -605,10 +605,20 @@ def test_model_preset_options_include_codex_preset():
     assert presets["xiaomi_mimo_v2_5_pro_token_plan"]["provider"]["base_url"] == (
         "https://token-plan-cn.xiaomimimo.com/v1"
     )
+    assert "xiaomi_mimo_v2_5_multimodal" in presets
+    assert presets["xiaomi_mimo_v2_5_multimodal"]["category"] == "official"
+    assert presets["xiaomi_mimo_v2_5_multimodal"]["model"]["model"] == "mimo-v2.5"
+    assert presets["xiaomi_mimo_v2_5_multimodal"]["model"]["supports_image_input"] is True
+    assert presets["xiaomi_mimo_v2_5_multimodal"]["provider"]["kind"] == "xiaomi"
+    assert presets["xiaomi_mimo_v2_5_multimodal"]["provider"]["base_url"] == "https://api.xiaomimimo.com/v1"
     assert "deepseek_v4_flash" in presets
     assert presets["deepseek_v4_flash"]["model"]["model"] == "deepseek-v4-flash"
     assert presets["deepseek_v4_flash"]["model"]["contract"] == "reasoning_chat"
+    assert presets["deepseek_v4_flash"]["model"]["supports_image_input"] is False
+    assert presets["deepseek_v4_flash"]["model"]["capability_status"] == "unsupported"
     assert presets["deepseek_v4_pro"]["model"]["reasoning_state_field"] == "reasoning_content"
+    assert presets["deepseek_v4_pro"]["model"]["supports_image_input"] is False
+    assert presets["deepseek_v4_pro"]["model"]["capability_status"] == "unsupported"
 
 
 def test_list_llm_model_options_exposes_inline_provider_and_source():
@@ -694,6 +704,38 @@ def test_apply_xiaomi_mimo_token_plan_preset_materializes_provider():
     assert model["contract"] == "tool_chat"
     assert model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
     build_effective_config(updated)
+
+
+def test_apply_xiaomi_mimo_multimodal_preset_materializes_image_support():
+    public_config = load_public_config()
+    public_config["llm"]["model_library"].pop("xiaomi_mimo_v2_5_multimodal", None)
+
+    updated = apply_llm_model_preset(public_config, "xiaomi_mimo_v2_5_multimodal")
+    model = updated["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]
+
+    assert model["provider"]["kind"] == "xiaomi"
+    assert model["provider"]["api_key_env"] == "MIMO_API_KEY"
+    assert model["provider"]["base_url"] == "https://api.xiaomimimo.com/v1"
+    assert model["model"] == "mimo-v2.5"
+    assert model["transport"] == "chat_completions"
+    assert model["contract"] == "tool_chat"
+    assert model["supports_image_input"] is True
+    assert model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
+    build_effective_config(updated)
+
+
+def test_xiaomi_mimo_multimodal_model_ref_materializes_image_support_to_profile():
+    public_config = load_public_config()
+    public_config["llm"]["profiles"]["primary"] = {"model_ref": "xiaomi_mimo_v2_5_multimodal"}
+
+    effective = build_effective_config(public_config)
+
+    profile = effective.llm.profiles["primary"]
+    provider = effective.llm.get_provider(profile.provider_id)
+    assert profile.model == "mimo-v2.5"
+    assert profile.supports_image_input is True
+    assert provider.kind == "xiaomi"
+    assert provider.base_url == public_config["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]["provider"]["base_url"]
 
 
 def test_apply_custom_openai_compatible_relay_preset_accepts_user_base_url():
@@ -786,6 +828,9 @@ def test_default_public_config_includes_new_official_model_templates():
     assert deepseek_model["contract"] == "reasoning_chat"
     assert deepseek_model["reasoning_state_field"] == "reasoning_content"
     assert deepseek_model["max_output_tokens"] == 384000
+    assert deepseek_model["supports_image_input"] is False
+    assert deepseek_model["capability_status"] == "unsupported"
+    assert deepseek_model["capability_source"] == "preset"
 
     xiaomi_model = public_config["llm"]["model_library"]["xiaomi_mimo_v2_5_pro_token_plan"]
 
@@ -797,6 +842,16 @@ def test_default_public_config_includes_new_official_model_templates():
     assert xiaomi_model["contract"] == "tool_chat"
     assert xiaomi_model["max_output_tokens"] == 128000
     assert xiaomi_model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_PRO_TOKEN_PLAN_API_KEY"
+
+    xiaomi_multimodal_model = public_config["llm"]["model_library"]["xiaomi_mimo_v2_5_multimodal"]
+
+    assert xiaomi_multimodal_model["provider"]["kind"] == "xiaomi"
+    assert xiaomi_multimodal_model["provider"]["api_key_env"] == "MIMO_API_KEY"
+    assert xiaomi_multimodal_model["provider"]["base_url"] == "https://api.xiaomimimo.com/v1"
+    assert xiaomi_multimodal_model["model"] == "mimo-v2.5"
+    assert xiaomi_multimodal_model["contract"] == "tool_chat"
+    assert xiaomi_multimodal_model["supports_image_input"] is True
+    assert xiaomi_multimodal_model["api_key_env"] == "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
     build_effective_config(public_config)
 
 

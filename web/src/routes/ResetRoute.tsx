@@ -36,6 +36,9 @@ const COPY = {
     selected: "已选",
     selectAll: "全选可清理",
     clearSelection: "清空选择",
+    selectLow: "低风险",
+    selectMedium: "中风险",
+    selectHigh: "高风险",
     preview: "预览清理",
     previewing: "预览中",
     execute: "确认执行",
@@ -73,6 +76,9 @@ const COPY = {
     selected: "selected",
     selectAll: "Select cleanable",
     clearSelection: "Clear",
+    selectLow: "Low",
+    selectMedium: "Medium",
+    selectHigh: "High",
     preview: "Preview cleanup",
     previewing: "Previewing",
     execute: "Confirm execute",
@@ -142,6 +148,22 @@ export function ResetRoute() {
   const summary = resetQuery.data;
   const items = summary?.items ?? summary?.categories ?? [];
   const selectableIds = useMemo(() => items.filter((item) => item.exists || item.id === "chat_history").map((item) => item.id), [items]);
+  const groupedItems = useMemo(() => {
+    const groups: Array<{ key: string; label: string; items: ResetInventoryItem[] }> = [];
+    const byKey = new Map<string, { key: string; label: string; items: ResetInventoryItem[] }>();
+    for (const item of items) {
+      const key = item.category || "uncategorized";
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.items.push(item);
+        continue;
+      }
+      const group = { key, label: item.categoryLabel || key, items: [item] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    return groups;
+  }, [items]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [preview, setPreview] = useState<ResetPreviewResponse | null>(null);
   const [result, setResult] = useState<ResetExecuteResponse | null>(null);
@@ -224,6 +246,11 @@ export function ResetRoute() {
     setNotice(null);
   }
 
+  function selectByRisk(risk: "low" | "medium" | "high") {
+    setSelectedIds(items.filter((item) => item.risk === risk && (item.exists || item.id === "chat_history")).map((item) => item.id));
+    setNotice(null);
+  }
+
   function previewSelection() {
     if (!canPreview) {
       setNotice({ tone: "error", message: copy.noSelection });
@@ -278,6 +305,15 @@ export function ResetRoute() {
                 <CheckSquare size={15} />
                 {copy.selectAll}
               </button>
+              <button type="button" className={styles.secondaryButton} onClick={() => selectByRisk("low")}>
+                {copy.selectLow}
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={() => selectByRisk("medium")}>
+                {copy.selectMedium}
+              </button>
+              <button type="button" className={styles.secondaryButton} onClick={() => selectByRisk("high")}>
+                {copy.selectHigh}
+              </button>
               <button type="button" className={styles.secondaryButton} onClick={() => setSelectedIds([])}>
                 <Square size={15} />
                 {copy.clearSelection}
@@ -286,36 +322,49 @@ export function ResetRoute() {
           </div>
 
           <div className={styles.itemList}>
-            {items.map((item) => {
-              const selected = selectedIds.includes(item.id);
-              const disabled = !item.exists && item.id !== "chat_history";
+            {groupedItems.map((group) => {
+              const groupSelected = group.items.filter((item) => selectedIds.includes(item.id)).length;
               return (
-                <button
-                  type="button"
-                  key={item.id}
-                  className={`${styles.itemRow} ${selected ? styles.itemRowSelected : ""}`}
-                  onClick={() => toggleItem(item)}
-                  disabled={disabled}
-                >
-                  <span className={styles.checkIcon}>{selected ? <CheckSquare size={18} /> : <Square size={18} />}</span>
-                  <span className={styles.itemMain}>
-                    <span className={styles.itemTopLine}>
-                      <strong>{item.name}</strong>
-                      <span className={`${styles.riskBadge} ${riskClass(item.risk)}`}>
-                        {copy[`risk_${item.risk as "low" | "medium" | "high"}`] ?? item.risk}
-                      </span>
-                    </span>
-                    <span className={styles.itemDescription}>{item.description}</span>
-                    <span className={styles.itemDetail}>{item.detail}</span>
-                    {item.rebuildHint ? <span className={styles.rebuildHint}>{item.rebuildHint}</span> : null}
-                  </span>
-                  <span className={styles.itemStats}>
-                    <span>{item.exists ? copy.present : copy.missing}</span>
-                    <span>{item.size}</span>
-                    <span>{formatCount(item.fileCount, copy.files)}</span>
-                    {item.protectedCount > 0 ? <span>{item.protectedCount} {copy.protectedTargets}</span> : null}
-                  </span>
-                </button>
+                <section key={group.key} className={styles.itemGroup}>
+                  <div className={styles.itemGroupHeader}>
+                    <strong>{group.label}</strong>
+                    <span>{groupSelected}/{group.items.length}</span>
+                  </div>
+                  <div className={styles.groupRows}>
+                    {group.items.map((item) => {
+                      const selected = selectedIds.includes(item.id);
+                      const disabled = !item.exists && item.id !== "chat_history";
+                      return (
+                        <button
+                          type="button"
+                          key={item.id}
+                          className={`${styles.itemRow} ${selected ? styles.itemRowSelected : ""}`}
+                          onClick={() => toggleItem(item)}
+                          disabled={disabled}
+                        >
+                          <span className={styles.checkIcon}>{selected ? <CheckSquare size={18} /> : <Square size={18} />}</span>
+                          <span className={styles.itemMain}>
+                            <span className={styles.itemTopLine}>
+                              <strong>{item.name}</strong>
+                              <span className={`${styles.riskBadge} ${riskClass(item.risk)}`}>
+                                {copy[`risk_${item.risk as "low" | "medium" | "high"}`] ?? item.risk}
+                              </span>
+                            </span>
+                            <span className={styles.itemDescription}>{item.description}</span>
+                            <span className={styles.itemDetail}>{item.detail}</span>
+                            {item.rebuildHint ? <span className={styles.rebuildHint}>{item.rebuildHint}</span> : null}
+                          </span>
+                          <span className={styles.itemStats}>
+                            <span>{item.exists ? copy.present : copy.missing}</span>
+                            <span>{item.size}</span>
+                            <span>{formatCount(item.fileCount, copy.files)}</span>
+                            {item.protectedCount > 0 ? <span>{item.protectedCount} {copy.protectedTargets}</span> : null}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
               );
             })}
           </div>

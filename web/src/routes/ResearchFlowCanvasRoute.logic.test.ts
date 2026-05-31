@@ -10,6 +10,7 @@ import {
   createCustomResearchModuleTemplate,
   createResearchNodeFromTemplate,
   deleteCanvasSelection,
+  edgeGeometry,
   findResearchEdgeTemplate,
   findResearchModuleTemplate,
   isValidEdgeReconnectTarget,
@@ -26,6 +27,7 @@ import {
   researchFlowLockBlockReason,
   researchFlowModuleTemplateKey,
   researchFlowUnlockBlockReason,
+  resolveEdgeLanes,
   RESEARCH_EDGE_TEMPLATES,
   RESEARCH_MODULE_TEMPLATES,
   sameCanvasSelection,
@@ -302,5 +304,32 @@ describe("ResearchFlowCanvasRoute flow canvas rules", () => {
     expect(researchFlowUnlockBlockReason({ saving: false, executing: false })).toBe("");
     expect(researchFlowUnlockBlockReason({ saving: false, executing: true })).toBe("节点执行中，完成后才能取消锁定。");
     expect(researchFlowUnlockBlockReason({ saving: true, executing: false })).toBe("画布正在保存，保存完成后才能取消锁定。");
+  });
+
+  it("keeps dense bidirectional organization communication edges close to the team layout", () => {
+    const nodes = [
+      { ...baseCanvas.nodes[0], id: "ceo", x: 240, y: 440 },
+      { ...baseCanvas.nodes[0], id: "advisor", x: 780, y: 260 },
+      { ...baseCanvas.nodes[0], id: "steward", x: 1320, y: 440 },
+    ];
+    const edges = [
+      { id: "ceo-advisor", source: "ceo", target: "advisor", label: "", condition: "completed", type: "success" },
+      { id: "advisor-ceo", source: "advisor", target: "ceo", label: "", condition: "completed", type: "success" },
+      { id: "ceo-steward", source: "ceo", target: "steward", label: "", condition: "completed", type: "success" },
+      { id: "steward-ceo", source: "steward", target: "ceo", label: "", condition: "completed", type: "success" },
+      { id: "advisor-steward", source: "advisor", target: "steward", label: "", condition: "completed", type: "success" },
+      { id: "steward-advisor", source: "steward", target: "advisor", label: "", condition: "completed", type: "success" },
+    ];
+
+    const lanes = resolveEdgeLanes(edges, nodes);
+    const geometries = edges.map((edge) => {
+      const source = nodes.find((node) => node.id === edge.source);
+      const target = nodes.find((node) => node.id === edge.target);
+      return edgeGeometry(source!, target!, lanes.get(edge.id));
+    });
+
+    expect([...lanes.values()].every((lane) => lane.overlapCount <= 1)).toBe(true);
+    expect(Math.max(...geometries.flatMap((geometry) => geometry.points.map((point) => point.y)))).toBeLessThan(650);
+    expect(Math.min(...geometries.flatMap((geometry) => geometry.points.map((point) => point.y)))).toBeGreaterThan(160);
   });
 });

@@ -64,18 +64,13 @@ def _read_windows_user_env_var(name: str) -> Optional[str]:
     if os.name != "nt":
         return None
     try:
-        import subprocess
+        import winreg
 
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", f"[Environment]::GetEnvironmentVariable('{name}', 'User')"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        value = result.stdout.strip()
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, _value_type = winreg.QueryValueEx(key, name)
+        value = str(value or "").strip()
         return value or None
-    except Exception:
+    except (OSError, ImportError, ValueError):
         return None
 
 

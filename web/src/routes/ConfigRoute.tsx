@@ -37,16 +37,12 @@ import {
   ConfigModelPresetOption,
   ConfigWorkspace,
   AgentInstance,
-  AgentModeBindingItem,
   AgentModeBindings,
-  AgentRunHistory,
   HealthDiagnostics,
   HealthFinding,
   HealthQuickAction,
   LogHelper,
   PromptTemplateWorkspace,
-  ResearchAgentConfig,
-  ResearchPromptWorkspace,
   SessionHelper,
 } from "../api/types";
 import {
@@ -55,6 +51,7 @@ import {
   avatarCropSourceRect,
   clonePublicConfig,
   collectModelDetailKeys,
+  configInvalidationDomainsForApply,
   defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
   deriveModelCenterInventoryRows,
@@ -64,16 +61,13 @@ import {
   clampAvatarCropOffset,
   groupModelPresets,
   hasPendingSecretChanges,
-  listSupervisedAgentInstances,
   modelLibraryIdFromParts,
   PROVIDER_KIND_OPTIONS,
-  resolveProfileDisplayState,
   resolveConfigSectionUiStateOnSelect,
-  resolveResearchAgentInstance,
+  resolveImageInputCapabilityStatus,
+  resolveProfileDisplayState,
   shouldBlockConfigLeave,
   selectModelScenarioPresetId,
-  supervisedAgentRole,
-  supervisedAgentRoleLabel,
   type ConfigProfileModeGroupLabels,
   type ModelScenarioId,
   uniqueModelLibraryId,
@@ -130,28 +124,6 @@ type ProfileDraft = {
 
 type ProfileEditState = {
   modelId: string;
-};
-
-type AgentRunPanelState = {
-  agentId: string;
-  data: AgentRunHistory | null;
-  loading: boolean;
-  error: string;
-};
-
-type ImageInputCheckState = {
-  status: "supported" | "unsupported" | "unknown" | "failed";
-  message: string;
-  checkedAt: string;
-};
-
-type ResearchAgentDraft = {
-  key: string;
-  label: string;
-  promptFilename: string;
-  templateId: string;
-  profileId: string;
-  enabled: boolean;
 };
 
 type ConfigSectionUiState = {
@@ -276,8 +248,8 @@ export const CONFIG_COPY = {
     sourceBody: "这里显示当前修改是否已经保存，以及哪些系统级设置需要重启后才会生效。",
     runtimeTitle: "运行时与界面",
     runtimeBody: "语言、默认入口和治理模式可以在这里修改，确认后页面会立即展示本次修改。",
-    profilesTitle: "LLM 配置",
-    profilesBody: "查看每个需要调用大模型的位置使用哪套模型、服务商和密钥；需要修改时先点编辑，确认后页面立即展示本次修改。",
+    profilesTitle: "调用档案",
+    profilesBody: "按业务分区查看每个大模型调用档案使用哪套模型、服务商和密钥；需要修改时先点编辑，确认后页面立即展示本次修改。",
     modelsTitle: "模型中心",
     modelsBody: "按服务商账号、模型库存、使用位置和密钥状态管理模型；新增或编辑会先进入本次修改，保存后写回 config.toml。",
     draftTitle: "高级配置检查",
@@ -315,12 +287,14 @@ export const CONFIG_COPY = {
     groupWorkbenchSummary: "默认入口、语言、前后端端口与重启后生效的工作台设置。",
     groupAvatarPetTitle: "用户、形象与陪伴体",
     groupAvatarPetSummary: "统一管理用户信息、形象、宠物与陪伴体相关配置。",
-    groupModelingTitle: "模型配置",
-    groupModelingSummary: "模型库、LLM 配置、模型发现，以及会调用大模型的功能入口都放在这里。",
+    groupModelingTitle: "模型中心",
+    groupModelingSummary: "模型库、服务商账号、密钥、能力检测和模型发现都在这里集中管理。",
+    groupProfileBindingsTitle: "调用档案",
+    groupProfileBindingsSummary: "按对话、Agent、进化和科研分区管理 LLM 调用档案到模型库的绑定。",
     groupPromptTitle: "系统提示词",
     groupPromptSummary: "统一管理 agent 系统提示词组件、章节文件和功能提示词模板。",
     groupAgentEvolutionTitle: "Agent 与进化",
-    groupAgentEvolutionSummary: "Agent 运行、自进化与上下文策略相关设置。",
+    groupAgentEvolutionSummary: "只保留 Agent 管理入口与进化/上下文系统配置，具体 Agent 绑定在 Agent 管理中维护。",
     groupToolingTitle: "工具与诊断",
     groupToolingSummary: "工具、网络、安全、日志、解析器与调试相关设置。",
     healthTitle: "健康诊断中心",
@@ -366,8 +340,8 @@ export const CONFIG_COPY = {
     defaultRoute: "默认入口",
     modelLibrary: "模型库",
     profiles: "LLM 配置",
-    profileAdd: "新增 LLM 配置",
-    profileId: "LLM 配置 ID",
+    profileAdd: "新增调用档案",
+    profileId: "调用档案 ID",
     sourceProfile: "参考配置",
     assignModel: "模型",
     createProfile: "确认新增",
@@ -377,12 +351,12 @@ export const CONFIG_COPY = {
     profileTableActions: "连接",
     profileTableCurrent: "当前配置",
     profileTableStaged: "本次修改预览",
-    profileGroupChat: "对话模式",
+    profileGroupChat: "对话 / 主智能体",
     profileGroupSupport: "心智与压缩",
-    profileGroupSubagents: "子代理模式",
-    profileGroupEvolution: "进化模式",
-    profileGroupResearch: "科研模型配置",
-    profileGroupOther: "其他模型配置",
+    profileGroupSubagents: "Agent 管理",
+    profileGroupEvolution: "监督进化",
+    profileGroupResearch: "科研 / Team",
+    profileGroupOther: "其他调用档案",
     promptTemplateCenterTitle: "Agent 提示词中心",
     promptTemplateCenterBody: "提示词编辑已迁移到 Agent 管理，配置中心只保留当前模板和引用关系概览，避免双处编辑同一份 Agent 提示词。",
     promptTemplateCategory: "分类",
@@ -391,8 +365,9 @@ export const CONFIG_COPY = {
     promptTemplateOpenCenter: "打开提示词中心",
     promptTemplateOpenResearch: "查看科研提示词",
     promptTemplateEmpty: "暂无提示词模板。",
-    agentConfigCenterTitle: "Agent 配置中心",
-    agentConfigCenterBody: "所有长期 Agent 都在这里按统一结构查看：模型、提示词、会话、工作区和被哪些模式引用。",
+    agentConfigCenterTitle: "Agent 管理入口",
+    agentConfigCenterBody: "Agent 绑定、提示词、工具、记忆、私聊会话、工作区和模式成员关系已收口到 Agent 管理；配置页只保留只读引用概览。",
+    openAgentManagement: "打开 Agent 管理",
     agentConfigRefs: "模式引用",
     agentConfigIsolation: "隔离资源",
     agentConfigRuns: "最近运行",
@@ -402,9 +377,10 @@ export const CONFIG_COPY = {
     agentConfigRunsFailed: "运行记录读取失败：",
     agentConfigSubRuns: "子任务",
     agentConfigStatus: "状态",
+    agentConfigActive: "长期 Agent",
     agentConfigEmpty: "暂无长期 Agent。",
     modeBindingTitle: "模式里的 Agent 分配",
-    modeBindingBody: "对话默认 Agent、科研 Agent 池、自进化和监督进化角色都在这里统一分配。",
+    modeBindingBody: "这里只读展示当前模式分配；修改默认 Agent、科研池、自进化和监督进化槽位请到 Agent 管理的成员关系中完成。",
     modeBindingMode: "模式",
     modeBindingSlot: "槽位",
     modeBindingBoundAgent: "绑定 Agent",
@@ -414,12 +390,8 @@ export const CONFIG_COPY = {
     modeBindingUpdating: "更新模式绑定中",
     modeBindingUpdated: "模式绑定已更新。",
     modeBindingUpdateFailed: "模式绑定更新失败：",
-    researchAgentPoolTitle: "统一 Agent 配置",
-    researchAgentPoolBody: "这里展示监督进化与科研 Agent 的真实绑定；模型、提示词、私聊会话和工作区必须在这里对齐。",
-    supervisedAgentPoolTitle: "监督进化 Agent",
-    supervisedAgentPoolBody: "基线、候选、评审、审计和裁决都作为独立持久 Agent 出现在这里；执行链会按这里的模式分配读取对应 Agent 配置。",
-    supervisedAgentRole: "角色",
-    supervisedAgentEmpty: "暂无监督进化 Agent，刷新后会自动同步。",
+    researchAgentPoolTitle: "Agent 使用情况摘要",
+    researchAgentPoolBody: "Agent 引用详情已收口到 Agent 管理；这里仅保留调用档案到模型库的绑定。",
     researchAgentAdd: "新增科研 Agent",
     researchAgentKey: "Agent Key",
     researchAgentName: "名称",
@@ -509,20 +481,23 @@ export const CONFIG_COPY = {
     profileCards: "当前模型",
     testConnection: "测试连接",
     testImageInput: "检测图像输入",
-    testImageInputShort: "图像输入",
+    checkAllImageCapabilities: "检测全部图像输入",
+    checkModelImageCapability: "检测图像输入",
+    imageCapabilityCheckPending: "检测模型能力中",
+    imageCapabilityStatus: "图像能力",
     imageInputStatusUnknown: "图像未检测",
     imageInputStatusSupported: "支持图像输入",
     imageInputStatusUnsupported: "不支持图像输入",
     imageInputStatusFailed: "检测失败",
     imageInputUnsupportedHint: "当前模型不能接收图片作为聊天输入，请切换视觉模型或改用图片生成工具。",
     selectedModel: "使用模型",
-    editProfiles: "编辑 LLM 配置",
-    saveProfileBatch: "确认 LLM 配置",
+    editProfiles: "编辑调用档案",
+    saveProfileBatch: "确认调用档案",
     cancelProfileBatch: "取消编辑",
     testSelectedModel: "测试当前内容",
-    profileSavePendingInline: "保存 LLM 配置修改中",
-    profilePrepared: "已准备好新增 LLM 配置",
-    profilePreparedHint: "可以在这里新增 LLM 配置。确认后页面会立即展示本次修改，保存后写入 config.toml。",
+    profileSavePendingInline: "保存调用档案修改中",
+    profilePrepared: "已准备好新增调用档案",
+    profilePreparedHint: "可以在这里新增调用档案。确认后页面会立即展示本次修改，保存后写入 config.toml。",
     currentRoute: "当前配置",
     stagedRoute: "本次修改预览",
     apiKeySource: "密钥来源",
@@ -551,7 +526,8 @@ export const CONFIG_COPY = {
     modelSaveFailed: "模型修改未生效：",
     modelEditorAdvancedTitle: "高级参数",
     modelEditorAdvancedHint: "常用字段已经在上方，只有需要时再展开这里。",
-    profileSavePending: "保存 LLM 配置修改中",
+    profileSavePending: "保存调用档案修改中",
+    gitCommitModelUsage: "Git 提交模型",
     testPending: "测试连接中",
     imageInputTestPending: "检测图像输入中",
     testScopeDraft: "按当前修改测试",
@@ -594,8 +570,8 @@ export const CONFIG_COPY = {
     sourceBody: "Shows whether current changes are saved and which system-level settings take effect after restart.",
     runtimeTitle: "Runtime and Interface",
     runtimeBody: "Language, default route, and governance mode changes are shown here immediately after confirmation.",
-    profilesTitle: "LLM Configs",
-    profilesBody: "Review which model, provider, and key each LLM call site uses. Click edit, then confirm to update the page immediately.",
+    profilesTitle: "Call Profiles",
+    profilesBody: "Review model, provider, and key bindings by business area. Click edit, then confirm to update the page immediately.",
     modelsTitle: "Model Center",
     modelsBody: "Manage model providers, inventory, usage, and key health together. Changes are staged first and saved to config.toml when you apply.",
     draftTitle: "Advanced Config Check",
@@ -633,12 +609,14 @@ export const CONFIG_COPY = {
     groupWorkbenchSummary: "Default entry, language, frontend/backend ports, and workbench settings that apply after restart.",
     groupAvatarPetTitle: "User, Avatar, and Companion",
     groupAvatarPetSummary: "Manage user info, avatar, pet, and companion-facing settings together.",
-    groupModelingTitle: "Model Configs",
-    groupModelingSummary: "Keep the model library, LLM configs, discovery, and LLM-using feature bindings together.",
+    groupModelingTitle: "Model Center",
+    groupModelingSummary: "Manage model inventory, provider accounts, keys, capability checks, and discovery in one place.",
+    groupProfileBindingsTitle: "Call Profiles",
+    groupProfileBindingsSummary: "Map LLM call profiles to model library entries by chat, Agent, evolution, and research areas.",
     groupPromptTitle: "System Prompts",
     groupPromptSummary: "Manage agent prompt components, section files, and feature prompt templates in one place.",
     groupAgentEvolutionTitle: "Agent and Evolution",
-    groupAgentEvolutionSummary: "Agent runtime, self-evolution, and context strategy settings.",
+    groupAgentEvolutionSummary: "Keep only the Agent management entry plus evolution/context system settings here; edit Agent bindings in Agent management.",
     groupToolingTitle: "Tooling and Diagnostics",
     groupToolingSummary: "Tooling, network, security, logging, parser, and debug settings.",
     healthTitle: "Health Diagnostics Center",
@@ -684,8 +662,8 @@ export const CONFIG_COPY = {
     defaultRoute: "Default route",
     modelLibrary: "Model library",
     profiles: "LLM configs",
-    profileAdd: "Add LLM config",
-    profileId: "LLM config ID",
+    profileAdd: "Add call profile",
+    profileId: "Call profile ID",
     sourceProfile: "Based on config",
     assignModel: "Model",
     createProfile: "Confirm",
@@ -695,12 +673,12 @@ export const CONFIG_COPY = {
     profileTableActions: "Connection",
     profileTableCurrent: "Current config",
     profileTableStaged: "Change preview",
-    profileGroupChat: "Chat mode",
+    profileGroupChat: "Chat / primary agent",
     profileGroupSupport: "Mental and compression",
-    profileGroupSubagents: "Subagent mode",
-    profileGroupEvolution: "Evolution mode",
-    profileGroupResearch: "Research model configs",
-    profileGroupOther: "Other model configs",
+    profileGroupSubagents: "Agent management",
+    profileGroupEvolution: "Supervised evolution",
+    profileGroupResearch: "Research / Team",
+    profileGroupOther: "Other call profiles",
     promptTemplateCenterTitle: "Agent prompt center",
     promptTemplateCenterBody: "Prompt editing has moved to Agent management. Config keeps the current template and usage overview only, so the same Agent prompt is not edited in two places.",
     promptTemplateCategory: "Category",
@@ -709,8 +687,9 @@ export const CONFIG_COPY = {
     promptTemplateOpenCenter: "Open prompt center",
     promptTemplateOpenResearch: "View research prompts",
     promptTemplateEmpty: "No prompt templates yet.",
-    agentConfigCenterTitle: "Agent config center",
-    agentConfigCenterBody: "Review every long-lived agent through the unified structure: model, prompt, session, workspace, and mode references.",
+    agentConfigCenterTitle: "Agent management entry",
+    agentConfigCenterBody: "Agent bindings, prompts, tools, memory, direct sessions, workspaces, and mode membership now live in Agent management. Config keeps only a read-only reference overview.",
+    openAgentManagement: "Open Agent management",
     agentConfigRefs: "Mode refs",
     agentConfigIsolation: "Isolation",
     agentConfigRuns: "Recent runs",
@@ -720,9 +699,10 @@ export const CONFIG_COPY = {
     agentConfigRunsFailed: "Run history load failed: ",
     agentConfigSubRuns: "Subtasks",
     agentConfigStatus: "Status",
+    agentConfigActive: "Long-lived Agents",
     agentConfigEmpty: "No long-lived agents yet.",
     modeBindingTitle: "Agent assignments by mode",
-    modeBindingBody: "Assign the chat default agent, research pool, self-evolution roles, and supervised-evolution roles in one place.",
+    modeBindingBody: "This is a read-only view of current mode assignments. Edit the chat default agent, research pool, self-evolution roles, and supervised-evolution slots in Agent management.",
     modeBindingMode: "Mode",
     modeBindingSlot: "Slot",
     modeBindingBoundAgent: "Bound agent",
@@ -732,12 +712,8 @@ export const CONFIG_COPY = {
     modeBindingUpdating: "Updating mode binding",
     modeBindingUpdated: "Mode binding updated.",
     modeBindingUpdateFailed: "Mode binding update failed: ",
-    researchAgentPoolTitle: "Unified agent config",
-    researchAgentPoolBody: "Shows the real binding for supervised evolution and research agents: model, prompt, direct session, and workspace stay aligned here.",
-    supervisedAgentPoolTitle: "Supervised evolution agents",
-    supervisedAgentPoolBody: "Baseline, candidate, reviewer, auditor, and judge are independent long-lived agents. The execution chain now reads the assigned agent config from here.",
-    supervisedAgentRole: "Role",
-    supervisedAgentEmpty: "No supervised evolution agents yet. Reload to sync them automatically.",
+    researchAgentPoolTitle: "Agent usage summary",
+    researchAgentPoolBody: "Agent reference details now live in Agent management. Config only keeps call-profile to model-library bindings here.",
     researchAgentAdd: "Add research agent",
     researchAgentKey: "Agent key",
     researchAgentName: "Name",
@@ -827,20 +803,23 @@ export const CONFIG_COPY = {
     profileCards: "Current models",
     testConnection: "Test connection",
     testImageInput: "Check image input",
-    testImageInputShort: "Image input",
+    checkAllImageCapabilities: "Check all image input",
+    checkModelImageCapability: "Check image input",
+    imageCapabilityCheckPending: "Checking model capabilities",
+    imageCapabilityStatus: "Image capability",
     imageInputStatusUnknown: "Image not checked",
     imageInputStatusSupported: "Supports image input",
     imageInputStatusUnsupported: "No image input",
     imageInputStatusFailed: "Check failed",
     imageInputUnsupportedHint: "This model cannot receive images in chat. Switch to a vision model or use the image generation tool.",
     selectedModel: "Model",
-    editProfiles: "Edit LLM configs",
-    saveProfileBatch: "Confirm LLM configs",
+    editProfiles: "Edit call profiles",
+    saveProfileBatch: "Confirm call profiles",
     cancelProfileBatch: "Cancel editing",
     testSelectedModel: "Test current values",
-    profileSavePendingInline: "Saving LLM config changes",
-    profilePrepared: "LLM config is ready",
-    profilePreparedHint: "Add a new LLM config here. Confirm updates the page immediately; saving writes config.toml.",
+    profileSavePendingInline: "Saving call profile changes",
+    profilePrepared: "Call profile is ready",
+    profilePreparedHint: "Add a new call profile here. Confirm updates the page immediately; saving writes config.toml.",
     currentRoute: "Current values",
     stagedRoute: "Change preview",
     apiKeySource: "API key source",
@@ -869,7 +848,8 @@ export const CONFIG_COPY = {
     modelSaveFailed: "Model changes were not applied:",
     modelEditorAdvancedTitle: "Advanced parameters",
     modelEditorAdvancedHint: "The common fields are above. Expand this only when needed.",
-    profileSavePending: "Saving LLM config changes",
+    profileSavePending: "Saving call profile changes",
+    gitCommitModelUsage: "Git commit model",
     testPending: "Testing connection",
     imageInputTestPending: "Checking image input",
     testScopeDraft: "Testing current changes",
@@ -980,13 +960,19 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "models-profiles",
       title: copy.groupModelingTitle,
       summary: copy.groupModelingSummary,
-      memberSectionIds: ["profiles", "models", "llm-profiles", "llm-discovery", "git-commit-profile"],
+      memberSectionIds: ["models", "llm-discovery"],
+    },
+    {
+      id: "profile-bindings",
+      title: copy.groupProfileBindingsTitle,
+      summary: copy.groupProfileBindingsSummary,
+      memberSectionIds: ["profiles"],
     },
     {
       id: "system-prompts",
       title: copy.groupPromptTitle,
       summary: copy.groupPromptSummary,
-      memberSectionIds: ["prompt", "git-commit-prompt"],
+      memberSectionIds: ["prompt"],
     },
     {
       id: "agent-evolution",
@@ -998,7 +984,7 @@ function buildConfigSidebarGroups(copy: ConfigCopy): ConfigSidebarGroup[] {
       id: "tooling-diagnostics",
       title: copy.groupToolingTitle,
       summary: copy.groupToolingSummary,
-      memberSectionIds: ["health-diagnostics", "tools", "security", "network", "log", "parser", "debug"],
+      memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile", "git-commit-prompt", "security", "network", "log", "parser", "debug"],
     },
   ];
 }
@@ -1016,22 +1002,6 @@ function emptyProfileEditState(modelId = ""): ProfileEditState {
     modelId,
   };
 }
-
-function emptyResearchAgentDraft(): ResearchAgentDraft {
-  return {
-    key: "",
-    label: "",
-    promptFilename: "",
-    templateId: "",
-    profileId: "",
-    enabled: true,
-  };
-}
-
-const FIXED_MODE_BINDING_SLOTS = [
-  { mode: "self_evolution", slots: ["executor", "reviewer", "summarizer"] },
-  { mode: "supervised_evolution", slots: ["baseline", "candidate", "reviewer", "auditor", "judge"] },
-];
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -1071,16 +1041,6 @@ function formatTimestamp(value: string, lang: ConfigLanguage, emptyLabel: string
     minute: "2-digit",
     second: "2-digit",
   }).format(parsed);
-}
-
-function latestAgentRunLabel(history: AgentRunHistory | null | undefined, lang: ConfigLanguage, emptyLabel: string): string {
-  const latest = history?.runs?.[0];
-  if (!latest) {
-    return emptyLabel;
-  }
-  const status = String(latest.status || latest.currentPhase || "").trim() || "-";
-  const updatedAt = formatTimestamp(latest.updatedAt || latest.finishedAt || latest.startedAt, lang, emptyLabel);
-  return `${status} · ${updatedAt}`;
 }
 
 function getBoolean(value: unknown, fallback = false): boolean {
@@ -2368,10 +2328,6 @@ export function ConfigRoute() {
     queryKey: queryKeys.diagnosticsHealth(),
     queryFn: () => fetchJson<HealthDiagnostics>("/api/diagnostics/health"),
   });
-  const researchPromptsQuery = useQuery({
-    queryKey: queryKeys.researchThemeDiscoveryPrompts(),
-    queryFn: () => fetchJson<ResearchPromptWorkspace>("/api/research/theme-discovery/prompts"),
-  });
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents(),
     queryFn: () => fetchJson<AgentInstance[]>("/api/agents"),
@@ -2400,9 +2356,6 @@ export function ConfigRoute() {
   const [selectedDiscoveredModelId, setSelectedDiscoveredModelId] = useState("");
   const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfileDraft());
   const [profileEditors, setProfileEditors] = useState<Record<string, ProfileEditState>>({});
-  const [agentRunPanel, setAgentRunPanel] = useState<AgentRunPanelState | null>(null);
-  const [imageInputChecks, setImageInputChecks] = useState<Record<string, ImageInputCheckState>>({});
-  const [researchAgentDraft, setResearchAgentDraft] = useState<ResearchAgentDraft>(emptyResearchAgentDraft());
   const [profileFormExpanded, setProfileFormExpanded] = useState(false);
   const [modelEditorExpanded, setModelEditorExpanded] = useState(false);
   const [sidebarIndexCollapsed, setSidebarIndexCollapsed] = useState(() => readStoredFlag(SIDEBAR_INDEX_COLLAPSED_STORAGE_KEY) ?? false);
@@ -2432,7 +2385,6 @@ export function ConfigRoute() {
     setModelEditorError("");
     setProfileDraft(emptyProfileDraft(workspace.profileCards[0]?.profileId ?? "primary"));
     setProfileEditors({});
-    setAgentRunPanel(null);
   }
 
   useEffect(() => {
@@ -2509,7 +2461,12 @@ export function ConfigRoute() {
     [availableSectionIds, sidebarGroups],
   );
   const activeSection = visibleSidebarGroups.find((section) => section.id === activeSectionId) ?? visibleSidebarGroups[0] ?? null;
-  const activeEditorSections = editorSections.filter((section) => activeSection?.memberSectionIds.includes(section.id));
+  const activeEditorSections = editorSections.filter((section) => {
+    if (!activeSection?.memberSectionIds.includes(section.id)) {
+      return false;
+    }
+    return section.id !== "prompt" && section.id !== "agent" && section.id !== "tools";
+  });
   const modelOptions = workspace?.modelOptions ?? [];
   const modelOptionsById = useMemo(() => new Map(modelOptions.map((option) => [option.model_id, option])), [modelOptions]);
   const modelDetailKeys = useMemo(() => collectModelDetailKeys(modelOptions), [modelOptions]);
@@ -2561,6 +2518,7 @@ export function ConfigRoute() {
           research: copy.profileGroupResearch,
           other: copy.profileGroupOther,
           image2Tool: copy.image2ToolUsage,
+          gitCommitModel: copy.gitCommitModelUsage,
         },
       }),
     [copy, draftConfig, modelOptions, workspace?.profileCards, workspace?.publicConfig],
@@ -2569,12 +2527,7 @@ export function ConfigRoute() {
     () => deriveModelCenterInventoryRows(modelOptions, modelCenterSummary),
     [modelCenterSummary, modelOptions],
   );
-  const researchWorkspace = researchPromptsQuery.data;
-  const researchAgents = researchWorkspace?.agents ?? [];
-  const researchAgentTemplates = researchWorkspace?.agentTemplates ?? [];
-  const researchLlmConfigs = researchWorkspace?.llmConfigs ?? [];
   const agentInstances = agentsQuery.data ?? [];
-  const supervisedAgents = useMemo(() => listSupervisedAgentInstances(agentInstances), [agentInstances]);
   const promptTemplates = promptTemplatesQuery.data?.templates ?? [];
   const promptTemplatesById = useMemo(
     () => new Map(promptTemplates.map((template) => [template.promptTemplateId, template])),
@@ -2590,44 +2543,6 @@ export function ConfigRoute() {
     () => agentInstances.filter((agent) => agent.status !== "archived"),
     [agentInstances],
   );
-  const agentInstancesSorted = useMemo(
-    () =>
-      activeAgentInstances
-        .slice()
-        .sort((left, right) => {
-          const leftKey = `${left.primaryMode || "general"}:${left.roleKey || ""}:${left.agentCode || left.agentId}`;
-          const rightKey = `${right.primaryMode || "general"}:${right.roleKey || ""}:${right.agentCode || right.agentId}`;
-          return leftKey.localeCompare(rightKey);
-        }),
-    [activeAgentInstances],
-  );
-  const agentModeReferences = useMemo(() => {
-    const refs = new Map<string, string[]>();
-    for (const [mode, binding] of Object.entries(modeBindings ?? {})) {
-      const modeBinding = binding as Partial<AgentModeBindingItem>;
-      const recordReference = (agentId: string, label: string) => {
-        const normalized = agentId.trim();
-        if (!normalized) {
-          return;
-        }
-        refs.set(normalized, [...(refs.get(normalized) ?? []), label]);
-      };
-      recordReference(modeBinding.defaultAgentId ?? "", `${mode}:default`);
-      for (const agentId of modeBinding.availableAgentIds ?? []) {
-        recordReference(agentId, `${mode}:available`);
-      }
-      for (const agentId of modeBinding.pool ?? []) {
-        recordReference(agentId, `${mode}:pool`);
-      }
-      for (const [slot, agentId] of Object.entries(modeBinding.slots ?? {})) {
-        recordReference(agentId, `${mode}:${slot}`);
-      }
-      for (const [nodeId, agentId] of Object.entries(modeBinding.flowBindings ?? {})) {
-        recordReference(agentId, `${mode}:${nodeId}`);
-      }
-    }
-    return refs;
-  }, [modeBindings]);
 
   useEffect(() => {
     if (!visibleSidebarGroups.length) {
@@ -2710,22 +2625,25 @@ export function ConfigRoute() {
 
   const sidebarApplyHint = hasEditorChanges ? copy.editorDirtyHint : hasPendingApply ? copy.saveSourceHint : copy.editorCleanHint;
 
-  async function invalidateWorkbenchQueries() {
-    await Promise.all([
+  async function invalidateWorkbenchQueries(nextConfig: PublicConfigShape) {
+    const domains = configInvalidationDomainsForApply(nextConfig);
+    const invalidations = [
       queryClient.invalidateQueries({ queryKey: queryKeys.configPublic() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.configWorkspace() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfOverview() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfActiveRun() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfTransactions() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfAudit() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.petSummary() }),
       queryClient.invalidateQueries({ queryKey: queryKeys.resetSummary() }),
-    ]);
+    ];
+    if (domains.includes("evolution")) {
+      invalidations.push(
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfOverview() }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfActiveRun() }),
+      );
+    }
+    await Promise.all(invalidations);
   }
 
   function markError(error: unknown) {
@@ -2801,17 +2719,18 @@ export function ConfigRoute() {
   async function handleApply(pendingLabel: string = copy.applying): Promise<boolean> {
     setBusyAction(pendingLabel);
     try {
+      const nextConfig = resolveDraftForSubmission();
       const response = await requestJson<ConfigWorkspace>(
         "/api/config/apply",
         {
-          publicConfig: resolveDraftForSubmission(),
+          publicConfig: nextConfig,
           draftMeta,
           baseHash,
         },
         "PUT",
       );
       syncWorkspace(response, "success");
-      await invalidateWorkbenchQueries();
+      await invalidateWorkbenchQueries(nextConfig);
       return true;
     } catch (error) {
       markError(error);
@@ -2912,201 +2831,6 @@ export function ConfigRoute() {
       ...current,
       [profileId]: emptyProfileEditState(modelId),
     }));
-  }
-
-  function editResearchAgent(agent: ResearchAgentConfig) {
-    setResearchAgentDraft({
-      key: agent.key,
-      label: agent.label,
-      promptFilename: agent.promptFilename,
-      templateId: agent.templateId,
-      profileId: agent.profileId || "",
-      enabled: agent.enabled,
-    });
-  }
-
-  async function saveResearchAgent(draft: ResearchAgentDraft = researchAgentDraft) {
-    const key = draft.key.trim();
-    if (!key) {
-      setNotice({ tone: "error", text: copy.researchAgentKey });
-      return;
-    }
-    setBusyAction(copy.researchAgentBusy);
-    try {
-      const response = await requestJson<ResearchPromptWorkspace>("/api/research/theme-discovery/agent-templates", {
-        key,
-        label: draft.label,
-        promptFilename: draft.promptFilename,
-        templateId: draft.templateId || researchAgentTemplates[0]?.templateId || "",
-        profileId: draft.profileId || researchLlmConfigs[0]?.configId || "",
-        enabled: draft.enabled,
-      }, "PUT");
-      queryClient.setQueryData(queryKeys.researchThemeDiscoveryPrompts(), response);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
-      setResearchAgentDraft(emptyResearchAgentDraft());
-      setNotice({ tone: "success", text: copy.profileDraftSaved });
-    } catch (error) {
-      markError(error);
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function deleteResearchAgent(agentKey: string) {
-    setBusyAction(copy.researchAgentBusy);
-    try {
-      const response = await fetchJson<ResearchPromptWorkspace>(
-        `/api/research/theme-discovery/agent-templates/${encodeURIComponent(agentKey)}`,
-        { method: "DELETE" },
-      );
-      queryClient.setQueryData(queryKeys.researchThemeDiscoveryPrompts(), response);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
-      await queryClient.invalidateQueries({ queryKey: queryKeys.researchFlowCanvas() });
-      if (researchAgentDraft.key === agentKey) {
-        setResearchAgentDraft(emptyResearchAgentDraft());
-      }
-      setNotice({ tone: "success", text: copy.profileDraftSaved });
-    } catch (error) {
-      const message = markError(error);
-      setNotice({ tone: "error", text: `${copy.researchAgentDeleteBlocked}${message}` });
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  function modeBindingLabel(mode: string): string {
-    if (mode === "chat") {
-      return copy.profileGroupChat;
-    }
-    if (mode === "research") {
-      return copy.profileGroupResearch;
-    }
-    if (mode === "self_evolution") {
-      return currentLanguage === "en" ? "Self-evolution" : "自进化";
-    }
-    if (mode === "supervised_evolution") {
-      return copy.supervisedAgentPoolTitle;
-    }
-    return mode;
-  }
-
-  function agentOptionLabel(agentId: string): string {
-    const agent = activeAgentInstances.find((item) => item.agentId === agentId);
-    if (!agent) {
-      return agentId || "-";
-    }
-    return agent.displayName || getString(asRecord(agent.metadata).functionalDisplayName) || agent.roleKey || agent.agentId;
-  }
-
-  async function openAgentRunHistory(agentId: string) {
-    const normalized = agentId.trim();
-    if (!normalized) {
-      return;
-    }
-    const cached = queryClient.getQueryData<AgentRunHistory>(queryKeys.agentRuns(normalized));
-    setAgentRunPanel({ agentId: normalized, data: cached ?? null, loading: !cached, error: "" });
-    try {
-      const data = await queryClient.fetchQuery({
-        queryKey: queryKeys.agentRuns(normalized),
-        queryFn: () => fetchJson<AgentRunHistory>(`/api/agents/${encodeURIComponent(normalized)}/runs?limit=5`),
-      });
-      setAgentRunPanel({ agentId: normalized, data, loading: false, error: "" });
-    } catch (error) {
-      setAgentRunPanel({
-        agentId: normalized,
-        data: cached ?? null,
-        loading: false,
-        error: readableErrorMessage(error),
-      });
-    }
-  }
-
-  async function applyModeBindingPatch(mode: string, body: Record<string, unknown>, successText = copy.modeBindingUpdated) {
-    setBusyAction(copy.modeBindingUpdating);
-    try {
-      const response = await requestJson<AgentModeBindings>(
-        `/api/agent-mode-bindings/${encodeURIComponent(mode)}`,
-        body,
-        "PATCH",
-      );
-      queryClient.setQueryData(queryKeys.agentModeBindings(), response);
-      setNotice({ tone: "success", text: successText });
-    } catch (error) {
-      const message = markError(error);
-      setNotice({ tone: "error", text: `${copy.modeBindingUpdateFailed}${message}` });
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function updateModeDefaultAgent(mode: string, agentId: string) {
-    const current = modeBindings?.[mode];
-    const availableAgentIds = Array.from(new Set([agentId, ...((current?.availableAgentIds ?? []) as string[])].filter(Boolean)));
-    await applyModeBindingPatch(mode, {
-      defaultAgentId: agentId,
-      availableAgentIds,
-    });
-  }
-
-  async function toggleChatAvailableAgent(agentId: string, enabled: boolean) {
-    const current = modeBindings?.chat;
-    const next = new Set(current?.availableAgentIds ?? []);
-    if (enabled) {
-      next.add(agentId);
-    } else {
-      next.delete(agentId);
-    }
-    const nextAvailable = Array.from(next);
-    const defaultAgentId = nextAvailable.includes(current?.defaultAgentId ?? "") ? current?.defaultAgentId : (nextAvailable[0] ?? "");
-    await applyModeBindingPatch("chat", {
-      defaultAgentId,
-      availableAgentIds: nextAvailable,
-    });
-  }
-
-  async function updateModeSlot(mode: string, slot: string, agentId: string) {
-    setBusyAction(copy.modeBindingUpdating);
-    try {
-      const response = await requestJson<AgentModeBindings>(
-        `/api/agent-mode-bindings/${encodeURIComponent(mode)}/slots/${encodeURIComponent(slot)}`,
-        { agentId },
-        "PATCH",
-      );
-      queryClient.setQueryData(queryKeys.agentModeBindings(), response);
-      setNotice({ tone: "success", text: copy.modeBindingUpdated });
-    } catch (error) {
-      const message = markError(error);
-      setNotice({ tone: "error", text: `${copy.modeBindingUpdateFailed}${message}` });
-    } finally {
-      setBusyAction("");
-    }
-  }
-
-  async function toggleResearchPoolAgent(agentId: string, enabled: boolean) {
-    const next = new Set(modeBindings?.research?.pool ?? []);
-    if (enabled) {
-      next.add(agentId);
-    } else {
-      next.delete(agentId);
-    }
-    setBusyAction(copy.modeBindingUpdating);
-    try {
-      const response = await requestJson<AgentModeBindings>(
-        "/api/agent-mode-bindings/research/pool",
-        { agentIds: Array.from(next) },
-        "PATCH",
-      );
-      queryClient.setQueryData(queryKeys.agentModeBindings(), response);
-      setNotice({ tone: "success", text: copy.modeBindingUpdated });
-    } catch (error) {
-      const message = markError(error);
-      setNotice({ tone: "error", text: `${copy.modeBindingUpdateFailed}${message}` });
-    } finally {
-      setBusyAction("");
-    }
   }
 
   function resetSidebarWidth() {
@@ -3456,48 +3180,20 @@ export function ConfigRoute() {
     }
   }
 
-  async function handleTestProfileImageInput(profileId: string, fallbackModelId = "") {
+  async function handleCheckModelImageCapabilities(modelIds: string[] = []) {
     if (structuredActionsDisabled) {
       return;
     }
-    setBusyAction(copy.imageInputTestPending);
+    setBusyAction(copy.imageCapabilityCheckPending);
     try {
-      const requestConfig = profilesEditing
-        ? buildDraftWithSelectedProfileModel(profileId, fallbackModelId).next
-        : requireDraft();
-      const result = await requestJson<ConfigLlmTestResult>("/api/config/test-llm", {
-        publicConfig: requestConfig,
+      const response = await requestJson<ConfigWorkspace>("/api/config/draft/check-model-capabilities", {
+        publicConfig: requireDraft(),
         draftMeta,
         baseHash,
-        profileId,
-        capability: "image_input",
+        modelIds,
       });
-      const supports = result.supports_image_input;
-      const status: ImageInputCheckState["status"] = result.ok && supports == null
-        ? "supported"
-        : imageInputStatusFromResult(result);
-      setImageInputChecks((current) => ({
-        ...current,
-        [profileId]: {
-          status,
-          message: result.message || "",
-          checkedAt: new Date().toLocaleTimeString(),
-        },
-      }));
-      setNotice({
-        tone: status === "supported" ? "success" : status === "unsupported" ? "error" : "neutral",
-        text: formatTestNotice(result),
-      });
+      syncWorkspace(response, "success");
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setImageInputChecks((current) => ({
-        ...current,
-        [profileId]: {
-          status: "failed",
-          message,
-          checkedAt: new Date().toLocaleTimeString(),
-        },
-      }));
       markError(error);
     } finally {
       setBusyAction("");
@@ -3545,26 +3241,21 @@ export function ConfigRoute() {
     return `${result.profile_id} / ${result.model}: ${result.message} [${detailParts.join(" | ")}]`;
   }
 
-  function imageInputStatusFromResult(result: ConfigLlmTestResult): ImageInputCheckState["status"] {
-    if (result.supports_image_input === true || result.capability_status === "supported") {
-      return "supported";
-    }
-    if (result.supports_image_input === false || result.capability_status === "unsupported") {
-      return "unsupported";
-    }
-    return "unknown";
+  function imageInputStatusFromResult(result: ConfigLlmTestResult): "supported" | "unsupported" | "unknown" {
+    return resolveImageInputCapabilityStatus({
+      supportsImageInput: result.supports_image_input,
+      capabilityStatus: result.capability_status,
+    });
   }
 
-  function isImageInputCheckState(result: ConfigLlmTestResult | ImageInputCheckState): result is ImageInputCheckState {
-    return "status" in result;
-  }
-
-  function imageInputStatusLabel(result: ConfigLlmTestResult | ImageInputCheckState | null | undefined) {
-    const status: ImageInputCheckState["status"] = !result
+  function imageInputStatusLabel(
+    result: ConfigLlmTestResult | { status: "supported" | "unsupported" | "unknown" | "failed"; checkedAt?: string } | null | undefined,
+  ) {
+    const status = !result
       ? "unknown"
-      : isImageInputCheckState(result)
-        ? result.status
-        : imageInputStatusFromResult(result);
+      : "ok" in result
+        ? imageInputStatusFromResult(result)
+        : result.status;
     switch (status) {
       case "supported":
         return copy.imageInputStatusSupported;
@@ -3959,15 +3650,24 @@ export function ConfigRoute() {
                     const selectedModelId = resolveSelectedProfileModelId(profile.profileId, profile.selectedModelId);
                     const selectedModel = modelOptionsById.get(selectedModelId) ?? null;
                     const displayState = resolveProfileDisplayState(profile, selectedModelId, selectedModel, isEditingProfile);
-                    const imageInputCheck = imageInputChecks[profile.profileId] ?? null;
+                    const selectedImageInputStatus = resolveImageInputCapabilityStatus({
+                      supportsImageInput: selectedModel?.supports_image_input,
+                      capabilityStatus: selectedModel?.capability_status,
+                    });
+                    const imageInputStatus = selectedImageInputStatus;
+                    const imageInputTitle =
+                      selectedModel?.capability_error ||
+                      selectedModel?.capability_checked_at ||
+                      selectedModel?.capability_source ||
+                      copy.imageCapabilityStatus;
                     const keyStateClassName =
                       displayState.apiKeyState === "missing" || displayState.apiKeyState === "clear_pending"
                         ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
                         : styles.inlineBadge;
                     const imageInputBadgeClassName =
-                      imageInputCheck?.status === "supported"
+                      imageInputStatus === "supported"
                         ? `${styles.inlineBadge} ${styles.inlineBadgeSuccess}`
-                        : imageInputCheck?.status === "unsupported" || imageInputCheck?.status === "failed"
+                        : imageInputStatus === "unsupported"
                           ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
                           : `${styles.inlineBadge} ${styles.inlineBadgeMuted}`;
                     return (
@@ -4015,11 +3715,15 @@ export function ConfigRoute() {
                             <span>{copy.profileTableKey}</span>
                             <div className={styles.profileStatusBadges}>
                               <span className={keyStateClassName}>{keyStateLabel(displayState.apiKeyState)}</span>
-                              <span className={imageInputBadgeClassName} title={imageInputCheck?.message || copy.imageInputUnsupportedHint}>
-                                {imageInputStatusLabel(imageInputCheck)}
+                              <span className={imageInputBadgeClassName} title={imageInputTitle}>
+                                {imageInputStatusLabel({
+                                  status: imageInputStatus,
+                                  message: "",
+                                  checkedAt: selectedModel?.capability_checked_at ?? "",
+                                })}
                               </span>
                             </div>
-                            {imageInputCheck?.status === "unsupported" ? <span>{copy.imageInputUnsupportedHint}</span> : null}
+                            {imageInputStatus === "unsupported" ? <span>{copy.imageInputUnsupportedHint}</span> : null}
                           </div>
                         </div>
                         <div className={styles.profileCardActions}>
@@ -4036,166 +3740,11 @@ export function ConfigRoute() {
                             <Play size={14} />
                             {isEditingProfile ? copy.testSelectedModel : copy.testConnection}
                           </button>
-                          <button
-                            type="button"
-                            className={`${styles.actionButton} ${styles.compactButton}`}
-                            disabled={structuredActionsDisabled || !selectedModelId}
-                            onClick={() => handleTestProfileImageInput(profile.profileId, profile.selectedModelId)}
-                          >
-                            <ImageIcon size={14} />
-                            {busyAction === copy.imageInputTestPending ? copy.imageInputTestPending : copy.testImageInputShort}
-                          </button>
                         </div>
                       </article>
                     );
                   }),
                 )}
-            </div>
-          </div>
-          <div className={styles.researchAgentPool}>
-            <div className={styles.formHeader}>
-              <div className={styles.formHeaderIntro}>
-                <Blocks size={16} />
-                <div>
-                  <span>{copy.researchAgentPoolTitle}</span>
-                  <p className={styles.helperText}>{copy.researchAgentPoolBody}</p>
-                </div>
-              </div>
-              <span className={styles.countPill}>
-                {supervisedAgents.length + researchAgents.length} / {agentInstances.length}
-                {modeBindingWarnings.length ? ` · ${modeBindingWarnings.length}` : ""}
-              </span>
-            </div>
-            <div className={styles.formHeader}>
-              <div className={styles.formHeaderIntro}>
-                <ShieldAlert size={16} />
-                <div>
-                  <span>{copy.supervisedAgentPoolTitle}</span>
-                  <p className={styles.helperText}>{copy.supervisedAgentPoolBody}</p>
-                </div>
-              </div>
-              <span className={styles.countPill}>{supervisedAgents.length}</span>
-            </div>
-            <div className={styles.agentCardGrid}>
-              {supervisedAgents.length ? supervisedAgents.map((agent) => {
-                const profile = workspace.profileCards.find((item) => item.profileId === agent.profileId);
-                const promptTemplate = promptTemplatesById.get(agent.promptTemplateId);
-                const slotAgentId = modeBindings?.supervised_evolution?.slots?.[supervisedAgentRole(agent)] ?? "";
-                return (
-                  <article key={agent.agentId} className={styles.agentConfigCard}>
-                    <div className={styles.agentCardHeader}>
-                      <div>
-                        <strong>{supervisedAgentRoleLabel(agent)}</strong>
-                        <span>{supervisedAgentRole(agent)}</span>
-                      </div>
-                      <div className={styles.cardBadges}>
-                        <span className={styles.inlineBadge}>{copy.profileGroupEvolution}</span>
-                        {slotAgentId === agent.agentId ? <span className={styles.inlineBadge}>slot</span> : null}
-                      </div>
-                    </div>
-                    <div className={styles.agentCardBody}>
-                      <span><strong>{copy.researchAgentInstance}</strong>{agent.displayName || agent.agentId}</span>
-                      <span><strong>{copy.researchAgentLlm}</strong>{profile ? `${profile.label} · ${profile.providerKind} / ${profile.model}` : copy.llmConfigMissing}</span>
-                      <span><strong>{copy.researchAgentPrompt}</strong>{promptTemplate?.name ?? (agent.promptTemplateId || "-")}</span>
-                      <span><strong>{copy.researchAgentSession}</strong>{agent.directSessionId || "-"}</span>
-                      <span><strong>{copy.researchAgentWorkspace}</strong>{agent.workspacePath || "-"}</span>
-                    </div>
-                  </article>
-                );
-              }) : (
-                <p className={styles.helperText}>{agentsQuery.isPending ? copy.loading : copy.supervisedAgentEmpty}</p>
-              )}
-            </div>
-            <div className={styles.agentCardGrid}>
-              {researchAgents.length ? researchAgents.map((agent) => {
-                const linkedAgent = resolveResearchAgentInstance(agent, agentInstances);
-                const effectiveProfileId = linkedAgent?.profileId || agent.profileId;
-                const llmConfig = researchLlmConfigs.find((item) => item.configId === effectiveProfileId);
-                const template = researchAgentTemplates.find((item) => item.templateId === agent.templateId);
-                const linkedAgentId = agent.agentId ?? agent.agentInstanceId ?? "";
-                const directSessionId = agent.directSessionId || linkedAgent?.directSessionId || "";
-                const promptTemplateId = linkedAgent?.promptTemplateId || agent.promptTemplateId || "";
-                const promptTemplate = promptTemplatesById.get(promptTemplateId);
-                const inResearchPool = Boolean(linkedAgent?.agentId && modeBindings?.research?.pool?.includes(linkedAgent.agentId));
-                return (
-                  <article key={agent.key} className={styles.agentConfigCard}>
-                    <div className={styles.agentCardHeader}>
-                      <div>
-                        <strong>{agent.label || agent.key}</strong>
-                        <span>{linkedAgent?.roleKey || agent.roleKey || agent.key}</span>
-                      </div>
-                      <div className={styles.cardBadges}>
-                        <span className={agent.enabled ? styles.inlineBadge : `${styles.inlineBadge} ${styles.inlineBadgeWarning}`}>
-                          {agent.enabled ? copy.researchAgentEnabled : copy.no}
-                        </span>
-                        {inResearchPool ? <span className={styles.inlineBadge}>pool</span> : null}
-                      </div>
-                    </div>
-                    <div className={styles.agentCardBody}>
-                      <span><strong>{copy.researchAgentInstance}</strong>{linkedAgent?.displayName || linkedAgentId || copy.researchAgentUnlinked}</span>
-                      <span><strong>{copy.researchAgentTemplate}</strong>{template?.label ?? agent.templateId}</span>
-                      <span><strong>{copy.researchAgentLlm}</strong>{llmConfig ? `${llmConfig.label} · ${llmConfig.providerKind} / ${llmConfig.model}` : copy.llmConfigMissing}</span>
-                      <span><strong>{copy.researchAgentPrompt}</strong>{promptTemplate?.name ?? (promptTemplateId || "-")}</span>
-                      <span><strong>{copy.researchAgentSession}</strong>{directSessionId || "-"}</span>
-                      <span><strong>{copy.researchAgentWorkspace}</strong>{linkedAgent?.workspacePath || "-"}</span>
-                    </div>
-                    <div className={styles.agentCardActions}>
-                      <button type="button" className={`${styles.actionButton} ${styles.compactButton}`} onClick={() => editResearchAgent(agent)}>
-                        <Pencil size={14} />
-                        {copy.editSection}
-                      </button>
-                      <button type="button" className={`${styles.actionButton} ${styles.compactButton}`} onClick={() => deleteResearchAgent(agent.key)}>
-                        <Trash2 size={14} />
-                        {copy.researchAgentDelete}
-                      </button>
-                    </div>
-                  </article>
-                );
-              }) : (
-                <p className={styles.helperText}>{researchPromptsQuery.isPending || agentsQuery.isPending ? copy.loading : copy.researchAgentEmpty}</p>
-              )}
-            </div>
-            <div className={styles.formGrid}>
-              <label className={styles.field}>
-                <span>{copy.researchAgentKey}</span>
-                <input value={researchAgentDraft.key} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, key: event.target.value }))} />
-              </label>
-              <label className={styles.field}>
-                <span>{copy.researchAgentName}</span>
-                <input value={researchAgentDraft.label} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, label: event.target.value }))} />
-              </label>
-              <label className={styles.field}>
-                <span>{copy.researchAgentTemplate}</span>
-                <select value={researchAgentDraft.templateId} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, templateId: event.target.value }))}>
-                  <option value="" />
-                  {researchAgentTemplates.map((template) => (
-                    <option key={template.templateId} value={template.templateId}>{template.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className={styles.field}>
-                <span>{copy.researchAgentLlm}</span>
-                <select value={researchAgentDraft.profileId} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, profileId: event.target.value }))}>
-                  <option value="" />
-                  {researchLlmConfigs.map((config) => (
-                    <option key={config.configId} value={config.configId}>{config.label} / {config.model}</option>
-                  ))}
-                </select>
-              </label>
-              <label className={`${styles.field} ${styles.checkboxField}`}>
-                <span>{copy.researchAgentEnabled}</span>
-                <input type="checkbox" checked={researchAgentDraft.enabled} onChange={(event) => setResearchAgentDraft((current) => ({ ...current, enabled: event.target.checked }))} />
-              </label>
-            </div>
-            <div className={styles.formActions}>
-              <button type="button" className={styles.primaryButton} disabled={Boolean(busyAction)} onClick={() => saveResearchAgent()}>
-                <Save size={14} />
-                {copy.researchAgentSave}
-              </button>
-              <button type="button" className={styles.actionButton} onClick={() => setResearchAgentDraft(emptyResearchAgentDraft())}>
-                <RotateCcw size={14} />
-                {copy.cancelEditing}
-              </button>
             </div>
           </div>
           <div ref={profileFormRef} className={styles.formSurface}>
@@ -4413,6 +3962,15 @@ export function ConfigRoute() {
                   >
                     <RefreshCw size={14} />
                     {busyAction === copy.discoveryPending ? copy.discoveryPending : copy.discoverModels}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.actionButton}
+                    disabled={structuredActionsDisabled || busyAction === copy.imageCapabilityCheckPending || !modelOptions.length}
+                    onClick={() => void handleCheckModelImageCapabilities()}
+                  >
+                    <ImageIcon size={14} />
+                    {busyAction === copy.imageCapabilityCheckPending ? copy.imageCapabilityCheckPending : copy.checkAllImageCapabilities}
                   </button>
                   {discoveredModels.length ? (
                     <label className={`${styles.field} ${styles.profileTableSelect}`}>
@@ -4727,6 +4285,22 @@ export function ConfigRoute() {
                         <span className={row.apiKeyState === "missing" || row.apiKeyState === "clear_pending" ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}` : styles.inlineBadge}>
                           {keyStateLabel(row.apiKeyState)}
                         </span>
+                        <span
+                          className={
+                            row.imageInputStatus === "supported"
+                              ? `${styles.inlineBadge} ${styles.inlineBadgeSuccess}`
+                              : row.imageInputStatus === "unsupported"
+                                ? `${styles.inlineBadge} ${styles.inlineBadgeWarning}`
+                                : styles.inlineBadge
+                          }
+                          title={row.capabilityError || row.capabilityCheckedAt || row.capabilitySource || copy.imageCapabilityStatus}
+                        >
+                          {imageInputStatusLabel({
+                            status: row.imageInputStatus,
+                            message: row.capabilityError,
+                            checkedAt: row.capabilityCheckedAt,
+                          })}
+                        </span>
                       </td>
                       <td className={styles.profileMetaCell}>
                         <strong>{row.usageCount} {copy.modelCenterUsageCount}</strong>
@@ -4764,6 +4338,15 @@ export function ConfigRoute() {
                           </button>
                           <button
                             type="button"
+                            className={`${styles.actionButton} ${styles.compactButton}`}
+                            disabled={structuredActionsDisabled || busyAction === copy.imageCapabilityCheckPending || !option}
+                            onClick={() => void handleCheckModelImageCapabilities([row.modelId])}
+                          >
+                            <ImageIcon size={14} />
+                            {copy.checkModelImageCapability}
+                          </button>
+                          <button
+                            type="button"
                             className={`${styles.dangerButton} ${styles.compactButton}`}
                             disabled={structuredActionsDisabled || !row.deletable}
                             onClick={() => handleDeleteModel(row.modelId)}
@@ -4789,214 +4372,31 @@ export function ConfigRoute() {
               <p className={styles.eyebrow}>{sectionTitle("agent", copy.agentConfigCenterTitle)}</p>
               <h2 className={styles.sectionTitle}>{copy.agentConfigCenterTitle}</h2>
             </div>
-            <Blocks size={16} className={styles.sectionIcon} />
+            <div className={styles.sectionHeaderActions}>
+              <Link className={styles.primaryButton} to="/agents">
+                <ExternalLink size={14} />
+                {copy.openAgentManagement}
+              </Link>
+              <Blocks size={16} className={styles.sectionIcon} />
+            </div>
           </div>
           <p className={styles.sectionText}>{copy.agentConfigCenterBody}</p>
-          <div className={styles.agentCardGrid}>
-            {agentInstancesSorted.length ? agentInstancesSorted.map((agent) => {
-              const profile = workspace.profileCards.find((item) => item.profileId === agent.profileId);
-              const promptTemplate = promptTemplatesById.get(agent.promptTemplateId);
-              const refs = agentModeReferences.get(agent.agentId) ?? [];
-              return (
-                <article key={agent.agentId} className={styles.agentConfigCard}>
-                  <div className={styles.agentCardHeader}>
-                    <div>
-                      <strong>{agent.displayName || agent.agentId}</strong>
-                      <span>{getString(asRecord(agent.metadata).functionalDisplayName) || agent.roleKey || agent.primaryMode || "-"}</span>
-                    </div>
-                    <div className={styles.cardBadges}>
-                      <span className={styles.inlineBadge}>{agent.status || "active"}</span>
-                      <span className={styles.inlineBadge}>{modeBindingLabel(agent.primaryMode || "general")}</span>
-                    </div>
-                  </div>
-                  <div className={styles.agentCardBody}>
-                    <span><strong>{copy.modeBindingMode}</strong>{agent.roleKey || "-"}</span>
-                    <span><strong>{copy.researchAgentLlm}</strong>{profile ? `${profile.label} · ${profile.providerKind} / ${profile.model}` : copy.llmConfigMissing}</span>
-                    <span><strong>{copy.researchAgentPrompt}</strong>{promptTemplate?.name ?? (agent.promptTemplateId || "-")}</span>
-                    <span><strong>{copy.agentConfigRefs}</strong>{refs.length ? refs.join(" / ") : "-"}</span>
-                    <span><strong>{copy.researchAgentSession}</strong>{agent.directSessionId || "-"}</span>
-                    <span><strong>{copy.researchAgentWorkspace}</strong>{agent.workspacePath || "-"}</span>
-                    <span><strong>{copy.agentConfigIsolation}</strong>{agent.memoryPolicyId || "-"} / {agent.toolPolicyId || "-"}</span>
-                    <span><strong>{copy.agentConfigRuns}</strong>{latestAgentRunLabel(agentRunPanel?.agentId === agent.agentId ? agentRunPanel.data : null, currentLanguage, copy.healthNotRecorded)}</span>
-                  </div>
-                  <div className={styles.agentCardActions}>
-                    <button
-                      type="button"
-                      className={`${styles.actionButton} ${styles.compactButton}`}
-                      disabled={agentRunPanel?.agentId === agent.agentId && agentRunPanel.loading}
-                      onClick={() => void openAgentRunHistory(agent.agentId)}
-                    >
-                      <Play size={14} />
-                      {agentRunPanel?.agentId === agent.agentId && agentRunPanel.loading ? copy.agentConfigRunsLoading : copy.agentConfigRunsOpen}
-                    </button>
-                  </div>
-                </article>
-              );
-            }) : (
-              <p className={styles.helperText}>{agentsQuery.isPending ? copy.loading : copy.agentConfigEmpty}</p>
-            )}
-          </div>
-          {agentRunPanel ? (
-            <div className={styles.agentRunPanel}>
-              <div className={styles.agentRunPanelHeader}>
-                <div>
-                  <strong>{agentOptionLabel(agentRunPanel.agentId)}</strong>
-                  <span>{copy.agentConfigRuns}</span>
-                </div>
-                <button type="button" className={`${styles.actionButton} ${styles.compactButton}`} onClick={() => setAgentRunPanel(null)}>
-                  <X size={14} />
-                  {copy.closePanel}
-                </button>
-              </div>
-              {agentRunPanel.error ? (
-                <p className={styles.inlineFormError}>{copy.agentConfigRunsFailed}{agentRunPanel.error}</p>
-              ) : null}
-              {agentRunPanel.loading && !agentRunPanel.data ? (
-                <p className={styles.helperText}>{copy.agentConfigRunsLoading}</p>
-              ) : null}
-              {agentRunPanel.data?.runs?.length ? (
-                <div className={styles.agentRunList}>
-                  {agentRunPanel.data.runs.map((run) => (
-                    <article key={run.runId} className={styles.agentRunItem}>
-                      <div>
-                        <strong>{run.status || run.currentPhase || "-"}</strong>
-                        <span>{formatTimestamp(run.updatedAt || run.finishedAt || run.startedAt, currentLanguage, copy.healthNotRecorded)}</span>
-                      </div>
-                      <p>{run.summary || run.sourceRunId || run.runId}</p>
-                      <small>{run.sessionId || "-"} · {run.toolCallCount ?? 0} tools</small>
-                    </article>
-                  ))}
-                </div>
-              ) : !agentRunPanel.loading && !agentRunPanel.error ? (
-                <p className={styles.helperText}>{copy.agentConfigRunsEmpty}</p>
-              ) : null}
-              {agentRunPanel.data?.subAgentRuns?.length ? (
-                <p className={styles.helperText}>{copy.agentConfigSubRuns}: {agentRunPanel.data.subAgentRuns.length}</p>
-              ) : null}
-            </div>
-          ) : null}
-        </section>
-        ) : null}
-
-        {isSectionVisible("agent") ? (
-        <section id="config-mode-bindings" className={styles.sectionSurface}>
-          <div className={styles.sectionHeader}>
-            <div>
-              <p className={styles.eyebrow}>{sectionTitle("agent", copy.modeBindingTitle)}</p>
-              <h2 className={styles.sectionTitle}>{copy.modeBindingTitle}</h2>
-            </div>
-            <SlidersHorizontal size={16} className={styles.sectionIcon} />
-          </div>
-          <p className={styles.sectionText}>{copy.modeBindingBody}</p>
-          <div className={styles.formGrid}>
-            <label className={styles.field}>
-              <span>{copy.modeBindingDefaultAgent}</span>
-              <select
-                value={modeBindings?.chat?.defaultAgentId ?? ""}
-                disabled={Boolean(busyAction)}
-                onChange={(event) => void updateModeDefaultAgent("chat", event.target.value)}
-              >
-                <option value="" />
-                {activeAgentInstances.map((agent) => (
-                  <option key={agent.agentId} value={agent.agentId}>
-                    {agentOptionLabel(agent.agentId)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className={styles.bindingCardGrid}>
-            {activeAgentInstances.length ? activeAgentInstances.map((agent) => {
-              const chatAvailable = Boolean(modeBindings?.chat?.availableAgentIds?.includes(agent.agentId));
-              const researchPool = Boolean(modeBindings?.research?.pool?.includes(agent.agentId));
-              return (
-                <article key={`pool-${agent.agentId}`} className={styles.bindingCard}>
-                  <div className={styles.bindingCardTitle}>
-                    <strong>{agent.displayName || agent.agentId}</strong>
-                    <span>{modeBindingLabel(agent.primaryMode || "general")} · {agent.roleKey || "-"}</span>
-                  </div>
-                  <label className={styles.miniToggle}>
-                    <input
-                      type="checkbox"
-                      checked={chatAvailable}
-                      disabled={Boolean(busyAction)}
-                      onChange={(event) => void toggleChatAvailableAgent(agent.agentId, event.target.checked)}
-                    />
-                    <span>{copy.modeBindingChatAvailable}</span>
-                  </label>
-                  <label className={styles.miniToggle}>
-                    <input
-                      type="checkbox"
-                      checked={researchPool}
-                      disabled={Boolean(busyAction)}
-                      onChange={(event) => void toggleResearchPoolAgent(agent.agentId, event.target.checked)}
-                    />
-                    <span>{copy.modeBindingResearchPool}</span>
-                  </label>
-                </article>
-              );
-            }) : (
-              <p className={styles.helperText}>{agentsQuery.isPending ? copy.loading : copy.agentConfigEmpty}</p>
-            )}
-          </div>
-          <div className={styles.profileTableWrap}>
-            <table className={styles.profileTable}>
-              <thead>
-                <tr>
-                  <th>{copy.modeBindingMode}</th>
-                  <th>{copy.modeBindingSlot}</th>
-                  <th>{copy.modeBindingBoundAgent}</th>
-                  <th>{copy.researchAgentLlm}</th>
-                  <th>{copy.researchAgentPrompt}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {FIXED_MODE_BINDING_SLOTS.flatMap((modeSlots) =>
-                  modeSlots.slots.map((slot) => {
-                    const boundAgentId = modeBindings?.[modeSlots.mode]?.slots?.[slot] ?? "";
-                    const boundAgent = activeAgentInstances.find((agent) => agent.agentId === boundAgentId);
-                    const profile = workspace.profileCards.find((item) => item.profileId === boundAgent?.profileId);
-                    const promptTemplate = boundAgent ? promptTemplatesById.get(boundAgent.promptTemplateId) : null;
-                    return (
-                      <tr key={`${modeSlots.mode}-${slot}`}>
-                        <td className={styles.profileMetaCell}>
-                          <strong>{modeBindingLabel(modeSlots.mode)}</strong>
-                          <span>{modeSlots.mode}</span>
-                        </td>
-                        <td className={styles.profileTaskCell}>
-                          <strong>{slot}</strong>
-                        </td>
-                        <td>
-                          <label className={`${styles.field} ${styles.profileTableSelect}`}>
-                            <span>{copy.modeBindingBoundAgent}</span>
-                            <select
-                              value={boundAgentId}
-                              disabled={Boolean(busyAction)}
-                              onChange={(event) => void updateModeSlot(modeSlots.mode, slot, event.target.value)}
-                            >
-                              <option value="" />
-                              {activeAgentInstances.map((agent) => (
-                                <option key={agent.agentId} value={agent.agentId}>
-                                  {agentOptionLabel(agent.agentId)}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </td>
-                        <td className={styles.profileMetaCell}>
-                          <strong>{profile?.label ?? boundAgent?.profileId ?? "-"}</strong>
-                          <span>{profile ? `${profile.providerKind} / ${profile.model}` : boundAgent ? copy.llmConfigMissing : "-"}</span>
-                        </td>
-                        <td className={styles.profileMetaCell}>
-                          <strong>{promptTemplate?.name ?? boundAgent?.promptTemplateId ?? "-"}</strong>
-                          <span>{boundAgent?.promptTemplateId ?? "-"}</span>
-                        </td>
-                      </tr>
-                    );
-                  }),
-                )}
-              </tbody>
-            </table>
+          <div className={styles.matrixGrid}>
+            <article className={styles.matrixCard}>
+              <p className={styles.matrixTitle}>{copy.agentConfigActive}</p>
+              <strong>{agentsQuery.isPending ? copy.loading : activeAgentInstances.length}</strong>
+              <span>{copy.agentConfigCenterBody}</span>
+            </article>
+            <article className={styles.matrixCard}>
+              <p className={styles.matrixTitle}>{copy.modeBindingTitle}</p>
+              <strong>{modeBindingWarnings.length}</strong>
+              <span>{modeBindingWarnings.length ? copy.warningSignals : copy.noWarnings}</span>
+            </article>
+            <article className={styles.matrixCard}>
+              <p className={styles.matrixTitle}>{copy.promptTemplateCenterTitle}</p>
+              <strong>{promptTemplatesQuery.isPending ? copy.loading : promptTemplates.length}</strong>
+              <span>{copy.promptTemplateUsage}: {promptTemplateUsageTotal}</span>
+            </article>
           </div>
         </section>
         ) : null}

@@ -14,6 +14,7 @@ from core.web.services.config_service import (
     apply_config_workspace,
     draft_add_model,
     draft_add_profile,
+    draft_check_model_image_input_capabilities,
     draft_delete_model,
     discover_config_models,
     draft_update_model,
@@ -79,6 +80,10 @@ class ConfigDraftAddProfilePayload(ConfigDraftPayload):
 class ConfigDraftTestPayload(ConfigDraftPayload):
     profileId: str | None = None
     capability: str = "text"
+
+
+class ConfigDraftCapabilityPayload(ConfigDraftPayload):
+    modelIds: list[str] = Field(default_factory=list)
 
 
 class ConfigDiscoverModelsPayload(ConfigDraftPayload):
@@ -223,6 +228,19 @@ def config_test_llm(payload: ConfigDraftTestPayload) -> dict:
             draft_meta=payload.draftMeta,
             profile_id=payload.profileId,
             capability=payload.capability,
+        )
+    except Exception as exc:  # pragma: no cover - routed below
+        _raise_config_http_error(exc)
+
+
+@router.post("/config/draft/check-model-capabilities")
+def config_draft_check_model_capabilities(payload: ConfigDraftCapabilityPayload) -> dict:
+    try:
+        return draft_check_model_image_input_capabilities(
+            payload.publicConfig,
+            draft_meta=payload.draftMeta,
+            base_hash=payload.baseHash,
+            model_ids=payload.modelIds,
         )
     except Exception as exc:  # pragma: no cover - routed below
         _raise_config_http_error(exc)

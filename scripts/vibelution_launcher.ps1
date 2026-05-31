@@ -3839,6 +3839,7 @@ function Start-ManagedBrowser {
     $browserArgs = @(
         "--user-data-dir=$browserProfileDir",
         "--app=$url",
+        "--force-dark-mode",
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-session-crashed-bubble",

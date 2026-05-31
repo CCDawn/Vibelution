@@ -319,6 +319,9 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "preset"
 
 [llm.model_library.deepseek_v4_pro.provider]
 kind = "deepseek"
@@ -343,6 +346,9 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "preset"
 
 [llm.model_library.deepseek_v4_flash.provider]
 kind = "deepseek"
@@ -371,6 +377,32 @@ discovery_enabled = true
 kind = "xiaomi"
 api_key_env = "MIMO_API_KEY"
 base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+compat_mode = "openai"
+requires_api_key = true
+context_window = 1000000
+
+[llm.model_library.xiaomi_mimo_v2_5_multimodal]
+model = "mimo-v2.5"
+label = "小米 MiMo V2.5 多模态"
+api_key_env = "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
+transport = "chat_completions"
+contract = "tool_chat"
+strict_compatibility = false
+temperature = 0.7
+max_output_tokens = 128000
+timeout = 120
+connect_timeout = 20
+streaming = true
+tool_calling_mode = "auto"
+discovery_enabled = true
+supports_image_input = true
+capability_status = "supported"
+capability_source = "preset"
+
+[llm.model_library.xiaomi_mimo_v2_5_multimodal.provider]
+kind = "xiaomi"
+api_key_env = "MIMO_API_KEY"
+base_url = "https://api.xiaomimimo.com/v1"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -430,7 +462,7 @@ contract = "tool_chat"
 strict_compatibility = false
 temperature = 0.7
 max_output_tokens = 4096
-timeout = 180
+timeout = 300
 connect_timeout = 20
 streaming = false
 tool_calling_mode = "disabled"
@@ -452,7 +484,7 @@ transport = "chat_completions"
 contract = "tool_chat"
 temperature = 0.7
 max_output_tokens = 4096
-timeout = 180
+timeout = 300
 connect_timeout = 20
 streaming = false
 tool_calling_mode = "disabled"

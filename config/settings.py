@@ -88,6 +88,11 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
     "streaming",
     "tool_calling_mode",
     "discovery_enabled",
+    "supports_image_input",
+    "capability_status",
+    "capability_source",
+    "capability_checked_at",
+    "capability_error",
 )
 UNCONFIGURED_MODEL_REF = "__unconfigured__"
 

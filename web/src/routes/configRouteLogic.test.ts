@@ -8,6 +8,7 @@ import {
   avatarCropSourceRect,
   clampAvatarCropOffset,
   collectModelDetailKeys,
+  configInvalidationDomainsForApply,
   defaultModelApiKeyEnv,
   deriveConfigEditorSyncState,
   deriveModelCenterInventoryRows,
@@ -19,6 +20,7 @@ import {
   modelLibraryIdFromParts,
   PROVIDER_KIND_OPTIONS,
   presetCategory,
+  resolveImageInputCapabilityStatus,
   resolveProfileDisplayState,
   resolveConfigSectionUiStateOnSelect,
   resolveResearchAgentInstance,
@@ -74,6 +76,22 @@ function option(overrides: Partial<ConfigModelOption> = {}): ConfigModelOption {
 }
 
 describe("configRouteLogic", () => {
+  it("scopes config apply invalidation domains to changed config areas", () => {
+    expect(configInvalidationDomainsForApply({ ui: { language: "zh" } })).toEqual([
+      "config",
+      "runtime",
+      "sessions",
+      "reset",
+    ]);
+    expect(configInvalidationDomainsForApply({ evolution: { intake_mode: "reviewed" } })).toEqual([
+      "config",
+      "runtime",
+      "sessions",
+      "reset",
+      "evolution",
+    ]);
+  });
+
   it("classifies model presets from explicit category before provider heuristics", () => {
     expect(presetCategory(preset("relay", { kind: "openai" }, "relay"))).toBe("relay");
     expect(presetCategory(preset("local", { kind: "openai", base_url: "http://127.0.0.1:11434/v1" }))).toBe("local");
@@ -410,6 +428,7 @@ describe("configRouteLogic", () => {
         research: "科研模型配置",
         other: "其他",
         image2Tool: "image2 生图工具",
+        gitCommitModel: "Git 提交模型",
       },
     });
 
@@ -488,6 +507,7 @@ describe("configRouteLogic", () => {
         research: "科研模型配置",
         other: "其他",
         image2Tool: "image2 生图工具",
+        gitCommitModel: "Git 提交模型",
       },
     });
 
@@ -516,6 +536,125 @@ describe("configRouteLogic", () => {
     });
   });
 
+  it("tracks git commit message model usage through its selected call profile", () => {
+    const chatModel = option({
+      model_id: "relay_openai_gpt_5_5",
+      label: "GPT-5.5 via relay",
+      model: "gpt-5.5",
+    });
+    const profiles: ConfigProfileCard[] = [
+      {
+        profileId: "primary",
+        label: "主聊天",
+        modelRef: "relay_openai_gpt_5_5",
+        selectedModelId: "relay_openai_gpt_5_5",
+        selectedModelLabel: "GPT-5.5 via relay",
+        model: "gpt-5.5",
+        providerKind: "relay",
+        baseUrl: "https://pixel.try-chatapi.com/v1",
+        apiKeyEnv: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
+        apiKeyConfigured: true,
+        apiKeyState: "configured",
+        apiKeySource: "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
+        requiredModelMissing: false,
+      },
+    ];
+
+    const summary = deriveModelCenterSummary({
+      modelOptions: [chatModel],
+      profiles,
+      publicConfig: { git: { commit_message_profile: "primary" } },
+      labels: {
+        chat: "对话 / 主智能体",
+        support: "心智与压缩",
+        subagents: "Agent 管理",
+        evolution: "监督进化",
+        research: "科研 / Team",
+        other: "其他调用档案",
+        image2Tool: "image2 生图工具",
+        gitCommitModel: "Git 提交模型",
+      },
+    });
+
+    expect(summary.usageCountsByModelId.relay_openai_gpt_5_5).toBe(2);
+    expect(summary.usagesByModelId.relay_openai_gpt_5_5.map((usage) => usage.label)).toEqual([
+      "主聊天",
+      "Git 提交模型",
+    ]);
+    expect(summary.usagesByModelId.relay_openai_gpt_5_5[1]).toMatchObject({
+      kind: "feature",
+      detail: "primary",
+      groupLabel: "Git 提交模型",
+    });
+  });
+
+  it("keeps image input support conservative when status and boolean disagree", () => {
+    expect(
+      resolveImageInputCapabilityStatus({
+        supportsImageInput: null,
+        capabilityStatus: "supported",
+      }),
+    ).toBe("unknown");
+    expect(
+      resolveImageInputCapabilityStatus({
+        supportsImageInput: true,
+        capabilityStatus: "supported",
+      }),
+    ).toBe("supported");
+    expect(
+      resolveImageInputCapabilityStatus({
+        supportsImageInput: false,
+        capabilityStatus: "supported",
+      }),
+    ).toBe("unsupported");
+    expect(
+      resolveImageInputCapabilityStatus({
+        supportsImageInput: null,
+        capabilityStatus: "unsupported",
+      }),
+    ).toBe("unsupported");
+  });
+
+  it("does not mark DeepSeek-like inventory rows as image-capable without boolean support", () => {
+    const rows = deriveModelCenterInventoryRows(
+      [
+        option({
+          model_id: "deepseek_v4_pro",
+          provider_kind: "deepseek",
+          model: "deepseek-v4-pro",
+          label: "DeepSeek V4 Pro",
+          supports_image_input: null,
+          capability_status: "supported",
+        }),
+        option({
+          model_id: "xiaomi_mimo_v2_5_multimodal",
+          provider_kind: "xiaomi",
+          model: "mimo-v2.5",
+          label: "小米 MiMo V2.5 多模态",
+          supports_image_input: true,
+          capability_status: "supported",
+        }),
+      ],
+      {
+        usagesByModelId: {},
+        usageCountsByModelId: {},
+      },
+    );
+
+    expect(rows[0]).toMatchObject({
+      modelId: "deepseek_v4_pro",
+      supportsImageInput: null,
+      capabilityStatus: "supported",
+      imageInputStatus: "unknown",
+    });
+    expect(rows[1]).toMatchObject({
+      modelId: "xiaomi_mimo_v2_5_multimodal",
+      supportsImageInput: true,
+      capabilityStatus: "supported",
+      imageInputStatus: "supported",
+    });
+  });
+
   it("reports usage bindings that point to missing models", () => {
     const summary = deriveModelCenterSummary({
       modelOptions: [option()],
@@ -529,6 +668,7 @@ describe("configRouteLogic", () => {
         research: "research",
         other: "other",
         image2Tool: "image2",
+        gitCommitModel: "Git commit model",
       },
     });
 
@@ -668,24 +808,25 @@ describe("configRouteLogic", () => {
 });
 
 describe("config route copy", () => {
-  it("uses LLM-config language instead of exposing profile jargon", () => {
+  it("uses call-profile language instead of exposing model-dossier jargon", () => {
     const zhCopy = JSON.stringify(CONFIG_COPY.zh);
     const enCopy = Object.entries(CONFIG_COPY.en)
       .filter(([key]) => !["runtimeProfile"].includes(key))
       .map(([, value]) => value)
       .join("\n");
 
-    expect(CONFIG_COPY.zh.profilesTitle).toBe("LLM 配置");
-    expect(CONFIG_COPY.en.profilesTitle).toBe("LLM Configs");
+    expect(CONFIG_COPY.zh.profilesTitle).toBe("调用档案");
+    expect(CONFIG_COPY.en.profilesTitle).toBe("Call Profiles");
     expect(CONFIG_COPY.zh.profileTableActions).toBe("连接");
     expect(CONFIG_COPY.en.profileTableActions).toBe("Connection");
-    expect(CONFIG_COPY.zh.editProfiles).toBe("编辑 LLM 配置");
-    expect(CONFIG_COPY.en.editProfiles).toBe("Edit LLM configs");
+    expect(CONFIG_COPY.zh.editProfiles).toBe("编辑调用档案");
+    expect(CONFIG_COPY.en.editProfiles).toBe("Edit call profiles");
     expect(CONFIG_COPY.zh.openEnvironment).toBe("打开系统环境变量");
     expect(CONFIG_COPY.en.openEnvironment).toBe("Open system environment variables");
     expect(zhCopy).not.toContain("配置档");
     expect(zhCopy).not.toContain("模型档案");
-    expect(enCopy).not.toMatch(/\bprofiles?\b/i);
+    expect(enCopy).not.toMatch(/\bdossiers?\b/i);
+    expect(enCopy).not.toMatch(/\bmodel profiles?\b/i);
   });
 
   it("keeps internal draft and JSON editor jargon out of visible copy", () => {
@@ -705,15 +846,17 @@ describe("config route copy", () => {
     expect(visibleCopy.en).not.toMatch(/\bJSON editor\b/i);
   });
 
-  it("groups model configs and system prompts without a standalone git section", () => {
-    expect(CONFIG_COPY.zh.groupModelingTitle).toBe("模型配置");
-    expect(CONFIG_COPY.en.groupModelingTitle).toBe("Model Configs");
+  it("splits model assets, call profiles, and git tooling into separate areas", () => {
+    expect(CONFIG_COPY.zh.groupModelingTitle).toBe("模型中心");
+    expect(CONFIG_COPY.en.groupModelingTitle).toBe("Model Center");
+    expect(CONFIG_COPY.zh.groupProfileBindingsTitle).toBe("调用档案");
+    expect(CONFIG_COPY.en.groupProfileBindingsTitle).toBe("Call Profiles");
     expect(CONFIG_COPY.zh.groupPromptTitle).toBe("系统提示词");
     expect(CONFIG_COPY.en.groupPromptTitle).toBe("System Prompts");
 
     const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
-    expect(visibleCopy).not.toContain("Git 提交");
-    expect(visibleCopy).not.toContain("Git Commits");
+    expect(visibleCopy).toContain("Git 提交模型");
+    expect(visibleCopy).toContain("Git commit model");
   });
 
   it("exposes the settings model library as a task-oriented model center", () => {
@@ -756,15 +899,19 @@ describe("config route copy", () => {
     expect(CONFIG_COPY.en.settingsNeedsCheck).toBe("Check advanced config first");
   });
 
-  it("exposes unified agent and mode binding settings instead of legacy mode-specific wording", () => {
-    expect(CONFIG_COPY.zh.agentConfigCenterTitle).toBe("Agent 配置中心");
-    expect(CONFIG_COPY.en.agentConfigCenterTitle).toBe("Agent config center");
+  it("keeps agent editing centralized in Agent management from the config page", () => {
+    expect(CONFIG_COPY.zh.agentConfigCenterTitle).toBe("Agent 管理入口");
+    expect(CONFIG_COPY.en.agentConfigCenterTitle).toBe("Agent management entry");
+    expect(CONFIG_COPY.zh.openAgentManagement).toBe("打开 Agent 管理");
+    expect(CONFIG_COPY.en.openAgentManagement).toBe("Open Agent management");
     expect(CONFIG_COPY.zh.modeBindingTitle).toBe("模式里的 Agent 分配");
     expect(CONFIG_COPY.en.modeBindingTitle).toBe("Agent assignments by mode");
-    expect(CONFIG_COPY.zh.agentConfigRuns).toBe("最近运行");
-    expect(CONFIG_COPY.en.agentConfigRuns).toBe("Recent runs");
-    expect(CONFIG_COPY.zh.supervisedAgentPoolBody).toContain("执行链会按这里的模式分配读取对应 Agent 配置");
-    expect(CONFIG_COPY.en.supervisedAgentPoolBody).toContain("execution chain now reads the assigned agent config");
+    expect(CONFIG_COPY.zh.modeBindingBody).toContain("只读展示");
+    expect(CONFIG_COPY.en.modeBindingBody).toContain("read-only");
+    expect(CONFIG_COPY.zh.researchAgentPoolBody).toContain("Agent 引用详情已收口到 Agent 管理");
+    expect(CONFIG_COPY.en.researchAgentPoolBody).toContain("Agent reference details now live in Agent management");
+    expect(CONFIG_COPY.zh.groupAgentEvolutionSummary).toContain("具体 Agent 绑定在 Agent 管理中维护");
+    expect(CONFIG_COPY.en.groupAgentEvolutionSummary).toContain("edit Agent bindings in Agent management");
     const visibleCopy = `${Object.values(CONFIG_COPY.zh).join("\n")}\n${Object.values(CONFIG_COPY.en).join("\n")}`;
     expect(visibleCopy).not.toContain("ModeBinding");
     expect(visibleCopy).not.toContain("Persistent Agent");

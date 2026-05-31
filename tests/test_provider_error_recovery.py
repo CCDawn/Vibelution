@@ -172,15 +172,20 @@ def test_session_failed_result_sanitizes_provider_upstream_error(tmp_path, monke
 
     payload = session_service.submit_session_message("session-live", "继续当前对话")
 
-    assert payload["messages"][-1]["role"] == "user"
-    assert payload["messages"][-1]["content"] == "继续当前对话"
+    assert payload["messages"][-2]["role"] == "user"
+    assert payload["messages"][-2]["content"] == "继续当前对话"
+    assert payload["messages"][-1]["role"] == "assistant"
+    assert "模型服务上游暂时失败" in payload["messages"][-1]["content"]
+    assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
+    assert payload["messages"][-1]["metadata"]["providerFailure"] is True
     assert payload["lastTurnError"] is not None
     assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
     assert payload["lastTurnError"]["recoverable"] is True
     assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
     assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
     assert "provider_protocol_error" not in payload["lastTurnError"]["message"]
-    assert all("模型服务上游暂时失败" not in message["content"] for message in payload["messages"])
+    assert "litellm.BadGatewayError" not in payload["messages"][-1]["content"]
+    assert "provider_protocol_error" not in payload["messages"][-1]["content"]
     assert payload["currentPhase"] == "failed"
 
 
@@ -350,12 +355,15 @@ def test_session_exception_failure_sanitizes_provider_error_and_logs_raw(tmp_pat
 
     payload = session_service.submit_session_message("session-live", "继续当前对话")
 
-    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-2]["role"] == "user"
+    assert payload["messages"][-1]["role"] == "assistant"
+    assert "模型服务上游暂时失败" in payload["messages"][-1]["content"]
+    assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
     assert payload["lastTurnError"] is not None
     assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
     assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
     assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
-    assert all("模型服务上游暂时失败" not in message["content"] for message in payload["messages"])
+    assert "litellm.BadGatewayError" not in payload["messages"][-1]["content"]
 
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run is not None
@@ -364,7 +372,49 @@ def test_session_exception_failure_sanitizes_provider_error_and_logs_raw(tmp_pat
     assert "litellm.BadGatewayError" in latest_run["error"]
 
 
-def test_session_completed_result_with_provider_error_is_not_persisted_as_assistant_message(tmp_path, monkeypatch):
+def test_session_provider_failure_preserves_partial_visible_reply(tmp_path, monkeypatch):
+    _seed_session(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "_WORK_RUN_STORE",
+        session_service.WorkRunStore(tmp_path / ".runtime" / "runtime-manager" / "work_runs"),
+    )
+
+    provider_error = (
+        'provider_protocol_error: litellm.BadGatewayError: BadGatewayError: OpenAIException - '
+        '{"error":{"message":"Upstream request failed","type":"upstream_error"}}'
+    )
+
+    class PartialThenFailingAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "failed",
+                "summary": "我已经完成了前半段审查，发现会话入口需要保留错误消息。",
+                "raw_output": "我已经完成了前半段审查，发现会话入口需要保留错误消息。",
+                "error": provider_error,
+                "outcome": "blocked",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: PartialThenFailingAgent())
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: session_service._run_session_turn(context))
+
+    payload = session_service.submit_session_message("session-live", "继续当前对话")
+
+    assert payload["messages"][-3]["role"] == "user"
+    assert payload["messages"][-2]["role"] == "assistant"
+    assert payload["messages"][-2]["content"] == "我已经完成了前半段审查，发现会话入口需要保留错误消息。"
+    assert payload["messages"][-1]["role"] == "assistant"
+    assert "模型服务上游暂时失败" in payload["messages"][-1]["content"]
+    assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
+
+
+def test_session_completed_result_with_provider_error_is_persisted_as_assistant_message(tmp_path, monkeypatch):
     _seed_session(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -399,11 +449,14 @@ def test_session_completed_result_with_provider_error_is_not_persisted_as_assist
 
     payload = session_service.submit_session_message("session-live", "继续当前对话")
 
-    assert payload["messages"][-1]["role"] == "user"
+    assert payload["messages"][-2]["role"] == "user"
+    assert payload["messages"][-1]["role"] == "assistant"
+    assert "模型服务上游暂时失败" in payload["messages"][-1]["content"]
+    assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
     assert payload["lastTurnError"] is not None
     assert payload["lastTurnError"]["errorType"] == "provider_protocol_error"
     assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
-    assert all("模型服务上游暂时失败" not in message["content"] for message in payload["messages"])
+    assert "reasoning_content" not in payload["messages"][-1]["content"]
 
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run is not None
@@ -412,7 +465,7 @@ def test_session_completed_result_with_provider_error_is_not_persisted_as_assist
     assert "reasoning_content" in latest_run["error"]
 
 
-def test_session_history_seed_filters_provider_error_and_recovery_notices(tmp_path, monkeypatch):
+def test_session_history_seed_keeps_provider_error_but_filters_recovery_notices(tmp_path, monkeypatch):
     save_chat_state(
         tmp_path,
         {
@@ -484,6 +537,11 @@ def test_session_history_seed_filters_provider_error_and_recovery_notices(tmp_pa
             "role": "user",
             "content": "现在审查一下整个项目,然后向我汇报结果",
             "timestamp": "2026-05-23T00:00:00",
+        },
+        {
+            "role": "assistant",
+            "content": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+            "timestamp": "2026-05-23T00:01:00",
         },
         {
             "role": "assistant",

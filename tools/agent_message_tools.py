@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from core.chat.chat_task_types import trim_lines
@@ -68,7 +69,7 @@ def agent_message_tool(
                 }
             )
 
-        message_body = trim_lines(str(content or ""), max_lines=20).strip()
+        message_body = str(content or "").strip()
         if not message_body:
             return _json_result(
                 {
@@ -165,11 +166,12 @@ def agent_message_tool(
 
 def _resolve_target_agent(target: str, agents: list[dict[str, Any]]) -> dict[str, Any]:
     normalized = str(target or "").strip()
-    folded = normalized.casefold()
+    candidate_labels = _target_agent_lookup_labels(normalized)
+    folded_labels = {item.casefold() for item in candidate_labels if item}
     exact_matches = [
         item for item in agents
-        if str(item.get("agentId") or "").strip() == normalized
-        or str(item.get("agentCode") or "").strip().casefold() == folded
+        if str(item.get("agentId") or "").strip() in candidate_labels
+        or str(item.get("agentCode") or "").strip().casefold() in folded_labels
     ]
     if len(exact_matches) == 1:
         return {"ok": True, "agent": exact_matches[0]}
@@ -182,7 +184,7 @@ def _resolve_target_agent(target: str, agents: list[dict[str, Any]]) -> dict[str
         }
     name_matches = [
         item for item in agents
-        if str(item.get("displayName") or "").strip().casefold() == folded
+        if str(item.get("displayName") or "").strip().casefold() in folded_labels
     ]
     if len(name_matches) == 1:
         return {"ok": True, "agent": name_matches[0]}
@@ -199,6 +201,46 @@ def _resolve_target_agent(target: str, agents: list[dict[str, Any]]) -> dict[str
         "error": "target_not_found",
         "message": f"未找到目标 Agent: {normalized}",
     }
+
+
+def _target_agent_lookup_labels(target: str) -> list[str]:
+    normalized = str(target or "").strip()
+    if not normalized:
+        return []
+    labels: list[str] = [normalized]
+    composite_match = re.match(
+        r"^\s*(?P<code>A\d{3,})\s*(?:[·•\-\u2013\u2014:：|/]|[\(（])\s*(?P<name>.+?)\s*[\)）]?\s*$",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if composite_match:
+        labels.extend(
+            [
+                str(composite_match.group("code") or "").strip(),
+                str(composite_match.group("name") or "").strip(),
+            ]
+        )
+    paren_match = re.match(r"^\s*(?P<head>.+?)\s*[\(（]\s*(?P<body>.+?)\s*[\)）]\s*$", normalized)
+    if paren_match:
+        labels.extend(
+            [
+                str(paren_match.group("head") or "").strip(),
+                str(paren_match.group("body") or "").strip(),
+            ]
+        )
+
+    unique: list[str] = []
+    seen: set[str] = set()
+    for label in labels:
+        clean = str(label or "").strip()
+        if not clean:
+            continue
+        folded = clean.casefold()
+        if folded in seen:
+            continue
+        unique.append(clean)
+        seen.add(folded)
+    return unique
 
 
 def _parse_metadata(metadata_json: str) -> dict[str, Any]:

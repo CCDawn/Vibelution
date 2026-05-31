@@ -63,6 +63,8 @@ def ensure_supervised_agent_instances() -> list[dict[str, Any]]:
                     fields={"errorType": type(exc).__name__, "message": str(exc)},
                 )
                 continue
+            if not agent:
+                continue
             ensured.append(agent)
             if changed:
                 changed_roles.append(role.role)
@@ -195,7 +197,13 @@ def _record_supervised_binding_failure(role: str, *, agent_id: str, reason: str)
     except Exception:
         return
 def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_existing_slots: bool = False) -> None:
-    active_agent_ids = [str(agent.get("agentId") or "").strip() for agent in agents if str(agent.get("agentId") or "").strip()]
+    active_agents = [
+        agent
+        for agent in agents
+        if str(agent.get("agentId") or "").strip()
+        and str(agent.get("status") or "active").strip() != "archived"
+    ]
+    active_agent_ids = [str(agent.get("agentId") or "").strip() for agent in active_agents]
     slots = {}
     if preserve_existing_slots:
         try:
@@ -205,7 +213,7 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
                 slots.update({str(key): str(value or "").strip() for key, value in existing.items()})
         except Exception:
             slots = {}
-    for agent in agents:
+    for agent in active_agents:
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         role = str(metadata.get("supervisedRole") or agent.get("roleKey") or "").strip()
         agent_id = str(agent.get("agentId") or "").strip()
@@ -224,9 +232,21 @@ def _sync_supervised_mode_binding(agents: list[dict[str, Any]], *, preserve_exis
         return
 
 
-def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any], bool]:
+def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any] | None, bool]:
     existing = _find_agent_by_supervised_role(role.role)
     changed = False
+    if _supervised_role_slot_excluded(role.role):
+        _record_supervised_agent_event(
+            "supervised.agent_instance.sync_skipped_excluded_slot",
+            role=role,
+            level="info",
+            outcome="skipped",
+            fields={
+                "reason": "mode_binding_slot_excluded",
+                "agentId": str((existing or {}).get("agentId") or "").strip(),
+            },
+        )
+        return None, False
     if not existing:
         session_detail = session_service.create_chat_session(
             title=role.label,
@@ -238,6 +258,18 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any], 
         if not existing:
             raise RuntimeError(f"Supervised agent was not created for role: {role.role}")
         changed = True
+    if str(existing.get("status") or "active").strip() == "archived":
+        _record_supervised_agent_event(
+            "supervised.agent_instance.sync_skipped_archived",
+            role=role,
+            level="info",
+            outcome="skipped",
+            fields={
+                "reason": "agent_archived",
+                "agentId": str(existing.get("agentId") or "").strip(),
+            },
+        )
+        return None, False
 
     metadata = dict(existing.get("metadata") or {})
     expected_metadata = {
@@ -251,15 +283,8 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any], 
     needs_update = (
         str(existing.get("profileId") or "").strip() != role.profile_id
         or any(metadata.get(key) != value for key, value in expected_metadata.items())
-        or str(existing.get("status") or "active").strip() == "archived"
     )
     if needs_update:
-        if str(existing.get("status") or "active").strip() == "archived":
-            existing = agent_directory_service.reactivate_agent_instance(
-                str(existing.get("agentId") or ""),
-                reason="supervised_fixed_role_bootstrap",
-                metadata={"fixedRole": True, "supervisedRole": role.role},
-            )
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             profile_id=role.profile_id,
@@ -282,6 +307,19 @@ def _ensure_supervised_role(role: SupervisedAgentRole) -> tuple[dict[str, Any], 
         except Exception:
             pass
     return existing, changed
+
+
+def _supervised_role_slot_excluded(role: str) -> bool:
+    normalized = str(role or "").strip()
+    if not normalized:
+        return False
+    try:
+        payload = agent_mode_binding_service.get_mode_bindings_payload()
+        mode = (payload.get("modes") or {}).get("supervised_evolution") or {}
+        excluded_slots = {str(item or "").strip() for item in list(mode.get("excludedSlots") or [])}
+        return normalized in excluded_slots
+    except Exception:
+        return False
 
 
 def _find_agent_by_supervised_role(role: str) -> dict[str, Any] | None:

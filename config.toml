@@ -31,8 +31,9 @@ avatar_image_path = ""
 [llm.profiles]
 
 [llm.profiles.primary]
-model = "mimo-v2.5-pro"
-api_key_env = "VIBELUTION_LLM_MIMO_V2_5_PRO_MIMO_V2_5_PRO_API_KEY"
+supports_image_input = true
+model = "mimo-v2.5"
+api_key_env = "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
 transport = "chat_completions"
 contract = "tool_chat"
 strict_compatibility = false
@@ -65,6 +66,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.mental_model.provider]
 kind = "xiaomi"
@@ -88,6 +94,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.subagent_worker.provider]
 kind = "xiaomi"
@@ -110,6 +121,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.subagent_explorer.provider]
 kind = "xiaomi"
@@ -133,6 +149,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.supervised_baseline.provider]
 kind = "xiaomi"
@@ -156,6 +177,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.supervised_candidate.provider]
 kind = "xiaomi"
@@ -178,6 +204,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.research_broad.provider]
 kind = "xiaomi"
@@ -200,6 +231,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.research_deep.provider]
 kind = "xiaomi"
@@ -222,6 +258,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.research_review.provider]
 kind = "xiaomi"
@@ -244,6 +285,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.research_themes.provider]
 kind = "xiaomi"
@@ -266,6 +312,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.research_card.provider]
 kind = "xiaomi"
@@ -289,6 +340,11 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.profiles.compression.provider]
 kind = "xiaomi"
@@ -319,6 +375,9 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "preset"
 
 [llm.model_library.deepseek_v4_pro.provider]
 kind = "deepseek"
@@ -343,6 +402,9 @@ streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
 api_key_env = "VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY"
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "preset"
 
 [llm.model_library.deepseek_v4_flash.provider]
 kind = "deepseek"
@@ -366,11 +428,42 @@ connect_timeout = 20
 streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
+supports_image_input = false
+capability_status = "unsupported"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:05Z"
+capability_error = "image input is not supported by this model route"
 
 [llm.model_library.xiaomi_mimo_v2_5_pro_token_plan.provider]
 kind = "xiaomi"
 api_key_env = "MIMO_API_KEY"
 base_url = "https://token-plan-cn.xiaomimimo.com/v1"
+compat_mode = "openai"
+requires_api_key = true
+context_window = 1000000
+
+[llm.model_library.xiaomi_mimo_v2_5_multimodal]
+model = "mimo-v2.5"
+label = "小米 MiMo V2.5 多模态"
+transport = "chat_completions"
+contract = "tool_chat"
+strict_compatibility = false
+temperature = 0.7
+max_output_tokens = 128000
+timeout = 120
+connect_timeout = 20
+streaming = true
+tool_calling_mode = "auto"
+discovery_enabled = true
+supports_image_input = true
+capability_status = "supported"
+capability_source = "preset"
+api_key_env = "VIBELUTION_LLM_XIAOMI_MIMO_V2_5_MULTIMODAL_API_KEY"
+
+[llm.model_library.xiaomi_mimo_v2_5_multimodal.provider]
+kind = "xiaomi"
+api_key_env = "MIMO_API_KEY"
+base_url = "https://api.xiaomimimo.com/v1"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 1000000
@@ -389,6 +482,10 @@ streaming = true
 tool_calling_mode = "auto"
 discovery_enabled = true
 api_key_env = "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY"
+capability_status = "unknown"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:14Z"
+capability_error = "Invalid user message at index 0. Please ensure all user messages are valid OpenAI chat completion messages."
 
 [llm.model_library.relay_openai_gpt_5_5.provider]
 kind = "relay"
@@ -406,12 +503,16 @@ contract = "tool_chat"
 strict_compatibility = false
 temperature = 0.7
 max_output_tokens = 4096
-timeout = 180
+timeout = 300
 connect_timeout = 20
 streaming = false
 tool_calling_mode = "disabled"
 discovery_enabled = false
 api_key_env = "VIBELUTION_LLM_RELAY_IMAGE2_API_KEY"
+capability_status = "unknown"
+capability_source = "runtime_probe"
+capability_checked_at = "2026-05-30T07:24:12Z"
+capability_error = "provider 额度不足或计费受限"
 
 [llm.model_library.relay_image2.provider]
 kind = "relay"
@@ -420,51 +521,6 @@ base_url = "https://ai-pixel.online"
 compat_mode = "openai"
 requires_api_key = true
 context_window = 128000
-
-[llm.model_library.openai_gpt_image_1_5]
-model = "gpt-image-1.5"
-label = "OpenAI GPT Image 1.5"
-api_key_env = "VIBELUTION_LLM_OPENAI_GPT_IMAGE_1_5_API_KEY"
-transport = "chat_completions"
-contract = "tool_chat"
-temperature = 0.7
-max_output_tokens = 4096
-timeout = 180
-connect_timeout = 20
-streaming = false
-tool_calling_mode = "disabled"
-discovery_enabled = false
-
-[llm.model_library.openai_gpt_image_1_5.provider]
-kind = "openai"
-api_key_env = "OPENAI_API_KEY"
-base_url = "https://api.openai.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 128000
-
-[llm.model_library.mimo_v2_5_pro_mimo_v2_5_pro]
-model = "mimo-v2.5-pro"
-label = "mimo-v2.5-pro"
-transport = "chat_completions"
-contract = "tool_chat"
-strict_compatibility = false
-temperature = 0.7
-max_output_tokens = 128000
-timeout = 120
-connect_timeout = 20
-streaming = true
-tool_calling_mode = "auto"
-discovery_enabled = true
-api_key_env = "VIBELUTION_LLM_MIMO_V2_5_PRO_MIMO_V2_5_PRO_API_KEY"
-
-[llm.model_library.mimo_v2_5_pro_mimo_v2_5_pro.provider]
-kind = "xiaomi"
-api_key_env = "MIMO_API_KEY"
-base_url = "https://token-plan-cn.xiaomimimo.com/v1"
-compat_mode = "openai"
-requires_api_key = true
-context_window = 1000000
 
 [agent]
 name = "SelfEvolvingAgent"

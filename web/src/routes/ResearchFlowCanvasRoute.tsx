@@ -86,8 +86,8 @@ type InspectorView = "properties" | "issues" | "organization";
 const NODE_WIDTH = 260;
 const NODE_HEIGHT = 124;
 const EDGE_NODE_GAP = 12;
-const EDGE_CONTROL_MIN = 140;
-const EDGE_CONTROL_MAX = 340;
+const EDGE_CONTROL_MIN = 96;
+const EDGE_CONTROL_MAX = 220;
 const CANVAS_ZOOM_MIN = 0.5;
 const CANVAS_ZOOM_MAX = 1.8;
 const CANVAS_ZOOM_STEP = 0.1;
@@ -788,7 +788,7 @@ function arrowHeadPoints(tip: CanvasPoint, control: CanvasPoint) {
   return `${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}`;
 }
 
-function edgeGeometry(source: ResearchFlowNode, target: ResearchFlowNode, lane: EdgeLane = { laneIndex: 0, overlapCount: 0 }): EdgeGeometry {
+export function edgeGeometry(source: ResearchFlowNode, target: ResearchFlowNode, lane: EdgeLane = { laneIndex: 0, overlapCount: 0 }): EdgeGeometry {
   const sourceCenter = nodeCenter(source);
   const targetCenter = nodeCenter(target);
   const dx = targetCenter.x - sourceCenter.x;
@@ -800,7 +800,7 @@ function edgeGeometry(source: ResearchFlowNode, target: ResearchFlowNode, lane: 
   const normal = { x: -dy / length, y: dx / length };
   const laneSign = lane.laneIndex < 0 ? -1 : 1;
   const laneMagnitude = Math.abs(lane.laneIndex);
-  const laneOffset = lane.laneIndex === 0 ? 0 : laneSign * (44 + laneMagnitude * 64 + lane.overlapCount * 34);
+  const laneOffset = lane.laneIndex === 0 ? 0 : laneSign * (20 + laneMagnitude * 28 + lane.overlapCount * 12);
   const startBase = boundaryAnchor(source, target, 1);
   const endBase = boundaryAnchor(target, source, 1);
   const start = { x: startBase.x + normal.x * laneOffset, y: startBase.y + normal.y * laneOffset };
@@ -809,13 +809,12 @@ function edgeGeometry(source: ResearchFlowNode, target: ResearchFlowNode, lane: 
     EDGE_CONTROL_MAX,
     Math.max(EDGE_CONTROL_MIN, horizontal ? Math.abs(end.x - start.x) / 2 : Math.abs(end.y - start.y) / 2),
   );
-  const arcOffset = Math.abs(laneOffset) + (lane.laneIndex === 0 ? 18 : 54) + (lane.overlapCount ? 48 : 0);
-  const verticalBias = horizontal ? laneSign * (lane.laneIndex === 0 ? 0 : 96 + laneMagnitude * 42) : 0;
+  const arcOffset = Math.abs(laneOffset) + (lane.laneIndex === 0 ? 10 : 18) + (lane.overlapCount ? 12 : 0);
   const controlStart = horizontal
-    ? { x: start.x + directionX * spread, y: start.y + normal.y * arcOffset + verticalBias }
+    ? { x: start.x + directionX * spread, y: start.y + normal.y * arcOffset }
     : { x: start.x + normal.x * arcOffset, y: start.y + directionY * spread };
   const controlEnd = horizontal
-    ? { x: end.x - directionX * spread, y: end.y + normal.y * arcOffset + verticalBias }
+    ? { x: end.x - directionX * spread, y: end.y + normal.y * arcOffset }
     : { x: end.x + normal.x * arcOffset, y: end.y - directionY * spread };
   const labelCenter = {
     x: (start.x + controlStart.x + controlEnd.x + end.x) / 4,
@@ -873,7 +872,7 @@ function detectEdgeOverlap(left: CanvasPoint[], right: CanvasPoint[]) {
   );
 }
 
-function resolveEdgeLanes(edges: ResearchFlowEdge[], nodes: ResearchFlowNode[]) {
+export function resolveEdgeLanes(edges: ResearchFlowEdge[], nodes: ResearchFlowNode[]) {
   const lanes = new Map<string, EdgeLane>();
   const byPair = new Map<string, ResearchFlowEdge[]>();
   for (const edge of edges) {
@@ -897,8 +896,7 @@ function resolveEdgeLanes(edges: ResearchFlowEdge[], nodes: ResearchFlowNode[]) 
     const lane = lanes.get(edge.id) ?? { laneIndex: 0, overlapCount: 0 };
     let geometry = edgeGeometry(source, target, lane);
     const crossesNode = nodes.some((node) => node.id !== edge.source && node.id !== edge.target && pathIntersectsNode(geometry.points, node));
-    const overlapsEdge = geometries.some((item) => item.edge.source !== edge.source || item.edge.target !== edge.target ? detectEdgeOverlap(geometry.points, item.geometry.points) : false);
-    if (crossesNode || overlapsEdge) {
+    if (crossesNode) {
       const nextLane = { laneIndex: lane.laneIndex || 1, overlapCount: lane.overlapCount + 1 };
       lanes.set(edge.id, nextLane);
       geometry = edgeGeometry(source, target, nextLane);
@@ -2617,7 +2615,7 @@ export function ResearchFlowCanvasRoute() {
 
                   <div className={styles.organizationSectionHeader}>
                     <strong>组织图成员</strong>
-                    <span>节点只表示 Agent，工具权限来自每个 Agent 的 ToolPolicy。</span>
+                    <span>节点只表示 Agent；成员、角色和工具权限不在这里编辑，分别回到团队/Agent 管理处理。</span>
                   </div>
                   <div className={styles.organizationAgentList}>
                     {organizationAgents.map((agent) => (
@@ -2645,10 +2643,10 @@ export function ResearchFlowCanvasRoute() {
                       }
                     }}
                   >
-                    <div className={styles.organizationSectionHeader}>
-                      <strong>发送组织消息</strong>
-                      <span>用户消息带 human_override，可越过通信边；Agent 之间仍按边和等级校验。</span>
-                    </div>
+                  <div className={styles.organizationSectionHeader}>
+                    <strong>发送组织消息</strong>
+                    <span>仅用于科研组织上下文消息；通用项目总群、@Agent 和撤回仍在对话页处理。</span>
+                  </div>
                     <div className={styles.twoColumns}>
                       <label>
                         通信方式
@@ -2735,7 +2733,7 @@ export function ResearchFlowCanvasRoute() {
 
                   <div className={styles.organizationSectionHeader}>
                     <strong>提案面板</strong>
-                    <span>创建、归档、扩大工具权限等高风险组织变更必须用户确认。</span>
+                    <span>这里只确认科研组织提案；通用 Agent 配置和工具权限仍由 Agent 管理承接。</span>
                   </div>
                   <div className={styles.organizationProposalList}>
                     {pendingOrganizationProposals.length ? (
@@ -2922,7 +2920,7 @@ export function ResearchFlowCanvasRoute() {
                       <strong>{orgNode?.allowedTools.length ? `${orgNode.allowedTools.length} tools` : "未显式授权"}</strong>
                     </div>
                     <p className={styles.readonlyDescription}>{selectedNode.description || "该 Agent 来自科研团队组织架构。"}</p>
-                    <p className={styles.fieldHint}>画布持续锁定；修改成员、职能、通信线请通过科研组织提案或 Agent 管理完成。</p>
+                    <p className={styles.fieldHint}>画布持续锁定；成员/角色回团队页，工具权限回 Agent 管理，科研通信线通过组织提案确认。</p>
                   </>
                 );
               })()}

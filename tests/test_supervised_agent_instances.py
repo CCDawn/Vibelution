@@ -63,7 +63,7 @@ def test_ensure_supervised_agent_instances_creates_fixed_role_agents_without_ste
     assert state["active_conversation_id"] == "session-user"
 
 
-def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_metadata(tmp_path, monkeypatch):
+def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_active_metadata(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     events = []
     monkeypatch.setattr(
@@ -74,7 +74,6 @@ def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_metadata(tm
 
     first = supervised_agent_service.ensure_supervised_agent_instances()
     baseline = next(agent for agent in first if agent["metadata"]["supervisedRole"] == "baseline")
-    agent_directory_service.archive_agent_instance(baseline["agentId"])
     agent_directory_service.update_agent_instance(
         baseline["agentId"],
         display_name="旧名称",
@@ -92,8 +91,35 @@ def test_ensure_supervised_agent_instances_is_idempotent_and_repairs_metadata(tm
     assert repaired["status"] == "active"
     assert repaired["metadata"]["supervisedRoleLabel"] == "监督进化基线 Agent"
     assert repaired["metadata"]["functionalDisplayName"] == "监督进化基线 Agent"
-    reactivated_events = [item for item in events if item[0][2] == "agent.reactivated"]
-    assert reactivated_events[-1][1]["fields"]["agentId"] == baseline["agentId"]
+
+
+def test_ensure_supervised_agent_instances_does_not_reactivate_archived_fixed_role(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    events = []
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    first = supervised_agent_service.ensure_supervised_agent_instances()
+    baseline = next(agent for agent in first if agent["metadata"]["supervisedRole"] == "baseline")
+    agent_mode_binding_service.remove_agent_from_mode_bindings(baseline["agentId"])
+    agent_directory_service.archive_agent_instance(baseline["agentId"])
+
+    second = supervised_agent_service.ensure_supervised_agent_instances()
+
+    assert baseline["agentId"] not in {agent["agentId"] for agent in second}
+    archived = agent_directory_service.get_agent(baseline["agentId"], include_archived=True)
+    assert archived["status"] == "archived"
+    payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert payload["slots"]["baseline"] == ""
+    assert "baseline" in payload["excludedSlots"]
+    assert baseline["agentId"] not in payload["availableAgentIds"]
+    skipped_events = [
+        item for item in events if item[0][2] == "supervised.agent_instance.sync_skipped_excluded_slot"
+    ]
+    assert skipped_events[-1][1]["fields"]["agentId"] == baseline["agentId"]
 
 
 def test_agents_api_auto_syncs_supervised_agent_instances(tmp_path, monkeypatch):

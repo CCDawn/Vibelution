@@ -17,6 +17,8 @@ LAUNCHER_STATE_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "state.json"
 MAX_TEXT_CHARS = 200_000
 BROWSER_TELEMETRY_RAW_PATH = "raw/browser.telemetry.log"
 BROWSER_TELEMETRY_COMPONENT = "browser_page"
+BROWSER_MEMORY_INDEX_MIN_SECONDS = 300.0
+BROWSER_MEMORY_INDEX_HEAP_DELTA_MB = 128.0
 BACKEND_API_RAW_PATH = "raw/backend.api.log"
 BACKEND_COMPONENT = "backend"
 CONFIG_MODEL_DISCOVERY_ENDPOINT = "/api/config/discover-models"
@@ -526,7 +528,8 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
                 "tail_lines": 80,
             },
         ]
-        indexed = _should_index_browser_telemetry_event(manifest, timestamp, event_code, level, fields)
+        ignored_dev_surface = _is_dev_browser_telemetry_surface(fields)
+        indexed = (not ignored_dev_surface) and _should_index_browser_telemetry_event(manifest, timestamp, event_code, level, fields)
         event_payload = {
             "schema_version": 1,
             "runtime_scene_id": scene_id,
@@ -543,13 +546,25 @@ def record_browser_telemetry(payload: dict[str, Any]) -> dict[str, Any]:
         }
         if indexed:
             _append_scene_event(scene_dir, BROWSER_TELEMETRY_COMPONENT, event_payload)
+            _update_browser_manifest(scene_dir, manifest, timestamp, event_code, level, message, fields, indexed=indexed)
+        else:
+            if ignored_dev_surface:
+                _update_ignored_browser_telemetry_manifest(
+                    scene_dir,
+                    manifest,
+                    timestamp,
+                    fields,
+                    reason="vite_dev_surface",
+                )
+            else:
+                _update_browser_manifest(scene_dir, manifest, timestamp, event_code, level, message, fields, indexed=indexed)
         _update_runtime_scene_package_manifest(scene_dir, manifest)
-        _update_browser_manifest(scene_dir, manifest, timestamp, event_code, level, message, fields, indexed=indexed)
 
     return {
         "accepted": True,
         "runtimeSceneId": scene_id,
         "recordedAt": timestamp,
+        "indexed": indexed,
     }
 
 
@@ -4138,9 +4153,45 @@ def _append_scene_event(scene_dir: Path, component: str, payload: dict[str, Any]
     with event_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
         handle.write("\n")
+    if not _should_promote_scene_event_to_timeline(payload):
+        return
     _append_scene_jsonl(scene_dir, TIMELINE_PATH, payload)
     if _is_lifecycle_event(payload):
         _append_scene_jsonl(scene_dir, LIFECYCLE_PATH, payload)
+
+
+def _should_promote_scene_event_to_timeline(payload: dict[str, Any]) -> bool:
+    """Keep component evidence complete while reserving timeline for diagnostic signals."""
+
+    event_code = str(payload.get("event_code") or "").strip()
+    level = str(payload.get("level") or "").strip().lower()
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+    if _is_known_benign_browser_event(payload):
+        return False
+    if event_code in {
+        "session.list.loaded",
+        "session.agent_missing.hidden_from_index",
+        "browser.memory.sampled",
+        "browser.process_memory.sampled",
+    }:
+        return level in {"warning", "error", "fatal"}
+    if bool(fields.get("controlSignal")) and level in {"", "debug", "info"}:
+        return False
+    return True
+
+
+def _is_known_benign_browser_event(payload: dict[str, Any]) -> bool:
+    event_code = str(payload.get("event_code") or "").strip()
+    if event_code != "browser.page.error":
+        return False
+    message = str(payload.get("message") or "")
+    fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else {}
+    field_message = " ".join(
+        str(fields.get(key) or "")
+        for key in ("message", "error", "errorMessage", "stack")
+    )
+    text = f"{message} {field_message}".lower()
+    return "resizeobserver loop completed with undelivered notifications" in text
 
 
 def _is_lifecycle_event(payload: dict[str, Any]) -> bool:
@@ -4167,6 +4218,8 @@ def _should_index_browser_telemetry_event(
 
     if level in {"warning", "error"}:
         return True
+    if event_code == "browser.memory.sampled":
+        return _should_index_browser_memory_sample(manifest, timestamp, fields)
     if event_code != "browser.visibility.changed":
         return True
 
@@ -4182,6 +4235,41 @@ def _should_index_browser_telemetry_event(
     if not last_indexed_at:
         return True
     return _seconds_between_iso(last_indexed_at, timestamp) >= BROWSER_VISIBILITY_TIMELINE_MIN_SECONDS
+
+
+def _should_index_browser_memory_sample(
+    manifest: dict[str, Any],
+    timestamp: str,
+    fields: dict[str, Any],
+) -> bool:
+    browser = manifest.get("browser") if isinstance(manifest.get("browser"), dict) else {}
+    last_indexed_at = str(browser.get("last_indexed_memory_sample_at") or "").strip()
+    if not last_indexed_at:
+        return True
+    reason = str(fields.get("reason") or "").strip()
+    previous_reason = str(browser.get("last_indexed_memory_reason") or "").strip()
+    pathname = str(fields.get("pathname") or "").strip()
+    previous_pathname = str(browser.get("last_indexed_memory_pathname") or "").strip()
+    if reason and reason != previous_reason:
+        return True
+    if pathname and pathname != previous_pathname:
+        return True
+    previous_heap = _coerce_float(browser.get("last_indexed_memory_used_js_heap_mb"), default=0.0)
+    next_heap = _coerce_float(fields.get("usedJSHeapMB"), default=0.0)
+    if next_heap and previous_heap and abs(next_heap - previous_heap) >= BROWSER_MEMORY_INDEX_HEAP_DELTA_MB:
+        return True
+    return _seconds_between_iso(last_indexed_at, timestamp) >= BROWSER_MEMORY_INDEX_MIN_SECONDS
+
+
+def _is_dev_browser_telemetry_surface(fields: dict[str, Any]) -> bool:
+    surface = str(fields.get("telemetrySurface") or "").strip().lower()
+    if surface == "vite_dev":
+        return True
+    port = str(fields.get("port") or "").strip()
+    if port in {"5173", "5174"}:
+        return True
+    href = str(fields.get("href") or fields.get("origin") or "").strip()
+    return ":5173" in href or ":5174" in href
 
 
 def _update_runtime_scene_package_manifest(scene_dir: Path, manifest: dict[str, Any]) -> None:
@@ -4304,6 +4392,15 @@ def _update_browser_manifest(
         ):
             if field_name in fields:
                 browser[f"last_memory_{_camel_to_snake(field_name)}"] = fields.get(field_name)
+        memory_sample_count = _coerce_int(browser.get("memory_sample_count"), default=0) + 1
+        browser["memory_sample_count"] = memory_sample_count
+        if indexed:
+            browser["last_indexed_memory_sample_at"] = timestamp
+            browser["last_indexed_memory_reason"] = str(fields.get("reason") or "").strip()
+            browser["last_indexed_memory_pathname"] = str(fields.get("pathname") or "").strip()
+            browser["last_indexed_memory_used_js_heap_mb"] = fields.get("usedJSHeapMB")
+        else:
+            browser["memory_sample_suppressed_count"] = _coerce_int(browser.get("memory_sample_suppressed_count"), default=0) + 1
 
     if event_code == "browser.process_memory.sampled":
         browser["last_process_memory_sample_at"] = timestamp
@@ -4338,6 +4435,34 @@ def _update_browser_manifest(
                 MAX_TELEMETRY_FIELD_TEXT_CHARS,
             )
 
+    manifest["browser"] = browser
+    _save_scene_manifest(scene_dir, manifest)
+
+
+def _update_ignored_browser_telemetry_manifest(
+    scene_dir: Path,
+    manifest: dict[str, Any],
+    timestamp: str,
+    fields: dict[str, Any],
+    *,
+    reason: str,
+) -> None:
+    browser = manifest.get("browser")
+    if not isinstance(browser, dict):
+        browser = {}
+    browser["telemetry_path"] = BROWSER_TELEMETRY_RAW_PATH
+    browser["last_event_at"] = timestamp
+    browser["last_event_indexed"] = False
+    browser["last_ignored_telemetry_at"] = timestamp
+    browser["last_ignored_telemetry_reason"] = _truncate_text(reason, 120)
+    ignored_count = _coerce_int(browser.get("ignored_telemetry_count"), default=0)
+    browser["ignored_telemetry_count"] = ignored_count + 1
+    href = fields.get("href")
+    if isinstance(href, str) and href.strip():
+        browser["last_ignored_telemetry_href"] = _truncate_text(href.strip(), MAX_TELEMETRY_FIELD_TEXT_CHARS)
+    surface = fields.get("telemetrySurface")
+    if isinstance(surface, str) and surface.strip():
+        browser["last_ignored_telemetry_surface"] = _truncate_text(surface.strip(), MAX_TELEMETRY_FIELD_TEXT_CHARS)
     manifest["browser"] = browser
     _save_scene_manifest(scene_dir, manifest)
 

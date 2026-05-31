@@ -30,6 +30,12 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.agentPanel");
     expect(routeSource).toContain("styles.detailPanel");
     expect(routeSource).toContain("styles.agentTable");
+    expect(routeSource).toContain("agent.avatarImageUrl");
+    expect(routeSource).toContain("styles.agentAvatarImage");
+    expect(routeSource).toContain("/api/agents/avatar-options");
+    expect(routeSource).toContain("/avatar-image");
+    expect(routeSource).toContain("/avatar");
+    expect(routeSource).toContain("styles.avatarEditorPanel");
     expect(routeSource).not.toContain("agentCardGrid");
   });
 
@@ -48,6 +54,11 @@ describe("AgentsRoute layout contract", () => {
   it("shows the unified Agent card sections needed by later editing phases", () => {
     expect(routeSource).toContain("copy.model");
     expect(routeSource).toContain("copy.prompt");
+    expect(routeSource).toContain("promptTemplateDisplayName(agent.promptTemplate, agent.promptTemplateId, lang)");
+    expect(routeSource).toContain("promptTemplateDisplayName(selectedAgent.promptTemplate, selectedAgent.promptTemplateId, lang)");
+    expect(routeSource).toContain("promptTemplateOptionLabel(template, lang)");
+    expect(routeSource).toContain('"research ceo": "科研负责人"');
+    expect(routeSource).not.toContain("<span>{agent.promptTemplate?.name || agent.promptTemplateId || \"-\"}</span>");
     expect(routeSource).toContain("copy.tools");
     expect(routeSource).toContain("copy.memory");
     expect(routeSource).toContain("copy.runtimeStatus");
@@ -67,6 +78,11 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("AgentConfigDraft");
     expect(routeSource).toContain("useMutation");
     expect(routeSource).toContain("copy.configTitle");
+    expect(routeSource).toContain("copy.configGuideTitle");
+    expect(routeSource).toContain("copy.configGuideBoundaryHint");
+    expect(routeSource).toContain("copy.toolPolicyPickerHint");
+    expect(routeSource).toContain("copy.memoryPolicyPickerHint");
+    expect(routeSource).toContain("styles.configGuidePanel");
     expect(routeSource).toContain("displayName: payload.draft.displayName");
     expect(routeSource).toContain("profileId: payload.draft.profileId");
     expect(routeSource).toContain("promptTemplateId: payload.draft.promptTemplateId");
@@ -75,6 +91,67 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("status: payload.draft.status");
     expect(routeSource).toContain("method: \"PATCH\"");
     expect(routeSource).toContain("queryKeys.agentConfigWorkspace()");
+    expect(styles.configGuidePanel).toBeTruthy();
+    expect(styles.healthGuidePanel).toBeTruthy();
+  });
+
+  it("explains Agent health states with reason and next action instead of a bare hint pill", () => {
+    expect(routeSource).toContain('return lang === "zh" ? "可优化" : "Optional"');
+    expect(routeSource).toContain("function issueSummary");
+    expect(routeSource).toContain("function issueNextStep");
+    expect(routeSource).toContain("styles.healthCell");
+    expect(routeSource).toContain("styles.detailHealthStatus");
+    expect(routeSource).toContain("copy.healthNextStep");
+    expect(routeSource).toContain("issueSummary(agent.health, lang)");
+    expect(routeSource).toContain("issueNextStep(selectedAgent.health, lang)");
+    expect(styles.healthCell).toBeTruthy();
+    expect(styles.detailHealthStatus).toBeTruthy();
+  });
+
+  it("edits Agent persona profile from AgentDirectory without recommendation automation", () => {
+    expect(routeSource).toContain("AgentPersonaDraft");
+    expect(routeSource).toContain("personaProfileFromDraft");
+    expect(routeSource).toContain("personaProfile: personaProfileFromDraft(payload.draft)");
+    expect(routeSource).toContain("copy.personaTitle");
+    expect(routeSource).toContain("copy.gender");
+    expect(routeSource).toContain("copy.age");
+    expect(routeSource).toContain("copy.communicationStyle");
+    expect(routeSource).toContain("copy.collaborationPreference");
+    expect(routeSource).toContain("copy.identityNotes");
+    expect(routeSource).toContain("styles.fieldWide");
+    expect(routeSource).toContain("updatePersonaMutation");
+    expect(routeSource).not.toContain("recommendAgents");
+    expect(styles.fieldWide).toBeTruthy();
+  });
+
+  it("protects unsaved Agent drafts from workspace polling refreshes", () => {
+    expect(routeSource).toContain("AgentDraftSyncSource");
+    expect(routeSource).toContain("draftSyncSourceRef");
+    expect(routeSource).toContain("draftSyncSourceFromAgent(workspace, selectedAgent)");
+    expect(routeSource).toContain("const agentChanged = previousSource?.agentId !== nextSource.agentId");
+    expect(routeSource).toContain("configDraftEqualsDraft(current, previousSource.config) ? nextSource.config : current");
+    expect(routeSource).toContain("personaDraftEqualsDraft(current, previousSource.persona) ? nextSource.persona : current");
+    expect(routeSource).toContain("taskDraftEqualsDraft(current, previousSource.task) ? nextSource.task : current");
+    expect(routeSource).toContain("toolPolicyDraftEqualsDraft(current, previousSource.toolPolicy) ? nextSource.toolPolicy : current");
+    expect(routeSource).toContain("memoryPolicyDraftEqualsDraft(current, previousSource.memoryPolicy) ? nextSource.memoryPolicy : current");
+    expect(routeSource).toContain("delegationPolicyDraftEqualsDraft(current, previousSource.delegationPolicy) ? nextSource.delegationPolicy : current");
+    expect(routeSource).toContain("supervisionPolicyDraftEqualsDraft(current, previousSource.supervisionPolicy) ? nextSource.supervisionPolicy : current");
+    expect(routeSource).not.toContain("}, [selectedAgent?.agentId, workspace?.generatedAt]);");
+  });
+
+  it("edits Agent task profile from AgentDirectory without automatic routing", () => {
+    expect(routeSource).toContain("AgentTaskDraft");
+    expect(routeSource).toContain("taskProfileFromDraft");
+    expect(routeSource).toContain("taskProfile: taskProfileFromDraft(payload.draft)");
+    expect(routeSource).toContain("copy.taskTitle");
+    expect(routeSource).toContain("copy.mission");
+    expect(routeSource).toContain("copy.taskTypes");
+    expect(routeSource).toContain("copy.responsibilities");
+    expect(routeSource).toContain("copy.preferredTasks");
+    expect(routeSource).toContain("copy.successCriteria");
+    expect(routeSource).toContain("copy.handoffNotes");
+    expect(routeSource).toContain("updateTaskMutation");
+    expect(routeSource).not.toContain("autoRouteAgent");
   });
 
   it("edits Agent mode membership from the same detail card", () => {
@@ -85,19 +162,25 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("copy.researchPool");
     expect(routeSource).toContain("copy.supervisedSlot");
     expect(routeSource).toContain("copy.selfEvolutionSlot");
-    expect(routeSource).toContain("queryKeys.agentModeBindings()");
+    expect(routeSource).toContain("chatWorkspaceCache.afterAgentWorkspaceChanged()");
     expect(routeSource).toContain("styles.toggleGrid");
   });
 
-  it("edits Agent group room membership from the same detail card", () => {
-    expect(routeSource).toContain("AgentChatRoomMembershipDraft");
-    expect(routeSource).toContain("chatRoomDraftFromWorkspace");
-    expect(routeSource).toContain("/chat-rooms");
+  it("shows Agent group room membership as read-only references", () => {
     expect(routeSource).toContain("copy.chatRoomMembership");
-    expect(routeSource).toContain("copy.saveChatRooms");
-    expect(routeSource).toContain("queryKeys.chatRooms()");
+    expect(routeSource).toContain("只读引用");
+    expect(routeSource).toContain("Read-only");
+    expect(routeSource).toContain("selectedAgent.references.filter((reference) => reference.kind === \"chat_room\").length");
     expect(routeSource).toContain("styles.roomMembershipList");
     expect(routeSource).toContain("styles.roomCheckField");
+    expect(routeSource).toContain("navigate(`/chat?room=${encodeURIComponent(room.roomId)}`)");
+    expect(routeSource).toContain("打开群聊");
+    expect(routeSource).toContain("群聊成员关系在对话页的群设置中维护；团队关联群聊由团队页同步。");
+    expect(routeSource).not.toContain("AgentChatRoomMembershipDraft");
+    expect(routeSource).not.toContain("chatRoomDraftFromWorkspace");
+    expect(routeSource).not.toContain("updateChatRoomsMutation");
+    expect(routeSource).not.toContain("chatWorkspaceCache.afterAgentChatRoomsChanged()");
+    expect(routeSource).not.toContain("copy.saveChatRooms");
   });
 
   it("surfaces Team references as first-class Agent Center relationships", () => {
@@ -105,7 +188,7 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain('team: "Team"');
     expect(routeSource).toContain("summary?.teamCount");
     expect(routeSource).toContain("referenceRoute(reference)");
-    expect(routeSource).toContain('`/agents/teams?team=${encodeURIComponent(reference.sourceId)}`');
+    expect(routeSource).toContain('`/teams?team=${encodeURIComponent(reference.sourceId)}`');
     expect(routeSource).toContain("styles.referenceRouteButton");
     expect(routeSource).toContain("styles.referenceStatusStale");
   });
@@ -115,16 +198,56 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("fetchJson<ToolRegistryPayload>(\"/api/tools\")");
     expect(routeSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("allowedTools: sortedIds(payload.draft.allowedTools)");
+    expect(routeSource).toContain("preferredTools: sortedIds(payload.draft.preferredTools)");
     expect(routeSource).toContain("blockedTools: sortedIds(payload.draft.blockedTools)");
     expect(routeSource).toContain("writeScopes: sortedIds(payload.draft.writeScopes)");
+    expect(routeSource).toContain("const toolBundles = toolsQuery.data?.toolBundles ?? []");
+    expect(routeSource).toContain("applyToolBundle(bundle, \"merge\")");
+    expect(routeSource).toContain("applyToolBundle(bundle, \"replace\")");
+    expect(routeSource).toContain("copy.toolBundlesTitle");
+    expect(routeSource).toContain("copy.applyBundle");
+    expect(routeSource).toContain("copy.replaceWithBundle");
+    expect(routeSource).toContain("copy.preferredTools");
+    expect(routeSource).toContain("styles.toolBundlePanel");
+    expect(routeSource).toContain("styles.toolBundleItem");
     expect(routeSource).toContain("toggleToolPolicyScope(\"writeScopes\", \"shared\"");
     expect(routeSource).toContain("copy.workspaceWriteScopes");
     expect(routeSource).toContain("styles.workspaceScopePanel");
+    expect(routeSource).toContain("groupPolicyToolsByCategory");
+    expect(routeSource).toContain("visiblePolicyToolGroups");
+    expect(routeSource).toContain("toolCategoryLabel");
+    expect(routeSource).toContain("toolTierLabel");
+    expect(routeSource).toContain("copy.toolCategoryCount");
+    expect(routeSource).toContain("styles.toolPermissionGroup");
+    expect(routeSource).toContain("styles.toolPermissionGroupHeader");
+    expect(routeSource).toContain("styles.toolPermissionMeta");
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"allowed\")");
     expect(routeSource).toContain("updateToolPolicyMode(tool.name, \"blocked\")");
     expect(routeSource).toContain("queryKeys.tools()");
     expect(routeSource).toContain("styles.toolPermissionList");
     expect(routeSource).toContain("styles.segmentedControl");
+    expect(styles.toolBundlePanel).toBeTruthy();
+    expect(styles.toolBundleItem).toBeTruthy();
+    expect(styles.toolPermissionGroup).toBeTruthy();
+    expect(styles.toolPermissionGroupHeader).toBeTruthy();
+    expect(styles.toolPermissionMeta).toBeTruthy();
+  });
+
+  it("surfaces advisor tool-governance requests without bypassing ToolPolicy", () => {
+    expect(routeSource).toContain("AgentToolGovernanceRequest");
+    expect(routeSource).toContain("toolGovernanceDraftFromAgent");
+    expect(routeSource).toContain("toolPolicyDeltaFromDraft");
+    expect(routeSource).toContain("/tool-governance-requests");
+    expect(routeSource).toContain("copy.toolGovernanceTitle");
+    expect(routeSource).toContain("copy.toolGovernancePending");
+    expect(routeSource).toContain("copy.toolGovernanceApprove");
+    expect(routeSource).toContain("copy.toolGovernanceReject");
+    expect(routeSource).toContain("createToolGovernanceMutation");
+    expect(routeSource).toContain("resolveToolGovernanceMutation");
+    expect(routeSource).toContain("styles.toolGovernanceList");
+    expect(routeSource).toContain("styles.toolGovernanceItem");
+    expect(styles.toolGovernanceList).toBeTruthy();
+    expect(styles.toolGovernanceItem).toBeTruthy();
   });
 
   it("edits Agent memory policy from the same detail card", () => {

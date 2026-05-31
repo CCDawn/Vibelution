@@ -17,7 +17,7 @@ import {
   TerminalSquare,
   Wrench,
 } from "lucide-react";
-import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { DragEvent, ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import {
   ChatNextStateSignalSummary,
@@ -36,7 +36,14 @@ import {
   hasResponseBlock,
   hasThoughtBlock,
   hasMentalBlock,
+  hasToolBlock,
   hasUserContent,
+  imageArtifactForMessage,
+  isAgentInboxMessage,
+  isGroupRoomTranscriptMessage,
+  isRuntimeNoticeMessage,
+  isTurnErrorMessage,
+  researchOrgMessageChips,
 } from "./messageSections";
 import { parseResponseSegments, ResponseSegment } from "./messageResponseSegments";
 import styles from "./ConversationView.module.css";
@@ -44,9 +51,35 @@ import styles from "./ConversationView.module.css";
 const RUNNING_OPERATION_STATUSES = new Set(["queued", "pending", "running", "thinking", "tooling", "answering"]);
 const DEFAULT_EXPANDED_RESPONSE_TAIL_COUNT = 1;
 
+type ComposerDragData = {
+  files?: ArrayLike<File> | Iterable<File> | null;
+  items?: ArrayLike<DataTransferItem> | Iterable<DataTransferItem> | null;
+} | null | undefined;
+
+export function extractComposerImageDropFiles(data: ComposerDragData): File[] {
+  const files = data?.files;
+  if (!files) {
+    return [];
+  }
+  return Array.from(files).filter((file) => file.type.startsWith("image/"));
+}
+
+export function hasComposerImageDragPayload(data: ComposerDragData): boolean {
+  if (extractComposerImageDropFiles(data).length > 0) {
+    return true;
+  }
+  const items = data?.items;
+  if (!items) {
+    return false;
+  }
+  return Array.from(items).some((item) => item.kind === "file" && item.type.startsWith("image/"));
+}
+
 type MarkdownBlock =
   | { type: "heading"; level: 1 | 2 | 3 | 4; content: string }
   | { type: "paragraph"; content: string }
+  | { type: "image"; alt: string; url: string }
+  | { type: "table"; headers: string[]; rows: string[][] }
   | { type: "unorderedList"; items: string[] }
   | { type: "orderedList"; items: string[] }
   | { type: "divider" };
@@ -126,14 +159,92 @@ function userAvatarSymbol(preset: string | undefined, label: string) {
   return label.trim().slice(0, 1).toUpperCase() || "U";
 }
 
-type ImageArtifactMessage = {
-  imageUrl: string;
+function metadataText(metadata: Record<string, unknown> | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function agentInboxSourceLabel(message: ConversationMessage) {
+  const metadata = message.metadata;
+  const sourceLabel = [
+    metadataText(metadata, "sourceAgentCode"),
+    metadataText(metadata, "sourceAgentName"),
+  ].filter(Boolean).join(" · ");
+  if (sourceLabel) {
+    return `Agent 私信 · ${sourceLabel}`;
+  }
+  const fallback = String(message.content ?? "").match(/^来源 Agent:\s*(.+)$/m)?.[1]?.trim();
+  return fallback ? `Agent 私信 · ${fallback}` : "Agent 私信";
+}
+
+function agentInboxSummary(message: ConversationMessage) {
+  const metadataSummary = metadataText(message.metadata, "summary");
+  if (metadataSummary) {
+    return metadataSummary;
+  }
+  const content = String(message.content ?? "");
+  const summaryMatch = content.match(/^摘要:\s*([\s\S]*?)(?:\n\s*消息内容:|$)/m);
+  const summary = summaryMatch?.[1]?.trim();
+  if (summary) {
+    return summary;
+  }
+  const bodyMatch = content.match(/^消息内容:\s*([\s\S]*)$/m);
+  const body = bodyMatch?.[1]?.trim();
+  if (body) {
+    return body.replace(/\s+/g, " ").trim();
+  }
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith("[Agent 私信") && !line.startsWith("来源 Agent") && !line.startsWith("消息ID"))
+    ?? "";
+}
+
+function turnErrorType(message: ConversationMessage) {
+  const raw = message.metadata?.errorType ?? message.metadata?.error_type;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+function groupRoomTranscriptLabel(message: ConversationMessage) {
+  const metadata = message.metadata;
+  const roomTitle = metadataText(metadata, "sourceRoomTitle");
+  return roomTitle ? `群聊同步记录 · ${roomTitle}` : "群聊同步记录";
+}
+
+function mergeAdjacentTurnErrorMessages(previous: ConversationMessage, next: ConversationMessage): ConversationMessage {
+  const previousThought = String(previous.thought ?? "").trim();
+  const nextThought = String(next.thought ?? "").trim();
+  const thought = [previousThought, nextThought]
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join("\n\n");
+  const toolCalls = [...(previous.toolCalls ?? [])];
+  const seenToolCalls = new Set(toolCalls.map((toolCall) => JSON.stringify(toolCall)));
+  for (const toolCall of next.toolCalls ?? []) {
+    const key = JSON.stringify(toolCall);
+    if (seenToolCalls.has(key)) {
+      continue;
+    }
+    seenToolCalls.add(key);
+    toolCalls.push(toolCall);
+  }
+  return {
+    ...previous,
+    thought: thought || undefined,
+    mentalSnapshot: previous.mentalSnapshot ?? next.mentalSnapshot,
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    metadata: {
+      ...(next.metadata ?? {}),
+      ...(previous.metadata ?? {}),
+    },
+  };
+}
+
+type PreviewImageState = {
+  src: string;
+  alt: string;
   downloadUrl: string;
-  prompt: string;
-  artifactId: string;
-  size: string;
-  quality: string;
-  model: string;
+  downloadName: string | true;
 };
 
 type ComposerAttachment = {
@@ -143,34 +254,6 @@ type ComposerAttachment = {
   sizeBytes: number;
   contentType: string;
 };
-
-function metadataString(metadata: Record<string, unknown> | undefined, key: string) {
-  const value = metadata?.[key];
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function imageArtifactForMessage(message: ConversationMessage): ImageArtifactMessage | null {
-  const metadata = message.metadata;
-  if (!metadata || metadataString(metadata, "kind") !== "image2_generation") {
-    return null;
-  }
-  if (metadataString(metadata, "status") !== "succeeded") {
-    return null;
-  }
-  const imageUrl = metadataString(metadata, "imageUrl") || metadataString(metadata, "url");
-  if (!imageUrl) {
-    return null;
-  }
-  return {
-    imageUrl,
-    downloadUrl: metadataString(metadata, "downloadUrl") || imageUrl,
-    prompt: metadataString(metadata, "prompt"),
-    artifactId: metadataString(metadata, "artifactId"),
-    size: metadataString(metadata, "size"),
-    quality: metadataString(metadata, "quality"),
-    model: metadataString(metadata, "model"),
-  };
-}
 
 export function shouldShowNextStateSignalInConversation(
   signal: ChatNextStateSignalSummary,
@@ -298,6 +381,8 @@ export function ConversationView({
   const lastComposerFocusSignalRef = useRef("");
   const [sectionExpansion, setSectionExpansion] = useState<Record<string, Record<string, boolean>>>({});
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [previewImage, setPreviewImage] = useState<PreviewImageState | null>(null);
+  const [composerDragActive, setComposerDragActive] = useState(false);
   const previousStreamingRef = useRef<Record<string, boolean>>({});
   const resolvedActionMode = composerActionMode ?? "send";
   const hasComposerAttachments = composerAttachments.length > 0;
@@ -315,6 +400,7 @@ export function ConversationView({
   const userLabel = userDisplayName?.trim() || t("operator");
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
   const handlePrimaryAction = resolvedActionMode === "stop" ? onStop ?? onSubmit : onSubmit;
+  const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const timestampFormatter = useMemo(
     () =>
       new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", {
@@ -326,6 +412,53 @@ export function ConversationView({
       }),
     [lang],
   );
+
+  useEffect(() => {
+    if (!composerCanAcceptImageDrop && composerDragActive) {
+      setComposerDragActive(false);
+    }
+  }, [composerCanAcceptImageDrop, composerDragActive]);
+
+  function handleComposerDragEnter(event: DragEvent<HTMLDivElement>) {
+    if (!composerCanAcceptImageDrop || !hasComposerImageDragPayload(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setComposerDragActive(true);
+  }
+
+  function handleComposerDragOver(event: DragEvent<HTMLDivElement>) {
+    if (!composerCanAcceptImageDrop || !hasComposerImageDragPayload(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setComposerDragActive(true);
+  }
+
+  function handleComposerDragLeave(event: DragEvent<HTMLDivElement>) {
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      return;
+    }
+    setComposerDragActive(false);
+  }
+
+  function handleComposerDrop(event: DragEvent<HTMLDivElement>) {
+    if (!composerCanAcceptImageDrop || !onAddComposerAttachments) {
+      setComposerDragActive(false);
+      return;
+    }
+    const files = extractComposerImageDropFiles(event.dataTransfer);
+    if (!files.length) {
+      setComposerDragActive(false);
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+    setComposerDragActive(false);
+    onAddComposerAttachments(files);
+  }
 
   const latestUserMessage = useMemo(
     () =>
@@ -364,17 +497,52 @@ export function ConversationView({
     [nextStateSignals, phase],
   );
   const [nextStateSignalsExpanded, setNextStateSignalsExpanded] = useState(false);
+  const displayMessages = useMemo(
+    () => {
+      const visibleMessages = messages.filter((message) => !isRuntimeNoticeMessage(message));
+      const mergedMessages: ConversationMessage[] = [];
+      for (const message of visibleMessages) {
+        const previous = mergedMessages[mergedMessages.length - 1];
+        if (
+          previous
+          && isTurnErrorMessage(previous)
+          && isTurnErrorMessage(message)
+          && normalizeNoticeText(previous.content) === normalizeNoticeText(message.content)
+        ) {
+          mergedMessages[mergedMessages.length - 1] = mergeAdjacentTurnErrorMessages(previous, message);
+          continue;
+        }
+        mergedMessages.push(message);
+      }
+      return mergedMessages;
+    },
+    [messages],
+  );
+  const imageArtifactUrlsBeforeMessage = useMemo(() => {
+    const urlsByMessageId = new Map<string, Set<string>>();
+    const seenImageUrls = new Set<string>();
+    for (const message of displayMessages) {
+      urlsByMessageId.set(message.id, new Set(seenImageUrls));
+      const artifact = imageArtifactForMessage(message);
+      if (!artifact) {
+        continue;
+      }
+      addComparableImageUrl(seenImageUrls, artifact.imageUrl);
+      addComparableImageUrl(seenImageUrls, artifact.downloadUrl);
+    }
+    return urlsByMessageId;
+  }, [displayMessages]);
   const latestToolCalls = useMemo(
     () =>
-      [...messages]
+      [...displayMessages]
         .reverse()
-        .find((message) => (message.toolCalls?.length ?? 0) > 0)?.toolCalls ?? [],
-    [messages],
+        .find((message) => !isTurnErrorMessage(message) && (message.toolCalls?.length ?? 0) > 0)?.toolCalls ?? [],
+    [displayMessages],
   );
   const defaultExpandedResponseIds = useMemo(() => {
     const ids: string[] = [];
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-      const message = messages[index];
+    for (let index = displayMessages.length - 1; index >= 0; index -= 1) {
+      const message = displayMessages[index];
       if (!hasResponseBlock(message)) {
         continue;
       }
@@ -384,8 +552,8 @@ export function ConversationView({
       }
     }
     return new Set(ids);
-  }, [messages]);
-  const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(messages), [messages]);
+  }, [displayMessages]);
+  const timelineScrollSignal = useMemo(() => buildTimelineScrollSignal(displayMessages), [displayMessages]);
   const hasSessionMeta = resolvedStats.length > 0 || latestToolCalls.length > 0;
   const hasMetaSection = showSessionOverview && (hasSessionMeta || Boolean(supplementalContent));
   const operationLabels = useMemo(
@@ -416,6 +584,25 @@ export function ConversationView({
       return normalized;
     }
     return `${normalized.slice(0, maxLength - 1).trimEnd()}...`;
+  }
+
+  function normalizeNoticeText(value: string) {
+    return value.replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  function addComparableImageUrl(target: Set<string>, url: string) {
+    const normalized = comparableImageUrl(url);
+    if (normalized) {
+      target.add(normalized);
+    }
+  }
+
+  function comparableImageUrl(url: string) {
+    return previewUrlForImage(url).trim();
+  }
+
+  function openImagePreview(image: PreviewImageState) {
+    setPreviewImage(image);
   }
 
   useLayoutEffect(() => {
@@ -451,6 +638,19 @@ export function ConversationView({
     timeline.addEventListener("scroll", handleScroll);
     return () => timeline.removeEventListener("scroll", handleScroll);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!previewImage) {
+      return undefined;
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPreviewImage(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [previewImage]);
 
   useEffect(() => {
     const focusSignal = String(editingMessageId || "").trim();
@@ -600,10 +800,18 @@ export function ConversationView({
     if (["done", "success", "completed", "succeeded"].includes(status)) {
       return <CheckCircle2 size={14} />;
     }
-    if (RUNNING_OPERATION_STATUSES.has(status)) {
+    if (isRunningOperationStatus(status)) {
       return <LoaderCircle className={styles.statusSpinner} size={14} />;
     }
     return <CircleDot size={14} />;
+  }
+
+  function isRunningOperationStatus(status: string) {
+    return RUNNING_OPERATION_STATUSES.has(status.trim().toLowerCase());
+  }
+
+  function hasRunningOperation(operations: ConversationOperation[]) {
+    return operations.some((operation) => isRunningOperationStatus(operation.status));
   }
 
   function operationLabel(operation: ConversationOperation) {
@@ -688,10 +896,12 @@ export function ConversationView({
             : detailsExpanded ? t("toolCallDetailsVisible") : t("toolCallDetailsHidden");
           return (
             <div key={operation.id} className={styles.operationItemWrap}>
-              <div className={styles.operationItem}>
-                <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
-                  {operationIcon(operation.kind, operation.label)}
-                </span>
+              <div className={operation.kind === "tool" ? `${styles.operationItem} ${styles.operationItemTool}` : styles.operationItem}>
+                {operation.kind !== "tool" ? (
+                  <span className={`${styles.operationIcon} ${styles[`operationIcon_${operation.kind}`]}`}>
+                    {operationIcon(operation.kind, operation.label)}
+                  </span>
+                ) : null}
                 <div className={styles.operationText}>
                   <span className={styles.operationName}>{operationLabel(operation)}</span>
                   {operation.summary ? (
@@ -756,10 +966,7 @@ export function ConversationView({
     const expanded = getExpansionState(messageId, section, defaultExpanded);
     const kind = operations[0]?.kind ?? "tool";
     const title = operationGroupTitle(kind, operations.length);
-    const isRunning = operations.some((operation) => {
-      const status = operation.status.trim().toLowerCase();
-      return RUNNING_OPERATION_STATUSES.has(status);
-    });
+    const isRunning = hasRunningOperation(operations);
     const toggleTitle = expanded
       ? section === "thought"
         ? t("thoughtProcessVisible")
@@ -808,6 +1015,21 @@ export function ConversationView({
     );
   }
 
+  function mentalFeelingSummaryRow(snapshot: MentalStateSnapshot | undefined) {
+    const feeling = String(snapshot?.feeling ?? "").trim();
+    const summary = String(snapshot?.summary ?? "").trim();
+    if (!feeling && !summary) {
+      return null;
+    }
+    if (!summary || feeling === summary) {
+      return { label: t("mentalFeeling"), value: feeling || summary };
+    }
+    if (!feeling) {
+      return { label: t("mentalSummary"), value: summary };
+    }
+    return { label: `${t("mentalFeeling")} / ${t("mentalSummary")}`, value: `${feeling}\n${summary}` };
+  }
+
   function renderAuxiliaryToggle(
     messageId: string,
     section: "thought" | "mental",
@@ -848,13 +1070,14 @@ export function ConversationView({
       return null;
     }
     const thought = message.thought?.trim() ?? "";
+    const hasLaterActiveSection = hasMentalBlock(message) || hasToolBlock(message) || hasResponseBlock(message);
     return renderAuxiliaryToggle(
       message.id,
       "thought",
       t("thoughtProcess"),
       compactPreview(thought),
       Boolean(message.streaming),
-      Boolean(message.streaming),
+      Boolean(message.streaming) && !hasLaterActiveSection,
       <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_thought}`}>
         <p className={styles.thoughtText}>{thought}</p>
       </div>,
@@ -877,8 +1100,7 @@ export function ConversationView({
       snapshot?.updatedAt ? { label: t("mentalLastUpdated"), value: formatTimestamp(snapshot.updatedAt) } : null,
     ].filter(Boolean) as Array<{ label: string; value: string }>;
     const bodyRows = [
-      snapshot?.feeling ? { label: t("mentalFeeling"), value: snapshot.feeling } : null,
-      snapshot?.summary ? { label: t("mentalSummary"), value: snapshot.summary } : null,
+      mentalFeelingSummaryRow(snapshot),
       snapshot?.whisper ? { label: t("mentalWhisper"), value: snapshot.whisper } : null,
       snapshot?.intervention ? { label: t("mentalIntervention"), value: snapshot.intervention } : null,
     ].filter(Boolean) as Array<{ label: string; value: string }>;
@@ -888,7 +1110,7 @@ export function ConversationView({
       t("mentalProcess"),
       mentalSnapshotPreview(snapshot),
       true,
-      Boolean(message.streaming),
+      Boolean(message.streaming) && !hasToolBlock(message) && !hasResponseBlock(message),
       <div className={`${styles.auxiliaryPanel} ${styles.auxiliaryPanel_mental}`}>
         {metaRows.length ? (
           <div className={styles.mentalMetaGrid}>
@@ -934,7 +1156,7 @@ export function ConversationView({
     }
   }
 
-  function renderResponseSegment(segment: ResponseSegment) {
+  function renderResponseSegment(segment: ResponseSegment, duplicateImageUrls?: Set<string>) {
     const label = responseSegmentLabel(segment);
     const isCodeLike = segment.kind === "code"
       || Boolean(segment.language)
@@ -955,25 +1177,25 @@ export function ConversationView({
             <code>{segment.content}</code>
           </pre>
         ) : (
-          renderResponseText(segment.content)
+          renderResponseText(segment.content, duplicateImageUrls)
         )}
       </section>
     );
   }
 
-  function renderResponseText(content: string) {
+  function renderResponseText(content: string, duplicateImageUrls?: Set<string>) {
     const blocks = parseMarkdownBlocks(content);
     if (blocks.length === 0) {
       return null;
     }
     return (
       <div className={styles.markdownBody}>
-        {blocks.map((block, index) => renderMarkdownBlock(block, index))}
+        {blocks.map((block, index) => renderMarkdownBlock(block, index, duplicateImageUrls))}
       </div>
     );
   }
 
-  function renderMarkdownBlock(block: MarkdownBlock, index: number) {
+  function renderMarkdownBlock(block: MarkdownBlock, index: number, duplicateImageUrls?: Set<string>) {
     if (block.type === "heading") {
       const HeadingTag = block.level <= 2 ? "h3" : "h4";
       return (
@@ -987,6 +1209,68 @@ export function ConversationView({
     }
     if (block.type === "divider") {
       return <hr key={`divider-${index}`} className={styles.markdownDivider} />;
+    }
+    if (block.type === "image") {
+      const previewUrl = previewUrlForImage(block.url);
+      if (duplicateImageUrls?.has(comparableImageUrl(block.url))) {
+        return null;
+      }
+      const imageAlt = block.alt || (lang === "zh" ? "生成图片" : "Generated image");
+      const previewLabel = lang === "zh" ? "预览图片" : "Preview image";
+      return (
+        <figure key={`image-${index}-${block.url}`} className={styles.markdownImageFigure}>
+          <button
+            type="button"
+            className={styles.imagePreviewButton}
+            onClick={() =>
+              openImagePreview({
+                src: previewUrl,
+                alt: imageAlt,
+                downloadUrl: block.url,
+                downloadName: downloadNameFromUrl(block.url) || true,
+              })
+            }
+            aria-label={previewLabel}
+            title={previewLabel}
+          >
+            <img className={styles.markdownImage} src={previewUrl} alt={imageAlt} loading="lazy" />
+          </button>
+          <figcaption className={styles.markdownImageCaption}>
+            {block.alt ? <span>{block.alt}</span> : null}
+            <a
+              className={styles.markdownImageLink}
+              href={block.url}
+              download={downloadNameFromUrl(block.url) || true}
+            >
+              {lang === "zh" ? "下载图片" : "Download image"}
+            </a>
+          </figcaption>
+        </figure>
+      );
+    }
+    if (block.type === "table") {
+      return (
+        <div key={`table-${index}`} className={styles.markdownTableWrap}>
+          <table className={styles.markdownTable}>
+            <thead>
+              <tr>
+                {block.headers.map((header, headerIndex) => (
+                  <th key={`${header}-${headerIndex}`}>{renderInlineContent(header)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, rowIndex) => (
+                <tr key={`row-${rowIndex}`}>
+                  {block.headers.map((_, cellIndex) => (
+                    <td key={`cell-${rowIndex}-${cellIndex}`}>{renderInlineContent(row[cellIndex] ?? "")}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
     }
     if (block.type === "unorderedList") {
       return (
@@ -1023,8 +1307,37 @@ export function ConversationView({
           </code>
         );
       }
-      return part;
+      return renderLinkedInlineText(part, index);
     });
+  }
+
+  function renderLinkedInlineText(content: string, partIndex: number) {
+    const nodes: ReactNode[] = [];
+    const linkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+    let cursor = 0;
+    let match: RegExpExecArray | null;
+    while ((match = linkPattern.exec(content)) !== null) {
+      if (match.index > cursor) {
+        nodes.push(content.slice(cursor, match.index));
+      }
+      const label = match[1];
+      const href = match[2];
+      nodes.push(
+        <a
+          key={`link-${partIndex}-${match.index}`}
+          className={styles.inlineLink}
+          href={href}
+          download={isLikelyImageUrl(href) ? downloadNameFromUrl(href) || true : undefined}
+        >
+          {label}
+        </a>,
+      );
+      cursor = match.index + match[0].length;
+    }
+    if (cursor < content.length) {
+      nodes.push(content.slice(cursor));
+    }
+    return nodes.length > 0 ? nodes : content;
   }
 
   function renderImageArtifact(message: ConversationMessage) {
@@ -1033,13 +1346,27 @@ export function ConversationView({
       return null;
     }
     const downloadLabel = lang === "zh" ? "下载图片" : "Download image";
+    const previewLabel = lang === "zh" ? "预览图片" : "Preview image";
     const imageAlt = artifact.prompt || (lang === "zh" ? "生成图片" : "Generated image");
     const metaItems = [artifact.size, artifact.quality, artifact.model].filter(Boolean);
     return (
       <figure className={styles.imageArtifact}>
-        <div className={styles.imageArtifactFrame}>
+        <button
+          type="button"
+          className={`${styles.imageArtifactFrame} ${styles.imagePreviewButton}`}
+          onClick={() =>
+            openImagePreview({
+              src: artifact.imageUrl,
+              alt: imageAlt,
+              downloadUrl: artifact.downloadUrl,
+              downloadName: artifact.artifactId || true,
+            })
+          }
+          aria-label={previewLabel}
+          title={previewLabel}
+        >
           <img className={styles.imagePreview} src={artifact.imageUrl} alt={imageAlt} loading="lazy" />
-        </div>
+        </button>
         <figcaption className={styles.imageArtifactFooter}>
           <span className={styles.imageArtifactMeta}>
             {artifact.prompt ? <span className={styles.imageArtifactPrompt}>{artifact.prompt}</span> : null}
@@ -1116,6 +1443,13 @@ export function ConversationView({
         continue;
       }
 
+      const image = trimmed.match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+      if (image) {
+        flushParagraph();
+        blocks.push({ type: "image", alt: image[1].trim(), url: image[2].trim() });
+        continue;
+      }
+
       const heading = trimmed.match(/^(#{1,4})\s+(.+?)\s*#*$/);
       if (heading) {
         flushParagraph();
@@ -1130,6 +1464,22 @@ export function ConversationView({
       if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
         flushParagraph();
         blocks.push({ type: "divider" });
+        continue;
+      }
+
+      if (isMarkdownTableHeader(lines, index)) {
+        flushParagraph();
+        const headers = parseMarkdownTableRow(lines[index]);
+        const rows: string[][] = [];
+        index += 2;
+        for (; index < lines.length; index += 1) {
+          if (!isMarkdownTableRow(lines[index])) {
+            index -= 1;
+            break;
+          }
+          rows.push(parseMarkdownTableRow(lines[index]));
+        }
+        blocks.push({ type: "table", headers, rows });
         continue;
       }
 
@@ -1170,6 +1520,52 @@ export function ConversationView({
 
     flushParagraph();
     return blocks;
+  }
+
+  function isMarkdownTableHeader(lines: string[], index: number) {
+    return isMarkdownTableRow(lines[index]) && isMarkdownTableSeparator(lines[index + 1] ?? "");
+  }
+
+  function isMarkdownTableRow(line: string) {
+    const trimmed = String(line ?? "").trim();
+    return trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.includes("|", 1);
+  }
+
+  function isMarkdownTableSeparator(line: string) {
+    const cells = parseMarkdownTableRow(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
+  }
+
+  function parseMarkdownTableRow(line: string) {
+    return String(line ?? "")
+      .trim()
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((cell) => cell.trim());
+  }
+
+  function isLikelyImageUrl(url: string) {
+    const normalized = String(url ?? "").toLowerCase();
+    return /\.(png|jpe?g|webp|gif)(?:[?#].*)?$/.test(normalized) || normalized.includes("/artifacts/image");
+  }
+
+  function previewUrlForImage(url: string) {
+    const trimmed = String(url ?? "").trim();
+    const [withoutHash, hash = ""] = trimmed.split("#", 2);
+    const [path, query = ""] = withoutHash.split("?", 2);
+    if (!query) {
+      return trimmed;
+    }
+    const kept = query
+      .split("&")
+      .filter((param) => !/^download=(1|true)$/i.test(param));
+    return `${path}${kept.length ? `?${kept.join("&")}` : ""}${hash ? `#${hash}` : ""}`;
+  }
+
+  function downloadNameFromUrl(url: string) {
+    const path = String(url ?? "").split(/[?#]/, 1)[0] ?? "";
+    return path.split("/").filter(Boolean).pop() ?? "";
   }
 
   return (
@@ -1244,19 +1640,42 @@ export function ConversationView({
       ) : null}
 
       <div ref={timelineRef} className={styles.timeline}>
-        {messages.length === 0 ? (
+        {displayMessages.length === 0 ? (
           <div className={styles.emptyState}>{t("sessionNoMessages")}</div>
         ) : (
-          messages.map((message) => {
+          displayMessages.map((message) => {
             const operationGroups = buildConversationOperationGroups(message, operationLabels);
+            const hasRunningTools = hasRunningOperation(operationGroups.tools);
+            const turnErrorMessage = isTurnErrorMessage(message);
+            const agentInboxMessage = isAgentInboxMessage(message);
+            const groupTranscriptMessage = isGroupRoomTranscriptMessage(message);
+            const userAuthoredMessage = message.role === "user" && !agentInboxMessage;
+            const isResponseStreaming = Boolean(message.streaming) && hasResponseBlock(message) && !hasRunningTools;
             const defaultResponseExpanded = Boolean(message.streaming) || defaultExpandedResponseIds.has(message.id);
             const responseExpanded = getExpansionState(message.id, "response", defaultResponseExpanded);
             const responseSegments = responseExpanded ? parseResponseSegments(message.content) : [];
-            const isEditingMessage = message.role === "user" && message.id === editingMessageId;
+            const isEditingMessage = userAuthoredMessage && message.id === editingMessageId;
+            const agentInboxExpanded = getExpansionState(message.id, "agentInbox", false);
+            const agentInboxPreview = agentInboxMessage ? compactPreview(agentInboxSummary(message), 140) : "";
+            const researchOrgChips = researchOrgMessageChips(message);
             const turnClassName = [
-              message.role === "assistant" ? styles.assistantTurn : styles.userTurn,
+              groupTranscriptMessage
+                ? styles.groupTranscriptTurn
+                : message.role === "assistant"
+                  ? styles.assistantTurn
+                  : agentInboxMessage
+                  ? styles.agentInboxTurn
+                  : styles.userTurn,
+              turnErrorMessage ? styles.turnErrorTurn : "",
               isEditingMessage ? styles.turnEditing : "",
             ].filter(Boolean).join(" ");
+            const speakerLabel = groupTranscriptMessage
+              ? groupRoomTranscriptLabel(message)
+              : message.role === "assistant"
+                ? assistantLabel
+                : agentInboxMessage
+                  ? agentInboxSourceLabel(message)
+                  : userLabel;
             const editDisabled = Boolean(editUserMessageDisabled);
             return (
               <article
@@ -1264,8 +1683,12 @@ export function ConversationView({
                 className={turnClassName}
               >
                 <div className={styles.turnAvatar} aria-hidden="true">
-                  {message.role === "assistant" ? (
+                  {groupTranscriptMessage ? (
+                    <MessageSquarePlus size={17} />
+                  ) : message.role === "assistant" ? (
                     <Sparkles size={18} />
+                  ) : agentInboxMessage ? (
+                    <MessageSquarePlus size={17} />
                   ) : userAvatarImageUrl ? (
                     <img src={userAvatarImageUrl} alt="" className={styles.turnAvatarImage} />
                   ) : (
@@ -1276,13 +1699,13 @@ export function ConversationView({
                   <div className={styles.turnMeta}>
                     <div className={styles.turnMetaIdentity}>
                       <span className={styles.turnSpeaker}>
-                        {message.role === "assistant" ? assistantLabel : userLabel}
+                        {speakerLabel}
                       </span>
                       {isEditingMessage ? <span className={styles.turnEditBadge}>{t("editMessage")}</span> : null}
                     </div>
                     <span className={styles.turnMetaActions}>
                       {message.timestamp ? <span>{formatTimestamp(message.timestamp)}</span> : null}
-                      {message.role === "user" && message.id === latestUserMessageId && onEditUserMessage ? (
+                      {userAuthoredMessage && message.id === latestUserMessageId && onEditUserMessage ? (
                         <button
                           type="button"
                           className={
@@ -1302,14 +1725,64 @@ export function ConversationView({
                     </span>
                   </div>
 
-                  {hasUserContent(message) ? (
-                    <div className={styles.userMessageBody}>{renderResponseText(message.content)}</div>
+                  {agentInboxMessage ? (
+                    <section className={styles.agentInboxSection}>
+                      {researchOrgChips.length > 0 ? (
+                        <div className={styles.researchOrgChipRow} aria-label={lang === "zh" ? "科研组织消息标签" : "Research organization message labels"}>
+                          {researchOrgChips.map((chip) => (
+                            <span
+                              key={chip.key}
+                              className={`${styles.researchOrgChip} ${styles[`researchOrgChip_${chip.tone}`]}`}
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <button
+                        type="button"
+                        className={styles.agentInboxToggle}
+                        aria-expanded={agentInboxExpanded}
+                        onClick={() => toggleSection(message.id, "agentInbox", false)}
+                        title={agentInboxExpanded ? (lang === "zh" ? "折叠私信内容" : "Collapse private message") : (lang === "zh" ? "展开私信内容" : "Expand private message")}
+                      >
+                        {agentInboxExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        <span>{lang === "zh" ? "私信内容" : "Private message"}</span>
+                        {agentInboxPreview ? <span className={styles.agentInboxPreview}>{agentInboxPreview}</span> : null}
+                      </button>
+                      {agentInboxExpanded ? (
+                        <div className={styles.agentInboxMessageBody}>
+                          {renderResponseText(message.content)}
+                        </div>
+                      ) : null}
+                    </section>
+                  ) : hasUserContent(message) ? (
+                    <div className={styles.userMessageBody}>
+                      {renderResponseText(message.content)}
+                    </div>
+                  ) : null}
+                  {groupTranscriptMessage ? (
+                    <div className={styles.groupTranscriptBody}>{renderResponseText(message.content)}</div>
                   ) : null}
                   {renderUserAttachments(message)}
 
                   {renderThoughtPanel(message)}
                   {renderMentalPanel(message)}
                   {renderOperationGroup(message.id, "tools", operationGroups.tools, Boolean(message.streaming))}
+                  {turnErrorMessage ? (
+                    <div className={styles.turnErrorNotice} role="status" aria-live="polite">
+                      <div className={styles.turnErrorNoticeIcon} aria-hidden="true">
+                        <TerminalSquare size={15} />
+                      </div>
+                      <div className={styles.turnErrorNoticeBody}>
+                        <div className={styles.turnErrorNoticeMeta}>
+                          <span>{lang === "zh" ? "运行提示" : "Runtime notice"}</span>
+                          {turnErrorType(message) ? <span>{turnErrorType(message)}</span> : null}
+                        </div>
+                        <div className={styles.turnErrorNoticeText}>{renderResponseText(message.content)}</div>
+                      </div>
+                    </div>
+                  ) : null}
                   {renderImageArtifact(message)}
 
                   {hasResponseBlock(message) ? (
@@ -1323,11 +1796,13 @@ export function ConversationView({
                       >
                         {responseExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                         <span>{t("responseLabel")}</span>
-                        {message.streaming ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
+                        {isResponseStreaming ? <LoaderCircle className={styles.statusSpinner} size={14} /> : null}
                       </button>
                       {responseExpanded ? (
                         <div className={styles.responseBody}>
-                          {responseSegments.map(renderResponseSegment)}
+                          {responseSegments.map((segment) =>
+                            renderResponseSegment(segment, imageArtifactUrlsBeforeMessage.get(message.id)),
+                          )}
                         </div>
                       ) : null}
                     </section>
@@ -1400,7 +1875,15 @@ export function ConversationView({
       ) : null}
 
       <div className={styles.composer}>
-        <div className={styles.composerField}>
+        <div
+          className={
+            composerDragActive ? `${styles.composerField} ${styles.composerFieldDragActive}` : styles.composerField
+          }
+          onDragEnter={handleComposerDragEnter}
+          onDragOver={handleComposerDragOver}
+          onDragLeave={handleComposerDragLeave}
+          onDrop={handleComposerDrop}
+        >
           {composerError ? <p className={styles.composerError}>{composerError}</p> : null}
           {composerGuidance ? (
             <div className={styles.composerGuidance} role="status">
@@ -1519,6 +2002,42 @@ export function ConversationView({
           {composerPending ? resolvedPendingLabel : resolvedActionLabel}
         </button>
       </div>
+      {previewImage ? (
+        <div
+          className={styles.imagePreviewOverlay}
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewImage.alt}
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className={styles.imagePreviewDialog} onClick={(event) => event.stopPropagation()}>
+            <div className={styles.imagePreviewToolbar}>
+              <span title={previewImage.alt}>{previewImage.alt}</span>
+              <div className={styles.imagePreviewActions}>
+                <a
+                  className={styles.imageDownloadButton}
+                  href={previewImage.downloadUrl}
+                  download={previewImage.downloadName}
+                  title={lang === "zh" ? "下载图片" : "Download image"}
+                  aria-label={lang === "zh" ? "下载图片" : "Download image"}
+                >
+                  <Download size={15} />
+                </a>
+                <button
+                  type="button"
+                  className={styles.imagePreviewCloseButton}
+                  onClick={() => setPreviewImage(null)}
+                  title={lang === "zh" ? "关闭预览" : "Close preview"}
+                  aria-label={lang === "zh" ? "关闭预览" : "Close preview"}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <img className={styles.imagePreviewLarge} src={previewImage.src} alt={previewImage.alt} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

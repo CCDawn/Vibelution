@@ -48,10 +48,22 @@ def test_reset_summary_includes_memory_as_optional_item(reset_project: Path):
     item_ids = {item["id"] for item in summary["items"]}
     assert "memory" in item_ids
     assert "chat_history" in item_ids
+    assert "workspace_sessions" in item_ids
+    assert "chat_rooms" in item_ids
+    assert "teams" in item_ids
+    assert "agents" in item_ids
+    assert "generated_tools" in item_ids
     assert "web_dist" in item_ids
     assert "workspace" not in item_ids
+    memory_item = next(item for item in summary["items"] if item["id"] == "memory")
+    agents_item = next(item for item in summary["items"] if item["id"] == "agents")
+    assert memory_item["category"] == "agent_state"
+    assert agents_item["risk"] == "high"
+    assert agents_item["defaultSelected"] is False
     assert summary["presets"] == []
     protected_paths = {path for group in summary["protected"] for path in group["paths"]}
+    assert "core/" in protected_paths
+    assert "tools/*.py" in protected_paths
     assert "workspace/agent_brain.db" not in protected_paths
     assert "workspace/memory/" not in protected_paths
     assert "workspace/prompts/" not in protected_paths
@@ -148,6 +160,83 @@ def test_execute_chat_history_recreates_empty_default_session(reset_project: Pat
     assert state["active_conversation_id"] == "default"
 
 
+def test_reset_can_clear_sessions_rooms_teams_agents_and_bus(reset_project: Path):
+    _write(reset_project / "workspace" / "sessions" / "session-a" / "state.json", "{}")
+    _write(reset_project / "workspace" / "chat_rooms" / "rooms.json", "[]")
+    _write(reset_project / "workspace" / "teams" / "teams.json", "[]")
+    _write(reset_project / "workspace" / "agents" / "agents.json", json.dumps({"agents": [{"id": "agent-a"}]}))
+    _write(reset_project / "workspace" / "agents" / "agent-a" / "events" / "event.jsonl", "{}\n")
+    _write(reset_project / "workspace" / "shared" / "keep.txt", "shared")
+    _write(reset_project / "workspace" / "project_agent_bus" / "queue.jsonl", "{}\n")
+
+    preview = reset_service.preview_reset([
+        "workspace_sessions",
+        "chat_rooms",
+        "teams",
+        "agents",
+        "project_agent_bus",
+    ])
+    preview_paths = {
+        entry["path"]
+        for item in preview["items"]
+        for entry in item["deleteCandidates"]
+    }
+
+    assert preview_paths == {
+        "workspace/sessions",
+        "workspace/chat_rooms",
+        "workspace/teams",
+        "workspace/agents",
+        "workspace/project_agent_bus",
+    }
+
+    result = reset_service.execute_reset([
+        "workspace_sessions",
+        "chat_rooms",
+        "teams",
+        "agents",
+        "project_agent_bus",
+    ], confirmed=True)
+
+    assert result["totals"]["failedCount"] == 0
+    assert not (reset_project / "workspace" / "sessions").exists()
+    assert not (reset_project / "workspace" / "chat_rooms").exists()
+    assert not (reset_project / "workspace" / "teams").exists()
+    assert not (reset_project / "workspace" / "project_agent_bus").exists()
+    agents_registry = reset_project / "workspace" / "agents" / "agents.json"
+    assert agents_registry.exists()
+    assert json.loads(agents_registry.read_text(encoding="utf-8"))["agents"] == []
+    assert (reset_project / "workspace" / "shared" / "keep.txt").exists()
+
+
+def test_generated_tools_reset_keeps_source_tools(reset_project: Path):
+    generated_tools = _write(
+        reset_project / "workspace" / "tool_registry" / "generated_tools.json",
+        json.dumps([{"name": "draft_tool"}]),
+    )
+    source_tool = _write(reset_project / "tools" / "real_tool.py", "print('keep')\n")
+
+    result = reset_service.execute_reset(["generated_tools"], confirmed=True)
+
+    assert result["totals"]["deletedCount"] == 1
+    assert generated_tools.exists()
+    assert json.loads(generated_tools.read_text(encoding="utf-8")) == []
+    assert source_tool.exists()
+
+
+def test_reset_clears_agent_config_state(reset_project: Path):
+    mode_bindings = _write(reset_project / "workspace" / "agent_config" / "mode_bindings.json", "{}")
+    prompt_templates = _write(reset_project / "workspace" / "agent_config" / "prompt_templates.json", "{}")
+    dynamic_prompt = _write(reset_project / "workspace" / "prompts" / "DYNAMIC.md", "keep")
+
+    result = reset_service.execute_reset(["agent_config_state"], confirmed=True)
+
+    assert result["totals"]["deletedCount"] == 2
+    assert not mode_bindings.exists()
+    assert not prompt_templates.exists()
+    assert dynamic_prompt.exists()
+
+
 def test_chat_history_is_available_even_before_state_file_exists(reset_project: Path):
     preview = reset_service.preview_reset(["chat_history"])
 
@@ -200,6 +289,35 @@ def test_browser_profile_cleanup_protects_current_profile(reset_project: Path):
     assert result["totals"]["deletedCount"] == 1
     assert current.exists()
     assert not old.exists()
+
+
+def test_workspace_runtime_residue_cleanup(reset_project: Path):
+    workspace_profile = _write(reset_project / "workspace" / "edge-headless-profile" / "Default" / "Preferences", "{}")
+    workspace_log = _write(reset_project / "workspace" / "server.err.log", "err")
+    workspace_logs_dir = _write(reset_project / "workspace" / "logs" / "service.log", "log")
+    diagnostic_payload = _write(reset_project / "log_info" / "payloads" / "payload.json", "{}")
+    root_tmp = _write(reset_project / ".tmp-vite-chat2.log", "tmp")
+    root_tmp_dir = _write(reset_project / "tmp_prompt_debug" / "trace.log", "tmp")
+    runtime_preview = _write(reset_project / ".runtime" / "codex-preview" / "trace.log", "tmp")
+    runtime_tmp = _write(reset_project / ".runtime" / "tmp-run" / "trace.log", "tmp")
+
+    result = reset_service.execute_reset([
+        "workspace_browser_profiles",
+        "workspace_service_logs",
+        "diagnostic_payloads",
+        "root_temp_artifacts",
+        "runtime_preview_artifacts",
+    ], confirmed=True)
+
+    assert result["totals"]["failedCount"] == 0
+    assert not workspace_profile.exists()
+    assert not workspace_log.exists()
+    assert not workspace_logs_dir.exists()
+    assert not diagnostic_payload.exists()
+    assert not root_tmp.exists()
+    assert not root_tmp_dir.exists()
+    assert not runtime_preview.exists()
+    assert not runtime_tmp.exists()
 
 
 def test_reset_execution_keeps_protected_runtime_targets_out_of_candidate_events(

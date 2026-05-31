@@ -118,25 +118,37 @@ def test_create_chat_session_creates_persistent_agent_and_direct_conversation(tm
     assert direct[0]["agentPromptTemplateId"] == "prompt-chat-default"
 
 
-def test_legacy_session_is_repaired_with_agent_id_without_moving_session_workspace(tmp_path, monkeypatch):
+def test_legacy_session_list_is_read_only_until_detail_repairs_agent_binding(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
 
     sessions = session_service.list_sessions()
 
     alpha = next(item for item in sessions if item["id"] == "session-alpha")
-    assert alpha["agentId"]
+    assert alpha["agentId"] == ""
     assert alpha["workspacePath"] == "workspace/sessions/session-alpha"
     state = load_chat_state(tmp_path)
     raw_alpha = next(item for item in state["conversations"] if item["conversation_id"] == "session-alpha")
-    assert raw_alpha["agent_id"] == alpha["agentId"]
-    assert raw_alpha["workspace_path"] == "workspace/sessions/session-alpha"
+    assert "agent_id" not in raw_alpha
+    assert "workspace_path" not in raw_alpha
+    assert not (tmp_path / "workspace" / "sessions" / "session-alpha").exists()
+
+    detail = session_service.get_session_detail("session-alpha")
+
+    assert detail is not None
+    assert detail["agentId"]
+    repaired_state = load_chat_state(tmp_path)
+    repaired_alpha = next(item for item in repaired_state["conversations"] if item["conversation_id"] == "session-alpha")
+    assert repaired_alpha["agent_id"] == detail["agentId"]
+    assert repaired_alpha["workspace_path"] == "workspace/sessions/session-alpha"
+    assert (tmp_path / "workspace" / "sessions" / "session-alpha").exists()
 
 
 def test_session_list_reuses_agent_lookup_for_existing_bound_sessions(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
-    session_service.list_sessions()
+    session_service.get_session_detail("session-alpha")
+    session_service.get_session_detail("session-beta")
 
     def fail_get_agent(agent_id, *args, **kwargs):
         raise AssertionError(f"session list should use the shared Agent lookup: {agent_id}")
@@ -147,6 +159,82 @@ def test_session_list_reuses_agent_lookup_for_existing_bound_sessions(tmp_path, 
 
     assert {item["id"] for item in sessions} == {"session-alpha", "session-beta"}
     assert all(item["agentId"] for item in sessions)
+
+
+def test_session_list_uses_short_snapshot_cache_and_invalidates_on_update(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    created = session_service.create_chat_session(title="Cached Agent")
+    session_service._invalidate_session_list_cache()
+    tick = {"value": 10.0}
+
+    def next_tick():
+        value = tick["value"]
+        tick["value"] += 0.05
+        return value
+
+    monkeypatch.setattr(session_service, "_perf_counter", next_tick)
+    lookup_calls = 0
+    load_calls = 0
+    real_lookup = session_service._agent_lookup_for_conversations
+    real_load = session_service._load_conversations
+    events = []
+
+    def counting_lookup():
+        nonlocal lookup_calls
+        lookup_calls += 1
+        return real_lookup()
+
+    def counting_load(*args, **kwargs):
+        nonlocal load_calls
+        load_calls += 1
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(session_service, "_agent_lookup_for_conversations", counting_lookup)
+    monkeypatch.setattr(session_service, "_load_conversations", counting_load)
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    first = session_service.list_sessions()
+    second = session_service.list_sessions()
+
+    assert [item["id"] for item in first] == [item["id"] for item in second]
+    assert lookup_calls == 1
+    assert load_calls == 1
+    loaded_events = [item for item in events if item[0][2] == "session.list.loaded"]
+    assert loaded_events[0][1]["fields"]["cacheHit"] is False
+    assert loaded_events[1][1]["fields"]["cacheHit"] is True
+    assert loaded_events[1][1]["fields"]["cacheAgeMs"] > 0
+
+    session_service.update_chat_session(created["id"], title="Renamed Cached Agent")
+    lookup_calls = 0
+    load_calls = 0
+    updated = session_service.list_sessions()
+
+    assert lookup_calls == 1
+    assert load_calls == 1
+    assert next(item for item in updated if item["id"] == created["id"])["title"] == "Renamed Cached Agent"
+    assert [item for item in events if item[0][2] == "session.list.loaded"][-1][1]["fields"]["cacheHit"] is False
+
+
+def test_update_chat_session_skips_noop_profile_binding_write(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    session = session_service.create_chat_session(title="Stable Agent", profile_id="primary")
+    before = load_chat_state(tmp_path)
+    events = []
+    monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: events.append((args, kwargs)))
+
+    detail = session_service.update_chat_session(
+        session["id"],
+        title=session["title"],
+        profile_id=session["agentProfileId"],
+    )
+
+    assert detail["id"] == session["id"]
+    assert load_chat_state(tmp_path) == before
+    assert not [item for item in events if item[0][2] == "session.agent_binding_updated"]
 
 
 def test_conversation_index_returns_direct_agents_and_group_rooms(tmp_path, monkeypatch):
@@ -302,8 +390,8 @@ def test_agent_directory_index_logging_is_deduplicated_per_agent_session(tmp_pat
 def test_missing_agent_hidden_index_logging_is_deduplicated_per_session(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
-    sessions = session_service.list_sessions()
-    alpha = next(item for item in sessions if item["id"] == "session-alpha")
+    alpha = session_service.get_session_detail("session-alpha")
+    assert alpha is not None
     agent_directory_service.archive_agent_instance(alpha["agentId"])
     recorded_events = []
     monkeypatch.setattr(
@@ -549,6 +637,7 @@ def test_agents_api_returns_recent_agent_runs(tmp_path, monkeypatch):
 
 def test_agent_configuration_api_exposes_prompt_templates_and_mode_bindings(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
     alpha = session_service.create_chat_session(title="Alpha Agent")
 
     templates_response = client.get("/api/prompt-templates")
@@ -621,6 +710,7 @@ def test_agent_configuration_api_exposes_self_evolution_role_agents(tmp_path, mo
         "prompt-self-summarizer",
     }
 
+    monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
     bindings_response = client.get("/api/agent-mode-bindings")
 
     assert bindings_response.status_code == 200, bindings_response.text
@@ -683,8 +773,11 @@ def test_agents_api_skips_config_agent_sync_when_fixed_roles_are_present(tmp_pat
 def test_chat_room_completion_syncs_group_context_events_to_participant_agents_only(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     _seed_chat_sessions(tmp_path)
-    sessions = session_service.list_sessions()
-    agent_ids = {item["id"]: item["agentId"] for item in sessions}
+    alpha = session_service.get_session_detail("session-alpha")
+    beta = session_service.get_session_detail("session-beta")
+    assert alpha is not None
+    assert beta is not None
+    agent_ids = {item["id"]: item["agentId"] for item in [alpha, beta]}
     outsider = agent_directory_service.create_agent_instance(
         display_name="Outsider",
         profile_id="primary",
@@ -747,6 +840,28 @@ def test_agent_inbox_message_persists_for_offline_target_and_enters_runtime_cont
 
     beta_detail = session_service.get_session_detail(beta["id"])
     assert beta_detail["agentInboxMessages"][0]["messageId"] == message["messageId"]
+
+
+def test_agent_inbox_message_preserves_full_content(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    full_report = "\n".join(f"第 {index:02d} 行：人才缺口分析细节" for index in range(1, 31))
+
+    message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content=full_report,
+        summary="完整人才缺口报告",
+        created_by="agent",
+    )
+
+    assert message["content"] == full_report
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"])
+    assert pending[0]["content"] == full_report
+    prompt = session_service._format_agent_inbox_wake_prompt(message)
+    assert "第 01 行：人才缺口分析细节" in prompt
+    assert "第 30 行：人才缺口分析细节" in prompt
 
 
 def test_agent_inbox_wake_respects_target_delegation_policy(tmp_path, monkeypatch):
@@ -897,7 +1012,7 @@ def test_agent_inbox_message_api_can_wake_target_agent_and_consume_message(tmp_p
             captured["runtimeContext"] = context
 
         def run_single_turn(self, initial_prompt=None):
-            captured["prompt"] = str(initial_prompt or "")
+            captured.setdefault("prompts", []).append(str(initial_prompt or ""))
             return {
                 "status": "completed",
                 "raw_output": "Beta 已收到 Alpha 的私信，并给出回复。",
@@ -926,18 +1041,29 @@ def test_agent_inbox_message_api_can_wake_target_agent_and_consume_message(tmp_p
     assert payload["delivery"]["wakeStatus"] == "started"
     assert payload["delivery"]["targetSessionId"] == beta["id"]
     assert payload["delivery"]["turnId"]
-    assert "Beta，请接着审查 Alpha 的方案。" in captured["prompt"]
+    assert any("Beta，请接着审查 Alpha 的方案。" in prompt for prompt in captured["prompts"])
+    assert any("Beta 已收到 Alpha 的私信，并给出回复。" in prompt for prompt in captured["prompts"])
+    assert any("面向当前用户或当前任务汇总这条回复" in prompt for prompt in captured["prompts"])
     assert "AgentInboxMessages:" in captured["runtimeContext"]
 
     detail = session_service.get_session_detail(beta["id"])
     assert detail["messages"][-2]["role"] == "user"
     assert detail["messages"][-2]["metadata"]["kind"] == "agent_inbox_message"
     assert detail["messages"][-2]["metadata"]["messageId"] == payload["messageId"]
+    assert detail["messages"][-2]["metadata"]["sourceAgentName"] == alpha["agentDisplayName"]
     assert detail["messages"][-1]["content"] == "Beta 已收到 Alpha 的私信，并给出回复。"
     assert agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending") == []
     consumed = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="consumed")
     assert consumed[0]["messageId"] == payload["messageId"]
     assert consumed[0]["consumedByTurnId"] == payload["delivery"]["turnId"]
+    alpha_detail = session_service.get_session_detail(alpha["id"])
+    assert alpha_detail["messages"][-2]["metadata"]["kind"] == "agent_inbox_message"
+    assert alpha_detail["messages"][-2]["metadata"]["inboxKind"] == "agent_inbox_reply"
+    assert alpha_detail["messages"][-2]["metadata"]["sourceAgentId"] == beta["agentId"]
+    assert alpha_detail["messages"][-2]["content"].startswith("[Agent 私信回复]")
+    alpha_consumed = agent_directory_service.list_agent_inbox_messages_for_agent(alpha["agentId"], status="consumed")
+    assert alpha_consumed[0]["kind"] == "agent_inbox_reply"
+    assert alpha_consumed[0]["metadata"]["replyToMessageId"] == payload["messageId"]
 
 
 def test_agent_inbox_message_wake_skips_busy_target_without_consuming(tmp_path, monkeypatch):
@@ -1001,6 +1127,88 @@ def test_agent_message_tool_sends_persistent_message_by_agent_code(tmp_path, mon
     assert pending[0]["metadata"] == {"priority": "normal"}
 
 
+def test_agent_message_tool_resolves_ui_composite_agent_label(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    beta_agent = agent_directory_service.get_agent(beta["agentId"])
+    label = f"{beta['agentCode']} · {beta_agent['displayName']}"
+
+    with agent_directory_service.active_agent_runtime(alpha["agentId"], session_id=alpha["id"]):
+        result, action = ToolExecutor().execute(
+            "agent_message_tool",
+            {
+                "target_agent": label,
+                "content": "Beta，请确认 UI 复合标签也能投递。",
+                "summary": "复合标签投递",
+                "wake_target": False,
+            },
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["ok"] is True
+    assert payload["status"] == "sent"
+    assert payload["targetAgentId"] == beta["agentId"]
+    assert payload["targetAgentCode"] == beta["agentCode"]
+
+
+@pytest.mark.parametrize(
+    "label_template",
+    [
+        "{code} - {name}",
+        "{code}: {name}",
+        "{code}（{name}）",
+    ],
+)
+def test_agent_message_tool_resolves_common_agent_label_variants(tmp_path, monkeypatch, label_template):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    beta_agent = agent_directory_service.get_agent(beta["agentId"])
+    label = label_template.format(code=beta["agentCode"], name=beta_agent["displayName"])
+
+    with agent_directory_service.active_agent_runtime(alpha["agentId"], session_id=alpha["id"]):
+        result, action = ToolExecutor().execute(
+            "agent_message_tool",
+            {
+                "target_agent": label,
+                "content": "Beta，请确认常见标签格式也能投递。",
+                "summary": "标签变体投递",
+                "wake_target": False,
+            },
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["ok"] is True
+    assert payload["targetAgentId"] == beta["agentId"]
+
+
+def test_agent_message_tool_preserves_full_message_body(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    full_report = "\n".join(f"第 {index:02d} 行：工具发送报告正文" for index in range(1, 31))
+
+    with agent_directory_service.active_agent_runtime(alpha["agentId"], session_id=alpha["id"]):
+        result, action = ToolExecutor().execute(
+            "agent_message_tool",
+            {
+                "target_agent": beta["agentId"],
+                "content": full_report,
+                "summary": "完整报告",
+                "wake_target": False,
+            },
+        )
+
+    payload = json.loads(result)
+    assert action is None
+    assert payload["ok"] is True
+    pending = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending")
+    assert pending[0]["content"] == full_report
+
+
 def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     alpha = session_service.create_chat_session(title="Alpha Agent")
@@ -1015,7 +1223,7 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
             captured["runtimeContext"] = context
 
         def run_single_turn(self, initial_prompt=None):
-            captured["prompt"] = str(initial_prompt or "")
+            captured.setdefault("prompts", []).append(str(initial_prompt or ""))
             return {
                 "status": "completed",
                 "raw_output": "Beta 已通过 agent_message_tool 接到私信。",
@@ -1046,18 +1254,217 @@ def test_agent_message_tool_can_wake_target_session_and_consume_inbox(tmp_path, 
     assert payload["wakeStatus"] == "started"
     assert payload["delivery"]["targetSessionId"] == beta["id"]
     assert payload["delivery"]["turnId"]
-    assert "Beta，请接力回答 Alpha 的私信。" in captured["prompt"]
+    assert any("Beta，请接力回答 Alpha 的私信。" in prompt for prompt in captured["prompts"])
+    assert any("Beta 已通过 agent_message_tool 接到私信。" in prompt for prompt in captured["prompts"])
+    assert any("面向当前用户或当前任务汇总这条回复" in prompt for prompt in captured["prompts"])
     assert "AgentInboxMessages:" in captured["runtimeContext"]
 
     detail = session_service.get_session_detail(beta["id"])
     assert detail["messages"][-2]["role"] == "user"
     assert detail["messages"][-2]["metadata"]["kind"] == "agent_inbox_message"
     assert detail["messages"][-2]["metadata"]["messageId"] == payload["messageId"]
+    assert detail["messages"][-2]["metadata"]["sourceAgentName"] == alpha["agentDisplayName"]
     assert detail["messages"][-1]["content"] == "Beta 已通过 agent_message_tool 接到私信。"
     assert agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="pending") == []
     consumed = agent_directory_service.list_agent_inbox_messages_for_agent(beta["agentId"], status="consumed")
     assert consumed[0]["messageId"] == payload["messageId"]
     assert consumed[0]["consumedByTurnId"] == payload["delivery"]["turnId"]
+    alpha_detail = session_service.get_session_detail(alpha["id"])
+    assert alpha_detail["messages"][-2]["metadata"]["inboxKind"] == "agent_inbox_reply"
+    assert alpha_detail["messages"][-2]["metadata"]["sourceAgentId"] == beta["agentId"]
+
+
+def test_research_org_inbox_wake_carries_communication_metadata_to_conversation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+    org = research_organization_service.get_research_organization()
+    steward = next(node for node in org["agents"] if node["role"] == "capability_steward")
+    ceo = next(node for node in org["agents"] if node["role"] == "ceo")
+
+    captured = {}
+
+    def fake_submit_session_message(session_id, content, **kwargs):
+        captured["sessionId"] = session_id
+        captured["content"] = content
+        captured["kwargs"] = kwargs
+        return {"startedTurnId": "turn-research-org"}
+
+    monkeypatch.setattr(session_service, "submit_session_message", fake_submit_session_message)
+
+    result = research_organization_service.send_research_org_message(
+        {
+            "sourceType": "agent",
+            "sourceAgentId": steward["agentId"],
+            "sourceSessionId": steward["agent"]["directSessionId"],
+            "targetAgentId": ceo["agentId"],
+            "messageType": "request",
+            "intent": "decision_request",
+            "content": "请 CEO 决策数据库试水团队是否扩招。",
+            "summary": "数据库试水团队扩招决策",
+            "wakeTarget": False,
+            "createdBy": "agent_tool",
+        }
+    )
+
+    delivery = result["message"]["deliveries"][0]
+    assert delivery["wakeStatus"] == "started"
+
+    assert captured["sessionId"] == ceo["agent"]["directSessionId"]
+    metadata = captured["kwargs"]["message_metadata"]
+    assert metadata["kind"] == "agent_inbox_message"
+    assert metadata["inboxKind"] == "research_org_request"
+    assert metadata["researchOrgMessageId"] == result["message"]["messageId"]
+    assert metadata["researchOrgMessageType"] == "request"
+    assert metadata["researchOrgIntent"] == "decision_request"
+    assert metadata["researchOrgDeliveryMode"] == "private"
+    assert metadata["communicationEdgeId"] == delivery["edgeId"]
+
+
+def test_agent_inbox_auto_reply_skips_when_agent_message_tool_already_sent_to_source(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    inbox_message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="请输出完整人才缺口分析报告。",
+    )
+    messages = [
+        {
+            "role": "user",
+            "content": "inbox",
+            "metadata": {
+                "kind": "agent_inbox_message",
+                "messageId": inbox_message["messageId"],
+                "sourceAgentId": alpha["agentId"],
+                "targetAgentId": beta["agentId"],
+                "threadId": inbox_message["threadId"],
+            },
+        }
+    ]
+    tool_result = json.dumps(
+        {
+            "ok": True,
+            "status": "sent",
+            "targetAgentId": alpha["agentId"],
+            "messageId": "agentmsg-explicit",
+        },
+        ensure_ascii=False,
+    )
+
+    reply = session_service._build_agent_inbox_turn_reply(
+        messages,
+        assistant_text="已将人才缺口分析报告发送给 CEO 夏予安。消息投递成功。",
+        tool_calls=[
+            {
+                "name": "agent_message_tool",
+                "arguments": {"target_agent": alpha["agentId"]},
+                "resultPreview": tool_result,
+            }
+        ],
+        source_session_id=beta["id"],
+        source_turn_id="turn-beta",
+    )
+
+    assert reply is None
+    assert any(item[0][2] == "agent_inbox.reply_skipped" for item in events)
+    fields = events[-1][1]["fields"]
+    assert fields["reason"] == "explicit_agent_message_sent"
+    assert agent_directory_service.list_agent_inbox_messages_for_agent(alpha["agentId"], status="pending") == []
+
+
+def test_agent_inbox_auto_reply_not_skipped_for_failed_agent_message_tool(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    inbox_message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="请输出完整人才缺口分析报告。",
+    )
+    failed_tool_result = json.dumps(
+        {
+            "ok": False,
+            "status": "blocked",
+            "error": "target_not_found",
+            "targetAgentId": alpha["agentId"],
+        },
+        ensure_ascii=False,
+    )
+
+    reply = session_service._build_agent_inbox_turn_reply(
+        [
+            {
+                "role": "user",
+                "metadata": {
+                    "kind": "agent_inbox_message",
+                    "messageId": inbox_message["messageId"],
+                    "sourceAgentId": alpha["agentId"],
+                    "targetAgentId": beta["agentId"],
+                    "threadId": inbox_message["threadId"],
+                },
+            }
+        ],
+        assistant_text="我无法直接完成投递：目标 Agent 未找到。请改用稳定代号后重试。",
+        tool_calls=[
+            {
+                "name": "agent_message_tool",
+                "arguments": {"target_agent": "A012 · 江知微"},
+                "resultPreview": failed_tool_result,
+            }
+        ],
+        source_session_id=beta["id"],
+        source_turn_id="turn-beta",
+    )
+
+    assert reply is not None
+    assert reply["targetAgentId"] == alpha["agentId"]
+    assert "目标 Agent 未找到" in reply["content"]
+
+
+def test_agent_inbox_auto_reply_skips_short_delivery_confirmation(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    alpha = session_service.create_chat_session(title="Alpha Agent")
+    beta = session_service.create_chat_session(title="Beta Agent")
+    events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+    inbox_message = agent_directory_service.write_agent_inbox_message(
+        beta["agentId"],
+        source_agent_id=alpha["agentId"],
+        content="请输出完整人才缺口分析报告。",
+    )
+
+    reply = session_service._build_agent_inbox_turn_reply(
+        [
+            {
+                "role": "user",
+                "metadata": {
+                    "kind": "agent_inbox_message",
+                    "messageId": inbox_message["messageId"],
+                    "sourceAgentId": alpha["agentId"],
+                    "targetAgentId": beta["agentId"],
+                },
+            }
+        ],
+        assistant_text="已将人才缺口分析报告发送给 CEO 夏予安。消息投递成功。",
+        tool_calls=[],
+        source_session_id=beta["id"],
+        source_turn_id="turn-beta",
+    )
+
+    assert reply is None
+    assert events[-1][1]["fields"]["reason"] == "operation_confirmation"
 
 
 def test_agent_message_tool_routes_research_core_messages_through_org_policy(tmp_path, monkeypatch):

@@ -58,12 +58,17 @@ export function collectBrowserPageSnapshot(): Record<string, unknown> {
     return {};
   }
 
+  const port = window.location.port || "";
   const activeNav = document.querySelector<HTMLAnchorElement>("header nav a[aria-current='page']");
   const heading = document.querySelector("h1");
   const main = document.querySelector("main");
 
   return {
     href: window.location.href,
+    origin: window.location.origin,
+    hostname: window.location.hostname,
+    port,
+    telemetrySurface: port === "5173" || port === "5174" ? "vite_dev" : "managed_workbench",
     pathname: window.location.pathname,
     search: window.location.search,
     hash: window.location.hash,

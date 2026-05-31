@@ -4,7 +4,7 @@ import routeSource from "./LogsRoute.tsx?raw";
 
 describe("LogsRoute layout contract", () => {
   it("keeps the raw file preview before the diagnostic summary in the main column", () => {
-    const filePreviewIndex = routeSource.indexOf("<FilePreview");
+    const filePreviewIndex = routeSource.indexOf("<LazyFilePreview");
     const diagnosticsIndex = routeSource.indexOf("{renderDiagnosticsPanel(contentQuery.data.diagnostics, lang)}");
 
     expect(filePreviewIndex).toBeGreaterThan(0);
