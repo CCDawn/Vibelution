@@ -34,6 +34,64 @@ from .supervised_evolution import (
 
 
 DATASET_REGISTRY_PATH = Path("workspace/evaluation/datasets/registry.json")
+TERMINAL_BENCH_SMOKE_ROWS: List[Dict[str, Any]] = [
+    {
+        "case_id": "tb_smoke_inspect_validate",
+        "instruction": (
+            "Run a repository-local terminal investigation before answering. Inspect "
+            "core/evaluation/dataset_registry.py and tests/test_dataset_registry.py, "
+            "run the focused dataset registry tests, then close the evolution "
+            "transaction with status=success only if validation passes."
+        ),
+        "training_tier": "coordination",
+        "max_steps": 8,
+        "allowed_tools": [
+            "open_evolution_transaction_tool",
+            "execute_shell_command_tool",
+            "python_lint_tool",
+            "close_evolution_transaction_tool",
+        ],
+        "verifier": {
+            "kind": "focused_pytest",
+            "command": "python -m pytest tests/test_dataset_registry.py -q",
+            "success_marker": "passed",
+        },
+        "expected": {
+            "kind": "terminal_harness",
+            "requires_transaction": True,
+            "requires_validation": True,
+            "requires_multi_step_trace": True,
+        },
+    },
+    {
+        "case_id": "tb_smoke_safe_probe_edit",
+        "instruction": (
+            "Use the terminal/tool harness to make one reversible safe-probe edit, "
+            "verify it with py_compile or pytest, and close the evolution transaction "
+            "successfully. Do not commit. Keep edits scoped to the harness-managed safe "
+            "probe path if a write is needed."
+        ),
+        "training_tier": "coordination",
+        "max_steps": 10,
+        "allowed_tools": [
+            "open_evolution_transaction_tool",
+            "execute_shell_command_tool",
+            "python_lint_tool",
+            "close_evolution_transaction_tool",
+        ],
+        "verifier": {
+            "kind": "safe_probe_validation",
+            "command": "python -m py_compile scripts/evolution_harness.py",
+            "success_marker": "returncode=0",
+        },
+        "expected": {
+            "kind": "terminal_harness",
+            "requires_transaction": True,
+            "requires_validation": True,
+            "forbid_commit": True,
+        },
+    },
+]
 
 
 @dataclass
@@ -156,6 +214,26 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "tags": ["local", "jsonl"],
             },
             {
+                "name": "terminal_bench_smoke",
+                "kind": "terminal_bench_jsonl",
+                "description": (
+                    "Terminal-Bench 风格本地 smoke 数据集，要求 agent 通过终端/工具进行多步 inspect、"
+                    "modify/verify、transaction close；官方 Terminal-Bench runner 后续再接。"
+                ),
+                "source_path": "workspace/evaluation/datasets/terminal_bench_smoke.jsonl",
+                "bundle_name": "terminal_bench_smoke_v1",
+                "scenario": "transaction",
+                "mode": "multi_step_react",
+                "timeout_seconds": 900,
+                "runnable": True,
+                "adapter_status": "ready_local_smoke",
+                "tags": ["terminal-bench", "react", "harness", "smoke"],
+                "source_track": "benchmark",
+                "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
+                "holdout_allowed": False,
+                "raw_chat_direct_training_allowed": False,
+            },
+            {
                 "name": "generated_cases",
                 "kind": "generated_case_jsonl",
                 "description": "Gym 依据 Trace、Harness Gap 或 Improvement Episode 生成的训练压力，不可自动进入 holdout。",
@@ -272,7 +350,7 @@ def _merge_registry_payload(existing: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSpec]) -> None:
-    bootstrap_names = {"generated_cases", "chat_reviewed_multiturn"}
+    bootstrap_names = {"generated_cases", "chat_reviewed_multiturn", "terminal_bench_smoke"}
     for spec in specs:
         if spec.name not in bootstrap_names or not spec.source_path:
             continue
@@ -280,7 +358,13 @@ def _bootstrap_builtin_dataset_sources(project_root: Path, specs: List[DatasetSp
         if source is None or source.exists():
             continue
         source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_text("", encoding="utf-8")
+        if spec.name == "terminal_bench_smoke":
+            source.write_text(
+                "\n".join(json.dumps(row, ensure_ascii=False) for row in TERMINAL_BENCH_SMOKE_ROWS) + "\n",
+                encoding="utf-8",
+            )
+        else:
+            source.write_text("", encoding="utf-8")
 
 
 def ensure_dataset_registry(project_root: Optional[Path] = None) -> Path:
@@ -399,6 +483,17 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
             usability_status = "ready"
             usability_reason = "数据集已有可运行 case。"
         effective = usability_status == "ready"
+        visibility = "primary" if effective else "hidden"
+        if usability_status == "empty":
+            visibility_reason = "空数据集已从主选择器隐藏。"
+        elif usability_status == "missing_source":
+            visibility_reason = "缺少本地源文件，已从主选择器隐藏。"
+        elif usability_status == "requires_external_harness":
+            visibility_reason = "需要外部 harness，已从主选择器隐藏。"
+        elif usability_status in {"invalid", "blocked"}:
+            visibility_reason = "当前不可运行，已从主选择器隐藏。"
+        else:
+            visibility_reason = "可直接用于监督进化运行。"
         boundary = dataset_intake_boundary(
             name=spec.name,
             kind=spec.kind,
@@ -419,6 +514,10 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 "case_count": case_count,
                 "usability_status": usability_status,
                 "usability_reason": usability_reason,
+                "visibility": visibility,
+                "visibility_reason": visibility_reason,
+                "selectable": effective,
+                "noise_level": "low" if effective else "hidden",
                 "adapter_status": spec.adapter_status,
                 "source_path": str(source) if source else None,
                 "source_exists": bool(source and source.exists()),
@@ -695,6 +794,97 @@ def _build_swe_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Dict[
     }
 
 
+def _build_terminal_bench_prompt(row: Dict[str, Any], *, case_id: str) -> str:
+    instruction = _prompt_from_row(row)
+    verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
+    allowed_tools = _text_list(row.get("allowed_tools"))
+    max_steps = int(row.get("max_steps") or 8)
+    verifier_command = str(verifier.get("command") or "").strip()
+    success_marker = str(verifier.get("success_marker") or "").strip()
+    tool_line = ", ".join(allowed_tools) if allowed_tools else "project-approved terminal and evolution tools"
+    verifier_lines = []
+    if verifier_command:
+        verifier_lines.append(f"- Verifier command: {verifier_command}")
+    if success_marker:
+        verifier_lines.append(f"- Success marker: {success_marker}")
+    verifier_block = "\n".join(verifier_lines) or "- Verifier: use the dataset row verifier metadata."
+    return (
+        "Run this Terminal-Bench-style local smoke case through the full agent harness.\n"
+        f"Case: {case_id}\n\n"
+        "Task:\n"
+        f"{instruction}\n\n"
+        "Harness contract:\n"
+        "1. Open an evolution transaction before doing meaningful work.\n"
+        "2. Use a multi-step ReAct loop: inspect evidence, choose a tool action, observe, adjust, then verify.\n"
+        f"3. Use only these intended tool classes unless the local runtime requires an equivalent: {tool_line}.\n"
+        f"4. Keep the loop within roughly {max_steps} meaningful tool steps.\n"
+        "5. Run the verifier before closing the transaction.\n"
+        "6. Close the transaction with status=success only when verification passes; otherwise close with status=failed.\n"
+        "7. Do not commit or publish changes.\n\n"
+        "Verifier:\n"
+        f"{verifier_block}"
+    )
+
+
+def _build_terminal_bench_case(spec: DatasetSpec, row: Dict[str, Any], index: int) -> Dict[str, Any]:
+    case_id = _case_id_from_row(row, index)
+    prompt = str(row.get("baseline_prompt") or row.get("candidate_prompt") or "").strip()
+    if not prompt:
+        prompt = _build_terminal_bench_prompt(row, case_id=case_id)
+    verifier = row.get("verifier") if isinstance(row.get("verifier"), dict) else {}
+    allowed_tools = _text_list(row.get("allowed_tools"))
+    max_steps = int(row.get("max_steps") or 8)
+    case = {
+        "case_id": case_id,
+        "case_type": STATIC_CASE_TYPE,
+        "scenario": str(row.get("scenario") or spec.scenario),
+        "mode": str(row.get("mode") or spec.mode),
+        "timeout_seconds": int(row.get("timeout_seconds") or spec.timeout_seconds),
+        "expect_restart": bool(row.get("expect_restart", False)),
+        "baseline_prompt": prompt,
+        "candidate_prompt": str(row.get("candidate_prompt") or prompt).strip(),
+        "training_tier": _normalize_training_tier(row.get("training_tier")),
+        "dataset_ref": {
+            "dataset": spec.name,
+            "case_id": case_id,
+            **_dataset_ref_from_row(row),
+        },
+        "benchmark_family": "terminal_bench",
+        "terminal_bench_adapter": "local_smoke",
+        "requires_react_trace": True,
+        "requires_terminal_harness": True,
+        "official_runner": "pending",
+        "allowed_tools": allowed_tools,
+        "max_steps": max_steps,
+        "verifier": verifier,
+        "expected": row.get(
+            "expected",
+            {
+                "kind": "terminal_harness",
+                "requires_transaction": True,
+                "requires_validation": True,
+                "requires_multi_step_trace": True,
+            },
+        ),
+        "source_track": spec.source_track,
+        "allowed_downstream_uses": list(spec.allowed_downstream_uses),
+        "intake_boundary": dataset_intake_boundary(
+            name=spec.name,
+            kind=spec.kind,
+            review_required=spec.review_required,
+            source_track=spec.source_track,
+            allowed_downstream_uses=spec.allowed_downstream_uses,
+            holdout_allowed=spec.holdout_allowed,
+            raw_chat_direct_training_allowed=spec.raw_chat_direct_training_allowed,
+        ),
+    }
+    if "rubric" in row:
+        case["rubric"] = row["rubric"]
+    if "dataset_splits" in row:
+        case["dataset_splits"] = _normalize_dataset_splits(row["dataset_splits"])
+    return case
+
+
 def materialize_dataset_bundle(
     dataset_name: str,
     *,
@@ -747,6 +937,8 @@ def materialize_dataset_bundle(
             cases.append(_build_swe_case(spec, row, index))
         elif spec.kind == "generated_case_jsonl":
             cases.append(_build_generated_case(spec, row, index))
+        elif spec.kind == "terminal_bench_jsonl":
+            cases.append(_build_terminal_bench_case(spec, row, index))
         elif spec.kind == "prompt_jsonl":
             cases.append(_build_prompt_case(spec, row, index))
         else:

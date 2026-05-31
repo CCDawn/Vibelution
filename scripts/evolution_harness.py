@@ -656,16 +656,17 @@ def build_agent_command(
     python_executable: Optional[str] = None,
     config_path: Optional[str] = None,
 ) -> List[str]:
+    launch_mode = "single_turn" if mode == "multi_step_react" else mode
     cmd = [python_executable or sys.executable, "agent.py", "--no-shell", "--skip-doctor"]
     if config_path:
         cmd.extend(["--config", config_path])
-    if mode == "test":
+    if launch_mode == "test":
         cmd.append("--test")
-    elif mode == "single_turn":
+    elif launch_mode == "single_turn":
         cmd.append("--single-turn")
         if prompt:
             cmd.extend(["--prompt", prompt])
-    elif mode == "auto":
+    elif launch_mode == "auto":
         cmd.append("--auto")
         if prompt:
             cmd.extend(["--prompt", prompt])
@@ -694,7 +695,7 @@ def resolve_run_options(
     if scenario == "transaction":
         normalized_prompt = prompt or DEFAULT_TRANSACTION_PROMPT
         return HarnessRunOptions(
-            mode="single_turn",
+            mode=mode if mode == "multi_step_react" else "single_turn",
             prompt=normalized_prompt,
             expect_restart=expect_restart,
             scenario="transaction",
@@ -2301,7 +2302,7 @@ def parse_args() -> argparse.Namespace:
         ],
         default="restart",
     )
-    parser.add_argument("--mode", choices=["test", "auto", "single_turn"], default="test")
+    parser.add_argument("--mode", choices=["test", "auto", "single_turn", "multi_step_react"], default="test")
     parser.add_argument("--prompt", default=None, help="初始提示词；为空时按 scenario 使用默认探针")
     parser.add_argument("--timeout-seconds", type=int, default=900)
     parser.add_argument("--post-restart-observe-seconds", type=int, default=20)

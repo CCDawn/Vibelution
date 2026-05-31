@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 - 2026-05-31
+
+- Added a local Terminal-Bench-style supervised dataset adapter with two multi-step terminal/ReAct smoke cases that materialize into `terminal_bench_smoke_v1`.
+- Added `multi_step_react` as a supervised harness mode alias that preserves benchmark metadata while launching through the existing single-turn prompt runner.
+- Hid empty, missing-source, and external-harness datasets from the supervised workbench's primary dataset picker while keeping their status visible through API metadata.
+- Exposed dataset `visibility`, `selectable`, and `noiseLevel` fields from the evolution workbench API for cleaner benchmark selection.
+
 ## 0.5.3 - 2026-05-31
 
 - Added Agent Center tool package presets for fast ToolPolicy setup, including core, research, coding, collaboration, memory/context, media, and operations bundles.
