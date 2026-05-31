@@ -5,6 +5,7 @@
 - Added a local Terminal-Bench-style supervised dataset adapter with two multi-step terminal/ReAct smoke cases that materialize into `terminal_bench_smoke_v1`.
 - Added `multi_step_react` as a supervised harness mode alias that preserves benchmark metadata while launching through the existing single-turn prompt runner.
 - Hid empty, missing-source, and external-harness datasets from the supervised workbench's primary dataset picker while keeping their status visible through API metadata.
+- Merged the supervised launch dataset/bundle controls into one evaluation-source picker with compact source counts and inline terminology guidance.
 - Exposed dataset `visibility`, `selectable`, and `noiseLevel` fields from the evolution workbench API for cleaner benchmark selection.
 
 ## 0.5.3 - 2026-05-31
