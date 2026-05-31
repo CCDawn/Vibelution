@@ -9,7 +9,11 @@ LOW_PERMISSION_TIER = "low"
 MEDIUM_PERMISSION_TIER = "medium"
 HIGH_PERMISSION_TIER = "high"
 GENERATED_PERMISSION_TIER = "generated"
-EXPLICIT_ALLOW_TOOLS = {"research_knowledge_query_tool", "research_communication_edge_proposal_tool"}
+EXPLICIT_ALLOW_TOOLS = {
+    "research_knowledge_query_tool",
+    "research_agent_creation_proposal_tool",
+    "research_communication_edge_proposal_tool",
+}
 
 CATEGORY_LABELS = {
     "workspace_read": "Workspace read",
@@ -219,6 +223,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["permission_management"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "research_agent_creation_proposal_tool": {
+        "category": "agent_collaboration",
+        "capabilityTags": ["agent_creation", "organization_governance", "proposal"],
+        "riskTags": ["organization_policy_change", "agent_creation"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "research_communication_edge_proposal_tool": {
         "category": "agent_collaboration",
         "capabilityTags": ["communication_edge", "organization_governance", "proposal"],
@@ -387,18 +397,20 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
     {
         "bundleId": "collaboration",
         "label": "Collaboration toolkit",
-        "description": "Tools for Agent-to-Agent messaging, delegation, and controlled permission-change requests.",
+        "description": "Tools for Agent-to-Agent messaging, delegation, and controlled organization governance requests.",
         "category": "collaboration",
         "toolNames": [
             "agent_message_tool",
             "spawn_agent_tool",
             "agent_tool_permission_request_tool",
+            "research_agent_creation_proposal_tool",
             "research_communication_edge_proposal_tool",
             "get_core_context_tool",
             "task_list_tool",
         ],
         "preferredToolNames": [
             "agent_message_tool",
+            "research_agent_creation_proposal_tool",
             "agent_tool_permission_request_tool",
             "research_communication_edge_proposal_tool",
         ],

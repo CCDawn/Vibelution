@@ -31,10 +31,15 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
     assert edge_tool["category"] == "agent_collaboration"
     assert edge_tool["permissionTier"] == "high"
     assert edge_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    creation_tool = next(item for item in payload["tools"] if item["name"] == "research_agent_creation_proposal_tool")
+    assert creation_tool["category"] == "agent_collaboration"
+    assert creation_tool["permissionTier"] == "high"
+    assert creation_tool["permissionPolicy"]["requiresExplicitAllow"] is True
     bundles = {item["bundleId"]: item for item in payload["toolBundles"]}
     assert {"core", "research", "coding", "collaboration"}.issubset(bundles)
     assert "grep_search_tool" in bundles["core"]["toolNames"]
     assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
+    assert "research_agent_creation_proposal_tool" in bundles["collaboration"]["toolNames"]
     assert "research_communication_edge_proposal_tool" in bundles["collaboration"]["toolNames"]
     assert bundles["research"]["explicitAllowToolCount"] >= 1
     assert bundles["collaboration"]["explicitAllowToolCount"] >= 1

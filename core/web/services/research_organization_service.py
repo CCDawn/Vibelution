@@ -67,11 +67,19 @@ IMMEDIATE_WAKE_INTENTS = {"decision_request", "risk_escalation"}
 MAILBOX_ONLY_INTENTS = {"status_report", "knowledge_update", "final_report", "capability_report", "report"}
 PROTECTED_SYSTEM_ROLES = {"ceo", "organization_advisor", "capability_steward"}
 HIGH_RISK_ACTIONS = {"create_agent", "archive_agent", "update_tool_policy", "expand_tool_permissions"}
+RESEARCH_AGENT_CREATION_TOOL = "research_agent_creation_proposal_tool"
 RESEARCH_COMMUNICATION_EDGE_TOOL = "research_communication_edge_proposal_tool"
-CEO_AGENT_TOOLS = ["agent_message_tool", RESEARCH_COMMUNICATION_EDGE_TOOL, "web_search_tool", "web_fetch_tool"]
+CEO_AGENT_TOOLS = [
+    "agent_message_tool",
+    RESEARCH_AGENT_CREATION_TOOL,
+    RESEARCH_COMMUNICATION_EDGE_TOOL,
+    "web_search_tool",
+    "web_fetch_tool",
+]
 ORGANIZATION_ADVISOR_TOOLS = [
     "agent_message_tool",
     "agent_tool_permission_request_tool",
+    RESEARCH_AGENT_CREATION_TOOL,
     RESEARCH_COMMUNICATION_EDGE_TOOL,
     "web_search_tool",
     "web_fetch_tool",
@@ -79,6 +87,7 @@ ORGANIZATION_ADVISOR_TOOLS = [
 CAPABILITY_STEWARD_TOOLS = [
     "agent_message_tool",
     "agent_tool_permission_request_tool",
+    RESEARCH_AGENT_CREATION_TOOL,
     RESEARCH_COMMUNICATION_EDGE_TOOL,
     "web_search_tool",
     "web_fetch_tool",
@@ -200,6 +209,10 @@ def build_research_organization_context_block(agent_id: str, *, limit: int = 6) 
             if _clean_id(item.get("agentId")) in connected_agent_ids
         ]
     agents_by_id = {_clean_id(item.get("agentId")): item for item in active_agents}
+    self_member = agents_by_id.get(normalized_agent_id, {})
+    self_tool_policy = self_member.get("toolPolicy") if isinstance(self_member.get("toolPolicy"), dict) else {}
+    self_allowed_tools = set(_normalize_allowed_tools(self_tool_policy.get("allowedTools") or []))
+    can_create_agent_proposal = RESEARCH_AGENT_CREATION_TOOL in self_allowed_tools
     bounded_limit = max(1, int(limit or 1)) + 8
     lines = [
         "## Research Organization Context",
@@ -207,8 +220,13 @@ def build_research_organization_context_block(agent_id: str, *, limit: int = 6) 
         "Use AgentId or AgentCode with agent_message_tool when contacting an Agent. Communication still follows edge policy, supervision policy, and wake rules.",
         "Organization Governance Protocol:",
         "- CEO decides priorities and may approve recommendations; high-risk changes still require the user gate before application.",
+        (
+            "- If a required role/member does not exist yet, first use research_agent_creation_proposal_tool to create a reviewable create_agent proposal; only after that proposal is applied should you configure its tool permissions or communication edges."
+            if can_create_agent_proposal
+            else "- If a required role/member does not exist yet, report the gap to CEO, Organization Advisor, or Capability Steward; do not configure permissions or communication edges for a missing Agent."
+        ),
         "- Organization Advisor can propose new Agents, archives, permission changes, and communication edges, but does not directly apply them.",
-        "- Capability Steward manages prompt/tool/memory policy recommendations and audits least-privilege boundaries; it does not grant hidden tools by itself.",
+        "- Capability Steward can propose missing capability Agents and manages prompt/tool/memory policy recommendations; it does not grant hidden tools by itself.",
         "- Created specialist Agents must follow their role contract and request changes through CEO/Advisor/Capability Steward instead of self-expanding.",
         "Research Communication Protocol:",
         "- Every research_org message from an Agent must include metadata_json.researchOrgIntent; empty intent is blocked so messages stay routable.",
@@ -220,8 +238,14 @@ def build_research_organization_context_block(agent_id: str, *, limit: int = 6) 
     ]
     for member in active_agents[:bounded_limit]:
         lines.extend(_format_research_org_context_member_lines(member, self_agent_id=normalized_agent_id))
-    lines.extend(_format_organization_capability_roster(active_agents[:bounded_limit], self_agent_id=normalized_agent_id))
-    lines.extend(_format_team_onboarding_context(agents_by_id.get(normalized_agent_id, {})))
+    lines.extend(
+        _format_organization_capability_roster(
+            active_agents[:bounded_limit],
+            self_agent_id=normalized_agent_id,
+            self_allowed_tools=self_allowed_tools,
+        )
+    )
+    lines.extend(_format_team_onboarding_context(self_member))
     if outbound_edges:
         lines.append("Directly reachable from you:")
         for edge in outbound_edges[:bounded_limit]:
@@ -1939,7 +1963,12 @@ def _format_research_org_context_member_lines(member: dict[str, Any], *, self_ag
     return lines
 
 
-def _format_organization_capability_roster(members: list[dict[str, Any]], *, self_agent_id: str) -> list[str]:
+def _format_organization_capability_roster(
+    members: list[dict[str, Any]],
+    *,
+    self_agent_id: str,
+    self_allowed_tools: set[str],
+) -> list[str]:
     lines = ["Organization Capability Roster:"]
     for member in members:
         agent_id = _clean_id(member.get("agentId"))
@@ -1951,16 +1980,23 @@ def _format_organization_capability_roster(members: list[dict[str, Any]], *, sel
         name = _clean_id(member.get("displayName") or agent.get("displayName"))
         own = " (you)" if agent_id == self_agent_id else ""
         proposal_actions = ", ".join(boundary.get("proposal_actions") or [])
-        allowed_tools = ", ".join(
-            _normalize_allowed_tools(
-                (member.get("toolPolicy") if isinstance(member.get("toolPolicy"), dict) else {}).get("allowedTools")
-                or (agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}).get("allowedTools")
-                or []
-            )[:8]
-        ) or "none"
+        member_allowed_tools = _normalize_allowed_tools(
+            (member.get("toolPolicy") if isinstance(member.get("toolPolicy"), dict) else {}).get("allowedTools")
+            or (agent.get("toolPolicy") if isinstance(agent.get("toolPolicy"), dict) else {}).get("allowedTools")
+            or []
+        )
+        visible_tool_names = (
+            member_allowed_tools
+            if agent_id == self_agent_id
+            else [tool for tool in member_allowed_tools if tool in self_allowed_tools]
+        )
+        allowed_tools = ", ".join(visible_tool_names[:8]) or "none"
+        hidden_suffix = ""
+        if agent_id != self_agent_id and len(visible_tool_names) < len(member_allowed_tools):
+            hidden_suffix = "; peer-only tools hidden by your ToolPolicy"
         lines.append(
             f"- {code} · {name}{own}: role={role or 'research_specialist'} "
-            f"authority={boundary['authority']} proposalActions={proposal_actions} visibleTools={allowed_tools}"
+            f"authority={boundary['authority']} proposalActions={proposal_actions} visibleTools={allowed_tools}{hidden_suffix}"
         )
         lines.append(f"  boundary: {boundary['must_not']}")
     return lines

@@ -60,6 +60,7 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
     assert steward["agent"]["metadata"]["systemRole"] == "capability_steward"
     assert ceo["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
+        "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
         "web_search_tool",
         "web_fetch_tool",
@@ -67,6 +68,7 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
     assert advisor["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
         "agent_tool_permission_request_tool",
+        "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
         "web_search_tool",
         "web_fetch_tool",
@@ -74,6 +76,7 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
     assert steward["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
         "agent_tool_permission_request_tool",
+        "research_agent_creation_proposal_tool",
         "research_communication_edge_proposal_tool",
         "web_search_tool",
         "web_fetch_tool",

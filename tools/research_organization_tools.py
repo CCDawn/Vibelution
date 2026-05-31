@@ -10,6 +10,102 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 
 
+def research_agent_creation_proposal_tool(
+    display_name: str,
+    role: str = "research_specialist",
+    role_key: str = "",
+    employee_rank: str = "specialist",
+    prompt_template_id: str = "",
+    responsibilities: str = "",
+    allowed_tools: str = "",
+    read_shared_groups: str = "",
+    write_shared_groups: str = "",
+    communication_targets: str = "",
+    report_to: str = "CEO",
+    reason: str = "",
+) -> str:
+    """
+    Submit a controlled proposal to create a new research Agent.
+
+    The tool creates a high-risk organization proposal only. Applying the proposal remains
+    handled by the existing user-gated research organization proposal path.
+    """
+
+    try:
+        from core.web.services.agent_directory_service import current_agent_runtime
+        from core.web.services.research_organization_service import create_research_org_proposal
+
+        runtime = current_agent_runtime()
+        proposer_agent_id = str(runtime.get("agentId") or "").strip()
+        if not proposer_agent_id:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "agent_runtime_missing",
+                    "message": "当前工具需要在已绑定 AgentInstance 的运行时中调用。",
+                }
+            )
+
+        normalized_name = trim_lines(str(display_name or ""), max_lines=1).strip()
+        if not normalized_name:
+            return _json_result(
+                {
+                    "ok": False,
+                    "status": "blocked",
+                    "error": "display_name_required",
+                    "message": "创建 Agent 提案需要 display_name。",
+                }
+            )
+
+        normalized_role = trim_lines(str(role or "research_specialist"), max_lines=1).strip() or "research_specialist"
+        normalized_role_key = trim_lines(str(role_key or normalized_role), max_lines=1).strip() or normalized_role
+        action = {
+            "actionType": "create_agent",
+            "displayName": normalized_name,
+            "role": normalized_role,
+            "roleKey": normalized_role_key,
+            "employeeRank": trim_lines(str(employee_rank or "specialist"), max_lines=1).strip() or "specialist",
+            "promptTemplateId": trim_lines(str(prompt_template_id or ""), max_lines=1).strip(),
+            "responsibilities": _parse_lines(responsibilities),
+            "allowedTools": _parse_list(allowed_tools) or ["agent_message_tool", "web_search_tool", "web_fetch_tool"],
+            "readSharedGroups": _parse_list(read_shared_groups) or ["project", "research"],
+            "writeSharedGroups": _parse_list(write_shared_groups),
+            "communicationTargets": _parse_lines(communication_targets) or ["CEO", "Organization Advisor", "Capability Steward"],
+            "reportTo": trim_lines(str(report_to or "CEO"), max_lines=1).strip() or "CEO",
+        }
+        proposal = create_research_org_proposal(
+            {
+                "title": f"新增科研 Agent 提案: {normalized_name}",
+                "description": trim_lines(reason or f"Agent requested creation of {normalized_name}.", max_lines=8),
+                "proposedByAgentId": proposer_agent_id,
+                "recommendedByAgentId": proposer_agent_id,
+                "actions": [action],
+            }
+        )["proposal"]
+        return _json_result(
+            {
+                "ok": True,
+                "status": "proposal_created",
+                "proposalId": proposal.get("proposalId") or "",
+                "proposalStatus": proposal.get("status") or "",
+                "riskLevel": proposal.get("riskLevel") or "",
+                "requiresUserConfirmation": bool(proposal.get("requiresUserConfirmation")),
+                "action": action,
+                "message": "新增 Agent 提案已创建；应用后才会生成 Agent，之后再配置工具权限和通信边。",
+            }
+        )
+    except Exception as exc:
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+            }
+        )
+
+
 def research_communication_edge_proposal_tool(
     action: str,
     source_agent: str = "",
@@ -266,6 +362,21 @@ def _parse_list(value: str) -> list[str]:
         result.append(clean)
         seen.add(clean)
     return result[:40]
+
+
+def _parse_lines(value: str) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in re.split(r"[\n;；]+", raw):
+        clean = trim_lines(str(item or ""), max_lines=1).strip(" -\t")
+        if not clean or clean in seen:
+            continue
+        result.append(clean)
+        seen.add(clean)
+    return result[:12]
 
 
 def _normalize_wake_strategy(value: str) -> str:
