@@ -77,16 +77,11 @@
 }
 
 .controlStrip {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
   padding: 4px 12px 0;
-}
-
-.managementNav {
-  margin: 0;
 }
 
 .subnav {
@@ -177,6 +172,83 @@
   overflow: hidden;
   color: var(--fg-primary);
   font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pipelinePanel {
+  display: grid;
+  gap: 5px;
+  margin: 4px 12px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 90%, var(--surface-card));
+}
+
+.pipelineHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pipelineHeader h2 {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.pipelineBoundary {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.pipelineBoundary span,
+.pipelineIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  font-size: 0.64rem;
+  font-weight: 720;
+  white-space: nowrap;
+}
+
+.pipelineSteps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.pipelineStep {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 74%, transparent);
+}
+
+.pipelineStep strong {
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+}
+
+.pipelineStep > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.68rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -387,6 +459,8 @@
 
 .reviewQueuePanel {
   margin: 8px 10px 0;
+  gap: 5px;
+  padding: 8px 10px;
 }
 
 .panelLead,
@@ -407,64 +481,122 @@
 
 .reviewQueueList {
   display: grid;
-  gap: 6px;
+  gap: 3px;
+  min-height: 0;
 }
 
 .reviewQueueItem {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
+  grid-template-columns: 24px minmax(210px, 0.58fr) minmax(220px, 0.75fr) minmax(132px, 0.42fr) auto auto;
   gap: 8px;
-  align-items: start;
+  align-items: center;
   min-width: 0;
-  padding: 8px;
+  min-height: 32px;
+  padding: 3px 6px;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--surface-card);
 }
 
 .reviewRank {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
   border: 1px solid color-mix(in srgb, var(--accent-warm) 28%, transparent);
   border-radius: 999px;
   color: var(--accent-warm-2);
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 800;
 }
 
 .reviewQueueBody {
   display: grid;
-  gap: 4px;
   min-width: 0;
+}
+
+.reviewQueueTitleLine {
+  display: grid;
+  grid-template-columns: minmax(0, 0.62fr) minmax(82px, 0.38fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.reviewQueueTitleLine strong,
+.reviewQueueTitleLine span,
+.reviewQueueSummary,
+.reviewQueueTime {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reviewQueueTitleLine strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.reviewQueueTitleLine span,
+.reviewQueueSummary,
+.reviewQueueTime {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.reviewQueueSummary {
+  display: block;
+  color: var(--fg-secondary);
+}
+
+.reviewQueueTime {
+  font-variant-numeric: tabular-nums;
 }
 
 .reviewReasonList {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-wrap: nowrap;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .reviewReasonPill {
   display: inline-flex;
   align-items: center;
-  min-height: 20px;
-  padding: 0 6px;
+  min-height: 18px;
+  padding: 0 5px;
   border: 1px solid color-mix(in srgb, var(--state-warning) 26%, transparent);
   border-radius: 999px;
   background: color-mix(in srgb, var(--state-warning) 9%, transparent);
   color: var(--fg-secondary);
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   white-space: nowrap;
 }
 
 .reviewQueueActions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 4px;
+}
+
+.reviewQueueActions .detailActionButton {
+  min-height: 26px;
+  width: 32px;
+  justify-content: center;
+  padding: 0;
+}
+
+.reviewQueueActions .detailActionButton span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .panelNotice {
@@ -529,15 +661,46 @@
 }
 
 .manageWorkspace {
-  grid-template-columns: minmax(190px, 230px) minmax(500px, 1.12fr) minmax(400px, 0.9fr);
+  grid-template-columns: minmax(560px, 1.08fr) minmax(320px, 0.72fr) minmax(360px, 0.72fr);
 }
 
 .knowledgeWorkspace {
-  grid-template-columns: minmax(220px, 270px) minmax(460px, 1fr) minmax(360px, 0.85fr);
+  grid-template-columns: minmax(180px, 230px) minmax(620px, 1.15fr) minmax(300px, 0.72fr);
 }
 
 .manageFormPanel {
   overflow: auto;
+}
+
+.manageFormPanel > .managementHeader + p {
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 7%, transparent);
+}
+
+.manageFormPanel .managementHeader {
+  align-items: center;
+}
+
+.manageFormPanel .managementPanel {
+  gap: 7px;
+  padding: 8px;
+}
+
+.manageFormPanel .managementPanel > p {
+  font-size: 0.76rem;
+  line-height: 1.32;
+}
+
+.manageFormPanel .managementActions {
+  gap: 6px;
+}
+
+.manageFormPanel .managementActions .detailActionButton {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 0.72rem;
 }
 
 .manageFormPanel .emptyDetail {
@@ -549,8 +712,137 @@
   display: none;
 }
 
+.selectedConfigSummary {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.selectedConfigSummary strong,
+.selectedConfigSummary p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.selectedConfigSummary strong {
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+  white-space: nowrap;
+}
+
+.selectedConfigSummary p {
+  display: -webkit-box;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.28;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .manageListPanel {
-  grid-template-rows: auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr);
+  gap: 6px;
+}
+
+.manageListPanel .panelHeader span {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.manageFilterPanel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 3px 0;
+  border-block: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+}
+
+.manageFilterHeader {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.manageFilterHeader strong {
+  color: var(--accent-cool-2);
+  font-size: 0.72rem;
+}
+
+.manageFilterPanel .filterGroup {
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.manageSourceFilters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 26px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 0 3px;
+}
+
+.sourceChip,
+.sourceChipActive {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  max-width: 155px;
+  min-height: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 0.7rem;
+}
+
+.sourceChip span,
+.sourceChipActive span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceChip strong,
+.sourceChipActive strong {
+  flex: 0 0 auto;
+  color: inherit;
+  font-size: 0.7rem;
+}
+
+.sourceChip:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-panel-hover);
+  color: var(--fg-primary);
+}
+
+.sourceChipActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 12%, transparent);
+  color: var(--accent-cool-2);
 }
 
 .sourcePanel,
@@ -848,8 +1140,8 @@
   grid-template-columns: 24px minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  min-height: 56px;
-  padding: 5px 7px;
+  min-height: 48px;
+  padding: 4px 7px;
 }
 
 .itemContentButton {
@@ -955,7 +1247,7 @@
 
 .manageItemPrimary strong {
   color: var(--fg-primary);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .manageItemPrimary span {
@@ -967,7 +1259,7 @@
   grid-template-columns: minmax(92px, 0.28fr) minmax(0, 1fr);
   gap: 8px;
   color: var(--fg-tertiary);
-  font-size: 0.69rem;
+  font-size: 0.67rem;
 }
 
 .manageItemFooter {
@@ -978,7 +1270,7 @@
 
 .manageItemSummary {
   color: var(--fg-secondary);
-  font-size: 0.72rem;
+  font-size: 0.69rem;
 }
 
 .manageItemBadges {
@@ -1043,6 +1335,8 @@
 }
 
 .statusPillMuted {
+  border-color: color-mix(in srgb, var(--border-soft) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-panel-muted) 72%, transparent);
   color: var(--fg-tertiary);
 }
 
@@ -1141,6 +1435,14 @@
   padding: 8px;
 }
 
+.manageDetailPanel .visibilityPanel,
+.manageDetailPanel .managementPanel,
+.manageDetailPanel .sectionPanel,
+.manageDetailPanel .rawPanel,
+.manageDetailPanel .factGrid section {
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+}
+
 .manageDetailPanel .impactPanel > p,
 .manageDetailPanel .managementPanel > p {
   font-size: 0.76rem;
@@ -1181,15 +1483,40 @@
 
 .knowledgeMain {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-height: 0;
   overflow: auto;
+}
+
+.knowledgeWorkspace .sourcePanel,
+.knowledgeWorkspace .detailPanel {
+  gap: 7px;
+  padding: 8px;
+}
+
+.knowledgeWorkspace .panelLead {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.knowledgeWorkspace .managementPanel {
+  gap: 7px;
+  padding: 8px;
+}
+
+.knowledgeWorkspace .managementPanel > .emptyDetail,
+.knowledgeWorkspace .knowledgeItems > .emptyDetail,
+.knowledgeWorkspace .sourcePanel > .emptyDetail {
+  min-height: 74px;
+  padding: 10px;
 }
 
 .knowledgeFormGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -1228,18 +1555,68 @@
 .knowledgeFormGrid select,
 .knowledgeItemCard input,
 .knowledgeItemCard select {
-  min-height: 28px;
-  padding: 0 8px;
+  min-height: 26px;
+  padding: 0 7px;
 }
 
 .knowledgeFormGrid textarea {
   resize: vertical;
-  padding: 7px 8px;
-  line-height: 1.35;
+  min-height: 42px;
+  max-height: 92px;
+  padding: 6px 7px;
+  line-height: 1.3;
 }
 
 .wideField {
   grid-column: 1 / -1;
+}
+
+.queueToolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.queueToolbar label,
+.inlineCheck {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.queueToolbar select {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-muted);
+  color: var(--fg-primary);
+  font: inherit;
+}
+
+.inlineCheck {
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.inlineCheck input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent-cool);
+}
+
+.inlineCheck span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .knowledgeProposalList,
@@ -1251,7 +1628,7 @@
 
 .knowledgeRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) auto auto;
+  grid-template-columns: minmax(82px, 0.32fr) minmax(0, 0.72fr) minmax(0, 1.15fr) auto auto;
   align-items: center;
   gap: 6px;
   min-width: 0;
@@ -1272,6 +1649,69 @@
 .knowledgeRow span {
   color: var(--fg-secondary);
   font-size: 0.74rem;
+}
+
+.knowledgeRow small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.governanceMiniPanel {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  margin: 3px 0;
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-muted);
+}
+
+.governanceMiniPanel strong {
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+}
+
+.governanceMiniPanel .statusPill,
+.governanceMiniPanel .statusPillMuted {
+  justify-content: flex-start;
+  min-height: 18px;
+  font-size: 0.66rem;
+}
+
+.permissionMatrix {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.permissionRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) repeat(4, auto);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.permissionRow strong,
+.permissionRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permissionRow span {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
 }
 
 .knowledgeItemCard {
@@ -1684,6 +2124,10 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .pipelineSteps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .overviewGrid,
   .effectiveGrid {
     grid-template-columns: 1fr;
@@ -1724,9 +2168,8 @@
     align-items: start;
   }
 
-  .controlStrip,
-  .subnav {
-    grid-template-columns: 1fr;
+  .controlStrip {
+    align-items: stretch;
   }
 
   .subnav {
@@ -1740,6 +2183,7 @@
   }
 
   .summaryGrid,
+  .pipelineSteps,
   .matrixGrid,
   .overviewGrid,
   .effectiveGrid,

@@ -119,3 +119,158 @@ def test_knowledge_overview_returns_visible_team_knowledge(tmp_path, monkeypatch
     payload = response.json()
     assert payload["summary"]["knowledgeBaseCount"] == 1
     assert payload["knowledgeBases"][0]["knowledgeBaseId"] == base["knowledgeBaseId"]
+
+
+def test_knowledge_search_permission_audit_and_rating_suggestion_routes(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Governance KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "Governed search item",
+            "content": "Knowledge search and rating suggestions share governance rules.",
+            "tags": ["governance"],
+        },
+    ).json()
+    applied = client.patch(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals/{proposal['proposalId']}/review",
+        json={"status": "approved", "reviewedByAgentId": lead["agentId"]},
+    ).json()
+
+    search_response = client.get(
+        "/api/knowledge/search",
+        params={"agentId": member["agentId"], "query": "rating suggestions", "tags": "governance"},
+    )
+    assert search_response.status_code == 200
+    assert search_response.json()["summary"]["resultCount"] == 1
+
+    suggestion_response = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/rating-suggestions",
+        json={
+            "suggestedByAgentId": lead["agentId"],
+            "targetType": "knowledge_item",
+            "knowledgeItemId": applied["item"]["knowledgeItemId"],
+            "importanceLevel": "critical",
+            "confidence": 0.9,
+            "stability": "stable",
+            "reviewPriority": "urgent",
+            "markingReason": "Governance test.",
+        },
+    )
+    assert suggestion_response.status_code == 201
+    suggestion = suggestion_response.json()
+    assert suggestion["status"] == "pending"
+
+    review_response = client.patch(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/rating-suggestions/{suggestion['suggestionId']}/review",
+        json={"status": "applied", "reviewedByAgentId": lead["agentId"]},
+    )
+    assert review_response.status_code == 200
+    assert review_response.json()["item"]["importanceLevel"] == "critical"
+
+    suggestion_two = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/rating-suggestions",
+        json={
+            "suggestedByAgentId": lead["agentId"],
+            "targetType": "knowledge_item",
+            "knowledgeItemId": applied["item"]["knowledgeItemId"],
+            "importanceLevel": "high",
+            "confidence": 0.8,
+            "stability": "evolving",
+            "reviewPriority": "elevated",
+            "markingReason": "Bulk route test.",
+        },
+    ).json()
+    bulk_response = client.patch(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/rating-suggestions/review-batch",
+        json={
+            "suggestionIds": [suggestion_two["suggestionId"], suggestion["suggestionId"], "missing-suggestion"],
+            "status": "rejected",
+            "reviewedByAgentId": lead["agentId"],
+        },
+    )
+    assert bulk_response.status_code == 200
+    assert bulk_response.json()["summary"]["reviewedCount"] == 1
+    assert bulk_response.json()["summary"]["skippedCount"] == 2
+
+    audit_response = client.get("/api/knowledge/permissions/audit", params={"agentId": member["agentId"]})
+    assert audit_response.status_code == 200
+    assert audit_response.json()["summary"]["knowledgeBaseCount"] == 1
+
+
+def test_knowledge_ingestion_package_route_creates_pending_candidate_only(tmp_path, monkeypatch):
+    client, team, lead, member, outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Ingestion KB", "actorAgentId": lead["agentId"]},
+    ).json()
+
+    response = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/ingestion-packages",
+        json={
+            "sourceType": "external_search_refinement",
+            "sourceRef": {"url": "https://example.test/a", "query": "memory ingestion"},
+            "sourceTitle": "Search result",
+            "sourceSummary": "External search evidence.",
+            "excerpt": "Search result says ingestion should keep URL and query.",
+            "proposedByAgentId": member["agentId"],
+            "proposalTitle": "Preserve search URL and query",
+            "tags": ["search", "ingestion"],
+        },
+    )
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["sourceArtifact"]["sourceType"] == "external_search_refinement"
+    assert payload["proposal"]["status"] == "pending"
+
+    items_response = client.get(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/items",
+        params={"agentId": member["agentId"]},
+    )
+    assert items_response.json()["summary"]["itemCount"] == 0
+
+
+def test_knowledge_governance_tasks_adapters_and_trace_routes(tmp_path, monkeypatch):
+    client, team, lead, member, outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Governance Ops KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    package = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/ingestion-packages",
+        json={
+            "sourceType": "manual_user_entry",
+            "sourceRef": {"note": "route trace"},
+            "excerpt": "Route trace evidence.",
+            "proposedByAgentId": member["agentId"],
+            "proposalTitle": "Route trace proposal",
+        },
+    ).json()
+
+    tasks_response = client.get("/api/knowledge/governance/tasks", params={"agentId": lead["agentId"]})
+    adapters_response = client.get("/api/knowledge/ingestion-adapters")
+    trace_response = client.get(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/trace/{package['proposal']['proposalId']}",
+        params={"agentId": member["agentId"]},
+    )
+
+    assert tasks_response.status_code == 200
+    assert tasks_response.json()["summary"]["proposalReviewCount"] == 1
+    assert adapters_response.status_code == 200
+    assert adapters_response.json()["summary"]["adapterCount"] >= 6
+    assert trace_response.status_code == 200
+    assert trace_response.json()["summary"]["sourceArtifacts"] == 1
+
+    blocked = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/ingestion-packages",
+        json={
+            "sourceType": "manual_user_entry",
+            "excerpt": "Outsider cannot ingest.",
+            "proposedByAgentId": outsider["agentId"],
+        },
+    )
+    assert blocked.status_code == 403

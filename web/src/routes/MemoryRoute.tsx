@@ -25,9 +25,19 @@ import { queryKeys } from "../api/queryKeys";
 import {
   KnowledgeItemsPayload,
   KnowledgeItem,
+  KnowledgeGovernanceTasksPayload,
+  KnowledgeIngestionAdaptersPayload,
+  KnowledgeIngestionPackageResponse,
+  KnowledgePermissionAuditPayload,
+  KnowledgeRatingSuggestionBulkReviewResponse,
+  KnowledgeRatingSuggestion,
+  KnowledgeRatingSuggestionReviewResponse,
+  KnowledgeRatingSuggestionsPayload,
   KnowledgeRefinementProposal,
   KnowledgeReviewResponse,
+  KnowledgeSearchPayload,
   KnowledgeSourceArtifact,
+  KnowledgeTracePayload,
   MemoryItem,
   MemoryMutationResponse,
   MemoryOverview,
@@ -37,7 +47,6 @@ import {
 } from "../api/types";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
-import { AgentManagementNav } from "./AgentManagementNav";
 import styles from "./MemoryRoute.module.css";
 
 type Copy = {
@@ -96,6 +105,13 @@ type Copy = {
   filterVisible: string;
   filterManual: string;
   filterMissing: string;
+  manageFilters: string;
+  manageFilterAll: string;
+  manageFilterPrompt: string;
+  manageFilterEditable: string;
+  manageFilterChanged: string;
+  manageFilterMissing: string;
+  sourceFilters: string;
   impact: string;
   impactPromptTitle: string;
   impactPromptBody: string;
@@ -148,6 +164,9 @@ type Copy = {
   disabledOrOverridden: string;
   effectiveByChannel: string;
   manageAllMemory: string;
+  manageConfigPanel: string;
+  manageConfigHint: string;
+  manageListHint: string;
   selectedMemory: string;
   sourceAudit: string;
   reviewQueue: string;
@@ -201,9 +220,53 @@ type Copy = {
   markingReason: string;
   noKnowledgeBases: string;
   knowledgeHint: string;
+  platformPipeline: string;
+  pipelineSource: string;
+  pipelineProposal: string;
+  pipelineBatch: string;
+  pipelineFormal: string;
+  pipelineRating: string;
+  toolReadableOnly: string;
+  promptBoundary: string;
+  agentPrivateDomain: string;
+  teamKnowledgeDomain: string;
+  governance: string;
+  knowledgeSearch: string;
+  searchQuery: string;
+  ratingSuggestions: string;
+  submitRatingSuggestion: string;
+  applySuggestion: string;
+  rejectSuggestion: string;
+  permissionAudit: string;
+  toolVisibility: string;
+  readable: string;
+  proposable: string;
+  reviewable: string;
+  rateable: string;
+  ingestionPackage: string;
+  submitIngestionPackage: string;
+  excerpt: string;
+  status: string;
+  allStatuses: string;
+  priority: string;
+  allPriorities: string;
+  selectSuggestion: string;
+  selectAllVisibleSuggestions: string;
+  clearSuggestionSelection: string;
+  bulkApplySuggestions: string;
+  bulkRejectSuggestions: string;
+  selectedSuggestions: string;
+  skippedSuggestions: string;
+  governanceTasks: string;
+  ingestionAdapters: string;
+  traceability: string;
+  sourceChain: string;
+  outputContract: string;
+  createsKnowledgeItem: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
+type ManageFilterMode = "all" | "prompt" | "editable" | "changed" | "missing";
 export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge";
 type MemoryChannel = "conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read";
 type ChannelFilter = MemoryChannel | "";
@@ -237,6 +300,21 @@ type ProposalDraft = {
   content: string;
   tags: string;
 };
+type IngestionDraft = {
+  sourceType: string;
+  sourceRef: string;
+  sourceCreatedAt: string;
+  capturedBy: string;
+  evidenceRange: string;
+  sourceTitle: string;
+  sourceSummary: string;
+  excerpt: string;
+  proposedByAgentId: string;
+  proposalTitle: string;
+  proposalSummary: string;
+  proposalContent: string;
+  tags: string;
+};
 type RatingDraft = {
   actorAgentId: string;
   importanceLevel: string;
@@ -246,15 +324,36 @@ type RatingDraft = {
   reviewPriority: string;
   markingReason: string;
 };
+type KnowledgeSearchDraft = {
+  query: string;
+  tags: string;
+};
+type RatingSuggestionStatusFilter = "pending" | "applied" | "rejected" | "all";
+type RatingSuggestionPriorityFilter = "all" | "urgent" | "elevated" | "normal";
+type KnowledgePermissionEntry = KnowledgePermissionAuditPayload["knowledgeBases"][number]["permissions"][string] | string | null | undefined;
+
+function normalizeKnowledgePermission(permission: KnowledgePermissionEntry): { allowed: boolean; reason: string } {
+  if (permission && typeof permission === "object" && "allowed" in permission) {
+    return {
+      allowed: Boolean(permission.allowed),
+      reason: String(permission.reason || "-"),
+    };
+  }
+  return {
+    allowed: false,
+    reason: typeof permission === "string" && permission.trim() ? permission : "-",
+  };
+}
 
 const FILTER_MODES: FilterMode[] = ["all", "prompt", "visible", "manual", "missing"];
+const MANAGE_FILTER_MODES: ManageFilterMode[] = ["all", "prompt", "editable", "changed", "missing"];
 const MEMORY_CHANNELS: MemoryChannel[] = ["conversation", "research", "self_evolution", "supervised_evolution", "explicit_read"];
 
 const COPY: Record<"zh" | "en", Copy> = {
   zh: {
-    eyebrow: "Agent Memory",
-    title: "记忆",
-    subtitle: "按来源聚合 agent 记忆、运行证据和可感知入口，明确哪些内容会进入 prompt。",
+    eyebrow: "Memory Library",
+    title: "记忆库",
+    subtitle: "统一治理 Agent 私有记忆、团队知识库、来源证据和生效边界。",
     refresh: "刷新",
     loading: "正在整理记忆...",
     loadFailed: "记忆概览加载失败",
@@ -307,6 +406,13 @@ const COPY: Record<"zh" | "en", Copy> = {
     filterVisible: "agent 可感知",
     filterManual: "显式读取",
     filterMissing: "缺失/截断",
+    manageFilters: "配置任务",
+    manageFilterAll: "全部",
+    manageFilterPrompt: "进 prompt",
+    manageFilterEditable: "可编辑",
+    manageFilterChanged: "已改写/禁用",
+    manageFilterMissing: "缺失/截断",
+    sourceFilters: "来源分区",
     impact: "影响说明",
     impactPromptTitle: "会进入运行上下文",
     impactPromptBody: "这条记忆会通过对应 prompt、会话历史或 harness 输入被 agent 直接感知。",
@@ -342,12 +448,12 @@ const COPY: Record<"zh" | "en", Copy> = {
     mutationFailed: "操作失败",
     overviewView: "总览",
     effectiveView: "生效范围",
-    manageView: "手动管理",
+    manageView: "Agent 私有记忆",
     sourcesView: "来源审计",
     knowledgeView: "团队知识库",
     overviewSubtitle: "先看记忆健康、运行影响和需要检查的内容；复杂证据放到子页里。",
     effectiveSubtitle: "按对话、自进化、监督进化和显式读取说明哪些记忆会被 agent 感知。",
-    manageSubtitle: "集中新增、编辑、禁用、恢复和删除用户可管理的记忆。",
+    manageSubtitle: "集中新增、编辑、禁用、恢复和删除 Agent 私有或用户可管理的记忆。",
     sourcesSubtitle: "保留完整来源、路径、接口、原文和复制动作，供专业审查使用。",
     knowledgeSubtitle: "管理团队共享知识库、来源登记、精炼提案、审核落盘和重要程度标记。",
     healthOverview: "记忆健康概览",
@@ -359,6 +465,9 @@ const COPY: Record<"zh" | "en", Copy> = {
     disabledOrOverridden: "已禁用/覆盖",
     effectiveByChannel: "按作用位置查看",
     manageAllMemory: "全部可管理记忆",
+    manageConfigPanel: "配置面板",
+    manageConfigHint: "先在左侧选择一条记忆，再在这里编辑、禁用、恢复或新增用户记忆。系统来源只保存覆盖状态，原始文件保持不变。",
+    manageListHint: "选择一条记忆后在中间配置；右侧只负责查看来源、影响和原文。",
     selectedMemory: "选中记忆",
     sourceAudit: "来源审计",
     reviewQueue: "优先检查队列",
@@ -412,11 +521,54 @@ const COPY: Record<"zh" | "en", Copy> = {
     markingReason: "标记原因",
     noKnowledgeBases: "当前没有可访问的团队知识库。",
     knowledgeHint: "P1 只登记来源、提交候选并审核落盘；正式知识默认可检索，不默认注入 prompt。",
+    platformPipeline: "记忆平台流水线",
+    pipelineSource: "来源登记",
+    pipelineProposal: "精炼提案",
+    pipelineBatch: "审核批次",
+    pipelineFormal: "正式知识",
+    pipelineRating: "评级标记",
+    toolReadableOnly: "工具可读",
+    promptBoundary: "不默认进 prompt",
+    agentPrivateDomain: "Agent 私有记忆",
+    teamKnowledgeDomain: "团队知识库",
+    governance: "治理",
+    knowledgeSearch: "知识检索",
+    searchQuery: "检索词",
+    ratingSuggestions: "评级建议",
+    submitRatingSuggestion: "提交评级建议",
+    applySuggestion: "应用建议",
+    rejectSuggestion: "拒绝建议",
+    permissionAudit: "权限审计",
+    toolVisibility: "工具可见性",
+    readable: "可读",
+    proposable: "可提案",
+    reviewable: "可审核",
+    rateable: "可评级",
+    ingestionPackage: "半自动摄取包",
+    submitIngestionPackage: "提交摄取包",
+    excerpt: "摘录",
+    status: "状态",
+    allStatuses: "全部状态",
+    priority: "优先级",
+    allPriorities: "全部优先级",
+    selectSuggestion: "选择建议",
+    selectAllVisibleSuggestions: "选择可见建议",
+    clearSuggestionSelection: "清空选择",
+    bulkApplySuggestions: "批量应用",
+    bulkRejectSuggestions: "批量拒绝",
+    selectedSuggestions: "已选建议",
+    skippedSuggestions: "跳过",
+    governanceTasks: "治理任务",
+    ingestionAdapters: "摄取适配器",
+    traceability: "证据链",
+    sourceChain: "来源链路",
+    outputContract: "输出合同",
+    createsKnowledgeItem: "生成正式知识",
   },
   en: {
-    eyebrow: "Agent Memory",
-    title: "Memory",
-    subtitle: "Groups agent memory, runtime evidence, and visibility by source, including prompt injection status.",
+    eyebrow: "Memory Library",
+    title: "Memory Library",
+    subtitle: "Governs Agent private memory, team knowledge, source evidence, and effective scope in one place.",
     refresh: "Refresh",
     loading: "Loading memory...",
     loadFailed: "Memory overview failed to load",
@@ -469,6 +621,13 @@ const COPY: Record<"zh" | "en", Copy> = {
     filterVisible: "Agent visible",
     filterManual: "Explicit read",
     filterMissing: "Missing/truncated",
+    manageFilters: "Config tasks",
+    manageFilterAll: "All",
+    manageFilterPrompt: "In prompt",
+    manageFilterEditable: "Editable",
+    manageFilterChanged: "Changed/disabled",
+    manageFilterMissing: "Missing/truncated",
+    sourceFilters: "Source groups",
     impact: "Impact",
     impactPromptTitle: "Injected into runtime context",
     impactPromptBody: "This memory can be directly perceived through a prompt section, conversation history, or harness input.",
@@ -504,12 +663,12 @@ const COPY: Record<"zh" | "en", Copy> = {
     mutationFailed: "Action failed",
     overviewView: "Overview",
     effectiveView: "Effective scope",
-    manageView: "Manual management",
+    manageView: "Agent private memory",
     sourcesView: "Source audit",
     knowledgeView: "Team knowledge",
     overviewSubtitle: "Start with memory health, runtime impact, and items that need review. Detailed evidence stays in subpages.",
     effectiveSubtitle: "Shows how conversation, self-evolution, supervised evolution, and explicit-read memory can be perceived.",
-    manageSubtitle: "Add, edit, disable, restore, and delete user-manageable memory in one place.",
+    manageSubtitle: "Add, edit, disable, restore, and delete Agent-private or user-manageable memory in one place.",
     sourcesSubtitle: "Keeps the full source, path, API, raw content, and copy actions for professional audit.",
     knowledgeSubtitle: "Manage team knowledge bases, source registration, refinement proposals, review, and importance marking.",
     healthOverview: "Memory health",
@@ -521,6 +680,9 @@ const COPY: Record<"zh" | "en", Copy> = {
     disabledOrOverridden: "Disabled/overridden",
     effectiveByChannel: "By effective scope",
     manageAllMemory: "All manageable memory",
+    manageConfigPanel: "Configuration panel",
+    manageConfigHint: "Select one memory on the left, then edit, disable, restore, or add user memory here. System sources keep reversible overrides and original files stay unchanged.",
+    manageListHint: "Select a memory to configure it in the middle; the right pane is for source, impact, and raw inspection.",
     selectedMemory: "Selected memory",
     sourceAudit: "Source audit",
     reviewQueue: "Priority review queue",
@@ -574,6 +736,49 @@ const COPY: Record<"zh" | "en", Copy> = {
     markingReason: "Marking reason",
     noKnowledgeBases: "No accessible team knowledge bases yet.",
     knowledgeHint: "P1 registers sources, submits candidates, and reviews batches; formal knowledge is tool-readable, not prompt-injected.",
+    platformPipeline: "Memory platform pipeline",
+    pipelineSource: "Source registration",
+    pipelineProposal: "Refinement proposal",
+    pipelineBatch: "Review batch",
+    pipelineFormal: "Formal knowledge",
+    pipelineRating: "Rating mark",
+    toolReadableOnly: "Tool-readable",
+    promptBoundary: "Not prompt-injected",
+    agentPrivateDomain: "Agent private memory",
+    teamKnowledgeDomain: "Team knowledge base",
+    governance: "Governance",
+    knowledgeSearch: "Knowledge search",
+    searchQuery: "Search query",
+    ratingSuggestions: "Rating suggestions",
+    submitRatingSuggestion: "Submit suggestion",
+    applySuggestion: "Apply suggestion",
+    rejectSuggestion: "Reject suggestion",
+    permissionAudit: "Permission audit",
+    toolVisibility: "Tool visibility",
+    readable: "Readable",
+    proposable: "Proposable",
+    reviewable: "Reviewable",
+    rateable: "Rateable",
+    ingestionPackage: "Semi-automatic ingestion",
+    submitIngestionPackage: "Submit ingestion",
+    excerpt: "Excerpt",
+    status: "Status",
+    allStatuses: "All statuses",
+    priority: "Priority",
+    allPriorities: "All priorities",
+    selectSuggestion: "Select suggestion",
+    selectAllVisibleSuggestions: "Select visible suggestions",
+    clearSuggestionSelection: "Clear selection",
+    bulkApplySuggestions: "Bulk apply",
+    bulkRejectSuggestions: "Bulk reject",
+    selectedSuggestions: "Selected suggestions",
+    skippedSuggestions: "Skipped",
+    governanceTasks: "Governance tasks",
+    ingestionAdapters: "Ingestion adapters",
+    traceability: "Traceability",
+    sourceChain: "Source chain",
+    outputContract: "Output contract",
+    createsKnowledgeItem: "Creates formal item",
   },
 };
 
@@ -653,6 +858,10 @@ function normalizeFilterMode(value: string | null): FilterMode {
   return FILTER_MODES.includes(value as FilterMode) ? (value as FilterMode) : "all";
 }
 
+function normalizeManageFilterMode(value: string | null): ManageFilterMode {
+  return MANAGE_FILTER_MODES.includes(value as ManageFilterMode) ? (value as ManageFilterMode) : "all";
+}
+
 function normalizeChannelFilter(value: string | null): ChannelFilter {
   return MEMORY_CHANNELS.includes(value as MemoryChannel) ? (value as MemoryChannel) : "";
 }
@@ -675,6 +884,33 @@ function itemMatchesFilter(item: MemoryItem, filterMode: FilterMode) {
 
 function itemMatchesChannelFilter(item: MemoryItem, channelFilter: ChannelFilter) {
   return !channelFilter || item.channels.includes(channelFilter);
+}
+
+function itemIsManageable(item: MemoryItem) {
+  return Boolean(
+    item.managedState?.editable
+      || item.managedState?.deletable
+      || item.managedState?.restorable
+      || item.managedState?.userManaged
+      || item.managedState?.disabled
+      || item.managedState?.overridden,
+  );
+}
+
+function itemMatchesManageFilter(item: MemoryItem, filterMode: ManageFilterMode) {
+  if (filterMode === "prompt") {
+    return item.inPrompt || item.visibilityClass === "prompt";
+  }
+  if (filterMode === "editable") {
+    return Boolean(item.managedState?.editable || item.managedState?.userManaged);
+  }
+  if (filterMode === "changed") {
+    return Boolean(item.managedState?.disabled || item.managedState?.overridden || item.managedState?.userManaged);
+  }
+  if (filterMode === "missing") {
+    return item.visibilityClass === "missing" || !item.exists || item.contentTruncated;
+  }
+  return true;
 }
 
 function filterSections(
@@ -788,6 +1024,10 @@ function filterCount(pairs: MemoryPair[], filterMode: FilterMode) {
   return pairs.filter(({ item }) => itemMatchesFilter(item, filterMode)).length;
 }
 
+function manageFilterCount(pairs: MemoryPair[], filterMode: ManageFilterMode) {
+  return pairs.filter(({ item }) => itemMatchesManageFilter(item, filterMode)).length;
+}
+
 function statusClassName(active: boolean, injected: boolean) {
   if (injected) {
     return `${styles.statusPill} ${styles.statusPillPrompt}`;
@@ -854,6 +1094,7 @@ function buildMemorySearchParams(
   activeSectionId: string,
   activeItemId: string,
   activeFilter: FilterMode,
+  activeManageFilter: ManageFilterMode,
   activeChannel: ChannelFilter,
   searchText: string,
 ) {
@@ -866,6 +1107,9 @@ function buildMemorySearchParams(
   }
   if (activeFilter !== "all") {
     next.set("filter", activeFilter);
+  }
+  if (activeManageFilter !== "all") {
+    next.set("manage", activeManageFilter);
   }
   if (activeChannel) {
     next.set("channel", activeChannel);
@@ -880,13 +1124,14 @@ function buildMemoryLink(
   activeSectionId: string,
   activeItemId: string,
   activeFilter: FilterMode,
+  activeManageFilter: ManageFilterMode,
   activeChannel: ChannelFilter,
   searchText: string,
 ) {
   if (typeof window === "undefined") {
     return "";
   }
-  const next = buildMemorySearchParams(activeSectionId, activeItemId, activeFilter, activeChannel, searchText);
+  const next = buildMemorySearchParams(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText);
   const query = next.toString();
   return `${window.location.origin}${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
 }
@@ -936,6 +1181,24 @@ function newProposalDraft(): ProposalDraft {
   };
 }
 
+function newIngestionDraft(): IngestionDraft {
+  return {
+    sourceType: "external_search_refinement",
+    sourceRef: "{\"url\":\"\",\"query\":\"\"}",
+    sourceCreatedAt: "",
+    capturedBy: "",
+    evidenceRange: "{}",
+    sourceTitle: "",
+    sourceSummary: "",
+    excerpt: "",
+    proposedByAgentId: "",
+    proposalTitle: "",
+    proposalSummary: "",
+    proposalContent: "",
+    tags: "",
+  };
+}
+
 function newRatingDraft(): RatingDraft {
   return {
     actorAgentId: "",
@@ -945,6 +1208,13 @@ function newRatingDraft(): RatingDraft {
     scope: "team",
     reviewPriority: "elevated",
     markingReason: "",
+  };
+}
+
+function newKnowledgeSearchDraft(): KnowledgeSearchDraft {
+  return {
+    query: "",
+    tags: "",
   };
 }
 
@@ -976,11 +1246,11 @@ type MemoryRouteProps = {
 };
 
 const MEMORY_VIEWS: Array<{ key: MemoryRouteView; href: string }> = [
-  { key: "overview", href: "/agents/memory" },
-  { key: "effective", href: "/agents/memory/effective" },
-  { key: "manage", href: "/agents/memory/manage" },
-  { key: "sources", href: "/agents/memory/sources" },
-  { key: "knowledge", href: "/agents/memory/knowledge" },
+  { key: "overview", href: "/memory" },
+  { key: "effective", href: "/memory/effective" },
+  { key: "manage", href: "/memory/manage" },
+  { key: "sources", href: "/memory/sources" },
+  { key: "knowledge", href: "/memory/knowledge" },
 ];
 
 function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
@@ -1080,6 +1350,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [activeSectionId, setActiveSectionId] = useState(() => searchParams.get("section") ?? "");
   const [activeItemId, setActiveItemId] = useState(() => searchParams.get("item") ?? "");
   const [activeFilter, setActiveFilter] = useState<FilterMode>(() => normalizeFilterMode(searchParams.get("filter")));
+  const [activeManageFilter, setActiveManageFilter] = useState<ManageFilterMode>(() => normalizeManageFilterMode(searchParams.get("manage")));
   const [activeChannel, setActiveChannel] = useState<ChannelFilter>(() => normalizeChannelFilter(searchParams.get("channel")));
   const [searchText, setSearchText] = useState(() => searchParams.get("q") ?? "");
   const [copyFeedback, setCopyFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
@@ -1096,7 +1367,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [activeKnowledgeBaseId, setActiveKnowledgeBaseId] = useState("");
   const [sourceDraft, setSourceDraft] = useState<SourceDraft>(() => newSourceDraft());
   const [proposalDraft, setProposalDraft] = useState<ProposalDraft>(() => newProposalDraft());
+  const [ingestionDraft, setIngestionDraft] = useState<IngestionDraft>(() => newIngestionDraft());
   const [ratingDraft, setRatingDraft] = useState<RatingDraft>(() => newRatingDraft());
+  const [knowledgeSearchDraft, setKnowledgeSearchDraft] = useState<KnowledgeSearchDraft>(() => newKnowledgeSearchDraft());
+  const [ratingSuggestionStatus, setRatingSuggestionStatus] = useState<RatingSuggestionStatusFilter>("pending");
+  const [ratingSuggestionPriority, setRatingSuggestionPriority] = useState<RatingSuggestionPriorityFilter>("all");
+  const [selectedRatingSuggestionIds, setSelectedRatingSuggestionIds] = useState<string[]>([]);
+  const [traceTargetId, setTraceTargetId] = useState("");
   const [knowledgeFeedback, setKnowledgeFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
     tone: "idle",
     text: "",
@@ -1245,6 +1522,38 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     },
   });
 
+  const ingestionMutation = useMutation({
+    mutationFn: async ({ knowledgeBaseId, draft }: { knowledgeBaseId: string; draft: IngestionDraft }) =>
+      fetchJson<KnowledgeIngestionPackageResponse>(`/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/ingestion-packages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceType: draft.sourceType,
+          sourceRef: parseJsonObject(draft.sourceRef),
+          sourceCreatedAt: draft.sourceCreatedAt,
+          capturedBy: draft.capturedBy,
+          evidenceRange: parseJsonObject(draft.evidenceRange),
+          sourceTitle: draft.sourceTitle,
+          sourceSummary: draft.sourceSummary,
+          excerpt: draft.excerpt,
+          proposedByAgentId: draft.proposedByAgentId,
+          proposalTitle: draft.proposalTitle,
+          proposalSummary: draft.proposalSummary,
+          proposalContent: draft.proposalContent,
+          tags: commaList(draft.tags),
+        }),
+      }),
+    onSuccess: (payload) => {
+      setIngestionDraft(newIngestionDraft());
+      setKnowledgeFeedback({ tone: "success", text: `${copy.mutationDone} · ${payload.proposal.title}` });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
+    },
+    onError: (error) => {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
+    },
+  });
+
   const reviewMutation = useMutation({
     mutationFn: async ({ knowledgeBaseId, proposalId, status }: { knowledgeBaseId: string; proposalId: string; status: string }) =>
       fetchJson<KnowledgeReviewResponse>(
@@ -1259,6 +1568,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setKnowledgeFeedback({ tone: "success", text: payload.item ? `${copy.mutationDone} · ${payload.item.title}` : copy.mutationDone });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1268,26 +1578,70 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
 
   const ratingMutation = useMutation({
     mutationFn: async ({ knowledgeBaseId, item, draft }: { knowledgeBaseId: string; item: KnowledgeItem; draft: RatingDraft }) =>
-      fetchJson<KnowledgeItem>(
-        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/items/${encodeURIComponent(item.knowledgeItemId)}/rating`,
+      fetchJson<KnowledgeRatingSuggestion>(`/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          suggestedByAgentId: draft.actorAgentId,
+          targetType: "knowledge_item",
+          knowledgeItemId: item.knowledgeItemId,
+          importanceLevel: draft.importanceLevel,
+          confidence: draft.confidence.trim() ? Number(draft.confidence) : null,
+          stability: draft.stability,
+          reviewPriority: draft.reviewPriority,
+          markingReason: draft.markingReason,
+        }),
+      }),
+    onSuccess: () => {
+      setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
+      void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+    },
+    onError: (error) => {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
+    },
+  });
+
+  const ratingSuggestionReviewMutation = useMutation({
+    mutationFn: async ({ knowledgeBaseId, suggestionId, status }: { knowledgeBaseId: string; suggestionId: string; status: "applied" | "rejected" }) =>
+      fetchJson<KnowledgeRatingSuggestionReviewResponse>(
+        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions/${encodeURIComponent(suggestionId)}/review`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            actorAgentId: draft.actorAgentId,
-            importanceLevel: draft.importanceLevel,
-            confidence: draft.confidence.trim() ? Number(draft.confidence) : null,
-            stability: draft.stability,
-            scope: draft.scope,
-            reviewPriority: draft.reviewPriority,
-            markingReason: draft.markingReason,
-          }),
+          body: JSON.stringify({ status }),
         },
       ),
     onSuccess: () => {
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
+      void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
+    },
+    onError: (error) => {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
+    },
+  });
+
+  const ratingSuggestionBulkReviewMutation = useMutation({
+    mutationFn: async ({ knowledgeBaseId, suggestionIds, status }: { knowledgeBaseId: string; suggestionIds: string[]; status: "applied" | "rejected" }) =>
+      fetchJson<KnowledgeRatingSuggestionBulkReviewResponse>(
+        `/api/knowledge-bases/${encodeURIComponent(knowledgeBaseId)}/rating-suggestions/review-batch`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ suggestionIds, status }),
+        },
+      ),
+    onSuccess: (payload) => {
+      setSelectedRatingSuggestionIds([]);
+      setKnowledgeFeedback({
+        tone: "success",
+        text: `${copy.mutationDone} · ${payload.summary.reviewedCount}/${payload.summary.requestedCount}${payload.summary.skippedCount ? ` · ${copy.skippedSuggestions}: ${payload.summary.skippedCount}` : ""}`,
+      });
+      void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1309,6 +1663,78 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchIntervalInBackground: false,
   });
   const knowledgeItems = knowledgeItemsQuery.data?.items ?? [];
+  const knowledgeSearchQuery = useQuery({
+    queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseForItems, knowledgeSearchDraft.query, knowledgeSearchDraft.tags),
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (activeKnowledgeBaseForItems) {
+        params.set("knowledgeBaseId", activeKnowledgeBaseForItems);
+      }
+      if (knowledgeSearchDraft.query.trim()) {
+        params.set("query", knowledgeSearchDraft.query.trim());
+      }
+      commaList(knowledgeSearchDraft.tags).forEach((tag) => params.append("tags", tag));
+      params.set("limit", "12");
+      return fetchJson<KnowledgeSearchPayload>(`/api/knowledge/search?${params.toString()}`);
+    },
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
+    refetchInterval: false,
+  });
+  const ratingSuggestionsQuery = useQuery({
+    queryKey: queryKeys.knowledgeRatingSuggestions(activeKnowledgeBaseForItems, ratingSuggestionStatus, ratingSuggestionPriority),
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (ratingSuggestionStatus !== "all") {
+        params.set("status", ratingSuggestionStatus);
+      }
+      return fetchJson<KnowledgeRatingSuggestionsPayload>(
+        `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/rating-suggestions?${params.toString()}`,
+      );
+    },
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
+    refetchIntervalInBackground: false,
+  });
+  const permissionAuditQuery = useQuery({
+    queryKey: queryKeys.knowledgePermissionAudit(""),
+    queryFn: () => fetchJson<KnowledgePermissionAuditPayload>("/api/knowledge/permissions/audit"),
+    enabled: forcedView === "knowledge",
+    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
+    refetchIntervalInBackground: false,
+  });
+  const governanceTasksQuery = useQuery({
+    queryKey: queryKeys.knowledgeGovernanceTasks("", "open"),
+    queryFn: () => fetchJson<KnowledgeGovernanceTasksPayload>("/api/knowledge/governance/tasks?status=open"),
+    enabled: forcedView === "knowledge",
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
+    refetchIntervalInBackground: false,
+  });
+  const ingestionAdaptersQuery = useQuery({
+    queryKey: queryKeys.knowledgeIngestionAdapters(),
+    queryFn: () => fetchJson<KnowledgeIngestionAdaptersPayload>("/api/knowledge/ingestion-adapters"),
+    enabled: forcedView === "knowledge",
+    refetchInterval: false,
+  });
+  const knowledgeTraceQuery = useQuery({
+    queryKey: queryKeys.knowledgeTrace(activeKnowledgeBaseForItems, traceTargetId),
+    queryFn: () =>
+      fetchJson<KnowledgeTracePayload>(
+        `/api/knowledge-bases/${encodeURIComponent(activeKnowledgeBaseForItems)}/trace/${encodeURIComponent(traceTargetId)}`,
+      ),
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems) && Boolean(traceTargetId),
+    refetchInterval: false,
+  });
+  const knowledgeSearchResults = knowledgeSearchQuery.data?.results ?? [];
+  const ratingSuggestions = (ratingSuggestionsQuery.data?.suggestions ?? []).filter((suggestion) =>
+    ratingSuggestionPriority === "all" ? true : suggestion.reviewPriority === ratingSuggestionPriority,
+  );
+  const pendingVisibleRatingSuggestions = ratingSuggestions.filter((suggestion) => suggestion.status === "pending");
+  const selectedVisibleRatingSuggestionIds = selectedRatingSuggestionIds.filter((suggestionId) =>
+    pendingVisibleRatingSuggestions.some((suggestion) => suggestion.suggestionId === suggestionId),
+  );
+  const permissionAudit = permissionAuditQuery.data;
+  const governanceTasks = governanceTasksQuery.data?.tasks ?? [];
+  const ingestionAdapters = ingestionAdaptersQuery.data?.adapters ?? [];
   const allPairs = useMemo(() => flattenSections(sections), [sections]);
   const runtimePairs = useMemo(
     () =>
@@ -1342,16 +1768,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     [allPairs],
   );
   const manageablePairs = useMemo(
-    () =>
-      allPairs.filter(
-        ({ item }) =>
-          item.managedState?.editable
-          || item.managedState?.deletable
-          || item.managedState?.restorable
-          || item.managedState?.userManaged
-          || item.managedState?.disabled
-          || item.managedState?.overridden,
-      ),
+    () => allPairs.filter(({ item }) => itemIsManageable(item)),
     [allPairs],
   );
   const managedStateCount = manageablePairs.filter(
@@ -1427,6 +1844,26 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     ],
     [allPairs, copy],
   );
+  const manageFilterOptions = useMemo(
+    () => [
+      { id: "all" as const, label: copy.manageFilterAll, count: manageFilterCount(manageablePairs, "all") },
+      { id: "prompt" as const, label: copy.manageFilterPrompt, count: manageFilterCount(manageablePairs, "prompt") },
+      { id: "editable" as const, label: copy.manageFilterEditable, count: manageFilterCount(manageablePairs, "editable") },
+      { id: "changed" as const, label: copy.manageFilterChanged, count: manageFilterCount(manageablePairs, "changed") },
+      { id: "missing" as const, label: copy.manageFilterMissing, count: manageFilterCount(manageablePairs, "missing") },
+    ],
+    [copy, manageablePairs],
+  );
+  const manageableSectionMetrics = useMemo(
+    () =>
+      new Map(
+        sections.map((section) => {
+          const items = section.items.filter((item) => itemIsManageable(item));
+          return [section.id, items.length] as const;
+        }),
+      ),
+    [sections],
+  );
   const visibleSections = useMemo(
     () => filterSections(sections, activeSectionId, searchText, activeFilter, activeChannel),
     [activeChannel, activeFilter, activeSectionId, searchText, sections],
@@ -1436,18 +1873,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       filterSections(sections, activeSectionId, searchText, activeFilter, activeChannel)
         .map((section) => ({
           ...section,
-          items: section.items.filter(
-            (item) =>
-              item.managedState?.editable
-              || item.managedState?.deletable
-              || item.managedState?.restorable
-              || item.managedState?.userManaged
-              || item.managedState?.disabled
-              || item.managedState?.overridden,
-          ),
+          items: section.items.filter((item) => itemIsManageable(item) && itemMatchesManageFilter(item, activeManageFilter)),
         }))
         .filter((section) => section.items.length > 0),
-    [activeChannel, activeFilter, activeSectionId, searchText, sections],
+    [activeChannel, activeFilter, activeManageFilter, activeSectionId, searchText, sections],
   );
   const activeDisplaySections = forcedView === "manage" ? manageSections : visibleSections;
   const flatVisibleItems = useMemo(
@@ -1494,6 +1923,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     const sectionParam = searchParams.get("section") ?? "";
     const itemParam = searchParams.get("item") ?? "";
     const filterParam = normalizeFilterMode(searchParams.get("filter"));
+    const manageFilterParam = normalizeManageFilterMode(searchParams.get("manage"));
     const channelParam = normalizeChannelFilter(searchParams.get("channel"));
     const queryParam = searchParams.get("q") ?? "";
     if (sectionParam !== activeSectionId) {
@@ -1505,6 +1935,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     if (filterParam !== activeFilter) {
       setActiveFilter(filterParam);
     }
+    if (manageFilterParam !== activeManageFilter) {
+      setActiveManageFilter(manageFilterParam);
+    }
     if (channelParam !== activeChannel) {
       setActiveChannel(channelParam);
     }
@@ -1514,11 +1947,11 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   }, [searchParamText]);
 
   useEffect(() => {
-    const next = buildMemorySearchParams(activeSectionId, activeItemId, activeFilter, activeChannel, searchText);
+    const next = buildMemorySearchParams(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText);
     if (next.toString() !== searchParamText) {
       setSearchParams(next, { replace: true });
     }
-  }, [activeChannel, activeFilter, activeItemId, activeSectionId, searchParamText, searchText, setSearchParams]);
+  }, [activeChannel, activeFilter, activeItemId, activeManageFilter, activeSectionId, searchParamText, searchText, setSearchParams]);
 
   useEffect(() => {
     if (copyFeedback.tone === "idle") {
@@ -1589,9 +2022,22 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     }
   }, [activeKnowledgeBaseId, knowledgeBases]);
 
+  useEffect(() => {
+    if (!selectedRatingSuggestionIds.length) {
+      return;
+    }
+    const visiblePendingIds = new Set(pendingVisibleRatingSuggestions.map((suggestion) => suggestion.suggestionId));
+    const nextIds = selectedRatingSuggestionIds.filter((suggestionId) => visiblePendingIds.has(suggestionId));
+    if (nextIds.length !== selectedRatingSuggestionIds.length) {
+      setSelectedRatingSuggestionIds(nextIds);
+    }
+  }, [pendingVisibleRatingSuggestions, selectedRatingSuggestionIds]);
+
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernanceTasks("", "open") });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeIngestionAdapters() });
     if (activeKnowledgeBaseForItems) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseForItems) });
     }
@@ -1605,8 +2051,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     setActiveChannel((current) => (current === channel ? "" : channel));
   };
   const currentUrl = useMemo(
-    () => buildMemoryLink(activeSectionId, activeItemId, activeFilter, activeChannel, searchText),
-    [activeChannel, activeFilter, activeItemId, activeSectionId, searchText],
+    () => buildMemoryLink(activeSectionId, activeItemId, activeFilter, activeManageFilter, activeChannel, searchText),
+    [activeChannel, activeFilter, activeItemId, activeManageFilter, activeSectionId, searchText],
   );
   const handleCopySourceSummary = async () => {
     if (!activeSection || !activeItem) {
@@ -1691,7 +2137,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   };
   const mutationBusy = memoryMutation.isPending || deleteMemoryMutation.isPending || restoreMemoryMutation.isPending || bulkActionPending !== null;
   const knowledgeBusy =
-    sourceArtifactMutation.isPending || proposalMutation.isPending || reviewMutation.isPending || ratingMutation.isPending;
+    sourceArtifactMutation.isPending
+    || proposalMutation.isPending
+    || ingestionMutation.isPending
+    || reviewMutation.isPending
+    || ratingMutation.isPending
+    || ratingSuggestionReviewMutation.isPending
+    || ratingSuggestionBulkReviewMutation.isPending;
   const toggleMemorySelection = (sectionId: string, itemId: string) => {
     const key = pairSelectionKey(sectionId, itemId);
     setSelectedMemoryKeys((current) => (current.includes(key) ? current.filter((value) => value !== key) : [...current, key]));
@@ -1760,6 +2212,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     }
     proposalMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, draft: proposalDraft });
   };
+  const submitIngestionPackage = () => {
+    if (!activeKnowledgeBase || !ingestionDraft.sourceType.trim()) {
+      setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${copy.ingestionPackage}` });
+      return;
+    }
+    ingestionMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, draft: ingestionDraft });
+  };
   const reviewProposal = (proposalId: string, status: "approved" | "rejected") => {
     if (!activeKnowledgeBase) {
       return;
@@ -1771,6 +2230,40 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       return;
     }
     ratingMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, item, draft: ratingDraft });
+  };
+  const reviewRatingSuggestion = (suggestionId: string, status: "applied" | "rejected") => {
+    if (!activeKnowledgeBase) {
+      return;
+    }
+    ratingSuggestionReviewMutation.mutate({ knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId, suggestionId, status });
+  };
+  const toggleRatingSuggestionSelection = (suggestionId: string) => {
+    setSelectedRatingSuggestionIds((current) =>
+      current.includes(suggestionId) ? current.filter((value) => value !== suggestionId) : [...current, suggestionId],
+    );
+  };
+  const toggleVisibleRatingSuggestions = () => {
+    const visibleIds = pendingVisibleRatingSuggestions.map((suggestion) => suggestion.suggestionId);
+    if (!visibleIds.length) {
+      return;
+    }
+    setSelectedRatingSuggestionIds((current) => {
+      const allVisibleSelected = visibleIds.every((suggestionId) => current.includes(suggestionId));
+      if (allVisibleSelected) {
+        return current.filter((suggestionId) => !visibleIds.includes(suggestionId));
+      }
+      return Array.from(new Set([...current, ...visibleIds]));
+    });
+  };
+  const reviewSelectedRatingSuggestions = (status: "applied" | "rejected") => {
+    if (!activeKnowledgeBase || !selectedVisibleRatingSuggestionIds.length) {
+      return;
+    }
+    ratingSuggestionBulkReviewMutation.mutate({
+      knowledgeBaseId: activeKnowledgeBase.knowledgeBaseId,
+      suggestionIds: selectedVisibleRatingSuggestionIds,
+      status,
+    });
   };
 
   const renderSubnav = () => (
@@ -1972,27 +2465,27 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <article key={`${section.id}:${item.id}`} className={styles.reviewQueueItem}>
               <div className={styles.reviewRank}>{index + 1}</div>
               <div className={styles.reviewQueueBody}>
-                <div className={styles.itemHeader}>
+                <div className={styles.reviewQueueTitleLine}>
                   <strong>{item.title}</strong>
-                  <span>{formatTimestamp(item.updatedAt, lang)}</span>
-                </div>
-                <span className={styles.itemOrigin}>
-                  {copy.sourceOrigin}: {sourceOriginLabel(section, item)}
-                </span>
-                <span className={styles.itemSummary}>{item.summary}</span>
-                <div className={styles.reviewReasonList} aria-label={copy.reviewReason}>
-                  {reasons.map((reason) => (
-                    <span key={`${item.id}:${reason}`} className={styles.reviewReasonPill}>
-                      {reason}
-                    </span>
-                  ))}
+                  <span>{sourceOriginLabel(section, item)}</span>
                 </div>
               </div>
+              <span className={styles.reviewQueueSummary}>{item.summary}</span>
+              <div className={styles.reviewReasonList} aria-label={copy.reviewReason}>
+                {reasons.map((reason) => (
+                  <span key={`${item.id}:${reason}`} className={styles.reviewReasonPill}>
+                    {reason}
+                  </span>
+                ))}
+              </div>
+              <span className={styles.reviewQueueTime}>{formatTimestamp(item.updatedAt, lang)}</span>
               <div className={styles.reviewQueueActions}>
                 <NavLink
                   className={styles.detailActionButton}
-                  to={`/agents/memory/sources?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
+                  to={`/memory/sources?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
                   onClick={() => openReviewTarget(pair)}
+                  title={copy.auditMemory}
+                  aria-label={`${copy.auditMemory}: ${item.title}`}
                 >
                   <FileText size={14} />
                   <span>{copy.auditMemory}</span>
@@ -2000,8 +2493,10 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 {target === "manage" ? (
                   <NavLink
                     className={styles.detailActionButton}
-                    to={`/agents/memory/manage?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
+                    to={`/memory/manage?section=${encodeURIComponent(section.id)}&item=${encodeURIComponent(item.id)}`}
                     onClick={() => openReviewTarget(pair)}
+                    title={copy.manageMemoryAction}
+                    aria-label={`${copy.manageMemoryAction}: ${item.title}`}
                   >
                     <Pencil size={14} />
                     <span>{copy.manageMemoryAction}</span>
@@ -2157,6 +2652,64 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       </section>
     ) : null;
 
+  const renderSelectedMemoryConfig = () =>
+    activeItem && activeSection && !editDraft ? (
+      <section className={styles.managementPanel} aria-label={copy.management}>
+        <div className={styles.managementHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{activeSection.title}</p>
+            <h2>{activeItem.managedState?.userManaged ? copy.userManaged : activeItem.managedState?.overridden ? copy.overridden : copy.management}</h2>
+          </div>
+          <span className={styles.countPill}>
+            {activeItem.managedState?.disabled
+              ? copy.disabledByUser
+              : activeItem.managedState?.userManaged
+                ? copy.userManaged
+                : activeItem.managedState?.overridden
+                  ? copy.overridden
+                  : copy.canUse}
+          </span>
+        </div>
+        <p>{activeItem.managedState?.actionHint || copy.managementHint}</p>
+        <div className={styles.selectedConfigSummary}>
+          <strong>{activeItem.title}</strong>
+          <p>{activeItem.summary || activeItem.content || copy.noContent}</p>
+        </div>
+        <div className={styles.managementActions}>
+          <button
+            type="button"
+            className={styles.detailActionButton}
+            onClick={startEdit}
+            disabled={!activeItem.managedState?.editable || mutationBusy}
+          >
+            <Pencil size={15} />
+            <span>{copy.editMemory}</span>
+          </button>
+          {activeItem.managedState?.restorable ? (
+            <button type="button" className={styles.detailActionButton} onClick={restoreActiveItem} disabled={mutationBusy}>
+              <Undo2 size={15} />
+              <span>{copy.restoreMemory}</span>
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={styles.detailActionButton}
+            onClick={disableOrDeleteActiveItem}
+            disabled={!activeItem.managedState?.deletable || mutationBusy}
+          >
+            <Trash2 size={15} />
+            <span>{activeItem.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
+          </button>
+        </div>
+        {mutationFeedback.tone !== "idle" ? (
+          <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
+            {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
+            <span>{mutationFeedback.text}</span>
+          </p>
+        ) : null}
+      </section>
+    ) : null;
+
   const renderDetailPanel = (showEditor = true) => (
     <aside className={showEditor ? styles.detailPanel : `${styles.detailPanel} ${styles.manageDetailPanel}`}>
       {showEditor ? renderManagementEditor() : null}
@@ -2216,58 +2769,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <p className={styles.copyNotice} data-tone={copyFeedback.tone}>
               {copyFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
               <span>{copyFeedback.text}</span>
-            </p>
-          ) : null}
-
-          <section className={styles.managementPanel} aria-label={copy.management}>
-            <div className={styles.managementHeader}>
-              <div>
-                <p className={styles.panelEyebrow}>{copy.management}</p>
-                <h2>{activeItem.managedState?.userManaged ? copy.userManaged : activeItem.managedState?.overridden ? copy.overridden : copy.management}</h2>
-              </div>
-              <span className={styles.countPill}>
-                {activeItem.managedState?.disabled
-                  ? copy.disabledByUser
-                  : activeItem.managedState?.userManaged
-                    ? copy.userManaged
-                    : activeItem.managedState?.overridden
-                      ? copy.overridden
-                      : copy.canUse}
-              </span>
-            </div>
-            <p>{activeItem.managedState?.actionHint || copy.managementHint}</p>
-            <div className={styles.managementActions}>
-              <button
-                type="button"
-                className={styles.detailActionButton}
-                onClick={startEdit}
-                disabled={!activeItem.managedState?.editable || mutationBusy}
-              >
-                <Pencil size={15} />
-                <span>{copy.editMemory}</span>
-              </button>
-              {activeItem.managedState?.restorable ? (
-                <button type="button" className={styles.detailActionButton} onClick={restoreActiveItem} disabled={mutationBusy}>
-                  <Undo2 size={15} />
-                  <span>{copy.restoreMemory}</span>
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className={styles.detailActionButton}
-                onClick={disableOrDeleteActiveItem}
-                disabled={!activeItem.managedState?.deletable || mutationBusy}
-              >
-                <Trash2 size={15} />
-                <span>{activeItem.managedState?.userManaged ? copy.deleteMemory : copy.disableMemory}</span>
-              </button>
-            </div>
-          </section>
-
-          {mutationFeedback.tone !== "idle" ? (
-            <p className={styles.copyNotice} data-tone={mutationFeedback.tone}>
-              {mutationFeedback.tone === "success" ? <CheckCircle2 size={14} /> : <TriangleAlert size={14} />}
-              <span>{mutationFeedback.text}</span>
             </p>
           ) : null}
 
@@ -2549,33 +3050,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     <>
       {renderWarningStrip()}
       <div className={`${styles.workspace} ${styles.manageWorkspace}`}>
-        <section className={styles.manageFormPanel}>
-          <div className={styles.managementHeader}>
-            <div>
-              <p className={styles.panelEyebrow}>{copy.management}</p>
-              <h2>{editDraft ? (editDraft.mode === "create" ? copy.addMemory : copy.editMemory) : copy.manageAllMemory}</h2>
-            </div>
-            <button type="button" className={styles.primaryActionButton} onClick={startCreate} disabled={mutationBusy}>
-              <Pencil size={15} />
-              <span>{copy.addMemory}</span>
-            </button>
-          </div>
-          <p>{copy.managementHint}</p>
-          {renderManagementEditor()}
-          {!editDraft ? (
-            <section className={styles.emptyDetail}>
-              <Brain size={24} />
-              <strong>{copy.selectedMemory}</strong>
-              <p>{activeItem ? activeItem.title : copy.noMatches}</p>
-            </section>
-          ) : null}
-        </section>
-
         <main className={styles.manageListPanel}>
           <div className={styles.panelHeader}>
             <div>
               <p className={styles.panelEyebrow}>{copy.management}</p>
               <h2>{copy.manageAllMemory}</h2>
+              <span>{copy.manageListHint}</span>
             </div>
             <span className={styles.countPill}>{manageablePairs.length}</span>
           </div>
@@ -2583,6 +3063,64 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <Search size={15} />
             <input value={searchText} placeholder={copy.searchPlaceholder} onChange={(event) => setSearchText(event.target.value)} />
           </label>
+          <section className={styles.manageFilterPanel} aria-label={copy.manageFilters}>
+            <div className={styles.manageFilterHeader}>
+              <span>{copy.manageFilters}</span>
+              <strong>{flatVisibleItems.length}</strong>
+            </div>
+            <div className={styles.filterGroup}>
+              {manageFilterOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={option.id === activeManageFilter ? `${styles.filterButton} ${styles.filterButtonActive}` : styles.filterButton}
+                  onClick={() => {
+                    setActiveItemId("");
+                    setActiveManageFilter(option.id);
+                  }}
+                  aria-pressed={option.id === activeManageFilter}
+                >
+                  <span>{option.label}</span>
+                  <strong>{option.count}</strong>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section className={styles.manageSourceFilters} aria-label={copy.sourceFilters}>
+            <button
+              type="button"
+              className={!activeSectionId ? `${styles.sourceChip} ${styles.sourceChipActive}` : styles.sourceChip}
+              onClick={() => {
+                setActiveItemId("");
+                setActiveSectionId("");
+              }}
+              aria-pressed={!activeSectionId}
+            >
+              <span>{copy.allSections}</span>
+              <strong>{manageablePairs.length}</strong>
+            </button>
+            {sections
+              .filter((section) => (manageableSectionMetrics.get(section.id) ?? 0) > 0)
+              .map((section) => {
+                const active = section.id === activeSectionId;
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={active ? `${styles.sourceChip} ${styles.sourceChipActive}` : styles.sourceChip}
+                    onClick={() => {
+                      setActiveItemId("");
+                      setActiveSectionId(section.id);
+                    }}
+                    aria-pressed={active}
+                    title={section.title}
+                  >
+                    <span>{section.title}</span>
+                    <strong>{manageableSectionMetrics.get(section.id) ?? 0}</strong>
+                  </button>
+                );
+              })}
+          </section>
           <section className={styles.bulkActionBar}>
             <button type="button" className={styles.detailActionButton} onClick={toggleVisibleMemorySelection} disabled={mutationBusy}>
               {allVisibleSelected ? <SquareCheckBig size={14} /> : <Square size={14} />}
@@ -2616,6 +3154,29 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           </section>
           {renderMemoryList(flatVisibleItems, copy.noMatches, false, true)}
         </main>
+
+        <section className={styles.manageFormPanel}>
+          <div className={styles.managementHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.management}</p>
+              <h2>{editDraft ? (editDraft.mode === "create" ? copy.addMemory : copy.editMemory) : copy.manageConfigPanel}</h2>
+            </div>
+            <button type="button" className={styles.primaryActionButton} onClick={startCreate} disabled={mutationBusy}>
+              <Pencil size={15} />
+              <span>{copy.addMemory}</span>
+            </button>
+          </div>
+          <p>{copy.manageConfigHint}</p>
+          {renderManagementEditor()}
+          {renderSelectedMemoryConfig()}
+          {!editDraft && !activeItem ? (
+            <section className={styles.emptyDetail}>
+              <Brain size={24} />
+              <strong>{copy.selectedMemory}</strong>
+              <p>{copy.noMatches}</p>
+            </section>
+          ) : null}
+        </section>
 
         {renderDetailPanel(false)}
       </div>
@@ -2653,6 +3214,34 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           <strong>{knowledgeOverview?.summary.sourceArtifactCount ?? 0}</strong>
         </section>
       </div>
+      <section className={styles.pipelinePanel} aria-label={copy.platformPipeline}>
+        <div className={styles.pipelineHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.platformPipeline}</p>
+            <h2>{copy.teamKnowledgeDomain}</h2>
+          </div>
+          <div className={styles.pipelineBoundary}>
+            <span>{copy.toolReadableOnly}</span>
+            <span>{copy.promptBoundary}</span>
+            <span>{copy.governance}</span>
+          </div>
+        </div>
+        <div className={styles.pipelineSteps}>
+          {[
+            { label: copy.pipelineSource, value: knowledgeOverview?.summary.sourceArtifactCount ?? 0 },
+            { label: copy.pipelineProposal, value: knowledgeOverview?.summary.pendingProposalCount ?? 0 },
+            { label: copy.pipelineBatch, value: knowledgeBases.reduce((total, base) => total + base.stats.batchCount, 0) },
+            { label: copy.pipelineFormal, value: knowledgeOverview?.summary.itemCount ?? 0 },
+            { label: copy.pipelineRating, value: ratingSuggestionsQuery.data?.summary.pendingSuggestionCount ?? knowledgeItems.filter((item) => item.markedAt).length },
+          ].map((step, index) => (
+            <div key={step.label} className={styles.pipelineStep}>
+              <span className={styles.pipelineIndex}>{index + 1}</span>
+              <strong>{step.value}</strong>
+              <span>{step.label}</span>
+            </div>
+          ))}
+        </div>
+      </section>
       {knowledgeFeedback.tone !== "idle" ? (
         <section className={knowledgeFeedback.tone === "error" ? styles.panelError : styles.panelNotice}>
           {knowledgeFeedback.tone === "error" ? <TriangleAlert size={16} /> : <CheckCircle2 size={16} />}
@@ -2669,6 +3258,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <span className={styles.countPill}>{knowledgeBases.length}</span>
           </div>
           <p className={styles.panelLead}>{copy.knowledgeHint}</p>
+          <section className={styles.governanceMiniPanel} aria-label={copy.toolVisibility}>
+            <strong>{copy.toolVisibility}</strong>
+            {Object.values(permissionAudit?.tools ?? {}).map((tool) => (
+              <span key={tool.toolName} className={tool.visible ? styles.statusPill : styles.statusPillMuted}>
+                {tool.toolName}: {tool.visible ? copy.yes : tool.reason}
+              </span>
+            ))}
+          </section>
           {knowledgeOverviewQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
           {!knowledgeOverviewQuery.isPending && !knowledgeBases.length ? (
             <section className={styles.emptyDetail}>
@@ -2698,6 +3295,152 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         </aside>
 
         <main className={styles.knowledgeMain}>
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.knowledgeSearch}</p>
+                <h2>{copy.governance}</h2>
+              </div>
+              <span className={styles.countPill}>{knowledgeSearchQuery.data?.summary.resultCount ?? 0}</span>
+            </div>
+            <div className={styles.knowledgeFormGrid}>
+              <label>
+                <span>{copy.searchQuery}</span>
+                <input value={knowledgeSearchDraft.query} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, query: event.target.value })} />
+              </label>
+              <label>
+                <span>{copy.tags}</span>
+                <input value={knowledgeSearchDraft.tags} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, tags: event.target.value })} />
+              </label>
+            </div>
+            <div className={styles.knowledgeProposalList}>
+              {knowledgeSearchResults.map((item) => (
+                <section key={`search:${item.knowledgeItemId}`} className={styles.knowledgeRow}>
+                  <strong>{item.title}</strong>
+                  <span>{item.summary || item.content}</span>
+                  <span className={styles.statusPill}>{item.importanceLevel}</span>
+                  <small>{item.teamName} · {item.knowledgeBaseName} · {item.sourceTypes.join(", ") || copy.sourceArtifacts}</small>
+                </section>
+              ))}
+              {!knowledgeSearchQuery.isPending && !knowledgeSearchResults.length ? (
+                <section className={styles.emptyDetail}>
+                  <Search size={20} />
+                  <strong>{copy.noMatches}</strong>
+                </section>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.governanceTasks}</p>
+                <h2>{copy.teamKnowledgeDomain}</h2>
+              </div>
+              <span className={styles.countPill}>{governanceTasksQuery.data?.summary.openTaskCount ?? 0}</span>
+            </div>
+            <div className={styles.knowledgeProposalList}>
+              {governanceTasks.slice(0, 8).map((task) => (
+                <section key={task.taskId} className={styles.knowledgeRow}>
+                  <span className={styles.statusPill}>{task.priority}</span>
+                  <strong>{task.title}</strong>
+                  <span>{task.summary || task.targetId}</span>
+                  <small>{task.taskType} · {task.targetStatus} · {task.knowledgeBaseName}</small>
+                  <button type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(task.targetId)}>
+                    <Eye size={14} />
+                    <span>{copy.traceability}</span>
+                  </button>
+                </section>
+              ))}
+              {!governanceTasksQuery.isPending && !governanceTasks.length ? (
+                <section className={styles.emptyDetail}>
+                  <CheckCircle2 size={20} />
+                  <strong>{copy.noIssues}</strong>
+                </section>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.ingestionPackage}</p>
+                <h2>{copy.sourceArtifacts} + {copy.pendingProposals}</h2>
+              </div>
+              <button
+                type="button"
+                className={styles.primaryActionButton}
+                onClick={submitIngestionPackage}
+                disabled={!activeKnowledgeBase?.permissions.canPropose || knowledgeBusy}
+              >
+                <Link2 size={15} />
+                <span>{copy.submitIngestionPackage}</span>
+              </button>
+            </div>
+            <div className={styles.knowledgeFormGrid}>
+              <label>
+                <span>{copy.sourceType}</span>
+                <select value={ingestionDraft.sourceType} onChange={(event) => setIngestionDraft({ ...ingestionDraft, sourceType: event.target.value })}>
+                  {["external_search_refinement", "pdf_refinement", "team_chat_refinement", "runtime_evidence_refinement", "agent_authored", "manual_user_entry"].map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{copy.titleField}</span>
+                <input value={ingestionDraft.sourceTitle} onChange={(event) => setIngestionDraft({ ...ingestionDraft, sourceTitle: event.target.value })} />
+              </label>
+              <label>
+                <span>{copy.capturedBy}</span>
+                <input value={ingestionDraft.proposedByAgentId} onChange={(event) => setIngestionDraft({ ...ingestionDraft, proposedByAgentId: event.target.value })} />
+              </label>
+              <label>
+                <span>{copy.tags}</span>
+                <input value={ingestionDraft.tags} onChange={(event) => setIngestionDraft({ ...ingestionDraft, tags: event.target.value })} />
+              </label>
+              <label className={styles.wideField}>
+                <span>{copy.sourceRef}</span>
+                <textarea rows={2} value={ingestionDraft.sourceRef} onChange={(event) => setIngestionDraft({ ...ingestionDraft, sourceRef: event.target.value })} />
+              </label>
+              <label className={styles.wideField}>
+                <span>{copy.excerpt}</span>
+                <textarea rows={3} value={ingestionDraft.excerpt} onChange={(event) => setIngestionDraft({ ...ingestionDraft, excerpt: event.target.value })} />
+              </label>
+              <label>
+                <span>{copy.proposalTitle}</span>
+                <input value={ingestionDraft.proposalTitle} onChange={(event) => setIngestionDraft({ ...ingestionDraft, proposalTitle: event.target.value })} />
+              </label>
+              <label>
+                <span>{copy.summaryField}</span>
+                <input value={ingestionDraft.proposalSummary} onChange={(event) => setIngestionDraft({ ...ingestionDraft, proposalSummary: event.target.value })} />
+              </label>
+              <label className={styles.wideField}>
+                <span>{copy.proposalContent}</span>
+                <textarea rows={4} value={ingestionDraft.proposalContent} onChange={(event) => setIngestionDraft({ ...ingestionDraft, proposalContent: event.target.value })} />
+              </label>
+            </div>
+          </section>
+
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.ingestionAdapters}</p>
+                <h2>{copy.outputContract}</h2>
+              </div>
+              <span className={styles.countPill}>{ingestionAdapters.length}</span>
+            </div>
+            <div className={styles.permissionMatrix}>
+              {ingestionAdapters.map((adapter) => (
+                <section key={adapter.sourceType} className={styles.permissionRow}>
+                  <strong>{adapter.sourceType}</strong>
+                  <span>{adapter.requiredSourceRef.join(", ")}</span>
+                  <small>{copy.outputContract}: {adapter.outputContract.creates.join(" + ")}</small>
+                  <small>{copy.createsKnowledgeItem}: {adapter.outputContract.createsKnowledgeItem ? copy.yes : copy.no}</small>
+                </section>
+              ))}
+            </div>
+          </section>
+
           <section className={styles.managementPanel}>
             <div className={styles.managementHeader}>
               <div>
@@ -2825,6 +3568,139 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               ) : null}
             </div>
           </section>
+
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.ratingSuggestions}</p>
+                <h2>{copy.governance}</h2>
+              </div>
+              <span className={styles.countPill}>{ratingSuggestions.length}</span>
+            </div>
+            <div className={styles.queueToolbar}>
+              <label>
+                <span>{copy.status}</span>
+                <select value={ratingSuggestionStatus} onChange={(event) => setRatingSuggestionStatus(event.target.value as RatingSuggestionStatusFilter)}>
+                  <option value="pending">{copy.pendingProposals}</option>
+                  <option value="applied">{copy.applySuggestion}</option>
+                  <option value="rejected">{copy.rejectSuggestion}</option>
+                  <option value="all">{copy.allStatuses}</option>
+                </select>
+              </label>
+              <label>
+                <span>{copy.priority}</span>
+                <select value={ratingSuggestionPriority} onChange={(event) => setRatingSuggestionPriority(event.target.value as RatingSuggestionPriorityFilter)}>
+                  <option value="all">{copy.allPriorities}</option>
+                  <option value="urgent">urgent</option>
+                  <option value="elevated">elevated</option>
+                  <option value="normal">normal</option>
+                </select>
+              </label>
+            </div>
+            <div className={styles.bulkActionBar}>
+              <span className={styles.countPill}>{copy.selectedSuggestions}: {selectedVisibleRatingSuggestionIds.length}</span>
+              <button type="button" className={styles.detailActionButton} onClick={toggleVisibleRatingSuggestions} disabled={!pendingVisibleRatingSuggestions.length || knowledgeBusy}>
+                <SquareCheckBig size={14} />
+                <span>{copy.selectAllVisibleSuggestions}</span>
+              </button>
+              <button type="button" className={styles.detailActionButton} onClick={() => setSelectedRatingSuggestionIds([])} disabled={!selectedVisibleRatingSuggestionIds.length || knowledgeBusy}>
+                <Square size={14} />
+                <span>{copy.clearSuggestionSelection}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.detailActionButton}
+                disabled={!activeKnowledgeBase?.permissions.canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
+                onClick={() => reviewSelectedRatingSuggestions("applied")}
+              >
+                <CheckCircle2 size={14} />
+                <span>{copy.bulkApplySuggestions}</span>
+              </button>
+              <button
+                type="button"
+                className={styles.detailActionButton}
+                disabled={!activeKnowledgeBase?.permissions.canRate || !selectedVisibleRatingSuggestionIds.length || knowledgeBusy}
+                onClick={() => reviewSelectedRatingSuggestions("rejected")}
+              >
+                <XCircle size={14} />
+                <span>{copy.bulkRejectSuggestions}</span>
+              </button>
+            </div>
+            <div className={styles.knowledgeProposalList}>
+              {ratingSuggestions.map((suggestion) => (
+                <section key={suggestion.suggestionId} className={styles.knowledgeRow}>
+                  <label className={styles.inlineCheck}>
+                    <input
+                      type="checkbox"
+                      aria-label={copy.selectSuggestion}
+                      checked={selectedRatingSuggestionIds.includes(suggestion.suggestionId)}
+                      disabled={suggestion.status !== "pending" || knowledgeBusy}
+                      onChange={() => toggleRatingSuggestionSelection(suggestion.suggestionId)}
+                    />
+                    <span>{copy.selectSuggestion}</span>
+                  </label>
+                  <strong>{suggestion.importanceLevel} · {suggestion.reviewPriority}</strong>
+                  <span>{suggestion.markingReason || suggestion.suggestionId}</span>
+                  <small>{suggestion.status} · {suggestion.targetType} · {suggestion.knowledgeItemId || suggestion.proposalId} · {copy.confidence}: {suggestion.confidence}</small>
+                  <button
+                    type="button"
+                    className={styles.detailActionButton}
+                    disabled={!activeKnowledgeBase?.permissions.canRate || suggestion.status !== "pending" || knowledgeBusy}
+                    onClick={() => reviewRatingSuggestion(suggestion.suggestionId, "applied")}
+                  >
+                    <CheckCircle2 size={14} />
+                    <span>{copy.applySuggestion}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.detailActionButton}
+                    disabled={!activeKnowledgeBase?.permissions.canRate || suggestion.status !== "pending" || knowledgeBusy}
+                    onClick={() => reviewRatingSuggestion(suggestion.suggestionId, "rejected")}
+                  >
+                    <XCircle size={14} />
+                    <span>{copy.rejectSuggestion}</span>
+                  </button>
+                </section>
+              ))}
+              {!ratingSuggestionsQuery.isPending && !ratingSuggestions.length ? (
+                <section className={styles.emptyDetail}>
+                  <CheckCircle2 size={20} />
+                  <strong>{copy.noIssues}</strong>
+                </section>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.permissionAudit}</p>
+                <h2>{copy.teamKnowledgeDomain}</h2>
+              </div>
+              <span className={styles.countPill}>{permissionAudit?.summary.knowledgeBaseCount ?? 0}</span>
+            </div>
+            <div className={styles.permissionMatrix}>
+              {(permissionAudit?.knowledgeBases ?? []).map((row) => (
+                <section key={`perm:${row.knowledgeBaseId}`} className={styles.permissionRow}>
+                  <strong>{row.knowledgeBaseName}</strong>
+                  <span>{row.teamName} · {row.teamRole || "-"}</span>
+                  {[
+                    { label: copy.readable, permission: row.permissions.read },
+                    { label: copy.proposable, permission: row.permissions.propose },
+                    { label: copy.reviewable, permission: row.permissions.review },
+                    { label: copy.rateable, permission: row.permissions.rate },
+                  ].map(({ label, permission }) => {
+                    const normalizedPermission = normalizeKnowledgePermission(permission);
+                    return (
+                      <small key={label} className={normalizedPermission.allowed ? styles.statusPill : styles.statusPillMuted}>
+                        {label}: {normalizedPermission.allowed ? copy.yes : normalizedPermission.reason}
+                      </small>
+                    );
+                  })}
+                </section>
+              ))}
+            </div>
+          </section>
         </main>
 
         <aside className={styles.detailPanel}>
@@ -2832,6 +3708,26 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             <p className={styles.panelEyebrow}>{copy.formalKnowledge}</p>
             <h2>{activeKnowledgeBase?.name ?? copy.selectedMemory}</h2>
           </div>
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.sourceChain}</p>
+                <h2>{copy.traceability}</h2>
+              </div>
+            </div>
+            <label>
+              <span>{copy.traceability}</span>
+              <input value={traceTargetId} onChange={(event) => setTraceTargetId(event.target.value)} placeholder="source / proposal / item / rating id" />
+            </label>
+            {knowledgeTraceQuery.data ? (
+              <div className={styles.metaGrid}>
+                <span>{copy.sourceArtifacts}: {knowledgeTraceQuery.data.summary.sourceArtifacts ?? 0}</span>
+                <span>{copy.pendingProposals}: {knowledgeTraceQuery.data.summary.proposals ?? 0}</span>
+                <span>{copy.formalKnowledge}: {knowledgeTraceQuery.data.summary.items ?? 0}</span>
+                <span>{copy.ratingSuggestions}: {knowledgeTraceQuery.data.summary.ratingSuggestions ?? 0}</span>
+              </div>
+            ) : null}
+          </section>
           {knowledgeItemsQuery.isPending ? <div className={styles.emptyState}>{copy.loading}</div> : null}
           <div className={styles.knowledgeItems}>
             {knowledgeItems.map((item) => (
@@ -2868,7 +3764,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                     disabled={!activeKnowledgeBase?.permissions.canRate || knowledgeBusy}
                   >
                     <CheckCircle2 size={14} />
-                    <span>{copy.updateRating}</span>
+                    <span>{copy.submitRatingSuggestion}</span>
                   </button>
                 </div>
               </section>
@@ -2900,7 +3796,6 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       </header>
 
       <div className={styles.controlStrip}>
-        <AgentManagementNav active="memory" className={styles.managementNav} />
         {renderSubnav()}
       </div>
 

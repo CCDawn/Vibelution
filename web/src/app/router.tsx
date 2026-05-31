@@ -4,6 +4,7 @@ import { createBrowserRouter } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { LegacyChatRoomsRedirect } from "../routes/LegacyChatRoomsRedirect";
 import { LegacyTeamsRedirect } from "../routes/LegacyTeamsRedirect";
+import { LegacyMemoryRedirect } from "../routes/LegacyMemoryRedirect";
 import { HomeRedirect } from "../routes/HomeRedirect";
 import { LegacyEvolutionRedirect } from "../routes/LegacyEvolutionRedirect";
 import { WorkbenchDomainRoute } from "../routes/WorkbenchDomainRoute";
@@ -105,11 +106,16 @@ export const router = createBrowserRouter([
       { path: "agents/prompts", element: lazyElement(<PromptTemplatesRoute />) },
       { path: "agents/tools", element: lazyElement(<ToolsRoute />) },
       { path: "agents/skills", element: lazyElement(<SkillsRoute />) },
-      { path: "agents/memory", element: lazyElement(<MemoryRoute forcedView="overview" />) },
-      { path: "agents/memory/effective", element: lazyElement(<MemoryRoute forcedView="effective" />) },
-      { path: "agents/memory/manage", element: lazyElement(<MemoryRoute forcedView="manage" />) },
-      { path: "agents/memory/sources", element: lazyElement(<MemoryRoute forcedView="sources" />) },
-      { path: "agents/memory/knowledge", element: lazyElement(<MemoryRoute forcedView="knowledge" />) },
+      { path: "agents/memory", element: <LegacyMemoryRedirect to="/memory" /> },
+      { path: "agents/memory/effective", element: <LegacyMemoryRedirect to="/memory/effective" /> },
+      { path: "agents/memory/manage", element: <LegacyMemoryRedirect to="/memory/manage" /> },
+      { path: "agents/memory/sources", element: <LegacyMemoryRedirect to="/memory/sources" /> },
+      { path: "agents/memory/knowledge", element: <LegacyMemoryRedirect to="/memory/knowledge" /> },
+      { path: "memory", element: lazyElement(<MemoryRoute forcedView="overview" />) },
+      { path: "memory/effective", element: lazyElement(<MemoryRoute forcedView="effective" />) },
+      { path: "memory/manage", element: lazyElement(<MemoryRoute forcedView="manage" />) },
+      { path: "memory/sources", element: lazyElement(<MemoryRoute forcedView="sources" />) },
+      { path: "memory/knowledge", element: lazyElement(<MemoryRoute forcedView="knowledge" />) },
       { path: "teams", element: lazyElement(<TeamsRoute />) },
       { path: "git", element: lazyElement(<GitRoute />) },
       { path: "logs", element: lazyElement(<LogsRoute />) },

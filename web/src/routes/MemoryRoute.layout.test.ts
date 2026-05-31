@@ -59,17 +59,34 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain('forcedView === "knowledge"');
   });
 
-  it("wires the team knowledge platform to scoped overview, source, proposal, review, and rating APIs", () => {
+  it("wires the team knowledge platform to scoped overview, source, proposal, review, search, and governance APIs", () => {
     expect(routeSource).toContain("queryKeys.knowledgeOverview()");
     expect(routeSource).toContain('fetchJson<TeamKnowledgeOverview>("/api/knowledge/overview")');
     expect(routeSource).toContain('sourceType: "manual_user_entry"');
     expect(routeSource).toContain("/source-artifacts");
     expect(routeSource).toContain("/refinement-proposals");
+    expect(routeSource).toContain("/ingestion-packages");
     expect(routeSource).toContain("/review");
-    expect(routeSource).toContain("/rating");
+    expect(routeSource).toContain("/api/knowledge/search");
+    expect(routeSource).toContain("/api/knowledge/governance/tasks");
+    expect(routeSource).toContain("/api/knowledge/ingestion-adapters");
+    expect(routeSource).toContain("/trace/");
+    expect(routeSource).toContain("/rating-suggestions");
+    expect(routeSource).toContain("/rating-suggestions/review-batch");
+    expect(routeSource).toContain("/api/knowledge/permissions/audit");
     expect(routeSource).toContain("copy.approveProposal");
     expect(routeSource).toContain("copy.rejectProposal");
-    expect(routeSource).toContain("copy.updateRating");
+    expect(routeSource).toContain("copy.submitRatingSuggestion");
+    expect(routeSource).toContain("copy.bulkApplySuggestions");
+    expect(routeSource).toContain("copy.bulkRejectSuggestions");
+    expect(routeSource).toContain("selectedRatingSuggestionIds");
+    expect(routeSource).toContain("toggleVisibleRatingSuggestions");
+    expect(routeSource).toContain("copy.permissionAudit");
+    expect(routeSource).toContain("copy.ingestionPackage");
+    expect(routeSource).toContain("copy.submitIngestionPackage");
+    expect(routeSource).toContain("copy.governanceTasks");
+    expect(routeSource).toContain("copy.ingestionAdapters");
+    expect(routeSource).toContain("copy.traceability");
   });
 
   it("shows a priority review queue on the default memory overview", () => {
@@ -79,6 +96,9 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("memoryPairActionTarget(pair)");
     expect(routeSource).toContain("styles.reviewQueuePanel");
     expect(routeSource).toContain("styles.reviewQueueList");
+    expect(routeSource).toContain("styles.reviewQueueTitleLine");
+    expect(routeSource).toContain("styles.reviewQueueSummary");
+    expect(routeSource).toContain("styles.reviewQueueTime");
     expect(routeSource).toContain("styles.reviewReasonPill");
     expect(routeSource).toContain("copy.reviewQueue");
     expect(routeSource).toContain("copy.reviewQueueHint");
@@ -102,6 +122,22 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.itemSelectionRow");
     expect(routeSource).toContain("styles.itemContentButton");
     expect(routeSource).toContain("renderMemoryList(flatVisibleItems, copy.noMatches, false, true)");
+    expect(routeSource.indexOf("styles.manageListPanel")).toBeLessThan(routeSource.indexOf("styles.manageFormPanel"));
+    expect(routeSource).toContain("copy.manageConfigPanel");
+    expect(routeSource).toContain("copy.manageConfigHint");
+    expect(routeSource).toContain("copy.manageListHint");
+    expect(routeSource).toContain("type ManageFilterMode");
+    expect(routeSource).toContain('next.set("manage", activeManageFilter)');
+    expect(routeSource).toContain("normalizeManageFilterMode");
+    expect(routeSource).toContain("itemMatchesManageFilter");
+    expect(routeSource).toContain("copy.manageFilters");
+    expect(routeSource).toContain("copy.sourceFilters");
+    expect(routeSource).toContain("styles.manageFilterPanel");
+    expect(routeSource).toContain("styles.manageSourceFilters");
+    expect(routeSource).toContain("styles.sourceChip");
+    expect(routeSource).toContain("const renderSelectedMemoryConfig");
+    expect(routeSource).toContain("styles.selectedConfigSummary");
+    expect(routeSource.indexOf("{renderSelectedMemoryConfig()}")).toBeGreaterThan(routeSource.indexOf("{renderManagementEditor()}"));
     expect(routeSource).toContain("copy.selectedCount");
     expect(routeSource).toContain("copy.bulkDisable");
     expect(routeSource).toContain("copy.bulkRestore");
@@ -212,34 +248,46 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).not.toContain("overviewQuery.isError ? (");
   });
 
-  it("is registered as an Agent management section with memory subviews", () => {
-    expect(routerSource).toContain('path: "agents/memory"');
+  it("is registered as a primary Memory Library with legacy Agent memory redirects", () => {
+    expect(routerSource).toContain('path: "memory"');
     expect(routerSource).toContain('<MemoryRoute forcedView="overview" />');
-    expect(routerSource).toContain('path: "agents/memory/effective"');
+    expect(routerSource).toContain('path: "memory/effective"');
     expect(routerSource).toContain('<MemoryRoute forcedView="effective" />');
-    expect(routerSource).toContain('path: "agents/memory/manage"');
+    expect(routerSource).toContain('path: "memory/manage"');
     expect(routerSource).toContain('<MemoryRoute forcedView="manage" />');
-    expect(routerSource).toContain('path: "agents/memory/sources"');
+    expect(routerSource).toContain('path: "memory/sources"');
     expect(routerSource).toContain('<MemoryRoute forcedView="sources" />');
-    expect(routerSource).toContain('path: "agents/memory/knowledge"');
+    expect(routerSource).toContain('path: "memory/knowledge"');
     expect(routerSource).toContain('<MemoryRoute forcedView="knowledge" />');
-    expect(routerSource).not.toContain('path: "memory"');
-    expect(routerSource).not.toContain('path: "memory/effective"');
-    expect(routerSource).not.toContain('path: "memory/manage"');
-    expect(routerSource).not.toContain('path: "memory/sources"');
-    expect(routerSource).not.toContain('path: "memory/knowledge"');
-    expect(routerSource).not.toContain('to="/agents/memory" replace');
-    expect(routeSource).toContain('{ key: "overview", href: "/agents/memory" }');
-    expect(routeSource).toContain('to={`/agents/memory/sources?section=');
-    expect(routeSource).toContain('to={`/agents/memory/manage?section=');
-    expect(routeSource).toContain('<AgentManagementNav active="memory" className={styles.managementNav} />');
-    expect(routeSource.indexOf('<AgentManagementNav active="memory" className={styles.managementNav} />')).toBeGreaterThan(
-      routeSource.indexOf("</header>"),
-    );
-    expect(routeSource.indexOf('<AgentManagementNav active="memory" className={styles.managementNav} />')).toBeLessThan(
-      routeSource.indexOf("{renderSubnav()}"),
-    );
+    expect(routerSource).toContain('path: "agents/memory"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory" />');
+    expect(routerSource).toContain('path: "agents/memory/effective"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/effective" />');
+    expect(routerSource).toContain('path: "agents/memory/manage"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/manage" />');
+    expect(routerSource).toContain('path: "agents/memory/sources"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/sources" />');
+    expect(routerSource).toContain('path: "agents/memory/knowledge"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/knowledge" />');
+    expect(routeSource).toContain('{ key: "overview", href: "/memory" }');
+    expect(routeSource).toContain('to={`/memory/sources?section=');
+    expect(routeSource).toContain('to={`/memory/manage?section=');
+    expect(routeSource).not.toContain("AgentManagementNav");
     expect(routeSource.indexOf("{renderSubnav()}")).toBeLessThan(routeSource.indexOf("styles.viewStack"));
-    expect(appShellSource).not.toContain('to="/memory"');
+    expect(appShellSource).toContain('to="/memory"');
+    expect(appShellSource).toContain('t("navMemory")');
+  });
+
+  it("visualizes the P1 team knowledge pipeline and prompt boundary", () => {
+    expect(routeSource).toContain("copy.platformPipeline");
+    expect(routeSource).toContain("copy.pipelineSource");
+    expect(routeSource).toContain("copy.pipelineProposal");
+    expect(routeSource).toContain("copy.pipelineBatch");
+    expect(routeSource).toContain("copy.pipelineFormal");
+    expect(routeSource).toContain("copy.pipelineRating");
+    expect(routeSource).toContain("copy.toolReadableOnly");
+    expect(routeSource).toContain("copy.promptBoundary");
+    expect(routeSource).toContain("styles.pipelinePanel");
+    expect(routeSource).toContain("styles.pipelineSteps");
   });
 });

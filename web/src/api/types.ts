@@ -193,6 +193,16 @@ export type KnowledgeReviewResponse = {
   item: KnowledgeItem | null;
 };
 
+export type KnowledgeIngestionPackageResponse = {
+  schemaVersion: number;
+  teamId: string;
+  knowledgeBaseId: string;
+  status: string;
+  sourceArtifact: KnowledgeSourceArtifact;
+  proposal: KnowledgeRefinementProposal;
+  updatedAt: string;
+};
+
 export type KnowledgeItemsPayload = {
   schemaVersion: number;
   teamId: string;
@@ -201,6 +211,199 @@ export type KnowledgeItemsPayload = {
   summary: {
     itemCount: number;
   };
+  updatedAt: string;
+};
+
+export type KnowledgeRatingSuggestion = {
+  suggestionId: string;
+  teamId: string;
+  knowledgeBaseId: string;
+  targetType: "proposal" | "knowledge_item" | string;
+  knowledgeItemId: string;
+  proposalId: string;
+  suggestedByAgentId: string;
+  importanceLevel: string;
+  confidence: number;
+  stability: string;
+  reviewPriority: string;
+  markingReason: string;
+  status: "pending" | "applied" | "rejected" | string;
+  createdAt: string;
+  updatedAt: string;
+  reviewedByAgentId: string;
+  reviewedAt: string;
+  resolutionNote: string;
+};
+
+export type KnowledgeRatingSuggestionsPayload = {
+  schemaVersion: number;
+  teamId: string;
+  knowledgeBase: TeamKnowledgeBase;
+  suggestions: KnowledgeRatingSuggestion[];
+  summary: {
+    suggestionCount: number;
+    pendingSuggestionCount: number;
+  };
+  updatedAt: string;
+};
+
+export type KnowledgeRatingSuggestionReviewResponse = {
+  suggestion: KnowledgeRatingSuggestion;
+  item: KnowledgeItem | null;
+};
+
+export type KnowledgeRatingSuggestionBulkReviewResponse = {
+  schemaVersion: number;
+  teamId: string;
+  knowledgeBaseId: string;
+  status: string;
+  reviewed: KnowledgeRatingSuggestionReviewResponse[];
+  skipped: Array<{
+    suggestionId: string;
+    reason: string;
+  }>;
+  summary: {
+    requestedCount: number;
+    reviewedCount: number;
+    skippedCount: number;
+    appliedItemCount: number;
+  };
+  updatedAt: string;
+};
+
+export type KnowledgeSearchResult = KnowledgeItem & {
+  knowledgeBaseName: string;
+  teamName: string;
+  sourceTypes: string[];
+  sourceSummaries: Array<{
+    sourceArtifactId: string;
+    sourceType: string;
+    capturedAt: string;
+    title: string;
+    summary: string;
+  }>;
+};
+
+export type KnowledgeSearchPayload = {
+  schemaVersion: number;
+  agentId: string;
+  filters: Record<string, unknown>;
+  summary: {
+    resultCount: number;
+    scannedKnowledgeBaseCount: number;
+  };
+  results: KnowledgeSearchResult[];
+  updatedAt: string;
+};
+
+export type KnowledgePermissionAuditPayload = {
+  schemaVersion: number;
+  agentId: string;
+  tools: Record<string, {
+    toolName: string;
+    visible: boolean;
+    allowedByToolPolicy: boolean;
+    blockedByToolPolicy: boolean;
+    reason: string;
+  }>;
+  knowledgeBases: Array<{
+    teamId: string;
+    teamName: string;
+    knowledgeBaseId: string;
+    knowledgeBaseName: string;
+    teamRole: string;
+    permissions: Record<string, {
+      allowed: boolean;
+      reason: string;
+      teamAclAllowed: boolean;
+      memoryPolicyAllowed: boolean;
+      memoryPolicyExplicit: boolean;
+    }>;
+  }>;
+  summary: {
+    knowledgeBaseCount: number;
+    readableCount: number;
+    proposableCount: number;
+    reviewableCount: number;
+    rateableCount: number;
+  };
+  updatedAt: string;
+};
+
+export type KnowledgeGovernanceTask = {
+  taskId: string;
+  taskType: "proposal_review" | "rating_review" | "source_needs_proposal" | string;
+  status: "open" | "closed" | string;
+  priority: string;
+  teamId: string;
+  teamName: string;
+  knowledgeBaseId: string;
+  knowledgeBaseName: string;
+  targetId: string;
+  targetStatus: string;
+  title: string;
+  summary: string;
+  sourceArtifactIds: string[];
+  createdAt: string;
+  updatedAt: string;
+  permissions: {
+    canReview: boolean;
+    canRate: boolean;
+    canPropose: boolean;
+  };
+};
+
+export type KnowledgeGovernanceTasksPayload = {
+  schemaVersion: number;
+  agentId: string;
+  tasks: KnowledgeGovernanceTask[];
+  summary: {
+    taskCount: number;
+    openTaskCount: number;
+    proposalReviewCount: number;
+    ratingReviewCount: number;
+    sourceNeedsProposalCount: number;
+  };
+  updatedAt: string;
+};
+
+export type KnowledgeIngestionAdapter = {
+  sourceType: string;
+  label: string;
+  requiredSourceRef: string[];
+  optionalSourceRef: string[];
+  evidenceKinds: string[];
+  outputContract: {
+    creates: string[];
+    proposalStatus: string;
+    createsKnowledgeItem: boolean;
+    requiresReview: boolean;
+  };
+};
+
+export type KnowledgeIngestionAdaptersPayload = {
+  schemaVersion: number;
+  adapters: KnowledgeIngestionAdapter[];
+  summary: {
+    adapterCount: number;
+  };
+  updatedAt: string;
+};
+
+export type KnowledgeTracePayload = {
+  schemaVersion: number;
+  teamId: string;
+  knowledgeBase: TeamKnowledgeBase;
+  targetId: string;
+  targetType: string;
+  nodes: {
+    sourceArtifacts: KnowledgeSourceArtifact[];
+    proposals: KnowledgeRefinementProposal[];
+    batches: KnowledgeBatch[];
+    items: KnowledgeItem[];
+    ratingSuggestions: KnowledgeRatingSuggestion[];
+  };
+  summary: Record<string, number>;
   updatedAt: string;
 };
 
@@ -1207,6 +1410,7 @@ export type MemoryPolicy = {
   readKnowledgeBaseIds: string[];
   proposeKnowledgeBaseIds: string[];
   reviewKnowledgeBaseIds: string[];
+  rateKnowledgeBaseIds: string[];
 };
 
 export type AgentWorkspaceTerritory = {
@@ -1731,6 +1935,7 @@ export type AgentConfigWorkspace = {
   modeBindings: Record<string, AgentModeBindingItem>;
   promptTemplates: PromptTemplate[];
   modelProfiles: ConfigProfileCard[];
+  modelOptions: ConfigModelOption[];
   toolPolicies: AgentToolPolicyOption[];
   memoryPolicies: AgentMemoryPolicyOption[];
   chatRooms: Array<{
@@ -2459,6 +2664,8 @@ export type EvolutionActiveRun = {
   datasetName: string;
   datasetLimit: number | null;
   keepWorktree: boolean;
+  retryOfRunId?: string;
+  resumeFromDecisionPath?: string;
   startedAt: string;
   updatedAt: string;
   finishedAt: string;
