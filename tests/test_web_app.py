@@ -10654,7 +10654,11 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
         "caseCount": 1,
         "benchmark": "dry",
     } in payload["bundles"]
-    assert {item["name"] for item in payload["datasets"]} == {"supervised_dry_run", "terminal_bench_smoke"}
+    assert {item["name"] for item in payload["datasets"]} == {
+        "supervised_dry_run",
+        "terminal_bench_smoke",
+        "terminal_bench_core",
+    }
     dry_run = next(item for item in payload["datasets"] if item["name"] == "supervised_dry_run")
     assert dry_run["effective"] is True
     assert dry_run["caseCount"] >= 1
@@ -10666,6 +10670,10 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert terminal_smoke["selectable"] is True
     assert terminal_smoke["adapterStatus"] == "ready_local_smoke"
     assert "terminal-bench" in terminal_smoke["tags"]
+    terminal_core = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_core")
+    assert terminal_core["effective"] is True
+    assert terminal_core["selectable"] is True
+    assert terminal_core["adapterStatus"] == "ready_official_seed"
     assert payload["activeRun"] is None
 
 
@@ -11058,13 +11066,16 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert response.status_code == 200
     rows = response.json()["datasets"]
     names = {item["name"] for item in rows}
-    assert names == {"supervised_dry_run", "terminal_bench_smoke"}
+    assert names == {"supervised_dry_run", "terminal_bench_smoke", "terminal_bench_core"}
     assert not any(item["name"] == "generated_cases" for item in rows)
     assert not any(item["name"] == "chat_reviewed_multiturn" for item in rows)
     assert any(item["name"] == "terminal_bench_smoke" for item in rows)
     terminal_row = next(item for item in rows if item["name"] == "terminal_bench_smoke")
     assert terminal_row["effective"] is True
     assert terminal_row["selectable"] is True
+    terminal_core = next(item for item in rows if item["name"] == "terminal_bench_core")
+    assert terminal_core["effective"] is True
+    assert terminal_core["adapterStatus"] == "ready_official_seed"
 
 
 def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_path, monkeypatch):

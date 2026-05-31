@@ -48,6 +48,11 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
     assert by_name["terminal_bench_smoke"]["visibility"] == "primary"
     assert by_name["terminal_bench_smoke"]["selectable"] is True
     assert by_name["terminal_bench_smoke"]["case_count"] >= 2
+    assert by_name["terminal_bench_core"]["runnable"] is True
+    assert by_name["terminal_bench_core"]["adapter_status"] == "ready_official_seed"
+    assert by_name["terminal_bench_core"]["effective"] is True
+    assert by_name["terminal_bench_core"]["visibility"] == "primary"
+    assert by_name["terminal_bench_core"]["case_count"] >= 5
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
 
@@ -81,6 +86,7 @@ def test_ensure_dataset_registry_backfills_missing_builtin_datasets(tmp_path: Pa
     assert "generated_cases" in names
     assert "chat_reviewed_multiturn" in names
     assert "terminal_bench_smoke" in names
+    assert "terminal_bench_core" in names
     assert "custom_prompt_jsonl" in names
 
 
@@ -235,6 +241,9 @@ def test_ensure_dataset_registry_bootstraps_generated_and_chat_sources(tmp_path:
     terminal_path = tmp_path / "workspace" / "evaluation" / "datasets" / "terminal_bench_smoke.jsonl"
     assert terminal_path.exists()
     assert len([line for line in terminal_path.read_text(encoding="utf-8").splitlines() if line.strip()]) >= 2
+    core_path = tmp_path / "workspace" / "evaluation" / "datasets" / "terminal_bench_core.jsonl"
+    assert core_path.exists()
+    assert len([line for line in core_path.read_text(encoding="utf-8").splitlines() if line.strip()]) >= 5
 
 
 def test_dataset_status_distinguishes_effective_empty_missing_and_harness(tmp_path: Path):
@@ -473,7 +482,33 @@ def test_materialize_terminal_bench_smoke_preserves_harness_contract(tmp_path: P
     assert case["official_runner"] == "pending"
     assert case["verifier"]["command"]
     assert "multi-step ReAct" in case["baseline_prompt"]
+    assert "Official metadata" not in case["baseline_prompt"]
     assert "Close the transaction" in case["baseline_prompt"] or "close the transaction" in case["baseline_prompt"]
+
+
+def test_materialize_terminal_bench_core_preserves_official_metadata(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+
+    result = materialize_dataset_bundle("terminal_bench_core", project_root=tmp_path, limit=2)
+    bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+    case = bundle["cases"][0]
+
+    assert result.bundle_name == "terminal_bench_core_v1"
+    assert result.runnable is True
+    assert result.adapter_status == "ready_official_seed"
+    assert result.case_count == 2
+    assert bundle["dataset"]["name"] == "terminal_bench_core"
+    assert case["mode"] == "multi_step_react"
+    assert case["terminal_bench_adapter"] == "official_seed"
+    assert case["official_runner"] == "harbor_pending"
+    assert case["official_metadata"]["dataset"] == "terminal-bench@2.0"
+    assert case["official_metadata"]["repo"].endswith("terminal-bench-2")
+    assert case["official_metadata"]["revision"]
+    assert case["official_metadata"]["task_slug"]
+    assert case["official_metadata"]["docker_image"]
+    assert case["verifier"]["kind"] == "harbor_terminal_bench"
+    assert "uv run harbor run --dataset terminal-bench@2.0" in case["verifier"]["command"]
+    assert "Official metadata" in case["baseline_prompt"]
 
 
 def test_materialize_missing_dataset_source_fails_clearly(tmp_path: Path):
