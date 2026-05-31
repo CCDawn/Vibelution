@@ -381,7 +381,8 @@
 }
 
 .overviewPanel {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-auto-rows: max-content;
+  overflow: hidden;
 }
 
 .reviewQueuePanel {
@@ -399,8 +400,9 @@
 .compactMemoryList {
   display: grid;
   align-content: start;
-  gap: 6px;
+  gap: 4px;
   min-height: 0;
+  overflow: auto;
 }
 
 .reviewQueueList {
@@ -492,6 +494,32 @@
   white-space: nowrap;
 }
 
+.panelError {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 6px 10px 0;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--state-danger) 34%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-danger) 10%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.8rem;
+}
+
+.panelError svg {
+  flex: 0 0 auto;
+  color: var(--state-danger);
+}
+
+.panelError span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(230px, 280px) minmax(340px, 0.95fr) minmax(440px, 1.1fr);
@@ -500,12 +528,29 @@
   padding: 8px 10px;
 }
 
+.manageWorkspace {
+  grid-template-columns: minmax(190px, 230px) minmax(500px, 1.12fr) minmax(400px, 0.9fr);
+}
+
+.knowledgeWorkspace {
+  grid-template-columns: minmax(220px, 270px) minmax(460px, 1fr) minmax(360px, 0.85fr);
+}
+
 .manageFormPanel {
   overflow: auto;
 }
 
+.manageFormPanel .emptyDetail {
+  min-height: 82px;
+  padding: 10px;
+}
+
+.manageFormPanel .emptyDetail svg {
+  display: none;
+}
+
 .manageListPanel {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
 }
 
 .sourcePanel,
@@ -531,6 +576,11 @@
   gap: 9px;
   overflow: auto;
   padding: 10px;
+}
+
+.manageDetailPanel {
+  gap: 7px;
+  padding: 8px;
 }
 
 .panelHeader {
@@ -683,6 +733,21 @@
   accent-color: var(--accent-warm);
 }
 
+.itemSelectionRowDense {
+  justify-content: center;
+  width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.itemSelectionRowDense input {
+  width: 15px;
+  height: 15px;
+}
+
 .sourceButton:hover,
 .itemButton:hover {
   border-color: var(--border-strong);
@@ -773,6 +838,20 @@
   padding: 8px 9px;
 }
 
+.itemButtonCompact {
+  gap: 2px;
+  min-height: 48px;
+  padding: 5px 8px;
+}
+
+.itemButtonDense {
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 56px;
+  padding: 5px 7px;
+}
+
 .itemContentButton {
   display: grid;
   gap: 5px;
@@ -785,6 +864,10 @@
   color: inherit;
   font: inherit;
   text-align: left;
+}
+
+.itemContentButtonDense {
+  gap: 3px;
 }
 
 .itemHeader {
@@ -802,6 +885,114 @@
 
 .itemSummary {
   line-height: 1.35;
+}
+
+.compactItemPrimary,
+.compactItemMeta {
+  display: grid;
+  min-width: 0;
+}
+
+.compactItemPrimary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.compactItemPrimary strong,
+.compactItemMeta span,
+.compactItemSummary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compactItemPrimary strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.compactItemPrimary span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.compactItemMeta {
+  grid-template-columns: minmax(72px, 0.2fr) minmax(0, 1fr);
+  gap: 8px;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.compactItemSummary {
+  display: block;
+  color: var(--fg-secondary);
+  font-size: 0.7rem;
+}
+
+.manageItemPrimary,
+.manageItemMeta,
+.manageItemFooter {
+  display: grid;
+  min-width: 0;
+}
+
+.manageItemPrimary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.manageItemPrimary strong,
+.manageItemMeta span,
+.manageItemSummary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manageItemPrimary strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.manageItemPrimary span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.manageItemMeta {
+  grid-template-columns: minmax(92px, 0.28fr) minmax(0, 1fr);
+  gap: 8px;
+  color: var(--fg-tertiary);
+  font-size: 0.69rem;
+}
+
+.manageItemFooter {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.manageItemSummary {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.manageItemBadges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.manageItemBadges > span {
+  min-height: 18px;
+  padding-inline: 5px;
+  font-size: 0.66rem;
 }
 
 .itemBadges,
@@ -927,6 +1118,43 @@
   padding: 10px;
 }
 
+.manageDetailPanel .detailHeader {
+  padding-bottom: 6px;
+}
+
+.manageDetailPanel .detailHeader > div {
+  gap: 4px;
+}
+
+.manageDetailPanel .detailHeader p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.manageDetailPanel .visibilityPanel,
+.manageDetailPanel .impactPanel,
+.manageDetailPanel .managementPanel,
+.manageDetailPanel .sectionPanel {
+  gap: 6px;
+  padding: 8px;
+}
+
+.manageDetailPanel .impactPanel > p,
+.manageDetailPanel .managementPanel > p {
+  font-size: 0.76rem;
+  line-height: 1.32;
+}
+
+.manageDetailPanel .factGrid {
+  gap: 5px;
+}
+
+.manageDetailPanel .factGrid section {
+  padding: 6px;
+}
+
 .impactPanel {
   border-color: color-mix(in srgb, var(--accent-warm) 24%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 8%, var(--surface-card));
@@ -951,6 +1179,129 @@
   line-height: 1.45;
 }
 
+.knowledgeMain {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.knowledgeFormGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.knowledgeFormGrid label,
+.knowledgeItemCard label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.knowledgeFormGrid label > span,
+.knowledgeItemCard label > span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.knowledgeFormGrid input,
+.knowledgeFormGrid select,
+.knowledgeFormGrid textarea,
+.knowledgeItemCard input,
+.knowledgeItemCard select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.knowledgeFormGrid input,
+.knowledgeFormGrid select,
+.knowledgeItemCard input,
+.knowledgeItemCard select {
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.knowledgeFormGrid textarea {
+  resize: vertical;
+  padding: 7px 8px;
+  line-height: 1.35;
+}
+
+.wideField {
+  grid-column: 1 / -1;
+}
+
+.knowledgeProposalList,
+.knowledgeItems {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.knowledgeRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.knowledgeRow strong,
+.knowledgeRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledgeRow span {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.knowledgeItemCard {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+
+.knowledgeItemCard p {
+  display: -webkit-box;
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  line-height: 1.32;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.ratingControls {
+  display: grid;
+  grid-template-columns: minmax(80px, 0.8fr) minmax(64px, 0.5fr) minmax(90px, 0.8fr) auto;
+  gap: 6px;
+  min-width: 0;
+}
+
 .managementHeader {
   display: flex;
   align-items: flex-start;
@@ -973,14 +1324,29 @@
 
 .bulkActionBar {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 8px;
+  min-height: 30px;
+  overflow-x: auto;
+  padding: 4px 0;
   border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-card);
+  border-inline: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.bulkActionBar .detailActionButton {
+  flex: 0 0 auto;
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: 0.7rem;
+}
+
+.bulkActionBar .countPill {
+  min-height: 22px;
+  font-size: 0.7rem;
 }
 
 .editPreviewPanel {
@@ -1129,6 +1495,10 @@
   gap: 8px;
 }
 
+.manageDetailPanel .detailActions {
+  gap: 6px;
+}
+
 .detailActionButton {
   display: inline-flex;
   align-items: center;
@@ -1142,6 +1512,12 @@
   color: var(--fg-secondary);
   font: inherit;
   font-size: 0.75rem;
+}
+
+.manageDetailPanel .detailActionButton {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 0.72rem;
 }
 
 .detailActionButton span {
@@ -1326,6 +1702,10 @@
     grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
   }
 
+  .knowledgeWorkspace {
+    grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  }
+
   .detailPanel {
     grid-column: 1 / -1;
     max-height: 46vh;
@@ -1363,7 +1743,11 @@
   .matrixGrid,
   .overviewGrid,
   .effectiveGrid,
-  .workspace {
+  .workspace,
+  .knowledgeWorkspace,
+  .knowledgeFormGrid,
+  .knowledgeRow,
+  .ratingControls {
     grid-template-columns: 1fr;
   }
 

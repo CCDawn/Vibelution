@@ -56,6 +56,10 @@ from tools.research_organization_tools import (
 )
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
+from tools.team_knowledge_tools import (
+    knowledge_proposal_tool as _knowledge_proposal_impl,
+    knowledge_query_tool as _knowledge_query_impl,
+)
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
     code_symbol_tool as _code_symbol_impl,
@@ -1061,6 +1065,77 @@ def create_key_tools() -> List[BaseTool]:
             limit=limit,
         )
 
+    @tool
+    def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: int = 8) -> str:
+        """
+        【团队知识库查询】只读检索已审核落盘的团队正式知识。
+
+        该工具只返回正式 KnowledgeItem，不读取 pending proposal，也不写入知识库。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_query_tool，且其团队/MemoryPolicy 允许读取目标知识库时才可用。
+
+        Args:
+            query: 查询关键词，可为空以查看最近正式知识
+            knowledge_base_id: 可选知识库 ID；为空时检索当前 Agent 可访问的知识库
+            limit: 最多返回条数，范围 1-25
+
+        Returns:
+            JSON 格式的正式知识条目列表
+        """
+        return _knowledge_query_impl(query=query, knowledge_base_id=knowledge_base_id, limit=limit)
+
+    @tool
+    def knowledge_proposal_tool(
+        knowledge_base_id: str,
+        source_type: str,
+        source_ref_json: str,
+        proposal_title: str,
+        proposal_content: str,
+        source_title: str = "",
+        source_summary: str = "",
+        proposal_summary: str = "",
+        tags: str = "",
+        evidence_range_json: str = "{}",
+        source_created_at: str = "",
+        captured_by: str = "",
+    ) -> str:
+        """
+        【团队知识候选提交】登记来源并提交精炼提案，等待审核后才会落为正式知识。
+
+        该工具不会直接创建 KnowledgeItem；普通 Agent 只能把群聊、PDF、外部搜索、运行证据或手写内容提交为候选。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_proposal_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
+
+        Args:
+            knowledge_base_id: 目标团队知识库 ID
+            source_type: 来源类型，如 team_chat_refinement / pdf_refinement / external_search_refinement / agent_authored / runtime_evidence_refinement / manual_user_entry
+            source_ref_json: 来源引用 JSON 字符串，例如 {"url":"..."} 或 {"roomId":"...","messageRange":{"from":0,"to":3}}
+            proposal_title: 精炼提案标题
+            proposal_content: 精炼后的候选知识正文
+            source_title: 可选来源标题
+            source_summary: 可选来源摘要
+            proposal_summary: 可选候选摘要
+            tags: 逗号分隔标签
+            evidence_range_json: 可选证据范围 JSON 字符串
+            source_created_at: 可选来源产生时间
+            captured_by: 可选来源登记者，默认当前 Agent
+
+        Returns:
+            JSON 格式的 SourceArtifact 和 RefinementProposal
+        """
+        return _knowledge_proposal_impl(
+            knowledge_base_id=knowledge_base_id,
+            source_type=source_type,
+            source_ref_json=source_ref_json,
+            proposal_title=proposal_title,
+            proposal_content=proposal_content,
+            source_title=source_title,
+            source_summary=source_summary,
+            proposal_summary=proposal_summary,
+            tags=tags,
+            evidence_range_json=evidence_range_json,
+            source_created_at=source_created_at,
+            captured_by=captured_by,
+        )
+
     # ── 学习卸载工具 (P2) ──────────────────────────────────────────────────
 
     @tool
@@ -1183,6 +1258,8 @@ def create_key_tools() -> List[BaseTool]:
         research_communication_edge_proposal_tool,
         image2_generate_tool,
         research_knowledge_query_tool,
+        knowledge_query_tool,
+        knowledge_proposal_tool,
         # 学习卸载 (P2)
         record_learning_tool,
         search_memory_tool,

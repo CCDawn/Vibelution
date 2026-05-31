@@ -42,6 +42,15 @@ LAUNCHER_SHUTDOWN_LOG_PATH = PROJECT_ROOT / ".runtime" / "launcher" / "shutdown-
 RUNNING_SESSION_PHASES = {"running", "stopping"}
 
 
+class RuntimeRestartActiveWorkBlocked(Exception):
+    """Raised when a restart would interrupt active work without confirmation."""
+
+    def __init__(self, message: str, active_work_runs: list[dict[str, str]]) -> None:
+        super().__init__(message)
+        self.message = message
+        self.active_work_runs = active_work_runs
+
+
 def get_runtime_summary() -> dict:
     """Return a light runtime summary for the global shell."""
 
@@ -237,15 +246,42 @@ def request_runtime_shutdown() -> dict[str, object]:
     }
 
 
-def request_runtime_restart() -> dict[str, object]:
+def request_runtime_restart(*, confirmed_active_work: bool = False) -> dict[str, object]:
     """Request a managed workbench restart through the runtime manager."""
 
     lang = get_web_language()
+    active_work_runs = _restart_guard_active_work_runs()
     _record_restart_event(
         "runtime.restart.requested",
         message="Runtime restart requested from web UI.",
-        fields={"source": "web_ui"},
+        fields={
+            "source": "web_ui",
+            "confirmedActiveWork": bool(confirmed_active_work),
+            "activeWorkCount": len(active_work_runs),
+            "activeWorkKinds": _active_work_kinds(active_work_runs),
+        },
     )
+    if active_work_runs and not confirmed_active_work:
+        message = text_for(
+            lang,
+            zh="仍有团队通信或其他任务正在运行。请先等待完成，或确认后再重启工作台。",
+            en="Team communication or other work is still running. Wait for it to finish, or confirm the workbench restart.",
+        )
+        _record_restart_event(
+            "runtime.restart.blocked_active_work",
+            message="Runtime restart blocked because active work was not confirmed.",
+            outcome="blocked",
+            level="warning",
+            fields={
+                "source": "web_ui",
+                "mode": "runtime_manager",
+                "confirmedActiveWork": False,
+                "activeWorkCount": len(active_work_runs),
+                "activeWorkKinds": _active_work_kinds(active_work_runs),
+                "activeWorkRuns": active_work_runs[:8],
+            },
+        )
+        raise RuntimeRestartActiveWorkBlocked(message, active_work_runs)
     stopped_chat_room_rounds = _stop_active_chat_room_rounds_before_shutdown()
     stopped_chat_turns = _stop_active_chat_turns_before_shutdown()
     stopped_evolution_runs = _stop_active_evolution_runs_before_shutdown()
@@ -268,6 +304,8 @@ def request_runtime_restart() -> dict[str, object]:
                 stopped_chat_room_rounds=stopped_chat_room_rounds,
                 stopped_chat_turns=stopped_chat_turns,
                 stopped_evolution_runs=stopped_evolution_runs,
+                confirmed_active_work=confirmed_active_work,
+                active_work_runs=active_work_runs,
             )
             | {"errorType": type(exc).__name__, "errorMessage": str(exc)},
         )
@@ -283,6 +321,8 @@ def request_runtime_restart() -> dict[str, object]:
             stopped_chat_room_rounds=stopped_chat_room_rounds,
             stopped_chat_turns=stopped_chat_turns,
             stopped_evolution_runs=stopped_evolution_runs,
+            confirmed_active_work=confirmed_active_work,
+            active_work_runs=active_work_runs,
         )
         | {"commandId": command_id},
     )
@@ -379,10 +419,16 @@ def _restart_event_fields(
     stopped_chat_room_rounds: list[dict[str, object]],
     stopped_chat_turns: list[dict[str, object]],
     stopped_evolution_runs: list[dict[str, object]],
+    confirmed_active_work: bool = False,
+    active_work_runs: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
+    active_work_runs = active_work_runs or []
     return {
         "source": "web_ui",
         "mode": mode,
+        "confirmedActiveWork": bool(confirmed_active_work),
+        "activeWorkCount": len(active_work_runs),
+        "activeWorkKinds": _active_work_kinds(active_work_runs),
         "chatRoomRoundCount": len(stopped_chat_room_rounds),
         "chatTurnCount": len(stopped_chat_turns),
         "evolutionRunCount": len(stopped_evolution_runs),
@@ -405,6 +451,43 @@ def _status_counts(items: list[dict[str, object]]) -> dict[str, int]:
         status = str(item.get("status") or "unknown").strip() or "unknown"
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _active_work_kinds(items: list[dict[str, str]]) -> list[str]:
+    return sorted({str(item.get("kind") or "").strip() for item in items if str(item.get("kind") or "").strip()})
+
+
+def _restart_guard_active_work_runs() -> list[dict[str, str]]:
+    """Return active work that should block an unconfirmed destructive restart."""
+
+    try:
+        active = _active_work_runs(_work_run_summary())
+    except Exception:
+        active = []
+    if active:
+        return active
+
+    try:
+        chat_runs = list_active_session_work_runs()
+    except Exception:
+        return []
+
+    guarded: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for run in chat_runs:
+        if not isinstance(run, dict):
+            continue
+        item = {
+            "kind": "chat_turn",
+            "runId": str(run.get("runId") or "").strip(),
+            "status": str(run.get("status") or run.get("currentPhase") or "").strip(),
+            "sessionId": str(run.get("sessionId") or "").strip(),
+        }
+        key = (item["kind"], item["runId"] or item["sessionId"])
+        if key not in seen:
+            seen.add(key)
+            guarded.append(item)
+    return guarded
 
 
 def _can_use_managed_launcher_shutdown() -> bool:

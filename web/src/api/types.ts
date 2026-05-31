@@ -75,6 +75,135 @@ export type MemoryMutationResponse = {
   item: MemoryItem;
 };
 
+export type KnowledgeBasePermissions = {
+  canRead: boolean;
+  canPropose: boolean;
+  canReview: boolean;
+  canRate: boolean;
+};
+
+export type TeamKnowledgeBase = {
+  knowledgeBaseId: string;
+  teamId: string;
+  teamName: string;
+  name: string;
+  description: string;
+  status: string;
+  acl: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  stats: {
+    sourceArtifactCount: number;
+    pendingProposalCount: number;
+    proposalCount: number;
+    itemCount: number;
+    batchCount: number;
+  };
+  pendingProposals: KnowledgeRefinementProposal[];
+  permissions: KnowledgeBasePermissions;
+};
+
+export type TeamKnowledgeOverview = {
+  schemaVersion: number;
+  agentId: string;
+  summary: {
+    knowledgeBaseCount: number;
+    pendingProposalCount: number;
+    itemCount: number;
+    sourceArtifactCount: number;
+  };
+  knowledgeBases: TeamKnowledgeBase[];
+  updatedAt: string;
+};
+
+export type KnowledgeSourceArtifact = {
+  sourceArtifactId: string;
+  teamId: string;
+  knowledgeBaseId: string;
+  sourceType: string;
+  sourceRef: Record<string, unknown>;
+  capturedAt: string;
+  sourceCreatedAt: string;
+  capturedBy: string;
+  sourceHash: string;
+  evidenceRange: Record<string, unknown>;
+  title: string;
+  summary: string;
+};
+
+export type KnowledgeRefinementProposal = {
+  proposalId: string;
+  teamId: string;
+  targetKnowledgeBaseId: string;
+  sourceArtifactIds: string[];
+  proposedByAgentId: string;
+  status: string;
+  title: string;
+  summary: string;
+  content: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt: string;
+  reviewedByAgentId: string;
+  resolutionNote: string;
+  batchId: string;
+  knowledgeItemIds: string[];
+};
+
+export type KnowledgeBatch = {
+  batchId: string;
+  teamId: string;
+  knowledgeBaseId: string;
+  proposalIds: string[];
+  sourceArtifactIds: string[];
+  reviewedByAgentId: string;
+  appliedAt: string;
+  status: string;
+};
+
+export type KnowledgeItem = {
+  knowledgeItemId: string;
+  teamId: string;
+  knowledgeBaseId: string;
+  batchId: string;
+  sourceArtifactIds: string[];
+  title: string;
+  summary: string;
+  content: string;
+  tags: string[];
+  importanceLevel: "low" | "medium" | "high" | "critical" | string;
+  confidence: number;
+  stability: "temporary" | "evolving" | "stable" | "deprecated" | string;
+  scope: "agent" | "team" | "project" | "global" | string;
+  reviewPriority: "normal" | "elevated" | "urgent" | string;
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt: string;
+  appliedAt: string;
+  reviewedByAgentId: string;
+  markedBy: string;
+  markedAt: string;
+  markingReason: string;
+};
+
+export type KnowledgeReviewResponse = {
+  proposal: KnowledgeRefinementProposal;
+  batch: KnowledgeBatch | null;
+  item: KnowledgeItem | null;
+};
+
+export type KnowledgeItemsPayload = {
+  schemaVersion: number;
+  teamId: string;
+  knowledgeBase: TeamKnowledgeBase;
+  items: KnowledgeItem[];
+  summary: {
+    itemCount: number;
+  };
+  updatedAt: string;
+};
+
 export type SkillLibraryRoot = {
   path: string;
   source: "codex" | "agents" | "other" | string;
@@ -978,6 +1107,17 @@ export type RuntimeControlResponse = {
   }>;
 };
 
+export type RuntimeControlBlockedDetail = {
+  code?: string;
+  message?: string;
+  activeWorkRuns?: Array<{
+    kind?: string;
+    runId?: string;
+    sessionId?: string;
+    status?: string;
+  }>;
+};
+
 export type ShutdownResponse = RuntimeControlResponse;
 
 export type RuntimeRestartResponse = RuntimeControlResponse;
@@ -1064,6 +1204,9 @@ export type MemoryPolicy = {
   summariesPath: string;
   readSharedGroups: string[];
   writeSharedGroups: string[];
+  readKnowledgeBaseIds: string[];
+  proposeKnowledgeBaseIds: string[];
+  reviewKnowledgeBaseIds: string[];
 };
 
 export type AgentWorkspaceTerritory = {
@@ -1544,6 +1687,9 @@ export type AgentMemoryPolicyOption = {
   privateMemoryRoot: string;
   readSharedGroupCount: number;
   writeSharedGroupCount: number;
+  readKnowledgeBaseCount: number;
+  proposeKnowledgeBaseCount: number;
+  reviewKnowledgeBaseCount: number;
   hasInboxPath: boolean;
 };
 
@@ -1875,6 +2021,13 @@ export type SessionTurnAcceptedResponse = {
   turnId: string;
   status: string;
   acceptedAt: string;
+};
+
+export type SessionGuidanceMode = "safe" | "interrupt";
+
+export type SessionGuidancePayload = {
+  content: string;
+  mode: SessionGuidanceMode;
 };
 
 export type SessionDeleteResponse = {

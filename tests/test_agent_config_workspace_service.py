@@ -271,6 +271,9 @@ def test_repair_agent_directory_moves_legacy_workspace_into_private_territory(tm
     assert repaired["memoryPolicy"]["agentInboxMessagesPath"] == f"workspace/agents/{agent['agentId']}/events/agent_inbox_messages.jsonl"
     assert repaired["memoryPolicy"]["readSharedGroups"] == ["project"]
     assert repaired["memoryPolicy"]["writeSharedGroups"] == ["project"]
+    assert repaired["memoryPolicy"]["readKnowledgeBaseIds"] == []
+    assert repaired["memoryPolicy"]["proposeKnowledgeBaseIds"] == []
+    assert repaired["memoryPolicy"]["reviewKnowledgeBaseIds"] == []
     workspace = agent_config_workspace_service.get_agent_config_workspace()
     issues = workspace["health"]["byAgent"][agent["agentId"]]
     assert any(item["code"] == "legacy_workspace_retained" and item["severity"] == "info" for item in issues)
@@ -919,6 +922,149 @@ def test_agent_purge_api_reports_workspace_delete_failure_without_server_error(t
     assert workspace_path.exists()
 
 
+def test_agent_reset_api_clears_runtime_state_without_removing_bindings_or_memory(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    direct_session = session_service.create_chat_session(title="Resettable Agent")
+    agent = agent_directory_service.get_agent(direct_session["agentId"])
+    peer = agent_directory_service.create_agent_instance(
+        display_name="Peer Agent",
+        direct_session_id="session-peer-agent",
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "chat",
+        default_agent_id=agent["agentId"],
+        available_agent_ids=[agent["agentId"], peer["agentId"]],
+    )
+    room = chat_room_service.create_chat_room(
+        title="调试群聊",
+        participant_agent_ids=[agent["agentId"], peer["agentId"]],
+    )
+    team = team_service.create_team(
+        name="调试团队",
+        members=[{"agentId": agent["agentId"], "role": "lead"}],
+    )
+    workspace_path = tmp_path / agent["workspacePath"]
+    for subdir in ("inbox", "events", "logs", "runs", "scratch", "artifacts"):
+        target = workspace_path / subdir
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "trace.txt").write_text("runtime trace", encoding="utf-8")
+    memory_file = workspace_path / "memory" / "keep.md"
+    memory_file.parent.mkdir(parents=True, exist_ok=True)
+    memory_file.write_text("private memory", encoding="utf-8")
+
+    response = client.post(f"/api/agents/{agent['agentId']}/reset", json={})
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["agent"]["agentId"] == agent["agentId"]
+    assert payload["agent"]["status"] == "active"
+    assert payload["agent"]["directSessionId"] != direct_session["id"]
+    assert payload["resetSummary"]["clearedRuntimeState"] is True
+    assert payload["resetSummary"]["resetDirectSession"] is True
+    assert payload["resetSummary"]["previousDirectSessionId"] == direct_session["id"]
+    assert payload["resetSummary"]["replacementDirectSessionId"] == payload["agent"]["directSessionId"]
+    assert "team_membership" in payload["resetSummary"]["preserved"]
+    for subdir in ("inbox", "events", "logs", "runs", "scratch", "artifacts"):
+        assert (workspace_path / subdir).is_dir()
+        assert not (workspace_path / subdir / "trace.txt").exists()
+    assert memory_file.read_text(encoding="utf-8") == "private memory"
+    session_ids = {item["id"] for item in session_service.list_sessions()}
+    assert direct_session["id"] not in session_ids
+    assert payload["agent"]["directSessionId"] in session_ids
+    active_session = session_service.get_active_session_detail()
+    assert active_session["id"] == payload["agent"]["directSessionId"]
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]
+    assert bindings["chat"]["defaultAgentId"] == agent["agentId"]
+    assert agent["agentId"] in bindings["chat"]["availableAgentIds"]
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert agent["agentId"] in {participant["agentId"] for participant in room_detail["participants"]}
+    team_detail = team_service.get_team(team["teamId"])
+    assert agent["agentId"] in [member["agentId"] for member in team_detail["members"]]
+
+
+def test_agent_reset_api_can_keep_existing_direct_session_when_requested(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    direct_session = session_service.create_chat_session(title="保留直连会话")
+    agent = agent_directory_service.get_agent(direct_session["agentId"])
+
+    response = client.post(
+        f"/api/agents/{agent['agentId']}/reset",
+        json={"resetDirectSession": False},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["resetSummary"]["resetDirectSession"] is False
+    assert payload["agent"]["directSessionId"] == direct_session["id"]
+    assert direct_session["id"] in {item["id"] for item in session_service.list_sessions()}
+
+
+def test_agent_reset_api_can_reset_selected_advanced_profiles_and_policies(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(display_name="Advanced Reset Agent")
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "personaProfile": {"gender": "female", "age": "34", "communicationStyle": "brief"},
+            "taskProfile": {"mission": "run experiments", "taskTypes": ["research"]},
+            "toolPolicy": {
+                "policyId": agent["toolPolicyId"],
+                "allowedTools": ["web_search"],
+                "preferredTools": ["web_search"],
+                "blockedTools": [],
+                "readScopes": ["private"],
+                "writeScopes": ["private", "shared"],
+            },
+            "memoryPolicy": {
+                "policyId": agent["memoryPolicyId"],
+                "readSharedGroups": ["research"],
+                "writeSharedGroups": ["research"],
+            },
+            "delegationPolicy": {"allowSubagents": True, "maxConcurrent": 3, "maxDepth": 2},
+            "supervisionPolicy": {"supervisionEnabled": True, "requiresReview": True, "reviewMode": "approval"},
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    reset = client.post(
+        f"/api/agents/{agent['agentId']}/reset",
+        json={
+            "clearRuntimeState": False,
+            "resetPersonaProfile": True,
+            "resetTaskProfile": True,
+            "resetToolPolicy": True,
+            "resetMemoryPolicy": True,
+            "resetRuntimePolicy": True,
+        },
+    )
+
+    assert reset.status_code == 200, reset.text
+    payload = reset.json()
+    assert payload["resetSummary"]["clearedRuntimeState"] is False
+    assert payload["agent"]["personaProfile"]["communicationStyle"] == ""
+    assert payload["agent"]["personaProfile"]["age"] == ""
+    assert payload["agent"]["taskProfile"]["mission"] == ""
+    assert payload["agent"]["taskProfile"]["taskTypes"] == []
+    assert payload["agent"]["toolPolicyId"] == agent_directory_service.DEFAULT_TOOL_POLICY_ID
+    assert payload["agent"]["toolPolicy"]["allowedTools"] == []
+    assert payload["agent"]["memoryPolicy"]["readSharedGroups"] == []
+    assert payload["agent"]["memoryPolicy"]["writeSharedGroups"] == []
+    assert payload["agent"]["metadata"]["delegationPolicy"]["allowSubagents"] is False
+    assert payload["agent"]["metadata"]["supervisionPolicy"]["supervisionEnabled"] is False
+
+
+def test_agent_reset_api_rejects_archived_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = session_service.create_chat_session(title="Archived Reset Agent")
+    agent_directory_service.archive_agent_instance(agent["agentId"])
+
+    response = client.post(f"/api/agents/{agent['agentId']}/reset", json={})
+
+    assert response.status_code == 422
+    assert "Archived Agent cannot be reset" in response.json()["detail"]
+    assert agent_directory_service.get_agent(agent["agentId"], include_archived=True)["status"] == "archived"
+
+
 def test_agent_config_workspace_agent_patch_updates_card_fields(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -1171,7 +1317,15 @@ def test_agent_patch_memory_policy_updates_private_policy_and_logs(tmp_path, mon
 
     response = client.patch(
         f"/api/agents/{agent['agentId']}",
-        json={"memoryPolicy": {"readSharedGroups": ["project", "research"], "writeSharedGroups": ["project"]}},
+        json={
+            "memoryPolicy": {
+                "readSharedGroups": ["project", "research"],
+                "writeSharedGroups": ["project"],
+                "readKnowledgeBaseIds": ["kb-research"],
+                "proposeKnowledgeBaseIds": ["kb-research"],
+                "reviewKnowledgeBaseIds": ["kb-review"],
+            }
+        },
     )
 
     assert response.status_code == 200, response.text
@@ -1179,13 +1333,22 @@ def test_agent_patch_memory_policy_updates_private_policy_and_logs(tmp_path, mon
     assert payload["memoryPolicyId"] == f"memory-{agent['agentId']}"
     assert payload["memoryPolicy"]["readSharedGroups"] == ["project", "research"]
     assert payload["memoryPolicy"]["writeSharedGroups"] == ["project"]
+    assert payload["memoryPolicy"]["readKnowledgeBaseIds"] == ["kb-research"]
+    assert payload["memoryPolicy"]["proposeKnowledgeBaseIds"] == ["kb-research"]
+    assert payload["memoryPolicy"]["reviewKnowledgeBaseIds"] == ["kb-review"]
     assert payload["memoryPolicy"]["privateMemoryRoot"].endswith("/memory")
     assert any(
         event[0][:3] == ("agent_directory", "memory_policy", "agent.memory_policy.updated")
         and event[1]["fields"]["readSharedGroupCount"] == 2
         and event[1]["fields"]["writeSharedGroupCount"] == 1
+        and event[1]["fields"]["readKnowledgeBaseCount"] == 1
+        and event[1]["fields"]["reviewKnowledgeBaseCount"] == 1
         for event in recorded_events
     )
+    context_block = agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+    assert "TeamKnowledgeAccess:" in context_block
+    assert "ReadKnowledgeBaseIds: kb-research" in context_block
+    assert "Knowledge bodies are tool-readable only" in context_block
 
 
 def test_project_memory_update_proposals_are_agent_private_and_resolvable(tmp_path, monkeypatch):

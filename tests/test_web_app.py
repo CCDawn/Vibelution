@@ -564,6 +564,8 @@ def test_runtime_shutdown_queues_runtime_manager_when_state_exists(tmp_path, mon
     monkeypatch.setattr(runtime_service, "LAUNCHER_STATE_PATH", state_path)
     monkeypatch.setattr(runtime_service.os, "name", "nt", raising=False)
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
     monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
     monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
     monkeypatch.setattr(
@@ -603,6 +605,7 @@ def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatc
         return {"accepted": True}
 
     monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "_work_run_summary", lambda: {"active": {}, "activeItems": {}})
     monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
     monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
     monkeypatch.setattr(
@@ -636,6 +639,54 @@ def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatc
     assert accepted_event[3]["lifecycle"] is True
     assert accepted_event[3]["fields"]["mode"] == "runtime_manager"
     assert accepted_event[3]["fields"]["commandId"] == "cmd-restart-web"
+
+
+def test_runtime_restart_blocks_unconfirmed_active_work(monkeypatch):
+    calls: list[object] = []
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(
+        runtime_service,
+        "_work_run_summary",
+        lambda: {
+            "active": {},
+            "activeItems": {
+                "chat_turn": [
+                    {
+                        "sessionId": "session-live",
+                        "runId": "chat-turn-live",
+                        "status": "running",
+                    }
+                ]
+            },
+        },
+    )
+    monkeypatch.setattr(runtime_service, "list_active_session_work_runs", lambda: [])
+    monkeypatch.setattr(runtime_service, "record_runtime_scene_event", record_scene_event, raising=False)
+    monkeypatch.setattr(runtime_service, "ensure_daemon_running", lambda: calls.append("ensure"))
+    monkeypatch.setattr(
+        runtime_service,
+        "submit_command",
+        lambda command_type, args=None, requested_by="unknown": calls.append((command_type, args, requested_by))
+        or {"commandId": "cmd-restart-web"},
+    )
+
+    response = client.post("/api/runtime/restart")
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["detail"]["code"] == "active_work_requires_confirmation"
+    assert payload["detail"]["activeWorkRuns"][0]["runId"] == "chat-turn-live"
+    assert calls == []
+    event_codes = [item[2] for item in scene_events]
+    assert "runtime.restart.requested" in event_codes
+    assert "runtime.restart.blocked_active_work" in event_codes
+    blocked_event = next(item for item in scene_events if item[2] == "runtime.restart.blocked_active_work")
+    assert blocked_event[3]["fields"]["activeWorkCount"] == 1
 
 
 def test_runtime_restart_releases_active_work_before_manager_restart(monkeypatch):
@@ -677,7 +728,7 @@ def test_runtime_restart_releases_active_work_before_manager_restart(monkeypatch
         raising=False,
     )
 
-    response = client.post("/api/runtime/restart")
+    response = client.post("/api/runtime/restart?confirmedActiveWork=true")
 
     assert response.status_code == 202
     payload = response.json()
@@ -2481,6 +2532,24 @@ def test_build_followup_prompt_unwraps_nested_continue_goal():
     assert "继续完成同一个用户目标：继续完成" not in prompt
 
 
+def test_build_followup_prompt_includes_running_turn_guidance():
+    prompt = session_service._build_followup_prompt(
+        original_prompt="审查对话日志并汇报",
+        effective_prompt="审查对话日志并汇报",
+        latest_result={
+            "status": "completed",
+            "outcome": "progress",
+            "recommended_next_action": "基于已读证据输出结论。",
+        },
+        history_messages=[{"role": "user", "content": "审查对话日志并汇报"}],
+        turn_index=2,
+        guidance_summaries=["先不要继续实现，先汇报链路风险。"],
+    )
+
+    assert "用户在当前运行轮补充了以下引导" in prompt
+    assert "先不要继续实现，先汇报链路风险。" in prompt
+
+
 def test_normalize_persisted_tool_calls_preserves_timeout_as_failed():
     tool_calls = session_service._normalize_persisted_tool_calls(
         [
@@ -2941,7 +3010,10 @@ def test_delete_session_prefer_async_returns_lightweight_handoff(tmp_path, monke
         "deleted": True,
         "deletedSessionId": "session-live",
         "nextActiveSessionId": "session-next",
+        "replacementDirectSessionId": payload["replacementDirectSessionId"],
     }
+    assert payload["replacementDirectSessionId"].startswith("session-")
+    assert payload["replacementDirectSessionId"] != "session-live"
     assert session_service.get_session_detail("session-live") is None
 
 
@@ -5859,6 +5931,74 @@ def test_request_stop_session_turn_persists_stop_snapshot_and_releases_session(t
         assert continue_response.json()["currentPhase"] == "running"
         continue_signals = _read_next_state_signals(tmp_path, session_id="session-live")
         assert any(item["kind"] == "user_continues" for item in continue_signals)
+    finally:
+        session_service._set_session_running("session-live", False)
+        session_service._clear_session_turn_control("session-live")
+
+
+def test_submit_session_safe_guidance_records_signal_without_stopping(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    try:
+        submit_response = client.post(
+            "/api/sessions/session-live/messages",
+            json={"content": "先继续分析当前对话提交流程"},
+        )
+        assert submit_response.status_code == 202
+
+        guidance_response = client.post(
+            "/api/sessions/session-live/guidance",
+            json={"mode": "safe", "content": "这一轮先不要改代码，只汇报安全引导链路。"},
+        )
+
+        assert guidance_response.status_code == 202
+        payload = guidance_response.json()
+        assert payload["currentPhase"] == "running"
+        assert payload["stopRequested"] is False
+        signals = _read_next_state_signals(tmp_path, session_id="session-live")
+        assert any(
+            item["kind"] == "user_guidance"
+            and item["summary"] == "这一轮先不要改代码，只汇报安全引导链路。"
+            and item["turnId"]
+            for item in signals
+        )
+    finally:
+        session_service._set_session_running("session-live", False)
+        session_service._clear_session_turn_control("session-live")
+
+
+def test_submit_session_interrupt_guidance_records_signal_and_stops(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    try:
+        submit_response = client.post(
+            "/api/sessions/session-live/messages",
+            json={"content": "先继续分析当前对话提交流程"},
+        )
+        assert submit_response.status_code == 202
+
+        guidance_response = client.post(
+            "/api/sessions/session-live/guidance",
+            json={"mode": "interrupt", "content": "停止当前思路，改为先审计数据流。"},
+        )
+
+        assert guidance_response.status_code == 202
+        payload = guidance_response.json()
+        assert payload["currentPhase"] == "ready"
+        assert payload["stopRequested"] is False
+        assert "本轮已按请求停止" in payload["messages"][-1]["content"]
+        signals = _read_next_state_signals(tmp_path, session_id="session-live")
+        assert any(
+            item["kind"] == "user_interrupt_guidance"
+            and item["summary"] == "停止当前思路，改为先审计数据流。"
+            and item["turnId"]
+            for item in signals
+        )
+        assert any(item["kind"] == "user_stops" for item in signals)
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")

@@ -26,11 +26,9 @@ import styles from "./ToolsRoute.module.css";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
 type ToolPolicyMode = "inherited" | "explicit_required" | "allowed" | "blocked" | "excluded";
-type ToolPermissionFilter = "all" | ToolPolicyMode;
 type Translate = (key: TranslationKey) => string;
 
 const FILTERS: ToolFilter[] = ["all", "built_in", "generated", "llm", "enabled"];
-const PERMISSION_FILTERS: ToolPermissionFilter[] = ["all", "allowed", "blocked", "explicit_required", "inherited", "excluded"];
 const TOOLS_LEFT_PANEL_WIDTH_KEY = "vibelution.tools.left-panel-width";
 const TOOLS_LEFT_PANEL_BOUNDS = { min: 260, max: 520 };
 const TOOLS_LEFT_PANEL_DEFAULT_WIDTH = 350;
@@ -131,13 +129,6 @@ function filterLabel(filter: ToolFilter, lang: string) {
     enabled: "Enabled",
   };
   return (lang === "zh" ? zh : en)[filter];
-}
-
-function permissionFilterLabel(filter: ToolPermissionFilter, lang: string) {
-  if (filter === "all") {
-    return lang === "zh" ? "全部权限" : "All states";
-  }
-  return toolPolicyModeLabel(filter, lang);
 }
 
 function toolFilterCounts(tools: ToolRegistryItem[]) {
@@ -252,24 +243,6 @@ function toolPolicyModeLabel(mode: ToolPolicyMode, lang: string) {
   return (lang === "zh" ? zh : en)[mode];
 }
 
-function toolPolicyModeReason(mode: ToolPolicyMode, lang: string) {
-  const zh = {
-    inherited: "该工具未被当前 Agent 单独限制。",
-    explicit_required: "该工具是受限能力，只有加入允许清单后才会对当前 Agent 可见并可调用。",
-    allowed: "该工具在当前 Agent 的允许清单中。",
-    blocked: "该工具被当前 Agent 禁用，测试不会执行。",
-    excluded: "当前 Agent 使用允许清单，该工具未被列入。",
-  };
-  const en = {
-    inherited: "This tool is not individually restricted for the selected Agent.",
-    explicit_required: "This restricted tool stays hidden and blocked until this Agent explicitly allows it.",
-    allowed: "This tool is in the selected Agent allow-list.",
-    blocked: "This tool is blocked for the selected Agent; tests will not execute it.",
-    excluded: "The selected Agent uses an allow-list and this tool is not included.",
-  };
-  return (lang === "zh" ? zh : en)[mode];
-}
-
 function agentTestLabel(agent: ToolTestResponse["agent"] | null | undefined, lang: string) {
   const agentId = String(agent?.agentId ?? "").trim();
   if (!agentId) {
@@ -374,8 +347,6 @@ export function ToolsRoute() {
   const [searchText, setSearchText] = useState("");
   const [activeAgentScopeId, setActiveAgentScopeId] = useState(MAIN_AGENT_SCOPE_ID);
   const [activePolicyAgentId, setActivePolicyAgentId] = useState("");
-  const [permissionFilter, setPermissionFilter] = useState<ToolPermissionFilter>("all");
-  const [permissionSearchText, setPermissionSearchText] = useState("");
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
     storedPaneWidth(TOOLS_LEFT_PANEL_WIDTH_KEY, TOOLS_LEFT_PANEL_DEFAULT_WIDTH, TOOLS_LEFT_PANEL_BOUNDS),
@@ -453,19 +424,6 @@ export function ToolsRoute() {
   const activePolicy = toolPolicyForAgent(activePolicyAgent);
   const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(activePolicy, activeTool) : "inherited";
   const policyModeCounts = useMemo(() => toolPolicyModeCounts(activePolicy, tools), [activePolicy, tools]);
-  const permissionTools = useMemo(() => {
-    const query = permissionSearchText.trim().toLowerCase();
-    return tools.filter((tool) => {
-      const mode = toolPolicyMode(activePolicy, tool);
-      if (permissionFilter !== "all" && mode !== permissionFilter) {
-        return false;
-      }
-      if (!query) {
-        return true;
-      }
-      return `${tool.name} ${tool.description} ${tool.source} ${tool.status}`.toLowerCase().includes(query);
-    });
-  }, [activePolicy, permissionFilter, permissionSearchText, tools]);
   const scopedTools = useMemo(
     () => tools.filter((tool) => scopeStateForTool(tool, activeAgentScopeId).visible),
     [activeAgentScopeId, tools],
@@ -790,17 +748,17 @@ export function ToolsRoute() {
         />
 
         <main className={styles.detailPanel}>
-          <section className={styles.agentBulkPolicyPanel}>
+          <section className={styles.agentPermissionSummaryPanel}>
             <div className={styles.panelHeader}>
               <div>
-                <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 工具权限" : "Agent tool permissions"}</p>
-                <h2>{lang === "zh" ? "只读权限观察" : "Read-only permission overview"}</h2>
+                <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 权限边界" : "Agent permission boundary"}</p>
+                <h2>{lang === "zh" ? "这里用于测试工具，不在这里配置 Agent" : "Test tools here, configure Agents in Agent Center"}</h2>
               </div>
               <span className={styles.countPill}>{lang === "zh" ? "编辑入口在 Agent 管理" : "Edit in Agent Center"}</span>
             </div>
-            <div className={styles.bulkPolicyTopRow}>
+            <div className={styles.permissionSummaryGrid}>
               <label className={styles.agentPolicySelect}>
-                <span>{lang === "zh" ? "当前 Agent" : "Current Agent"}</span>
+                <span>{lang === "zh" ? "测试 Agent" : "Test Agent"}</span>
                 <select
                   value={activePolicyAgent?.agentId ?? ""}
                   disabled={!activeAgents.length}
@@ -816,82 +774,17 @@ export function ToolsRoute() {
                   ))}
                 </select>
               </label>
-              <div className={styles.policyMeta}>
-                <span>
-                  allowed: <strong>{policyModeCounts.allowed}</strong>
-                </span>
-                <span>
-                  blocked: <strong>{policyModeCounts.blocked}</strong>
-                </span>
-                <span>
-                  inherited: <strong>{policyModeCounts.inherited}</strong>
-                </span>
-                <span>
-                  {lang === "zh" ? "需授权" : "explicit"}: <strong>{policyModeCounts.explicit_required}</strong>
-                </span>
-                <span>
-                  excluded: <strong>{policyModeCounts.excluded}</strong>
-                </span>
+              <div className={styles.permissionSummaryCards}>
+                <span>{lang === "zh" ? "允许" : "Allowed"} <strong>{policyModeCounts.allowed}</strong></span>
+                <span>{lang === "zh" ? "禁用" : "Blocked"} <strong>{policyModeCounts.blocked}</strong></span>
+                <span>{lang === "zh" ? "默认" : "Default"} <strong>{policyModeCounts.inherited}</strong></span>
+                <span>{lang === "zh" ? "需授权" : "Explicit"} <strong>{policyModeCounts.explicit_required}</strong></span>
+                <span>{lang === "zh" ? "未列入" : "Excluded"} <strong>{policyModeCounts.excluded}</strong></span>
               </div>
-            </div>
-            <div className={styles.bulkPolicyToolbar}>
-              <label className={styles.bulkPolicySearch}>
-                <Search size={15} />
-                <input
-                  value={permissionSearchText}
-                  placeholder={lang === "zh" ? "搜索可分配工具" : "Search assignable tools"}
-                  onChange={(event) => setPermissionSearchText(event.target.value)}
-                />
-              </label>
-              <div className={styles.bulkPolicyFilters}>
-                {PERMISSION_FILTERS.map((filter) => (
-                  <button
-                    key={filter}
-                    type="button"
-                    className={filter === permissionFilter ? styles.filterButtonActive : styles.filterButton}
-                    onClick={() => setPermissionFilter(filter)}
-                  >
-                    <span>{permissionFilterLabel(filter, lang)}</span>
-                    <strong>{filter === "all" ? tools.length : policyModeCounts[filter]}</strong>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className={styles.bulkPolicyList}>
-              {permissionTools.map((tool) => {
-                const mode = toolPolicyMode(activePolicy, tool);
-                return (
-                  <div
-                    key={`policy-${tool.source}-${tool.id}`}
-                    className={styles.bulkPolicyToolRow}
-                  >
-                    <span className={styles.bulkPolicyToolCopy}>
-                      <strong>{tool.name}</strong>
-                      <span>{tool.description || t("toolsNoDescription")}</span>
-                    </span>
-                    <span className={styles.toolBadges}>
-                      <span className={`${styles.policyStatePill} ${styles[`policy_${mode}`]}`}>
-                        {toolPolicyModeLabel(mode, lang)}
-                      </span>
-                      <span className={styles.sourcePill}>{displaySource(tool.source, lang)}</span>
-                    </span>
-                  </div>
-                );
-              })}
-              {!permissionTools.length ? (
-                <p className={styles.emptyState}>{lang === "zh" ? "没有匹配的工具权限项" : "No matching tool permission rows"}</p>
-              ) : null}
-            </div>
-            <div className={styles.bulkPolicyFooter}>
-              <span>
-                {lang === "zh" ? "当前结果" : "Visible"} <strong>{permissionTools.length}</strong> / {tools.length}
-              </span>
-              <div className={styles.bulkPolicyActions}>
-                <Link className={styles.secondaryButton} to="/agents">
-                  <Wrench size={15} />
-                  {lang === "zh" ? "打开 Agent 策略页" : "Open Agent policies"}
-                </Link>
-              </div>
+              <Link className={styles.secondaryButton} to="/agents">
+                <Wrench size={15} />
+                {lang === "zh" ? "去 Agent 中心配置" : "Configure in Agent Center"}
+              </Link>
             </div>
           </section>
           {activeTool ? (
@@ -942,54 +835,19 @@ export function ToolsRoute() {
                   </div>
                 ))}
               </section>
-              <section className={styles.agentPolicyPanel}>
-                <div className={styles.panelHeader}>
-                  <div>
-                    <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 权限" : "Agent permissions"}</p>
-                    <h3>{lang === "zh" ? "ToolPolicy" : "ToolPolicy"}</h3>
-                  </div>
-                  <span className={styles.countPill}>
-                    {activePolicyAgent ? toolPolicyModeLabel(activePolicyMode, lang) : "-"}
-                  </span>
+              <section className={styles.toolAgentFitPanel}>
+                <div>
+                  <p className={styles.panelEyebrow}>{lang === "zh" ? "当前测试边界" : "Current test boundary"}</p>
+                  <h3>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</h3>
+                  <span>{activePolicy.policyId || activePolicyAgent?.toolPolicyId || "-"}</span>
                 </div>
-                <div className={styles.agentPolicyControls}>
-                  <label className={styles.agentPolicySelect}>
-                    <span>{lang === "zh" ? "Agent" : "Agent"}</span>
-                    <select
-                      value={activePolicyAgent?.agentId ?? ""}
-                      disabled={!activeAgents.length}
-                      onChange={(event) => setActivePolicyAgentId(event.target.value)}
-                    >
-                      {activeAgents.map((agent) => (
-                        <option key={agent.agentId} value={agent.agentId}>
-                          {agent.agentCode ? `${agent.agentCode} · ` : ""}{agent.displayName || agent.agentId}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className={styles.agentPolicyButtonGroup} aria-label={lang === "zh" ? "只读权限状态" : "Read-only permission state"}>
-                    {(["inherited", "allowed", "blocked"] as const).map((mode) => (
-                      <span key={mode} className={activePolicyMode === mode ? styles.policyModeButtonActive : styles.policyModeButton}>
-                        {toolPolicyModeLabel(mode, lang)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className={styles.policyMeta}>
-                  <span>
-                    Agent: <strong>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</strong>
-                  </span>
-                  <span>
-                    allowed: <strong>{activePolicy.allowedTools.length}</strong>
-                  </span>
-                  <span>
-                    blocked: <strong>{activePolicy.blockedTools.length}</strong>
-                  </span>
-                  <span>
-                    policy: <strong>{activePolicy.policyId || activePolicyAgent?.toolPolicyId || "-"}</strong>
-                  </span>
-                </div>
-                <p>{toolPolicyModeReason(activePolicyMode, lang)}</p>
+                <strong className={`${styles.policyStatePill} ${styles[`policy_${activePolicyMode}`]}`}>
+                  {toolPolicyModeLabel(activePolicyMode, lang)}
+                </strong>
+                <Link className={styles.secondaryButton} to="/agents">
+                  <Wrench size={15} />
+                  {lang === "zh" ? "编辑 Agent 策略" : "Edit Agent policy"}
+                </Link>
               </section>
               {activeIsImage2Tool ? (
                 <section className={styles.image2ModelPanel}>

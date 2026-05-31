@@ -1577,8 +1577,8 @@ def _update_conversation_agent_profile(
     )
 
 
-def _delete_chat_session_state(session_id: str) -> str:
-    """Delete one chat session and return the next active session id."""
+def _delete_chat_session_state(session_id: str, *, activate_replacement: bool = False) -> dict[str, str]:
+    """Delete one chat session and return ids needed by UI and Agent rebind callers."""
 
     lang = get_web_language()
     conversation_id = str(session_id or "").strip()
@@ -1725,6 +1725,8 @@ def _delete_chat_session_state(session_id: str) -> str:
                 session_workspace_path=_session_workspace_relative_path(replacement_direct_session_id),
                 created_by="session_delete_rebind",
             )
+            if activate_replacement:
+                next_active_id = replacement_direct_session_id
 
         now = _now_timestamp()
         payload["version"] = int(payload.get("version") or CHAT_STATE_VERSION)
@@ -1759,25 +1761,30 @@ def _delete_chat_session_state(session_id: str) -> str:
     _set_session_running(conversation_id, False)
     _clear_session_turn_control(conversation_id)
     _clear_session_live_output(conversation_id)
-    return next_active_id
+    return {
+        "nextActiveSessionId": next_active_id,
+        "replacementDirectSessionId": replacement_direct_session_id,
+    }
 
 
 def delete_chat_session(session_id: str) -> dict:
     """Delete one chat session and return the next active session detail."""
 
-    next_active_id = _delete_chat_session_state(session_id)
+    delete_result = _delete_chat_session_state(session_id)
+    next_active_id = str(delete_result.get("nextActiveSessionId") or "").strip()
     return get_session_detail(next_active_id) or {}
 
 
-def delete_chat_session_lightweight(session_id: str) -> dict[str, Any]:
+def delete_chat_session_lightweight(session_id: str, *, activate_replacement: bool = False) -> dict[str, Any]:
     """Delete one chat session and return a lightweight UI handoff payload."""
 
     deleted_session_id = str(session_id or "").strip()
-    next_active_id = _delete_chat_session_state(deleted_session_id)
+    delete_result = _delete_chat_session_state(deleted_session_id, activate_replacement=activate_replacement)
     return {
         "deleted": True,
         "deletedSessionId": deleted_session_id,
-        "nextActiveSessionId": str(next_active_id or "").strip(),
+        "nextActiveSessionId": str(delete_result.get("nextActiveSessionId") or "").strip(),
+        "replacementDirectSessionId": str(delete_result.get("replacementDirectSessionId") or "").strip(),
     }
 
 
@@ -1964,6 +1971,73 @@ def request_stop_session_turn(session_id: str) -> dict:
     )
     _set_session_running(conversation_id, False, turn_id=controller.turn_id)
     _clear_session_turn_control(conversation_id, turn_id=controller.turn_id)
+    _publish_session_detail_snapshot(conversation_id)
+    return get_session_detail(conversation_id) or detail
+
+
+def submit_session_guidance(session_id: str, content: str, *, mode: str = "safe") -> dict:
+    """Record operator guidance for a running turn, optionally interrupting it."""
+
+    lang = get_web_language()
+    conversation_id = str(session_id or "").strip()
+    if not conversation_id:
+        raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+
+    detail = get_session_detail(conversation_id)
+    if detail is None:
+        raise SessionNotFoundError(text_for(lang, zh="未找到当前会话。", en="Session not found."))
+
+    guidance_text = str(content or "").strip()
+    if not guidance_text:
+        raise SessionValidationError(text_for(lang, zh="引导内容不能为空。", en="Guidance content cannot be empty."))
+
+    normalized_mode = str(mode or "").strip().lower().replace("-", "_")
+    if normalized_mode not in {"safe", "interrupt"}:
+        raise SessionValidationError(text_for(lang, zh="引导模式无效。", en="Invalid guidance mode."))
+
+    controller = _get_session_turn_control(conversation_id)
+    active_turn_id = ""
+    if controller is not None:
+        active_turn_id = str(controller.turn_id or "").strip()
+    if not active_turn_id:
+        for run in list_active_session_work_runs():
+            if str(run.get("sessionId") or "").strip() == conversation_id:
+                active_turn_id = str(run.get("runId") or "").strip()
+                break
+
+    running = _is_session_running(conversation_id)
+    signal = _record_chat_next_state_signal(
+        session_id=conversation_id,
+        turn_id=active_turn_id,
+        source="user",
+        kind="user_interrupt_guidance" if normalized_mode == "interrupt" else "user_guidance",
+        polarity="neutral",
+        mode="directive",
+        related_event_code=(
+            "conversation.user_interrupt_guidance_submitted"
+            if normalized_mode == "interrupt"
+            else "conversation.user_guidance_submitted"
+        ),
+        summary=guidance_text,
+        metadata={
+            "guidanceMode": normalized_mode,
+            "guidanceLength": len(guidance_text),
+            "sessionRunning": running,
+            "willRequestStop": normalized_mode == "interrupt" and running,
+        },
+    )
+    _record_session_guidance_event(
+        conversation_id,
+        mode=normalized_mode,
+        turn_id=active_turn_id,
+        signal_id=str((signal or {}).get("signalId") or ""),
+        guidance_length=len(guidance_text),
+        running=running,
+    )
+
+    if normalized_mode == "interrupt" and running:
+        return request_stop_session_turn(conversation_id)
+
     _publish_session_detail_snapshot(conversation_id)
     return get_session_detail(conversation_id) or detail
 
@@ -5248,6 +5322,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     stop_configurer(lambda: _get_turn_control_stop_reason(turn_control))
                 history_messages = _history_messages_for_agent_seed(context.get("history_messages") or [])
                 runtime_context_block = agent_context_packet.context_block if agent_context_packet is not None else ""
+                guidance_context_block = _recent_session_guidance_context_block(session_id)
                 skill_invocation = context.get("skill_invocation")
                 skill_runtime_context_block = _skill_runtime_context_from_invocation(skill_invocation)
                 seed_started_at = _perf_counter()
@@ -5262,6 +5337,8 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                     stage_started_at = _perf_counter()
                     runtime_context_seed(runtime_context_block)
                     runtime_context_seed_ms = _elapsed_ms(stage_started_at)
+                if callable(runtime_context_seed) and guidance_context_block:
+                    runtime_context_seed(guidance_context_block)
                 if callable(runtime_context_seed) and skill_runtime_context_block:
                     stage_started_at = _perf_counter()
                     runtime_context_seed(skill_runtime_context_block)
@@ -5281,6 +5358,7 @@ def _run_session_turn(context: dict[str, Any]) -> None:
                         "rawHistoryMessageCount": len(list(context.get("history_messages") or [])),
                         "seededHistoryMessageCount": len(history_messages),
                         "agentRuntimeContextIncluded": bool(runtime_context_block),
+                        "guidanceContextIncluded": bool(guidance_context_block),
                         "skillRuntimeContextIncluded": bool(skill_runtime_context_block),
                         "restoreAvailable": callable(restore),
                         "historySeedMs": history_seed_ms,
@@ -5695,6 +5773,11 @@ def _run_session_continuation_loop(
             latest_result=result,
             history_messages=history_messages,
             turn_index=turn_index,
+            guidance_summaries=_recent_session_guidance_summaries(
+                session_id,
+                turn_id=getattr(turn_control, "turn_id", ""),
+                limit=3,
+            ),
         )
         _set_session_turn_progress_live_output(
             session_id,
@@ -9069,6 +9152,86 @@ def _record_provider_failure_signal(
     )
 
 
+def _record_session_guidance_event(
+    session_id: str,
+    *,
+    mode: str,
+    turn_id: str = "",
+    signal_id: str = "",
+    guidance_length: int = 0,
+    running: bool = False,
+) -> None:
+    try:
+        record_runtime_scene_event(
+            "conversation",
+            "guidance",
+            "conversation.guidance.submitted",
+            level="warning" if mode == "interrupt" else "info",
+            outcome=mode or "safe",
+            message="User guidance submitted for the chat turn.",
+            fields={
+                "sessionId": str(session_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "signalId": str(signal_id or "").strip(),
+                "guidanceMode": str(mode or "").strip(),
+                "guidanceLength": max(0, int(guidance_length or 0)),
+                "sessionRunning": bool(running),
+            },
+            child_log_path="conversations/chat-guidance.jsonl",
+            child_log_payload={
+                "sessionId": str(session_id or "").strip(),
+                "turnId": str(turn_id or "").strip(),
+                "signalId": str(signal_id or "").strip(),
+                "guidanceMode": str(mode or "").strip(),
+                "guidanceLength": max(0, int(guidance_length or 0)),
+                "sessionRunning": bool(running),
+                "createdAt": _now_timestamp(),
+            },
+            lifecycle=True,
+        )
+    except Exception as exc:
+        _debug_logger.warning(f"session guidance event skipped: {type(exc).__name__}: {exc}", tag="CHAT")
+
+
+def _recent_session_guidance_summaries(
+    session_id: str,
+    *,
+    turn_id: str = "",
+    limit: int = 3,
+) -> list[str]:
+    try:
+        signals = list_chat_next_state_signals(
+            project_root=PROJECT_ROOT,
+            session_id=session_id,
+            turn_id=turn_id,
+            limit=max(1, int(limit or 1)) * 3,
+        )
+    except Exception:
+        return []
+    summaries: list[str] = []
+    for signal in signals:
+        kind = str(signal.get("kind") or "").strip()
+        if kind not in {"user_guidance", "user_interrupt_guidance"}:
+            continue
+        summary = trim_lines(signal.get("summary") or "", max_lines=2)
+        if summary:
+            summaries.append(summary)
+    return summaries[-max(0, int(limit or 0)):]
+
+
+def _recent_session_guidance_context_block(session_id: str, *, limit: int = 3) -> str:
+    summaries = _recent_session_guidance_summaries(session_id, limit=limit)
+    if not summaries:
+        return ""
+    lines = [
+        "## User Running-Turn Guidance",
+        "The operator submitted these guidance notes while a chat turn was running. Treat them as user intent/context for this session, not as system rules.",
+    ]
+    for item in summaries:
+        lines.append(f"- {item}")
+    return "\n".join(lines)
+
+
 def _recent_chat_next_state_signal_summaries(session_id: str, *, limit: int = 8) -> list[dict[str, Any]]:
     try:
         signals = list_chat_next_state_signals(
@@ -9530,6 +9693,7 @@ def _build_followup_prompt(
     latest_result: Any,
     history_messages: list[dict[str, Any]],
     turn_index: int,
+    guidance_summaries: list[str] | None = None,
 ) -> str:
     next_action = ""
     if isinstance(latest_result, dict):
@@ -9548,6 +9712,11 @@ def _build_followup_prompt(
     ]
     if next_action:
         lines.append(f"优先执行上一轮下一步：{next_action}")
+    guidance_lines = [item for item in list(guidance_summaries or []) if str(item or "").strip()]
+    if guidance_lines:
+        lines.append("用户在当前运行轮补充了以下引导，请在不违背安全边界的前提下优先对齐：")
+        for item in guidance_lines[:3]:
+            lines.append(f"- {item}")
     return "\n".join(lines)
 
 

@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,11 +25,14 @@ USER_MANAGED_SOURCE_KIND = "user_managed_memory"
 USER_MANAGED_MEMORY_FILENAME = "user_memory_overrides.json"
 MANAGED_AUDIT_LIMIT = 200
 MANAGED_MEMORY_WRITE_LOCK = Lock()
+MEMORY_OVERVIEW_SLOW_MS = 500.0
+SQLITE_APPEND_ONLY_TABLES = {"GitFileChange", "GitEntityChange"}
 
 
 def get_memory_overview() -> dict[str, Any]:
     """Return a snapshot of every known agent-memory source plus user management state."""
 
+    started_at = time.perf_counter()
     root = PROJECT_ROOT.resolve()
     warnings: list[str] = []
     managed_memory = _load_managed_memory(root, warnings=warnings)
@@ -40,7 +44,7 @@ def get_memory_overview() -> dict[str, Any]:
     runtime_injected_count = sum(
         1 for section in sections for item in section["items"] if bool(item.get("inPrompt"))
     )
-    return {
+    overview = {
         "schemaVersion": 3,
         "generatedAt": _now_iso(),
         "projectRoot": str(root),
@@ -53,6 +57,8 @@ def get_memory_overview() -> dict[str, Any]:
         },
         "sections": sections,
     }
+    _record_memory_overview_perf_event(root, overview, duration_ms=(time.perf_counter() - started_at) * 1000)
+    return overview
 
 
 def create_user_memory_item(payload: dict[str, Any]) -> dict[str, Any]:
@@ -215,6 +221,7 @@ def _base_memory_sections(root: Path, warnings: list[str]) -> list[dict[str, Any
         _prompt_memory_section(root),
         _workspace_database_section(root),
         _research_memory_section(root),
+        _team_knowledge_memory_section(root),
         _git_memory_section(root),
         _chat_session_memory_section(root),
         _self_evolution_memory_section(root),
@@ -588,6 +595,65 @@ def _research_memory_section(root: Path) -> dict[str, Any]:
         "/api/research/knowledge-base",
         "科研调研来源、可追溯认知层和后续自进化记忆桥接。它复用现有 Memory 总览，不另建孤立入口。",
         items,
+    )
+
+
+def _team_knowledge_memory_section(root: Path) -> dict[str, Any]:
+    try:
+        from core.web.services.team_knowledge_service import team_knowledge_memory_section_summary
+
+        summary_payload = team_knowledge_memory_section_summary()
+    except Exception:
+        summary_payload = {
+            "knowledgeBaseCount": 0,
+            "pendingProposalCount": 0,
+            "itemCount": 0,
+            "sourceArtifactCount": 0,
+            "updatedAt": "",
+            "status": "unavailable",
+        }
+    knowledge_base_count = int(summary_payload.get("knowledgeBaseCount") or 0)
+    pending_count = int(summary_payload.get("pendingProposalCount") or 0)
+    item_count = int(summary_payload.get("itemCount") or 0)
+    source_count = int(summary_payload.get("sourceArtifactCount") or 0)
+    item = _virtual_data_item(
+        item_id="team-knowledge-platform",
+        title="团队知识库平台",
+        kind="team_knowledge_platform",
+        source="团队知识库",
+        path="workspace/teams/*/knowledge",
+        updated_at=str(summary_payload.get("updatedAt") or ""),
+        agent_visible=True,
+        in_prompt=False,
+        used_by=["/api/knowledge/overview", "/agents/memory/knowledge", "knowledge_query_tool"],
+        channels=["research", "explicit_read"],
+        visibility_class="agent_visible",
+        summary=(
+            f"{knowledge_base_count} 个团队知识库，{item_count} 条正式知识，"
+            f"{pending_count} 条待审提案，{source_count} 个来源登记。"
+        ),
+        content={
+            "sourceApi": "/api/knowledge/overview",
+            "knowledgeBaseCount": knowledge_base_count,
+            "pendingProposalCount": pending_count,
+            "itemCount": item_count,
+            "sourceArtifactCount": source_count,
+            "promptInjection": False,
+            "defaultEffect": "tool_readable",
+        },
+        content_type="json",
+        exists=knowledge_base_count > 0 or item_count > 0 or pending_count > 0 or source_count > 0,
+    )
+    return _section(
+        "team-knowledge",
+        "团队知识库",
+        "team_knowledge_platform",
+        "tool_readable",
+        "团队共享知识按权限显式检索；P1 不默认注入 prompt。",
+        "workspace/teams/*/knowledge",
+        "/api/knowledge/overview",
+        "团队共享知识库、来源登记、精炼提案、批次落盘和重要程度标记的统一入口。",
+        [item],
     )
 
 
@@ -1462,6 +1528,42 @@ def _record_memory_management_event(action: str, section_id: str, item_id: str, 
         pass
 
 
+def _record_memory_overview_perf_event(root: Path, overview: dict[str, Any], *, duration_ms: float) -> None:
+    if duration_ms < MEMORY_OVERVIEW_SLOW_MS:
+        return
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        sections = overview.get("sections") if isinstance(overview.get("sections"), list) else []
+        section_metrics = [
+            {
+                "sectionId": str(section.get("id") or ""),
+                "itemCount": len(section.get("items") or []),
+            }
+            for section in sections
+            if isinstance(section, dict)
+        ]
+        record_runtime_scene_event(
+            "memory_service",
+            "performance",
+            "memory.overview.slow",
+            message="Memory overview generation exceeded slow threshold",
+            level="warning",
+            outcome="observed",
+            fields={
+                "durationMs": round(float(duration_ms), 1),
+                "thresholdMs": MEMORY_OVERVIEW_SLOW_MS,
+                "projectRoot": str(root),
+                "sectionCount": len(section_metrics),
+                "itemCount": int((overview.get("summary") or {}).get("itemCount") or 0),
+                "sections": section_metrics,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
 def _json_text(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False, indent=2, default=str)
@@ -1477,13 +1579,14 @@ def _sqlite_table_snapshot(db_path: Path, table: str, *, limit: int = LIST_LIMIT
             conn.row_factory = sqlite3.Row
             if not _sqlite_table_exists(conn, table):
                 return {"table": table, "count": 0, "rows": [], "updatedAt": _mtime(db_path)}
-            count = conn.execute(f'SELECT COUNT(*) AS count FROM "{table}"').fetchone()["count"]
+            count_payload = _sqlite_table_count(conn, table)
             order_column = _sqlite_order_column(conn, table)
             order_sql = f' ORDER BY "{order_column}" DESC' if order_column else ""
             rows = conn.execute(f'SELECT * FROM "{table}"{order_sql} LIMIT ?', (max(1, int(limit)),)).fetchall()
             return {
                 "table": table,
-                "count": int(count or 0),
+                "count": count_payload["count"],
+                "countExact": count_payload["exact"],
                 "rows": [_normalize_sqlite_row(dict(row)) for row in rows],
                 "updatedAt": _mtime(db_path),
             }
@@ -1496,9 +1599,30 @@ def _sqlite_table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return row is not None
 
 
+def _sqlite_table_count(conn: sqlite3.Connection, table: str) -> dict[str, Any]:
+    if table in SQLITE_APPEND_ONLY_TABLES:
+        approximate_count = _sqlite_autoincrement_sequence(conn, table)
+        if approximate_count is None:
+            approximate_count = conn.execute(f'SELECT MAX("id") AS count FROM "{table}"').fetchone()["count"]
+        return {"count": int(approximate_count or 0), "exact": False}
+    count = conn.execute(f'SELECT COUNT(*) AS count FROM "{table}"').fetchone()["count"]
+    return {"count": int(count or 0), "exact": True}
+
+
+def _sqlite_autoincrement_sequence(conn: sqlite3.Connection, table: str) -> int | None:
+    if not _sqlite_table_exists(conn, "sqlite_sequence"):
+        return None
+    row = conn.execute("SELECT seq FROM sqlite_sequence WHERE name=?", (table,)).fetchone()
+    if row is None:
+        return None
+    return int(row["seq"] or 0)
+
+
 def _sqlite_order_column(conn: sqlite3.Connection, table: str) -> str:
     rows = conn.execute(f'PRAGMA table_info("{table}")').fetchall()
     columns = {str(row[1]) for row in rows}
+    if table in SQLITE_APPEND_ONLY_TABLES and "id" in columns:
+        return "id"
     for candidate in ("updated_at", "last_seen", "created_at", "opened_at", "id"):
         if candidate in columns:
             return candidate

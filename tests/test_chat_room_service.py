@@ -544,6 +544,100 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
     assert speaker_fields["totalSpeakerMs"] >= 0
 
 
+def test_reset_chat_room_clears_history_and_group_context_pollution(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    recorded_events = []
+    monkeypatch.setattr(
+        chat_room_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    prompts = []
+
+    def fake_runner(participant, prompt, context):
+        prompts.append(prompt)
+        return {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 提到旧污染",
+            "summary": "旧污染摘要",
+        }
+
+    alpha = agent_directory_service.ensure_agent_for_session("session-alpha", display_name="Alpha Agent")
+    beta = agent_directory_service.ensure_agent_for_session("session-beta", display_name="Beta Agent")
+    room = chat_room_service.create_chat_room(
+        title="可重置群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+        purpose="meeting",
+        config={"source": "team", "teamId": "team-a"},
+    )
+    detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "旧污染议题",
+        agent_runner=fake_runner,
+    )
+    latest_round = detail["rounds"][-1]
+    assert latest_round["messages"]
+    assert "旧污染议题" in prompts[0]
+    assert agent_directory_service.list_group_context_events_for_agent(
+        alpha["agentId"],
+        prompt_eligible_only=True,
+    )
+    synced_state = load_chat_state(tmp_path)
+    assert any(
+        (message.get("metadata") or {}).get("sourceRoomId") == room["roomId"]
+        for conversation in synced_state["conversations"]
+        for message in conversation.get("messages") or []
+        if isinstance(message, dict)
+    )
+
+    reset = chat_room_service.reset_chat_room(room["roomId"])
+
+    assert reset["roomId"] == room["roomId"]
+    assert reset["title"] == "可重置群聊"
+    assert reset["purpose"] == "meeting"
+    assert reset["config"]["teamId"] == "team-a"
+    assert [participant["agentId"] for participant in reset["participants"]] == [alpha["agentId"], beta["agentId"]]
+    assert reset["rounds"] == []
+    assert reset["status"] == "ready"
+    assert reset["activeRoundId"] == ""
+    cleaned_state = load_chat_state(tmp_path)
+    assert not any(
+        (message.get("metadata") or {}).get("sourceRoomId") == room["roomId"]
+        for conversation in cleaned_state["conversations"]
+        for message in conversation.get("messages") or []
+        if isinstance(message, dict)
+    )
+    assert not agent_directory_service.list_group_context_events_for_agent(
+        alpha["agentId"],
+        prompt_eligible_only=True,
+    )
+    reset_events = [
+        event
+        for event in recorded_events
+        if event[0][:3] == ("chat_room", "room", "chat_room.reset")
+    ]
+    assert reset_events
+    reset_fields = reset_events[-1][1]["fields"]
+    assert reset_fields["clearedRoundCount"] == 1
+    assert reset_fields["clearedMessageCount"] == 2
+    assert reset_fields["clearedSessionTranscriptCount"] == 2
+    assert reset_fields["disabledGroupContextEventCount"] == 2
+
+    prompts.clear()
+    next_detail = chat_room_service.start_chat_room_round(
+        room["roomId"],
+        "新议题",
+        agent_runner=fake_runner,
+    )
+
+    assert len(next_detail["rounds"]) == 1
+    assert "旧污染议题" not in prompts[0]
+    assert "旧污染摘要" not in prompts[0]
+
+
 def test_chat_room_required_supervision_blocks_autonomous_speaker_before_runner(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

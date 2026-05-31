@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.0 - 2026-05-31
+
+- Added Memory Platform P1 for team knowledge bases: JSON/JSONL persistence for knowledge bases, source artifacts, refinement proposals, batches, formal items, and audit records under each team workspace.
+- Added knowledge APIs for accessible overview, team knowledge-base creation/listing, source registration, proposal submission, review/apply, item listing, and rating updates with team role/ACL enforcement.
+- Extended Agent memory policy with readable/proposable/reviewable knowledge-base boundaries and exposed those controls in Agent Center.
+- Added ToolPolicy-gated Agent tools `knowledge_query_tool` and `knowledge_proposal_tool` so Agents can read reviewed team knowledge or submit source-backed candidates without directly writing formal knowledge.
+- Integrated Team Knowledge into `/agents/memory/knowledge` with source registration, refinement proposal review, formal item inspection, and rating controls while keeping formal knowledge tool-readable and out of prompt by default.
+
+## 0.6.2 - 2026-05-31
+
+- Tightened Agent Center management around setup tasks: added per-Agent management readiness, next-action guidance, task-oriented filters for missing persona/task/tools/team/inbox/maintenance gaps, effective tool capability previews, and a dedicated maintenance intro for reset/archive/purge actions.
+- Reduced Agent detail top-level tabs from Overview / Base config / Policies / Membership / Activity to Overview / Config / Activity, with tool, memory, and membership controls progressively disclosed inside Config.
+- Reduced overlap between Tools and Agent Center: Tools now stays focused on tool catalog, scope visibility, runtime testing, and lightweight Agent test-boundary summaries, while Agent Center remains the configuration source for Agent ToolPolicy and tool package editing.
+
 ## 0.6.1 - 2026-05-31
 
 - Fixed supervised worktree merge analysis so untracked files that already existed before candidate creation, such as local `.codex/visual-checks` artifacts, are kept as baseline noise instead of counted as candidate changes or merge overlaps.

@@ -27,6 +27,7 @@ from core.web.services.agent_directory_service import (
     list_agents,
     list_project_memory_update_proposals,
     purge_archived_agent_instance,
+    reset_agent_instance,
     resolve_agent_avatar_file,
     resolve_project_memory_update_proposal,
     store_agent_avatar_image,
@@ -102,6 +103,16 @@ class AgentUpdatePayload(BaseModel):
 class AgentAvatarUpdatePayload(BaseModel):
     avatarImagePath: str = ""
     resetToDefault: bool = False
+
+
+class AgentResetPayload(BaseModel):
+    clearRuntimeState: bool = True
+    resetDirectSession: bool = True
+    resetPersonaProfile: bool = False
+    resetTaskProfile: bool = False
+    resetToolPolicy: bool = False
+    resetMemoryPolicy: bool = False
+    resetRuntimePolicy: bool = False
 
 
 class AgentAvatarUploadPayload(BaseModel):
@@ -564,6 +575,25 @@ def agent_chat_room_membership_update(agent_id: str, payload: AgentChatRoomMembe
     except ChatRoomBusyError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ChatRoomValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/agents/{agent_id}/reset")
+def agent_reset(agent_id: str, payload: AgentResetPayload) -> dict:
+    try:
+        return reset_agent_instance(
+            agent_id,
+            clear_runtime_state=payload.clearRuntimeState,
+            reset_direct_session=payload.resetDirectSession,
+            reset_persona_profile=payload.resetPersonaProfile,
+            reset_task_profile=payload.resetTaskProfile,
+            reset_tool_policy=payload.resetToolPolicy,
+            reset_memory_policy=payload.resetMemoryPolicy,
+            reset_runtime_policy=payload.resetRuntimePolicy,
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentDirectoryError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

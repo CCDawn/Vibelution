@@ -125,8 +125,14 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
     let message = "";
     if (contentType.includes("application/json")) {
       try {
-        const payload = (await response.json()) as { detail?: string; message?: string };
-        message = payload.detail || payload.message || "";
+        const payload = (await response.json()) as { detail?: unknown; message?: unknown };
+        if (typeof payload.detail === "string") {
+          message = payload.detail;
+        } else if (payload.detail && typeof payload.detail === "object") {
+          message = JSON.stringify({ detail: payload.detail });
+        } else if (typeof payload.message === "string") {
+          message = payload.message;
+        }
       } catch {
         message = "";
       }

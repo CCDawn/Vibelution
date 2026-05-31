@@ -1735,22 +1735,6 @@
   opacity: 0.58;
 }
 
-.projectBusShortcut {
-  margin-top: 2px;
-  padding-right: 4px;
-  border-color: color-mix(in srgb, var(--accent-cool) 16%, transparent);
-  background: color-mix(in srgb, var(--surface-card) 36%, transparent);
-}
-
-.projectBusShortcut[aria-current="true"] {
-  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
-}
-
-.projectBusShortcut .sessionItemMain {
-  min-height: 48px;
-  padding: 2px 0;
-}
-
 .groupComposerPanel {
   display: grid;
   gap: 8px;
@@ -1900,6 +1884,87 @@
 .conversationGroup {
   display: grid;
   gap: 5px;
+}
+
+.systemEntryGroup {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-soft) 58%, transparent);
+}
+
+.systemEntryButton {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.systemEntryButton:hover,
+.systemEntryButton:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-card) 64%, transparent);
+  outline: none;
+}
+
+.systemEntryButtonActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-card));
+}
+
+.systemEntryIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  color: var(--accent-cool-2);
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+}
+
+.systemEntryCopy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.systemEntryTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.systemEntryTitle {
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.84rem;
+  font-weight: 780;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemEntryMeta {
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversationGroup + .conversationGroup {
@@ -2540,7 +2605,7 @@ button.teamTreeChild:focus-visible {
 
 .groupManagementActions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.86fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
 }
 

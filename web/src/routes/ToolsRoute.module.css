@@ -617,11 +617,11 @@
 .schemaDisclosure,
 .testPanel,
 .policyPanel,
-.agentBulkPolicyPanel,
-.agentPolicyPanel,
+.agentPermissionSummaryPanel,
+.toolAgentFitPanel,
 .image2ModelPanel {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   min-height: 0;
   padding: 12px;
   border: 1px solid var(--border-soft);
@@ -642,7 +642,7 @@
 
 .testPanel h3,
 .policyPanel h3,
-.agentPolicyPanel h3,
+.toolAgentFitPanel h3,
 .image2ModelPanel h3 {
   margin: 0;
   font-family: var(--font-display);
@@ -706,7 +706,6 @@
 
 .testPanel p,
 .policyPanel p,
-.agentPolicyPanel p,
 .image2ModelPanel p {
   margin: 0;
   color: var(--fg-secondary);
@@ -765,13 +764,6 @@
   font-size: 0.76rem;
 }
 
-.agentPolicyControls {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.2fr);
-  gap: 10px;
-  min-width: 0;
-}
-
 .agentPolicySelect {
   display: grid;
   gap: 5px;
@@ -786,164 +778,58 @@
   width: 100%;
 }
 
-.agentPolicyButtonGroup {
+.permissionSummaryGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.permissionSummaryCards {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  align-items: center;
   gap: 6px;
   min-width: 0;
-  align-self: end;
 }
 
-.bulkPolicyTopRow {
+.permissionSummaryCards span {
   display: grid;
-  grid-template-columns: minmax(220px, 0.72fr) minmax(0, 1.28fr);
-  gap: 8px;
+  gap: 2px;
   min-width: 0;
-  align-items: end;
-}
-
-.bulkPolicyToolbar {
-  display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
-  gap: 8px;
-  min-width: 0;
-  align-items: start;
-}
-
-.bulkPolicySearch {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  min-height: 32px;
-  padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: var(--surface-input-strong, rgba(14, 17, 20, 0.88));
-  color: var(--fg-tertiary);
-}
-
-.bulkPolicySearch input {
-  min-width: 0;
-  width: 100%;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--fg-primary);
-}
-
-.bulkPolicyFilters,
-.bulkPolicyActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  min-width: 0;
-}
-
-.bulkPolicyList {
-  display: grid;
-  align-content: start;
-  gap: 5px;
-  min-height: 0;
-  max-height: 38vh;
-  overflow: auto;
-  padding-right: 4px;
-}
-
-.bulkPolicyToolRow {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(116px, 0.3fr);
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 7px 8px;
+  min-height: 38px;
+  padding: 6px 7px;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-input-strong, rgba(14, 17, 20, 0.68));
-  cursor: pointer;
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
 }
 
-.bulkPolicyToolRow:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-panel-strong, rgba(34, 39, 44, 0.86));
+.permissionSummaryCards strong {
+  color: var(--fg-primary);
+  font-size: 0.84rem;
 }
 
-.bulkPolicyToolRowSelected {
-  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
-  background: color-mix(in srgb, var(--accent-cool) 10%, var(--surface-input-strong));
+.toolAgentFitPanel {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
 }
 
-.bulkPolicyToolRow input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent-cool);
-}
-
-.bulkPolicyToolCopy {
+.toolAgentFitPanel > div {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
-.bulkPolicyToolCopy strong,
-.bulkPolicyToolCopy span {
+.toolAgentFitPanel h3,
+.toolAgentFitPanel span {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.bulkPolicyToolCopy strong {
-  color: var(--fg-primary);
-  font-size: 0.82rem;
-}
-
-.bulkPolicyToolCopy span {
-  color: var(--fg-tertiary);
-  font-size: 0.76rem;
-}
-
-.bulkPolicyFooter {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-  min-width: 0;
-  padding-top: 2px;
-  color: var(--fg-secondary);
-  font-size: 0.78rem;
-}
-
-.bulkPolicyFooter strong {
-  color: var(--fg-primary);
-}
-
-.policyModeButton,
-.policyModeButtonActive {
-  min-width: 0;
-  min-height: 28px;
-  padding: 4px 7px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
-  color: var(--fg-secondary);
-  font: inherit;
-  font-size: 0.76rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.policyModeButtonActive {
-  border-color: color-mix(in srgb, var(--accent-cool) 42%, transparent);
-  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
-  color: var(--fg-primary);
-}
-
-.policyModeButton:disabled,
-.policyModeButtonActive:disabled {
-  cursor: not-allowed;
-  opacity: 0.48;
 }
 
 .readinessPanel,
@@ -1115,16 +1001,14 @@
   .readinessPanel,
   .resultSummaryGrid,
   .metaGrid,
-  .bulkPolicyTopRow,
-  .bulkPolicyToolbar,
-  .bulkPolicyToolRow,
-  .agentPolicyControls,
-  .agentPolicyButtonGroup,
+  .permissionSummaryGrid,
+  .permissionSummaryCards,
+  .toolAgentFitPanel,
   .image2ModelControls {
     grid-template-columns: 1fr;
   }
 
-  .bulkPolicyToolRow .toolBadges {
+  .toolAgentFitPanel .secondaryButton {
     justify-content: flex-start;
   }
 

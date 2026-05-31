@@ -195,6 +195,8 @@ describe("AgentsRoute layout contract", () => {
 
   it("edits Agent tool permissions from the same detail card", () => {
     expect(routeSource).toContain("AgentToolPolicyDraft");
+    expect(routeSource).toContain("AgentCapabilityPreview");
+    expect(routeSource).toContain("buildAgentCapabilityPreview");
     expect(routeSource).toContain("fetchJson<ToolRegistryPayload>(\"/api/tools\")");
     expect(routeSource).toContain("copy.toolPolicyTitle");
     expect(routeSource).toContain("allowedTools: sortedIds(payload.draft.allowedTools)");
@@ -218,6 +220,9 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("toolCategoryLabel");
     expect(routeSource).toContain("toolTierLabel");
     expect(routeSource).toContain("copy.toolCategoryCount");
+    expect(routeSource).toContain("copy.capabilityPreviewTitle");
+    expect(routeSource).toContain("capabilityPreview.highRiskAllowed");
+    expect(routeSource).toContain("styles.capabilityPreviewPanel");
     expect(routeSource).toContain("styles.toolPermissionGroup");
     expect(routeSource).toContain("styles.toolPermissionGroupHeader");
     expect(routeSource).toContain("styles.toolPermissionMeta");
@@ -231,6 +236,7 @@ describe("AgentsRoute layout contract", () => {
     expect(styles.toolPermissionGroup).toBeTruthy();
     expect(styles.toolPermissionGroupHeader).toBeTruthy();
     expect(styles.toolPermissionMeta).toBeTruthy();
+    expect(styles.capabilityPreviewPanel).toBeTruthy();
   });
 
   it("surfaces advisor tool-governance requests without bypassing ToolPolicy", () => {
@@ -256,19 +262,35 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("memoryPolicy: {");
     expect(routeSource).toContain("readSharedGroups: sortedIds(payload.draft.readSharedGroups)");
     expect(routeSource).toContain("writeSharedGroups: sortedIds(payload.draft.writeSharedGroups)");
+    expect(routeSource).toContain("readKnowledgeBaseIds: sortedIds(payload.draft.readKnowledgeBaseIds)");
+    expect(routeSource).toContain("proposeKnowledgeBaseIds: sortedIds(payload.draft.proposeKnowledgeBaseIds)");
+    expect(routeSource).toContain("reviewKnowledgeBaseIds: sortedIds(payload.draft.reviewKnowledgeBaseIds)");
+    expect(routeSource).toContain("copy.readKnowledgeBaseIds");
+    expect(routeSource).toContain("copy.proposeKnowledgeBaseIds");
+    expect(routeSource).toContain("copy.reviewKnowledgeBaseIds");
     expect(routeSource).toContain("styles.memoryPolicyGrid");
     expect(routeSource).toContain("styles.tagList");
     expect(routeSource).toContain("styles.inlineAdd");
   });
 
-  it("organizes the Agent card into switchable panes with run history", () => {
+  it("organizes the Agent card into three switchable panes with run history", () => {
     expect(routeSource).toContain("AgentConfigPaneId");
+    expect(routeSource).toContain('type AgentConfigPaneId = "overview" | "config" | "activity"');
     expect(routeSource).toContain("agentConfigPanes(copy, selectedAgent)");
+    expect(routeSource).toContain("AgentManagementBrief");
+    expect(routeSource).toContain("buildAgentManagementBrief(selectedAgent, copy, lang)");
+    expect(routeSource).toContain("copy.managementBriefTitle");
+    expect(routeSource).toContain("copy.nextActionsTitle");
+    expect(routeSource).toContain("styles.managementBriefPanel");
+    expect(routeSource).toContain("styles.nextActionList");
     expect(routeSource).toContain("styles.detailTabs");
     expect(routeSource).toContain("activePane === \"overview\"");
     expect(routeSource).toContain("activePane === \"config\"");
-    expect(routeSource).toContain("activePane === \"policies\"");
-    expect(routeSource).toContain("activePane === \"membership\"");
+    expect(routeSource).not.toContain("activePane === \"policies\"");
+    expect(routeSource).not.toContain("activePane === \"membership\"");
+    expect(routeSource).toContain("copy.toolPolicyTitle");
+    expect(routeSource).toContain("copy.memoryPolicyTitle");
+    expect(routeSource).toContain("copy.membershipTitle");
     expect(routeSource).toContain("activePane === \"activity\"");
     expect(routeSource).toContain("fetchJson<AgentRunHistory>");
     expect(routeSource).toContain("queryKeys.agentRuns");
@@ -277,6 +299,24 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("styles.runtimePill");
     expect(routeSource).toContain("styles.runtimeFocusPanel");
     expect(routeSource).toContain("styles.runHistoryList");
+    expect(routeSource).toContain("styles.boundarySummaryGrid");
+    expect(styles.managementBriefPanel).toBeTruthy();
+    expect(styles.nextActionList).toBeTruthy();
+    expect(styles.boundarySummaryGrid).toBeTruthy();
+    expect(styles.detailTabs).toBeTruthy();
+  });
+
+  it("adds task-oriented Agent management filters for configuration gaps", () => {
+    expect(routeSource).toContain("buildManagementFilterGroups");
+    expect(routeSource).toContain("managementFilterMatches");
+    expect(routeSource).toContain("activeFilter.startsWith(\"setup:\")");
+    expect(routeSource).toContain("copy.filterSections.management");
+    expect(routeSource).toContain("copy.managementFilterMissingPersona");
+    expect(routeSource).toContain("copy.managementFilterMissingTask");
+    expect(routeSource).toContain("copy.managementFilterMissingTools");
+    expect(routeSource).toContain("copy.managementFilterNoTeam");
+    expect(routeSource).toContain("copy.managementFilterPendingInbox");
+    expect(routeSource).toContain("copy.managementFilterMaintenance");
   });
 
   it("surfaces pending Agent inbox messages from the activity pane", () => {
@@ -353,9 +393,40 @@ describe("AgentsRoute layout contract", () => {
     expect(routeSource).toContain("purgeAgentMutation");
     expect(routeSource).toContain("/purge");
     expect(routeSource).toContain("copy.purgeAgent");
+    expect(routeSource).toContain("copy.maintenanceTitle");
+    expect(routeSource).toContain("styles.maintenanceIntro");
     expect(routeSource).toContain("selectedAgent.status === \"archived\"");
     expect(routeSource).toContain("styles.dangerZone");
     expect(routeSource).toContain("styles.dangerButton");
+    expect(styles.maintenanceIntro).toBeTruthy();
+  });
+
+  it("offers a governed per-Agent debug reset without archive or membership cleanup", () => {
+    expect(routeSource).toContain("AgentResetOptions");
+    expect(routeSource).toContain("resetAgentMutation");
+    expect(routeSource).toContain("/reset");
+    expect(routeSource).toContain("method: \"POST\"");
+    expect(routeSource).toContain("copy.resetAgent");
+    expect(routeSource).toContain("copy.resetClearRuntimeState");
+    expect(routeSource).toContain("copy.resetClearRuntimeStateHint");
+    expect(routeSource).toContain("copy.resetDirectSession");
+    expect(routeSource).toContain("copy.resetDirectSessionHint");
+    expect(routeSource).toContain("copy.resetPersonaProfile");
+    expect(routeSource).toContain("copy.resetPersonaProfileHint");
+    expect(routeSource).toContain("copy.resetTaskProfile");
+    expect(routeSource).toContain("copy.resetTaskProfileHint");
+    expect(routeSource).toContain("copy.resetToolPolicy");
+    expect(routeSource).toContain("copy.resetToolPolicyHint");
+    expect(routeSource).toContain("copy.resetMemoryPolicy");
+    expect(routeSource).toContain("copy.resetMemoryPolicyHint");
+    expect(routeSource).toContain("copy.resetRuntimePolicy");
+    expect(routeSource).toContain("copy.resetRuntimePolicyHint");
+    expect(routeSource).toContain("styles.resetOptionField");
+    expect(routeSource).toContain("queryKeys.agentRuntimeEvidence(agent.agentId)");
+    expect(routeSource).toContain("selectedAgent.status !== \"archived\"");
+    expect(styles.resetZone).toBeTruthy();
+    expect(styles.resetOptionGrid).toBeTruthy();
+    expect(styles.resetOptionField).toBeTruthy();
   });
 
   it("keeps archived Agents out of non-archived filter lists immediately", () => {

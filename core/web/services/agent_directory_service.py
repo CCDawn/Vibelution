@@ -125,6 +125,8 @@ AGENT_TERRITORY_WRITE_SCOPES = ("private",)
 AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
 TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
 EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
+    "knowledge_proposal_tool",
+    "knowledge_query_tool",
     "research_knowledge_query_tool",
     "research_agent_creation_proposal_tool",
     "research_communication_edge_proposal_tool",
@@ -679,6 +681,9 @@ def list_agent_policy_options() -> dict[str, list[dict[str, Any]]]:
                 "privateMemoryRoot": str(policy.get("privateMemoryRoot") or ""),
                 "readSharedGroupCount": len(list(policy.get("readSharedGroups") or [])),
                 "writeSharedGroupCount": len(list(policy.get("writeSharedGroups") or [])),
+                "readKnowledgeBaseCount": len(list(policy.get("readKnowledgeBaseIds") or [])),
+                "proposeKnowledgeBaseCount": len(list(policy.get("proposeKnowledgeBaseIds") or [])),
+                "reviewKnowledgeBaseCount": len(list(policy.get("reviewKnowledgeBaseIds") or [])),
                 "hasInboxPath": bool(str(policy.get("agentInboxMessagesPath") or "").strip()),
             }
             for policy_id, policy in sorted(memory_policies.items())
@@ -755,6 +760,128 @@ def purge_archived_agent_instance(agent_id: str) -> dict[str, Any]:
     }
     _record_agent_purged_event(agent_snapshot, result)
     return result
+
+
+def reset_agent_instance(
+    agent_id: str,
+    *,
+    clear_runtime_state: bool = True,
+    reset_direct_session: bool = True,
+    reset_persona_profile: bool = False,
+    reset_task_profile: bool = False,
+    reset_tool_policy: bool = False,
+    reset_memory_policy: bool = False,
+    reset_runtime_policy: bool = False,
+) -> dict[str, Any]:
+    """Reset a single Agent for debugging without changing team, room, or mode membership."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    if not normalized_agent_id:
+        raise AgentDirectoryError("Agent id is required.")
+
+    reset_summary: dict[str, Any] = {
+        "agentId": normalized_agent_id,
+        "clearedRuntimeState": False,
+        "resetDirectSession": False,
+        "previousDirectSessionId": "",
+        "replacementDirectSessionId": "",
+        "deletedPaths": [],
+        "skippedPaths": [],
+        "resetPersonaProfile": False,
+        "resetTaskProfile": False,
+        "resetToolPolicy": False,
+        "resetMemoryPolicy": False,
+        "resetRuntimePolicy": False,
+        "preserved": ["agent_identity", "team_membership", "chat_room_membership", "mode_membership"],
+    }
+    updated_tool_policy: dict[str, Any] | None = None
+    updated_memory_policy: dict[str, Any] | None = None
+    updated_delegation_policy: dict[str, Any] | None = None
+    updated_supervision_policy: dict[str, Any] | None = None
+    updated_persona_profile: dict[str, Any] | None = None
+    updated_task_profile: dict[str, Any] | None = None
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, normalized_agent_id)
+        if agent is None:
+            raise AgentNotFoundError(f"Agent not found: {normalized_agent_id}")
+        if str(agent.get("status") or "active").strip() == "archived":
+            raise AgentDirectoryError("Archived Agent cannot be reset. Restore or purge archived data instead.")
+        agent_snapshot = dict(agent)
+        reset_summary["previousDirectSessionId"] = str(agent_snapshot.get("directSessionId") or "").strip()
+        now = utc_now_iso()
+        if reset_persona_profile:
+            metadata = dict(agent.get("metadata") or {})
+            updated_persona_profile = normalize_persona_profile({})
+            metadata["personaProfile"] = updated_persona_profile
+            agent["metadata"] = metadata
+            reset_summary["resetPersonaProfile"] = True
+        if reset_task_profile:
+            metadata = dict(agent.get("metadata") or {})
+            updated_task_profile = normalize_task_profile({})
+            metadata["taskProfile"] = updated_task_profile
+            agent["metadata"] = metadata
+            reset_summary["resetTaskProfile"] = True
+        if reset_tool_policy:
+            previous_policy_id = str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID
+            agent["toolPolicyId"] = DEFAULT_TOOL_POLICY_ID
+            policies = _tool_policies(state)
+            if previous_policy_id != DEFAULT_TOOL_POLICY_ID and _count_policy_refs(state.get("agents") or [], "toolPolicyId", previous_policy_id) == 0:
+                policies.pop(previous_policy_id, None)
+            state["toolPolicies"] = policies
+            updated_tool_policy = normalize_tool_policy(policies.get(DEFAULT_TOOL_POLICY_ID) or default_tool_policy(DEFAULT_TOOL_POLICY_ID), DEFAULT_TOOL_POLICY_ID)
+            reset_summary["resetToolPolicy"] = True
+        if reset_memory_policy:
+            policy_id = str(agent.get("memoryPolicyId") or "").strip() or f"memory-{normalized_agent_id}"
+            workspace_path = _agent_workspace_relative_path(normalized_agent_id)
+            agent["workspacePath"] = workspace_path
+            agent["memoryPolicyId"] = policy_id
+            _ensure_agent_workspace(workspace_path)
+            policies = _memory_policies(state)
+            updated_memory_policy = default_memory_policy(policy_id, workspace_path)
+            policies[policy_id] = updated_memory_policy
+            state["memoryPolicies"] = policies
+            reset_summary["resetMemoryPolicy"] = True
+        if reset_runtime_policy:
+            metadata = dict(agent.get("metadata") or {})
+            updated_delegation_policy = normalize_delegation_policy({})
+            updated_supervision_policy = normalize_supervision_policy({})
+            metadata["delegationPolicy"] = updated_delegation_policy
+            metadata["supervisionPolicy"] = updated_supervision_policy
+            agent["metadata"] = metadata
+            reset_summary["resetRuntimePolicy"] = True
+        agent["updatedAt"] = now
+        save_state(state)
+
+    if clear_runtime_state:
+        runtime_cleanup = _clear_agent_runtime_state(agent_snapshot)
+        reset_summary["clearedRuntimeState"] = True
+        reset_summary["deletedPaths"] = list(runtime_cleanup.get("deletedPaths") or [])
+        reset_summary["skippedPaths"] = list(runtime_cleanup.get("skippedPaths") or [])
+    if reset_direct_session:
+        direct_session_cleanup = _reset_agent_direct_session(agent_snapshot)
+        reset_summary["resetDirectSession"] = bool(direct_session_cleanup.get("resetDirectSession"))
+        reset_summary["replacementDirectSessionId"] = str(direct_session_cleanup.get("replacementDirectSessionId") or "").strip()
+        reset_summary["skippedPaths"].extend(list(direct_session_cleanup.get("skippedPaths") or []))
+
+    updated_agent = get_agent(normalized_agent_id)
+    _record_agent_reset_event(updated_agent or agent_snapshot, reset_summary)
+    if updated_tool_policy is not None and updated_agent:
+        _record_agent_tool_policy_event(updated_agent, updated_tool_policy)
+    if updated_memory_policy is not None and updated_agent:
+        _record_agent_memory_policy_event(updated_agent, updated_memory_policy)
+    if updated_delegation_policy is not None and updated_agent:
+        _record_agent_delegation_policy_event(updated_agent, updated_delegation_policy)
+    if updated_supervision_policy is not None and updated_agent:
+        _record_agent_supervision_policy_event(updated_agent, updated_supervision_policy)
+    if updated_persona_profile is not None and updated_agent:
+        _record_agent_persona_profile_event(updated_agent, updated_persona_profile)
+    if updated_task_profile is not None and updated_agent:
+        _record_agent_task_profile_event(updated_agent, updated_task_profile)
+    return {
+        "agent": updated_agent,
+        "resetSummary": reset_summary,
+    }
 
 
 def ensure_agent_purge_allowed(agent_id: str) -> dict[str, Any]:
@@ -1410,6 +1537,68 @@ def write_group_context_event(agent_id: str, event: dict[str, Any]) -> dict[str,
     return event_payload
 
 
+def disable_group_context_events_for_room(
+    source_room_id: str,
+    *,
+    agent_ids: list[str] | None = None,
+    reason: str = "chat_room_reset",
+) -> dict[str, Any]:
+    normalized_room_id = str(source_room_id or "").strip()
+    if not normalized_room_id:
+        return {"sourceRoomId": "", "changedAgentCount": 0, "disabledEventCount": 0}
+    target_agent_ids = {
+        str(item or "").strip()
+        for item in list(agent_ids or [])
+        if str(item or "").strip()
+    }
+    state = load_state()
+    changed_agent_count = 0
+    disabled_event_count = 0
+    now = utc_now_iso()
+    for agent in list(state.get("agents") or []):
+        if not isinstance(agent, dict):
+            continue
+        agent_id = str(agent.get("agentId") or "").strip()
+        if target_agent_ids and agent_id not in target_agent_ids:
+            continue
+        path = _agent_workspace_event_path(agent, "group_context_events.jsonl")
+        events = _read_jsonl(path)
+        changed = False
+        agent_disabled_count = 0
+        for event in events:
+            if str(event.get("sourceRoomId") or "").strip() != normalized_room_id:
+                continue
+            if not bool(event.get("promptEligible", True)):
+                continue
+            event["promptEligible"] = False
+            event["disabledAt"] = now
+            event["disabledReason"] = trim_lines(str(reason or "chat_room_reset"), max_lines=1) or "chat_room_reset"
+            changed = True
+            agent_disabled_count += 1
+        if not changed:
+            continue
+        _write_jsonl(path, events)
+        changed_agent_count += 1
+        disabled_event_count += agent_disabled_count
+        _record_memory_event(
+            "group_context.disabled_for_room",
+            {
+                "sourceRoomId": normalized_room_id,
+                "targetAgentId": agent_id,
+                "disabledEventCount": agent_disabled_count,
+                "reason": trim_lines(str(reason or "chat_room_reset"), max_lines=1) or "chat_room_reset",
+                "disabledAt": now,
+            },
+            agent_id=agent_id,
+            lifecycle=True,
+        )
+    return {
+        "sourceRoomId": normalized_room_id,
+        "changedAgentCount": changed_agent_count,
+        "disabledEventCount": disabled_event_count,
+    }
+
+
 def write_project_memory_update_proposal(
     agent_id: str,
     *,
@@ -1762,6 +1951,11 @@ def build_agent_runtime_context_block(agent_id: str, *, limit: int = 6) -> str:
         f"AgentWorkspace: {agent.get('workspacePath') or ''}",
         f"MemoryRoot: {memory_policy.get('privateMemoryRoot') or ''}",
         f"ProjectMemoryUpdatesPath: {memory_policy.get('projectMemoryUpdatesPath') or ''}",
+        "TeamKnowledgeAccess:",
+        f"- ReadKnowledgeBaseIds: {', '.join(list(memory_policy.get('readKnowledgeBaseIds') or [])) or 'team-membership'}",
+        f"- ProposeKnowledgeBaseIds: {', '.join(list(memory_policy.get('proposeKnowledgeBaseIds') or [])) or 'team-membership'}",
+        f"- ReviewKnowledgeBaseIds: {', '.join(list(memory_policy.get('reviewKnowledgeBaseIds') or [])) or 'team-review-roles'}",
+        "- Knowledge bodies are tool-readable only; do not treat team knowledge as prompt-injected memory.",
         _format_tool_policy_summary(tool_policy),
     ]
     persona_lines = _format_persona_profile_context(agent.get("personaProfile"))
@@ -2011,6 +2205,9 @@ def default_memory_policy(policy_id: str, agent_workspace_path: str) -> dict[str
         "summariesPath": f"{workspace_path}/memory/summaries.jsonl" if workspace_path else "",
         "readSharedGroups": [],
         "writeSharedGroups": [],
+        "readKnowledgeBaseIds": [],
+        "proposeKnowledgeBaseIds": [],
+        "reviewKnowledgeBaseIds": [],
     }
 
 
@@ -2032,7 +2229,13 @@ def normalize_memory_policy(policy: dict[str, Any], policy_id: str, agent_worksp
         if workspace_path:
             value = f"{workspace_path}/{suffix}"
         payload[key] = value
-    for key in ("readSharedGroups", "writeSharedGroups"):
+    for key in (
+        "readSharedGroups",
+        "writeSharedGroups",
+        "readKnowledgeBaseIds",
+        "proposeKnowledgeBaseIds",
+        "reviewKnowledgeBaseIds",
+    ):
         payload[key] = _unique_string_list(payload.get(key))
     return payload
 
@@ -2804,6 +3007,70 @@ def _delete_purged_agent_workspace(agent: dict[str, Any]) -> dict[str, Any]:
     return {"deleted": True, "deletedPaths": [relative_path], "skippedPaths": []}
 
 
+def _clear_agent_runtime_state(agent: dict[str, Any]) -> dict[str, Any]:
+    agent_id = str(agent.get("agentId") or "").strip()
+    workspace_path = str(agent.get("workspacePath") or _agent_workspace_relative_path(agent_id)).strip()
+    runtime_subdirs = ("inbox", "outbox", "events", "tmp", "logs", "runs", "scratch", "artifacts")
+    if not agent_id or not workspace_path:
+        return {"deletedPaths": [], "skippedPaths": [workspace_path or agent_id]}
+    try:
+        resolved = _resolve_project_path(workspace_path)
+        expected_private = _resolve_project_path(_agent_workspace_relative_path(agent_id))
+        agents_root = (_project_root() / "workspace" / "agents").resolve()
+    except Exception:
+        return {"deletedPaths": [], "skippedPaths": [workspace_path]}
+    if resolved != expected_private:
+        return {"deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
+    try:
+        if not resolved.is_relative_to(agents_root):
+            return {"deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
+    except ValueError:
+        return {"deletedPaths": [], "skippedPaths": [_relative_project_path(resolved)]}
+
+    resolved.mkdir(parents=True, exist_ok=True)
+    deleted_paths: list[str] = []
+    skipped_paths: list[str] = []
+    for subdir in runtime_subdirs:
+        target = (resolved / subdir).resolve()
+        relative_path = _relative_project_path(target)
+        try:
+            if not target.is_relative_to(resolved):
+                skipped_paths.append(relative_path)
+                continue
+        except ValueError:
+            skipped_paths.append(relative_path)
+            continue
+        try:
+            if target.exists():
+                shutil.rmtree(target)
+                deleted_paths.append(relative_path)
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            skipped_paths.append(f"{relative_path} ({type(exc).__name__})")
+    return {"deletedPaths": deleted_paths, "skippedPaths": skipped_paths}
+
+
+def _reset_agent_direct_session(agent: dict[str, Any]) -> dict[str, Any]:
+    session_id = str(agent.get("directSessionId") or "").strip()
+    if not session_id:
+        return {"resetDirectSession": False, "replacementDirectSessionId": "", "skippedPaths": []}
+    try:
+        from . import session_service
+
+        result = session_service.delete_chat_session_lightweight(session_id, activate_replacement=True)
+    except Exception as exc:
+        return {
+            "resetDirectSession": False,
+            "replacementDirectSessionId": "",
+            "skippedPaths": [f"direct_session:{session_id} ({type(exc).__name__})"],
+        }
+    return {
+        "resetDirectSession": True,
+        "replacementDirectSessionId": str(result.get("replacementDirectSessionId") or result.get("nextActiveSessionId") or "").strip(),
+        "skippedPaths": [],
+    }
+
+
 def _resolve_project_path(path_value: str) -> Path:
     raw = str(path_value or "").strip()
     path = Path(raw)
@@ -3086,6 +3353,39 @@ def _record_agent_purged_event(agent: dict[str, Any], result: dict[str, Any]) ->
         return
 
 
+def _record_agent_reset_event(agent: dict[str, Any], summary: dict[str, Any]) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "reset",
+            "agent.reset.completed",
+            message="Agent debug reset completed.",
+            level="info",
+            outcome="reset",
+            fields={
+                "agentId": str(agent.get("agentId") or summary.get("agentId") or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "directSessionId": str(agent.get("directSessionId") or "").strip(),
+                "clearedRuntimeState": bool(summary.get("clearedRuntimeState")),
+                "resetDirectSession": bool(summary.get("resetDirectSession")),
+                "previousDirectSessionId": str(summary.get("previousDirectSessionId") or "").strip(),
+                "replacementDirectSessionId": str(summary.get("replacementDirectSessionId") or "").strip(),
+                "deletedPathCount": len(list(summary.get("deletedPaths") or [])),
+                "skippedPathCount": len(list(summary.get("skippedPaths") or [])),
+                "resetPersonaProfile": bool(summary.get("resetPersonaProfile")),
+                "resetTaskProfile": bool(summary.get("resetTaskProfile")),
+                "resetToolPolicy": bool(summary.get("resetToolPolicy")),
+                "resetMemoryPolicy": bool(summary.get("resetMemoryPolicy")),
+                "resetRuntimePolicy": bool(summary.get("resetRuntimePolicy")),
+                "preserved": list(summary.get("preserved") or []),
+                "source": "AgentDirectory",
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
 def _record_agent_territory_event(event_code: str, agent: dict[str, Any], *, outcome: str = "observed", level: str = "info") -> None:
     try:
         territory = _agent_workspace_territory(agent)
@@ -3180,6 +3480,9 @@ def _record_agent_memory_policy_event(agent: dict[str, Any], policy: dict[str, A
                 "memoryPolicyId": str(policy.get("policyId") or agent.get("memoryPolicyId") or "").strip(),
                 "readSharedGroupCount": len(list(policy.get("readSharedGroups") or [])),
                 "writeSharedGroupCount": len(list(policy.get("writeSharedGroups") or [])),
+                "readKnowledgeBaseCount": len(list(policy.get("readKnowledgeBaseIds") or [])),
+                "proposeKnowledgeBaseCount": len(list(policy.get("proposeKnowledgeBaseIds") or [])),
+                "reviewKnowledgeBaseCount": len(list(policy.get("reviewKnowledgeBaseIds") or [])),
                 "hasPrivateMemoryRoot": bool(str(policy.get("privateMemoryRoot") or "").strip()),
             },
             lifecycle=True,

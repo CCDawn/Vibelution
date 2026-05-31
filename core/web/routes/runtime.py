@@ -7,11 +7,16 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
-from core.web.services.runtime_service import get_runtime_summary, request_runtime_restart, request_runtime_shutdown
+from core.web.services.runtime_service import (
+    RuntimeRestartActiveWorkBlocked,
+    get_runtime_summary,
+    request_runtime_restart,
+    request_runtime_shutdown,
+)
 from core.web.services.runtime_scene_service import record_browser_telemetry
 
 
@@ -37,8 +42,18 @@ def runtime_shutdown() -> dict:
 
 
 @router.post("/runtime/restart", status_code=202)
-def runtime_restart() -> dict:
-    return request_runtime_restart()
+def runtime_restart(confirmed_active_work: bool = Query(default=False, alias="confirmedActiveWork")) -> dict:
+    try:
+        return request_runtime_restart(confirmed_active_work=confirmed_active_work)
+    except RuntimeRestartActiveWorkBlocked as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "active_work_requires_confirmation",
+                "message": exc.message,
+                "activeWorkRuns": exc.active_work_runs,
+            },
+        ) from exc
 
 
 @router.post("/runtime/browser-telemetry", status_code=202)

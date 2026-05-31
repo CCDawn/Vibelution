@@ -149,11 +149,14 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("styles.groupComposerPanel");
     expect(routeSource).toContain("styles.groupAgentPicker");
     expect(routeSource).toContain("styles.createGroupButton");
-    expect(routeSource).toContain("styles.projectBusShortcut");
+    expect(routeSource).toContain("styles.systemEntryGroup");
+    expect(routeSource).toContain("styles.systemEntryButton");
 
     expect(routeStyles.sessionActionRow).toBeTypeOf("string");
     expect(routeStyles.newGroupButton).toBeTypeOf("string");
-    expect(routeStyles.projectBusShortcut).toBeTypeOf("string");
+    expect(routeStyles.systemEntryGroup).toBeTypeOf("string");
+    expect(routeStyles.systemEntryButton).toBeTypeOf("string");
+    expect(routeStyles.systemEntryIcon).toBeTypeOf("string");
     expect(routeStyles.groupComposerPanel).toBeTypeOf("string");
     expect(routeStyles.groupAgentOption).toBeTypeOf("string");
     expect(routeStyles.createGroupButton).toBeTypeOf("string");
@@ -257,7 +260,9 @@ describe("ChatCodingRoute layout contract", () => {
     expect(routeSource).toContain("isProjectAgentBusEventRevoked(event)");
     expect(routeSource).toContain("handleRevokeProjectBusMessage(event.eventId)");
     expect(routeSource).toContain("projectBusInterruptTargets");
-    expect(routeSource).toContain("@全体成员");
+    expect(routeSource).toContain("Agent 通知流");
+    expect(routeSource).toContain("它不是团队群聊");
+    expect(routeSource).toContain("全局广播/私信投递记录");
     expect(routeSource).toContain("不带 @ 默认投递全体");
     expect(routeSource).toContain("打断目标 Agent");
     expect(routeSource).toContain("buildChatMentionTargets(agentsQuery.data ?? [])");
@@ -411,6 +416,11 @@ describe("ChatCodingRoute layout contract", () => {
       deleteMutationSource.indexOf("void chatWorkspaceCache.afterSessionChanged()"),
     );
     expect(deleteMutationSource).toContain("Prefer\": \"respond-async\"");
+  });
+
+  it("switches away when the active direct session disappears after reset or delete", () => {
+    expect(routeSource).toContain("!sessionsQuery.data.some((session) => session.id === activeSessionId)");
+    expect(routeSource).toContain("setActiveSession(sessionsQuery.data[0].id)");
   });
 
   it("keeps renamed direct session titles visible before conversation refetch finishes", () => {

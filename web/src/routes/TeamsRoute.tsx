@@ -126,6 +126,18 @@ function canvasStyleScale(style: CanvasViewportStyle) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
 }
 
+function nodeBoundaryPoint(center: { x: number; y: number }, direction: { x: number; y: number }) {
+  const halfWidth = NODE_WIDTH / 2;
+  const halfHeight = NODE_HEIGHT / 2;
+  const scaleX = Math.abs(direction.x) > 0.0001 ? halfWidth / Math.abs(direction.x) : Number.POSITIVE_INFINITY;
+  const scaleY = Math.abs(direction.y) > 0.0001 ? halfHeight / Math.abs(direction.y) : Number.POSITIVE_INFINITY;
+  const distanceToRectEdge = Math.min(scaleX, scaleY);
+  return {
+    x: center.x + direction.x * distanceToRectEdge,
+    y: center.y + direction.y * distanceToRectEdge,
+  };
+}
+
 function edgeLine(
   edge: { id?: string; source: string; target: string; type?: string },
   nodes: TeamCanvasNode[],
@@ -149,10 +161,12 @@ function edgeLine(
   const distance = Math.hypot(dx, dy) || 1;
   const unitX = dx / distance;
   const unitY = dy / distance;
-  const x1 = sourceCenter.x + unitX * (NODE_WIDTH / 2);
-  const y1 = sourceCenter.y + unitY * (NODE_HEIGHT / 2);
-  const x2 = targetCenter.x - unitX * (NODE_WIDTH / 2);
-  const y2 = targetCenter.y - unitY * (NODE_HEIGHT / 2);
+  const sourcePoint = nodeBoundaryPoint(sourceCenter, { x: unitX, y: unitY });
+  const targetPoint = nodeBoundaryPoint(targetCenter, { x: -unitX, y: -unitY });
+  const x1 = sourcePoint.x;
+  const y1 = sourcePoint.y;
+  const x2 = targetPoint.x;
+  const y2 = targetPoint.y;
   const normalX = -unitY;
   const normalY = unitX;
   const peerEdges = visiblePeerEdges.filter(
@@ -301,6 +315,7 @@ export function TeamsRoute() {
   const [showCommunicationEdges, setShowCommunicationEdges] = useState(false);
   const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
   const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
+  const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<NodeDragState | null>(null);
 
@@ -383,7 +398,8 @@ export function TeamsRoute() {
     () => [...organizationEdges, ...visibleCommunicationEdges],
     [organizationEdges, visibleCommunicationEdges],
   );
-  const canvasViewportStyle = useMemo(() => canvasViewStyle(canvasNodes, canvasFrameSize), [canvasFrameSize, canvasNodes]);
+  const autoCanvasViewportStyle = useMemo(() => canvasViewStyle(canvasNodes, canvasFrameSize), [canvasFrameSize, canvasNodes]);
+  const canvasViewportStyle = lockedCanvasViewportStyle ?? autoCanvasViewportStyle;
   const canvasScale = canvasStyleScale(canvasViewportStyle);
   const teamBusEvents = useMemo(
     () => projectAgentBusEventsForTeam(projectBusQuery.data, selectedTeam?.teamId),
@@ -415,6 +431,10 @@ export function TeamsRoute() {
     setNodePositionDrafts({});
     dragStateRef.current = null;
   }, [selectedTeam?.teamId, canvas?.updatedAt]);
+
+  useEffect(() => {
+    setLockedCanvasViewportStyle(null);
+  }, [selectedTeam?.teamId]);
 
   useEffect(() => {
     const element = canvasFrameRef.current;
@@ -662,6 +682,7 @@ export function TeamsRoute() {
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     setSelectedNodeId(node.id);
+    setLockedCanvasViewportStyle(canvasViewportStyle);
     dragStateRef.current = {
       nodeId: node.id,
       startClientX: event.clientX,
@@ -875,7 +896,7 @@ export function TeamsRoute() {
                   <marker
                     id="team-edge-arrow"
                     viewBox="0 0 10 10"
-                    refX="8.4"
+                    refX="10"
                     refY="5"
                     markerWidth="6"
                     markerHeight="6"
@@ -905,6 +926,7 @@ export function TeamsRoute() {
                     type="button"
                     className={`${styles.node} ${nodeTone(node)} ${selectedNode?.id === node.id ? styles.nodeActive : ""}`}
                     style={{ "--node-x": `${node.x}px`, "--node-y": `${node.y}px` } as NodePositionStyle}
+                    title={lang === "zh" ? "拖动调整节点位置" : "Drag to reposition"}
                     onPointerDown={(event) => startNodeDrag(event, node)}
                     onPointerMove={moveNodeDrag}
                     onPointerUp={finishNodeDrag}
