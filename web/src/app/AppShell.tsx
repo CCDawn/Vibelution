@@ -10,6 +10,7 @@ import {
   ConfigSummary,
   FileTreeNode,
   GitStatusSummary,
+  RuntimeControlBlockedDetail,
   RuntimeRestartResponse,
   RuntimeSummary,
   ShutdownResponse,
@@ -257,6 +258,39 @@ export function restartRequestUnconfirmedBody(lang: string): string {
   return lang === "en"
     ? "The restart flow has started, but this window did not receive a final confirmation yet. The workbench is still checking the runtime state."
     : "重启流程已经开始，但这个窗口还没有收到最终确认。工作台正在继续检查运行状态。";
+}
+
+export function restartActiveWorkConfirmMessage(lang: string, activeWorkDetails: string): string {
+  const details = activeWorkDetails.trim();
+  if (lang === "en") {
+    return [
+      "Active team communication or other work is still running.",
+      details ? `Running now: ${details}` : "",
+      "Restarting the workbench will stop those runs. Continue?",
+    ].filter(Boolean).join("\n\n");
+  }
+  return [
+    "当前还有团队通信或其他任务正在运行。",
+    details ? `正在运行：${details}` : "",
+    "重启工作台会停止这些轮次。确定继续吗？",
+  ].filter(Boolean).join("\n\n");
+}
+
+function restartEndpoint(confirmedActiveWork: boolean): string {
+  return confirmedActiveWork ? "/api/runtime/restart?confirmedActiveWork=true" : "/api/runtime/restart";
+}
+
+function runtimeBlockedDetail(error: unknown): RuntimeControlBlockedDetail | null {
+  if (!(error instanceof Error)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(error.message) as { detail?: RuntimeControlBlockedDetail };
+    const detail = parsed?.detail;
+    return detail && typeof detail === "object" ? detail : null;
+  } catch {
+    return null;
+  }
 }
 
 export function shutdownLocallyCompleteBody(lang: string): string {
@@ -610,7 +644,7 @@ export function AppShell() {
     return task;
   }, [emitBrowserTelemetry, restartRequested, shutdownBody, shutdownHeading, shutdownUnconfirmedBody]);
 
-  const beginRestart = useCallback(() => {
+  const beginRestart = useCallback((options?: { confirmedActiveWork?: boolean }) => {
     if (shutdownPromiseRef.current || shutdownRequested) {
       return shutdownPromiseRef.current ?? Promise.resolve();
     }
@@ -627,13 +661,36 @@ export function AppShell() {
       setShutdownDetail(restartBody);
       emitBrowserTelemetry(buildRestartRequestedTelemetry(), { preferBeacon: true });
 
-      const payload = await fetchJson<RuntimeRestartResponse>("/api/runtime/restart", {
+      const payload = await fetchJson<RuntimeRestartResponse>(restartEndpoint(Boolean(options?.confirmedActiveWork)), {
         method: "POST",
       });
       if (payload.message) {
         setShutdownDetail(payload.message);
       }
     })().catch((error) => {
+      const blocked = runtimeBlockedDetail(error);
+      if (blocked?.code === "active_work_requires_confirmation") {
+        setRestartRequested(false);
+        setShutdownOpen(false);
+        setShutdownSettled(false);
+        setShutdownTitle("");
+        setShutdownDetail("");
+        emitBrowserTelemetry(
+          {
+            phase: "restart",
+            eventCode: "browser.user_action.restart_blocked_active_work",
+            message: "Restart was blocked because active work requires explicit confirmation.",
+            level: "warning",
+            fields: {
+              action: "restart",
+              source: "app_shell",
+              activeWorkCount: blocked.activeWorkRuns?.length ?? 0,
+            },
+          },
+          { preferBeacon: true },
+        );
+        return;
+      }
       const errorMessage = error instanceof Error ? error.message : String(error || "");
       setRestartRequested(true);
       setShutdownOpen(true);
@@ -1669,7 +1726,28 @@ export function AppShell() {
                 onClick={() => {
                   setLifecycleMenuOpen(false);
                   const proceed = () => {
-                    void beginRestart();
+                    if (activeWorkIndicator) {
+                      const confirmed = window.confirm(restartActiveWorkConfirmMessage(lang, activeWorkDetailsTitle));
+                      if (!confirmed) {
+                        emitBrowserTelemetry(
+                          {
+                            phase: "restart",
+                            eventCode: "browser.user_action.restart_active_work_cancelled",
+                            message: "User cancelled workbench restart because active work is running.",
+                            level: "info",
+                            fields: {
+                              action: "restart",
+                              source: "app_shell",
+                              activeWorkCount: activeWorkIndicator.count,
+                              activeWorkKinds: activeWorkIndicator.items.map((item) => item.kind),
+                            },
+                          },
+                          { preferBeacon: true },
+                        );
+                        return;
+                      }
+                    }
+                    void beginRestart({ confirmedActiveWork: Boolean(activeWorkIndicator) });
                   };
                   if (requestWorkbenchExitGuard("restart", proceed)) {
                     proceed();

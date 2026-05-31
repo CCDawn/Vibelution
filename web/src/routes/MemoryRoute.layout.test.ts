@@ -42,17 +42,34 @@ describe("MemoryRoute layout contract", () => {
     expect(detailPanelIndex).toBeGreaterThan(sourcesPanelsIndex);
   });
 
-  it("splits memory into overview, effective scope, management, and source audit views", () => {
-    expect(routeSource).toContain('export type MemoryRouteView = "overview" | "effective" | "manage" | "sources"');
+  it("splits memory into overview, effective scope, management, source audit, and team knowledge views", () => {
+    expect(routeSource).toContain(
+      'export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge"',
+    );
     expect(routeSource).toContain("MEMORY_VIEWS");
     expect(routeSource).toContain("styles.subnav");
     expect(routeSource).toContain("renderOverviewView()");
     expect(routeSource).toContain("renderEffectiveView()");
     expect(routeSource).toContain("renderManageView()");
     expect(routeSource).toContain("renderSourcesView()");
+    expect(routeSource).toContain("renderKnowledgeView()");
     expect(routeSource).toContain('forcedView === "overview"');
     expect(routeSource).toContain('forcedView === "effective"');
     expect(routeSource).toContain('forcedView === "manage"');
+    expect(routeSource).toContain('forcedView === "knowledge"');
+  });
+
+  it("wires the team knowledge platform to scoped overview, source, proposal, review, and rating APIs", () => {
+    expect(routeSource).toContain("queryKeys.knowledgeOverview()");
+    expect(routeSource).toContain('fetchJson<TeamKnowledgeOverview>("/api/knowledge/overview")');
+    expect(routeSource).toContain('sourceType: "manual_user_entry"');
+    expect(routeSource).toContain("/source-artifacts");
+    expect(routeSource).toContain("/refinement-proposals");
+    expect(routeSource).toContain("/review");
+    expect(routeSource).toContain("/rating");
+    expect(routeSource).toContain("copy.approveProposal");
+    expect(routeSource).toContain("copy.rejectProposal");
+    expect(routeSource).toContain("copy.updateRating");
   });
 
   it("shows a priority review queue on the default memory overview", () => {
@@ -95,7 +112,7 @@ describe("MemoryRoute layout contract", () => {
   it("surfaces agent visibility, prompt injection, and raw content in the detail pane", () => {
     expect(routeSource).toContain("activeItem.agentVisible");
     expect(routeSource).toContain("activeItem.inPrompt");
-    expect(routeSource).toContain("<details className={styles.rawPanel} open>");
+    expect(routeSource).toContain("<details className={styles.rawPanel} open={showEditor}>");
     expect(routeSource).toContain("activeItem.content");
     expect(routeSource).toContain("copySourceSummary");
     expect(routeSource).toContain("copySourcePath");
@@ -204,10 +221,13 @@ describe("MemoryRoute layout contract", () => {
     expect(routerSource).toContain('<MemoryRoute forcedView="manage" />');
     expect(routerSource).toContain('path: "agents/memory/sources"');
     expect(routerSource).toContain('<MemoryRoute forcedView="sources" />');
+    expect(routerSource).toContain('path: "agents/memory/knowledge"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="knowledge" />');
     expect(routerSource).not.toContain('path: "memory"');
     expect(routerSource).not.toContain('path: "memory/effective"');
     expect(routerSource).not.toContain('path: "memory/manage"');
     expect(routerSource).not.toContain('path: "memory/sources"');
+    expect(routerSource).not.toContain('path: "memory/knowledge"');
     expect(routerSource).not.toContain('to="/agents/memory" replace');
     expect(routeSource).toContain('{ key: "overview", href: "/agents/memory" }');
     expect(routeSource).toContain('to={`/agents/memory/sources?section=');

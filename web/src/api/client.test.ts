@@ -89,6 +89,50 @@ describe("fetchJson control token", () => {
     ]);
   });
 
+  it("preserves structured JSON error details for callers", async () => {
+    const reports: unknown[] = [];
+    setFetchJsonFailureReporter((report) => reports.push(report));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        headers: new Headers({ "content-type": "application/json" }),
+        json: async () => ({
+          detail: {
+            code: "active_work_requires_confirmation",
+            activeWorkRuns: [{ kind: "chat_turn", runId: "turn-live" }],
+          },
+        }),
+        text: async () => "",
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const expectedMessage = JSON.stringify({
+      detail: {
+        code: "active_work_requires_confirmation",
+        activeWorkRuns: [{ kind: "chat_turn", runId: "turn-live" }],
+      },
+    });
+    await expect(fetchJson("/api/runtime/restart", { method: "POST" })).rejects.toThrow(expectedMessage);
+
+    expect(reports).toEqual([
+      {
+        endpoint: "/api/runtime/restart",
+        method: "POST",
+        status: 409,
+        message: expectedMessage,
+        failureKind: "http",
+      },
+    ]);
+  });
+
   it("clears cached control token after a guarded write returns 403", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({

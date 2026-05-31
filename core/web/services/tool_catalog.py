@@ -325,6 +325,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["research_database_access"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "knowledge_query_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "read_only"],
+        "riskTags": ["team_knowledge_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "knowledge_proposal_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "proposal_write", "source_registration"],
+        "riskTags": ["team_knowledge_proposal"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
 }
 
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
@@ -361,12 +373,15 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "web_search_tool",
             "web_fetch_tool",
             "research_knowledge_query_tool",
+            "knowledge_query_tool",
+            "knowledge_proposal_tool",
             "get_session_files_tool",
         ],
         "preferredToolNames": [
             "web_search_tool",
             "web_fetch_tool",
             "research_knowledge_query_tool",
+            "knowledge_query_tool",
         ],
     },
     {

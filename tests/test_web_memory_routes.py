@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import memory_service, runtime_scene_service
+from core.web.services import agent_directory_service, memory_service, runtime_scene_service, team_knowledge_service, team_service
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -105,7 +105,24 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     scene_dir.mkdir(parents=True)
     (scene_dir / "manifest.json").write_text('{"title":"memory run","status":"stopped"}', encoding="utf-8")
 
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Knowledge Agent", direct_session_id="session-knowledge")
+    team = team_service.create_team(name="Knowledge Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Team Knowledge",
+        actor_agent_id=agent["agentId"],
+    )
+    team_knowledge_service.create_refinement_proposal(
+        knowledge_base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=agent["agentId"],
+        title="Pending knowledge",
+        content="This candidate should stay out of memory overview content.",
+    )
 
     response = client.get("/api/memory/overview")
 
@@ -114,7 +131,7 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     sections = {section["id"]: section for section in payload["sections"]}
     assert payload["schemaVersion"] == 3
     assert payload["projectRoot"] == str(tmp_path.resolve())
-    assert payload["summary"]["sectionCount"] == 11
+    assert payload["summary"]["sectionCount"] == 12
     assert set(sections) == {
         "user-managed-memory",
         "project-memory",
@@ -122,6 +139,7 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
         "prompt-memory",
         "workspace-database",
         "research-memory",
+        "team-knowledge",
         "git-memory",
         "chat-session-memory",
         "self-evolution-memory",
@@ -158,6 +176,13 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     assert research_items["research-knowledge-base"]["inPrompt"] is False
     assert '"claimCount": 1' in research_items["research-knowledge-base"]["content"]
     assert "1 条论断" in research_items["research-knowledge-base"]["summary"]
+    team_knowledge_items = {item["id"]: item for item in sections["team-knowledge"]["items"]}
+    assert sections["team-knowledge"]["sourceApi"] == "/api/knowledge/overview"
+    assert team_knowledge_items["team-knowledge-platform"]["agentVisible"] is True
+    assert team_knowledge_items["team-knowledge-platform"]["inPrompt"] is False
+    assert team_knowledge_items["team-knowledge-platform"]["channels"] == ["research", "explicit_read"]
+    assert "Pending knowledge" not in team_knowledge_items["team-knowledge-platform"]["content"]
+    assert '"pendingProposalCount": 1' in team_knowledge_items["team-knowledge-platform"]["content"]
     self_items = {item["id"]: item for item in sections["self-evolution-memory"]["items"]}
     assert self_items["self-evolution-transactions"]["channels"] == ["self_evolution"]
     supervised_items = {item["id"]: item for item in sections["supervised-evolution-memory"]["items"]}
@@ -193,6 +218,47 @@ def test_memory_overview_marks_research_knowledge_base_missing_before_first_sear
     assert research_item["channels"] == ["research", "self_evolution", "explicit_read"]
     assert "科研知识库尚未生成" in research_item["summary"]
     assert '"status": "missing"' in research_item["content"]
+
+
+def test_git_entity_change_snapshot_uses_insert_order_for_append_only_table(tmp_path):
+    db_path = tmp_path / "agent_brain.db"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE GitEntityChange (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                commit_sha TEXT NOT NULL,
+                path TEXT NOT NULL,
+                entity_ref TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                change_type TEXT NOT NULL,
+                is_worktree INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO GitEntityChange
+                (commit_sha, path, entity_ref, entity_type, change_type, created_at)
+            VALUES
+                ('old-sha', 'old.py', 'old.ref', 'function', 'modified', '2099-01-01T00:00:00Z')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO GitEntityChange
+                (commit_sha, path, entity_ref, entity_type, change_type, created_at)
+            VALUES
+                ('new-sha', 'new.py', 'new.ref', 'function', 'modified', '2026-01-01T00:00:00Z')
+            """
+        )
+
+    snapshot = memory_service._sqlite_table_snapshot(db_path, "GitEntityChange", limit=1)
+
+    assert snapshot["count"] == 2
+    assert snapshot["countExact"] is False
+    assert snapshot["rows"][0]["commit_sha"] == "new-sha"
 
 
 def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path, monkeypatch):

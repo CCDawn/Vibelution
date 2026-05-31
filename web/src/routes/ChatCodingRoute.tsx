@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import {
   Apple,
   ArrowUpRight,
+  BellRing,
   BookPlus,
   Bot,
   Check,
@@ -16,6 +17,7 @@ import {
   Square,
   Trash2,
   UsersRound,
+  RotateCcw,
   X,
 } from "lucide-react";
 import {
@@ -55,6 +57,7 @@ import {
   RuntimeSummary,
   SessionChatReviewCandidateResponse,
   SessionDeleteResponse,
+  SessionGuidanceMode,
   ConversationSummary,
   SessionDetail,
   SessionRuntimeNotice,
@@ -810,6 +813,16 @@ export function ChatCodingRoute() {
     }
     if (!activeSessionId && sessionsQuery.data && sessionsQuery.data.length > 0) {
       setActiveSession(sessionsQuery.data[0].id);
+      return;
+    }
+    if (
+      activeSessionId
+      && !requestedRoomId
+      && sessionsQuery.data
+      && sessionsQuery.data.length > 0
+      && !sessionsQuery.data.some((session) => session.id === activeSessionId)
+    ) {
+      setActiveSession(sessionsQuery.data[0].id);
     }
   }, [activeGroupRoomId, activeSessionId, requestedRoomId, requestedSessionId, sessionsQuery.data, setActiveSession]);
 
@@ -968,6 +981,46 @@ export function ChatCodingRoute() {
         [variables.sessionId]: describeError(error, t("stopFailed")),
       }));
       void chatWorkspaceCache.afterDirectTurnFailed(variables.sessionId);
+    },
+  });
+
+  const sessionGuidanceMutation = useMutation({
+    mutationFn: async (
+      {
+        sessionId,
+        content,
+        mode,
+      }: {
+        sessionId: string;
+        content: string;
+        mode: SessionGuidanceMode;
+      },
+    ) =>
+      fetchJson<SessionDetail>(`/api/sessions/${sessionId}/guidance`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content, mode }),
+      }),
+    onSuccess: (nextDetail, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+      }));
+      setSessionDrafts((current) => ({
+        ...current,
+        [variables.sessionId]: "",
+      }));
+      syncSessionDetail(nextDetail);
+      void chatWorkspaceCache.afterSessionChanged({ sessionId: variables.sessionId });
+    },
+    onError: (error, variables) => {
+      setSessionComposerErrors((current) => ({
+        ...current,
+        [variables.sessionId]: describeError(error, t("guidanceFailed")),
+      }));
+      void chatWorkspaceCache.refreshSessionRuntime(variables.sessionId);
     },
   });
 
@@ -1177,6 +1230,26 @@ export function ChatCodingRoute() {
     },
     onError: (error) => {
       setGroupRoomActionError(describeError(error, lang === "zh" ? "删除群聊失败" : "Delete group failed"));
+    },
+  });
+
+  const resetGroupRoomMutation = useMutation({
+    mutationFn: async ({ roomId }: { roomId: string }) =>
+      fetchJson<ChatRoomDetail>(`/api/chat-rooms/${roomId}/reset`, {
+        method: "POST",
+      }),
+    onSuccess: (room) => {
+      setActiveGroupRoomId(room.roomId);
+      setRightIndexPanel("members");
+      setGroupRoomActionError("");
+      syncChatRoomDetail(room);
+      void chatWorkspaceCache.afterChatRoomChanged(room.roomId);
+    },
+    onError: (error) => {
+      setGroupRoomActionError(describeError(error, lang === "zh" ? "重置群聊失败" : "Reset group failed"));
+      if (activeGroupRoomId) {
+        void chatWorkspaceCache.afterChatRoomChanged(activeGroupRoomId);
+      }
     },
   });
 
@@ -1778,6 +1851,13 @@ export function ChatCodingRoute() {
     || activeGroupTeamOwned
     || groupRoundActive
     || deleteGroupRoomMutation.isPending;
+  const groupResetDisabled =
+    !legacyGroupRoomActive
+    ||
+    !activeGroupRoom
+    || groupRoundActive
+    || resetGroupRoomMutation.isPending
+    || (activeGroupRoom?.rounds ?? []).length < 1;
   const groupStopDisabled =
     !legacyGroupRoomActive
     || !activeGroupRoom
@@ -1786,21 +1866,21 @@ export function ChatCodingRoute() {
   const activeSurfaceTitle = groupPanelActive
     ? (
       projectBusActive
-        ? (lang === "zh" ? "项目总群" : "Project bus")
+        ? (lang === "zh" ? "Agent 通知流" : "Agent notice stream")
         : activeGroupRoom?.title ?? (lang === "zh" ? "群聊加载中" : "Loading group")
     )
     : detail?.title ?? runtime?.sessionTitle ?? t("loadingSession");
   const activeSurfaceStatus = groupPanelActive
     ? (
       projectBusActive
-        ? (lang === "zh" ? "观察与投递" : "observe and deliver")
+        ? (lang === "zh" ? "全局广播" : "global broadcast")
         : statusLabel(activeGroupRoom?.status ?? "ready")
     )
     : statusLabel(detail?.status || detail?.currentPhase || "idle");
   const activeSurfaceLine = groupPanelActive
     ? (
       projectBusActive
-        ? `${projectBusTimeline?.activeAgentCount ?? 0} ${lang === "zh" ? "位 active Agent" : "active agents"} · @全体成员 / @AgentCode`
+        ? `${projectBusTimeline?.activeAgentCount ?? 0} ${lang === "zh" ? "位 active Agent · 全局广播/私信投递记录" : "active agents · broadcast/private delivery log"}`
         : (
           activeGroupRound?.summary
           || `${availableGroupParticipantCount} ${lang === "zh" ? "位可用 Agent" : "available agents"} · ${activeGroupRoom?.mode ?? "round_robin"} · ${activeGroupRoom?.purpose ?? "discussion"}`
@@ -1862,6 +1942,8 @@ export function ChatCodingRoute() {
     editResubmitMutation.variables?.sessionId === activeSessionId;
   const stopMutationMatchesActiveSession =
     stopTurnMutation.variables?.sessionId === activeSessionId;
+  const guidanceMutationMatchesActiveSession =
+    sessionGuidanceMutation.variables?.sessionId === activeSessionId;
   const submitPending =
     (submitTurnMutation.isPending && submitMutationMatchesActiveSession)
     || (editResubmitMutation.isPending && editResubmitMutationMatchesActiveSession)
@@ -1873,6 +1955,14 @@ export function ChatCodingRoute() {
   const composerGuidance = sessionBusy && !sessionStopping ? t("sessionBusyComposerGuidance") : "";
   const composerPending =
     composerStopMode ? (stopTurnMutation.isPending && stopMutationMatchesActiveSession) || sessionStopping : submitPending;
+  const composerSafeGuidancePending =
+    sessionGuidanceMutation.isPending
+    && guidanceMutationMatchesActiveSession
+    && sessionGuidanceMutation.variables?.mode === "safe";
+  const composerInterruptGuidancePending =
+    sessionGuidanceMutation.isPending
+    && guidanceMutationMatchesActiveSession
+    && sessionGuidanceMutation.variables?.mode === "interrupt";
   const composerDisabled = !activeSessionId || submitPending;
   const composerActionDisabled = !activeSessionId || (
     composerStopMode ? composerPending : submitPending || (!activeDraftEffective.trim() && !activeImageAttachments.length)
@@ -2490,6 +2580,21 @@ export function ChatCodingRoute() {
     });
   }
 
+  function handleSubmitGuidance(mode: SessionGuidanceMode) {
+    if (!activeSessionId || !sessionBusy || sessionStopping) {
+      return;
+    }
+    const content = activeDraftEffective.trim();
+    if (!content) {
+      return;
+    }
+    sessionGuidanceMutation.mutate({
+      sessionId: activeSessionId,
+      content,
+      mode,
+    });
+  }
+
   function handlePetInteraction(action: PetInteractionAction) {
     setPetActionFeedback("");
     petActionMutation.mutate({ action });
@@ -2695,6 +2800,18 @@ export function ChatCodingRoute() {
       return;
     }
     deleteGroupRoomMutation.mutate({ roomId: activeGroupRoomId });
+  }
+
+  function handleResetActiveGroupRoom() {
+    if (!legacyGroupRoomActive || !activeGroupRoomId || groupResetDisabled) {
+      return;
+    }
+    const roomTitle = (activeGroupRoom?.title || activeGroupRoomId).trim();
+    const groupConfirmMessage = t("resetGroupConfirm").replace("{title}", roomTitle || activeGroupRoomId);
+    if (!window.confirm(groupConfirmMessage)) {
+      return;
+    }
+    resetGroupRoomMutation.mutate({ roomId: activeGroupRoomId });
   }
 
   function handleDeleteSession(session: SessionSummary) {
@@ -2935,6 +3052,19 @@ export function ChatCodingRoute() {
                       {deleteGroupRoomMutation.isPending
                         ? (lang === "zh" ? "删除中" : "Deleting")
                         : (lang === "zh" ? "删除" : "Delete")}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.groupSecondaryButton}
+                    disabled={groupResetDisabled}
+                    onClick={handleResetActiveGroupRoom}
+                  >
+                    <RotateCcw size={14} />
+                    <span>
+                      {resetGroupRoomMutation.isPending
+                        ? (lang === "zh" ? "重置中" : "Resetting")
+                        : (lang === "zh" ? "重置消息" : "Reset messages")}
                     </span>
                   </button>
                 </div>
@@ -3319,7 +3449,7 @@ export function ChatCodingRoute() {
               activeSessionId && setActiveTab(activeSessionId, "agent");
             }}
           >
-            {groupPanelActive ? (projectBusActive ? (lang === "zh" ? "项目总群" : "Project bus") : (lang === "zh" ? "群聊" : "Group")) : t("agentSession")}
+            {groupPanelActive ? (projectBusActive ? (lang === "zh" ? "通知流" : "Notice stream") : (lang === "zh" ? "群聊" : "Group")) : t("agentSession")}
           </button>
           {!groupPanelActive && workspace.openTabs.map((tabPath) => (
             <div
@@ -3401,11 +3531,11 @@ export function ChatCodingRoute() {
                     {" · "}
                     {activeGroupRoom?.purpose ?? "discussion"}
                   </p>
-                  <h2>{lang === "zh" ? "项目总群" : "Project bus"}</h2>
+                  <h2>{lang === "zh" ? "Agent 通知流" : "Agent notice stream"}</h2>
                   <span>
                     {projectBusTimeline?.activeAgentCount ?? availableGroupParticipantCount} {lang === "zh" ? "位 active Agent" : "active agents"}
                     {" · "}
-                    {lang === "zh" ? "观察与投递" : "observe and deliver"}
+                    {lang === "zh" ? "全局广播与投递观察" : "broadcasts and delivery observation"}
                   </span>
                 </div>
                 <button
@@ -3576,8 +3706,8 @@ export function ChatCodingRoute() {
                   })
                 ) : (
                   <div className={styles.groupEmptyState}>
-                    <UsersRound size={28} />
-                    <p>{lang === "zh" ? "项目总群会显示用户引导、Agent 私聊和广播投递结果。" : "The project bus shows guidance, private messages, broadcasts, and delivery results."}</p>
+                    <BellRing size={28} />
+                    <p>{lang === "zh" ? "Agent 通知流会显示用户引导、Agent 私聊和广播投递结果；它不是团队群聊。" : "The Agent notice stream shows guidance, private messages, broadcasts, and delivery results. It is not a team room."}</p>
                   </div>
                 )}
               </div>
@@ -3586,7 +3716,7 @@ export function ChatCodingRoute() {
                   value={projectBusDraft}
                   onChange={(event) => setProjectBusDraft(event.target.value)}
                   disabled={sendProjectBusMessageMutation.isPending}
-                  placeholder={lang === "zh" ? "输入总群消息；不带 @ 默认投递全体，可用 @AgentCode 指定" : "Message the project bus; no @ sends to all, @AgentCode targets one"}
+                  placeholder={lang === "zh" ? "输入广播；不带 @ 默认投递全体，可用 @AgentCode 指定" : "Write a broadcast; no @ sends to all, @AgentCode targets one"}
                   onKeyDown={(event) => {
                     if (event.key === "Enter" && !event.shiftKey) {
                       event.preventDefault();
@@ -3614,7 +3744,7 @@ export function ChatCodingRoute() {
                   <span>
                     {sendProjectBusMessageMutation.isPending
                       ? (lang === "zh" ? "发送中" : "Sending")
-                      : (lang === "zh" ? "发送到总群" : "Send")}
+                      : (lang === "zh" ? "发送广播" : "Send")}
                   </span>
                 </button>
               </div>
@@ -3858,6 +3988,8 @@ export function ChatCodingRoute() {
                   composerActionDisabled={composerActionDisabled}
                   composerActionMode={composerStopMode ? "stop" : "send"}
                   composerPending={composerPending}
+                  composerSafeGuidancePending={composerSafeGuidancePending}
+                  composerInterruptGuidancePending={composerInterruptGuidancePending}
                   composerError={activeComposerError}
                   composerGuidance={composerGuidance}
                   composerAttachments={activeImageAttachments.map((attachment) => ({
@@ -3874,6 +4006,10 @@ export function ChatCodingRoute() {
                   nextStateSignals={detail.nextStateSignals ?? []}
                   stopLabel={t("stop")}
                   stopPendingLabel={t("stopPending")}
+                  safeGuidanceLabel={t("safeGuidance")}
+                  safeGuidancePendingLabel={t("safeGuidancePending")}
+                  interruptGuidanceLabel={t("interruptGuidance")}
+                  interruptGuidancePendingLabel={t("interruptGuidancePending")}
                   editingMessageId={resolvedEditTarget?.messageId}
                   editUserMessageLabel={t("editAndResendMessage")}
                   editUserMessageDisabled={sessionBusy || submitPending}
@@ -3884,6 +4020,8 @@ export function ChatCodingRoute() {
                   onCancelComposerMode={resolvedEditTarget ? handleCancelEditMessage : undefined}
                   onSubmit={handleSubmitTurn}
                   onStop={handleStopTurn}
+                  onSafeGuidance={() => handleSubmitGuidance("safe")}
+                  onInterruptGuidance={() => handleSubmitGuidance("interrupt")}
                 />
               </div>
             ) : (
@@ -4125,36 +4263,35 @@ export function ChatCodingRoute() {
                 <span>{groupComposerOpen ? (lang === "zh" ? "收起" : "Close") : (lang === "zh" ? "新建群聊" : "New group")}</span>
               </button>
             </div>
-            <div
-              aria-current={groupPanelActive ? "true" : undefined}
-              className={
-                groupPanelActive
-                  ? `${styles.sessionItem} ${styles.groupSessionItem} ${styles.projectBusShortcut} ${styles.sessionItemActive}`
-                  : `${styles.sessionItem} ${styles.groupSessionItem} ${styles.projectBusShortcut}`
-              }
-            >
+            <section className={styles.systemEntryGroup} aria-label={lang === "zh" ? "系统入口" : "System entries"}>
+              <div className={styles.conversationTreeRootHeader}>
+                <span>{lang === "zh" ? "系统入口" : "System"}</span>
+                <strong>1</strong>
+              </div>
               <button
                 type="button"
-                className={styles.sessionItemMain}
+                aria-current={projectBusActive ? "true" : undefined}
+                className={
+                  projectBusActive
+                    ? `${styles.systemEntryButton} ${styles.systemEntryButtonActive}`
+                    : styles.systemEntryButton
+                }
                 onClick={handleOpenProjectAgentBus}
               >
-                <span className={`${styles.conversationAvatar} ${styles.conversationAvatarGroup}`} aria-hidden="true">
-                  <UsersRound size={18} />
+                <span className={styles.systemEntryIcon} aria-hidden="true">
+                  <BellRing size={16} />
                 </span>
-                <span className={styles.conversationCopy}>
-                  <span className={styles.conversationTitleRow}>
-                    <span className={styles.sessionItemTitle}>{lang === "zh" ? "项目总群" : "Project bus"}</span>
-                    {groupPanelActive ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
+                <span className={styles.systemEntryCopy}>
+                  <span className={styles.systemEntryTitleRow}>
+                    <span className={styles.systemEntryTitle}>{lang === "zh" ? "Agent 通知流" : "Agent notice stream"}</span>
+                    {projectBusActive ? <span className={styles.sessionCurrentBadge}>{t("currentSession")}</span> : null}
                   </span>
-                  <span className={styles.conversationMetaRow}>
-                    <span className={`${styles.conversationKindBadge} ${styles.conversationKindBadgeGroup}`}>
-                      {lang === "zh" ? "固定群" : "Pinned"}
-                    </span>
-                    <span>{lang === "zh" ? "全体 Agent" : "All agents"}</span>
+                  <span className={styles.systemEntryMeta}>
+                    {lang === "zh" ? "全局广播 · 私信投递记录" : "Global broadcast · private delivery log"}
                   </span>
                 </span>
               </button>
-            </div>
+            </section>
             {groupComposerOpen ? (
               <section className={styles.groupComposerPanel} aria-label={lang === "zh" ? "新建群聊" : "New group chat"}>
                 <label className={styles.groupComposerField}>

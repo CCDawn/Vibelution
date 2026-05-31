@@ -1684,7 +1684,7 @@
 .composer {
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 8px;
   padding: 8px 12px 10px;
   border-top: 1px solid color-mix(in srgb, var(--border-soft) 82%, transparent);
@@ -2048,6 +2048,17 @@
   border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
   background: color-mix(in srgb, var(--state-error) 16%, transparent);
   color: var(--state-error);
+}
+
+.interruptGuidanceButton {
+  border-color: color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: var(--accent-cool);
+}
+
+.interruptGuidanceButton:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-cool) 34%, transparent);
 }
 
 .stopButton:hover:not(:disabled) {

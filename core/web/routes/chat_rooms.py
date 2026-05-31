@@ -18,6 +18,7 @@ from core.web.services.chat_room_service import (
     list_chat_room_modes,
     list_chat_room_purposes,
     list_chat_rooms,
+    reset_chat_room,
     start_chat_room_round,
     stop_chat_room_round,
     stream_chat_room_events,
@@ -128,6 +129,16 @@ def chat_room_update(room_id: str, payload: ChatRoomUpdatePayload) -> dict:
 def chat_room_delete(room_id: str) -> dict:
     try:
         return delete_chat_room(room_id)
+    except ChatRoomNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ChatRoomBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/chat-rooms/{room_id}/reset")
+def chat_room_reset(room_id: str) -> dict:
+    try:
+        return reset_chat_room(room_id)
     except ChatRoomNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ChatRoomBusyError as exc:

@@ -77,3 +77,24 @@ def test_append_chat_next_state_signal_round_trip(tmp_path: Path, monkeypatch):
     assert recorded_events[0]["eventCode"] == "conversation.next_state_signal.recorded"
     assert recorded_events[0]["child_log_path"] == "conversations/chat-next-state-signals.jsonl"
     assert recorded_events[0]["child_log_payload"]["signalId"] == signal["signalId"]
+
+
+def test_user_guidance_signal_kind_is_preserved(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "core.web.services.runtime_scene_service.record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+
+    signal = append_chat_next_state_signal(
+        project_root=tmp_path,
+        session_id="session-live",
+        turn_id="turn-guidance",
+        source="user",
+        kind="user-guidance",
+        polarity="neutral",
+        mode="directive",
+        related_event_code="conversation.user_guidance_submitted",
+        summary="先不要改范围，只解释当前设计。",
+    )
+
+    assert signal["kind"] == "user_guidance"

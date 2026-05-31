@@ -51,16 +51,18 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("agentId: activePolicyAgent.agentId");
   });
 
-  it("shows Agent ToolPolicy state as a read-only overview from the tool bench", () => {
+  it("keeps Agent ToolPolicy state lightweight and routes configuration to Agent Center", () => {
     expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents\")");
-    expect(routeSource).toContain("只读权限观察");
-    expect(routeSource).toContain("Read-only permission overview");
-    expect(routeSource).toContain("aria-label={lang === \"zh\" ? \"只读权限状态\" : \"Read-only permission state\"}");
-    expect(routeSource).toContain("styles.agentPolicyPanel");
+    expect(routeSource).toContain("这里用于测试工具，不在这里配置 Agent");
+    expect(routeSource).toContain("Test tools here, configure Agents in Agent Center");
+    expect(routeSource).toContain("styles.agentPermissionSummaryPanel");
+    expect(routeSource).toContain("styles.permissionSummaryGrid");
+    expect(routeSource).toContain("styles.permissionSummaryCards");
+    expect(routeSource).toContain("styles.toolAgentFitPanel");
     expect(routeSource).toContain("styles.policyStatePill");
-    expect(routeSource).toContain("styles.policyModeButtonActive");
     expect(routeSource).toContain("to=\"/agents\"");
-    expect(routeSource).toContain("打开 Agent 策略页");
+    expect(routeSource).toContain("去 Agent 中心配置");
+    expect(routeSource).toContain("编辑 Agent 策略");
     expect(routeSource).not.toContain("toolPolicyMutation");
     expect(routeSource).not.toContain("body: JSON.stringify({ toolPolicy: payload.policy })");
   });
@@ -69,20 +71,21 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("explicit_required");
     expect(routeSource).toContain("tool.permissionPolicy?.requiresExplicitAllow");
     expect(routeSource).toContain("需显式授权");
-    expect(routeSource).toContain("只有加入允许清单后才会对当前 Agent 可见并可调用");
     expect(routeSource).toContain("policyModeCounts.explicit_required");
-    expect(routeSource).toContain("policy_${mode}");
+    expect(routeSource).toContain("policy_${policyMode}");
+    expect(routeSource).toContain("policy_${activePolicyMode}");
   });
 
-  it("keeps Agent-scoped bulk ToolPolicy state read-only and routes edits to Agent Center", () => {
-    expect(routeSource).toContain("permissionTools");
-    expect(routeSource).toContain("styles.agentBulkPolicyPanel");
-    expect(routeSource).toContain("setPermissionFilter(filter)");
-    expect(routeSource).toContain("setPermissionSearchText(event.target.value)");
-    expect(routeSource).toContain("toolPolicyMode(activePolicy, tool)");
-    expect(routeSource).toContain("styles.bulkPolicyToolRow");
-    expect(routeSource).toContain("styles.bulkPolicyActions");
-    expect(routeSource).toContain("Open Agent policies");
+  it("removes the duplicate Agent permission table from Tools", () => {
+    expect(routeSource).not.toContain("permissionTools");
+    expect(routeSource).not.toContain("PERMISSION_FILTERS");
+    expect(routeSource).not.toContain("permissionSearchText");
+    expect(routeSource).not.toContain("setPermissionFilter(filter)");
+    expect(routeSource).not.toContain("setPermissionSearchText(event.target.value)");
+    expect(routeSource).not.toContain("styles.agentBulkPolicyPanel");
+    expect(routeSource).not.toContain("styles.bulkPolicyToolRow");
+    expect(routeSource).not.toContain("styles.bulkPolicyActions");
+    expect(routeSource).not.toContain("styles.agentPolicyPanel");
     expect(routeSource).not.toContain("policyDraft");
     expect(routeSource).not.toContain("setSelectedToolsPolicyMode");
     expect(routeSource).not.toContain("applyPolicyDraft");
@@ -103,12 +106,12 @@ describe("ToolsRoute layout contract", () => {
 
   it("keeps test controls and result panels in normal document flow", () => {
     expect(routeSource).toContain("styles.policyPanel");
-    expect(routeSource).toContain("styles.agentPolicyPanel");
+    expect(routeSource).toContain("styles.toolAgentFitPanel");
     expect(routeSource).toContain("styles.image2ModelPanel");
     expect(routeSource).toContain("styles.detailActions");
     expect(routeSource.indexOf("styles.detailActions")).toBeGreaterThan(routeSource.indexOf("styles.policyPanel"));
-    expect(routeSource.indexOf("styles.agentBulkPolicyPanel")).toBeLessThan(routeSource.indexOf("styles.detailHeader"));
-    expect(routeSource.indexOf("styles.agentBulkPolicyPanel")).toBeGreaterThan(0);
+    expect(routeSource.indexOf("styles.agentPermissionSummaryPanel")).toBeLessThan(routeSource.indexOf("styles.detailHeader"));
+    expect(routeSource.indexOf("styles.agentPermissionSummaryPanel")).toBeGreaterThan(0);
     expect(routeSource.indexOf("styles.testPanel")).toBeGreaterThan(routeSource.indexOf("styles.detailActions"));
   });
 

@@ -105,8 +105,24 @@ type AgentToolGovernanceDraft = {
 type AgentMemoryPolicyDraft = {
   readSharedGroups: string[];
   writeSharedGroups: string[];
+  readKnowledgeBaseIds: string[];
+  proposeKnowledgeBaseIds: string[];
+  reviewKnowledgeBaseIds: string[];
   newReadGroup: string;
   newWriteGroup: string;
+  newReadKnowledgeBaseId: string;
+  newProposeKnowledgeBaseId: string;
+  newReviewKnowledgeBaseId: string;
+};
+
+type AgentResetOptions = {
+  clearRuntimeState: boolean;
+  resetDirectSession: boolean;
+  resetPersonaProfile: boolean;
+  resetTaskProfile: boolean;
+  resetToolPolicy: boolean;
+  resetMemoryPolicy: boolean;
+  resetRuntimePolicy: boolean;
 };
 
 type AgentDelegationPolicyDraft = AgentDelegationPolicy;
@@ -125,7 +141,7 @@ type AgentDraftSyncSource = {
 };
 
 type ToolPolicyMode = "inherited" | "allowed" | "blocked" | "excluded";
-type AgentConfigPaneId = "overview" | "config" | "policies" | "membership" | "activity";
+type AgentConfigPaneId = "overview" | "config" | "activity";
 type ToolPermissionGroup = {
   category: string;
   label: string;
@@ -136,6 +152,42 @@ type ToolPermissionGroup = {
   highRiskCount: number;
 };
 type ToolBundleApplyMode = "merge" | "replace";
+type AgentManagementAction = {
+  id: string;
+  label: string;
+  detail: string;
+  pane: AgentConfigPaneId;
+};
+type AgentManagementBrief = {
+  score: number;
+  completed: number;
+  total: number;
+  statusLabel: string;
+  statusDetail: string;
+  items: Array<{
+    id: string;
+    label: string;
+    complete: boolean;
+    pane: AgentConfigPaneId;
+  }>;
+  actions: AgentManagementAction[];
+};
+type AgentCapabilityPreview = {
+  effectiveAllowed: number;
+  preferred: number;
+  blocked: number;
+  inherited: number;
+  highRiskAllowed: number;
+  explicitAllowed: number;
+  writeBoundaryLabel: string;
+};
+type AgentManagementFilterGroup = {
+  id: string;
+  label: string;
+  count: number;
+  description?: string;
+  healthCount?: number;
+};
 type AgentActivityTimelineItem = {
   id: string;
   kind: "run" | "sub_run" | "inbox" | "context";
@@ -154,6 +206,15 @@ type RuntimeFocusEvidenceResult = {
 };
 
 const AGENT_PRIMARY_MODE_OPTIONS = ["chat", "research", "supervised_evolution", "self_evolution", "general"];
+const DEFAULT_AGENT_RESET_OPTIONS: AgentResetOptions = {
+  clearRuntimeState: true,
+  resetDirectSession: true,
+  resetPersonaProfile: false,
+  resetTaskProfile: false,
+  resetToolPolicy: false,
+  resetMemoryPolicy: false,
+  resetRuntimePolicy: false,
+};
 
 function normalizeText(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
@@ -335,7 +396,7 @@ function issueNextStep(issues: AgentConfigHealthIssue[], lang: "zh" | "en") {
     return lang === "zh" ? "先补齐阻塞项，否则不要加入可调度池。" : "Fix blocking items before routing this Agent.";
   }
   if (tone === "warning") {
-    return lang === "zh" ? "建议在基础配置或归属页处理，避免运行时缺上下文。" : "Review base config or membership to avoid missing runtime context.";
+    return lang === "zh" ? "建议在配置页处理，避免运行时缺上下文。" : "Review config to avoid missing runtime context.";
   }
   if (tone === "info") {
     return lang === "zh" ? "不影响使用，但补齐后更容易被团队和群聊理解。" : "Usable now; completing it improves team and room clarity.";
@@ -612,6 +673,7 @@ function filterAgents(
 ) {
   const agents = workspace?.agents ?? [];
   const query = normalizeText(searchText);
+  const managementFilter = activeFilter.startsWith("setup:");
   const group = (workspace?.groups ?? []).find((item) => item.id === activeFilter);
   const groupIds = new Set(group?.agentIds ?? []);
   return agents.filter((agent) => {
@@ -623,7 +685,10 @@ function filterAgents(
     } else if (archived) {
       return false;
     }
-    if (group && !groupIds.has(agent.agentId)) {
+    if (managementFilter && !managementFilterMatches(agent, activeFilter)) {
+      return false;
+    }
+    if (!managementFilter && group && !groupIds.has(agent.agentId)) {
       return false;
     }
     return !query || agentSearchText(agent).includes(query);
@@ -715,7 +780,7 @@ function archivedWorkspaceCache(
   };
 }
 
-function groupDisplayLabel(group: AgentConfigWorkspaceGroup | undefined, copy: ReturnType<typeof agentsRouteCopy>) {
+function groupDisplayLabel(group: { id: string; label?: string } | undefined, copy: ReturnType<typeof agentsRouteCopy>) {
   if (!group) {
     return copy.activeAgents;
   }
@@ -727,7 +792,7 @@ function groupSectionId(group: AgentConfigWorkspaceGroup) {
   return section === "mode" || section === "reference" ? section : "status";
 }
 
-function groupDescription(group: AgentConfigWorkspaceGroup, copy: ReturnType<typeof agentsRouteCopy>) {
+function groupDescription(group: { id: string; description?: string }, copy: ReturnType<typeof agentsRouteCopy>) {
   return copy.groupDescriptions[group.id] ?? group.description ?? "";
 }
 
@@ -894,6 +959,182 @@ function taskProfileSummary(agent: AgentConfigWorkspaceAgent | null | undefined,
     return parts[0];
   }
   return lang === "zh" ? "未设置任务档案" : "No task profile";
+}
+
+function hasPersonaProfile(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  const profile = normalizePersonaProfile(agent?.personaProfile);
+  return Boolean(
+    profile.gender
+      || profile.age
+      || profile.pronouns
+      || profile.personality
+      || profile.communicationStyle
+      || profile.background
+      || profile.expertise.length
+      || profile.collaborationPreference
+      || profile.identityNotes,
+  );
+}
+
+function hasTaskProfile(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  const profile = normalizeTaskProfile(agent?.taskProfile);
+  return Boolean(
+    profile.mission
+      || profile.taskTypes.length
+      || profile.responsibilities
+      || profile.preferredTasks
+      || profile.avoidTasks
+      || profile.successCriteria
+      || profile.deliverables
+      || profile.constraints
+      || profile.handoffNotes,
+  );
+}
+
+function hasToolPolicyConfiguration(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  const policy = agent?.toolPolicy;
+  return Boolean(
+    policy?.allowedTools?.length
+      || policy?.preferredTools?.length
+      || policy?.blockedTools?.length
+      || policy?.writeScopes?.length
+      || policy?.readScopes?.length,
+  );
+}
+
+function agentHasTeamReference(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return Boolean(agent?.references?.some((reference) => reference.kind === "team"));
+}
+
+function agentHasRuntimeSignal(agent: AgentConfigWorkspaceAgent | null | undefined) {
+  return Boolean(agent?.directSessionId || agent?.runtimeStatus || (agent?.agentInboxPendingCount ?? 0) > 0);
+}
+
+function buildAgentManagementBrief(
+  agent: AgentConfigWorkspaceAgent | null | undefined,
+  copy: ReturnType<typeof agentsRouteCopy>,
+  lang: "zh" | "en",
+): AgentManagementBrief {
+  const items = [
+    { id: "identity", label: copy.managementIdentity, complete: hasPersonaProfile(agent), pane: "config" as const },
+    { id: "task", label: copy.managementTask, complete: hasTaskProfile(agent), pane: "config" as const },
+    { id: "tools", label: copy.managementTools, complete: hasToolPolicyConfiguration(agent), pane: "config" as const },
+    { id: "membership", label: copy.managementMembership, complete: agentHasTeamReference(agent), pane: "config" as const },
+    { id: "runtime", label: copy.managementRuntime, complete: agentHasRuntimeSignal(agent), pane: "activity" as const },
+  ];
+  const actions: AgentManagementAction[] = [];
+  if (!items[0].complete) {
+    actions.push({ id: "identity", label: copy.nextSetupIdentity, detail: copy.nextSetupIdentityHint, pane: "config" });
+  }
+  if (!items[1].complete) {
+    actions.push({ id: "task", label: copy.nextSetupTask, detail: copy.nextSetupTaskHint, pane: "config" });
+  }
+  if (!items[2].complete) {
+    actions.push({ id: "tools", label: copy.nextSetupTools, detail: copy.nextSetupToolsHint, pane: "config" });
+  }
+  if (!items[3].complete) {
+    actions.push({ id: "membership", label: copy.nextSetupMembership, detail: copy.nextSetupMembershipHint, pane: "config" });
+  }
+  if ((agent?.agentInboxPendingCount ?? 0) > 0) {
+    actions.unshift({ id: "inbox", label: copy.nextHandleInbox, detail: copy.nextHandleInboxHint, pane: "activity" });
+  }
+  const completed = items.filter((item) => item.complete).length;
+  const score = items.length ? Math.round((completed / items.length) * 100) : 0;
+  return {
+    score,
+    completed,
+    total: items.length,
+    statusLabel: lang === "zh" ? `${score}% 完整` : `${score}% complete`,
+    statusDetail: lang === "zh" ? `${completed}/${items.length} 项已就绪` : `${completed}/${items.length} ready`,
+    items,
+    actions: actions.slice(0, 3),
+  };
+}
+
+function buildManagementFilterGroups(
+  agents: AgentConfigWorkspaceAgent[],
+  copy: ReturnType<typeof agentsRouteCopy>,
+): AgentManagementFilterGroup[] {
+  const activeAgents = agents.filter((agent) => agent.status !== "archived");
+  const count = (predicate: (agent: AgentConfigWorkspaceAgent) => boolean) => activeAgents.filter(predicate).length;
+  return [
+    {
+      id: "setup:persona",
+      label: copy.managementFilterMissingPersona,
+      count: count((agent) => !hasPersonaProfile(agent)),
+      description: copy.managementFilterMissingPersonaHint,
+    },
+    {
+      id: "setup:task",
+      label: copy.managementFilterMissingTask,
+      count: count((agent) => !hasTaskProfile(agent)),
+      description: copy.managementFilterMissingTaskHint,
+    },
+    {
+      id: "setup:tools",
+      label: copy.managementFilterMissingTools,
+      count: count((agent) => !hasToolPolicyConfiguration(agent)),
+      description: copy.managementFilterMissingToolsHint,
+    },
+    {
+      id: "setup:membership",
+      label: copy.managementFilterNoTeam,
+      count: count((agent) => !agentHasTeamReference(agent)),
+      description: copy.managementFilterNoTeamHint,
+    },
+    {
+      id: "setup:inbox",
+      label: copy.managementFilterPendingInbox,
+      count: count((agent) => (agent.agentInboxPendingCount ?? 0) > 0),
+      description: copy.managementFilterPendingInboxHint,
+      healthCount: count((agent) => (agent.agentInboxPendingCount ?? 0) > 0),
+    },
+    {
+      id: "setup:maintenance",
+      label: copy.managementFilterMaintenance,
+      count: count((agent) => agent.health.length > 0 || agent.status === "archived"),
+      description: copy.managementFilterMaintenanceHint,
+    },
+  ];
+}
+
+function managementFilterMatches(agent: AgentConfigWorkspaceAgent, activeFilter: FilterId) {
+  switch (activeFilter) {
+    case "setup:persona":
+      return !hasPersonaProfile(agent);
+    case "setup:task":
+      return !hasTaskProfile(agent);
+    case "setup:tools":
+      return !hasToolPolicyConfiguration(agent);
+    case "setup:membership":
+      return !agentHasTeamReference(agent);
+    case "setup:inbox":
+      return (agent.agentInboxPendingCount ?? 0) > 0;
+    case "setup:maintenance":
+      return agent.health.length > 0 || agent.status === "archived";
+    default:
+      return true;
+  }
+}
+
+function buildAgentCapabilityPreview(
+  draft: AgentToolPolicyDraft,
+  tools: ToolRegistryItem[],
+  copy: ReturnType<typeof agentsRouteCopy>,
+): AgentCapabilityPreview {
+  const allowed = new Set(draft.allowedTools);
+  const blocked = new Set(draft.blockedTools);
+  const highRiskAllowed = tools.filter((tool) => allowed.has(tool.name) && (tool.permissionTier === "high" || (tool.riskTags ?? []).length > 0)).length;
+  const explicitAllowed = tools.filter((tool) => allowed.has(tool.name) && tool.permissionPolicy?.requiresExplicitAllow).length;
+  return {
+    effectiveAllowed: draft.allowedTools.length,
+    preferred: draft.preferredTools.length,
+    blocked: draft.blockedTools.length,
+    inherited: Math.max(0, tools.length - allowed.size - blocked.size),
+    highRiskAllowed,
+    explicitAllowed,
+    writeBoundaryLabel: draft.writeScopes.includes("shared") ? copy.sharedWriteScope : copy.privateWriteScope,
+  };
 }
 
 function configDraftEqualsDraft(left: AgentConfigDraft, right: AgentConfigDraft) {
@@ -1273,6 +1514,9 @@ function defaultMemoryPolicy(policyId = ""): MemoryPolicy {
     summariesPath: "",
     readSharedGroups: [],
     writeSharedGroups: [],
+    readKnowledgeBaseIds: [],
+    proposeKnowledgeBaseIds: [],
+    reviewKnowledgeBaseIds: [],
   };
 }
 
@@ -1280,18 +1524,36 @@ function memoryPolicyDraftFromAgent(agent: AgentConfigWorkspaceAgent | null | un
   return {
     readSharedGroups: sortedIds(agent?.memoryPolicy?.readSharedGroups ?? []),
     writeSharedGroups: sortedIds(agent?.memoryPolicy?.writeSharedGroups ?? []),
+    readKnowledgeBaseIds: sortedIds(agent?.memoryPolicy?.readKnowledgeBaseIds ?? []),
+    proposeKnowledgeBaseIds: sortedIds(agent?.memoryPolicy?.proposeKnowledgeBaseIds ?? []),
+    reviewKnowledgeBaseIds: sortedIds(agent?.memoryPolicy?.reviewKnowledgeBaseIds ?? []),
     newReadGroup: "",
     newWriteGroup: "",
+    newReadKnowledgeBaseId: "",
+    newProposeKnowledgeBaseId: "",
+    newReviewKnowledgeBaseId: "",
   };
 }
 
 function memoryPolicyDraftEqualsAgent(draft: AgentMemoryPolicyDraft, agent: AgentConfigWorkspaceAgent | null | undefined) {
   const base = memoryPolicyDraftFromAgent(agent);
-  return sameStringSet(draft.readSharedGroups, base.readSharedGroups) && sameStringSet(draft.writeSharedGroups, base.writeSharedGroups);
+  return (
+    sameStringSet(draft.readSharedGroups, base.readSharedGroups)
+    && sameStringSet(draft.writeSharedGroups, base.writeSharedGroups)
+    && sameStringSet(draft.readKnowledgeBaseIds, base.readKnowledgeBaseIds)
+    && sameStringSet(draft.proposeKnowledgeBaseIds, base.proposeKnowledgeBaseIds)
+    && sameStringSet(draft.reviewKnowledgeBaseIds, base.reviewKnowledgeBaseIds)
+  );
 }
 
 function memoryPolicyDraftEqualsDraft(left: AgentMemoryPolicyDraft, right: AgentMemoryPolicyDraft) {
-  return sameStringSet(left.readSharedGroups, right.readSharedGroups) && sameStringSet(left.writeSharedGroups, right.writeSharedGroups);
+  return (
+    sameStringSet(left.readSharedGroups, right.readSharedGroups)
+    && sameStringSet(left.writeSharedGroups, right.writeSharedGroups)
+    && sameStringSet(left.readKnowledgeBaseIds, right.readKnowledgeBaseIds)
+    && sameStringSet(left.proposeKnowledgeBaseIds, right.proposeKnowledgeBaseIds)
+    && sameStringSet(left.reviewKnowledgeBaseIds, right.reviewKnowledgeBaseIds)
+  );
 }
 
 function sharedGroupCandidates(workspace: AgentConfigWorkspace | undefined, selectedAgent: AgentConfigWorkspaceAgent | null | undefined) {
@@ -1425,16 +1687,19 @@ function agentConfigPanes(copy: ReturnType<typeof agentsRouteCopy>, agent: Agent
   label: string;
   count: number;
 }> {
+  const configCount = (agent?.health.length ?? 0)
+    + (agent?.toolPolicy?.allowedTools?.length ?? 0)
+    + (agent?.toolPolicy?.blockedTools?.length ?? 0)
+    + (agent?.memoryPolicy?.readSharedGroups?.length ?? 0)
+    + (agent?.memoryPolicy?.writeSharedGroups?.length ?? 0)
+    + (agent?.memoryPolicy?.readKnowledgeBaseIds?.length ?? 0)
+    + (agent?.memoryPolicy?.proposeKnowledgeBaseIds?.length ?? 0)
+    + (agent?.memoryPolicy?.reviewKnowledgeBaseIds?.length ?? 0)
+    + (agent ? uniqueModes(agent).length : 0)
+    + (agent?.references.length ?? 0);
   return [
     { id: "overview", label: copy.overviewPane, count: agent ? uniqueModes(agent).length : 0 },
-    { id: "config", label: copy.configTitle, count: agent?.health.length ?? 0 },
-    {
-      id: "policies",
-      label: copy.policiesPane,
-      count: (agent?.toolPolicy?.allowedTools?.length ?? 0) + (agent?.toolPolicy?.blockedTools?.length ?? 0)
-        + (agent?.memoryPolicy?.readSharedGroups?.length ?? 0) + (agent?.memoryPolicy?.writeSharedGroups?.length ?? 0),
-    },
-    { id: "membership", label: copy.membershipPane, count: agent?.references.length ?? 0 },
+    { id: "config", label: copy.configTitle, count: configCount },
     { id: "activity", label: copy.activityPane, count: (agent?.agentInboxPendingCount ?? 0) + (agent?.groupContextEvents?.length ?? 0) },
   ];
 }
@@ -1456,6 +1721,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
           status: "状态",
           mode: "运行模式",
           reference: "引用关系",
+          management: "管理任务",
         },
         groupLabels: {
           active: "活跃 Agent",
@@ -1475,6 +1741,18 @@ function agentsRouteCopy(lang: "zh" | "en") {
           group_chat: "被一个或多个群聊引用的 Agent。",
           team: "被一个或多个团队画布引用的 Agent。",
         } as Record<string, string>,
+        managementFilterMissingPersona: "未配置人物",
+        managementFilterMissingPersonaHint: "缺少性别、年龄、沟通风格、背景或专长等人物档案。",
+        managementFilterMissingTask: "未配置任务",
+        managementFilterMissingTaskHint: "缺少使命、职责、适合任务、完成标准或交接说明。",
+        managementFilterMissingTools: "工具权限为空",
+        managementFilterMissingToolsHint: "缺少工具策略、允许/优先/禁用工具或写入边界。",
+        managementFilterNoTeam: "无团队归属",
+        managementFilterNoTeamHint: "尚未被任何团队画布引用，适合继续分配组织位置。",
+        managementFilterPendingInbox: "有待处理消息",
+        managementFilterPendingInboxHint: "Agent inbox 仍有待处理消息，需要进入运行页处理。",
+        managementFilterMaintenance: "维护/健康处理",
+        managementFilterMaintenanceHint: "存在健康问题或归档状态，需要进入维护区处理。",
         createAgent: "新增 Agent",
         createAgentTitle: "新增长期 Agent",
         createAgentHint: "新 Agent 会创建一个直连会话，并保留独立工作区、记忆策略和工具策略。",
@@ -1484,6 +1762,26 @@ function agentsRouteCopy(lang: "zh" | "en") {
         createAgentRolePlaceholder: "可选，例如 research_reviewer",
         cancelCreate: "取消",
         creatingAgent: "创建中...",
+        resetAgent: "重置调试状态",
+        resettingAgent: "重置中...",
+        resetAgentTitle: "调试重置",
+        resetAgentHint: "默认清理该 Agent 的运行痕迹，并重建一个干净的直连会话；不会删除/归档 Agent，也不会移出团队、群聊或模式绑定。",
+        resetAgentConfirm: "确认重置 {name}？默认会清理运行痕迹并重建直连会话，团队、群聊和模式绑定会保留；勾选的高级项会恢复为空档案或默认策略。",
+        resetAgentSuccess: "已重置 Agent 调试状态",
+        resetClearRuntimeState: "清理运行痕迹",
+        resetClearRuntimeStateHint: "删除该 Agent 私有工作区的 inbox、outbox、events、tmp、logs、runs、scratch、artifacts；保留 memory。",
+        resetDirectSession: "重建直连会话",
+        resetDirectSessionHint: "删除旧用户直聊会话和消息，创建新的空 directSessionId，并切到新会话；不影响群聊历史。",
+        resetPersonaProfile: "重置人物档案",
+        resetPersonaProfileHint: "清空性别、年龄、称谓、性格、背景、专长、沟通风格等身份描述。",
+        resetTaskProfile: "重置任务档案",
+        resetTaskProfileHint: "清空使命、职责、适合/不适合任务、完成标准、交付物和交接说明。",
+        resetToolPolicy: "重置工具权限",
+        resetToolPolicyHint: "恢复为默认工具策略，移除该 Agent 私有工具允许、优先、禁用和工作区写入调整。",
+        resetMemoryPolicy: "重置记忆策略",
+        resetMemoryPolicyHint: "恢复该 Agent 私有记忆策略配置；不删除 memory 目录里的记忆内容。",
+        resetRuntimePolicy: "重置运行策略",
+        resetRuntimePolicyHint: "恢复子 Agent 委派、并发深度、唤醒和监督审批策略为默认值。",
         archiveAgent: "安全归档",
         archivingAgent: "归档中...",
         archiveAgentTitle: "安全删减",
@@ -1528,6 +1826,33 @@ function agentsRouteCopy(lang: "zh" | "en") {
         policyPending: "策略注册表待接入",
         noIssues: "当前没有明显健康问题。",
         routeHint: "这张卡片是 Agent 的唯一配置点；业务页面只引用这里的 Agent。",
+        managementBriefTitle: "管理完整度",
+        managementBriefHint: "按招人后最常见的配置顺序检查：人物、任务、工具、归属、运行。",
+        managementIdentity: "人物",
+        managementTask: "任务",
+        managementTools: "工具",
+        managementMembership: "归属",
+        managementRuntime: "运行",
+        nextActionsTitle: "下一步建议",
+        nextAllReady: "关键配置已齐，可以直接在团队或会话中使用。",
+        nextSetupIdentity: "补齐人物档案",
+        nextSetupIdentityHint: "让顾问和用户知道这个 Agent 的性格、背景、专长与协作方式。",
+        nextSetupTask: "补齐任务档案",
+        nextSetupTaskHint: "明确它适合承担什么任务、产出什么交付物、何时需要交接。",
+        nextSetupTools: "配置工具能力包",
+        nextSetupToolsHint: "选择核心/科研/协作等工具包，并检查高风险工具授权。",
+        nextSetupMembership: "绑定团队归属",
+        nextSetupMembershipHint: "把它放进团队画布，形成可观察的组织结构。",
+        nextHandleInbox: "处理待办消息",
+        nextHandleInboxHint: "运行态里有其他 Agent 或群聊留下的消息，先处理再继续配置。",
+        capabilityPreviewTitle: "实际能力预览",
+        capabilityPreviewHint: "这里按当前草稿估算 Agent 真正能用、优先用、被禁用和需要注意的工具边界。",
+        effectiveAllowedTools: "实际允许",
+        highRiskAllowedTools: "高风险允许",
+        explicitAllowedTools: "显式授权",
+        writeBoundaryPreview: "写入边界",
+        maintenanceTitle: "维护与危险操作",
+        maintenanceHint: "调试重置、归档和彻底删除集中在这里；普通身份、任务、工具配置不和删除动作混在一起。",
         healthReason: "原因",
         healthNextStep: "下一步",
         configGuideTitle: "这页先回答三个问题",
@@ -1584,7 +1909,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         policiesPane: "策略",
         membershipPane: "归属",
         activityPane: "运行",
-        configTitle: "基础配置",
+        configTitle: "配置",
         saveConfig: "保存配置",
         resetConfig: "重置",
         savingConfig: "保存中...",
@@ -1635,6 +1960,11 @@ function agentsRouteCopy(lang: "zh" | "en") {
         savingMemoryPolicy: "保存记忆中...",
         readSharedGroups: "可读共享组",
         writeSharedGroups: "可写共享组",
+        readKnowledgeBaseIds: "可读知识库",
+        proposeKnowledgeBaseIds: "可提交知识库",
+        reviewKnowledgeBaseIds: "可审核知识库",
+        knowledgeBasePlaceholder: "输入知识库 ID，例如 kb-research",
+        noKnowledgeBaseIds: "未限定知识库，默认按团队成员和角色判定。",
         addSharedGroup: "添加",
         sharedGroupPlaceholder: "输入共享组，例如 project",
         noSharedGroups: "未配置共享组。",
@@ -1697,6 +2027,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
           status: "Status",
           mode: "Runtime mode",
           reference: "References",
+          management: "Management tasks",
         },
         groupLabels: {
           active: "Active Agents",
@@ -1716,6 +2047,18 @@ function agentsRouteCopy(lang: "zh" | "en") {
           group_chat: "Agents referenced by one or more group chats.",
           team: "Agents referenced by one or more team canvases.",
         } as Record<string, string>,
+        managementFilterMissingPersona: "Missing persona",
+        managementFilterMissingPersonaHint: "Missing gender, age, communication style, background, expertise, or identity notes.",
+        managementFilterMissingTask: "Missing task profile",
+        managementFilterMissingTaskHint: "Missing mission, responsibilities, task fit, success criteria, deliverables, or handoff notes.",
+        managementFilterMissingTools: "Empty tool permissions",
+        managementFilterMissingToolsHint: "Missing tool policy, allow/prefer/block choices, or write boundary.",
+        managementFilterNoTeam: "No team",
+        managementFilterNoTeamHint: "Not referenced by any team canvas yet.",
+        managementFilterPendingInbox: "Pending messages",
+        managementFilterPendingInboxHint: "Agent inbox has pending messages to handle in Activity.",
+        managementFilterMaintenance: "Maintenance",
+        managementFilterMaintenanceHint: "Has health issues or archived state that needs maintenance.",
         createAgent: "New Agent",
         createAgentTitle: "Create persistent Agent",
         createAgentHint: "A new Agent gets a direct chat session plus its own workspace, memory policy, and tool policy.",
@@ -1725,6 +2068,26 @@ function agentsRouteCopy(lang: "zh" | "en") {
         createAgentRolePlaceholder: "Optional, e.g. research_reviewer",
         cancelCreate: "Cancel",
         creatingAgent: "Creating...",
+        resetAgent: "Reset debug state",
+        resettingAgent: "Resetting...",
+        resetAgentTitle: "Debug reset",
+        resetAgentHint: "By default this clears runtime traces and rebuilds a clean direct session. It does not delete/archive the Agent or remove team, room, or mode bindings.",
+        resetAgentConfirm: "Reset {name}? Runtime traces are cleared and the direct session is rebuilt while team, room, and mode bindings are preserved. Checked advanced items return to empty profiles or default policies.",
+        resetAgentSuccess: "Agent debug state reset",
+        resetClearRuntimeState: "Clear runtime traces",
+        resetClearRuntimeStateHint: "Deletes inbox, outbox, events, tmp, logs, runs, scratch, and artifacts in the Agent private workspace; keeps memory.",
+        resetDirectSession: "Rebuild direct session",
+        resetDirectSessionHint: "Deletes the old direct chat and messages, creates a clean directSessionId, and switches to it; group history is untouched.",
+        resetPersonaProfile: "Reset persona profile",
+        resetPersonaProfileHint: "Clears gender, age, pronouns, personality, background, expertise, and communication style.",
+        resetTaskProfile: "Reset task profile",
+        resetTaskProfileHint: "Clears mission, responsibilities, preferred/avoided tasks, success criteria, deliverables, and handoff notes.",
+        resetToolPolicy: "Reset tool policy",
+        resetToolPolicyHint: "Restores the default tool policy and removes this Agent's private allow/prefer/block/write-scope changes.",
+        resetMemoryPolicy: "Reset memory policy",
+        resetMemoryPolicyHint: "Restores the Agent private memory policy config; does not delete files under the memory directory.",
+        resetRuntimePolicy: "Reset runtime policy",
+        resetRuntimePolicyHint: "Restores delegation, concurrency/depth, wake, and supervision-review settings to defaults.",
         archiveAgent: "Safe archive",
         archivingAgent: "Archiving...",
         archiveAgentTitle: "Safe removal",
@@ -1769,6 +2132,33 @@ function agentsRouteCopy(lang: "zh" | "en") {
         policyPending: "Policy registry pending",
         noIssues: "No obvious health issues.",
         routeHint: "This card is the single Agent config point. Product pages should only reference Agents from here.",
+        managementBriefTitle: "Management readiness",
+        managementBriefHint: "Checks the usual post-hiring setup order: persona, task, tools, membership, runtime.",
+        managementIdentity: "Persona",
+        managementTask: "Task",
+        managementTools: "Tools",
+        managementMembership: "Membership",
+        managementRuntime: "Runtime",
+        nextActionsTitle: "Next actions",
+        nextAllReady: "Core configuration is ready for teams or chat.",
+        nextSetupIdentity: "Complete persona",
+        nextSetupIdentityHint: "Give users and advisors a clear identity, background, expertise, and collaboration style.",
+        nextSetupTask: "Complete task profile",
+        nextSetupTaskHint: "Clarify what this Agent should take, deliver, avoid, and hand off.",
+        nextSetupTools: "Configure tool package",
+        nextSetupToolsHint: "Pick core/research/collaboration packages and review high-risk grants.",
+        nextSetupMembership: "Bind team membership",
+        nextSetupMembershipHint: "Place this Agent on a team canvas so the organization remains observable.",
+        nextHandleInbox: "Handle pending messages",
+        nextHandleInboxHint: "Other Agents or rooms left pending messages; process them before further setup.",
+        capabilityPreviewTitle: "Effective capability preview",
+        capabilityPreviewHint: "Estimated from the current draft: usable, preferred, blocked, and risky tool boundaries.",
+        effectiveAllowedTools: "Effective allowed",
+        highRiskAllowedTools: "High-risk allowed",
+        explicitAllowedTools: "Explicit grants",
+        writeBoundaryPreview: "Write boundary",
+        maintenanceTitle: "Maintenance and dangerous actions",
+        maintenanceHint: "Debug reset, archive, and purge live here so normal identity/task/tool editing stays separate from destructive actions.",
         healthReason: "Reason",
         healthNextStep: "Next step",
         configGuideTitle: "This page answers three questions first",
@@ -1825,7 +2215,7 @@ function agentsRouteCopy(lang: "zh" | "en") {
         policiesPane: "Policies",
         membershipPane: "Membership",
         activityPane: "Activity",
-        configTitle: "Base config",
+        configTitle: "Config",
         saveConfig: "Save config",
         resetConfig: "Reset",
         savingConfig: "Saving...",
@@ -1876,6 +2266,11 @@ function agentsRouteCopy(lang: "zh" | "en") {
         savingMemoryPolicy: "Saving memory...",
         readSharedGroups: "Readable shared groups",
         writeSharedGroups: "Writable shared groups",
+        readKnowledgeBaseIds: "Readable knowledge bases",
+        proposeKnowledgeBaseIds: "Proposal knowledge bases",
+        reviewKnowledgeBaseIds: "Review knowledge bases",
+        knowledgeBasePlaceholder: "Enter knowledge base ID, e.g. kb-research",
+        noKnowledgeBaseIds: "No knowledge base limit; team membership and roles apply.",
         addSharedGroup: "Add",
         sharedGroupPlaceholder: "Enter a shared group, e.g. project",
         noSharedGroups: "No shared groups configured.",
@@ -1947,6 +2342,7 @@ export function AgentsRoute() {
   const [memoryPolicyDraft, setMemoryPolicyDraft] = useState<AgentMemoryPolicyDraft>(() => memoryPolicyDraftFromAgent(null));
   const [delegationPolicyDraft, setDelegationPolicyDraft] = useState<AgentDelegationPolicyDraft>(() => delegationPolicyDraftFromAgent(null));
   const [supervisionPolicyDraft, setSupervisionPolicyDraft] = useState<AgentSupervisionPolicyDraft>(() => supervisionPolicyDraftFromAgent(null));
+  const [resetOptions, setResetOptions] = useState<AgentResetOptions>(DEFAULT_AGENT_RESET_OPTIONS);
   const [toolSearchText, setToolSearchText] = useState("");
   const [focusedMessageId, setFocusedMessageId] = useState("");
   const [avatarEditorOpen, setAvatarEditorOpen] = useState(false);
@@ -1978,18 +2374,31 @@ export function AgentsRoute() {
   const workspace = workspaceQuery.data;
   const tools = toolsQuery.data?.tools ?? [];
   const groups = workspace?.groups ?? [];
+  const managementFilterGroups = useMemo(
+    () => buildManagementFilterGroups(workspace?.agents ?? [], copy),
+    [copy, workspace?.agents],
+  );
   const groupedFilters = useMemo(() => {
     const sectionOrder = ["status", "mode", "reference"] as const;
-    return sectionOrder
+    const defaultSections = sectionOrder
       .map((section) => ({
         id: section,
         label: copy.filterSections[section],
         groups: groups.filter((group) => groupSectionId(group) === section),
       }))
       .filter((section) => section.groups.length > 0);
-  }, [copy, groups]);
+    return [
+      ...defaultSections,
+      {
+        id: "management",
+        label: copy.filterSections.management,
+        groups: managementFilterGroups.filter((group) => group.count > 0),
+      },
+    ].filter((section) => section.groups.length > 0);
+  }, [copy, groups, managementFilterGroups]);
   const activeGroup = groups.find((group) => group.id === activeFilter);
-  const activeGroupLabel = groupDisplayLabel(activeGroup, copy);
+  const activeManagementGroup = managementFilterGroups.find((group) => group.id === activeFilter);
+  const activeGroupLabel = activeManagementGroup?.label ?? groupDisplayLabel(activeGroup, copy);
   const visibleAgents = useMemo(
     () => filterAgents(workspace, activeFilter, searchText),
     [activeFilter, searchText, workspace],
@@ -2021,6 +2430,11 @@ export function AgentsRoute() {
     [lang, toolPolicyDraft, visiblePolicyTools],
   );
   const selectedAgent = selectedAgentFromList(visibleAgents, selectedAgentId, workspace?.agents ?? [], activeFilter);
+  const managementBrief = useMemo(() => buildAgentManagementBrief(selectedAgent, copy, lang), [copy, lang, selectedAgent]);
+  const capabilityPreview = useMemo(
+    () => buildAgentCapabilityPreview(toolPolicyDraft, visiblePolicyTools, copy),
+    [copy, toolPolicyDraft, visiblePolicyTools],
+  );
   const memoryGroupOptions = useMemo(() => sharedGroupCandidates(workspace, selectedAgent), [selectedAgent?.agentId, workspace?.generatedAt]);
   const panes = useMemo(() => agentConfigPanes(copy, selectedAgent), [copy, selectedAgent]);
   const agentRunsQuery = useQuery({
@@ -2100,6 +2514,7 @@ export function AgentsRoute() {
 
   useEffect(() => {
     setActivePane("overview");
+    setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
   }, [selectedAgent?.agentId]);
 
   useEffect(() => {
@@ -2131,6 +2546,7 @@ export function AgentsRoute() {
   const canSaveRuntimePolicy = Boolean(selectedAgent?.agentId && runtimePolicyDirty);
   const canCreateAgent = createDraftReady(createDraft);
   const selectedAgentProtected = agentArchiveProtected(selectedAgent);
+  const canResetAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived");
   const canArchiveAgent = Boolean(selectedAgent?.agentId && selectedAgent.status !== "archived" && !selectedAgentProtected);
   const canPurgeAgent = Boolean(selectedAgent?.agentId && selectedAgent.status === "archived" && !selectedAgentProtected);
 
@@ -2262,6 +2678,30 @@ export function AgentsRoute() {
         text: lang === "zh" ? "已彻底删除归档 Agent" : "Permanently deleted archived Agent",
       });
       void chatWorkspaceCache.afterAgentArchived();
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const resetAgentMutation = useMutation({
+    mutationFn: (payload: { agentId: string; options: AgentResetOptions }) =>
+      fetchJson<{ agent: AgentConfigWorkspaceAgent; resetSummary: Record<string, unknown> }>(
+        `/api/agents/${encodeURIComponent(payload.agentId)}/reset`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload.options),
+        },
+      ),
+    onSuccess: (result) => {
+      const agent = result.agent;
+      setNotice({ tone: "success", text: copy.resetAgentSuccess });
+      setResetOptions(DEFAULT_AGENT_RESET_OPTIONS);
+      void chatWorkspaceCache.afterAgentWorkspaceChanged();
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuns(agent.agentId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentMessages(agent.agentId, "pending") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.agentRuntimeEvidence(agent.agentId) });
     },
     onError: (error) => {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
@@ -2422,6 +2862,9 @@ export function AgentsRoute() {
             ...(payload.basePolicy ?? {}),
             readSharedGroups: sortedIds(payload.draft.readSharedGroups),
             writeSharedGroups: sortedIds(payload.draft.writeSharedGroups),
+            readKnowledgeBaseIds: sortedIds(payload.draft.readKnowledgeBaseIds),
+            proposeKnowledgeBaseIds: sortedIds(payload.draft.proposeKnowledgeBaseIds),
+            reviewKnowledgeBaseIds: sortedIds(payload.draft.reviewKnowledgeBaseIds),
           },
         }),
       }),
@@ -2617,6 +3060,33 @@ export function AgentsRoute() {
     }));
   };
 
+  const addKnowledgeBaseId = (
+    field: "readKnowledgeBaseIds" | "proposeKnowledgeBaseIds" | "reviewKnowledgeBaseIds",
+    value: string,
+  ) => {
+    const normalized = String(value || "").trim();
+    if (!normalized) {
+      return;
+    }
+    setMemoryPolicyDraft((current) => ({
+      ...current,
+      [field]: sortedIds([...current[field], normalized]),
+      newReadKnowledgeBaseId: field === "readKnowledgeBaseIds" ? "" : current.newReadKnowledgeBaseId,
+      newProposeKnowledgeBaseId: field === "proposeKnowledgeBaseIds" ? "" : current.newProposeKnowledgeBaseId,
+      newReviewKnowledgeBaseId: field === "reviewKnowledgeBaseIds" ? "" : current.newReviewKnowledgeBaseId,
+    }));
+  };
+
+  const removeKnowledgeBaseId = (
+    field: "readKnowledgeBaseIds" | "proposeKnowledgeBaseIds" | "reviewKnowledgeBaseIds",
+    value: string,
+  ) => {
+    setMemoryPolicyDraft((current) => ({
+      ...current,
+      [field]: current[field].filter((knowledgeBaseId) => knowledgeBaseId !== value),
+    }));
+  };
+
   const updateDelegationPolicyDraft = (patch: Partial<AgentDelegationPolicyDraft>) => {
     setDelegationPolicyDraft((current) => ({ ...current, ...patch }));
   };
@@ -2758,6 +3228,21 @@ export function AgentsRoute() {
       return;
     }
     purgeAgentMutation.mutate({ agentId: selectedAgent.agentId });
+  };
+
+  const updateResetOption = (key: keyof AgentResetOptions, value: boolean) => {
+    setResetOptions((current) => ({ ...current, [key]: value }));
+  };
+
+  const resetSelectedAgent = () => {
+    if (!selectedAgent || !canResetAgent || resetAgentMutation.isPending) {
+      return;
+    }
+    const confirmed = window.confirm(copy.resetAgentConfirm.replace("{name}", agentLabel(selectedAgent)));
+    if (!confirmed) {
+      return;
+    }
+    resetAgentMutation.mutate({ agentId: selectedAgent.agentId, options: resetOptions });
   };
 
   const resetSelectedAgentAvatar = () => {
@@ -2903,11 +3388,14 @@ export function AgentsRoute() {
                         key={group.id}
                         type="button"
                         className={active ? `${styles.groupButton} ${styles.groupButtonActive}` : styles.groupButton}
-                        onClick={() => setActiveFilter(group.id)}
+                        onClick={() => {
+                          setActiveFilter(group.id);
+                          setSelectedAgentId("");
+                        }}
                         title={description}
                       >
                         <span>
-                          {section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
+                          {section.id === "management" ? <CheckCircle2 size={15} /> : section.id === "reference" ? <Users size={15} /> : section.id === "mode" ? <Layers3 size={15} /> : group.id === "needs_review" ? <AlertTriangle size={15} /> : <Bot size={15} />}
                           {groupDisplayLabel(group, copy)}
                         </span>
                         <strong>{group.count}</strong>
@@ -3210,6 +3698,43 @@ export function AgentsRoute() {
                 ))}
               </nav>
 
+              <section className={styles.managementBriefPanel}>
+                <div className={styles.managementBriefHeader}>
+                  <div>
+                    <p className={styles.panelEyebrow}>{copy.managementBriefTitle}</p>
+                    <h3>{managementBrief.statusLabel}</h3>
+                    <span>{managementBrief.statusDetail} · {copy.managementBriefHint}</span>
+                  </div>
+                  <strong>{managementBrief.score}</strong>
+                </div>
+                <div className={styles.managementChecklist}>
+                  {managementBrief.items.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={item.complete ? styles.managementChecklistDone : styles.managementChecklistMissing}
+                      onClick={() => setActivePane(item.pane)}
+                    >
+                      {item.complete ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className={styles.nextActionList}>
+                  <span>{copy.nextActionsTitle}</span>
+                  {managementBrief.actions.length ? (
+                    managementBrief.actions.map((action) => (
+                      <button key={action.id} type="button" onClick={() => setActivePane(action.pane)}>
+                        <strong>{action.label}</strong>
+                        <small>{action.detail}</small>
+                      </button>
+                    ))
+                  ) : (
+                    <p>{copy.nextAllReady}</p>
+                  )}
+                </div>
+              </section>
+
               {activePane === "overview" ? (
                 <>
                   <div className={styles.factGrid}>
@@ -3267,22 +3792,23 @@ export function AgentsRoute() {
                     <div className={styles.panelHeader}>
                       <div>
                         <p className={styles.panelEyebrow}>{copy.territory}</p>
-                        <h3>{selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-"}</h3>
+                        <h3>{selectedAgent.workspaceTerritory?.defaultWriteScope || "private"}</h3>
                       </div>
                       <FolderTree size={16} />
                     </div>
-                    <div className={styles.pathList}>
-                      <span>{copy.privateTerritory}</span>
-                      <code>{selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-"}</code>
-                      <span>{copy.sharedTerritory}</span>
-                      <code>{selectedAgent.workspaceTerritory?.sharedRoot || "workspace/shared"}</code>
-                      <span>{copy.writeBoundary}: {(selectedAgent.workspaceTerritory?.writeScopes ?? ["private"]).join(" / ")}</span>
-                      {selectedAgent.workspaceTerritory?.legacyWorkspacePath ? (
-                        <>
-                          <span>{copy.territoryLegacy}</span>
-                          <code>{selectedAgent.workspaceTerritory.legacyWorkspacePath}</code>
-                        </>
-                      ) : null}
+                    <div className={styles.boundarySummaryGrid}>
+                      <span>
+                        <strong>{copy.privateTerritory}</strong>
+                        <small>{selectedAgent.workspaceTerritory?.privateRoot || selectedAgent.workspacePath || "-"}</small>
+                      </span>
+                      <span>
+                        <strong>{copy.sharedTerritory}</strong>
+                        <small>{selectedAgent.workspaceTerritory?.sharedRoot || "workspace/shared"}</small>
+                      </span>
+                      <span>
+                        <strong>{copy.writeBoundary}</strong>
+                        <small>{(selectedAgent.workspaceTerritory?.writeScopes ?? ["private"]).join(" / ")}</small>
+                      </span>
                     </div>
                   </section>
 
@@ -3693,6 +4219,14 @@ export function AgentsRoute() {
                 )}
               </section>
 
+              <section className={styles.maintenanceIntro}>
+                <div>
+                  <p className={styles.panelEyebrow}>{copy.maintenanceTitle}</p>
+                  <h3>{copy.maintenanceTitle}</h3>
+                </div>
+                <p>{copy.maintenanceHint}</p>
+              </section>
+
               <section className={selectedAgentProtected ? styles.protectedZone : styles.dangerZone}>
                 <div className={styles.panelHeader}>
                   <div>
@@ -3748,10 +4282,112 @@ export function AgentsRoute() {
                   </div>
                 )}
               </section>
+              {selectedAgent.status !== "archived" ? (
+                <section className={styles.resetZone}>
+                  <div className={styles.panelHeader}>
+                    <div>
+                      <p className={styles.panelEyebrow}>{copy.resetAgentTitle}</p>
+                      <h3>{copy.resetAgent}</h3>
+                    </div>
+                    <RefreshCw size={16} />
+                  </div>
+                  <p>{copy.resetAgentHint}</p>
+                  <div className={styles.resetOptionGrid}>
+                    <label className={styles.resetOptionField}>
+                      <input
+                        type="checkbox"
+                        checked={resetOptions.clearRuntimeState}
+                        onChange={(event) => updateResetOption("clearRuntimeState", event.target.checked)}
+                      />
+                      <span>
+                        <strong>{copy.resetClearRuntimeState}</strong>
+                        <small>{copy.resetClearRuntimeStateHint}</small>
+                      </span>
+                    </label>
+                    <label className={styles.resetOptionField}>
+                      <input
+                        type="checkbox"
+                        checked={resetOptions.resetDirectSession}
+                        onChange={(event) => updateResetOption("resetDirectSession", event.target.checked)}
+                      />
+                      <span>
+                        <strong>{copy.resetDirectSession}</strong>
+                        <small>{copy.resetDirectSessionHint}</small>
+                      </span>
+                    </label>
+                    <label className={styles.resetOptionField}>
+                      <input
+                        type="checkbox"
+                        checked={resetOptions.resetPersonaProfile}
+                        onChange={(event) => updateResetOption("resetPersonaProfile", event.target.checked)}
+                      />
+                      <span>
+                        <strong>{copy.resetPersonaProfile}</strong>
+                        <small>{copy.resetPersonaProfileHint}</small>
+                      </span>
+                    </label>
+                    <label className={styles.resetOptionField}>
+                      <input
+                        type="checkbox"
+                        checked={resetOptions.resetTaskProfile}
+                        onChange={(event) => updateResetOption("resetTaskProfile", event.target.checked)}
+                      />
+                      <span>
+                        <strong>{copy.resetTaskProfile}</strong>
+                        <small>{copy.resetTaskProfileHint}</small>
+                      </span>
+                    </label>
+                    <label className={styles.resetOptionField}>
+                      <input
+                        type="checkbox"
+                        checked={resetOptions.resetToolPolicy}
+                        onChange={(event) => updateResetOption("resetToolPolicy", event.target.checked)}
+                      />
+                      <span>
+                        <strong>{copy.resetToolPolicy}</strong>
+                        <small>{copy.resetToolPolicyHint}</small>
+                      </span>
+                    </label>
+                    <label className={styles.resetOptionField}>
+                      <input
+                        type="checkbox"
+                        checked={resetOptions.resetMemoryPolicy}
+                        onChange={(event) => updateResetOption("resetMemoryPolicy", event.target.checked)}
+                      />
+                      <span>
+                        <strong>{copy.resetMemoryPolicy}</strong>
+                        <small>{copy.resetMemoryPolicyHint}</small>
+                      </span>
+                    </label>
+                    <label className={styles.resetOptionField}>
+                      <input
+                        type="checkbox"
+                        checked={resetOptions.resetRuntimePolicy}
+                        onChange={(event) => updateResetOption("resetRuntimePolicy", event.target.checked)}
+                      />
+                      <span>
+                        <strong>{copy.resetRuntimePolicy}</strong>
+                        <small>{copy.resetRuntimePolicyHint}</small>
+                      </span>
+                    </label>
+                  </div>
+                  <div className={styles.editorActions}>
+                    <button
+                      type="button"
+                      className={styles.secondaryButton}
+                      disabled={!canResetAgent || resetAgentMutation.isPending}
+                      onClick={resetSelectedAgent}
+                    >
+                      <RefreshCw size={15} />
+                      {resetAgentMutation.isPending ? copy.resettingAgent : copy.resetAgent}
+                    </button>
+                  </div>
+                </section>
+              ) : null}
                 </>
               ) : null}
 
-              {activePane === "policies" ? (
+              {activePane === "config" ? (
                 <>
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>
@@ -3770,6 +4406,19 @@ export function AgentsRoute() {
                   <span>{copy.inheritedTools}: <strong>{Math.max(0, visiblePolicyTools.length - toolPolicyDraft.allowedTools.length - toolPolicyDraft.blockedTools.length)}</strong></span>
                   <span>{copy.toolCategoryCount}: <strong>{visiblePolicyToolGroups.length}</strong></span>
                 </div>
+                <section className={styles.capabilityPreviewPanel}>
+                  <div>
+                    <span>{copy.capabilityPreviewTitle}</span>
+                    <small>{copy.capabilityPreviewHint}</small>
+                  </div>
+                  <strong>{copy.effectiveAllowedTools}: {capabilityPreview.effectiveAllowed}</strong>
+                  <strong>{copy.preferredTools}: {capabilityPreview.preferred}</strong>
+                  <strong>{copy.blockedTools}: {capabilityPreview.blocked}</strong>
+                  <strong>{copy.inheritedTools}: {capabilityPreview.inherited}</strong>
+                  <strong>{copy.highRiskAllowedTools}: {capabilityPreview.highRiskAllowed}</strong>
+                  <strong>{copy.explicitAllowedTools}: {capabilityPreview.explicitAllowed}</strong>
+                  <strong>{copy.writeBoundaryPreview}: {capabilityPreview.writeBoundaryLabel}</strong>
+                </section>
                 {toolBundles.length ? (
                   <section className={styles.toolBundlePanel}>
                     <div className={styles.toolBundlePanelHeader}>
@@ -3960,6 +4609,66 @@ export function AgentsRoute() {
                       </button>
                     </div>
                   </section>
+                  <section>
+                    <span>{copy.readKnowledgeBaseIds}</span>
+                    <div className={styles.tagList}>
+                      {memoryPolicyDraft.readKnowledgeBaseIds.length ? memoryPolicyDraft.readKnowledgeBaseIds.map((knowledgeBaseId) => (
+                        <button key={`kb-read:${knowledgeBaseId}`} type="button" onClick={() => removeKnowledgeBaseId("readKnowledgeBaseIds", knowledgeBaseId)}>
+                          {knowledgeBaseId} x
+                        </button>
+                      )) : <small>{copy.noKnowledgeBaseIds}</small>}
+                    </div>
+                    <div className={styles.inlineAdd}>
+                      <input
+                        value={memoryPolicyDraft.newReadKnowledgeBaseId}
+                        placeholder={copy.knowledgeBasePlaceholder}
+                        onChange={(event) => updateMemoryDraftField({ newReadKnowledgeBaseId: event.target.value })}
+                      />
+                      <button type="button" onClick={() => addKnowledgeBaseId("readKnowledgeBaseIds", memoryPolicyDraft.newReadKnowledgeBaseId)}>
+                        {copy.addSharedGroup}
+                      </button>
+                    </div>
+                  </section>
+                  <section>
+                    <span>{copy.proposeKnowledgeBaseIds}</span>
+                    <div className={styles.tagList}>
+                      {memoryPolicyDraft.proposeKnowledgeBaseIds.length ? memoryPolicyDraft.proposeKnowledgeBaseIds.map((knowledgeBaseId) => (
+                        <button key={`kb-propose:${knowledgeBaseId}`} type="button" onClick={() => removeKnowledgeBaseId("proposeKnowledgeBaseIds", knowledgeBaseId)}>
+                          {knowledgeBaseId} x
+                        </button>
+                      )) : <small>{copy.noKnowledgeBaseIds}</small>}
+                    </div>
+                    <div className={styles.inlineAdd}>
+                      <input
+                        value={memoryPolicyDraft.newProposeKnowledgeBaseId}
+                        placeholder={copy.knowledgeBasePlaceholder}
+                        onChange={(event) => updateMemoryDraftField({ newProposeKnowledgeBaseId: event.target.value })}
+                      />
+                      <button type="button" onClick={() => addKnowledgeBaseId("proposeKnowledgeBaseIds", memoryPolicyDraft.newProposeKnowledgeBaseId)}>
+                        {copy.addSharedGroup}
+                      </button>
+                    </div>
+                  </section>
+                  <section>
+                    <span>{copy.reviewKnowledgeBaseIds}</span>
+                    <div className={styles.tagList}>
+                      {memoryPolicyDraft.reviewKnowledgeBaseIds.length ? memoryPolicyDraft.reviewKnowledgeBaseIds.map((knowledgeBaseId) => (
+                        <button key={`kb-review:${knowledgeBaseId}`} type="button" onClick={() => removeKnowledgeBaseId("reviewKnowledgeBaseIds", knowledgeBaseId)}>
+                          {knowledgeBaseId} x
+                        </button>
+                      )) : <small>{copy.noKnowledgeBaseIds}</small>}
+                    </div>
+                    <div className={styles.inlineAdd}>
+                      <input
+                        value={memoryPolicyDraft.newReviewKnowledgeBaseId}
+                        placeholder={copy.knowledgeBasePlaceholder}
+                        onChange={(event) => updateMemoryDraftField({ newReviewKnowledgeBaseId: event.target.value })}
+                      />
+                      <button type="button" onClick={() => addKnowledgeBaseId("reviewKnowledgeBaseIds", memoryPolicyDraft.newReviewKnowledgeBaseId)}>
+                        {copy.addSharedGroup}
+                      </button>
+                    </div>
+                  </section>
                 </div>
                 <datalist id="agent-memory-groups">
                   {memoryGroupOptions.map((group) => <option key={group} value={group} />)}
@@ -3986,7 +4695,7 @@ export function AgentsRoute() {
                 </>
               ) : null}
 
-              {activePane === "membership" ? (
+              {activePane === "config" ? (
                 <>
               <section className={styles.configEditor}>
                 <div className={styles.panelHeader}>

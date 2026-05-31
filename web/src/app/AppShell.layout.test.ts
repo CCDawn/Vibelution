@@ -85,6 +85,9 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('"/api/runtime/restart"');
     expect(shellSource).toContain("restartWorkbenchLabel");
     expect(shellSource).toContain("beginRestart");
+    expect(shellSource).toContain("restartActiveWorkConfirmMessage");
+    expect(shellSource).toContain("confirmedActiveWork");
+    expect(shellSource).toContain("restart_blocked_active_work");
     expect(shellSource).toContain("requestWorkbenchExitGuard");
     expect(shellSource).toContain('requestWorkbenchExitGuard("restart"');
     expect(shellSource).toContain('requestWorkbenchExitGuard("shutdown"');

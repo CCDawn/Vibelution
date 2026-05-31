@@ -977,7 +977,7 @@
 
 .detailTabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   min-width: 0;
   padding: 4px;
@@ -992,7 +992,7 @@
   justify-items: center;
   gap: 2px;
   min-width: 0;
-  min-height: 32px;
+  min-height: 30px;
   padding: 5px 4px;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
@@ -1029,6 +1029,159 @@
 
 .detailTabActive strong {
   color: var(--accent-cool);
+}
+
+.managementBriefPanel {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-cool) 5%, var(--surface-card));
+}
+
+.managementBriefHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.managementBriefHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.managementBriefHeader h3,
+.managementBriefHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managementBriefHeader h3 {
+  margin: 0;
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+}
+
+.managementBriefHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.managementBriefHeader > strong {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  min-height: 28px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: var(--accent-cool);
+  font-size: 0.9rem;
+}
+
+.managementChecklist {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+}
+
+.managementChecklist button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 26px;
+  padding: 3px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+}
+
+.managementChecklist svg {
+  flex: 0 0 auto;
+}
+
+.managementChecklistDone svg {
+  color: var(--state-success);
+}
+
+.managementChecklistMissing svg {
+  color: var(--accent-warm);
+}
+
+.managementChecklist button span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.7rem;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.managementChecklist button:hover {
+  background: var(--surface-panel-hover);
+}
+
+.nextActionList {
+  display: grid;
+  grid-template-columns: auto repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 5px;
+  min-width: 0;
+}
+
+.nextActionList > span {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.nextActionList button,
+.nextActionList p {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  color: var(--fg-secondary);
+  text-align: left;
+}
+
+.nextActionList strong,
+.nextActionList small,
+.nextActionList p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nextActionList strong {
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+}
+
+.nextActionList small,
+.nextActionList p {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
 }
 
 .editorGrid {
@@ -1085,6 +1238,53 @@
 
 .policySummaryGrid strong {
   color: var(--fg-primary);
+}
+
+.capabilityPreviewPanel {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.35fr) repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 20%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--accent-warm) 5%, var(--surface-panel));
+}
+
+.capabilityPreviewPanel > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.capabilityPreviewPanel span,
+.capabilityPreviewPanel small,
+.capabilityPreviewPanel strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capabilityPreviewPanel span {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.capabilityPreviewPanel small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.capabilityPreviewPanel strong {
+  align-self: stretch;
+  padding: 5px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
 }
 
 .workspaceScopePanel {
@@ -2120,6 +2320,106 @@
   color: var(--accent-cool);
 }
 
+.maintenanceIntro {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.maintenanceIntro > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.maintenanceIntro h3,
+.maintenanceIntro p {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.maintenanceIntro h3 {
+  color: var(--fg-primary);
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.maintenanceIntro p {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  line-height: 1.36;
+}
+
+.resetZone {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--state-warning) 28%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--state-warning) 7%, var(--surface-card));
+}
+
+.resetZone svg {
+  color: var(--state-warning);
+}
+
+.resetOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.resetOptionField {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 58px;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+}
+
+.resetOptionField input {
+  margin-top: 3px;
+}
+
+.resetOptionField span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.resetOptionField strong,
+.resetOptionField small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.resetOptionField strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.resetOptionField small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.32;
+}
+
 .dangerButton {
   border: 1px solid color-mix(in srgb, var(--state-error) 40%, transparent);
   background: color-mix(in srgb, var(--state-error) 10%, var(--surface-panel));
@@ -2239,7 +2539,8 @@
 .pillList,
 .referenceList,
 .issueList,
-.pathList {
+.pathList,
+.boundarySummaryGrid {
   display: grid;
   align-content: start;
   gap: 5px;
@@ -2249,6 +2550,38 @@
 .pillList {
   display: flex;
   flex-wrap: wrap;
+}
+
+.boundarySummaryGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.boundarySummaryGrid span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.boundarySummaryGrid strong,
+.boundarySummaryGrid small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boundarySummaryGrid strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.boundarySummaryGrid small {
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
 }
 
 .referenceItem,
@@ -2410,6 +2743,7 @@
   .editorGrid,
   .createAgentGrid,
   .toggleGrid,
+  .resetOptionGrid,
   .workspaceScopePanel,
   .configGuideGrid,
   .toolBundleList,

@@ -413,6 +413,55 @@ def delete_chat_room(room_id: str) -> dict[str, Any]:
     return {"deleted": True, "roomId": normalized_room_id}
 
 
+def reset_chat_room(room_id: str) -> dict[str, Any]:
+    """Clear one room's discussion history while keeping its members and settings."""
+
+    lang = get_web_language()
+    normalized_room_id = str(room_id or "").strip()
+    with _CHAT_ROOM_LOCK:
+        state = _store().load()
+        room = _find_room(state, normalized_room_id)
+        if room is None:
+            raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
+        _raise_if_room_busy(room)
+        old_rounds = [item for item in list(room.get("rounds") or []) if isinstance(item, dict)]
+        cleared_round_count = len(old_rounds)
+        cleared_message_count = sum(
+            len([message for message in list(item.get("messages") or []) if isinstance(message, dict)])
+            for item in old_rounds
+        )
+        now = utc_now_iso()
+        room["rounds"] = []
+        room["status"] = "ready"
+        room["activeRoundId"] = ""
+        room["updatedAt"] = now
+        _store().save(state)
+        room_payload = dict(room)
+
+    session_cleanup = _remove_group_room_transcripts_from_participant_sessions(room_payload, normalized_room_id)
+    group_context_cleanup = _disable_group_context_for_room(
+        normalized_room_id,
+    )
+    _record_room_event(
+        "room",
+        "chat_room.reset",
+        room_payload,
+        fields={
+            "clearedRoundCount": cleared_round_count,
+            "clearedMessageCount": cleared_message_count,
+            "participantCount": len(room_payload.get("participants") or []),
+            "clearedSessionTranscriptCount": session_cleanup.get("removedMessageCount", 0),
+            "cleanedSessionCount": session_cleanup.get("changedSessionCount", 0),
+            "disabledGroupContextEventCount": group_context_cleanup.get("disabledEventCount", 0),
+            "disabledGroupContextAgentCount": group_context_cleanup.get("changedAgentCount", 0),
+        },
+        outcome="reset",
+        lifecycle=True,
+    )
+    _publish_chat_room_detail_snapshot(normalized_room_id)
+    return _room_to_api(room_payload)
+
+
 def create_chat_room(
     *,
     title: str = "",
@@ -1672,6 +1721,83 @@ def _sync_group_round_to_participant_sessions(room: dict[str, Any], round_payloa
         outcome="written" if synced_count else "skipped",
         lifecycle=True,
     )
+
+
+def _remove_group_room_transcripts_from_participant_sessions(
+    room: dict[str, Any],
+    room_id: str,
+) -> dict[str, int]:
+    normalized_room_id = str(room_id or room.get("roomId") or "").strip()
+    if not normalized_room_id:
+        return {"changedSessionCount": 0, "removedMessageCount": 0}
+    changed_session_count = 0
+    removed_message_count = 0
+    with session_service._CHAT_STATE_LOCK:
+        payload = load_chat_state(PROJECT_ROOT)
+        conversations = payload.get("conversations")
+        if not isinstance(conversations, list):
+            return {"changedSessionCount": 0, "removedMessageCount": 0}
+        for conversation in conversations:
+            if not isinstance(conversation, dict):
+                continue
+            messages = [item for item in list(conversation.get("messages") or []) if isinstance(item, dict)]
+            kept_messages = [
+                item
+                for item in messages
+                if not _is_group_room_transcript_message(item, normalized_room_id)
+            ]
+            removed_count = len(messages) - len(kept_messages)
+            if removed_count <= 0:
+                continue
+            conversation["messages"] = normalize_chat_messages(kept_messages)
+            conversation["updated_at"] = utc_now_iso()
+            changed_session_count += 1
+            removed_message_count += removed_count
+        if removed_message_count:
+            payload["updated_at"] = utc_now_iso()
+            save_chat_state(PROJECT_ROOT, payload)
+    return {
+        "changedSessionCount": changed_session_count,
+        "removedMessageCount": removed_message_count,
+    }
+
+
+def _is_group_room_transcript_message(message: dict[str, Any], room_id: str) -> bool:
+    metadata = message.get("metadata")
+    if isinstance(metadata, dict):
+        return (
+            str(metadata.get("kind") or "").strip() == "group_room_transcript"
+            and str(metadata.get("sourceRoomId") or "").strip() == room_id
+        )
+    content = str(message.get("content") or "")
+    return "[群聊同步]" in content and room_id in content
+
+
+def _disable_group_context_for_room(room_id: str, *, agent_ids: list[str] | None = None) -> dict[str, int]:
+    try:
+        result = agent_directory_service.disable_group_context_events_for_room(
+            room_id,
+            agent_ids=agent_ids,
+            reason="chat_room_reset",
+        )
+    except Exception as exc:
+        _record_room_event(
+            "group_context",
+            "group_context.disable_for_room_failed",
+            {"roomId": room_id, "title": ""},
+            fields={
+                "errorType": type(exc).__name__,
+                "errorPreview": trim_lines(str(exc), max_lines=2),
+            },
+            outcome="failed",
+            level="warning",
+            lifecycle=True,
+        )
+        return {"changedAgentCount": 0, "disabledEventCount": 0}
+    return {
+        "changedAgentCount": int(result.get("changedAgentCount") or 0),
+        "disabledEventCount": int(result.get("disabledEventCount") or 0),
+    }
 
 
 def _has_group_round_session_sync(messages: list[dict[str, Any]], *, room_id: str, round_id: str) -> bool:

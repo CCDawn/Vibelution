@@ -287,9 +287,10 @@
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-linejoin: round;
   marker-end: url("#team-edge-arrow");
+  marker-start: none;
   opacity: 0.78;
 }
 

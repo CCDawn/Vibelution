@@ -21,6 +21,8 @@ SIGNAL_SCHEMA_VERSION = 1
 DEFAULT_SIGNAL_PATH = Path("workspace/evaluation/chat_next_state_signals.jsonl")
 ALLOWED_SOURCES = {"user", "tool", "runtime", "verification", "review"}
 ALLOWED_KINDS = {
+    "user_guidance",
+    "user_interrupt_guidance",
     "user_accepts",
     "user_corrects",
     "user_reasks",

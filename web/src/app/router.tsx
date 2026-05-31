@@ -109,6 +109,7 @@ export const router = createBrowserRouter([
       { path: "agents/memory/effective", element: lazyElement(<MemoryRoute forcedView="effective" />) },
       { path: "agents/memory/manage", element: lazyElement(<MemoryRoute forcedView="manage" />) },
       { path: "agents/memory/sources", element: lazyElement(<MemoryRoute forcedView="sources" />) },
+      { path: "agents/memory/knowledge", element: lazyElement(<MemoryRoute forcedView="knowledge" />) },
       { path: "teams", element: lazyElement(<TeamsRoute />) },
       { path: "git", element: lazyElement(<GitRoute />) },
       { path: "logs", element: lazyElement(<LogsRoute />) },

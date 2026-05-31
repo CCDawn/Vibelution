@@ -102,6 +102,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain('id="team-edge-arrow"');
     expect(routeSource).toContain("key={edge.id}");
     expect(routeSource).toContain("Q ${line.cx} ${line.cy}");
+    expect(routeSource).toContain("nodeBoundaryPoint");
+    expect(routeSource).toContain("distanceToRectEdge");
     expect(routeSource).toContain("edgeLine(edge, canvasNodes, visibleEdges)");
     expect(routeSource).not.toContain("<line key={edge.id}");
     expect(routeSource).toContain("className={styles.edges}");
@@ -133,6 +135,8 @@ describe("TeamsRoute layout contract", () => {
     expect(routeSource).toContain("CANVAS_VIEWPORT_WIDTH");
     expect(routeSource).toContain("CANVAS_VIEWPORT_HEIGHT");
     expect(routeSource).toContain("canvasViewportStyle");
+    expect(routeSource).toContain("lockedCanvasViewportStyle");
+    expect(routeSource).toContain("setLockedCanvasViewportStyle(canvasViewportStyle)");
     expect(routeSource).toContain("canvasFrameSize");
     expect(routeSource).toContain("ResizeObserver");
     expect(routeSource).toContain("styles.canvasViewport");

@@ -24,6 +24,7 @@ from core.web.services.session_service import (
     resolve_session_image_artifact,
     store_session_user_image_attachment,
     stream_session_events,
+    submit_session_guidance,
     submit_session_message,
     submit_session_message_lightweight,
     update_chat_session,
@@ -45,6 +46,11 @@ class SessionMessagePayload(BaseModel):
 
 class SessionMessageEditPayload(SessionMessagePayload):
     messageId: str = ""
+
+
+class SessionGuidancePayload(BaseModel):
+    content: str = ""
+    mode: str = "safe"
 
 
 class SessionUpdatePayload(BaseModel):
@@ -208,6 +214,16 @@ def session_stop_turn(session_id: str) -> dict:
         return request_stop_session_turn(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/sessions/{session_id}/guidance", status_code=status.HTTP_202_ACCEPTED)
+def session_submit_guidance(session_id: str, payload: SessionGuidancePayload) -> dict:
+    try:
+        return submit_session_guidance(session_id, payload.content, mode=payload.mode)
+    except SessionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/sessions/{session_id}/chat-review-candidate", status_code=status.HTTP_201_CREATED)

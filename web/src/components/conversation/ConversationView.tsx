@@ -298,6 +298,8 @@ type ConversationViewProps = {
   composerActionDisabled?: boolean;
   composerActionMode?: "send" | "stop";
   composerPending: boolean;
+  composerSafeGuidancePending?: boolean;
+  composerInterruptGuidancePending?: boolean;
   composerError?: string;
   composerGuidance?: string;
   composerAttachments?: ComposerAttachment[];
@@ -308,6 +310,10 @@ type ConversationViewProps = {
   submitPendingLabel?: string;
   stopLabel?: string;
   stopPendingLabel?: string;
+  safeGuidanceLabel?: string;
+  safeGuidancePendingLabel?: string;
+  interruptGuidanceLabel?: string;
+  interruptGuidancePendingLabel?: string;
   editingMessageId?: string;
   editUserMessageLabel?: string;
   editUserMessageDisabled?: boolean;
@@ -320,6 +326,8 @@ type ConversationViewProps = {
   onCancelComposerMode?: () => void;
   onSubmit: () => void;
   onStop?: () => void;
+  onSafeGuidance?: () => void;
+  onInterruptGuidance?: () => void;
 };
 
 export function ConversationView({
@@ -349,6 +357,8 @@ export function ConversationView({
   composerActionDisabled,
   composerActionMode,
   composerPending,
+  composerSafeGuidancePending = false,
+  composerInterruptGuidancePending = false,
   composerError,
   composerGuidance,
   composerAttachments = [],
@@ -359,6 +369,10 @@ export function ConversationView({
   submitPendingLabel,
   stopLabel,
   stopPendingLabel,
+  safeGuidanceLabel,
+  safeGuidancePendingLabel,
+  interruptGuidanceLabel,
+  interruptGuidancePendingLabel,
   editingMessageId,
   editUserMessageLabel,
   editUserMessageDisabled,
@@ -371,6 +385,8 @@ export function ConversationView({
   onCancelComposerMode,
   onSubmit,
   onStop,
+  onSafeGuidance,
+  onInterruptGuidance,
 }: ConversationViewProps) {
   const { lang, t, statusLabel } = useAppI18n();
   const timelineRef = useRef<HTMLDivElement | null>(null);
@@ -400,6 +416,9 @@ export function ConversationView({
   const userLabel = userDisplayName?.trim() || t("operator");
   const userAvatarLabel = userAvatarSymbol(userAvatarPreset, userLabel);
   const handlePrimaryAction = resolvedActionMode === "stop" ? onStop ?? onSubmit : onSubmit;
+  const runningGuidanceActionsEnabled = resolvedActionMode === "stop";
+  const guidanceActionDisabled =
+    !composerValue.trim() || composerDisabled || composerSafeGuidancePending || composerInterruptGuidancePending;
   const composerCanAcceptImageDrop = Boolean(onAddComposerAttachments) && !attachmentInputDisabled;
   const timestampFormatter = useMemo(
     () =>
@@ -1992,15 +2011,41 @@ export function ConversationView({
           <ImagePlus size={16} />
         </button>
         <button
-          className={
-            resolvedActionMode === "stop" ? `${styles.sendButton} ${styles.stopButton}` : styles.sendButton
-          }
-          disabled={resolvedActionDisabled}
+          className={styles.sendButton}
+          disabled={runningGuidanceActionsEnabled ? guidanceActionDisabled || !onSafeGuidance : resolvedActionDisabled}
           type="button"
-          onClick={handlePrimaryAction}
+          onClick={runningGuidanceActionsEnabled ? onSafeGuidance : handlePrimaryAction}
         >
-          {composerPending ? resolvedPendingLabel : resolvedActionLabel}
+          {runningGuidanceActionsEnabled
+            ? composerSafeGuidancePending
+              ? (safeGuidancePendingLabel ?? t("safeGuidancePending"))
+              : (safeGuidanceLabel ?? t("safeGuidance"))
+            : composerPending
+              ? resolvedPendingLabel
+              : resolvedActionLabel}
         </button>
+        {runningGuidanceActionsEnabled ? (
+          <button
+            className={`${styles.sendButton} ${styles.interruptGuidanceButton}`}
+            disabled={guidanceActionDisabled || !onInterruptGuidance}
+            type="button"
+            onClick={onInterruptGuidance}
+          >
+            {composerInterruptGuidancePending
+              ? (interruptGuidancePendingLabel ?? t("interruptGuidancePending"))
+              : (interruptGuidanceLabel ?? t("interruptGuidance"))}
+          </button>
+        ) : null}
+        {runningGuidanceActionsEnabled ? (
+          <button
+            className={`${styles.sendButton} ${styles.stopButton}`}
+            disabled={resolvedActionDisabled}
+            type="button"
+            onClick={handlePrimaryAction}
+          >
+            {composerPending ? resolvedPendingLabel : resolvedActionLabel}
+          </button>
+        ) : null}
       </div>
       {previewImage ? (
         <div

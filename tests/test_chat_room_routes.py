@@ -239,6 +239,49 @@ def test_chat_room_api_updates_and_deletes_room(tmp_path, monkeypatch):
     assert client.get(f"/api/chat-rooms/{room['roomId']}").status_code == 404
 
 
+def test_chat_room_api_resets_room_messages(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        chat_room_service,
+        "_run_participant_agent",
+        lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 发言",
+            "summary": "ok",
+        },
+    )
+
+    room = client.post(
+        "/api/chat-rooms",
+        json={
+            "title": "待重置群聊",
+            "participantSessionIds": ["session-a", "session-b"],
+            "purpose": "meeting",
+        },
+    ).json()
+    round_response = client.post(
+        f"/api/chat-rooms/{room['roomId']}/rounds",
+        json={"topic": "先产生旧消息"},
+    )
+    assert round_response.status_code == 202
+    detail = _wait_for_completed_room_round(room["roomId"], timeout=8.0)
+    assert detail["rounds"]
+
+    reset_response = client.post(f"/api/chat-rooms/{room['roomId']}/reset")
+
+    assert reset_response.status_code == 200
+    reset = reset_response.json()
+    assert reset["roomId"] == room["roomId"]
+    assert reset["title"] == "待重置群聊"
+    assert reset["purpose"] == "meeting"
+    assert len(reset["participants"]) == 2
+    assert reset["rounds"] == []
+    assert reset["status"] == "ready"
+    assert reset["activeRoundId"] == ""
+
+
 def test_chat_room_api_stops_active_round(tmp_path, monkeypatch):
     _seed_chat_sessions(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)

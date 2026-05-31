@@ -33,6 +33,8 @@ function renderConversation(
     composerActionMode?: "send" | "stop";
     composerActionDisabled?: boolean;
     composerGuidance?: string;
+    onSafeGuidance?: () => void;
+    onInterruptGuidance?: () => void;
   } = {},
 ) {
   const queryClient = new QueryClient({
@@ -70,6 +72,8 @@ function renderConversation(
         defaultFileContext="workspace"
         onComposerChange={() => undefined}
         onSubmit={() => undefined}
+        onSafeGuidance={options.onSafeGuidance}
+        onInterruptGuidance={options.onInterruptGuidance}
         onEditUserMessage={() => undefined}
       />
     </QueryClientProvider>,
@@ -318,17 +322,21 @@ describe("ConversationView edit resend affordance", () => {
     expect(html).toContain("Answer");
   });
 
-  it("keeps the composer writable while a running turn uses the stop action", () => {
+  it("keeps the composer writable while a running turn offers guidance actions", () => {
     const html = renderConversation([], {
       composerValue: "下一句先写在这里",
       composerDisabled: true,
       composerActionMode: "stop",
       composerActionDisabled: false,
-      composerGuidance: "当前轮仍在运行。你可以先把下一句写在这里，它会作为草稿保留；要打断当前轮请点“终止”。",
+      composerGuidance: "当前轮仍在运行。安全引导会记录到会话上下文；打断引导会先记录再请求停止当前轮。",
+      onSafeGuidance: () => undefined,
+      onInterruptGuidance: () => undefined,
     });
 
     expect(html).toContain("下一句先写在这里");
     expect(html).toContain("当前轮仍在运行");
+    expect(html).toContain("安全引导");
+    expect(html).toContain("打断引导");
     expect(html).toContain("stopButton");
     const textarea = html.match(/<textarea[^>]*>/)?.[0] ?? "";
     expect(textarea).not.toContain("disabled");

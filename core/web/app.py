@@ -24,6 +24,7 @@ from .routes.diagnostics import router as diagnostics_router
 from .routes.evolution import router as evolution_router
 from .routes.files import router as files_router
 from .routes.git import router as git_router
+from .routes.knowledge import router as knowledge_router
 from .routes.logs import router as logs_router
 from .routes.memory import router as memory_router
 from .routes.pet import router as pet_router
@@ -214,6 +215,7 @@ def create_app() -> FastAPI:
     app.include_router(tools_router, prefix="/api")
     app.include_router(files_router, prefix="/api")
     app.include_router(git_router, prefix="/api")
+    app.include_router(knowledge_router, prefix="/api")
     app.include_router(logs_router, prefix="/api")
     app.include_router(memory_router, prefix="/api")
     app.include_router(research_router, prefix="/api")
