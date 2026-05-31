@@ -119,7 +119,7 @@ const EVOLUTION_LIVE_RUN_BOUNDS = { min: 320, max: 560 };
 const EVOLUTION_LIVE_RUN_DEFAULT_WIDTH = 380;
 const EVOLUTION_LIVE_IO_HEIGHT_KEY = "vibelution.evolution.live-io-height";
 const EVOLUTION_LIVE_IO_HEIGHT_BOUNDS = { min: 260, max: 780 };
-const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 440;
+const EVOLUTION_LIVE_IO_DEFAULT_HEIGHT = 340;
 const WORKTREE_ACTION_ITEMS = [
   {
     action: "analyze_merge",

@@ -160,7 +160,7 @@
 
 .dashboardIo {
   grid-area: io;
-  grid-template-rows: auto minmax(0, var(--evolution-live-io-height, 440px)) 12px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, var(--evolution-live-io-height, 340px)) 12px minmax(0, 1fr);
   overflow: hidden !important;
 }
 
@@ -733,19 +733,21 @@
 
 .controlFooter {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .closedLoopStatus {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(56px, auto) minmax(0, 1fr);
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
-  padding: 8px 10px;
+  min-height: 34px;
+  padding: 5px 8px;
   border: 1px solid var(--border-hairline);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--surface-card-subtle);
+  font-size: 0.8rem;
 }
 
 .closedLoopStatus strong,
@@ -758,12 +760,12 @@
 
 .closedLoopStatus > span:last-child {
   color: var(--fg-secondary);
-  font-size: 0.84rem;
+  font-size: 0.78rem;
 }
 
 .worktreeRunPicker {
   display: grid;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -772,26 +774,31 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 20px;
   color: var(--fg-tertiary);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .worktreeRunList {
   display: grid;
-  gap: 6px;
-  max-height: 210px;
+  gap: 4px;
+  max-height: 238px;
   overflow: auto;
 }
 
 .worktreeRunItem {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(78px, 0.55fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  padding: 8px 10px;
+  min-height: 36px;
+  padding: 5px 8px;
   border: 1px solid var(--border-hairline);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--surface-card-muted);
   color: var(--fg-primary);
+  font-size: 0.8rem;
   text-align: left;
 }
 
@@ -802,10 +809,38 @@
 }
 
 .worktreeRunItemTop {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: contents;
+}
+
+.worktreeRunItemTop strong {
+  color: var(--fg-primary);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.worktreeRunItemTop span {
+  justify-self: start;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-card-subtle);
+}
+
+.worktreeRunItemMeta {
+  justify-self: end;
+  text-align: right;
+}
+
+.worktreeRunItemTop span,
+.worktreeRunItemMeta {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  line-height: 1.25;
 }
 
 .worktreeRunItemTop strong,
@@ -817,19 +852,17 @@
   white-space: nowrap;
 }
 
-.worktreeRunItemTop span,
 .worktreeRunItemMeta {
-  color: var(--fg-secondary);
-  font-size: 0.78rem;
+  color: var(--fg-tertiary);
 }
 
 .worktreeReviewGate {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-hairline));
-  border-radius: 8px;
+  border-radius: 7px;
   background: color-mix(in srgb, var(--accent-cool) 8%, var(--surface-card-subtle));
 }
 
@@ -839,6 +872,15 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+.worktreeReviewGate .noticeText {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .monitorSummary {
@@ -1880,7 +1922,7 @@
 @media (max-width: 1360px) {
   .overviewGrid {
     grid-template-columns: minmax(0, 1.1fr) minmax(320px, 1fr);
-    grid-template-rows: minmax(320px, var(--evolution-live-io-height, 440px)) minmax(0, 1fr);
+    grid-template-rows: minmax(300px, var(--evolution-live-io-height, 340px)) minmax(0, 1fr);
     grid-template-areas:
       "io io"
       "launch run";
@@ -1922,7 +1964,7 @@
   .overviewGrid {
     grid-template-columns: 1fr;
     grid-template-rows:
-      minmax(320px, var(--evolution-live-io-height, 440px))
+      minmax(300px, var(--evolution-live-io-height, 340px))
       minmax(320px, 1fr)
       minmax(320px, 1fr);
     grid-template-areas:
@@ -2023,12 +2065,19 @@
   }
 
   .compactRunRow,
-  .sourceNextAction {
+  .sourceNextAction,
+  .closedLoopStatus,
+  .worktreeRunItem {
     grid-template-columns: 1fr;
   }
 
   .compactRunMeta {
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .worktreeRunItemMeta {
+    justify-self: start;
+    text-align: left;
   }
 }
