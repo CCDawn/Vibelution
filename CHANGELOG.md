@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 - 2026-05-31
+
+- Fixed supervised worktree merge analysis so untracked files that already existed before candidate creation, such as local `.codex/visual-checks` artifacts, are kept as baseline noise instead of counted as candidate changes or merge overlaps.
+- Kept true candidate edits visible in `candidateWorktree.changedFiles`, allowing the Terminal-Bench smoke closed loop to finish with a clean `mergeAnalysis.ready` result when only the candidate marker changes.
+
 ## 0.6.0 - 2026-05-31
 
 - Added a local Terminal-Bench-style supervised dataset adapter with two multi-step terminal/ReAct smoke cases that materialize into `terminal_bench_smoke_v1`.

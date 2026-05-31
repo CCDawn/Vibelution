@@ -474,7 +474,10 @@ def _execute_flow(
         candidate_path = Path(str(candidate_worktree.get("path") or ""))
         modification = modifier(candidate_path, str(reflection.get("selfModificationPrompt") or ""), {"runId": run_id})
         snapshot["candidateModification"] = modification
-        snapshot["candidateWorktree"]["changedFiles"] = _candidate_changed_files(candidate_path)
+        snapshot["candidateWorktree"]["changedFiles"] = _candidate_changed_files(
+            candidate_path,
+            baseline_untracked=candidate_worktree.get("untrackedFiles"),
+        )
         _persist_snapshot(snapshot, active_run_id=run_id if _ACTIVE_RUN_ID == run_id else "")
 
         _transition(snapshot, "running", "candidate_evaluation", "正在用同一题集复测候选 agent。")
@@ -1047,7 +1050,7 @@ def _build_merge_analysis(snapshot: dict[str, Any]) -> dict[str, Any]:
             "highRiskFiles": [],
             "blockers": ["missing_candidate_worktree"],
         }
-    changed_files = _candidate_changed_files(candidate_path)
+    changed_files = _candidate_changed_files(candidate_path, baseline_untracked=worktree.get("untrackedFiles"))
     dirty_main = {item["path"] for item in _git_status_files(project_root)}
     overlap = [item for item in changed_files if item["path"] in dirty_main]
     high_risk = [item for item in changed_files if bool(item.get("highRisk"))]
@@ -1289,8 +1292,13 @@ def _cleanup_candidate_worktree(snapshot: dict[str, Any]) -> None:
     snapshot["candidateWorktree"] = {**worktree, "preserved": False, "removedAt": _now_iso()}
 
 
-def _candidate_changed_files(candidate_path: Path) -> list[dict[str, Any]]:
+def _candidate_changed_files(
+    candidate_path: Path,
+    *,
+    baseline_untracked: Any = None,
+) -> list[dict[str, Any]]:
     files = _git_status_files(candidate_path)
+    baseline_noise = _baseline_untracked_paths(baseline_untracked)
     return [
         {
             **item,
@@ -1298,7 +1306,37 @@ def _candidate_changed_files(candidate_path: Path) -> list[dict[str, Any]]:
             "highRisk": _is_high_risk_path(item["path"]),
         }
         for item in files
+        if not _is_baseline_untracked_noise(item, baseline_noise)
     ]
+
+
+def _baseline_untracked_paths(raw: Any) -> set[str]:
+    if not isinstance(raw, list):
+        return set()
+    paths: set[str] = set()
+    for item in raw:
+        normalized = str(item or "").replace("\\", "/").strip().lstrip("/")
+        if normalized:
+            paths.add(normalized)
+            if normalized.endswith("/"):
+                paths.add(normalized.rstrip("/"))
+    return paths
+
+
+def _is_baseline_untracked_noise(item: dict[str, str], baseline_untracked: set[str]) -> bool:
+    if not baseline_untracked:
+        return False
+    status = str(item.get("status") or "")
+    if "??" not in status:
+        return False
+    path = str(item.get("path") or "").replace("\\", "/").strip().lstrip("/")
+    if not path:
+        return False
+    if path in baseline_untracked:
+        return True
+    if path.endswith("/"):
+        return any(existing.startswith(path) for existing in baseline_untracked)
+    return False
 
 
 def _git_status_files(repo_root: Path) -> list[dict[str, str]]:
