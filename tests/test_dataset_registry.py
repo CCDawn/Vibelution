@@ -37,6 +37,13 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
     assert by_name["generated_cases"]["intake_boundary"]["contract"] == "generated_case"
     assert by_name["generated_cases"]["formal_supervised_evaluation_allowed"] is True
     assert "supervised_evaluation" in by_name["generated_cases"]["allowed_downstream_uses"]
+    assert by_name["terminal_bench_smoke"]["runnable"] is True
+    assert by_name["terminal_bench_smoke"]["kind"] == "terminal_bench_jsonl"
+    assert by_name["terminal_bench_smoke"]["adapter_status"] == "ready_local_smoke"
+    assert by_name["terminal_bench_smoke"]["effective"] is True
+    assert by_name["terminal_bench_smoke"]["visibility"] == "primary"
+    assert by_name["terminal_bench_smoke"]["selectable"] is True
+    assert by_name["terminal_bench_smoke"]["case_count"] >= 2
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
 
@@ -69,6 +76,7 @@ def test_ensure_dataset_registry_backfills_missing_builtin_datasets(tmp_path: Pa
 
     assert "generated_cases" in names
     assert "chat_reviewed_multiturn" in names
+    assert "terminal_bench_smoke" in names
     assert "custom_prompt_jsonl" in names
 
 
@@ -220,6 +228,9 @@ def test_ensure_dataset_registry_bootstraps_generated_and_chat_sources(tmp_path:
 
     assert (tmp_path / "workspace" / "evaluation" / "datasets" / "generated_cases.jsonl").exists()
     assert (tmp_path / "workspace" / "evaluation" / "datasets" / "chat_reviewed_multiturn.jsonl").exists()
+    terminal_path = tmp_path / "workspace" / "evaluation" / "datasets" / "terminal_bench_smoke.jsonl"
+    assert terminal_path.exists()
+    assert len([line for line in terminal_path.read_text(encoding="utf-8").splitlines() if line.strip()]) >= 2
 
 
 def test_dataset_status_distinguishes_effective_empty_missing_and_harness(tmp_path: Path):
@@ -240,10 +251,14 @@ def test_dataset_status_distinguishes_effective_empty_missing_and_harness(tmp_pa
     assert by_name["generated_cases"]["effective"] is False
     assert by_name["generated_cases"]["case_count"] == 0
     assert by_name["generated_cases"]["usability_status"] == "empty"
+    assert by_name["generated_cases"]["visibility"] == "hidden"
+    assert by_name["generated_cases"]["selectable"] is False
     assert by_name["humaneval_jsonl"]["effective"] is False
     assert by_name["humaneval_jsonl"]["usability_status"] == "missing_source"
+    assert by_name["humaneval_jsonl"]["visibility"] == "hidden"
     assert by_name["swe_bench_lite"]["effective"] is False
     assert by_name["swe_bench_lite"]["usability_status"] == "requires_external_harness"
+    assert by_name["swe_bench_lite"]["selectable"] is False
     assert "源文件不存在" in by_name["swe_bench_lite"]["usability_reason"]
 
 
@@ -430,6 +445,31 @@ def test_materialize_swe_jsonl_marks_external_harness_requirement(tmp_path: Path
     assert bundle["cases"][0]["scenario"] == "swe_patch"
     assert bundle["cases"][0]["requires_external_harness"] == "swe_bench"
     assert "gold patch" not in bundle["cases"][0]["baseline_prompt"]
+
+
+def test_materialize_terminal_bench_smoke_preserves_harness_contract(tmp_path: Path):
+    ensure_dataset_registry(tmp_path)
+
+    result = materialize_dataset_bundle("terminal_bench_smoke", project_root=tmp_path)
+    bundle = json.loads(Path(result.bundle_path).read_text(encoding="utf-8"))
+    case = bundle["cases"][0]
+
+    assert result.runnable is True
+    assert result.adapter_status == "ready_local_smoke"
+    assert result.case_count >= 2
+    assert bundle["dataset"]["name"] == "terminal_bench_smoke"
+    assert bundle["dataset"]["source_track"] == "benchmark"
+    assert bundle["dataset"]["holdout_allowed"] is False
+    assert case["scenario"] == "transaction"
+    assert case["mode"] == "multi_step_react"
+    assert case["benchmark_family"] == "terminal_bench"
+    assert case["terminal_bench_adapter"] == "local_smoke"
+    assert case["requires_react_trace"] is True
+    assert case["requires_terminal_harness"] is True
+    assert case["official_runner"] == "pending"
+    assert case["verifier"]["command"]
+    assert "multi-step ReAct" in case["baseline_prompt"]
+    assert "Close the transaction" in case["baseline_prompt"] or "close the transaction" in case["baseline_prompt"]
 
 
 def test_materialize_missing_dataset_source_fails_clearly(tmp_path: Path):

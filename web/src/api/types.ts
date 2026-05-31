@@ -2236,6 +2236,10 @@ export type EvolutionDatasetOption = {
   caseCount: number | null;
   usabilityStatus: string;
   usabilityReason: string;
+  visibility: string;
+  visibilityReason: string;
+  selectable: boolean;
+  noiseLevel: string;
   adapterStatus: string;
   description: string;
   sourcePath: string;

@@ -885,6 +885,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       : null;
   const selfRunLocked = Boolean(lockedSelfRun);
   const selectedDataset = workbenchControl?.datasets.find((item) => item.name === datasetName) ?? null;
+  const primaryDatasets = useMemo(
+    () => (workbenchControl?.datasets ?? []).filter((item) => item.selectable !== false && item.effective),
+    [workbenchControl?.datasets],
+  );
+  const hiddenDatasetCount = Math.max(0, (workbenchControl?.datasets ?? []).length - primaryDatasets.length);
   const availableBundles = workbenchControl?.bundles ?? [];
   const selectedBundleExists = availableBundles.some((item) => item.name === bundleNameInput);
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
@@ -1094,12 +1099,28 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     const fallbackBundle = workbenchControl.defaultBundleName || workbenchControl.bundles[0]?.name || "";
     const savedBundle = savedState.bundleName && bundleNames.has(savedState.bundleName) ? savedState.bundleName : fallbackBundle;
     setSourceKind(savedState.source === "bundle" && savedBundle ? "bundle" : "dataset");
-    setDatasetName(savedState.datasetName || workbenchControl.datasets[0]?.name || "");
+    const defaultDatasetName = primaryDatasets[0]?.name || workbenchControl.datasets[0]?.name || "";
+    const savedDatasetKnown = workbenchControl.datasets.some((item) => item.name === savedState.datasetName);
+    const savedDatasetSelectable = primaryDatasets.some((item) => item.name === savedState.datasetName);
+    setDatasetName(savedDatasetKnown && savedDatasetSelectable ? savedState.datasetName : defaultDatasetName);
     setDatasetLimitInput(toLimitInput(savedState.datasetLimit));
     setBundleNameInput(savedBundle);
     setKeepWorktree(Boolean(savedState.keepWorktree));
     setFormInitialized(true);
-  }, [formInitialized, workbenchControl]);
+  }, [formInitialized, primaryDatasets, workbenchControl]);
+
+  useEffect(() => {
+    if (!formInitialized || !workbenchControl || sourceKind !== "dataset") {
+      return;
+    }
+    if (datasetName && primaryDatasets.some((item) => item.name === datasetName)) {
+      return;
+    }
+    const fallback = primaryDatasets[0]?.name || "";
+    if (fallback && datasetName !== fallback) {
+      setDatasetName(fallback);
+    }
+  }, [datasetName, formInitialized, primaryDatasets, sourceKind, workbenchControl]);
 
   useEffect(() => {
     if (!formInitialized || !workbenchControl || sourceKind !== "bundle") {
@@ -2186,12 +2207,19 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           value={datasetName}
                           onChange={(event) => setDatasetName(event.target.value)}
                         >
-                          {workbenchControl?.datasets.map((item) => (
+                          {primaryDatasets.map((item) => (
                             <option key={item.name} value={item.name}>
                               {item.name} [{datasetUsabilityLabel(item, lang)}]
                             </option>
                           ))}
                         </select>
+                        {hiddenDatasetCount > 0 ? (
+                          <span className={styles.formHint}>
+                            {lang === "zh"
+                              ? `已隐藏 ${hiddenDatasetCount} 个空数据、缺源文件或需外部 harness 的数据集`
+                              : `${hiddenDatasetCount} empty, missing-source, or external-harness datasets hidden`}
+                          </span>
+                        ) : null}
                       </div>
                       <div className={styles.formField}>
                         <label htmlFor="supervised-limit">{t("caseLimit")}</label>

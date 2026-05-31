@@ -80,4 +80,12 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("aria-pressed={selected}");
     expect(routeSource).toContain("onClick={() => setSelectedWorktreeRunId(run.runId)}");
   });
+
+  it("hides noisy unavailable datasets from the supervised dataset picker", () => {
+    expect(routeSource).toContain("primaryDatasets");
+    expect(routeSource).toContain("item.selectable !== false && item.effective");
+    expect(routeSource).toContain("hiddenDatasetCount");
+    expect(routeSource).toContain("empty, missing-source, or external-harness datasets hidden");
+    expect(routeSource).toContain("primaryDatasets.map((item)");
+  });
 });

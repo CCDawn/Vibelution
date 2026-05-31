@@ -92,6 +92,17 @@ def test_build_agent_command_for_single_turn_prompt():
     assert "hello" in cmd
 
 
+def test_build_agent_command_for_multi_step_react_launches_single_turn_prompt():
+    cmd = build_agent_command("multi_step_react", "inspect then verify", config_path="config.harness.toml")
+
+    assert "--single-turn" in cmd
+    assert "--prompt" in cmd
+    assert "--config" in cmd
+    assert "inspect then verify" in cmd
+    assert "--auto" not in cmd
+    assert "--test" not in cmd
+
+
 def test_supervised_agent_binding_env_exports_safe_runtime_context_only():
     env = supervised_agent_binding_env(
         {
@@ -193,6 +204,20 @@ def test_resolve_run_options_allows_custom_transaction_prompt():
 
     assert options.mode == "single_turn"
     assert options.prompt == "custom transaction probe"
+
+
+def test_resolve_run_options_preserves_multi_step_react_transaction_metadata():
+    options = resolve_run_options(
+        scenario="transaction",
+        mode="multi_step_react",
+        prompt="terminal bench smoke",
+        expect_restart=False,
+    )
+
+    assert options.mode == "multi_step_react"
+    assert options.prompt == "terminal bench smoke"
+    assert options.scenario == "transaction"
+    assert options.expect_restart is False
 
 
 def test_resolve_run_options_for_modify_rollback_probe_forces_single_turn():
