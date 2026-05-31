@@ -12,13 +12,33 @@ def test_tool_registry_lists_builtins_as_protected(tmp_path, monkeypatch):
 
     builtin = next(item for item in payload["tools"] if item["name"] == "grep_search_tool")
     safe_builtin = next(item for item in payload["tools"] if item["name"] == "get_git_status_summary_tool")
+    image_tool = next(item for item in payload["tools"] if item["name"] == "image2_generate_tool")
     assert builtin["source"] == "built_in"
     assert builtin["deleteAllowed"] is False
     assert builtin["llmVisible"] is True
+    assert builtin["category"] == "workspace_read"
+    assert builtin["categoryLabel"] == "Workspace read"
+    assert builtin["capabilityTags"] == ["search", "codebase", "read_only"]
+    assert builtin["permissionTier"] == "low"
     assert builtin["testPolicy"]["mode"] == "blocked"
     assert safe_builtin["testPolicy"]["mode"] == "safe_builtin_fixture"
     assert safe_builtin["testPolicy"]["argsPreview"] == {"limit": 3}
     assert safe_builtin["permissionPolicy"]["requiresExplicitAllow"] is False
+    assert image_tool["category"] == "media_research"
+    assert image_tool["permissionTier"] == "high"
+    assert "model_cost" in image_tool["riskTags"]
+    edge_tool = next(item for item in payload["tools"] if item["name"] == "research_communication_edge_proposal_tool")
+    assert edge_tool["category"] == "agent_collaboration"
+    assert edge_tool["permissionTier"] == "high"
+    assert edge_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    bundles = {item["bundleId"]: item for item in payload["toolBundles"]}
+    assert {"core", "research", "coding", "collaboration"}.issubset(bundles)
+    assert "grep_search_tool" in bundles["core"]["toolNames"]
+    assert "research_knowledge_query_tool" in bundles["research"]["toolNames"]
+    assert "research_communication_edge_proposal_tool" in bundles["collaboration"]["toolNames"]
+    assert bundles["research"]["explicitAllowToolCount"] >= 1
+    assert bundles["collaboration"]["explicitAllowToolCount"] >= 1
+    assert bundles["coding"]["highRiskToolCount"] >= 1
 
 
 def test_tool_registry_marks_research_knowledge_tool_as_explicit_allow(tmp_path, monkeypatch):
@@ -77,6 +97,9 @@ def test_generated_tool_lifecycle(tmp_path, monkeypatch):
     deleted = registry.delete_generated_tool("summarize_notes_tool")
 
     assert created["source"] == "generated"
+    assert created["category"] == "custom_generated"
+    assert created["permissionTier"] == "generated"
+    assert created["riskTags"] == ["custom_tool"]
     assert created["validated"] is True
     assert created["enabled"] is False
     assert created["llmVisible"] is False

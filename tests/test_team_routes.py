@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import teams as teams_route
 from core.web.services import agent_directory_service, chat_room_service, project_agent_bus_service, session_service, team_service
 
 
@@ -32,6 +33,68 @@ def test_team_routes_create_detail_and_canvas(tmp_path, monkeypatch):
     canvas_response = client.get(f"/api/teams/{team['teamId']}/canvas")
     assert canvas_response.status_code == 200
     assert canvas_response.json()["canvasKind"] == "team_organization_canvas"
+
+
+def test_team_routes_reject_agent_that_already_belongs_to_active_team(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    client = _client()
+    first_response = client.post(
+        "/api/teams",
+        json={"name": "第一团队", "members": [{"agentId": agent["agentId"], "role": "lead"}]},
+    )
+
+    response = client.post(
+        "/api/teams",
+        json={"name": "第二团队", "members": [{"agentId": agent["agentId"], "role": "reviewer"}]},
+    )
+
+    assert first_response.status_code == 201, first_response.text
+    assert response.status_code == 422
+    assert "already belongs to Team" in response.json()["detail"]
+
+
+def test_team_list_route_materializes_evolution_system_teams(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    client = _client()
+
+    response = client.get("/api/teams")
+
+    assert response.status_code == 200, response.text
+    teams = {team["teamId"]: team for team in response.json()["teams"]}
+    assert {"self-evolution-team", "supervised-evolution-team"}.issubset(teams)
+    assert teams["self-evolution-team"]["linkedChatRoomId"]
+    assert teams["supervised-evolution-team"]["linkedChatRoomId"]
+    assert response.json()["summary"]["activeTeamCount"] == 2
+
+
+def test_team_list_route_skips_system_bootstrap_when_teams_exist(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(project_agent_bus_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    team_service.ensure_evolution_system_teams()
+    monkeypatch.setattr(
+        teams_route,
+        "ensure_evolution_system_teams",
+        lambda: (_ for _ in ()).throw(AssertionError("system team bootstrap should be skipped")),
+    )
+    client = _client()
+
+    response = client.get("/api/teams")
+
+    assert response.status_code == 200, response.text
+    teams = {team["teamId"]: team for team in response.json()["teams"]}
+    assert {"self-evolution-team", "supervised-evolution-team"}.issubset(teams)
 
 
 def test_team_routes_save_canvas(tmp_path, monkeypatch):

@@ -637,6 +637,11 @@ export type ToolRegistryItem = {
   name: string;
   description: string;
   source: ToolRegistrySource;
+  category: string;
+  categoryLabel: string;
+  capabilityTags: string[];
+  riskTags: string[];
+  permissionTier: "low" | "medium" | "high" | "generated" | string;
   status: string;
   enabled: boolean;
   validated: boolean;
@@ -654,6 +659,20 @@ export type ToolRegistryItem = {
   updatedAt: string;
 };
 
+export type ToolBundle = {
+  bundleId: string;
+  label: string;
+  description: string;
+  category: string;
+  toolNames: string[];
+  preferredToolNames: string[];
+  toolCount: number;
+  preferredToolCount: number;
+  highRiskToolCount: number;
+  explicitAllowToolCount: number;
+  riskTags: string[];
+};
+
 export type ToolRegistryPayload = {
   schemaVersion: number;
   mode: string;
@@ -668,6 +687,7 @@ export type ToolRegistryPayload = {
     invalidGenerated: number;
   };
   agentScopes: ToolAgentScopeSummary[];
+  toolBundles: ToolBundle[];
   tools: ToolRegistryItem[];
 };
 
@@ -875,6 +895,7 @@ export type RuntimeSummary = {
     lastCompression: null | {
       level: string;
       reason: string;
+      triggerSource: "manual" | "auto" | "provider_limit" | string;
       beforeTokens: number;
       afterTokens: number;
       savedTokens: number;
@@ -967,6 +988,8 @@ export type SessionSummary = {
   agentId?: string;
   agentCode?: string;
   agentDisplayName?: string;
+  agentAvatarImagePath?: string;
+  agentAvatarImageUrl?: string;
   agentProfileId?: string;
   agentTemplateId?: string;
   agentTemplateLabel?: string;
@@ -998,6 +1021,37 @@ export type ToolPolicy = {
   mutationAccess: string;
   maxCallsPerTurn: number;
   perToolRules: Record<string, unknown>;
+};
+
+export type AgentToolGovernanceRequest = {
+  eventId: string;
+  requestId: string;
+  kind: string;
+  status: "pending_review" | "applied" | "rejected" | string;
+  targetAgentId: string;
+  targetAgentCode: string;
+  targetAgentName: string;
+  proposedByAgentId: string;
+  proposedByAgentCode: string;
+  proposedByAgentName: string;
+  policyDelta: {
+    grantTools: string[];
+    revokeTools: string[];
+    blockTools: string[];
+    unblockTools: string[];
+  };
+  reason: string;
+  authority: Record<string, unknown>;
+  riskLevel: "low" | "medium" | "high" | string;
+  riskTags: string[];
+  requiresApproval: boolean;
+  approvalReason: string;
+  createdAt: string;
+  resolvedAt: string;
+  resolvedBy: string;
+  resolutionNote: string;
+  appliedToolPolicyId: string;
+  after?: Record<string, unknown>;
 };
 
 export type MemoryPolicy = {
@@ -1184,6 +1238,30 @@ export type AgentRuntimeStatus = {
   updatedAt: string;
 };
 
+export type AgentPersonaProfile = {
+  gender: string;
+  age: string;
+  pronouns: string;
+  personality: string;
+  communicationStyle: string;
+  background: string;
+  expertise: string[];
+  collaborationPreference: string;
+  identityNotes: string;
+};
+
+export type AgentTaskProfile = {
+  mission: string;
+  taskTypes: string[];
+  responsibilities: string;
+  preferredTasks: string;
+  avoidTasks: string;
+  successCriteria: string;
+  deliverables: string;
+  constraints: string;
+  handoffNotes: string;
+};
+
 export type AgentInstance = {
   agentId: string;
   agentCode: string;
@@ -1199,6 +1277,10 @@ export type AgentInstance = {
   workspaceTerritory?: AgentWorkspaceTerritory;
   toolPolicyId: string;
   memoryPolicyId: string;
+  avatarImagePath?: string;
+  avatarImageUrl?: string;
+  personaProfile?: AgentPersonaProfile;
+  taskProfile?: AgentTaskProfile;
   createdBy: string;
   status: string;
   metadata: Record<string, unknown> & {
@@ -1210,9 +1292,32 @@ export type AgentInstance = {
   runtimeStatus?: AgentRuntimeStatus;
   memoryPolicy?: MemoryPolicy;
   toolPolicy?: ToolPolicy;
+  toolGovernanceRequests?: AgentToolGovernanceRequest[];
   groupContextEvents?: GroupContextEvent[];
   agentInboxMessages?: AgentInboxMessage[];
   agentInboxPendingCount?: number;
+};
+
+export type AgentAvatarOption = {
+  filename: string;
+  path: string;
+  url: string;
+  source: string;
+  sizeBytes: number;
+};
+
+export type AgentAvatarOptionsPayload = {
+  directory: string;
+  options: AgentAvatarOption[];
+  count: number;
+};
+
+export type AgentAvatarUploadResponse = {
+  path: string;
+  url: string;
+  contentType: string;
+  sizeBytes: number;
+  agent: AgentInstance;
 };
 
 export type AgentRunSnapshot = {
@@ -1548,7 +1653,7 @@ export type TeamCanvasEdge = {
   source: string;
   target: string;
   label: string;
-  type: "reports_to" | "collaborates_with" | "delegates_to" | "observes" | "supports" | string;
+  type: "reports_to" | "communication" | "collaborates_with" | "delegates_to" | "observes" | "supports" | string;
 };
 
 export type TeamCanvasValidationIssue = {
@@ -1587,6 +1692,16 @@ export type TeamOrganizationCanvas = {
   validation?: TeamCanvasValidation;
 };
 
+export type TeamConversationProjection = {
+  teamId: string;
+  linkedRoomId: string;
+  status: "unlinked" | "linked" | "room_missing" | "agent_missing" | "membership_conflict" | string;
+  memberAgentIds: string[];
+  roomAgentIds: string[];
+  missingAgentIds: string[];
+  missingAgentCount: number;
+};
+
 export type Team = {
   teamId: string;
   name: string;
@@ -1605,6 +1720,7 @@ export type Team = {
     participantCount: number;
     updatedAt: string;
   } | null;
+  conversation?: TeamConversationProjection;
   canvasPath: string;
   createdAt: string;
   updatedAt: string;
@@ -1639,6 +1755,8 @@ export type ConversationSummary = {
   agentId?: string;
   agentCode?: string;
   agentDisplayName?: string;
+  agentAvatarImagePath?: string;
+  agentAvatarImageUrl?: string;
   directSessionId?: string;
   roomId?: string;
   status: string;
@@ -1751,12 +1869,37 @@ export type ConversationAttachment = {
   status: string;
 };
 
+export type SessionTurnAcceptedResponse = {
+  accepted: boolean;
+  sessionId: string;
+  turnId: string;
+  status: string;
+  acceptedAt: string;
+};
+
+export type SessionDeleteResponse = {
+  deleted: boolean;
+  deletedSessionId: string;
+  nextActiveSessionId: string;
+};
+
 export type SessionTurnError = {
   message: string;
   errorType: string;
   recoverable: boolean;
   timestamp: string;
   turnId: string;
+};
+
+export type SessionRuntimeNotice = {
+  id: string;
+  kind: string;
+  level: "info" | "warning" | "error" | "success";
+  message: string;
+  timestamp: string;
+  source: string;
+  turnId?: string;
+  previousStatus?: string;
 };
 
 export type ChatNextStateSignalSummary = {
@@ -1780,6 +1923,7 @@ export type SessionDetail = SessionSummary & {
   changedFiles: string[];
   readFiles: string[];
   messages: ConversationMessage[];
+  runtimeNotices?: SessionRuntimeNotice[];
   contextUsage?: {
     used: number;
     limit: number;
@@ -1847,6 +1991,7 @@ export type ChatRoomParticipant = {
   kind: string;
   agentId?: string;
   agentCode?: string;
+  agentAvatarImageUrl?: string;
   directSessionId?: string;
   sessionId: string;
   title: string;
@@ -1854,6 +1999,12 @@ export type ChatRoomParticipant = {
   agentProfileId?: string;
   agentTemplateId?: string;
   agentTemplateLabel?: string;
+  teamId?: string;
+  teamName?: string;
+  teamPurpose?: string;
+  teamRole?: string;
+  teamMemberPurpose?: string;
+  teamResponsibilities?: string[];
   agentMissing?: boolean;
   agentStatusCode?: string;
   agentStatusMessage?: string;
@@ -1894,6 +2045,19 @@ export type ChatRoomRound = {
   startedAt: string;
   updatedAt: string;
   finishedAt: string;
+};
+
+export type ChatRoomRoundAcceptedResponse = {
+  accepted: boolean;
+  roomId: string;
+  roundId: string;
+  activeRoundId: string;
+  status: string;
+  topic: string;
+  mode: string;
+  purpose: string;
+  speakerOrder: string[];
+  acceptedAt: string;
 };
 
 export type ChatRoomDetail = {
@@ -2867,6 +3031,11 @@ export type ConfigModelOption = {
   api_key_env: string;
   api_key_configured: boolean;
   api_key_state: string;
+  supports_image_input?: boolean | null;
+  capability_status?: "supported" | "unsupported" | "unknown" | string;
+  capability_source?: string;
+  capability_checked_at?: string;
+  capability_error?: string;
 };
 
 export type ConfigProfileCard = {
@@ -2978,6 +3147,8 @@ export type ResetInventoryItem = {
   name: string;
   description: string;
   detail: string;
+  category: string;
+  categoryLabel: string;
   risk: "low" | "medium" | "high" | string;
   defaultSelected: boolean;
   exists: boolean;
@@ -3022,6 +3193,8 @@ export type ResetItemTotals = {
 export type ResetPreviewItem = {
   id: string;
   name: string;
+  category: string;
+  categoryLabel: string;
   risk: string;
   deleteCandidates: ResetPathEntry[];
   skipped: ResetPathEntry[];
@@ -3035,6 +3208,8 @@ export type ResetPreviewItem = {
 export type ResetExecuteItem = {
   id: string;
   name: string;
+  category: string;
+  categoryLabel: string;
   risk: string;
   deleted: ResetPathEntry[];
   skipped: ResetPathEntry[];

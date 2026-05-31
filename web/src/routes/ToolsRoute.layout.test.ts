@@ -51,13 +51,18 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("agentId: activePolicyAgent.agentId");
   });
 
-  it("exposes Agent ToolPolicy controls from the tool bench", () => {
+  it("shows Agent ToolPolicy state as a read-only overview from the tool bench", () => {
     expect(routeSource).toContain("fetchJson<AgentInstance[]>(\"/api/agents\")");
-    expect(routeSource).toContain("toolPolicyMutation");
-    expect(routeSource).toContain("setPolicyDraft((current) => nextToolPolicy(current ?? activePolicy, activeTool.name, mode))");
+    expect(routeSource).toContain("只读权限观察");
+    expect(routeSource).toContain("Read-only permission overview");
+    expect(routeSource).toContain("aria-label={lang === \"zh\" ? \"只读权限状态\" : \"Read-only permission state\"}");
     expect(routeSource).toContain("styles.agentPolicyPanel");
     expect(routeSource).toContain("styles.policyStatePill");
     expect(routeSource).toContain("styles.policyModeButtonActive");
+    expect(routeSource).toContain("to=\"/agents\"");
+    expect(routeSource).toContain("打开 Agent 策略页");
+    expect(routeSource).not.toContain("toolPolicyMutation");
+    expect(routeSource).not.toContain("body: JSON.stringify({ toolPolicy: payload.policy })");
   });
 
   it("calls out tools that require explicit Agent allow-list permission", () => {
@@ -69,15 +74,18 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("policy_${mode}");
   });
 
-  it("supports Agent-scoped bulk ToolPolicy draft assignment", () => {
-    expect(routeSource).toContain("policyDraft");
+  it("keeps Agent-scoped bulk ToolPolicy state read-only and routes edits to Agent Center", () => {
     expect(routeSource).toContain("permissionTools");
     expect(routeSource).toContain("styles.agentBulkPolicyPanel");
-    expect(routeSource).toContain("setSelectedToolsPolicyMode(\"allowed\")");
-    expect(routeSource).toContain("setSelectedToolsPolicyMode(\"blocked\")");
-    expect(routeSource).toContain("setSelectedToolsPolicyMode(\"inherited\")");
-    expect(routeSource).toContain("applyPolicyDraft");
-    expect(routeSource).toContain("body: JSON.stringify({ toolPolicy: payload.policy })");
+    expect(routeSource).toContain("setPermissionFilter(filter)");
+    expect(routeSource).toContain("setPermissionSearchText(event.target.value)");
+    expect(routeSource).toContain("toolPolicyMode(activePolicy, tool)");
+    expect(routeSource).toContain("styles.bulkPolicyToolRow");
+    expect(routeSource).toContain("styles.bulkPolicyActions");
+    expect(routeSource).toContain("Open Agent policies");
+    expect(routeSource).not.toContain("policyDraft");
+    expect(routeSource).not.toContain("setSelectedToolsPolicyMode");
+    expect(routeSource).not.toContain("applyPolicyDraft");
   });
 
   it("lets the image2 tool choose a configured model without exposing provider secrets", () => {
@@ -100,6 +108,7 @@ describe("ToolsRoute layout contract", () => {
     expect(routeSource).toContain("styles.detailActions");
     expect(routeSource.indexOf("styles.detailActions")).toBeGreaterThan(routeSource.indexOf("styles.policyPanel"));
     expect(routeSource.indexOf("styles.agentBulkPolicyPanel")).toBeLessThan(routeSource.indexOf("styles.detailHeader"));
+    expect(routeSource.indexOf("styles.agentBulkPolicyPanel")).toBeGreaterThan(0);
     expect(routeSource.indexOf("styles.testPanel")).toBeGreaterThan(routeSource.indexOf("styles.detailActions"));
   });
 

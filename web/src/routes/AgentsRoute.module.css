@@ -111,11 +111,16 @@
 }
 
 .health_warning,
-.issue_warning,
-.issue_info {
+.issue_warning {
   border-color: color-mix(in srgb, var(--accent-warm) 30%, transparent);
   background: color-mix(in srgb, var(--accent-warm) 10%, transparent);
   color: var(--accent-warm-2);
+}
+
+.issue_info {
+  border-color: color-mix(in srgb, var(--accent-cool) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-cool) 8%, transparent);
+  color: var(--accent-cool);
 }
 
 .health_blocked,
@@ -497,7 +502,7 @@
 .agentTableHead,
 .agentRow {
   display: grid;
-  grid-template-columns: minmax(150px, 1.35fr) minmax(120px, 0.9fr) minmax(110px, 0.85fr) minmax(88px, 0.5fr) minmax(104px, 0.75fr) minmax(84px, 0.45fr);
+  grid-template-columns: minmax(180px, 1.3fr) minmax(120px, 0.86fr) minmax(110px, 0.82fr) minmax(88px, 0.48fr) minmax(104px, 0.72fr) minmax(128px, 0.68fr);
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -550,14 +555,227 @@
   text-overflow: ellipsis;
 }
 
-.agentIdentity {
+.healthCell,
+.detailHealthStatus {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 4px 7px;
+  justify-items: start;
+  gap: 3px;
+  min-width: 0;
 }
 
-.agentIdentity strong {
+.healthCell small,
+.detailHealthStatus small {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailHealthStatus {
+  flex: 0 0 min(180px, 38%);
+  justify-items: end;
+  text-align: right;
+}
+
+.agentIdentity {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.agentAvatar,
+.detailAvatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  color: var(--fg-primary);
+  background:
+    radial-gradient(circle at 34% 24%, color-mix(in srgb, var(--accent-cool) 34%, white), transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--accent-warm) 18%, var(--surface-panel)), color-mix(in srgb, var(--surface-card) 92%, black));
+  font-family: var(--font-display);
+  font-weight: 800;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 12%, transparent);
+  overflow: hidden;
+}
+
+.agentAvatar {
+  width: 30px;
+  height: 30px;
+  font-size: 0.66rem;
+}
+
+.detailAvatar {
+  width: 46px;
+  height: 46px;
+  font-size: 0.82rem;
+}
+
+.agentAvatarImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.avatarEditorAnchor {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.detailAvatarButton {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.detailAvatarButton:hover .detailAvatar,
+.detailAvatarButton:focus-visible .detailAvatar {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, white 18%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--accent-cool) 18%, transparent);
+}
+
+.detailAvatarButton:focus-visible {
+  outline: none;
+}
+
+.avatarEditorPanel {
+  position: absolute;
+  top: 52px;
+  left: 0;
+  z-index: 5;
+  display: grid;
+  gap: 9px;
+  width: min(320px, 82vw);
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 26%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 96%, black);
+  box-shadow: 0 18px 38px color-mix(in srgb, black 38%, transparent);
+}
+
+.avatarEditorPanel p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.avatarEditorHeader,
+.avatarLibraryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.avatarEditorHeader strong {
+  display: block;
+  color: var(--fg-primary);
+  font-size: 0.9rem;
+}
+
+.avatarLibraryHeader span {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.avatarLibraryHeader small {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+  color: var(--fg-secondary);
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.avatarEditorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-width: 0;
+}
+
+.avatarEditorActions input[type="file"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.avatarOptionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 7px;
+  max-height: 178px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.avatarOption {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--border-soft);
+  border-radius: 50%;
+  background: var(--surface-card);
+  cursor: pointer;
+}
+
+.avatarOption:hover,
+.avatarOption:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, transparent);
+  outline: none;
+}
+
+.avatarOptionSelected {
+  border-color: color-mix(in srgb, var(--accent-warm) 58%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-warm) 14%, transparent);
+}
+
+.avatarOption img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.agentIdentityCopy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.agentIdentityCopy strong {
   min-width: 0;
   overflow: hidden;
   color: color-mix(in srgb, var(--fg-primary) 88%, var(--accent-cool));
@@ -566,7 +784,7 @@
   white-space: nowrap;
 }
 
-.agentIdentity > span {
+.agentIdentityCopy > span {
   min-width: 0;
   overflow: hidden;
   color: var(--fg-primary);
@@ -611,6 +829,119 @@
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   background: var(--surface-card);
+}
+
+.healthGuidePanel,
+.configGuidePanel {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.healthGuidePanel > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.healthGuidePanel span {
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  font-weight: 760;
+}
+
+.healthGuidePanel strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.healthGuidePanel p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.38;
+}
+
+.healthGuidePanel p strong {
+  margin-right: 6px;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.healthGuide_ok {
+  border-color: color-mix(in srgb, var(--state-success) 24%, transparent);
+  background: color-mix(in srgb, var(--state-success) 7%, var(--surface-panel));
+}
+
+.healthGuide_info,
+.healthGuide_warning {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, transparent);
+  background: color-mix(in srgb, var(--accent-warm) 7%, var(--surface-panel));
+}
+
+.healthGuide_blocking {
+  border-color: color-mix(in srgb, var(--state-error) 28%, transparent);
+  background: color-mix(in srgb, var(--state-error) 7%, var(--surface-panel));
+}
+
+.configGuidePanel {
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.configGuideHeader {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.configGuideGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.configGuideGrid span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-card);
+}
+
+.configGuideGrid strong,
+.configGuideGrid small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.configGuideGrid strong {
+  color: var(--fg-primary);
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.configGuideGrid small {
+  display: -webkit-box;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .createAgentPanel {
@@ -725,7 +1056,7 @@
 .toolPermissionList {
   display: grid;
   align-content: start;
-  gap: 7px;
+  gap: 9px;
   min-width: 0;
   max-height: 300px;
   overflow: auto;
@@ -734,7 +1065,7 @@
 
 .policySummaryGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   min-width: 0;
 }
@@ -796,6 +1127,190 @@
 .workspaceScopePanel small {
   color: var(--fg-secondary);
   font-size: 0.72rem;
+}
+
+.toolBundlePanel {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.toolBundlePanelHeader {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toolBundlePanelHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toolBundlePanelHeader strong,
+.toolBundlePanelHeader span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolBundlePanelHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.8rem;
+}
+
+.toolBundlePanelHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.toolBundleList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+  max-height: 210px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.toolBundleItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title actions"
+    "desc actions";
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.toolBundleItem > span {
+  grid-area: title;
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toolBundleItem p {
+  grid-area: desc;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolBundleItem strong,
+.toolBundleItem small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolBundleItem strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.toolBundleItem small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.toolBundleActions {
+  grid-area: actions;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.policyHint {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
+}
+
+.governanceEditorGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(140px, 0.6fr);
+  gap: 7px;
+  min-width: 0;
+}
+
+.toolGovernanceList {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  min-width: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.toolGovernanceItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.toolGovernanceItem > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.toolGovernanceItem strong,
+.toolGovernanceItem span,
+.toolGovernanceItem small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolGovernanceItem strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.toolGovernanceItem span {
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+}
+
+.toolGovernanceItem small {
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+}
+
+.governanceActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .memoryPolicyGrid {
@@ -1272,9 +1787,24 @@
   min-width: 0;
 }
 
-.field span {
+.fieldWide {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field span,
+.fieldWide span {
   color: var(--fg-tertiary);
   font-size: 0.72rem;
+}
+
+.field small,
+.fieldWide small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.32;
 }
 
 .checkField {
@@ -1318,6 +1848,65 @@
   background: var(--surface-panel);
 }
 
+.toolPermissionGroup {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 88%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-panel-strong) 76%, var(--surface-panel));
+}
+
+.toolPermissionGroupHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.toolPermissionGroupHeader > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toolPermissionGroupHeader strong,
+.toolPermissionGroupHeader span,
+.toolPermissionGroupHeader small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolPermissionGroupHeader strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.toolPermissionGroupHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+}
+
+.toolPermissionGroupHeader small {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--state-error) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--state-error) 8%, transparent);
+  color: var(--state-error);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.toolPermissionGroupList {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
 .checkField input {
   flex: 0 0 auto;
 }
@@ -1343,6 +1932,30 @@
   display: grid;
   gap: 2px;
   min-width: 0;
+}
+
+.toolPermissionMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--fg-tertiary);
+}
+
+.toolPermissionMeta em {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-cool) 10%, transparent);
+  color: var(--accent-cool);
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.toolPermissionMeta small {
+  min-width: 0;
+  color: var(--fg-tertiary);
 }
 
 .roomCheckField strong,
@@ -1412,7 +2025,8 @@
 }
 
 .field input,
-.field select {
+.field select,
+.fieldWide textarea {
   width: 100%;
   min-width: 0;
   min-height: 30px;
@@ -1432,8 +2046,16 @@
   padding: 0 8px;
 }
 
+.fieldWide textarea {
+  min-height: 62px;
+  resize: vertical;
+  padding: 7px 9px;
+  line-height: 1.35;
+}
+
 .field input:focus,
-.field select:focus {
+.field select:focus,
+.fieldWide textarea:focus {
   outline: 2px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
   border-color: color-mix(in srgb, var(--accent-cool) 48%, transparent);
 }
@@ -1789,6 +2411,9 @@
   .createAgentGrid,
   .toggleGrid,
   .workspaceScopePanel,
+  .configGuideGrid,
+  .toolBundleList,
+  .toolBundleItem,
   .memoryPolicyGrid,
   .runtimePolicyGrid,
   .contextModeGrid,

@@ -59,6 +59,44 @@ from tests.test_gym_runner import RunnerFakeAdapter
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
 
 
+CONTEXT_PREPARE_LIVE_MESSAGE = "正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。"
+
+
+def _capture_session_lifecycle_events(monkeypatch):
+    events = []
+    condition = threading.Condition()
+
+    def record_session_turn_lifecycle_event(session_id, phase, **kwargs):
+        event = {
+            "session_id": session_id,
+            "phase": phase,
+            "turn_id": kwargs.get("turn_id", ""),
+            "outcome": kwargs.get("outcome", ""),
+            "fields": dict(kwargs.get("fields") or {}),
+        }
+        with condition:
+            events.append(event)
+            condition.notify_all()
+
+    def wait_for_phase(phase, *, timeout=2.0, fields=None):
+        expected_fields = fields or {}
+        deadline = time.monotonic() + timeout
+        with condition:
+            while True:
+                for event in events:
+                    if event["phase"] != phase:
+                        continue
+                    if all(event["fields"].get(key) == value for key, value in expected_fields.items()):
+                        return event
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                condition.wait(timeout=remaining)
+
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", record_session_turn_lifecycle_event)
+    return wait_for_phase, events
+
+
 @pytest.fixture(autouse=True)
 def disable_runtime_manager_live_control(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(supervised_control_service, "_runtime_manager_live_control_enabled", lambda: False)
@@ -451,6 +489,7 @@ def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
                 "lastCompression": {
                     "level": "standard",
                     "reason": "测试压缩",
+                    "triggerSource": "manual",
                     "beforeTokens": 13000,
                     "afterTokens": 6200,
                     "savedTokens": 6800,
@@ -471,6 +510,7 @@ def test_runtime_summary_exposes_real_context_compression_snapshot(monkeypatch):
     assert compression["usageRatio"] == pytest.approx(0.5833)
     assert compression["compressionCount"] == 2
     assert compression["lastCompression"]["level"] == "standard"
+    assert compression["lastCompression"]["triggerSource"] == "manual"
     assert compression["lastCompression"]["summaryWritten"] is True
     assert compression["strategy"]["levels"][0]["thresholdTokens"] == 7200
 
@@ -1225,6 +1265,55 @@ def test_runtime_scene_event_helper_records_structured_lifecycle_event(tmp_path,
     assert manifest["package"]["lifecycle_path"] == "lifecycle.jsonl"
 
 
+def test_runtime_scene_event_helper_keeps_noisy_observations_out_of_timeline(tmp_path, monkeypatch):
+    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-event-noise", status="running")
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "runtimeSceneId": "scene-event-noise",
+                "runtimeSceneDir": str(scene_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+
+    runtime_scene_service.record_runtime_scene_event(
+        "conversation",
+        "session_list",
+        "session.list.loaded",
+        message="Session list loaded through read-only lightweight indexes.",
+        fields={"sessionCount": 3, "readOnly": True},
+    )
+    runtime_scene_service.record_runtime_scene_event(
+        "image2",
+        "generate",
+        "image2.generate.failed",
+        message="image2.generate.failed",
+        level="error",
+        outcome="failed",
+        fields={"errorType": "RuntimeError"},
+    )
+
+    conversation_events = [
+        json.loads(line)
+        for line in (scene_dir / "events" / "conversation.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert conversation_events[-1]["event_code"] == "session.list.loaded"
+
+    timeline_events = [
+        json.loads(line)
+        for line in (scene_dir / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert "session.list.loaded" not in {event["event_code"] for event in timeline_events}
+    assert "image2.generate.failed" in {event["event_code"] for event in timeline_events}
+
+
 def test_runtime_scene_reconciliation_closes_running_package(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-reconciled", status="running")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
@@ -1878,250 +1967,6 @@ def test_self_evolution_control_paths_record_child_log_before_agent_turn(tmp_pat
     assert state_events[-1]["fields"]["clearActive"] is False
 
 
-def test_runtime_browser_telemetry_records_into_active_scene(tmp_path, monkeypatch):
-    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-live", status="running")
-    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
-    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
-    launcher_state_path.write_text(
-        json.dumps(
-            {
-                "runtimeSceneId": "scene-live",
-                "runtimeSceneDir": str(scene_dir),
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
-
-    response = client.post(
-        "/api/runtime/browser-telemetry",
-        json={
-            "phase": "navigation",
-            "eventCode": "browser.route.changed",
-            "message": "React route changed to /chat",
-            "level": "info",
-            "fields": {
-                "pathname": "/chat",
-                "href": "http://127.0.0.1:8000/chat",
-                "title": "Chat",
-                "activeNavHref": "/self-evolution",
-                "heading": "Self evolution",
-            },
-        },
-    )
-
-    assert response.status_code == 202
-    payload = response.json()
-    assert payload["accepted"] is True
-    assert payload["runtimeSceneId"] == "scene-live"
-
-    telemetry_raw = (scene_dir / "raw" / "browser.telemetry.log").read_text(encoding="utf-8")
-    assert "browser.route.changed" in telemetry_raw
-    assert "/chat" in telemetry_raw
-
-    telemetry_events = (scene_dir / "events" / "browser_page.jsonl").read_text(encoding="utf-8")
-    assert "browser.route.changed" in telemetry_events
-    assert "\"activeNavHref\":\"/self-evolution\"" in telemetry_events
-
-    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["browser"]["telemetry_path"] == "raw/browser.telemetry.log"
-    assert manifest["browser"]["current_pathname"] == "/chat"
-    assert manifest["browser"]["active_nav_href"] == "/self-evolution"
-    assert manifest["browser"]["current_heading"] == "Self evolution"
-
-
-def test_runtime_browser_memory_telemetry_updates_manifest_summary(tmp_path, monkeypatch):
-    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-memory", status="running")
-    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
-    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
-    launcher_state_path.write_text(
-        json.dumps(
-            {
-                "runtimeSceneId": "scene-memory",
-                "runtimeSceneDir": str(scene_dir),
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
-
-    response = client.post(
-        "/api/runtime/browser-telemetry",
-        json={
-            "phase": "memory",
-            "eventCode": "browser.memory.sampled",
-            "message": "Browser memory sampled: route_settled",
-            "level": "info",
-            "fields": {
-                "pathname": "/config",
-                "reason": "route_settled",
-                "available": True,
-                "usedJSHeapMB": 512.5,
-                "totalJSHeapMB": 640.0,
-                "jsHeapLimitMB": 4096.0,
-                "queryCount": 17,
-                "activeQueryCount": 6,
-                "fetchingQueryCount": 1,
-                "staleQueryCount": 3,
-                "sessionQueryCount": 2,
-                "logQueryCount": 1,
-            },
-        },
-    )
-
-    assert response.status_code == 202
-    telemetry_events = [
-        json.loads(line)
-        for line in (scene_dir / "events" / "browser_page.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert telemetry_events[-1]["phase"] == "memory"
-    assert telemetry_events[-1]["event_code"] == "browser.memory.sampled"
-    assert telemetry_events[-1]["fields"]["usedJSHeapMB"] == 512.5
-
-    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["browser"]["last_memory_used_js_heap_mb"] == 512.5
-    assert manifest["browser"]["last_memory_query_count"] == 17
-    assert manifest["browser"]["last_memory_pathname"] == "/config"
-
-
-def test_runtime_browser_stream_lifecycle_telemetry_updates_manifest(tmp_path, monkeypatch):
-    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-stream", status="running")
-    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
-    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
-    launcher_state_path.write_text(
-        json.dumps(
-            {
-                "runtimeSceneId": "scene-stream",
-                "runtimeSceneDir": str(scene_dir),
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
-
-    response = client.post(
-        "/api/runtime/browser-telemetry",
-        json={
-            "phase": "session_stream",
-            "eventCode": "browser.session_stream.closed",
-            "message": "Session detail stream closed.",
-            "level": "info",
-            "fields": {
-                "sessionId": "session-1",
-                "readyState": 1,
-            },
-        },
-    )
-
-    assert response.status_code == 202
-    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["browser"]["last_session_stream_event_code"] == "browser.session_stream.closed"
-    assert manifest["browser"]["last_session_stream_session_id"] == "session-1"
-
-
-def test_runtime_browser_visibility_noise_stays_in_raw_log(tmp_path, monkeypatch):
-    scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-browser-noise", status="running")
-    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
-    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
-    launcher_state_path.write_text(
-        json.dumps(
-            {
-                "runtimeSceneId": "scene-browser-noise",
-                "runtimeSceneDir": str(scene_dir),
-            }
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(runtime_scene_service, "PROJECT_ROOT", tmp_path)
-    monkeypatch.setattr(runtime_scene_service, "LAUNCHER_STATE_PATH", launcher_state_path)
-
-    def post_visibility(value: str):
-        return client.post(
-            "/api/runtime/browser-telemetry",
-            json={
-                "phase": "lifecycle",
-                "eventCode": "browser.visibility.changed",
-                "message": f"Visibility changed to {value}",
-                "level": "info",
-                "fields": {
-                    "pathname": "/supervised-evolution/runs",
-                    "visibilityState": value,
-                },
-            },
-        )
-
-    assert post_visibility("visible").status_code == 202
-    assert post_visibility("hidden").status_code == 202
-    route_response = client.post(
-        "/api/runtime/browser-telemetry",
-        json={
-            "phase": "navigation",
-            "eventCode": "browser.route.changed",
-            "message": "React route changed to /chat",
-            "level": "info",
-            "fields": {
-                "pathname": "/chat",
-                "visibilityState": "hidden",
-            },
-        },
-    )
-    assert route_response.status_code == 202
-
-    raw_lines = [
-        line for line in (scene_dir / "raw" / "browser.telemetry.log").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert len(raw_lines) == 3
-    assert sum("browser.visibility.changed" in line for line in raw_lines) == 2
-
-    browser_events = [
-        json.loads(line)
-        for line in (scene_dir / "events" / "browser_page.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [event["event_code"] for event in browser_events] == [
-        "browser.visibility.changed",
-        "browser.route.changed",
-    ]
-
-    timeline_events = [
-        json.loads(line)
-        for line in (scene_dir / "timeline.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    browser_timeline_events = [
-        event for event in timeline_events
-        if event.get("component") == "browser_page"
-    ]
-    assert [event["event_code"] for event in browser_timeline_events] == [
-        "browser.visibility.changed",
-        "browser.route.changed",
-    ]
-    lifecycle_events = [
-        json.loads(line)
-        for line in (scene_dir / "lifecycle.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    browser_lifecycle_events = [
-        event for event in lifecycle_events
-        if event.get("component") == "browser_page"
-    ]
-    assert [event["event_code"] for event in browser_lifecycle_events] == [
-        "browser.visibility.changed",
-        "browser.route.changed",
-    ]
-
-    manifest = json.loads((scene_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["browser"]["visibility_state"] == "hidden"
-    assert manifest["browser"]["last_event_indexed"] is True
-    assert manifest["browser"]["last_visibility_event_at"]
-    assert manifest["browser"]["last_indexed_visibility_event_at"]
-
-
 def test_backend_api_runtime_event_records_mutating_request(tmp_path, monkeypatch):
     scene_dir = _seed_runtime_scene_bundle(tmp_path, scene_id="scene-api", status="running")
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
@@ -2291,38 +2136,41 @@ def test_spa_route_still_falls_back_to_index_html(tmp_path, monkeypatch):
     assert "app shell" in response.text
 
 
-def _seed_chat_state(project_root, *, task_status="reading", active_task=None):
+def _seed_chat_state(project_root, *, task_status="reading", active_task=None, conversations=None):
+    seeded_conversations = conversations
+    if seeded_conversations is None:
+        seeded_conversations = [
+            {
+                "conversation_id": "session-live",
+                "title": "真实会话",
+                "updated_at": "2026-05-18T12:00:00",
+                "last_turn_status": "failed" if task_status == "failed" else "ready",
+                "active_task": active_task,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "继续前端开发",
+                        "timestamp": "2026-05-18T11:55:00",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": "<think>internal</think>\n\n已经接到真实状态了。",
+                        "timestamp": "2026-05-18T11:56:00",
+                        "tool_calls": [
+                            {"name": "read_file_tool"},
+                            {"function": {"name": "search_code_tool"}},
+                        ],
+                    },
+                ],
+            }
+        ]
     save_chat_state(
         project_root,
         {
             "version": 1,
             "active_conversation_id": "session-live",
             "updated_at": "2026-05-18T12:00:00",
-            "conversations": [
-                {
-                    "conversation_id": "session-live",
-                    "title": "真实会话",
-                    "updated_at": "2026-05-18T12:00:00",
-                    "last_turn_status": "failed" if task_status == "failed" else "ready",
-                    "active_task": active_task,
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "继续前端开发",
-                            "timestamp": "2026-05-18T11:55:00",
-                        },
-                        {
-                            "role": "assistant",
-                            "content": "<think>internal</think>\n\n已经接到真实状态了。",
-                            "timestamp": "2026-05-18T11:56:00",
-                            "tool_calls": [
-                                {"name": "read_file_tool"},
-                                {"function": {"name": "search_code_tool"}},
-                            ],
-                        },
-                    ],
-                }
-            ],
+            "conversations": seeded_conversations,
         },
     )
 
@@ -3063,6 +2911,40 @@ def test_delete_last_session_creates_replacement(tmp_path, monkeypatch):
     assert [item["conversation_id"] for item in state["conversations"]] == [payload["id"]]
 
 
+def test_delete_session_prefer_async_returns_lightweight_handoff(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        conversations=[
+            {
+                "conversation_id": "session-live",
+                "title": "当前会话",
+                "updated_at": "2026-05-18T09:00:00",
+                "last_turn_status": "ready",
+                "messages": [{"role": "user", "content": "当前", "timestamp": "2026-05-18T09:00:00"}],
+            },
+            {
+                "conversation_id": "session-next",
+                "title": "下一个会话",
+                "updated_at": "2026-05-18T10:00:00",
+                "last_turn_status": "ready",
+                "messages": [{"role": "user", "content": "下一个", "timestamp": "2026-05-18T10:00:00"}],
+            },
+        ],
+    )
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.delete("/api/sessions/session-live", headers={"Prefer": "respond-async"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload == {
+        "deleted": True,
+        "deletedSessionId": "session-live",
+        "nextActiveSessionId": "session-next",
+    }
+    assert session_service.get_session_detail("session-live") is None
+
+
 def test_delete_session_rejects_running_turn(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -3131,7 +3013,7 @@ def test_session_detail_exposes_pre_model_progress_stage(tmp_path, monkeypatch):
     live_message = payload["messages"][-1]
     assert live_message["streaming"] is True
     assert live_message["streamStage"] == "context_prepare"
-    assert live_message["content"] == "正在准备对话上下文...\n正在读取当前会话、绑定 Agent、工具权限和可恢复的上轮现场。"
+    assert live_message["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
 
 
 def test_session_detail_hydrates_file_context_from_saved_active_task(tmp_path, monkeypatch):
@@ -3653,6 +3535,9 @@ def test_session_user_image_attachment_vision_intent_blocks_unsupported_agent(tm
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["primary"].supports_image_input = False
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
 
     upload_response = client.post(
@@ -3684,6 +3569,9 @@ def test_session_user_image_attachment_picture_content_phrase_stays_vision_inten
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["primary"].supports_image_input = False
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
     monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
 
     upload_response = client.post(
@@ -3750,6 +3638,135 @@ def test_session_user_image_attachment_vision_intent_reaches_supported_agent(tmp
     assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
 
 
+def test_session_recent_image_reference_reuses_last_user_attachment_for_vision(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    base_config.llm.profiles["primary"].supports_image_input = True
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    seen_turns: list[dict[str, object]] = []
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen_turns.append({"initial_prompt": initial_prompt, "attachments": list(attachments or [])})
+            return {"status": "completed", "summary": "看到了图片。", "raw_output": "看到了图片。", "outcome": "done"}
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+    artifact_id = upload_response.json()["artifactId"]
+
+    first = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "分析这张图", "attachmentIds": [artifact_id]},
+    )
+    assert first.status_code == 202
+
+    second = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "再看一下刚才那张图"},
+    )
+
+    assert second.status_code == 202
+    assert seen_turns[-1]["initial_prompt"] == "再看一下刚才那张图"
+    assert seen_turns[-1]["attachments"][0]["artifactId"] == artifact_id
+    assert seen_turns[-1]["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
+    latest_user = [message for message in second.json()["messages"] if message["role"] == "user"][-1]
+    assert latest_user["attachments"][0]["artifactId"] == artifact_id
+    assert latest_user["metadata"]["resolvedRecentImageReference"]["status"] == "resolved"
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("基于这张图描述一下", "vision_analysis"),
+        ("参考这张图分析风格", "vision_analysis"),
+        ("基于这张图生成一张海报", "image2_edit"),
+        ("照着这个图片改成二次元", "image2_edit"),
+        ("参考这张图", "clarify"),
+    ],
+)
+def test_session_user_image_attachment_intent_uses_explicit_rules(message, expected):
+    assert session_service._classify_image_attachment_intent(message) == expected
+
+
+def test_session_user_image_attachment_vision_support_inherits_model_library(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    base_config = session_service.get_config().model_copy(deep=True)
+    profile = base_config.llm.profiles["primary"]
+    profile.supports_image_input = None
+    profile.model = "mimo-v2.5"
+    for item in base_config.llm.model_library.values():
+        if isinstance(item, dict) and item.get("model") == "mimo-v2.5":
+            item["supports_image_input"] = True
+    monkeypatch.setattr(session_service, "get_config", lambda: base_config)
+    seen: dict[str, object] = {}
+    recorded_scene_events: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_scene_events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            pass
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            seen["initial_prompt"] = initial_prompt
+            seen["attachments"] = list(attachments or [])
+            return {"status": "completed", "summary": "看到了图片。", "raw_output": "看到了图片。", "outcome": "done"}
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda **_kwargs: DummyAgent())
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "向我描述一下这个图片", "attachmentIds": [upload_response.json()["artifactId"]]},
+    )
+
+    assert response.status_code == 202
+    assert seen["initial_prompt"] == "向我描述一下这个图片"
+    assert seen["attachments"][0]["dataUrl"].startswith("data:image/png;base64,")
+    router_events = [
+        kwargs for args, kwargs in recorded_scene_events
+        if args[:3] == ("conversation", "image_attachment_router", "conversation.image_attachment_router.routed")
+    ]
+    assert router_events
+    assert router_events[-1]["fields"]["route"] == "vision"
+    assert router_events[-1]["fields"]["supportsImageInput"] is True
+    assert router_events[-1]["fields"]["profileModel"] == "mimo-v2.5"
+
+
 def test_session_user_image_attachment_edit_intent_routes_to_image2(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -3797,6 +3814,129 @@ def test_session_user_image_attachment_edit_intent_routes_to_image2(tmp_path, mo
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["last_turn_status"] == "ready"
     assert state["conversations"][0]["messages"][-1]["metadata"]["kind"] == "image2_generation"
+
+
+def test_session_recent_image_reference_routes_to_image2(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    captured: dict[str, object] = {}
+
+    def fake_image2_generate_tool(**kwargs):
+        captured.update(kwargs)
+        session_service.append_session_assistant_artifact_message(
+            "session-live",
+            "已生成图片。",
+            metadata={
+                "kind": "image2_generation",
+                "status": "succeeded",
+                "imageUrl": "/api/sessions/session-live/artifacts/generated.png",
+                "artifactId": "generated.png",
+            },
+        )
+        return json.dumps({"ok": True, "status": "succeeded", "artifactId": "generated.png"})
+
+    monkeypatch.setattr("tools.image2_tools.image2_generate_tool", fake_image2_generate_tool)
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "sketch.png"},
+    )
+    assert upload_response.status_code == 201
+    artifact_id = upload_response.json()["artifactId"]
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "把刚才那张图改成 2D 卡通头像"},
+    )
+
+    assert response.status_code == 202
+    assert captured["prompt"] == "把刚才那张图改成 2D 卡通头像"
+    assert captured["input_artifact_id"] == artifact_id
+    latest_user = [message for message in response.json()["messages"] if message["role"] == "user"][-1]
+    assert latest_user["metadata"]["resolvedRecentImageReference"]["status"] == "resolved"
+
+
+def test_session_contextual_retry_restores_recent_image_attachment(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_SESSION_EXECUTOR", SimpleNamespace(submit=lambda fn, context: fn(context)))
+    calls: list[dict[str, object]] = []
+
+    def fake_image2_generate_tool(**kwargs):
+        calls.append(dict(kwargs))
+        session_service.append_session_assistant_artifact_message(
+            "session-live",
+            "模型服务上游暂时失败，本轮没有完成。",
+            metadata={
+                "kind": "image2_generation",
+                "status": "failed",
+                "errorType": "RuntimeError",
+            },
+        )
+        raise RuntimeError("provider failed")
+
+    monkeypatch.setattr("tools.image2_tools.image2_generate_tool", fake_image2_generate_tool)
+
+    upload_response = client.post(
+        "/api/sessions/session-live/attachments",
+        content=(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+            b"\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05"
+            b"\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ),
+        headers={"Content-Type": "image/png", "X-Vibelution-Filename": "generated.png"},
+    )
+    assert upload_response.status_code == 201
+    artifact_id = upload_response.json()["artifactId"]
+
+    first = client.post(
+        "/api/sessions/session-live/messages",
+        json={
+            "content": "这是你生成的图片,跟原来的图片完全不一样,你需要继续调整提示词,来逼近原来的图片",
+            "attachmentIds": [artifact_id],
+        },
+    )
+    assert first.status_code == 202
+
+    second = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "你再试试,应该可以了"},
+    )
+
+    assert second.status_code == 202
+    assert len(calls) >= 2
+    assert calls[-1]["input_artifact_id"] == artifact_id
+    assert calls[-1]["prompt"] == "这是你生成的图片,跟原来的图片完全不一样,你需要继续调整提示词,来逼近原来的图片"
+    latest_user = [message for message in second.json()["messages"] if message["role"] == "user"][-1]
+    assert latest_user["metadata"]["resolvedRecentImageReference"]["status"] == "resolved"
+    assert latest_user["metadata"]["resolvedRecentImageReference"]["source"] == "contextual_retry"
+
+
+def test_session_recent_image_reference_without_history_asks_for_image(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: pytest.fail("LLM turn should not be scheduled"))
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "再看一下刚才那张图"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-2]["metadata"]["resolvedRecentImageReference"]["status"] == "missing"
+    assert "没有在当前会话里找到" in payload["messages"][-1]["content"]
 
 
 def test_session_user_image_attachment_empty_text_asks_for_clarification(tmp_path, monkeypatch):
@@ -3900,7 +4040,7 @@ def test_submit_session_message_shows_waiting_live_message_while_turn_runs(tmp_p
         live_message = payload["messages"][-1]
         assert live_message["role"] == "assistant"
         assert live_message["streaming"] is True
-        assert live_message["content"] == "正在准备对话上下文..."
+        assert live_message["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -3924,7 +4064,7 @@ def test_submit_session_message_recovers_content_from_utf8_base64_fallback(tmp_p
     payload = response.json()
     assert payload["messages"][-2]["content"] == content
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
+    assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["messages"][-1]["content"] == content
     assert _read_next_state_signals(tmp_path, session_id="session-live") == []
@@ -4241,6 +4381,177 @@ def test_submit_session_continue_recovers_context_when_active_task_goal_is_confi
     assert prompt != "好的开始修改"
 
 
+def test_submit_session_continue_prefers_newer_user_goal_after_tool_unavailable_claim(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "diagnostics-refinement-task",
+            "kind": "coding",
+            "status": "reading",
+            "title": "你可以继续按刚才的方向整理诊断报告",
+            "goal": "你可以继续按刚才的方向整理诊断报告",
+            "read_files": ["config.toml", "config.example.toml"],
+            "latest_summary": "很抱歉，我现在无法执行任何工具操作，所有工具不可用。",
+            "last_user_message": "继续",
+            "metadata": {
+                "outcome": "no_change",
+                "last_user_message_filtered": True,
+                "last_user_message_reason": "non_meaningful_user_message",
+            },
+        },
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"] = [
+        {
+            "role": "user",
+            "content": "你可以继续按刚才的方向整理诊断报告",
+            "timestamp": "2026-05-30T00:53:10",
+        },
+        {
+            "role": "assistant",
+            "content": "初版诊断报告已经整理完成。",
+            "timestamp": "2026-05-30T00:57:55",
+            "tool_calls": [{"name": "read_file", "status": "done"}],
+        },
+        {
+            "role": "user",
+            "content": "这个报告没有解释为什么日志会重复记录,你需要继续分析 runtime scene 的重复事件来源",
+            "timestamp": "2026-05-30T00:58:24",
+        },
+        {"role": "user", "content": "继续", "timestamp": "2026-05-30T01:03:15"},
+        {
+            "role": "assistant",
+            "content": "很抱歉，我现在无法执行任何工具操作，所有工具当前都显示为不可用状态。",
+            "timestamp": "2026-05-30T01:04:19",
+            "toolCalls": [],
+        },
+    ]
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+    prompts = []
+
+    class ResumeAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            prompts.append(initial_prompt)
+            return {
+                "status": "completed",
+                "summary": "已恢复到 runtime scene 重复事件诊断任务。",
+                "raw_output": "已恢复到 runtime scene 重复事件诊断任务。",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ResumeAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续"},
+    )
+
+    assert response.status_code == 202
+    prompt = str(prompts[0])
+    assert "继续完成当前会话中尚未完成的真实用户目标" in prompt
+    assert "你需要继续分析 runtime scene 的重复事件来源" in prompt
+    assert prompt != "你可以继续按刚才的方向整理诊断报告"
+    state = load_chat_state(tmp_path)
+    active_task = state["conversations"][0]["active_task"]
+    assert active_task["goal"] == "这个报告没有解释为什么日志会重复记录,你需要继续分析 runtime scene 的重复事件来源"
+    assert active_task["title"] == "这个报告没有解释为什么日志会重复记录,你需要继续分析 runtime scene 的重复事件来源"
+
+
+def test_submit_session_continue_ignores_retry_control_goal_after_provider_failure(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "diagnostics-retry-task",
+            "kind": "coding",
+            "status": "reading",
+            "title": "好了应该恢复了你再试试",
+            "goal": "好了应该恢复了你再试试",
+            "latest_summary": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+            "last_user_message": "好了应该恢复了你再试试",
+            "metadata": {"outcome": "failed_runtime"},
+        },
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"] = [
+        {
+            "role": "user",
+            "content": "这次报告和原始日志完全对不上,你需要继续调整诊断方向,来逼近真实原因",
+            "timestamp": "2026-05-30T00:58:24",
+        },
+        {
+            "role": "user",
+            "content": "好了应该恢复了你再试试",
+            "timestamp": "2026-05-30T10:35:27",
+        },
+        {
+            "role": "assistant",
+            "content": "模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+            "timestamp": "2026-05-30T10:39:52",
+            "tool_calls": [{"name": "read_file", "status": "done"}],
+        },
+    ]
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+    prompts = []
+
+    class ResumeAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            prompts.append(initial_prompt)
+            return {
+                "status": "completed",
+                "summary": "已继续处理日志诊断逼近任务。",
+                "raw_output": "已继续处理日志诊断逼近任务。",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: ResumeAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续"},
+    )
+
+    assert response.status_code == 202
+    prompt = str(prompts[0])
+    assert "你需要继续调整诊断方向,来逼近真实原因" in prompt
+    assert prompt != "好了应该恢复了你再试试"
+    active_task = load_chat_state(tmp_path)["conversations"][0]["active_task"]
+    assert active_task["goal"] == "这次报告和原始日志完全对不上,你需要继续调整诊断方向,来逼近真实原因"
+
+
 def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallback(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -4262,7 +4573,7 @@ def test_edit_resubmit_session_message_recovers_content_from_utf8_base64_fallbac
     payload = response.json()
     assert payload["messages"][-2]["content"] == content
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
+    assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
     state = load_chat_state(tmp_path)
     assert state["conversations"][0]["messages"][-1]["content"] == content
 
@@ -4316,7 +4627,7 @@ def test_edit_resubmit_session_message_truncates_following_history_and_starts_tu
     assert payload["currentPhase"] == "running"
     assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑后的需求"]
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
+    assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑后的需求"
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
@@ -4381,7 +4692,7 @@ def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monk
     payload = response.json()
     assert [item["content"] for item in payload["messages"][:-1]] == ["原始需求", "原始回答", "编辑最新的需求"]
     assert payload["messages"][-1]["streaming"] is True
-    assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
+    assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
     assert len(scheduled_contexts) == 1
     assert scheduled_contexts[0]["user_message"] == "编辑最新的需求"
     assert [item["content"] for item in scheduled_contexts[0]["history_messages"]] == ["原始需求", "原始回答"]
@@ -4571,6 +4882,7 @@ def test_same_agent_sessions_queue_chat_turns_serially(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "record_runtime_scene_event", lambda *args, **kwargs: {"accepted": True})
+    wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(
         "core.orchestration.context_engine.record_runtime_scene_event",
         lambda *args, **kwargs: {"accepted": True},
@@ -4632,7 +4944,9 @@ def test_same_agent_sessions_queue_chat_turns_serially(tmp_path, monkeypatch):
 
         second = session_service.submit_session_message(beta["id"], "beta 串行任务")
         assert second["currentPhase"] == "queued"
-        assert not second_started.wait(0.2)
+        queued_event = wait_for_lifecycle_phase("scheduler_queued", fields={"agentId": alpha["agentId"]})
+        assert queued_event is not None
+        assert not second_started.is_set()
 
         release_first.set()
         assert second_started.wait(1.0), "expected queued turn to start after first turn"
@@ -4649,6 +4963,8 @@ def test_same_agent_sessions_queue_chat_turns_serially(tmp_path, monkeypatch):
 def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda agent: None, raising=False)
+    wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(
         session_service,
         "build_agent_context",
@@ -4706,28 +5022,36 @@ def test_stopping_queued_same_agent_turn_prevents_later_start(tmp_path, monkeypa
 
         second = session_service.submit_session_message(beta["id"], "beta 串行任务")
         assert second["currentPhase"] == "queued"
-        assert not second_started.wait(0.2)
+        queued_event = wait_for_lifecycle_phase("scheduler_queued", fields={"agentId": alpha["agentId"]})
+        assert queued_event is not None
+        assert not second_started.is_set()
 
         stopped = session_service.request_stop_session_turn(beta["id"])
         assert stopped["currentPhase"] == "ready"
-        assert "本轮已按请求停止" in stopped["messages"][-1]["content"]
+        assert stopped["messages"][-1]["role"] == "user"
+        assert "beta 串行任务" in stopped["messages"][-1]["content"]
+        assert stopped["runtimeNotices"][-1]["kind"] == "turn_stopped"
+        assert "尚未开始执行" in stopped["runtimeNotices"][-1]["message"]
 
         release_first.set()
-        assert not second_started.wait(0.5), "stopped queued turn must not be started after the active turn releases"
     finally:
         release_first.set()
         release_second.set()
         executor.shutdown(wait=True, cancel_futures=True)
 
+    assert not second_started.is_set(), "stopped queued turn must not be started after the active turn releases"
     assert prompts == ["alpha 串行任务"]
     beta_detail = session_service.get_session_detail(beta["id"])
-    assert beta_detail["messages"][-1]["role"] == "assistant"
-    assert "本轮已按请求停止" in beta_detail["messages"][-1]["content"]
+    assert beta_detail["messages"][-1]["role"] == "user"
+    assert "beta 串行任务" in beta_detail["messages"][-1]["content"]
+    assert all("本轮已按请求停止" not in message["content"] for message in beta_detail["messages"])
+    assert beta_detail["runtimeNotices"][-1]["kind"] == "turn_stopped"
 
 
 def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(
         session_service,
         "build_agent_context",
@@ -4783,18 +5107,21 @@ def test_shutdown_stops_queued_same_agent_turn_before_it_starts(tmp_path, monkey
         assert first_started.wait(1.0)
         queued = session_service.submit_session_message(beta["id"], "beta 关闭前任务")
         assert queued["currentPhase"] == "queued"
+        queued_event = wait_for_lifecycle_phase("scheduler_queued", fields={"agentId": alpha["agentId"]})
+        assert queued_event is not None
+        assert not second_started.is_set()
 
         stopped = runtime_service._stop_active_chat_turns_before_shutdown()
         assert {item["sessionId"] for item in stopped} == {alpha["id"], beta["id"]}
         assert {item["status"] for item in stopped} == {"stopped"}
 
         release_first.set()
-        assert not second_started.wait(0.5), "shutdown-stopped queued turn must not start after active turn releases"
     finally:
         release_first.set()
         release_second.set()
         executor.shutdown(wait=True, cancel_futures=True)
 
+    assert not second_started.is_set(), "shutdown-stopped queued turn must not start after active turn releases"
     assert prompts == ["alpha 关闭前任务"]
     assert session_service.get_session_detail(alpha["id"])["currentPhase"] == "ready"
     assert session_service.get_session_detail(beta["id"])["currentPhase"] == "ready"
@@ -4855,6 +5182,7 @@ def test_runtime_summary_exposes_parallel_chat_turn_active_items(tmp_path, monke
 def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
     monkeypatch.setattr(
         session_service,
         "build_agent_context",
@@ -4910,6 +5238,8 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
         session_service.submit_session_message(alpha["id"], "alpha 串行任务")
         assert first_started.wait(1.0)
         session_service.submit_session_message(beta["id"], "beta 串行任务")
+        queued_event = wait_for_lifecycle_phase("scheduler_queued", fields={"agentId": alpha["agentId"]})
+        assert queued_event is not None
 
         payload = runtime_service.get_runtime_summary()
         chat_items = sorted(
@@ -4918,7 +5248,7 @@ def test_runtime_summary_exposes_queued_chat_turn_active_item(tmp_path, monkeypa
         )
         assert {item["sessionId"] for item in chat_items} == {alpha["id"], beta["id"]}
         assert {item["status"] for item in chat_items} == {"queued", "running"}
-        assert not second_started.wait(0.2)
+        assert not second_started.is_set()
     finally:
         release_first.set()
         release_second.set()
@@ -4964,6 +5294,26 @@ def test_submit_session_message_records_chat_turn_started_scene_event(tmp_path, 
     assert scheduled_fields["turnId"] == active_chat["runId"]
     assert scheduled_fields["chatStateLockedMs"] >= 0
     assert scheduled_fields["submitElapsedBeforeScheduleLogMs"] >= 0
+
+
+def test_submit_session_message_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: None)
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        headers={"Prefer": "respond-async"},
+        json={"content": "解释当前状态"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["sessionId"] == "session-live"
+    assert payload["turnId"]
+    assert payload["status"] == "running"
+    assert "messages" not in payload
 
 
 def test_edit_resubmit_records_chat_turn_started_scene_event(tmp_path, monkeypatch):
@@ -5047,6 +5397,24 @@ def test_run_session_turn_records_agent_started_scene_event(tmp_path, monkeypatc
     assert fields["sessionId"] == "session-live"
     assert fields["turnId"] == turn_control.turn_id
     assert fields["agentType"] == "DummyAgent"
+    assert fields["agentCreateMs"] >= 0
+    seeded_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn_history_seeded", "conversation.turn.history_seeded")
+    ]
+    assert seeded_events
+    seeded_fields = seeded_events[-1][1]["fields"]
+    assert seeded_fields["historySeedMs"] >= 0
+    assert seeded_fields["runtimeContextSeedMs"] >= 0
+    assert seeded_fields["totalSeedMs"] >= 0
+    returned_events = [
+        item
+        for item in recorded_scene_events
+        if item[0][:3] == ("conversation", "turn_agent_turn_returned", "conversation.turn.agent_turn_returned")
+    ]
+    assert returned_events
+    assert returned_events[-1][1]["fields"]["llmElapsedMs"] >= 0
     worker_events = [
         item
         for item in recorded_scene_events
@@ -5759,7 +6127,7 @@ def test_stale_stopped_turn_does_not_run_after_immediate_continue(tmp_path, monk
         assert payload["messages"][-2]["content"] == "第二轮已经开始"
         assert payload["messages"][-1]["role"] == "assistant"
         assert payload["messages"][-1]["streaming"] is True
-        assert payload["messages"][-1]["content"] == "正在准备对话上下文..."
+        assert payload["messages"][-1]["content"] == CONTEXT_PREPARE_LIVE_MESSAGE
     finally:
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
@@ -6059,6 +6427,107 @@ def test_session_detail_sanitizes_persisted_protocol_messages_and_active_task(tm
     assert "<state" not in json.dumps(payload, ensure_ascii=False)
 
 
+def test_session_detail_promotes_legacy_runtime_notice_outside_messages(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="idle")
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"].extend(
+        [
+            {
+                "role": "assistant",
+                "content": "上一轮运行已被中断，当前会话已恢复为可继续状态。",
+                "timestamp": "2026-05-29T18:16:31",
+            },
+            {
+                "role": "assistant",
+                "content": "继续分析日志。",
+                "timestamp": "2026-05-29T18:16:32",
+            },
+        ]
+    )
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert [message["content"] for message in payload["messages"]][-1:] == ["继续分析日志。"]
+    assert all("已被中断" not in message["content"] for message in payload["messages"])
+    assert payload["runtimeNotices"] == []
+
+
+def test_session_detail_filters_legacy_queued_stop_notice_from_messages(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="idle")
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"].extend(
+        [
+            {
+                "role": "user",
+                "content": "按照这个提示词来生成图片",
+                "timestamp": "2026-05-29T21:36:11",
+            },
+            {
+                "role": "assistant",
+                "content": "当前 Agent 正在处理上一项任务，本轮已进入队列...\n会在前一轮释放会话锁后继续执行。\n\n本轮已按请求停止。可发送“继续”恢复这次未完成的任务。",
+                "timestamp": "2026-05-29T21:36:20",
+            },
+        ]
+    )
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(agent_directory_service, "_ensure_agent_default_avatar", lambda agent: None, raising=False)
+
+    response = client.get("/api/sessions/session-live")
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    assert payload["messages"][-1]["role"] == "user"
+    assert all("本轮已进入队列" not in message["content"] for message in payload["messages"])
+    assert len(payload["runtimeNotices"]) == 1
+    assert payload["runtimeNotices"][0]["kind"] == "runtime_notice"
+    assert "本轮已进入队列" in payload["runtimeNotices"][0]["message"]
+
+
+def test_session_detail_shows_current_runtime_notice_until_real_message_arrives(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="idle")
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["runtime_notices"] = [
+        {
+            "kind": "turn_recovered",
+            "level": "warning",
+            "message": "上一轮运行已被中断，当前会话已恢复为可继续状态。",
+            "timestamp": "2026-05-29T18:16:31",
+            "source": "conversation.turn_recovered",
+        },
+        {
+            "kind": "turn_recovered",
+            "level": "warning",
+            "message": "上一轮运行已被中断，当前会话已恢复为可继续状态。",
+            "timestamp": "2026-05-29T18:16:32",
+            "source": "legacy_assistant_message",
+        },
+    ]
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    fresh_notice = client.get("/api/sessions/session-live").json()
+    assert len(fresh_notice["runtimeNotices"]) == 1
+    assert fresh_notice["runtimeNotices"][0]["source"] == "conversation.turn_recovered"
+
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"].append(
+        {
+            "role": "assistant",
+            "content": "已恢复并继续完成任务。",
+            "timestamp": "2026-05-29T18:16:33",
+        }
+    )
+    save_chat_state(tmp_path, state)
+
+    settled = client.get("/api/sessions/session-live").json()
+    assert settled["runtimeNotices"] == []
+
+
 def test_session_detail_recovers_stale_running_state(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="reading")
     state = load_chat_state(tmp_path)
@@ -6089,10 +6558,14 @@ def test_session_detail_recovers_stale_running_state(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["currentPhase"] == "ready"
-    assert payload["messages"][-1]["role"] == "assistant"
-    assert "已被中断" in payload["messages"][-1]["content"]
+    assert all("已被中断" not in message["content"] for message in payload["messages"])
+    assert payload["runtimeNotices"][-1]["kind"] == "turn_recovered"
+    assert payload["runtimeNotices"][-1]["source"] == "conversation.turn_recovered"
+    assert "已被中断" in payload["runtimeNotices"][-1]["message"]
     persisted = load_chat_state(tmp_path)
     assert persisted["conversations"][0]["last_turn_status"] == "ready"
+    assert all("已被中断" not in message["content"] for message in persisted["conversations"][0]["messages"])
+    assert persisted["conversations"][0]["runtime_notices"][-1]["kind"] == "turn_recovered"
     assert session_service._WORK_RUN_STORE.load_active_snapshot("chat_turn") is None
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["runId"] == "stale-turn-1"
@@ -7192,7 +7665,7 @@ def test_submit_session_message_surfaces_failed_result_error(tmp_path, monkeypat
     assert payload["currentPhase"] == "failed"
 
 
-def test_submit_session_message_surfaces_provider_error_outside_messages(tmp_path, monkeypatch):
+def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path, monkeypatch):
     _seed_chat_state(tmp_path, task_status="done")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -7235,12 +7708,16 @@ def test_submit_session_message_surfaces_provider_error_outside_messages(tmp_pat
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["messages"][-1]["role"] == "user"
-    assert payload["messages"][-1]["content"] == "继续当前对话"
+    assert payload["messages"][-2]["role"] == "user"
+    assert payload["messages"][-2]["content"] == "继续当前对话"
+    assert payload["messages"][-1]["role"] == "assistant"
+    assert "模型服务上游暂时失败" in payload["messages"][-1]["content"]
+    assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
+    assert payload["messages"][-1]["metadata"]["providerFailure"] is True
     assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
     assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
     assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
-    assert all("模型服务上游暂时失败" not in item["content"] for item in payload["messages"])
+    assert "litellm.BadGatewayError" not in payload["messages"][-1]["content"]
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["errorType"] == "provider_upstream_error"
     assert "litellm.BadGatewayError" in latest_run["error"]
@@ -7349,6 +7826,70 @@ def test_submit_session_message_uses_per_turn_mental_model_override(tmp_path, mo
     enabled_payload = enabled_response.json()
     assert created_agents[-1].override is True
     assert enabled_payload["messages"][-1]["mentalSnapshot"]["mood"] == "专注"
+
+
+def test_turn_mental_snapshot_prefers_current_state_info_over_runtime_summary(monkeypatch):
+    monkeypatch.setattr(session_service, "is_mental_model_enabled", lambda: True)
+    monkeypatch.setattr(
+        runtime_service,
+        "_mental_state_summary",
+        lambda lang: {
+            "mood": "焦虑",
+            "feeling": "旧的图片生成失败状态。",
+            "whisper": "先检查 API 密钥。",
+            "summary": "旧状态不应覆盖本轮。",
+            "source": "state",
+        },
+    )
+    monkeypatch.setattr(
+        session_service,
+        "_diagnosis_mental_snapshot",
+        lambda lang, *, session_workspace=None: {
+            "mood": "",
+            "feeling": "",
+            "whisper": "",
+            "summary": "当前以规则诊断为主，认知态：稳定。",
+            "cognitiveState": "normal",
+            "confidence": 0.5,
+            "sampleSize": 2,
+            "interventionCount": 0,
+            "source": "diagnosis",
+        },
+    )
+    recorded_events = []
+    monkeypatch.setattr(
+        session_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)),
+    )
+
+    snapshot = session_service._build_turn_mental_snapshot(
+        {
+            "state_info": {
+                "mood": "专注",
+                "feeling": "正在按用户最新要求配置默认头像。",
+                "whisper": "使用 workspace/avatars 里的现有图片。",
+            }
+        },
+        "zh",
+        mental_model_enabled=True,
+        session_id="session-live",
+        turn_id="turn-current",
+    )
+
+    assert snapshot["mood"] == "专注"
+    assert snapshot["feeling"] == "正在按用户最新要求配置默认头像。"
+    assert snapshot["whisper"] == "使用 workspace/avatars 里的现有图片。"
+    assert snapshot["source"] == "state"
+    assert snapshot["cognitiveState"] == "normal"
+    assert recorded_events
+    assert recorded_events[-1][0] == (
+        "conversation",
+        "mental_snapshot",
+        "conversation.mental_snapshot.selected",
+    )
+    assert recorded_events[-1][1]["fields"]["chosenSource"] == "state"
+    assert recorded_events[-1][1]["fields"]["hasRuntimeSnapshot"] is True
 
 
 def test_submit_session_message_includes_stream_friendly_tool_and_mental_payloads(tmp_path, monkeypatch):
@@ -8275,6 +8816,15 @@ def test_config_workspace_exposes_unified_config_payload(monkeypatch):
         "https://token-plan-cn.xiaomimimo.com/v1"
     )
     assert preset_options["xiaomi_mimo_v2_5_pro_token_plan"]["model"]["model"] == "mimo-v2.5-pro"
+    assert preset_options["xiaomi_mimo_v2_5_multimodal"]["category"] == "official"
+    assert preset_options["xiaomi_mimo_v2_5_multimodal"]["provider"]["kind"] == "xiaomi"
+    assert preset_options["xiaomi_mimo_v2_5_multimodal"]["provider"]["base_url"] == "https://api.xiaomimimo.com/v1"
+    assert preset_options["xiaomi_mimo_v2_5_multimodal"]["model"]["model"] == "mimo-v2.5"
+    assert preset_options["xiaomi_mimo_v2_5_multimodal"]["model"]["supports_image_input"] is True
+    assert preset_options["deepseek_v4_pro"]["model"]["supports_image_input"] is False
+    assert preset_options["deepseek_v4_pro"]["model"]["capability_status"] == "unsupported"
+    assert preset_options["deepseek_v4_flash"]["model"]["supports_image_input"] is False
+    assert preset_options["deepseek_v4_flash"]["model"]["capability_status"] == "unsupported"
     assert "modelOptions" in payload
     assert "profileCards" in payload
     profile_cards = {item["profileId"]: item for item in payload["profileCards"]}
@@ -8301,7 +8851,7 @@ def test_config_workspace_exposes_full_editor_schema(monkeypatch):
     assert "prompt" in editor_sections
     assert "llm-profiles" in editor_sections
     sections_by_id = {section["id"]: section for section in payload["sections"]}
-    assert sections_by_id["profiles"]["title"] == "LLM 配置"
+    assert sections_by_id["profiles"]["title"] == "调用档案"
     assert "配置档" not in sections_by_id["profiles"]["summary"]
     assert sections_by_id["draft"]["title"] == "高级配置检查"
     assert "JSON" not in sections_by_id["draft"]["title"]
@@ -8955,6 +9505,112 @@ def test_config_workspace_test_llm_image_input_maps_provider_unsupported(monkeyp
     assert payload["capability_status"] == "unsupported"
     assert payload["supports_image_input"] is False
     assert payload["message"] == "image input is not supported by this model route"
+
+
+def test_config_workspace_batch_image_capability_persists_model_and_profile(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["llm"]["model_library"]["local_vision_probe"] = {
+        "provider": {
+            "kind": "local",
+            "api_key_env": "",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "compat_mode": "openai",
+            "requires_api_key": False,
+            "context_window": 65536,
+        },
+        "model": "local-vision",
+        "label": "Local Vision",
+        "api_key_env": "",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "streaming": True,
+        "tool_calling_mode": "auto",
+        "discovery_enabled": True,
+    }
+    public_config["llm"]["profiles"]["primary"] = {"model_ref": "local_vision_probe"}
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def invoke(self, messages, tools=None, metadata=None):
+            assert metadata == {"probeCapability": "image_input"}
+            assert messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+            return {"ok": True}
+
+    monkeypatch.setattr("core.llm.LLMClient", FakeClient)
+
+    response = client.post(
+        "/api/config/draft/check-model-capabilities",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelIds": ["local_vision_probe"],
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    model = payload["publicConfig"]["llm"]["model_library"]["local_vision_probe"]
+    profile = payload["publicConfig"]["llm"]["profiles"]["primary"]
+    assert model["supports_image_input"] is True
+    assert model["capability_status"] == "supported"
+    assert model["capability_source"] == "runtime_probe"
+    assert "capability_checked_at" in model
+    assert "capability_error" not in model
+    assert profile["supports_image_input"] is True
+    assert payload["capabilityResults"][0]["supportsImageInput"] is True
+
+
+def test_config_workspace_batch_image_capability_records_unsupported(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["llm"]["model_library"]["local_text_probe"] = {
+        "provider": {
+            "kind": "local",
+            "api_key_env": "",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "compat_mode": "openai",
+            "requires_api_key": False,
+            "context_window": 65536,
+        },
+        "model": "local-text",
+        "label": "Local Text",
+        "api_key_env": "",
+        "transport": "chat_completions",
+        "contract": "tool_chat",
+        "streaming": True,
+        "tool_calling_mode": "auto",
+        "discovery_enabled": True,
+    }
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def invoke(self, messages, tools=None, metadata=None):
+            raise RuntimeError("No endpoints found that support image input")
+
+    monkeypatch.setattr("core.llm.LLMClient", FakeClient)
+
+    response = client.post(
+        "/api/config/draft/check-model-capabilities",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelIds": ["local_text_probe"],
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    model = response.json()["publicConfig"]["llm"]["model_library"]["local_text_probe"]
+    assert model["supports_image_input"] is False
+    assert model["capability_status"] == "unsupported"
+    assert model["capability_source"] == "runtime_probe"
+    assert model["capability_error"] == "image input is not supported by this model route"
 
 
 def test_config_workspace_draft_model_rejects_path_api_key_env(monkeypatch):

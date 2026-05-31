@@ -55,6 +55,7 @@ def test_chat_mode_does_not_keyword_route_evolution_mentions():
         {
             "user_prompt": "你现在审查一下监督进化的部分，然后向我汇报审查结果",
             "goal_override": None,
+            "attachments": None,
         }
     ]
     assert agent._last_turn_metadata == {}
@@ -111,6 +112,41 @@ def test_seed_chat_history_skips_mental_context_when_turn_disables_mental_model(
 
     assert captured == {"cleared": True}
     assert agent._active_turn_goal == "__chat_session__"
+
+
+def test_seed_chat_history_drops_internal_tool_protocol_from_assistant():
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent.config = _make_config()
+    agent.mode = AgentMode.CHAT
+    agent.mode_policy = resolve_mode_policy("chat", agent.config)
+    agent._mental_model_enabled_override = False
+    agent.mental_model = SimpleNamespace(clear_conversation_context=lambda: None)
+
+    agent.seed_chat_history([
+        {"role": "user", "content": "继续"},
+        {"role": "assistant", "content": "Tool failed: spawn_agent_tool"},
+        {"role": "assistant", "content": "正常历史结论"},
+    ])
+
+    restored_text = "\n".join(str(getattr(item, "content", "")) for item in agent._active_turn_messages)
+    assert "spawn_agent_tool" not in restored_text
+    assert "_internal_delegate" not in restored_text
+    assert "正常历史结论" in restored_text
+
+
+def test_xml_tool_visibility_guard_blocks_hidden_tool_without_executor():
+    agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+    agent.key_tool_maps = {"agent_message_tool"}
+    observed = []
+    agent._remember_tool_output = lambda tool_call, result, action: observed.append((tool_call, result, action))
+
+    assert agent._is_tool_visible_to_current_agent("spawn_agent_tool") is False
+    message = agent._hidden_tool_call_message("spawn_agent_tool")
+    agent._remember_tool_output({"name": "spawn_agent_tool"}, message, None)
+
+    assert "未暴露给当前 Agent" in message
+    assert observed[0][0]["name"] == "spawn_agent_tool"
+    assert "_internal_delegate" not in message
 
 
 def test_seed_chat_history_clears_mental_context_outside_chat_mode():

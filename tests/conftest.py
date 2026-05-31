@@ -155,9 +155,12 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
             session_service._RUNNING_SESSION_IDS.clear()
             session_service._SESSION_ACTIVE_TURN_IDS.clear()
             session_service._SESSION_ACTIVE_TURN_LEASES.clear()
-        with session_service._SESSION_AGENT_SCHEDULER_LOCK:
-            session_service._SESSION_AGENT_ACTIVE_TURN_IDS.clear()
-            session_service._SESSION_AGENT_QUEUES.clear()
+        if hasattr(session_service, "_SESSION_TURN_SCHEDULER"):
+            session_service._SESSION_TURN_SCHEDULER.clear()
+        else:
+            with session_service._SESSION_AGENT_SCHEDULER_LOCK:
+                session_service._SESSION_AGENT_ACTIVE_TURN_IDS.clear()
+                session_service._SESSION_AGENT_QUEUES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
         yield
@@ -167,9 +170,12 @@ def isolate_runtime_manager_evolution_store(tmp_path, monkeypatch):
             session_service._RUNNING_SESSION_IDS.clear()
             session_service._SESSION_ACTIVE_TURN_IDS.clear()
             session_service._SESSION_ACTIVE_TURN_LEASES.clear()
-        with session_service._SESSION_AGENT_SCHEDULER_LOCK:
-            session_service._SESSION_AGENT_ACTIVE_TURN_IDS.clear()
-            session_service._SESSION_AGENT_QUEUES.clear()
+        if hasattr(session_service, "_SESSION_TURN_SCHEDULER"):
+            session_service._SESSION_TURN_SCHEDULER.clear()
+        else:
+            with session_service._SESSION_AGENT_SCHEDULER_LOCK:
+                session_service._SESSION_AGENT_ACTIVE_TURN_IDS.clear()
+                session_service._SESSION_AGENT_QUEUES.clear()
         with session_service._SESSION_TURN_CONTROLS_LOCK:
             session_service._SESSION_TURN_CONTROLS.clear()
     else:

@@ -36,7 +36,7 @@ import {
   LogTreeResponse,
 } from "../api/types";
 import { PaneCollapseHandle } from "../components/layout/PaneCollapseHandle";
-import { FilePreview } from "../components/preview/FilePreview";
+import { LazyFilePreview } from "../components/preview/LazyFilePreview";
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import { type LogSeverityFilter } from "../logs/logSeverity";
@@ -1230,13 +1230,14 @@ export function LogsRoute() {
                       })}
                     </div>
                   </section>
-                  <FilePreview
+                  <LazyFilePreview
                     file={contentQuery.data}
                     changed={false}
                     sourceLabel={activeRoot.path}
                     headerActions={previewActions}
                     highlightAsLog
                     severityFilter={severityFilter}
+                    fallback={<div className={styles.emptySurface}>{t("loadingFilePreview")}</div>}
                   />
                   {renderDiagnosticsPanel(contentQuery.data.diagnostics, lang)}
                 </div>

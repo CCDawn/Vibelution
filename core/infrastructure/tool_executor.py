@@ -29,6 +29,9 @@ from core.infrastructure.llm_utils import parse_tool_args
 from core.infrastructure.tool_recommender import decide_next_tools
 
 
+IMAGE2_TOOL_TIMEOUT_SECONDS = 300
+
+
 def _record_tool_scene_event(
     phase: str,
     event_code: str,
@@ -201,8 +204,36 @@ def _validate_tool_arguments(tool_name: str, func: Callable, tool_args: dict[str
 
 
 def _classify_tool_semantic_result(tool_name: str, result: Any) -> dict[str, Any]:
-    text = str(result or "")
+    text = str(result or "").strip()
     fields: dict[str, Any] = {"semanticStatus": "succeeded"}
+    payload = _parse_json_object(text)
+    payload_status = str(payload.get("status") or "").strip().lower()
+    if payload and (
+        payload.get("ok") is False
+        or payload_status in {"blocked", "failed", "error", "timeout", "invalid_args", "policy_blocked"}
+    ):
+        outcome = "blocked" if payload_status in {"blocked", "policy_blocked"} else "failed"
+        level = "warning" if outcome == "blocked" else "error"
+        return {
+            "eventCode": f"tool.execute.{outcome}",
+            "level": level,
+            "outcome": outcome,
+            "lifecycle": True,
+            "fields": {
+                **fields,
+                "semanticStatus": outcome,
+                "toolResultStatus": payload_status,
+                "toolResultError": str(payload.get("error") or "").strip()[:120],
+            },
+        }
+    if text.startswith(("[错误]", "[超时]", "[短路]")):
+        return {
+            "eventCode": "tool.execute.failed",
+            "level": "error",
+            "outcome": "failed",
+            "lifecycle": True,
+            "fields": {**fields, "semanticStatus": "failed"},
+        }
     if tool_name == "cli_tool":
         if "[EXEC FAILURE" in text or "[执行失败" in text:
             return {
@@ -309,6 +340,7 @@ class ToolExecutor:
         "task_stop_tool",
         "clean_workspace_debris_tool",
         "agent_message_tool",
+        "agent_tool_permission_request_tool",
         "image2_generate_tool",
         "update_diagnosis_rules_tool",
         "update_self_model_tool",
@@ -337,7 +369,7 @@ class ToolExecutor:
             "code_symbol_tool": 30,
             "python_lint_tool": 60,
             "spawn_agent_tool": 150,
-            "image2_generate_tool": 180,
+            "image2_generate_tool": IMAGE2_TOOL_TIMEOUT_SECONDS,
         }
         self._retryable_tools = {"grep_search_tool"}
 
@@ -801,6 +833,8 @@ class ToolExecutor:
 
     @staticmethod
     def _check_agent_tool_policy_block(tool_name: str, tool_args: dict) -> Optional[str]:
+        if tool_name == "spawn_agent_tool" and (tool_args or {}).get("_internal_delegate") is True:
+            return None
         try:
             from core.web.services.agent_directory_service import evaluate_current_tool_policy
 

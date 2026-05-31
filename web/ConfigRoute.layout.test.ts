@@ -78,8 +78,8 @@ describe("ConfigRoute content experience contract", () => {
 
   it("uses compact cards for LLM config model and key scanning", () => {
     const profilesStart = configRouteSource.indexOf("copy.profilesBody");
-    const researchPoolStart = configRouteSource.indexOf("styles.researchAgentPool");
-    const profilesSection = configRouteSource.slice(profilesStart, researchPoolStart);
+    const profileFormStart = configRouteSource.indexOf("profileFormRef", profilesStart);
+    const profilesSection = configRouteSource.slice(profilesStart, profileFormStart);
 
     expect(profilesSection).toContain("styles.profileCardGroups");
     expect(profilesSection).toContain("styles.profileCardGrid");
@@ -89,12 +89,28 @@ describe("ConfigRoute content experience contract", () => {
     expect(profilesSection).not.toContain("<table");
     expect(configRouteSource).toContain("copy.profileTableModel");
     expect(configRouteSource).toContain("resolveProfileDisplayState");
-    expect(configRouteSource).toContain("handleTestProfileImageInput");
+    expect(configRouteSource).toContain("selectedImageInputStatus");
+    expect(configRouteSource).toContain("selectedModel?.supports_image_input");
+    expect(profilesSection).not.toContain("handleTestProfileImageInput");
+    expect(profilesSection).not.toContain("styles.researchAgentPool");
+    expect(profilesSection).not.toContain("copy.openAgentManagement");
 
     expect(cssRule(".profileCardGrid")).toContain("repeat(auto-fill, minmax(260px, 1fr))");
     expect(cssRule(".profileConfigCard")).toContain("min-height: 214px");
     expect(cssRule(".profileConfigCardBody")).toContain("grid-template-columns: minmax(0, 1fr)");
     expect(configRouteCss).toContain(".profileStatusBadges");
+  });
+
+  it("separates model assets, call profiles, and git model settings in the sidebar", () => {
+    expect(configRouteSource).toContain('id: "models-profiles"');
+    expect(configRouteSource).toContain('memberSectionIds: ["models", "llm-discovery"]');
+    expect(configRouteSource).toContain('id: "profile-bindings"');
+    expect(configRouteSource).toContain('memberSectionIds: ["profiles"]');
+    expect(configRouteSource).toContain('memberSectionIds: ["prompt"]');
+    expect(configRouteSource).toContain(
+      'memberSectionIds: ["health-diagnostics", "tools", "git-commit-profile", "git-commit-prompt", "security", "network", "log", "parser", "debug"]',
+    );
+    expect(configRouteSource).not.toContain('memberSectionIds: ["profiles", "models", "llm-profiles", "llm-discovery", "git-commit-profile"]');
   });
 
   it("keeps model-library advanced transport fields behind a disclosure", () => {
@@ -108,6 +124,30 @@ describe("ConfigRoute content experience contract", () => {
     expect(advancedPanelSource).toContain("copy.transport");
     expect(advancedPanelSource).toContain("copy.contract");
     expect(advancedPanelSource).toContain("copy.timeout");
+  });
+
+  it("keeps Agent editing out of the config page", () => {
+    expect(configRouteSource).toContain('to="/agents"');
+    expect(configRouteSource).toContain("copy.openAgentManagement");
+    expect(configRouteSource).toContain("copy.agentConfigActive");
+    expect(configRouteSource).not.toContain("saveResearchAgent");
+    expect(configRouteSource).not.toContain("deleteResearchAgent");
+    expect(configRouteSource).not.toContain("updateModeSlot");
+    expect(configRouteSource).not.toContain("toggleResearchPoolAgent");
+    expect(configRouteSource).not.toContain("toggleChatAvailableAgent");
+    expect(configRouteSource).not.toContain("styles.agentConfigCard");
+    expect(configRouteSource).not.toContain("styles.bindingCard");
+    expect(configRouteSource).not.toContain("config-mode-bindings");
+  });
+
+  it("keeps Agent prompt editing out of generic config sections", () => {
+    expect(configRouteSource).toContain("section.id !== \"prompt\"");
+    expect(configRouteSource).toContain('to="/agents/prompts"');
+    const promptSectionStart = configRouteSource.indexOf('id="config-prompt-templates"');
+    const editorSectionsStart = configRouteSource.indexOf("activeEditorSections.map", promptSectionStart);
+    const promptSectionSource = configRouteSource.slice(promptSectionStart, editorSectionsStart);
+    expect(promptSectionSource).not.toContain("ConfigSectionEditor");
+    expect(promptSectionSource).not.toContain("onSaveSection");
   });
 
   it("guards internal route changes when config changes have not been saved to disk", () => {

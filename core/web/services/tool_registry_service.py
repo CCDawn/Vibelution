@@ -24,6 +24,7 @@ from config.settings import reload_config
 from core.infrastructure.image_model_discovery import resolve_image_model, should_discover_image_model
 from core.infrastructure.llm_utils import parse_tool_args
 from core.orchestration.tool_lifecycle import ToolLifecycleBridge
+from core.web.services.tool_catalog import list_tool_bundles, metadata_for_tool
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -130,6 +131,7 @@ def get_tool_registry() -> dict[str, Any]:
         "storagePath": _relative_project_path(GENERATED_TOOLS_PATH),
         "counts": counts,
         "agentScopes": _agent_scope_summaries(tools),
+        "toolBundles": list_tool_bundles(available_tool_names={str(item.get("name") or "") for item in tools}),
         "tools": tools,
     }
 
@@ -993,6 +995,7 @@ def _builtin_tool_items() -> list[dict[str, Any]]:
                 "name": name,
                 "description": _description_for_tool(tool),
                 "source": "built_in",
+                **metadata_for_tool(name, source="built_in"),
                 "status": "active",
                 "enabled": True,
                 "validated": True,
@@ -1033,6 +1036,7 @@ def _generated_tool_item(record: dict[str, Any], *, builtin_names: set[str]) -> 
         "name": name,
         "description": str(item.get("description") or "").strip(),
         "source": "generated",
+        **metadata_for_tool(name, source="generated"),
         "status": status,
         "enabled": bool(item.get("enabled")) and status == "validated",
         "validated": bool(item.get("validated")) and status == "validated",

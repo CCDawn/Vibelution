@@ -67,10 +67,19 @@ IMMEDIATE_WAKE_INTENTS = {"decision_request", "risk_escalation"}
 MAILBOX_ONLY_INTENTS = {"status_report", "knowledge_update", "final_report", "capability_report", "report"}
 PROTECTED_SYSTEM_ROLES = {"ceo", "organization_advisor", "capability_steward"}
 HIGH_RISK_ACTIONS = {"create_agent", "archive_agent", "update_tool_policy", "expand_tool_permissions"}
-CEO_AGENT_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
-ORGANIZATION_ADVISOR_TOOLS = ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
+RESEARCH_COMMUNICATION_EDGE_TOOL = "research_communication_edge_proposal_tool"
+CEO_AGENT_TOOLS = ["agent_message_tool", RESEARCH_COMMUNICATION_EDGE_TOOL, "web_search_tool", "web_fetch_tool"]
+ORGANIZATION_ADVISOR_TOOLS = [
+    "agent_message_tool",
+    "agent_tool_permission_request_tool",
+    RESEARCH_COMMUNICATION_EDGE_TOOL,
+    "web_search_tool",
+    "web_fetch_tool",
+]
 CAPABILITY_STEWARD_TOOLS = [
     "agent_message_tool",
+    "agent_tool_permission_request_tool",
+    RESEARCH_COMMUNICATION_EDGE_TOOL,
     "web_search_tool",
     "web_fetch_tool",
     "read_memory_tool",
@@ -437,6 +446,7 @@ def apply_research_org_proposal(proposal_id: str) -> dict[str, Any]:
     )
     graph["updatedAt"] = now
     _write_organization(graph)
+    _sync_research_team_canvas_after_org_change(graph)
     _record_org_event(
         "research.organization.proposal_applied",
         outcome="applied",
@@ -451,6 +461,19 @@ def apply_research_org_proposal(proposal_id: str) -> dict[str, Any]:
         "proposal": proposal,
         "results": results,
     }
+
+
+def _sync_research_team_canvas_after_org_change(graph: dict[str, Any]) -> None:
+    try:
+        from . import team_service
+
+        team_service.ensure_research_team_from_organization(graph)
+    except Exception as exc:
+        _record_org_event(
+            "research.organization.team_canvas_sync_failed",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__, "message": trim_lines(str(exc), max_lines=2)},
+        )
 
 
 def retry_research_org_message_wake(message_id: str) -> dict[str, Any]:

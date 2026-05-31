@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Archive, Bot, Link2, Play, Plus, RefreshCw, Save, Send, Trash2, Unlink, Users } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -15,13 +16,18 @@ import {
 import { queryKeys } from "../api/queryKeys";
 import { AgentConfigWorkspace, ChatRoomDetail, Team, TeamCanvasNode, TeamListPayload, TeamOrganizationCanvas } from "../api/types";
 import { useAppI18n } from "../i18n/useAppI18n";
-import { AgentManagementNav } from "./AgentManagementNav";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { agentDisplayInfo } from "./agentDisplay";
+import { createChatWorkspaceCache } from "./chatWorkspaceCache";
 import styles from "./TeamsRoute.module.css";
 
 const NODE_WIDTH = 172;
 const NODE_HEIGHT = 92;
+const CANVAS_VIEWPORT_WIDTH = 1180;
+const CANVAS_VIEWPORT_HEIGHT = 760;
 const TEAM_ORGANIZATION_CANVAS_KIND = "team_organization_canvas";
+const LINKED_ROOM_ACTIVE_REFETCH_MS = 5_000;
+const LINKED_ROOM_IDLE_REFETCH_MS = 30_000;
 
 type TeamDraft = {
   name: string;
@@ -33,6 +39,34 @@ type NodeDraft = {
   role: string;
   purpose: string;
   agentId: string;
+};
+
+type NodeDragState = {
+  nodeId: string;
+  startClientX: number;
+  startClientY: number;
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  scale: number;
+  moved: boolean;
+};
+
+type CanvasViewportStyle = CSSProperties & {
+  "--canvas-offset-x": string;
+  "--canvas-offset-y": string;
+  "--canvas-scale": string;
+};
+
+type NodePositionStyle = CSSProperties & {
+  "--node-x": string;
+  "--node-y": string;
+};
+
+type CanvasFrameSize = {
+  width: number;
+  height: number;
 };
 
 function formatTime(value: string, lang: "zh" | "en") {
@@ -55,17 +89,156 @@ function canvasFromTeam(team: Team | null): TeamOrganizationCanvas | null {
   return team.canvas as TeamOrganizationCanvas;
 }
 
-function edgeLine(edge: { source: string; target: string }, nodes: TeamCanvasNode[]) {
+function canvasViewStyle(nodes: TeamCanvasNode[], frameSize?: CanvasFrameSize): CanvasViewportStyle {
+  if (!nodes.length) {
+    return {
+      "--canvas-offset-x": "0px",
+      "--canvas-offset-y": "0px",
+      "--canvas-scale": "1",
+    };
+  }
+  const minX = Math.min(...nodes.map((node) => node.x));
+  const minY = Math.min(...nodes.map((node) => node.y));
+  const maxX = Math.max(...nodes.map((node) => node.x + NODE_WIDTH));
+  const maxY = Math.max(...nodes.map((node) => node.y + NODE_HEIGHT));
+  const boundsWidth = maxX - minX;
+  const boundsHeight = maxY - minY;
+  const frameWidth = Math.max(420, Math.round(frameSize?.width || CANVAS_VIEWPORT_WIDTH));
+  const frameHeight = Math.max(360, Math.round(frameSize?.height || CANVAS_VIEWPORT_HEIGHT));
+  const scale = Math.min(
+    1,
+    Math.max(
+      0.58,
+      Math.min((frameWidth - 72) / Math.max(boundsWidth, 1), (frameHeight - 104) / Math.max(boundsHeight, 1)),
+    ),
+  );
+  const targetX = Math.max(40, Math.round((frameWidth / scale - boundsWidth) / 2));
+  const targetY = Math.max(54, Math.round((frameHeight / scale - boundsHeight) / 2));
+  return {
+    "--canvas-offset-x": `${Math.round(targetX - minX)}px`,
+    "--canvas-offset-y": `${Math.round(targetY - minY)}px`,
+    "--canvas-scale": scale.toFixed(3),
+  };
+}
+
+function canvasStyleScale(style: CanvasViewportStyle) {
+  const parsed = Number(style["--canvas-scale"]);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function edgeLine(
+  edge: { id?: string; source: string; target: string; type?: string },
+  nodes: TeamCanvasNode[],
+  visiblePeerEdges: Array<{ id?: string; source: string; target: string; type?: string }> = [],
+) {
   const source = nodes.find((node) => node.id === edge.source);
   const target = nodes.find((node) => node.id === edge.target);
   if (!source || !target) {
     return null;
   }
-  const x1 = source.x + NODE_WIDTH;
-  const y1 = source.y + NODE_HEIGHT / 2;
-  const x2 = target.x;
-  const y2 = target.y + NODE_HEIGHT / 2;
-  return { x1, y1, x2, y2 };
+  const sourceCenter = {
+    x: source.x + NODE_WIDTH / 2,
+    y: source.y + NODE_HEIGHT / 2,
+  };
+  const targetCenter = {
+    x: target.x + NODE_WIDTH / 2,
+    y: target.y + NODE_HEIGHT / 2,
+  };
+  const dx = targetCenter.x - sourceCenter.x;
+  const dy = targetCenter.y - sourceCenter.y;
+  const distance = Math.hypot(dx, dy) || 1;
+  const unitX = dx / distance;
+  const unitY = dy / distance;
+  const x1 = sourceCenter.x + unitX * (NODE_WIDTH / 2);
+  const y1 = sourceCenter.y + unitY * (NODE_HEIGHT / 2);
+  const x2 = targetCenter.x - unitX * (NODE_WIDTH / 2);
+  const y2 = targetCenter.y - unitY * (NODE_HEIGHT / 2);
+  const normalX = -unitY;
+  const normalY = unitX;
+  const peerEdges = visiblePeerEdges.filter(
+    (peerEdge) =>
+      (peerEdge.source === edge.source && peerEdge.target === edge.target)
+      || (peerEdge.source === edge.target && peerEdge.target === edge.source),
+  );
+  const peerIndex = Math.max(0, peerEdges.findIndex((peerEdge) => peerEdge.id === edge.id));
+  const pairSpread = peerEdges.length > 1 ? (peerIndex - (peerEdges.length - 1) / 2) * 20 : 0;
+  const curve = (isCommunicationEdge({ type: edge.type || "" }) ? 42 : 24) + pairSpread;
+  const cx = (x1 + x2) / 2 + normalX * curve;
+  const cy = (y1 + y2) / 2 + normalY * curve;
+  return { x1, y1, x2, y2, cx, cy };
+}
+
+function roleBadgeTone(node: TeamCanvasNode, displayTone = "") {
+  if (node.status === "stale") {
+    return styles.nodeRoleBadgeStale;
+  }
+  if (!node.agentId) {
+    return styles.nodeRoleBadgeOpen;
+  }
+  const key = `${node.role} ${node.purpose} ${displayTone}`.toLowerCase();
+  if (key.includes("ceo") || key.includes("lead") || key.includes("负责人")) {
+    return styles.nodeRoleBadgeLead;
+  }
+  if (key.includes("advisor") || key.includes("organization") || key.includes("顾问")) {
+    return styles.nodeRoleBadgeAdvisor;
+  }
+  if (key.includes("steward") || key.includes("capability") || key.includes("能力") || key.includes("管家")) {
+    return styles.nodeRoleBadgeSteward;
+  }
+  if (key.includes("research") || key.includes("科研")) {
+    return styles.nodeRoleBadgeResearch;
+  }
+  if (key.includes("self") || key.includes("进化")) {
+    return styles.nodeRoleBadgeSelf;
+  }
+  return styles.nodeRoleBadgeGeneral;
+}
+
+function teamNodeFunctionLabel(node: TeamCanvasNode, displayLabel: string | undefined, lang: "zh" | "en") {
+  const role = String(node.role || "").trim();
+  const purpose = String(node.purpose || "").trim();
+  const key = `${role} ${purpose}`.toLowerCase();
+  if (key.includes("ceo") || key.includes("lead") || key.includes("负责人")) {
+    return lang === "zh" ? "科研负责人" : "Research lead";
+  }
+  if (key.includes("organization") || key.includes("advisor") || key.includes("组织顾问") || key.includes("顾问")) {
+    return lang === "zh" ? "组织顾问" : "Organization advisor";
+  }
+  if (key.includes("capability") || key.includes("steward") || key.includes("能力管家") || key.includes("管家")) {
+    return lang === "zh" ? "能力管家" : "Capability steward";
+  }
+  if (purpose) {
+    return purpose;
+  }
+  return displayLabel || role || (lang === "zh" ? "未绑定" : "Unbound");
+}
+
+function teamConversationStatusLabel(status: string, lang: "zh" | "en") {
+  const normalized = String(status || "").trim();
+  const zh: Record<string, string> = {
+    linked: "契约已对齐",
+    unlinked: "未衔接",
+    room_missing: "群聊缺失",
+    agent_missing: "成员缺失",
+    membership_conflict: "成员不一致",
+  };
+  const en: Record<string, string> = {
+    linked: "contract aligned",
+    unlinked: "unlinked",
+    room_missing: "room missing",
+    agent_missing: "agent missing",
+    membership_conflict: "membership mismatch",
+  };
+  return (lang === "zh" ? zh : en)[normalized] ?? normalized;
+}
+
+export function linkedRoomRefetchInterval(pageVisible: boolean, status: string) {
+  const normalized = String(status || "").toLowerCase();
+  const active = normalized === "running" || normalized === "stopping";
+  return resolvePollingInterval(
+    pageVisible,
+    active ? LINKED_ROOM_ACTIVE_REFETCH_MS : LINKED_ROOM_IDLE_REFETCH_MS,
+  );
 }
 
 function nextNodeId(nodes: TeamCanvasNode[]) {
@@ -87,6 +260,10 @@ function nodeTone(node: TeamCanvasNode) {
     return styles.nodeBound;
   }
   return styles.nodeOpen;
+}
+
+function isCommunicationEdge(edge: { type: string }) {
+  return edge.type === "communication" || edge.type === "collaborates_with";
 }
 
 function latestChatRoomRound(room: ChatRoomDetail | null | undefined) {
@@ -111,7 +288,9 @@ function chatRoomStatusLabel(status: string, lang: "zh" | "en") {
 export function TeamsRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
+  const chatWorkspaceCache = useMemo(() => createChatWorkspaceCache(queryClient), [queryClient]);
   const [searchParams, setSearchParams] = useSearchParams();
+  const pageVisible = usePageVisibility();
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [teamDraft, setTeamDraft] = useState<TeamDraft>({ name: "", purpose: "" });
@@ -119,6 +298,11 @@ export function TeamsRoute() {
   const [teamMessage, setTeamMessage] = useState("");
   const [teamInterrupt, setTeamInterrupt] = useState(false);
   const [teamTaskTopic, setTeamTaskTopic] = useState("");
+  const [showCommunicationEdges, setShowCommunicationEdges] = useState(false);
+  const [nodePositionDrafts, setNodePositionDrafts] = useState<Record<string, { x: number; y: number }>>({});
+  const [canvasFrameSize, setCanvasFrameSize] = useState<CanvasFrameSize>({ width: CANVAS_VIEWPORT_WIDTH, height: CANVAS_VIEWPORT_HEIGHT });
+  const canvasFrameRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<NodeDragState | null>(null);
 
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
@@ -127,6 +311,7 @@ export function TeamsRoute() {
   const workspaceQuery = useQuery({
     queryKey: queryKeys.agentConfigWorkspace(),
     queryFn: () => fetchJson<AgentConfigWorkspace>("/api/agents/config-workspace"),
+    enabled: teamsQuery.isSuccess,
   });
   const projectBusQuery = useQuery({
     queryKey: queryKeys.projectAgentBus(),
@@ -137,6 +322,20 @@ export function TeamsRoute() {
     [workspaceQuery.data],
   );
   const teams = teamsQuery.data?.teams ?? [];
+  const agentTeamMembership = useMemo(() => {
+    const membership = new Map<string, { teamId: string; teamName: string }>();
+    teams.forEach((team) => {
+      if (team.status === "archived") {
+        return;
+      }
+      (team.members ?? []).forEach((member) => {
+        if (member.agentId) {
+          membership.set(member.agentId, { teamId: team.teamId, teamName: team.name });
+        }
+      });
+    });
+    return membership;
+  }, [teams]);
   const requestedTeamId = searchParams.get("team") ?? "";
   const effectiveTeamId = selectedTeamId || teams[0]?.teamId || "";
   const teamDetailQuery = useQuery({
@@ -146,14 +345,46 @@ export function TeamsRoute() {
   });
   const selectedTeam = teamDetailQuery.data ?? teams.find((team) => team.teamId === effectiveTeamId) ?? null;
   const linkedChatRoomId = selectedTeam?.linkedChatRoomId ?? "";
+  const linkedRoomStatusForPolling = String(selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
   const linkedChatRoomQuery = useQuery({
     queryKey: queryKeys.chatRoom(linkedChatRoomId || "none"),
     queryFn: () => fetchJson<ChatRoomDetail>(`/api/chat-rooms/${encodeURIComponent(linkedChatRoomId)}`),
-    enabled: Boolean(linkedChatRoomId),
-    refetchInterval: 5000,
+    enabled: Boolean(linkedChatRoomId && teamDetailQuery.data),
+    refetchInterval: (query) => {
+      const detail = query.state.data as ChatRoomDetail | undefined;
+      return linkedRoomRefetchInterval(pageVisible, detail?.status || linkedRoomStatusForPolling);
+    },
   });
   const canvas = canvasFromTeam(selectedTeam);
-  const selectedNode = canvas?.nodes.find((node) => node.id === selectedNodeId) ?? canvas?.nodes[0] ?? null;
+  const canvasNodes = useMemo(
+    () =>
+      (canvas?.nodes ?? []).map((node) => ({
+        ...node,
+        ...(nodePositionDrafts[node.id] ?? {}),
+      })),
+    [canvas, nodePositionDrafts],
+  );
+  const selectedNode = canvasNodes.find((node) => node.id === selectedNodeId) ?? canvasNodes[0] ?? null;
+  const organizationEdges = useMemo(() => (canvas?.edges ?? []).filter((edge) => !isCommunicationEdge(edge)), [canvas]);
+  const communicationEdges = useMemo(
+    () => (canvas?.edges ?? []).filter((edge) => isCommunicationEdge(edge)),
+    [canvas],
+  );
+  const visibleCommunicationEdges = useMemo(() => {
+    if (!showCommunicationEdges) {
+      return [];
+    }
+    if (!selectedNodeId) {
+      return communicationEdges;
+    }
+    return communicationEdges.filter((edge) => edge.source === selectedNodeId || edge.target === selectedNodeId);
+  }, [communicationEdges, selectedNodeId, showCommunicationEdges]);
+  const visibleEdges = useMemo(
+    () => [...organizationEdges, ...visibleCommunicationEdges],
+    [organizationEdges, visibleCommunicationEdges],
+  );
+  const canvasViewportStyle = useMemo(() => canvasViewStyle(canvasNodes, canvasFrameSize), [canvasFrameSize, canvasNodes]);
+  const canvasScale = canvasStyleScale(canvasViewportStyle);
   const teamBusEvents = useMemo(
     () => projectAgentBusEventsForTeam(projectBusQuery.data, selectedTeam?.teamId),
     [projectBusQuery.data, selectedTeam?.teamId],
@@ -180,6 +411,32 @@ export function TeamsRoute() {
     }
   }, [selectedNode?.id]);
 
+  useEffect(() => {
+    setNodePositionDrafts({});
+    dragStateRef.current = null;
+  }, [selectedTeam?.teamId, canvas?.updatedAt]);
+
+  useEffect(() => {
+    const element = canvasFrameRef.current;
+    if (!element) {
+      return;
+    }
+    const updateFrameSize = () => {
+      setCanvasFrameSize({
+        width: Math.max(420, Math.round(element.clientWidth)),
+        height: Math.max(360, Math.round(element.clientHeight)),
+      });
+    };
+    updateFrameSize();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateFrameSize);
+      return () => window.removeEventListener("resize", updateFrameSize);
+    }
+    const observer = new ResizeObserver(updateFrameSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   const createTeamMutation = useMutation({
     mutationFn: (draft: TeamDraft) =>
       fetchJson<Team>("/api/teams", {
@@ -191,9 +448,7 @@ export function TeamsRoute() {
       setSelectedTeamId(team.teamId);
       setSearchParams({ team: team.teamId });
       setTeamDraft({ name: "", purpose: "" });
-      queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
+      void chatWorkspaceCache.afterTeamChanged(team.teamId);
     },
   });
 
@@ -206,8 +461,7 @@ export function TeamsRoute() {
       setSelectedTeamId("");
       setSelectedNodeId("");
       setSearchParams({});
-      queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      void chatWorkspaceCache.afterTeamChanged();
     },
   });
 
@@ -219,11 +473,7 @@ export function TeamsRoute() {
         body: JSON.stringify(nextCanvas),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
-      if (selectedTeamId) {
-        queryClient.invalidateQueries({ queryKey: queryKeys.team(selectedTeamId) });
-      }
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      void chatWorkspaceCache.afterTeamChanged(selectedTeamId || undefined);
     },
   });
 
@@ -232,8 +482,7 @@ export function TeamsRoute() {
       sendTeamProjectBusMessage(payload),
     onSuccess: () => {
       setTeamMessage("");
-      queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      void chatWorkspaceCache.afterTeamChanged(selectedTeamId || undefined);
     },
   });
 
@@ -244,8 +493,7 @@ export function TeamsRoute() {
         reason: "Revoked from Agent Center team broadcast history.",
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.projectAgentBus() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      void chatWorkspaceCache.afterTeamChanged(selectedTeamId || undefined);
     },
   });
 
@@ -256,10 +504,11 @@ export function TeamsRoute() {
       }),
     onSuccess: (team) => {
       queryClient.setQueryData(queryKeys.team(team.teamId), team);
-      queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfigWorkspace() });
+      if (team.linkedChatRoom?.roomId) {
+        void chatWorkspaceCache.afterTeamRoomMembershipChanged(team.teamId, team.linkedChatRoom.roomId);
+      } else {
+        void chatWorkspaceCache.afterTeamChanged(team.teamId);
+      }
     },
   });
 
@@ -281,11 +530,7 @@ export function TeamsRoute() {
     onSuccess: (room, variables) => {
       setTeamTaskTopic("");
       queryClient.setQueryData(queryKeys.chatRoom(room.roomId), room);
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatRooms() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.chatRoom(room.roomId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.conversations() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.teams() });
-      queryClient.invalidateQueries({ queryKey: queryKeys.team(variables.teamId) });
+      void chatWorkspaceCache.afterTeamRoomMembershipChanged(variables.teamId, room.roomId);
     },
   });
 
@@ -325,6 +570,10 @@ export function TeamsRoute() {
 
   function applyNodeDraft() {
     if (!canvas || !selectedNode) {
+      return;
+    }
+    const membership = nodeDraft.agentId ? agentTeamMembership.get(nodeDraft.agentId) : undefined;
+    if (membership && membership.teamId !== selectedTeam?.teamId) {
       return;
     }
     const agent = activeAgents.find((item) => item.agentId === nodeDraft.agentId);
@@ -400,39 +649,102 @@ export function TeamsRoute() {
           source: source.id,
           target: selectedNode.id,
           label: "",
-          type: "supports",
+          type: "reports_to",
         },
       ],
+    });
+  }
+
+  function startNodeDrag(event: ReactPointerEvent<HTMLButtonElement>, node: TeamCanvasNode) {
+    if (!canvas || saveCanvasMutation.isPending) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setSelectedNodeId(node.id);
+    dragStateRef.current = {
+      nodeId: node.id,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: node.x,
+      startY: node.y,
+      currentX: node.x,
+      currentY: node.y,
+      scale: canvasScale,
+      moved: false,
+    };
+  }
+
+  function moveNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const dragState = dragStateRef.current;
+    if (!dragState) {
+      return;
+    }
+    const deltaX = (event.clientX - dragState.startClientX) / dragState.scale;
+    const deltaY = (event.clientY - dragState.startClientY) / dragState.scale;
+    const nextX = Math.max(0, Math.round(dragState.startX + deltaX));
+    const nextY = Math.max(0, Math.round(dragState.startY + deltaY));
+    dragState.moved = dragState.moved || Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2;
+    dragState.currentX = nextX;
+    dragState.currentY = nextY;
+    setNodePositionDrafts((current) => ({
+      ...current,
+      [dragState.nodeId]: { x: nextX, y: nextY },
+    }));
+  }
+
+  function finishNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const dragState = dragStateRef.current;
+    if (!dragState || !canvas) {
+      return;
+    }
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    dragStateRef.current = null;
+    if (!dragState.moved) {
+      return;
+    }
+    saveCanvas({
+      ...canvas,
+      nodes: canvas.nodes.map((node) => (node.id === dragState.nodeId ? { ...node, x: dragState.currentX, y: dragState.currentY } : node)),
     });
   }
 
   const validation = canvas?.validation;
   const saveLabel = saveCanvasMutation.isPending ? (lang === "zh" ? "保存中" : "Saving") : saveCanvasMutation.isSuccess ? (lang === "zh" ? "已保存" : "Saved") : "";
   const activeTeamMemberCount = selectedTeam?.members.filter((member) => member.agentStatus === "active").length ?? 0;
+  const conversationProjection = selectedTeam?.conversation ?? null;
   const linkedRoomDetail = linkedChatRoomQuery.data ?? null;
   const latestTeamRound = latestChatRoomRound(linkedRoomDetail);
   const linkedRoomStatus = String(linkedRoomDetail?.status || selectedTeam?.linkedChatRoom?.status || "").toLowerCase();
   const linkedRoomBusy = linkedRoomStatus === "running" || linkedRoomStatus === "stopping";
   const canStartTeamRound = Boolean(selectedTeam?.teamId && linkedChatRoomId && activeTeamMemberCount > 0 && teamTaskTopic.trim() && !linkedRoomBusy);
+  const visibleCommunicationEdgeCount = visibleCommunicationEdges.length;
+  const communicationEdgeHint = showCommunicationEdges
+    ? selectedNodeId
+      ? (lang === "zh" ? `信息线已展开：选中节点 ${visibleCommunicationEdgeCount} 条` : `Information lines expanded: ${visibleCommunicationEdgeCount} for selected node`)
+      : (lang === "zh" ? `信息线已展开：全部 ${visibleCommunicationEdgeCount} 条` : `Information lines expanded: ${visibleCommunicationEdgeCount} total`)
+    : (lang === "zh" ? `信息线已收起（${communicationEdges.length} 条，可展开）` : `Information lines hidden (${communicationEdges.length} available)`);
+  const communicationEdgeButtonLabel = showCommunicationEdges
+    ? (lang === "zh" ? "收起信息线" : "Hide info lines")
+    : (lang === "zh" ? `展开信息线 ${communicationEdges.length}` : `Show info ${communicationEdges.length}`);
 
   return (
     <section className={styles.route}>
       <header className={styles.header}>
         <div>
-          <p>{lang === "zh" ? "Agent Center / Teams" : "Agent Center / Teams"}</p>
+          <p>{lang === "zh" ? "团队工作台 / 组织画布" : "Team Workspace / Canvas"}</p>
           <h1>{lang === "zh" ? "团队组织画布" : "Team Organization Canvas"}</h1>
         </div>
         <button type="button" className={styles.iconButton} onClick={() => teamsQuery.refetch()} title={lang === "zh" ? "刷新" : "Refresh"}>
           <RefreshCw size={15} />
         </button>
       </header>
-      <AgentManagementNav active="teams" className={styles.managementNav} />
 
       <div className={styles.summaryBar}>
         <span>{lang === "zh" ? "团队" : "Teams"} <strong>{teamsQuery.data?.summary.activeTeamCount ?? 0}</strong></span>
         <span>{lang === "zh" ? "成员引用" : "Members"} <strong>{teamsQuery.data?.summary.memberCount ?? 0}</strong></span>
         <span>{lang === "zh" ? "失效引用" : "Stale"} <strong>{teamsQuery.data?.summary.staleMemberCount ?? 0}</strong></span>
-        <span>{lang === "zh" ? "Agent 源" : "Agent source"} <strong>Agent Center</strong></span>
+        <span>{lang === "zh" ? "成员源" : "Member source"} <strong>Agent Center</strong></span>
       </div>
 
       <div className={styles.workspace}>
@@ -484,6 +796,15 @@ export function TeamsRoute() {
             <div>
               <strong>{selectedTeam?.name ?? (lang === "zh" ? "暂无团队" : "No team")}</strong>
               <span>{canvas ? `${canvas.path} · ${TEAM_ORGANIZATION_CANVAS_KIND}` : "workspace/teams"}</span>
+              {canvas ? (
+                <small className={styles.edgeLayerLine}>
+                  {lang === "zh" ? "组织线" : "Org lines"} {organizationEdges.length}
+                  {" · "}
+                  {lang === "zh" ? "信息线" : "Info lines"} {communicationEdges.length}
+                  {" · "}
+                  {communicationEdgeHint}
+                </small>
+              ) : null}
               {selectedTeam?.linkedChatRoom ? (
                 <small className={styles.linkedRoomLine}>
                   {lang === "zh" ? "已衔接群聊" : "Linked room"}
@@ -491,10 +812,14 @@ export function TeamsRoute() {
                   {selectedTeam.linkedChatRoom.title}
                   {" · "}
                   {selectedTeam.linkedChatRoom.participantCount} agents
+                  {" · "}
+                  {teamConversationStatusLabel(conversationProjection?.status || "linked", lang)}
                 </small>
               ) : selectedTeam ? (
                 <small className={styles.linkedRoomLine}>
-                  {activeTeamMemberCount > 0
+                  {conversationProjection?.status === "agent_missing"
+                    ? (lang === "zh" ? `成员缺失 ${conversationProjection.missingAgentCount} 个，请先修复 Agent 引用。` : `${conversationProjection.missingAgentCount} missing agents. Repair Agent references first.`)
+                    : activeTeamMemberCount > 0
                     ? (lang === "zh" ? "尚未衔接群聊，可同步创建。" : "No linked room yet. Sync to create one.")
                     : (lang === "zh" ? "绑定 active Agent 后可衔接群聊。" : "Bind active agents before linking a room.")}
                 </small>
@@ -502,6 +827,16 @@ export function TeamsRoute() {
             </div>
             <div className={styles.toolbarActions}>
               {saveLabel ? <span className={styles.saveState}>{saveLabel}</span> : null}
+              <button
+                type="button"
+                className={showCommunicationEdges ? styles.layerButtonActive : ""}
+                onClick={() => setShowCommunicationEdges((current) => !current)}
+                disabled={!canvas || communicationEdges.length === 0}
+                title={communicationEdgeHint}
+              >
+                <Link2 size={14} />
+                {communicationEdgeButtonLabel}
+              </button>
               {linkedChatRoomId ? (
                 <Link className={styles.toolbarLink} to={`/chat?room=${encodeURIComponent(linkedChatRoomId)}`}>
                   {lang === "zh" ? "打开群聊" : "Open room"}
@@ -533,33 +868,57 @@ export function TeamsRoute() {
               </button>
             </div>
           </div>
-          <div className={styles.canvas}>
-            <svg className={styles.edges} width="100%" height="100%">
-              {canvas?.edges.map((edge) => {
-                const line = edgeLine(edge, canvas.nodes);
-                return line ? (
-                  <line key={edge.id} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
-                ) : null;
+          <div className={styles.canvas} ref={canvasFrameRef}>
+            <div className={styles.canvasViewport} style={canvasViewportStyle}>
+              <svg className={styles.edges} width="100%" height="100%" aria-hidden="true">
+                <defs>
+                  <marker
+                    id="team-edge-arrow"
+                    viewBox="0 0 10 10"
+                    refX="8.4"
+                    refY="5"
+                    markerWidth="6"
+                    markerHeight="6"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 0 L 10 5 L 0 10 z" />
+                  </marker>
+                </defs>
+                {visibleEdges.map((edge) => {
+                  const line = edgeLine(edge, canvasNodes, visibleEdges);
+                  return line ? (
+                    <path
+                      key={edge.id}
+                      className={isCommunicationEdge(edge) ? styles.edgeCommunication : styles.edgeOrganization}
+                      d={`M ${line.x1} ${line.y1} Q ${line.cx} ${line.cy} ${line.x2} ${line.y2}`}
+                    />
+                  ) : null;
+                })}
+              </svg>
+              {canvasNodes.map((node) => {
+                const agent = activeAgents.find((item) => item.agentId === node.agentId);
+                const display = agent ? agentDisplayInfo(agent, lang) : null;
+                const functionLabel = teamNodeFunctionLabel(node, display?.functionLabel, lang);
+                return (
+                  <button
+                    key={node.id}
+                    type="button"
+                    className={`${styles.node} ${nodeTone(node)} ${selectedNode?.id === node.id ? styles.nodeActive : ""}`}
+                    style={{ "--node-x": `${node.x}px`, "--node-y": `${node.y}px` } as NodePositionStyle}
+                    onPointerDown={(event) => startNodeDrag(event, node)}
+                    onPointerMove={moveNodeDrag}
+                    onPointerUp={finishNodeDrag}
+                    onPointerCancel={finishNodeDrag}
+                    onClick={() => setSelectedNodeId(node.id)}
+                  >
+                    <span className={styles.nodeIcon}>{node.agentId ? <Bot size={15} /> : <Users size={15} />}</span>
+                    <strong>{node.label}</strong>
+                    <span className={`${styles.nodeRoleBadge} ${roleBadgeTone(node, display?.tone)}`}>{functionLabel}</span>
+                    <small>{node.agentCode || node.status}</small>
+                  </button>
+                );
               })}
-            </svg>
-            {canvas?.nodes.map((node) => {
-              const agent = activeAgents.find((item) => item.agentId === node.agentId);
-              const display = agent ? agentDisplayInfo(agent, lang) : null;
-              return (
-                <button
-                  key={node.id}
-                  type="button"
-                  className={`${styles.node} ${nodeTone(node)} ${selectedNode?.id === node.id ? styles.nodeActive : ""}`}
-                  style={{ transform: `translate(${node.x}px, ${node.y}px)` }}
-                  onClick={() => setSelectedNodeId(node.id)}
-                >
-                  <span className={styles.nodeIcon}>{node.agentId ? <Bot size={15} /> : <Users size={15} />}</span>
-                  <strong>{node.label}</strong>
-                  <span>{display?.functionLabel || node.role || (lang === "zh" ? "未绑定" : "Unbound")}</span>
-                  <small>{node.agentCode || node.status}</small>
-                </button>
-              );
-            })}
+            </div>
           </div>
         </main>
 
@@ -584,9 +943,14 @@ export function TeamsRoute() {
                   <option value="">{lang === "zh" ? "不绑定" : "Unbound"}</option>
                   {activeAgents.map((agent) => {
                     const display = agentDisplayInfo(agent, lang);
+                    const membership = agentTeamMembership.get(agent.agentId);
+                    const ownedByOtherTeam = Boolean(membership && membership.teamId !== selectedTeam?.teamId);
                     return (
-                      <option key={agent.agentId} value={agent.agentId}>
+                      <option key={agent.agentId} value={agent.agentId} disabled={ownedByOtherTeam}>
                         {display.name} · {agent.agentCode}
+                        {ownedByOtherTeam
+                          ? ` · ${lang === "zh" ? "已属于" : "belongs to"} ${membership?.teamName}`
+                          : ""}
                       </option>
                     );
                   })}

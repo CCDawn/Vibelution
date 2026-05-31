@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.5.3 - 2026-05-31
+
+- Added Agent Center tool package presets for fast ToolPolicy setup, including core, research, coding, collaboration, memory/context, media, and operations bundles.
+- Exposed `toolBundles` from `/api/tools` with tool counts, preferred-tool counts, high-risk counts, explicit-allow counts, and risk tags.
+- Added compact Agent Center controls to merge a tool package into the current draft or reset the draft exactly to that package while keeping manual per-tool allow/block editing.
+- Persisted `preferredTools` from the Agent Center tool-policy editor so package priorities are not lost on save.
+
+## 0.5.2 - 2026-05-30
+
+- Added configuration-stage image input capability checks for model library entries and profile-derived models through `/api/config/draft/check-model-capabilities`.
+- Persist image input capability metadata including `supports_image_input`, `capability_status`, `capability_source`, `capability_checked_at`, and `capability_error`.
+- Added model-center actions to check one model or all models for image input support and display the resulting capability status.
+- Marked DeepSeek V4 Pro/Flash presets as unsupported for image input, kept Xiaomi MiMo V2.5 multimodal as supported, and made the profile/model-center badges use conservative `supports_image_input` evidence.
+- Moved Agent binding edits out of the Config page: LLM config now keeps read-only Agent usage summaries and links to Agent management instead of duplicating Agent bindings, prompt/session/workspace edits, and mode slot/pool assignment controls.
+- Restored recent image attachments for contextual retry messages such as “你再试试” when the active task is image comparison or prompt refinement.
+
+## 0.5.1 - 2026-05-30
+
+- Added AgentDirectory-backed `taskProfile` fields for mission, task types, responsibilities, preferred and avoided tasks, success criteria, deliverables, constraints, and handoff notes.
+- Added Agent Center editing for task profiles and exposed the profile through `/api/agents` plus `/api/agents/config-workspace`.
+- Injected non-empty task profiles into Agent runtime context as descriptive task-fit guidance without automatic recommendation, routing, permission, or scheduling behavior.
+- Logged task profile updates through `agent.task_profile.updated` and covered API/context/UI contracts with focused tests.
+
+## 0.5.0 - 2026-05-30
+
+- Added AgentDirectory-backed `personaProfile` fields for gender, age, pronouns, personality, communication style, background, expertise, collaboration preference, and identity notes.
+- Added Agent Center editing for persona profiles and exposed the profile through `/api/agents` plus `/api/agents/config-workspace`.
+- Injected non-empty persona profiles into Agent runtime context as descriptive collaboration guidance, while explicitly keeping age/gender out of capability or permission logic.
+- Logged persona profile updates through `agent.persona_profile.updated` and covered API/context/UI contracts with focused tests.
+
+## 0.4.33 - 2026-05-29
+
+- Added one-shot route chunk recovery for stale lazy-loaded assets after a frontend rebuild, preventing the default React Router error screen when a managed window still holds an older entry bundle.
+- Covered dynamic import fetch failure detection and reload loop prevention with focused frontend tests.
+
+## 0.4.32 - 2026-05-29
+
+- Renamed the top-level Research navigation entry to Team and mounted the Team workspace at `/teams`.
+- Kept `/research` and `/agents/teams` as compatibility redirects to `/teams`, preserving selected team query links.
+- Moved Team out of the Agent management subnavigation while keeping Agent Center as the member binding source.
+
+## 0.4.31 - 2026-05-29
+
+- Added Agent Center avatar editing from the detail avatar: upload a new PNG/JPG/WebP, choose an existing `workspace/avatars` image, or restore the Agent role default.
+- Added Agent avatar management APIs under `/api/agents/{agent_id}/avatar`, `/api/agents/{agent_id}/avatar-image`, and `/api/agents/avatar-options`.
+- Logged avatar updates/uploads through AgentDirectory runtime-scene events while preserving text-avatar fallback behavior.
+
+## 0.4.30 - 2026-05-29
+
+- Added AgentDirectory-backed default avatars sourced from `workspace/avatars`, exposed through `/api/agents/avatar-image/{filename}` and `avatarImageUrl` fields.
+- Render Agent avatars in Agent Center and Chat/Coding Agent reference surfaces while keeping text-initial fallbacks for missing images.
+- Persisted default avatar assignments for existing Agents and logged `agent.avatar_defaults_assigned` during directory repair.
+
+## 0.4.29 - 2026-05-29
+
+- Tightened Research Flow Canvas communication-edge routing so dense bidirectional team organization edges stay close to their Agent nodes instead of expanding into large overlapping arcs.
+- Added a focused ResearchFlowCanvas geometry regression for the three-Agent research team layout with six communication lines.
+- Render Chat/Coding generated-image Markdown as real inline image previews, links, and compact tables instead of exposing raw `![...](...)` syntax after image2 tool calls.
+- Suppress stale interrupted-turn runtime notices after a real follow-up message arrives, and show at most one active runtime notice in the Chat/Coding status strip.
+
+## 0.4.28 - 2026-05-29
+
+- Tightened `list_sessions()` into a read-only lightweight index path: session list loading no longer creates missing session workspaces, materializes legacy Agents, or hydrates each Agent through full detail serialization.
+- Kept AgentDirectory-only direct sessions visible in the list through compact Agent state, while moving legacy chat-state repair to detail/interaction paths such as `get_session_detail`.
+- Added `session.list.loaded` runtime-scene timing metadata so future diagnostics can verify the lightweight read path.
+- Moved interrupted-turn recovery notices out of Agent assistant replies and into `runtimeNotices`, rendered as a separate Chat/Coding status strip while filtering legacy notice messages from the conversation timeline.
+
+## 0.4.27 - 2026-05-29
+
+- Sped up Agent Center configuration workspace loading by switching team and group-room references to compact read paths that avoid session scans, participant repair, linked-room hydration, and canvas reads during the first aggregate load.
+- Added `loadModes` timing metadata to `agent_config.workspace.loaded` so future runtime-scene logs show when compact workspace reads are active.
+
 ## 0.4.26 - 2026-05-29
 
 - Simplified Chat/Coding auxiliary message rendering: “思考过程” and “心智模型” now render as compact dedicated panels instead of duplicated operation-timeline rows.

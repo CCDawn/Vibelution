@@ -21,6 +21,14 @@ MAX_PREVIEW_PATHS = 120
 MAX_SUMMARY_SCAN_ITEMS = 80_000
 RUNNING_SCENE_STATUSES = {"running", "starting", "queued", "stopping"}
 MEMORY_DB_TABLES = ("LongTermMemory", "TaskLog", "ErrorArchive", "CodebaseKnowledge")
+RESET_CATEGORY_LABELS = {
+    "conversation_state": ("对话与会话", "Conversation and sessions"),
+    "agent_state": ("Agent 与团队", "Agents and teams"),
+    "tool_state": ("工具状态", "Tool state"),
+    "diagnostics": ("日志与诊断", "Logs and diagnostics"),
+    "runtime_artifacts": ("运行与临时产物", "Runtime and temporary artifacts"),
+    "build_artifacts": ("可重建产物", "Rebuildable artifacts"),
+}
 
 
 @dataclass(frozen=True)
@@ -34,6 +42,9 @@ class ResetItemDefinition:
     detail_en: str
     risk: str
     default_selected: bool
+    category: str = "runtime_artifacts"
+    category_zh: str = "运行与临时产物"
+    category_en: str = "Runtime and temporary artifacts"
     rebuild_hint_zh: str = ""
     rebuild_hint_en: str = ""
     collector: Callable[[], list["ResetCandidate"]] | None = None
@@ -91,6 +102,12 @@ def get_reset_summary() -> dict:
     lang = get_web_language()
     items = [_summarize_item(definition, lang) for definition in _reset_items()]
     protected = [
+        {
+            "id": "source-code",
+            "label": text_for(lang, zh="源代码与工具源码", en="Source code and source tools"),
+            "paths": ["core/", "web/src/", "tools/*.py"],
+            "reason": text_for(lang, zh="Reset 只清理状态与产物，不删除实现代码。", en="Reset only cleans state and artifacts, not implementation code."),
+        },
         {
             "id": "config",
             "label": text_for(lang, zh="配置与任务模型", en="Config and task models"),
@@ -213,8 +230,41 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en="workspace/chat/chat_state.json",
             risk="medium",
             default_selected=False,
+            category="conversation_state",
+            category_zh="对话与会话",
+            category_en="Conversation and sessions",
             collector=_collect_chat_history,
             executor=_execute_chat_history,
+        ),
+        ResetItemDefinition(
+            id="workspace_sessions",
+            name_zh="会话工作区",
+            name_en="Session workspaces",
+            description_zh="删除 workspace/sessions/ 下的会话运行工作区。聊天历史需单独选择。",
+            description_en="Delete session runtime workspaces under workspace/sessions/. Select chat history separately.",
+            detail_zh="workspace/sessions/",
+            detail_en="workspace/sessions/",
+            risk="high",
+            default_selected=False,
+            category="conversation_state",
+            category_zh="对话与会话",
+            category_en="Conversation and sessions",
+            collector=_collect_workspace_sessions,
+        ),
+        ResetItemDefinition(
+            id="chat_rooms",
+            name_zh="聊天室与群聊",
+            name_en="Chat rooms",
+            description_zh="删除 workspace/chat_rooms/ 的聊天室索引和房间目录。",
+            description_en="Delete chat room indexes and room folders under workspace/chat_rooms/.",
+            detail_zh="workspace/chat_rooms/",
+            detail_en="workspace/chat_rooms/",
+            risk="high",
+            default_selected=False,
+            category="conversation_state",
+            category_zh="对话与会话",
+            category_en="Conversation and sessions",
+            collector=_collect_chat_rooms,
         ),
         ResetItemDefinition(
             id="memory",
@@ -226,8 +276,88 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en="workspace/agent_brain.db memory tables, workspace/memory/, workspace/prompts/STATE_MEMORY.md",
             risk="high",
             default_selected=False,
+            category="agent_state",
+            category_zh="Agent 与团队",
+            category_en="Agents and teams",
             collector=_collect_memory,
             executor=_execute_memory,
+        ),
+        ResetItemDefinition(
+            id="agents",
+            name_zh="Agent 注册表与工作区",
+            name_en="Agent registry and workspaces",
+            description_zh="删除 workspace/agents/ 下的 Agent 注册表、事件和私有工作区；不会删除 workspace/shared/。",
+            description_en="Delete Agent registry, events, and private workspaces under workspace/agents/; workspace/shared/ is not touched.",
+            detail_zh="workspace/agents/",
+            detail_en="workspace/agents/",
+            risk="high",
+            default_selected=False,
+            category="agent_state",
+            category_zh="Agent 与团队",
+            category_en="Agents and teams",
+            collector=_collect_agents,
+            executor=_execute_agents,
+        ),
+        ResetItemDefinition(
+            id="agent_config_state",
+            name_zh="Agent 模式与提示词配置",
+            name_en="Agent mode and prompt config",
+            description_zh="删除 workspace/agent_config/ 下的模式绑定与提示词模板状态；动态提示词文件仍固定保护。",
+            description_en="Delete mode bindings and prompt template state under workspace/agent_config/; dynamic prompt files stay protected.",
+            detail_zh="workspace/agent_config/mode_bindings.json、prompt_templates.json",
+            detail_en="workspace/agent_config/mode_bindings.json, prompt_templates.json",
+            risk="high",
+            default_selected=False,
+            category="agent_state",
+            category_zh="Agent 与团队",
+            category_en="Agents and teams",
+            collector=_collect_agent_config_state,
+        ),
+        ResetItemDefinition(
+            id="teams",
+            name_zh="团队配置",
+            name_en="Teams",
+            description_zh="删除 workspace/teams/ 的团队索引、团队目录和团队运行状态。",
+            description_en="Delete team indexes, folders, and team runtime state under workspace/teams/.",
+            detail_zh="workspace/teams/",
+            detail_en="workspace/teams/",
+            risk="high",
+            default_selected=False,
+            category="agent_state",
+            category_zh="Agent 与团队",
+            category_en="Agents and teams",
+            collector=_collect_teams,
+        ),
+        ResetItemDefinition(
+            id="project_agent_bus",
+            name_zh="Agent 消息总线",
+            name_en="Agent message bus",
+            description_zh="删除 workspace/project_agent_bus/ 的跨 Agent 消息队列和投递残留。",
+            description_en="Delete cross-Agent message queue and delivery residue under workspace/project_agent_bus/.",
+            detail_zh="workspace/project_agent_bus/",
+            detail_en="workspace/project_agent_bus/",
+            risk="high",
+            default_selected=False,
+            category="agent_state",
+            category_zh="Agent 与团队",
+            category_en="Agents and teams",
+            collector=_collect_project_agent_bus,
+        ),
+        ResetItemDefinition(
+            id="generated_tools",
+            name_zh="生成工具注册表",
+            name_en="Generated tool registry",
+            description_zh="清空 workspace/tool_registry/generated_tools.json；不会删除 tools/ 下的源码工具。",
+            description_en="Clear workspace/tool_registry/generated_tools.json without deleting source tools under tools/.",
+            detail_zh="workspace/tool_registry/generated_tools.json",
+            detail_en="workspace/tool_registry/generated_tools.json",
+            risk="high",
+            default_selected=False,
+            category="tool_state",
+            category_zh="工具状态",
+            category_en="Tool state",
+            collector=_collect_generated_tools,
+            executor=_execute_generated_tools,
         ),
         ResetItemDefinition(
             id="conversation_logs",
@@ -239,7 +369,25 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en="conversation and debug logs in log_info/",
             risk="medium",
             default_selected=False,
+            category="diagnostics",
+            category_zh="日志与诊断",
+            category_en="Logs and diagnostics",
             collector=_collect_conversation_logs,
+        ),
+        ResetItemDefinition(
+            id="diagnostic_payloads",
+            name_zh="诊断 payload 与报告",
+            name_en="Diagnostic payloads and reports",
+            description_zh="删除 log_info/payloads/ 与 log_info/harness_reports/ 等诊断大对象。",
+            description_en="Delete large diagnostic payloads such as log_info/payloads/ and log_info/harness_reports/.",
+            detail_zh="log_info/payloads/、log_info/harness_reports/",
+            detail_en="log_info/payloads/, log_info/harness_reports/",
+            risk="medium",
+            default_selected=False,
+            category="diagnostics",
+            category_zh="日志与诊断",
+            category_en="Logs and diagnostics",
+            collector=_collect_diagnostic_payloads,
         ),
         ResetItemDefinition(
             id="runtime_logs",
@@ -251,6 +399,9 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en="logs/ excluding runtime_scenes/",
             risk="low",
             default_selected=False,
+            category="diagnostics",
+            category_zh="日志与诊断",
+            category_en="Logs and diagnostics",
             collector=_collect_runtime_logs,
         ),
         ResetItemDefinition(
@@ -263,6 +414,9 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en="stopped logs/runtime_scenes/ bundles; current scene is skipped",
             risk="medium",
             default_selected=False,
+            category="diagnostics",
+            category_zh="日志与诊断",
+            category_en="Logs and diagnostics",
             collector=_collect_stopped_runtime_scenes,
         ),
         ResetItemDefinition(
@@ -275,6 +429,9 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en=".runtime/runtime-manager/results/",
             risk="low",
             default_selected=False,
+            category="runtime_artifacts",
+            category_zh="运行与临时产物",
+            category_en="Runtime and temporary artifacts",
             collector=_collect_runtime_manager_results,
         ),
         ResetItemDefinition(
@@ -287,7 +444,40 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en=".runtime/*profile* with current browserProfileDir skipped",
             risk="medium",
             default_selected=False,
+            category="runtime_artifacts",
+            category_zh="运行与临时产物",
+            category_en="Runtime and temporary artifacts",
             collector=_collect_browser_profiles,
+        ),
+        ResetItemDefinition(
+            id="workspace_browser_profiles",
+            name_zh="workspace 浏览器 profile",
+            name_en="Workspace browser profiles",
+            description_zh="删除 workspace/ 下的 headless/edge/browser 测试 profile。",
+            description_en="Delete headless/edge/browser test profiles under workspace/.",
+            detail_zh="workspace/*profile*、workspace/edge-headless-profile/",
+            detail_en="workspace/*profile*, workspace/edge-headless-profile/",
+            risk="medium",
+            default_selected=False,
+            category="runtime_artifacts",
+            category_zh="运行与临时产物",
+            category_en="Runtime and temporary artifacts",
+            collector=_collect_workspace_browser_profiles,
+        ),
+        ResetItemDefinition(
+            id="workspace_service_logs",
+            name_zh="workspace 服务日志",
+            name_en="Workspace service logs",
+            description_zh="删除 workspace 根下 *.out.log、*.err.log 与 workspace/logs/。",
+            description_en="Delete workspace root *.out.log, *.err.log, and workspace/logs/.",
+            detail_zh="workspace/*.out.log、workspace/*.err.log、workspace/logs/",
+            detail_en="workspace/*.out.log, workspace/*.err.log, workspace/logs/",
+            risk="low",
+            default_selected=False,
+            category="runtime_artifacts",
+            category_zh="运行与临时产物",
+            category_en="Runtime and temporary artifacts",
+            collector=_collect_workspace_service_logs,
         ),
         ResetItemDefinition(
             id="python_test_caches",
@@ -299,6 +489,9 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en="recursive cache directories",
             risk="low",
             default_selected=False,
+            category="runtime_artifacts",
+            category_zh="运行与临时产物",
+            category_en="Runtime and temporary artifacts",
             collector=_collect_python_test_caches,
         ),
         ResetItemDefinition(
@@ -311,7 +504,40 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en="workspace/tmp-* and .runtime/*.png|*.html|*.log|*.txt",
             risk="low",
             default_selected=False,
+            category="runtime_artifacts",
+            category_zh="运行与临时产物",
+            category_en="Runtime and temporary artifacts",
             collector=_collect_temp_artifacts,
+        ),
+        ResetItemDefinition(
+            id="root_temp_artifacts",
+            name_zh="根目录临时残留",
+            name_en="Root temporary residue",
+            description_zh="删除根目录显式临时目录和临时日志，如 .tmp、tmp_prompt_debug、.tmp-vite-chat2.log。",
+            description_en="Delete explicit root-level temporary folders and logs such as .tmp, tmp_prompt_debug, and .tmp-vite-chat2.log.",
+            detail_zh=".tmp、tmp、tmp-*、tmp_prompt_debug、.codex-temp、.tmp-*.log",
+            detail_en=".tmp, tmp, tmp-*, tmp_prompt_debug, .codex-temp, .tmp-*.log",
+            risk="low",
+            default_selected=False,
+            category="runtime_artifacts",
+            category_zh="运行与临时产物",
+            category_en="Runtime and temporary artifacts",
+            collector=_collect_root_temp_artifacts,
+        ),
+        ResetItemDefinition(
+            id="runtime_preview_artifacts",
+            name_zh="预览/冒烟运行残留",
+            name_en="Preview/smoke runtime residue",
+            description_zh="删除 .runtime/codex-preview、codex-reset-server、codex-ui-check、tmp-* 与预览/冒烟日志。",
+            description_en="Delete .runtime/codex-preview, codex-reset-server, codex-ui-check, tmp-*, and preview/smoke logs.",
+            detail_zh=".runtime/codex-preview、.runtime/codex-reset-server、.runtime/codex-ui-check、.runtime/tmp-*",
+            detail_en=".runtime/codex-preview, .runtime/codex-reset-server, .runtime/codex-ui-check, .runtime/tmp-*",
+            risk="low",
+            default_selected=False,
+            category="runtime_artifacts",
+            category_zh="运行与临时产物",
+            category_en="Runtime and temporary artifacts",
+            collector=_collect_runtime_preview_artifacts,
         ),
         ResetItemDefinition(
             id="web_dist",
@@ -323,6 +549,9 @@ def _reset_items() -> tuple[ResetItemDefinition, ...]:
             detail_en="web/dist/",
             risk="medium",
             default_selected=False,
+            category="build_artifacts",
+            category_zh="可重建产物",
+            category_en="Rebuildable artifacts",
             rebuild_hint_zh="删除 web/dist/ 后，单后端静态托管模式需要在 web/ 重新执行 npm run build。",
             rebuild_hint_en="After deleting web/dist/, run npm run build in web/ before using single-backend static hosting.",
             collector=_collect_web_dist,
@@ -343,6 +572,8 @@ def _summarize_item(definition: ResetItemDefinition, lang: str) -> dict:
         "name": _localized(definition, "name", lang),
         "description": _localized(definition, "description", lang),
         "detail": _localized(definition, "detail", lang),
+        "category": definition.category,
+        "categoryLabel": _localized_category(definition, lang),
         "risk": definition.risk,
         "defaultSelected": definition.default_selected,
         "exists": exists,
@@ -372,6 +603,8 @@ def _preview_item(definition: ResetItemDefinition, lang: str) -> dict:
     return {
         "id": definition.id,
         "name": _localized(definition, "name", lang),
+        "category": definition.category,
+        "categoryLabel": _localized_category(definition, lang),
         "risk": definition.risk,
         "deleteCandidates": [_candidate_payload(candidate, lang) for candidate in delete_candidates[:MAX_PREVIEW_PATHS]],
         "skipped": [_candidate_payload(candidate, lang) for candidate in skipped[:MAX_PREVIEW_PATHS]],
@@ -425,6 +658,8 @@ def _execute_item(definition: ResetItemDefinition, lang: str) -> dict:
     return {
         "id": definition.id,
         "name": _localized(definition, "name", lang),
+        "category": definition.category,
+        "categoryLabel": _localized_category(definition, lang),
         "risk": definition.risk,
         "deleted": [_result_payload(result) for result in deleted[:MAX_PREVIEW_PATHS]],
         "skipped": [_result_payload(result) for result in skipped[:MAX_PREVIEW_PATHS]],
@@ -441,6 +676,16 @@ def _collect_chat_history() -> list[ResetCandidate]:
     return [_candidate_for_path(path, kind="file", action="reset", missing=not path.exists())]
 
 
+def _collect_workspace_sessions() -> list[ResetCandidate]:
+    path = PROJECT_ROOT / "workspace" / "sessions"
+    return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
+
+
+def _collect_chat_rooms() -> list[ResetCandidate]:
+    path = PROJECT_ROOT / "workspace" / "chat_rooms"
+    return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
+
+
 def _collect_memory() -> list[ResetCandidate]:
     candidates = [
         _candidate_for_path(
@@ -454,6 +699,82 @@ def _collect_memory() -> list[ResetCandidate]:
         _candidate_for_path(PROJECT_ROOT / "workspace" / "prompts" / "STATE_MEMORY.md", kind="file", action="reset"),
     ]
     return _dedupe_candidates(candidates)
+
+
+def _collect_agents() -> list[ResetCandidate]:
+    path = PROJECT_ROOT / "workspace" / "agents"
+    return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
+
+
+def _execute_agents(candidate: ResetCandidate) -> ResetActionResult:
+    result = _execute_delete_candidate(candidate)
+    if result.status != "deleted":
+        return result
+    registry_path = PROJECT_ROOT / "workspace" / "agents" / "agents.json"
+    try:
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        registry_path.write_text(
+            json.dumps({"version": 1, "agents": []}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        failed = ResetActionResult("failed", registry_path, "file", "reset", str(exc))
+        _record_reset_candidate_event(failed)
+        return failed
+    return ResetActionResult(
+        status="deleted",
+        path=candidate.path,
+        kind=candidate.kind,
+        action=candidate.action,
+        message="reset agent registry to empty state",
+    )
+
+
+def _collect_agent_config_state() -> list[ResetCandidate]:
+    paths = [
+        PROJECT_ROOT / "workspace" / "agent_config" / "mode_bindings.json",
+        PROJECT_ROOT / "workspace" / "agent_config" / "prompt_templates.json",
+    ]
+    return _dedupe_candidates(
+        [_candidate_for_path(path, kind="file", missing=not path.exists()) for path in paths]
+    )
+
+
+def _collect_teams() -> list[ResetCandidate]:
+    path = PROJECT_ROOT / "workspace" / "teams"
+    return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
+
+
+def _collect_project_agent_bus() -> list[ResetCandidate]:
+    path = PROJECT_ROOT / "workspace" / "project_agent_bus"
+    return [_candidate_for_path(path, kind="directory", missing=not path.exists())]
+
+
+def _collect_generated_tools() -> list[ResetCandidate]:
+    path = PROJECT_ROOT / "workspace" / "tool_registry" / "generated_tools.json"
+    return [
+        _candidate_for_path(
+            path,
+            kind="file",
+            action="reset",
+            missing=not path.exists(),
+            note_zh="清空生成工具注册表；源码 tools/ 不会被删除。",
+            note_en="Clear generated tool registry; source tools/ is not deleted.",
+        )
+    ]
+
+
+def _execute_generated_tools(candidate: ResetCandidate) -> ResetActionResult:
+    try:
+        candidate.path.parent.mkdir(parents=True, exist_ok=True)
+        candidate.path.write_text("[]\n", encoding="utf-8")
+    except OSError as exc:
+        result = ResetActionResult("failed", candidate.path, candidate.kind, candidate.action, str(exc))
+        _record_reset_candidate_event(result)
+        return result
+    result = ResetActionResult("deleted", candidate.path, candidate.kind, candidate.action, "reset to empty generated tool registry")
+    _record_reset_candidate_event(result)
+    return result
 
 
 def _execute_memory(candidate: ResetCandidate) -> ResetActionResult:
@@ -546,6 +867,16 @@ def _collect_conversation_logs() -> list[ResetCandidate]:
     return _dedupe_candidates(candidates)
 
 
+def _collect_diagnostic_payloads() -> list[ResetCandidate]:
+    paths = [
+        PROJECT_ROOT / "log_info" / "payloads",
+        PROJECT_ROOT / "log_info" / "harness_reports",
+    ]
+    return _dedupe_candidates(
+        [_candidate_for_path(path, kind="directory", missing=not path.exists()) for path in paths]
+    )
+
+
 def _collect_runtime_logs() -> list[ResetCandidate]:
     root = PROJECT_ROOT / "logs"
     if not root.exists():
@@ -632,6 +963,34 @@ def _collect_browser_profiles() -> list[ResetCandidate]:
     return _collapse_nested_candidates(_dedupe_candidates(candidates))
 
 
+def _collect_workspace_browser_profiles() -> list[ResetCandidate]:
+    workspace = PROJECT_ROOT / "workspace"
+    if not workspace.exists():
+        return [_candidate_for_path(workspace, kind="directory", missing=True)]
+    candidates: list[ResetCandidate] = []
+    for path in workspace.iterdir():
+        if not path.is_dir():
+            continue
+        lowered = path.name.lower()
+        if "profile" in lowered and ("browser" in lowered or "edge" in lowered or "headless" in lowered):
+            candidates.append(_candidate_for_path(path, kind="directory"))
+    return _collapse_nested_candidates(_dedupe_candidates(candidates))
+
+
+def _collect_workspace_service_logs() -> list[ResetCandidate]:
+    workspace = PROJECT_ROOT / "workspace"
+    if not workspace.exists():
+        return [_candidate_for_path(workspace, kind="directory", missing=True)]
+    candidates: list[ResetCandidate] = []
+    logs_dir = workspace / "logs"
+    candidates.append(_candidate_for_path(logs_dir, kind="directory", missing=not logs_dir.exists()))
+    for pattern in ("*.out.log", "*.err.log"):
+        for path in workspace.glob(pattern):
+            if path.is_file():
+                candidates.append(_candidate_for_path(path, kind="file"))
+    return _dedupe_candidates(candidates)
+
+
 def _collect_python_test_caches() -> list[ResetCandidate]:
     names = {"__pycache__", ".pytest_cache", ".ruff_cache"}
     candidates: list[ResetCandidate] = []
@@ -660,6 +1019,59 @@ def _collect_temp_artifacts() -> list[ResetCandidate]:
                 if path.is_file():
                     candidates.append(_candidate_for_path(path, kind="file"))
     return _dedupe_candidates(candidates)
+
+
+def _collect_root_temp_artifacts() -> list[ResetCandidate]:
+    candidates: list[ResetCandidate] = []
+    exact_names = {
+        ".tmp",
+        "tmp",
+        "tmp-research-debug",
+        "tmp_prompt_debug",
+        ".codex-temp",
+        ".tmp-vite-chat2.log",
+    }
+    for name in sorted(exact_names):
+        path = PROJECT_ROOT / name
+        if path.exists():
+            candidates.append(_candidate_for_path(path, kind="directory" if path.is_dir() else "file"))
+    for path in PROJECT_ROOT.glob("tmp-*"):
+        if path.name in exact_names or not path.exists():
+            continue
+        candidates.append(_candidate_for_path(path, kind="directory" if path.is_dir() else "file"))
+    for path in PROJECT_ROOT.glob(".tmp-*.log"):
+        if path.name in exact_names or not path.is_file():
+            continue
+        candidates.append(_candidate_for_path(path, kind="file"))
+    return _collapse_nested_candidates(_dedupe_candidates(candidates))
+
+
+def _collect_runtime_preview_artifacts() -> list[ResetCandidate]:
+    runtime_root = PROJECT_ROOT / ".runtime"
+    if not runtime_root.exists():
+        return [_candidate_for_path(runtime_root, kind="directory", missing=True)]
+    current_profile = _current_browser_profile_dir()
+    explicit_dirs = [
+        runtime_root / "codex-preview",
+        runtime_root / "codex-reset-server",
+        runtime_root / "codex-ui-check",
+    ]
+    candidates: list[ResetCandidate] = [
+        _candidate_for_path(path, kind="directory", missing=not path.exists()) for path in explicit_dirs
+    ]
+    for path in runtime_root.glob("tmp-*"):
+        if path.exists():
+            candidates.append(_candidate_for_path(path, kind="directory" if path.is_dir() else "file"))
+    for pattern in ("*preview*.log", "*smoke*.log", "*ui-check*.log", "*reset-server*.log"):
+        for path in runtime_root.glob(pattern):
+            if path.is_file():
+                candidates.append(_candidate_for_path(path, kind="file"))
+    if current_profile is not None:
+        candidates = [
+            candidate for candidate in candidates
+            if not _same_or_child(candidate.path, current_profile)
+        ]
+    return _collapse_nested_candidates(_dedupe_candidates(candidates))
 
 
 def _collect_web_dist() -> list[ResetCandidate]:
@@ -796,6 +1208,14 @@ def _candidate_note(candidate: ResetCandidate, lang: str) -> str:
 def _localized(definition: ResetItemDefinition, field: str, lang: str) -> str:
     zh = getattr(definition, f"{field}_zh")
     en = getattr(definition, f"{field}_en")
+    return text_for(lang, zh=zh, en=en)
+
+
+def _localized_category(definition: ResetItemDefinition, lang: str) -> str:
+    zh = definition.category_zh
+    en = definition.category_en
+    if not zh or not en:
+        zh, en = RESET_CATEGORY_LABELS.get(definition.category, RESET_CATEGORY_LABELS["runtime_artifacts"])
     return text_for(lang, zh=zh, en=en)
 
 

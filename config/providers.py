@@ -389,6 +389,16 @@ MODEL_PRESETS: Dict[str, ModelPreset] = {
     # ========================================================================
     # Xiaomi MiMo / 小米 MiMo
     # ========================================================================
+    "xiaomi-mimo-v2.5-multimodal": ModelPreset(
+        name="小米 MiMo V2.5 多模态",
+        provider="xiaomi",
+        model_name="mimo-v2.5",
+        api_base="https://api.xiaomimimo.com/v1",
+        api_key_env="MIMO_API_KEY",
+        default_temperature=0.7,
+        max_tokens=128000,
+        description="小米 MiMo V2.5 OpenAI 兼容多模态接入模板，支持图片 URL 与 Base64 图片理解",
+    ),
     "xiaomi-mimo-v2.5-pro-token-plan": ModelPreset(
         name="小米 MiMo V2.5 Pro Token Plan",
         provider="xiaomi",
@@ -623,9 +633,10 @@ MODEL_ALIASES: Dict[str, str] = {
     "m2": "minimax-m2",
 
     # 小米 MiMo 别名
-    "mimo": "xiaomi-mimo-v2.5-pro-token-plan",
+    "mimo": "xiaomi-mimo-v2.5-multimodal",
+    "mimo-v2.5": "xiaomi-mimo-v2.5-multimodal",
     "mimo-v2.5-pro": "xiaomi-mimo-v2.5-pro-token-plan",
-    "xiaomi-mimo": "xiaomi-mimo-v2.5-pro-token-plan",
+    "xiaomi-mimo": "xiaomi-mimo-v2.5-multimodal",
 }
 
 

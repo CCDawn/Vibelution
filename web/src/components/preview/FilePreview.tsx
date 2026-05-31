@@ -17,7 +17,7 @@ import { parseStructuredLogPreview } from "../../logs/structuredLogPreview";
 import styles from "./FilePreview.module.css";
 import { StructuredLogPreview } from "./StructuredLogPreview";
 
-type FilePreviewProps = {
+export type FilePreviewProps = {
   file: FileContent;
   changed: boolean;
   sourceLabel: string;

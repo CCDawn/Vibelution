@@ -146,6 +146,54 @@ def test_mode_binding_update_rejects_archived_agent(tmp_path, monkeypatch):
         raise AssertionError("Expected archived agent binding update to fail")
 
 
+def test_remove_agent_from_mode_bindings_excludes_removed_fixed_slot(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="监督进化裁决 Agent",
+        profile_id="primary",
+        primary_mode="supervised_evolution",
+        role_key="judge",
+        prompt_template_id="prompt-supervised-judge",
+        metadata={"supervisedRole": "judge"},
+    )
+    agent_mode_binding_service.update_mode_binding(
+        "supervised_evolution",
+        available_agent_ids=[agent["agentId"]],
+        slots={"judge": agent["agentId"]},
+    )
+
+    payload = agent_mode_binding_service.remove_agent_from_mode_bindings(agent["agentId"])
+
+    mode = payload["modes"]["supervised_evolution"]
+    assert mode["slots"]["judge"] == ""
+    assert "judge" in mode["excludedSlots"]
+    assert agent["agentId"] not in mode["availableAgentIds"]
+
+
+def test_remove_agent_from_mode_bindings_preserves_fixed_role_tombstone_after_repair(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    agent = agent_directory_service.create_agent_instance(
+        display_name="自进化执行 Agent",
+        profile_id="primary",
+        primary_mode="self_evolution",
+        role_key="executor",
+        prompt_template_id="prompt-self-executor",
+        metadata={"selfEvolutionRole": "executor"},
+    )
+    seeded = agent_mode_binding_service.get_mode_bindings_payload()
+    assert seeded["modes"]["self_evolution"]["slots"]["executor"] == agent["agentId"]
+    agent_directory_service.archive_agent_instance(agent["agentId"])
+    repaired = agent_mode_binding_service.get_mode_bindings_payload()
+    assert repaired["modes"]["self_evolution"]["slots"]["executor"] == ""
+
+    payload = agent_mode_binding_service.remove_agent_from_mode_bindings(agent["agentId"])
+
+    mode = payload["modes"]["self_evolution"]
+    assert mode["slots"]["executor"] == ""
+    assert "executor" in mode["excludedSlots"]
+    assert agent["agentId"] not in mode["availableAgentIds"]
+
+
 def test_mode_binding_repair_persists_flow_binding_normalization(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     active_agent = agent_directory_service.create_agent_instance(

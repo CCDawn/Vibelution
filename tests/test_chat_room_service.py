@@ -1,6 +1,8 @@
 import json
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 from core.ui.chat_state import load_chat_state, save_chat_state
 from core.web.services import agent_directory_service, chat_room_service, session_service
@@ -34,6 +36,122 @@ def _seed_chat_sessions(root):
             ],
         },
     )
+
+
+def _capture_session_lifecycle_events(monkeypatch):
+    events = []
+    condition = threading.Condition()
+
+    def record_session_turn_lifecycle_event(session_id, phase, **kwargs):
+        event = {
+            "session_id": session_id,
+            "phase": phase,
+            "turn_id": kwargs.get("turn_id", ""),
+            "outcome": kwargs.get("outcome", ""),
+            "fields": dict(kwargs.get("fields") or {}),
+        }
+        with condition:
+            events.append(event)
+            condition.notify_all()
+
+    def wait_for_phase(phase, *, timeout=2.0, fields=None):
+        expected_fields = fields or {}
+        deadline = time.monotonic() + timeout
+        with condition:
+            while True:
+                for event in events:
+                    if event["phase"] != phase:
+                        continue
+                    if all(event["fields"].get(key) == value for key, value in expected_fields.items()):
+                        return event
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                condition.wait(timeout=remaining)
+
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", record_session_turn_lifecycle_event)
+    return wait_for_phase, events
+
+
+def _lightweight_agent_context(*args, **kwargs):
+    return SimpleNamespace(agent_id="", profile_id="", memory_policy={}, context_block="", timings={})
+
+
+def test_group_speaker_message_uses_completion_time_and_strips_self_prefix(monkeypatch):
+    timestamps = iter(["2026-05-29T12:00:30+00:00"])
+    monkeypatch.setattr(chat_room_service, "utc_now_iso", lambda: next(timestamps))
+
+    participant = {
+        "participantId": "session-alpha",
+        "agentId": "agent-alpha",
+        "agentCode": "A012",
+        "sessionId": "session-alpha",
+        "title": "组织顾问 Agent",
+    }
+
+    def fake_runner(_participant, _prompt, _context):
+        return {
+            "status": "completed",
+            "raw_output": "A012 · 江知微：收到，夏总。",
+            "summary": "A012 · 江知微：收到，夏总。",
+        }
+
+    message = chat_room_service._run_one_speaker(
+        participant,
+        "prompt",
+        {"roundId": "round-alpha", "speakerStartedAtMonotonic": chat_room_service._perf_counter()},
+        fake_runner,
+    )
+
+    assert message["timestamp"] == "2026-05-29T12:00:30+00:00"
+    assert message["content"] == "收到，夏总。"
+    assert message["summary"] == "收到，夏总。"
+
+
+def test_group_speaker_strips_ui_identity_prefix_and_prompt_uses_role_view():
+    participant = {
+        "participantId": "session-advisor",
+        "agentId": "agent-advisor",
+        "agentCode": "A012",
+        "sessionId": "session-advisor",
+        "title": "组织顾问 Agent",
+        "teamId": "research-team",
+        "teamName": "科研团队",
+        "teamPurpose": "组织科研 agent",
+        "teamRole": "organization_advisor",
+        "teamMemberPurpose": "科研组织顾问",
+        "teamResponsibilities": ["拆解研究组织结构", "提醒协作边界"],
+    }
+
+    prompt = chat_room_service._build_participant_prompt(
+        room={"roomId": "room-research", "title": "科研团队 团队群聊", "purpose": "discussion"},
+        round_payload={"topic": "请补充研究方向", "mode": "round_robin", "purpose": "discussion"},
+        participant=participant,
+        prior_messages=[],
+    )
+
+    assert "你的身份:" not in prompt
+    assert "A012 · 组织顾问 Agent" not in prompt
+    assert "你的发言视角: organization_advisor / 科研组织顾问" in prompt
+    assert "所属团队: 科研团队" in prompt
+    assert "团队目标: 组织科研 agent" in prompt
+    assert "岗位职责: 科研组织顾问" in prompt
+    assert "职责清单: 拆解研究组织结构；提醒协作边界" in prompt
+    assert "不是普通直连会话 Agent" in prompt
+    assert "不要在正文开头写 Agent 编号、姓名、职位、标题" in prompt
+    assert chat_room_service._strip_redundant_speaker_prefix(
+        "A012 · 组织顾问 Agent：认同CEO锚定方向优先的思路。",
+        participant,
+    ) == "认同CEO锚定方向优先的思路。"
+    assert chat_room_service._strip_redundant_speaker_prefix(
+        "**A012 · 组织顾问 Agent**：先搭骨架，再填血肉。",
+        participant,
+    ) == "先搭骨架，再填血肉。"
+
+
+def test_casual_group_topic_uses_chat_purpose_for_one_round():
+    assert chat_room_service._resolve_round_purpose("你们好", "discussion") == "chat"
+    assert chat_room_service._resolve_round_purpose("讨论近期科研方向", "discussion") == "discussion"
 
 
 def test_create_chat_room_defaults_to_existing_sessions(tmp_path, monkeypatch):
@@ -284,6 +402,10 @@ def test_chat_room_disables_missing_agent_participants(tmp_path, monkeypatch):
     state["conversations"][0]["agent_id"] = "agent-missing"
     state["conversations"][0]["agentId"] = "agent-missing"
     save_chat_state(tmp_path, state)
+    room_state = chat_room_service._store().load()
+    stored_room = next(item for item in room_state["rooms"] if item["roomId"] == room["roomId"])
+    stored_room["participants"][0]["agentId"] = "agent-missing"
+    chat_room_service._store().save(room_state)
 
     detail = chat_room_service.get_chat_room_detail(room["roomId"])
 
@@ -399,6 +521,27 @@ def test_start_chat_room_round_runs_participants_in_round_robin_and_persists_wor
         event[0][:3] == ("chat_room", "round", "chat_room.round.completed")
         for event in recorded_events
     )
+    started_events = [
+        event
+        for event in recorded_events
+        if event[0][:3] == ("chat_room", "round", "chat_room.round.started")
+    ]
+    assert started_events
+    started_fields = started_events[-1][1]["fields"]
+    assert started_fields["chatRoomLockedMs"] >= 0
+    assert started_fields["participantRefreshMs"] >= 0
+    assert started_fields["submitElapsedBeforeStartLogMs"] >= 0
+    speaker_events = [
+        event
+        for event in recorded_events
+        if event[0][:3] == ("chat_room", "speaker", "chat_room.speaker.completed")
+    ]
+    assert speaker_events
+    speaker_fields = speaker_events[-1][1]["fields"]
+    assert speaker_fields["promptBuildMs"] >= 0
+    assert speaker_fields["speakerRunMs"] >= 0
+    assert speaker_fields["runnerMs"] >= 0
+    assert speaker_fields["totalSpeakerMs"] >= 0
 
 
 def test_chat_room_required_supervision_blocks_autonomous_speaker_before_runner(tmp_path, monkeypatch):
@@ -563,6 +706,12 @@ def test_chat_room_participant_runner_reuses_session_workspace_and_agent_profile
     assert turn_results[-1]["agentId"] == agent_id
     assert turn_results[-1]["status"] == "completed"
     assert detail["rounds"][-1]["messages"][0]["status"] == "completed"
+    latest_message = detail["rounds"][-1]["messages"][0]
+    assert latest_message["timings"]["agentLookupMs"] >= 0
+    assert latest_message["timings"]["agentContextBuildMs"] >= 0
+    assert latest_message["timings"]["agentCreateMs"] >= 0
+    assert latest_message["timings"]["agentSeedMs"] >= 0
+    assert latest_message["timings"]["llmElapsedMs"] >= 0
 
 
 def test_chat_room_participant_runner_rejects_archived_agent_before_runtime(tmp_path, monkeypatch):
@@ -673,6 +822,9 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
+    monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
+    monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     room = chat_room_service.create_chat_room(
@@ -738,7 +890,12 @@ def test_chat_room_participant_waits_for_active_direct_turn_on_same_agent(tmp_pa
         )
         room_thread.start()
 
-        assert not room_started.wait(0.3)
+        queued_event = wait_for_lifecycle_phase(
+            "scheduler_external_queued",
+            fields={"owner": "chat_room_round"},
+        )
+        assert queued_event is not None
+        assert not room_started.is_set()
         release_direct.set()
         assert room_started.wait(8.0), "room speaker should start after the direct turn releases the agent slot"
         release_room.set()
@@ -758,6 +915,9 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
+    monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
+    monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     state = load_chat_state(tmp_path)
@@ -798,6 +958,7 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
                 run_order.append("room")
                 room_started.set()
                 assert release_room.wait(10.0)
+                run_order.append("room_finished")
                 return {"status": "completed", "summary": "room done", "raw_output": "room done"}
             if "first direct" in prompt:
                 run_order.append("first_direct")
@@ -811,7 +972,10 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
                     "tool_call_count": 0,
                     "tool_trace": [],
                 }
-            run_order.append("second_direct")
+            if "room_finished" not in run_order:
+                run_order.append("second_direct_started_before_room_finished")
+            else:
+                run_order.append("second_direct")
             second_direct_started.set()
             assert release_second_direct.wait(10.0)
             return {
@@ -837,15 +1001,22 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
             name="pytest-chat-room-fifo-round",
         )
         room_thread.start()
-        assert not room_started.wait(0.3)
+        external_queued_event = wait_for_lifecycle_phase(
+            "scheduler_external_queued",
+            fields={"owner": "chat_room_round"},
+        )
+        assert external_queued_event is not None
+        assert not room_started.is_set()
 
         queued_direct = session_service.submit_session_message(beta["id"], "beta second direct")
         assert queued_direct["currentPhase"] == "queued"
-        assert not second_direct_started.wait(0.3)
+        queued_direct_event = wait_for_lifecycle_phase("scheduler_queued", fields={"agentId": alpha["agentId"]})
+        assert queued_direct_event is not None
+        assert not second_direct_started.is_set()
 
         release_first_direct.set()
         assert room_started.wait(15.0)
-        assert not second_direct_started.wait(0.3)
+        assert "second_direct_started_before_room_finished" not in run_order
         release_room.set()
         assert second_direct_started.wait(15.0)
         release_second_direct.set()
@@ -858,13 +1029,16 @@ def test_chat_room_waiting_speaker_keeps_fifo_before_later_direct_turn(tmp_path,
 
     assert not room_thread.is_alive()
     assert result_holder["detail"]["rounds"][-1]["status"] == "completed"
-    assert run_order == ["first_direct", "room", "second_direct"]
+    assert run_order == ["first_direct", "room", "room_finished", "second_direct"]
 
 
 def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    wait_for_lifecycle_phase, _events = _capture_session_lifecycle_events(monkeypatch)
+    monkeypatch.setattr(session_service, "build_agent_context", _lightweight_agent_context)
+    monkeypatch.setattr(chat_room_service, "build_agent_context", _lightweight_agent_context)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     room = chat_room_service.create_chat_room(
@@ -917,7 +1091,12 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
         detail = chat_room_service.start_chat_room_round(room["roomId"], "等待 direct 后发言", background=True)
         round_id = detail["activeRoundId"]
         assert round_id
-        assert not room_started.wait(0.3)
+        queued_event = wait_for_lifecycle_phase(
+            "scheduler_external_queued",
+            fields={"owner": "chat_room_round"},
+        )
+        assert queued_event is not None
+        assert not room_started.is_set()
 
         stopped = chat_room_service.force_stop_active_chat_room_rounds_for_shutdown("pytest shutdown")
 
@@ -931,12 +1110,12 @@ def test_force_stop_chat_room_round_cancels_waiting_agent_slot(tmp_path, monkeyp
             }
         ]
         release_direct.set()
-        assert not room_started.wait(0.5), "stopped queued room speaker must not start after direct turn releases"
     finally:
         release_direct.set()
         session_executor.shutdown(wait=True, cancel_futures=True)
         room_executor.shutdown(wait=True, cancel_futures=True)
 
+    assert not room_started.is_set(), "stopped queued room speaker must not start after direct turn releases"
     final_detail = chat_room_service.get_chat_room_detail(room["roomId"])
     assert final_detail["status"] == "ready"
     assert final_detail["activeRoundId"] == ""

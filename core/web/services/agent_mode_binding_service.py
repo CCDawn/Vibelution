@@ -225,6 +225,8 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
     normalized_agent_id = str(agent_id or "").strip()
     if not normalized_agent_id:
         raise AgentModeBindingError("Agent id is required.")
+    agent_snapshot = get_agent(normalized_agent_id, include_archived=True)
+    tombstone_slot_by_mode = _fixed_role_tombstone_slots(agent_snapshot)
     payload = repair_mode_bindings()
     bindings = list(payload.get("bindings") or [])
     changed_modes: list[str] = []
@@ -234,14 +236,18 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
             continue
         record = _normalize_binding(binding)
         changed = False
+        exclude_agent_from_reseed = False
         if str(record.get("defaultAgentId") or "").strip() == normalized_agent_id:
             record["defaultAgentId"] = ""
             changed = True
+            exclude_agent_from_reseed = True
         for field in ("availableAgentIds", "pool", "excludedAgentIds"):
             values = [item for item in list(record.get(field) or []) if str(item or "").strip() != normalized_agent_id]
             if values != list(record.get(field) or []):
                 record[field] = values
                 changed = True
+                if field != "excludedAgentIds":
+                    exclude_agent_from_reseed = True
         flow_bindings = {
             key: value
             for key, value in dict(record.get("flowBindings") or {}).items()
@@ -250,13 +256,36 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
         if flow_bindings != dict(record.get("flowBindings") or {}):
             record["flowBindings"] = flow_bindings
             changed = True
-        slots = {
-            key: "" if str(value or "").strip() == normalized_agent_id else value
-            for key, value in dict(record.get("slots") or {}).items()
-        }
+            exclude_agent_from_reseed = True
+        excluded_slots = set(_safe_key_list(record.get("excludedSlots") or []))
+        slots = {}
+        for key, value in dict(record.get("slots") or {}).items():
+            normalized_key = _safe_key(key)
+            if str(value or "").strip() == normalized_agent_id:
+                slots[key] = ""
+                exclude_agent_from_reseed = True
+                if normalized_key:
+                    excluded_slots.add(normalized_key)
+            else:
+                slots[key] = value
         if slots != dict(record.get("slots") or {}):
             record["slots"] = slots
+            record["excludedSlots"] = sorted(excluded_slots)
             changed = True
+        tombstone_slot = tombstone_slot_by_mode.get(str(record.get("mode") or "").strip())
+        if tombstone_slot:
+            before = set(_safe_key_list(record.get("excludedSlots") or []))
+            before.add(tombstone_slot)
+            next_excluded_slots = sorted(before)
+            if next_excluded_slots != list(record.get("excludedSlots") or []):
+                record["excludedSlots"] = next_excluded_slots
+                changed = True
+            if str(record.get("slots", {}).get(tombstone_slot) or "").strip() == normalized_agent_id:
+                record["slots"][tombstone_slot] = ""
+                changed = True
+            exclude_agent_from_reseed = True
+        if exclude_agent_from_reseed:
+            record["excludedAgentIds"] = _dedupe([*list(record.get("excludedAgentIds") or []), normalized_agent_id])
         if not record["defaultAgentId"] and record["availableAgentIds"]:
             record["defaultAgentId"] = record["availableAgentIds"][0]
         if changed:
@@ -273,6 +302,20 @@ def remove_agent_from_mode_bindings(agent_id: str) -> dict[str, Any]:
             fields={"agentId": normalized_agent_id, "changedModes": changed_modes},
         )
     return get_mode_bindings_payload()
+
+
+def _fixed_role_tombstone_slots(agent: dict[str, Any] | None) -> dict[str, str]:
+    if not isinstance(agent, dict):
+        return {}
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    mode = str(agent.get("primaryMode") or "").strip()
+    role = ""
+    if mode == "supervised_evolution":
+        role = str(metadata.get("supervisedRole") or agent.get("roleKey") or "").strip()
+    elif mode == "self_evolution":
+        role = str(metadata.get("selfEvolutionRole") or agent.get("roleKey") or "").strip()
+    safe_role = _safe_key(role)
+    return {mode: safe_role} if mode in {"supervised_evolution", "self_evolution"} and safe_role else {}
 
 
 def repair_mode_bindings(*, agent_options: list[dict[str, Any]] | None = None) -> dict[str, Any]:

@@ -3,6 +3,8 @@
 配置去敏与环境变量优先级测试
 """
 
+import inspect
+
 from pathlib import Path
 
 from config import ConfigLoader, Settings
@@ -58,6 +60,20 @@ def test_example_config_uses_placeholders_only():
     assert 'api_key = "' not in content
     assert "your-api-key" not in content
     assert "sk-cp-" not in content
+
+
+def test_windows_user_env_fallback_does_not_spawn_shells():
+    from config import models
+    from config import public_config
+
+    sources = [
+        inspect.getsource(models._read_windows_user_env_var),
+        inspect.getsource(public_config._read_windows_user_env_var),
+    ]
+
+    assert all("subprocess" not in source for source in sources)
+    assert all("powershell" not in source.lower() for source in sources)
+    assert all("winreg" in source for source in sources)
 
 
 def test_env_overrides_toml_for_api_key(tmp_path, monkeypatch):

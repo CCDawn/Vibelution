@@ -5,14 +5,19 @@ from fastapi.testclient import TestClient
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
 from core.orchestration import context_engine
+from core.web.routes import agents as agents_route
 from core.web.services import (
     agent_config_workspace_service,
     agent_directory_service,
+    agent_tool_governance_service,
     agent_mode_binding_service,
     chat_room_service,
     config_service,
     prompt_template_service,
+    self_evolution_control_service,
     session_service,
+    supervised_agent_service,
+    team_service,
 )
 
 
@@ -35,6 +40,9 @@ def _use_tmp_project_root(tmp_path, monkeypatch):
     monkeypatch.setattr(prompt_template_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(supervised_agent_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(self_evolution_control_service, "PROJECT_ROOT", tmp_path)
 
 
 def _fake_config_workspace():
@@ -73,6 +81,13 @@ def _fake_config_workspace():
         ],
         "modelOptions": [],
     }
+
+
+def _seed_agent_avatars(root):
+    avatar_dir = root / "workspace" / "avatars"
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    for filename in agent_directory_service.AGENT_AVATAR_FILENAMES:
+        (avatar_dir / filename).write_bytes(b"\x89PNG\r\n\x1a\navatar")
 
 
 def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_path, monkeypatch):
@@ -127,6 +142,72 @@ def test_agent_config_workspace_lists_agents_once_and_derives_references(tmp_pat
     assert groups["team"]["section"] == "reference"
     assert research_agent["agentId"] in groups["research"]["agentIds"]
     assert research_agent["agentId"] in groups["group_chat"]["agentIds"]
+
+
+def test_agent_directory_assigns_default_avatar_from_workspace_avatars(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_agent_avatars(tmp_path)
+
+    chat_agent = agent_directory_service.create_agent_instance(display_name="会话 Agent")
+    deep_agent = agent_directory_service.create_agent_instance(
+        display_name="深搜 Agent",
+        primary_mode="research",
+        role_key="research_deep",
+        prompt_template_id="prompt-research-deep",
+    )
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    agents = {item["agentId"]: item for item in workspace["agents"]}
+
+    assert chat_agent["avatarImagePath"].startswith("workspace/avatars/")
+    assert chat_agent["avatarImageUrl"].startswith("/api/agents/avatar-image/")
+    assert deep_agent["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
+    assert deep_agent["avatarImageUrl"] == "/api/agents/avatar-image/06-deep-investigator.png"
+    assert agents[chat_agent["agentId"]]["avatarImageUrl"] == chat_agent["avatarImageUrl"]
+    assert agents[deep_agent["agentId"]]["metadata"]["avatarImageSource"] == "default"
+
+    response = client.get("/api/agents/avatar-image/06-deep-investigator.png")
+    assert response.status_code == 200
+    assert response.content.startswith(b"\x89PNG")
+
+
+def test_agent_avatar_can_be_selected_uploaded_and_reset(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _seed_agent_avatars(tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="头像 Agent", primary_mode="research", role_key="research_deep")
+
+    options = client.get("/api/agents/avatar-options")
+    assert options.status_code == 200
+    assert options.json()["count"] >= 2
+
+    update_response = client.patch(
+        f"/api/agents/{agent['agentId']}/avatar",
+        json={"avatarImagePath": "workspace/avatars/01-session-agent.png"},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["avatarImagePath"] == "workspace/avatars/01-session-agent.png"
+    assert update_response.json()["metadata"]["avatarImageSource"] == "custom"
+
+    upload_response = client.post(
+        f"/api/agents/{agent['agentId']}/avatar-image",
+        json={
+            "filename": "custom.png",
+            "contentType": "image/png",
+            "dataBase64": "iVBORw0KGgphdmF0YXI=",
+        },
+    )
+    assert upload_response.status_code == 200
+    uploaded = upload_response.json()
+    assert uploaded["path"].startswith("workspace/avatars/agent-avatar-")
+    assert uploaded["agent"]["metadata"]["avatarImageSource"] == "custom"
+    assert (tmp_path / uploaded["path"]).exists()
+
+    reset_response = client.patch(
+        f"/api/agents/{agent['agentId']}/avatar",
+        json={"resetToDefault": True},
+    )
+    assert reset_response.status_code == 200
+    assert reset_response.json()["avatarImagePath"] == "workspace/avatars/06-deep-investigator.png"
+    assert reset_response.json()["metadata"]["avatarImageSource"] == "default"
 
 
 def test_agent_config_workspace_reports_missing_model_key_and_prompt(tmp_path, monkeypatch):
@@ -239,6 +320,36 @@ def test_agent_config_workspace_logs_stage_timings_and_reuses_loaded_agents(tmp_
     timings = loaded_events[-1][1]["fields"]["timingsMs"]
     assert {"list_agents", "mode_bindings", "runtime_statuses", "total"}.issubset(timings)
     assert timings["total"] >= timings["mode_bindings"]
+    assert loaded_events[-1][1]["fields"]["loadModes"] == {"chatRooms": "compact", "teams": "compact"}
+
+
+def test_agent_config_workspace_uses_compact_room_and_team_indexes(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    alpha = agent_directory_service.create_agent_instance(display_name="Alpha", direct_session_id="session-alpha")
+    beta = agent_directory_service.create_agent_instance(display_name="Beta", direct_session_id="session-beta")
+    room = chat_room_service.create_chat_room(
+        title="配置中心群聊",
+        participant_agent_ids=[alpha["agentId"], beta["agentId"]],
+    )
+    team_service.create_team(
+        name="配置中心团队",
+        members=[{"agentId": alpha["agentId"], "role": "lead"}],
+    )
+
+    def fail_session_scan():
+        raise AssertionError("config workspace should not scan sessions through compact room/team indexes")
+
+    monkeypatch.setattr(session_service, "list_sessions", fail_session_scan)
+
+    payload = agent_config_workspace_service.get_agent_config_workspace()
+
+    assert payload["summary"]["chatRoomCount"] == 2
+    assert payload["summary"]["teamCount"] == 1
+    assert any(item["roomId"] == room["roomId"] for item in payload["chatRooms"])
+    alpha_refs = payload["references"][alpha["agentId"]]
+    assert any(item["kind"] == "chat_room" and item["sourceLabel"] == "配置中心群聊" for item in alpha_refs)
+    assert any(item["kind"] == "team" and item["sourceLabel"] == "配置中心团队" for item in alpha_refs)
 
 
 def test_agent_workspace_write_boundary_uses_tool_policy_for_shared_paths(tmp_path, monkeypatch):
@@ -376,13 +487,32 @@ def test_repair_agent_directory_keeps_real_user_display_name(tmp_path, monkeypat
 
 def test_agent_config_workspace_api_route(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
-    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
-    session_service.create_chat_session(title="路由 Agent")
+    calls = []
+    route_payload = {
+        "schemaVersion": 1,
+        "summary": {"agentCount": 1},
+        "toolPolicies": [{"policyId": "default"}],
+        "memoryPolicies": [{"policyId": "default"}],
+        "agents": [],
+        "groups": [],
+        "chatRooms": [],
+    }
+    monkeypatch.setattr(
+        agents_route,
+        "get_agent_config_workspace",
+        lambda: calls.append("get_agent_config_workspace") or route_payload,
+    )
 
-    response = client.get("/api/agents/config-workspace")
+    registered_routes = [
+        route
+        for route in client.app.routes
+        if getattr(route, "path", "") == "/api/agents/config-workspace"
+        and "GET" in set(getattr(route, "methods", set()) or set())
+    ]
+    payload = agents_route.agent_config_workspace()
 
-    assert response.status_code == 200, response.text
-    payload = response.json()
+    assert registered_routes
+    assert calls == ["get_agent_config_workspace"]
     assert payload["schemaVersion"] == 1
     assert payload["summary"]["agentCount"] >= 1
     assert any(item["policyId"] == "default" for item in payload["toolPolicies"])
@@ -499,6 +629,119 @@ def test_agent_delete_api_archives_and_cleans_bindings_and_rooms(tmp_path, monke
     assert alpha["agentId"] not in groups["chat"]["agentIds"]
     assert alpha["agentId"] not in groups["research"]["agentIds"]
     assert alpha["agentId"] not in groups["group_chat"]["agentIds"]
+
+
+def test_agent_delete_api_does_not_reactivate_archived_supervised_fixed_role(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    supervised = supervised_agent_service.ensure_supervised_agent_instances()
+    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+    events = []
+    monkeypatch.setattr(
+        supervised_agent_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
+    )
+
+    response = client.delete(f"/api/agents/{judge['agentId']}")
+    assert response.status_code == 200, response.text
+
+    workspace_response = client.get("/api/agents/config-workspace")
+    assert workspace_response.status_code == 200, workspace_response.text
+    archived = agent_directory_service.get_agent(judge["agentId"], include_archived=True)
+    assert archived["status"] == "archived"
+    payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert payload["slots"]["judge"] == ""
+    assert "judge" in payload["excludedSlots"]
+    assert judge["agentId"] not in payload["availableAgentIds"]
+    workspace = workspace_response.json()
+    assert judge["agentId"] in {item["agentId"] for item in workspace["agents"] if item["status"] == "archived"}
+    assert judge["agentId"] not in workspace["modeBindings"]["supervised_evolution"]["availableAgentIds"]
+    assert not any(item[0][2] == "agent.reactivated" for item in events)
+
+
+def test_agent_patch_status_archived_uses_safe_archive_cleanup(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    supervised = supervised_agent_service.ensure_supervised_agent_instances()
+    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+    peer = session_service.create_chat_session(title="Peer Agent")
+    room = chat_room_service.create_chat_room(
+        title="PATCH 归档群聊",
+        participant_agent_ids=[judge["agentId"], peer["agentId"]],
+    )
+
+    response = client.patch(
+        f"/api/agents/{judge['agentId']}",
+        json={"displayName": judge["displayName"], "profileId": judge["profileId"], "status": "archived"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "archived"
+    assert payload["archiveSummary"]["source"] == "patch_status"
+    assert payload["archiveSummary"]["removedFromRoomIds"] == [room["roomId"]]
+    archived = agent_directory_service.get_agent(judge["agentId"], include_archived=True)
+    assert archived["status"] == "archived"
+    bindings = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert bindings["slots"]["judge"] == ""
+    assert "judge" in bindings["excludedSlots"]
+    assert judge["agentId"] not in bindings["availableAgentIds"]
+    room_detail = chat_room_service.get_chat_room_detail(room["roomId"])
+    assert [participant["agentId"] for participant in room_detail["participants"]] == [peer["agentId"]]
+
+
+def test_agent_purge_api_does_not_recreate_deleted_supervised_fixed_role(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    supervised = supervised_agent_service.ensure_supervised_agent_instances()
+    judge = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "judge")
+
+    archive_response = client.delete(f"/api/agents/{judge['agentId']}")
+    assert archive_response.status_code == 200, archive_response.text
+    purge_response = client.delete(f"/api/agents/{judge['agentId']}/purge")
+    assert purge_response.status_code == 200, purge_response.text
+
+    workspace_response = client.get("/api/agents/config-workspace")
+    assert workspace_response.status_code == 200, workspace_response.text
+    assert agent_directory_service.get_agent(judge["agentId"], include_archived=True) is None
+    payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert payload["slots"]["judge"] == ""
+    assert "judge" in payload["excludedSlots"]
+    workspace = workspace_response.json()
+    supervised_agents = [
+        item
+        for item in workspace["agents"]
+        if item.get("primaryMode") == "supervised_evolution"
+        and item.get("roleKey") == "judge"
+    ]
+    assert supervised_agents == []
+
+
+def test_agent_purge_api_preserves_fixed_role_tombstone_after_legacy_archive(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    supervised = supervised_agent_service.ensure_supervised_agent_instances()
+    reviewer = next(agent for agent in supervised if agent["metadata"].get("supervisedRole") == "reviewer")
+    agent_directory_service.archive_agent_instance(reviewer["agentId"])
+    repaired = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert repaired["slots"]["reviewer"] == ""
+
+    purge_response = client.delete(f"/api/agents/{reviewer['agentId']}/purge")
+    assert purge_response.status_code == 200, purge_response.text
+    workspace_response = client.get("/api/agents/config-workspace")
+    assert workspace_response.status_code == 200, workspace_response.text
+
+    payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["supervised_evolution"]
+    assert payload["slots"]["reviewer"] == ""
+    assert "reviewer" in payload["excludedSlots"]
+    workspace = workspace_response.json()
+    assert not [
+        item
+        for item in workspace["agents"]
+        if item.get("primaryMode") == "supervised_evolution"
+        and item.get("roleKey") == "reviewer"
+    ]
 
 
 def test_agent_delete_api_rejects_only_group_member_without_partial_archive(tmp_path, monkeypatch):
@@ -762,6 +1005,159 @@ def test_agent_patch_tool_policy_creates_agent_private_policy_and_logs(tmp_path,
     )
 
 
+def test_agent_tool_governance_low_risk_change_auto_applies_for_governance_agent(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_tool_governance_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    advisor = agent_directory_service.create_agent_instance(
+        display_name="能力顾问",
+        metadata={"systemRole": "organization_advisor", "researchOrgRole": "organization_advisor"},
+    )
+    target = agent_directory_service.create_agent_instance(display_name="资料 Agent")
+
+    request = agent_tool_governance_service.submit_tool_governance_request(
+        target["agentId"],
+        proposed_by_agent_id=advisor["agentId"],
+        grant_tools=["read_file_tool", "grep_search_tool"],
+        reason="资料 Agent 需要只读检索项目材料。",
+        apply_mode="auto",
+    )
+
+    updated = agent_directory_service.get_agent(target["agentId"])
+    assert request["status"] == "applied"
+    assert request["requiresApproval"] is False
+    assert request["riskLevel"] == "low"
+    assert updated["toolPolicy"]["allowedTools"] == ["read_file_tool", "grep_search_tool"]
+    assert request["after"]["allowedTools"] == ["read_file_tool", "grep_search_tool"]
+    assert any(
+        event[0][:3] == ("agent_tool_governance", "tool_policy", "agent_tool_governance.request_applied")
+        and event[1]["fields"]["targetAgentId"] == target["agentId"]
+        for event in recorded_events
+    )
+    assert agent_tool_governance_service.list_tool_governance_requests(agent_id=target["agentId"], status="applied")[0][
+        "requestId"
+    ] == request["requestId"]
+
+
+def test_agent_tool_governance_high_risk_change_waits_for_review_and_can_be_approved(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    advisor = agent_directory_service.create_agent_instance(
+        display_name="权限顾问",
+        metadata={"systemRole": "capability_steward", "researchOrgRole": "capability_steward"},
+    )
+    target = agent_directory_service.create_agent_instance(display_name="执行 Agent")
+
+    request = agent_tool_governance_service.submit_tool_governance_request(
+        target["agentId"],
+        proposed_by_agent_id=advisor["agentId"],
+        grant_tools=["cli_tool"],
+        reason="执行 Agent 需要运行验证命令。",
+        apply_mode="auto",
+    )
+    unchanged = agent_directory_service.get_agent(target["agentId"])
+
+    assert request["status"] == "pending_review"
+    assert request["requiresApproval"] is True
+    assert request["riskLevel"] == "high"
+    assert unchanged["toolPolicy"]["allowedTools"] == []
+
+    approved = agent_tool_governance_service.resolve_tool_governance_request(
+        target["agentId"],
+        request["requestId"],
+        decision="approve",
+        resolved_by="user",
+        resolution_note="允许本轮验证。",
+    )
+    updated = agent_directory_service.get_agent(target["agentId"])
+
+    assert approved["status"] == "applied"
+    assert approved["resolvedBy"] == "user"
+    assert updated["toolPolicy"]["allowedTools"] == ["cli_tool"]
+
+
+def test_agent_tool_governance_uses_shared_tool_catalog_risk_metadata(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    advisor = agent_directory_service.create_agent_instance(
+        display_name="工具目录顾问",
+        metadata={"systemRole": "capability_steward", "researchOrgRole": "capability_steward"},
+    )
+    target = agent_directory_service.create_agent_instance(display_name="图像 Agent")
+
+    request = agent_tool_governance_service.submit_tool_governance_request(
+        target["agentId"],
+        proposed_by_agent_id=advisor["agentId"],
+        grant_tools=["image2_generate_tool"],
+        reason="图像 Agent 需要生成研究配图。",
+        apply_mode="auto",
+    )
+
+    assert request["status"] == "pending_review"
+    assert request["riskLevel"] == "high"
+    assert {"model_cost", "artifact_write"}.issubset(set(request["riskTags"]))
+    assert agent_directory_service.get_agent(target["agentId"])["toolPolicy"]["allowedTools"] == []
+
+
+def test_agent_tool_governance_routes_create_and_resolve_requests(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
+    advisor = agent_directory_service.create_agent_instance(
+        display_name="路由顾问",
+        metadata={"systemRole": "organization_advisor", "researchOrgRole": "organization_advisor"},
+    )
+    target = agent_directory_service.create_agent_instance(display_name="路由目标")
+
+    created = client.post(
+        f"/api/agents/{target['agentId']}/tool-governance-requests",
+        json={
+            "proposedByAgentId": advisor["agentId"],
+            "grantTools": ["image2_generate_tool"],
+            "reason": "需要图片生成能力。",
+            "applyMode": "auto",
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    request = created.json()
+    assert request["status"] == "pending_review"
+    listed = client.get("/api/agents/tool-governance-requests", params={"agentId": target["agentId"]})
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["requestId"] == request["requestId"]
+
+    resolved = client.patch(
+        f"/api/agents/{target['agentId']}/tool-governance-requests/{request['requestId']}",
+        json={"decision": "reject", "resolvedBy": "user", "resolutionNote": "暂不开放。"},
+    )
+
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["status"] == "rejected"
+
+
+def test_agent_config_workspace_surfaces_recent_tool_governance_requests(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    advisor = agent_directory_service.create_agent_instance(
+        display_name="配置顾问",
+        metadata={"systemRole": "organization_advisor", "researchOrgRole": "organization_advisor"},
+    )
+    target = agent_directory_service.create_agent_instance(display_name="配置目标")
+    request = agent_tool_governance_service.submit_tool_governance_request(
+        target["agentId"],
+        proposed_by_agent_id=advisor["agentId"],
+        grant_tools=["cli_tool"],
+        reason="需要命令验证。",
+    )
+
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == target["agentId"])
+
+    assert workspace_agent["toolGovernanceRequests"][0]["requestId"] == request["requestId"]
+    assert workspace_agent["toolGovernanceRequests"][0]["status"] == "pending_review"
+
+
 def test_agent_patch_memory_policy_updates_private_policy_and_logs(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
@@ -790,6 +1186,115 @@ def test_agent_patch_memory_policy_updates_private_policy_and_logs(tmp_path, mon
         and event[1]["fields"]["writeSharedGroupCount"] == 1
         for event in recorded_events
     )
+
+
+def test_project_memory_update_proposals_are_agent_private_and_resolvable(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    alpha = agent_directory_service.create_agent_instance(
+        display_name="运行主干 Agent",
+        direct_session_id="session-alpha",
+    )
+    beta = agent_directory_service.create_agent_instance(
+        display_name="前端 Agent",
+        direct_session_id="session-beta",
+    )
+
+    first = agent_directory_service.write_project_memory_update_proposal(
+        alpha["agentId"],
+        lane_id="agent-runtime-core",
+        focus="memory proposal queue",
+        update="Add a serialized project-memory proposal queue.",
+        related_files=["core/web/services/agent_directory_service.py"],
+        source_turn_id="turn-alpha",
+    )
+    second = agent_directory_service.write_project_memory_update_proposal(
+        beta["agentId"],
+        lane_id="web-workbench-surface",
+        update="Surface pending memory proposals in Agent Center later.",
+    )
+
+    proposal_path = tmp_path / "workspace" / "agents" / alpha["agentId"] / "events" / "project_memory_updates.jsonl"
+    assert proposal_path.exists()
+    assert agent_directory_service.resolve_memory_policy_for_agent(alpha["agentId"])[
+        "projectMemoryUpdatesPath"
+    ] == f"workspace/agents/{alpha['agentId']}/events/project_memory_updates.jsonl"
+    pending = agent_directory_service.list_project_memory_update_proposals(status="pending")
+    assert [item["proposalId"] for item in pending] == [first["proposalId"], second["proposalId"]]
+
+    resolved = agent_directory_service.resolve_project_memory_update_proposal(
+        alpha["agentId"],
+        first["proposalId"],
+        status="applied",
+        resolved_by="coordinator",
+        resolution_note="Merged into agent-runtime-core lane.",
+    )
+
+    assert resolved["status"] == "applied"
+    assert resolved["resolvedBy"] == "coordinator"
+    assert agent_directory_service.list_project_memory_update_proposals(status="pending") == [second]
+    context_block = agent_directory_service.build_agent_runtime_context_block(alpha["agentId"])
+    assert "ProjectMemoryUpdatesPath:" in context_block
+    assert any(
+        event[0][:3] == ("agent_memory", "events", "project_memory_update.proposed")
+        for event in recorded_events
+    )
+    assert any(
+        event[0][:3] == ("agent_memory", "events", "project_memory_update.resolved")
+        for event in recorded_events
+    )
+
+
+def test_project_memory_update_proposal_routes_queue_and_resolve(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: {"accepted": True},
+    )
+    agent = agent_directory_service.create_agent_instance(
+        display_name="协同 Agent",
+        direct_session_id="session-memory-proposal",
+    )
+
+    created = client.post(
+        f"/api/agents/{agent['agentId']}/project-memory-updates",
+        json={
+            "laneId": "agent-runtime-core",
+            "focus": "proposal queue",
+            "update": "Record project-memory changes as per-Agent proposals.",
+            "details": "Coordinator will merge these proposals serially.",
+            "relatedFiles": ["AGENTS.md"],
+            "sourceTurnId": "turn-1",
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    proposal = created.json()
+    assert proposal["status"] == "pending"
+    listed = client.get("/api/agents/project-memory-updates")
+    assert listed.status_code == 200, listed.text
+    assert [item["proposalId"] for item in listed.json()] == [proposal["proposalId"]]
+
+    resolved = client.patch(
+        f"/api/agents/{agent['agentId']}/project-memory-updates/{proposal['proposalId']}",
+        json={
+            "status": "rejected",
+            "resolvedBy": "coordinator",
+            "resolutionNote": "Duplicate proposal.",
+        },
+    )
+
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["status"] == "rejected"
+    assert client.get("/api/agents/project-memory-updates").json() == []
+    all_items = client.get("/api/agents/project-memory-updates", params={"status": ""}).json()
+    assert all_items[0]["status"] == "rejected"
 
 
 def test_agent_patch_runtime_policies_updates_metadata_and_logs(tmp_path, monkeypatch):
@@ -855,9 +1360,111 @@ def test_agent_patch_runtime_policies_updates_metadata_and_logs(tmp_path, monkey
     )
 
 
+def test_agent_patch_persona_profile_updates_api_context_and_logs(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    agent = agent_directory_service.create_agent_instance(display_name="人物 Agent")
+
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "personaProfile": {
+                "gender": "女",
+                "age": "32",
+                "pronouns": "她",
+                "personality": "冷静、细致，优先拆风险。",
+                "communicationStyle": "直接给结论，再补证据。",
+                "background": "长期负责科研团队方法论设计。",
+                "expertise": ["团队设计", "统计评审", "团队设计"],
+                "collaborationPreference": "偏好先明确边界再分工。",
+                "identityNotes": "供顾问 Agent 招人设计时参考。",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["personaProfile"]["gender"] == "女"
+    assert payload["personaProfile"]["age"] == "32"
+    assert payload["personaProfile"]["expertise"] == ["团队设计", "统计评审"]
+    assert payload["metadata"]["personaProfile"]["identityNotes"] == "供顾问 Agent 招人设计时参考。"
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+    assert workspace_agent["personaProfile"]["communicationStyle"] == "直接给结论，再补证据。"
+    context_block = agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+    assert "AgentPersonaProfile:" in context_block
+    assert "Gender: 女" in context_block
+    assert "Expertise: 团队设计, 统计评审" in context_block
+    assert "do not use age/gender as capability" in context_block
+    assert any(
+        event[0][:3] == ("agent_directory", "persona_profile", "agent.persona_profile.updated")
+        and event[1]["fields"]["hasGender"] is True
+        and event[1]["fields"]["hasAge"] is True
+        and event[1]["fields"]["expertiseCount"] == 2
+        for event in recorded_events
+    )
+
+
+def test_agent_patch_task_profile_updates_api_context_and_logs(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    recorded_events = []
+    monkeypatch.setattr(
+        agent_directory_service,
+        "record_runtime_scene_event",
+        lambda *args, **kwargs: recorded_events.append((args, kwargs)) or {"accepted": True},
+    )
+    agent = agent_directory_service.create_agent_instance(display_name="任务 Agent")
+
+    response = client.patch(
+        f"/api/agents/{agent['agentId']}",
+        json={
+            "taskProfile": {
+                "mission": "负责把科研问题收敛成可执行任务。",
+                "taskTypes": ["文献审查", "实验设计", "文献审查"],
+                "responsibilities": "拆解问题\n标注证据缺口",
+                "preferredTasks": "适合处理边界清晰、需要证据链的任务。",
+                "avoidTasks": "不负责凭空推荐成员或自动调度。",
+                "successCriteria": "输出可验收的任务边界和证据要求。",
+                "deliverables": "任务清单、风险列表、交接摘要。",
+                "constraints": "不越过 AgentDirectory 的事实来源。",
+                "handoffNotes": "需要交给顾问 Agent 时保留候选理由。",
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["taskProfile"]["mission"] == "负责把科研问题收敛成可执行任务。"
+    assert payload["taskProfile"]["taskTypes"] == ["文献审查", "实验设计"]
+    assert payload["metadata"]["taskProfile"]["successCriteria"] == "输出可验收的任务边界和证据要求。"
+    workspace = agent_config_workspace_service.get_agent_config_workspace()
+    workspace_agent = next(item for item in workspace["agents"] if item["agentId"] == agent["agentId"])
+    assert workspace_agent["taskProfile"]["preferredTasks"] == "适合处理边界清晰、需要证据链的任务。"
+    context_block = agent_directory_service.build_agent_runtime_context_block(agent["agentId"])
+    assert "AgentTaskProfile:" in context_block
+    assert "TaskTypes: 文献审查, 实验设计" in context_block
+    assert "SuccessCriteria: 输出可验收的任务边界和证据要求。" in context_block
+    assert "do not use it as an automatic permission, routing, or scheduling gate" in context_block
+    assert any(
+        event[0][:3] == ("agent_directory", "task_profile", "agent.task_profile.updated")
+        and event[1]["fields"]["hasMission"] is True
+        and event[1]["fields"]["hasSuccessCriteria"] is True
+        and event[1]["fields"]["taskTypeCount"] == 2
+        for event in recorded_events
+    )
+
+
 def test_agent_mode_membership_api_updates_selected_agent_bindings(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
     agent = agent_directory_service.create_agent_instance(
         display_name="模式 Agent",
         profile_id="primary",
@@ -881,6 +1488,7 @@ def test_agent_mode_membership_api_updates_selected_agent_bindings(tmp_path, mon
 def test_agent_chat_room_membership_api_updates_selected_agent_rooms(tmp_path, monkeypatch):
     _use_tmp_project_root(tmp_path, monkeypatch)
     monkeypatch.setattr(config_service, "get_config_workspace", _fake_config_workspace)
+    monkeypatch.setattr(agents_route, "_ensure_config_agent_instances", lambda: None)
     alpha = session_service.create_chat_session(title="Alpha Agent")
     beta = session_service.create_chat_session(title="Beta Agent")
     gamma = session_service.create_chat_session(title="Gamma Agent")
@@ -901,11 +1509,11 @@ def test_agent_chat_room_membership_api_updates_selected_agent_rooms(tmp_path, m
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["roomIds"] == [second_room["roomId"]]
-    workspace = agent_config_workspace_service.get_agent_config_workspace()
-    rooms = {room["roomId"]: room for room in workspace["chatRooms"]}
-    assert alpha["agentId"] not in rooms[first_room["roomId"]]["agentIds"]
-    assert alpha["agentId"] in rooms[second_room["roomId"]]["agentIds"]
-    assert beta["agentId"] in rooms[first_room["roomId"]]["agentIds"]
+    first_detail = chat_room_service.get_chat_room_detail(first_room["roomId"])
+    second_detail = chat_room_service.get_chat_room_detail(second_room["roomId"])
+    assert alpha["agentId"] not in {participant["agentId"] for participant in first_detail["participants"]}
+    assert alpha["agentId"] in {participant["agentId"] for participant in second_detail["participants"]}
+    assert beta["agentId"] in {participant["agentId"] for participant in first_detail["participants"]}
 
 
 def test_agent_config_workspace_surfaces_stale_room_participant(tmp_path, monkeypatch):

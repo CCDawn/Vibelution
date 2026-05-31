@@ -565,6 +565,14 @@
   font-weight: 800;
 }
 
+.agentAvatarImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
 .agentIndexCopy {
   display: grid;
   min-width: 0;
@@ -584,6 +592,21 @@
   font-family: var(--font-display);
   font-size: 0.82rem;
   line-height: 1.2;
+}
+
+.agentIndexNameLine {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.agentIndexNameLine > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg-primary);
+  white-space: nowrap;
 }
 
 .agentIndexCopy span {
@@ -630,29 +653,6 @@
   margin: 0;
   font-size: 0.76rem;
   line-height: 1.45;
-}
-
-.agentIndexEmptyAction {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 30%, var(--border-soft));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--accent-cool) 12%, var(--surface-card));
-  color: var(--accent-cool-2);
-  font: inherit;
-  font-size: 0.76rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.agentIndexEmptyAction:hover,
-.agentIndexEmptyAction:focus-visible {
-  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
-  outline: none;
 }
 
 .agentIndexDetails {
@@ -1370,6 +1370,60 @@
   color: var(--fg-primary);
 }
 
+.sessionAgentStatusControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 380px;
+  min-width: 220px;
+  max-width: min(44%, 420px);
+  min-height: 31px;
+  margin-left: auto;
+  margin-bottom: 1px;
+  padding: 3px 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 78%, transparent);
+  border-radius: 7px 7px 0 0;
+  background: color-mix(in srgb, var(--surface-panel-strong) 82%, transparent);
+  color: var(--fg-secondary);
+}
+
+.sessionAgentStatusIcon {
+  flex: 0 0 auto;
+  color: var(--accent-cool-2);
+}
+
+.sessionAgentStatusSelect {
+  min-width: 110px;
+  flex: 1 1 auto;
+  border: 0;
+  background: transparent;
+  color: var(--fg-primary);
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sessionAgentStatusSelect:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.sessionAgentStatusMeta {
+  min-width: 0;
+  flex: 0 1 128px;
+  color: var(--fg-tertiary);
+  font-size: 0.7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionAgentStatusSaving {
+  color: var(--accent-warm-2);
+}
+
 .centerSurface {
   display: grid;
   height: 100%;
@@ -1395,6 +1449,76 @@
   color: var(--state-error);
   font-size: 0.82rem;
   line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.runtimeNoticeStack {
+  display: grid;
+  gap: 6px;
+  margin: 10px 14px 0;
+}
+
+.runtimeNotice {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-panel) 82%, var(--accent-cool) 10%);
+  color: var(--fg-secondary);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.runtimeNotice svg {
+  margin-top: 2px;
+  color: var(--accent-cool);
+}
+
+.runtimeNotice_warning {
+  border-color: color-mix(in srgb, var(--accent-warm) 28%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-panel) 84%, var(--accent-warm) 12%);
+}
+
+.runtimeNotice_warning svg {
+  color: var(--accent-warm-2);
+}
+
+.runtimeNotice_error {
+  border-color: color-mix(in srgb, var(--state-error) 26%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-panel) 84%, var(--state-error) 10%);
+}
+
+.runtimeNotice_error svg {
+  color: var(--state-error);
+}
+
+.runtimeNotice_success {
+  border-color: color-mix(in srgb, var(--state-success) 26%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-panel) 84%, var(--state-success) 10%);
+}
+
+.runtimeNotice_success svg {
+  color: var(--state-success);
+}
+
+.runtimeNoticeBody {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runtimeNoticeLabel {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.runtimeNoticeMessage {
+  color: var(--fg-primary);
   overflow-wrap: anywhere;
 }
 
@@ -1559,7 +1683,7 @@
 
 .sessionActionRow {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(92px, auto);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 
@@ -1611,6 +1735,22 @@
   opacity: 0.58;
 }
 
+.projectBusShortcut {
+  margin-top: 2px;
+  padding-right: 4px;
+  border-color: color-mix(in srgb, var(--accent-cool) 16%, transparent);
+  background: color-mix(in srgb, var(--surface-card) 36%, transparent);
+}
+
+.projectBusShortcut[aria-current="true"] {
+  background: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-card));
+}
+
+.projectBusShortcut .sessionItemMain {
+  min-height: 48px;
+  padding: 2px 0;
+}
+
 .groupComposerPanel {
   display: grid;
   gap: 8px;
@@ -1659,7 +1799,7 @@
 
 .groupAgentOption {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto 28px minmax(0, 1fr);
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
@@ -1701,6 +1841,12 @@
   font-size: 0.72rem;
 }
 
+.groupAgentOption .agentRoleTag {
+  justify-self: start;
+  width: 132px;
+  max-width: 100%;
+}
+
 .groupComposerEmpty {
   margin: 0;
   padding: 8px;
@@ -1731,72 +1877,6 @@
   opacity: 0.54;
 }
 
-.agentTemplatePanel {
-  display: grid;
-  gap: 7px;
-  padding: 9px;
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, var(--border-soft));
-  border-radius: 8px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-cool) 9%, transparent), transparent 62%),
-    var(--surface-panel);
-}
-
-.agentTemplateHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--fg-primary);
-}
-
-.agentTemplateHeader svg {
-  color: var(--accent-cool-2);
-  flex: 0 0 auto;
-}
-
-.agentTemplateHeader div {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.agentTemplateHeader strong {
-  font-size: 0.82rem;
-}
-
-.agentTemplateHeader span {
-  color: var(--fg-tertiary);
-  font-size: 0.76rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agentTemplateSelect {
-  width: 100%;
-  min-height: 30px;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
-  background: var(--surface-input);
-  color: var(--fg-primary);
-  padding: 6px 8px;
-  font: inherit;
-  font-size: 0.84rem;
-}
-
-.agentTemplateSelect:disabled {
-  cursor: not-allowed;
-  opacity: 0.58;
-}
-
-.agentTemplateMeta {
-  margin: 0;
-  color: var(--fg-tertiary);
-  font-size: 0.76rem;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
 .panelState {
   padding: 12px;
   border: 1px dashed var(--border-soft);
@@ -1824,6 +1904,37 @@
 
 .conversationGroup + .conversationGroup {
   margin-top: 4px;
+}
+
+.conversationTreeRootHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 7px;
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--surface-card) 58%, transparent);
+  font-size: 0.76rem;
+  font-weight: 780;
+}
+
+.conversationTreeRootHeader span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversationTreeRootHeader strong {
+  min-width: 22px;
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  font-size: 0.68rem;
+  text-align: center;
 }
 
 .conversationGroupHeader {
@@ -1881,6 +1992,66 @@
 .conversationGroupList {
   display: grid;
   gap: 2px;
+}
+
+.teamTreeGroup {
+  margin-top: 8px;
+}
+
+.teamTreeItem {
+  gap: 5px;
+}
+
+.teamTreeChildren {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 6px 5px 42px;
+}
+
+.teamTreeChild {
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  min-height: 27px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 76%, transparent);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--surface-card) 50%, transparent);
+  color: var(--fg-tertiary);
+  font: inherit;
+  font-size: 0.7rem;
+  text-align: left;
+  min-width: 0;
+}
+
+button.teamTreeChild {
+  cursor: pointer;
+}
+
+button.teamTreeChild:hover,
+button.teamTreeChild:focus-visible {
+  border-color: color-mix(in srgb, var(--accent-cool) 32%, var(--border-soft));
+  color: var(--fg-primary);
+  outline: none;
+}
+
+.teamTreeChild:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.teamTreeChild span,
+.teamTreeChild strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teamTreeChild strong {
+  color: var(--fg-secondary);
+  font-weight: 760;
 }
 
 .sessionItem {
@@ -2479,7 +2650,7 @@
 
 .groupMemberChip {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto 26px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   width: 100%;
@@ -2500,6 +2671,21 @@
 
 .groupMemberChip input {
   margin: 0;
+}
+
+.agentOptionAvatar {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--fg-primary);
+  background: color-mix(in srgb, var(--accent-cool) 18%, var(--surface-card));
+  font-family: var(--font-body);
+  font-size: 0.62rem;
+  font-weight: 820;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 10%, transparent);
 }
 
 .groupMemberCopy {
@@ -2525,6 +2711,12 @@
   color: var(--fg-tertiary);
   font-size: 0.66rem;
   line-height: 1.1;
+}
+
+.groupMemberCopy .agentRoleTag {
+  justify-self: start;
+  width: 132px;
+  max-width: 100%;
 }
 
 .agentMissingInline {
@@ -2763,7 +2955,7 @@
 .groupBubbleRow {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
-  align-items: end;
+  align-items: start;
   gap: 7px;
   max-width: min(820px, 86%);
   min-width: 0;

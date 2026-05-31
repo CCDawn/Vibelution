@@ -15,6 +15,7 @@ from core.web.services.session_service import (
     create_chat_review_candidate_from_session,
     create_chat_session,
     delete_chat_session,
+    delete_chat_session_lightweight,
     edit_and_resubmit_session_message,
     get_session_detail,
     list_session_agent_templates,
@@ -24,6 +25,7 @@ from core.web.services.session_service import (
     store_session_user_image_attachment,
     stream_session_events,
     submit_session_message,
+    submit_session_message_lightweight,
     update_chat_session,
     update_chat_session_title,
 )
@@ -92,8 +94,10 @@ def session_update(session_id: str, payload: SessionUpdatePayload) -> dict:
 
 
 @router.delete("/sessions/{session_id}")
-def session_delete(session_id: str) -> dict:
+def session_delete(session_id: str, request: Request) -> dict:
     try:
+        if "respond-async" in str(request.headers.get("prefer") or "").lower():
+            return delete_chat_session_lightweight(session_id)
         return delete_chat_session(session_id)
     except SessionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -149,8 +153,18 @@ async def session_upload_attachment(session_id: str, request: Request) -> dict:
 
 
 @router.post("/sessions/{session_id}/messages", status_code=status.HTTP_202_ACCEPTED)
-def session_submit_message(session_id: str, payload: SessionMessagePayload) -> dict:
+def session_submit_message(session_id: str, payload: SessionMessagePayload, request: Request) -> dict:
     try:
+        if "respond-async" in str(request.headers.get("prefer") or "").lower():
+            return submit_session_message_lightweight(
+                session_id,
+                payload.content,
+                content_utf8_base64=payload.contentUtf8Base64,
+                attachment_ids=payload.attachmentIds,
+                mental_model_enabled=payload.mentalModelEnabled,
+                turn_mode=payload.turnMode,
+                write_intent=payload.writeIntent,
+            )
         return submit_session_message(
             session_id,
             payload.content,

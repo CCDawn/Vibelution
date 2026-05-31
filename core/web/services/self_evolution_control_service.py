@@ -398,7 +398,9 @@ def ensure_self_evolution_agent_instances() -> list[dict[str, Any]]:
     ensured: list[dict[str, Any]] = []
     try:
         for role in SELF_EVOLUTION_AGENT_ROLES:
-            ensured.append(_ensure_self_evolution_role(role))
+            agent = _ensure_self_evolution_role(role)
+            if agent:
+                ensured.append(agent)
         _sync_self_evolution_mode_binding(ensured, preserve_existing_slots=True)
         return ensured
     finally:
@@ -504,12 +506,19 @@ def _record_self_evolution_binding_failure(role: str, *, agent_id: str, reason: 
         return
 
 
-def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any]:
+def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any] | None:
     role_key = str(role.get("role") or "").strip()
     label = str(role.get("label") or role_key).strip() or role_key
     profile_id = str(role.get("profileId") or "primary").strip() or "primary"
     prompt_template_id = str(role.get("promptTemplateId") or "").strip()
     existing = _find_agent_by_self_evolution_role(role_key)
+    if _self_evolution_role_slot_excluded(role_key):
+        _record_self_evolution_agent_sync_skipped(
+            role_key,
+            agent_id=str((existing or {}).get("agentId") or "").strip(),
+            reason="mode_binding_slot_excluded",
+        )
+        return None
     if not existing:
         session_detail = session_service.create_chat_session(
             title=label,
@@ -520,6 +529,13 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any]:
         existing = agent_directory_service.get_agent(agent_id) if agent_id else None
         if not existing:
             raise RuntimeError(f"Self-evolution agent was not created for role: {role_key}")
+    if str(existing.get("status") or "active").strip() == "archived":
+        _record_self_evolution_agent_sync_skipped(
+            role_key,
+            agent_id=str(existing.get("agentId") or "").strip(),
+            reason="agent_archived",
+        )
+        return None
     metadata = dict(existing.get("metadata") or {})
     expected_metadata = {
         "agentMode": "self_evolution",
@@ -535,15 +551,8 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any]:
         or str(existing.get("roleKey") or "").strip() != role_key
         or str(existing.get("profileId") or "").strip() != profile_id
         or str(existing.get("promptTemplateId") or "").strip() != prompt_template_id
-        or str(existing.get("status") or "active").strip() == "archived"
         or any(metadata.get(key) != value for key, value in expected_metadata.items())
     ):
-        if str(existing.get("status") or "active").strip() == "archived":
-            existing = agent_directory_service.reactivate_agent_instance(
-                str(existing.get("agentId") or ""),
-                reason="self_evolution_fixed_role_bootstrap",
-                metadata={"fixedRole": True, "selfEvolutionRole": role_key},
-            )
         existing = agent_directory_service.update_agent_instance(
             str(existing.get("agentId") or ""),
             display_name=label,
@@ -556,6 +565,39 @@ def _ensure_self_evolution_role(role: dict[str, str]) -> dict[str, Any]:
             preserve_generated_display_name=True,
         )
     return existing
+
+
+def _self_evolution_role_slot_excluded(role: str) -> bool:
+    normalized = str(role or "").strip()
+    if not normalized:
+        return False
+    try:
+        payload = agent_mode_binding_service.get_mode_bindings_payload()
+        mode = (payload.get("modes") or {}).get("self_evolution") or {}
+        excluded_slots = {str(item or "").strip() for item in list(mode.get("excludedSlots") or [])}
+        return normalized in excluded_slots
+    except Exception:
+        return False
+
+
+def _record_self_evolution_agent_sync_skipped(role: str, *, agent_id: str, reason: str) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent",
+            "self_evolution.agent_instance.sync_skipped",
+            message="Self-evolution fixed role Agent sync skipped",
+            level="info",
+            outcome="skipped",
+            fields={
+                "selfEvolutionRole": str(role or "").strip(),
+                "agentId": str(agent_id or "").strip(),
+                "reason": str(reason or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
 
 
 def _find_agent_by_self_evolution_role(role: str) -> dict[str, Any] | None:
@@ -572,7 +614,13 @@ def _find_agent_by_self_evolution_role(role: str) -> dict[str, Any] | None:
 
 
 def _sync_self_evolution_mode_binding(agents: list[dict[str, Any]], *, preserve_existing_slots: bool = False) -> None:
-    active_agent_ids = [str(agent.get("agentId") or "").strip() for agent in agents if str(agent.get("agentId") or "").strip()]
+    active_agents = [
+        agent
+        for agent in agents
+        if str(agent.get("agentId") or "").strip()
+        and str(agent.get("status") or "active").strip() != "archived"
+    ]
+    active_agent_ids = [str(agent.get("agentId") or "").strip() for agent in active_agents]
     slots: dict[str, str] = {}
     if preserve_existing_slots:
         try:
@@ -582,7 +630,7 @@ def _sync_self_evolution_mode_binding(agents: list[dict[str, Any]], *, preserve_
                 slots.update({str(key): str(value or "").strip() for key, value in existing.items()})
         except Exception:
             slots = {}
-    for agent in agents:
+    for agent in active_agents:
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         role = str(metadata.get("selfEvolutionRole") or agent.get("roleKey") or "").strip()
         agent_id = str(agent.get("agentId") or "").strip()

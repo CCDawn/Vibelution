@@ -10,6 +10,7 @@ from core.web.services import (
     agent_mode_binding_service,
     research_organization_service,
     session_service,
+    team_service,
 )
 
 
@@ -57,10 +58,23 @@ def test_research_organization_initializes_protected_core_agents_with_explicit_t
     assert ceo["agent"]["metadata"]["systemRole"] == "ceo"
     assert advisor["agent"]["metadata"]["systemRole"] == "organization_advisor"
     assert steward["agent"]["metadata"]["systemRole"] == "capability_steward"
-    assert ceo["toolPolicy"]["allowedTools"] == ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
-    assert advisor["toolPolicy"]["allowedTools"] == ["agent_message_tool", "web_search_tool", "web_fetch_tool"]
+    assert ceo["toolPolicy"]["allowedTools"] == [
+        "agent_message_tool",
+        "research_communication_edge_proposal_tool",
+        "web_search_tool",
+        "web_fetch_tool",
+    ]
+    assert advisor["toolPolicy"]["allowedTools"] == [
+        "agent_message_tool",
+        "agent_tool_permission_request_tool",
+        "research_communication_edge_proposal_tool",
+        "web_search_tool",
+        "web_fetch_tool",
+    ]
     assert steward["toolPolicy"]["allowedTools"] == [
         "agent_message_tool",
+        "agent_tool_permission_request_tool",
+        "research_communication_edge_proposal_tool",
         "web_search_tool",
         "web_fetch_tool",
         "read_memory_tool",
@@ -445,6 +459,7 @@ def test_agent_message_without_edge_is_blocked_and_audited(org_workspace):
             "sourceAgentId": advisor["agentId"],
             "targetAgentId": outsider_agent["agentId"],
             "messageType": "notice",
+            "intent": "status_report",
             "content": "越权广播测试。",
             "wakeTarget": False,
         }
@@ -481,6 +496,7 @@ def test_required_supervision_policy_blocks_agent_research_org_message(org_works
             "sourceAgentId": ceo["agentId"],
             "targetAgentId": advisor["agentId"],
             "messageType": "task",
+            "intent": "decision_request",
             "content": "这条自主任务需要先复核。",
             "wakeTarget": True,
         }
@@ -530,6 +546,7 @@ def test_advisory_supervision_policy_observes_agent_message_without_blocking(org
             "sourceAgentId": ceo["agentId"],
             "targetAgentId": advisor["agentId"],
             "messageType": "task",
+            "intent": "decision_request",
             "content": "这条自主任务允许发送但要留下监督观察。",
             "wakeTarget": False,
         }
@@ -575,6 +592,7 @@ def test_disabled_supervision_policy_does_not_gate_agent_message(org_workspace, 
             "sourceAgentId": ceo["agentId"],
             "targetAgentId": advisor["agentId"],
             "messageType": "task",
+            "intent": "decision_request",
             "content": "监督禁用时不应阻断。",
             "wakeTarget": False,
         }
@@ -613,6 +631,7 @@ def test_upward_report_enters_mailbox_without_wake_and_ceo_task_wakes(org_worksp
             "sourceAgentId": advisor["agentId"],
             "targetAgentId": ceo["agentId"],
             "messageType": "report",
+            "intent": "status_report",
             "content": "建议新增一个论文审查 Agent。",
             "wakeTarget": True,
         }
@@ -623,6 +642,7 @@ def test_upward_report_enters_mailbox_without_wake_and_ceo_task_wakes(org_worksp
             "sourceAgentId": ceo["agentId"],
             "targetAgentId": advisor["agentId"],
             "messageType": "task",
+            "intent": "decision_request",
             "content": "请形成组织调整提案。",
             "wakeTarget": True,
         }
@@ -709,6 +729,7 @@ def test_busy_target_keeps_pending_message_and_retry_can_wake(org_workspace, mon
             "sourceAgentId": ceo["agentId"],
             "targetAgentId": advisor["agentId"],
             "messageType": "task",
+            "intent": "decision_request",
             "content": "忙碌重试测试。",
             "wakeTarget": True,
         }
@@ -760,6 +781,43 @@ def test_high_risk_create_agent_proposal_requires_user_apply(org_workspace):
     assert created["agentId"]
     created_node = next(node for node in applied["organization"]["agents"] if node["agentId"] == created["agentId"])
     assert created_node["allowedTools"] == ["agent_message_tool", "web_search_tool"]
+
+
+def test_edge_proposal_apply_syncs_research_team_canvas(org_workspace):
+    org = research_organization_service.get_research_organization()
+    ceo, _, steward = _core_agents(org)
+
+    proposal = research_organization_service.create_research_org_proposal(
+        {
+            "actions": [
+                {
+                    "actionType": "update_communication_edge",
+                    "fromAgentId": ceo["agentId"],
+                    "toAgentId": steward["agentId"],
+                    "label": "CEO 请求能力策略复核",
+                    "communicationPolicy": {
+                        "allowedMessageTypes": ["request", "task"],
+                        "allowedIntents": ["capability_policy", "decision_request"],
+                        "wakeStrategy": "immediate",
+                    },
+                }
+            ],
+        }
+    )["proposal"]
+
+    applied = research_organization_service.apply_research_org_proposal(proposal["proposalId"])
+
+    updated_edge = next(
+        edge for edge in applied["organization"]["edges"]
+        if edge["fromAgentId"] == ceo["agentId"] and edge["toAgentId"] == steward["agentId"]
+    )
+    canvas = team_service.get_team_canvas("research-team")
+    canvas_edge = next(
+        edge for edge in canvas["edges"]
+        if edge["source"] == ceo["agentId"] and edge["target"] == steward["agentId"] and edge.get("type") == "communication"
+    )
+    assert updated_edge["label"] == "CEO 请求能力策略复核"
+    assert canvas_edge["label"] == "CEO 请求能力策略复核"
 
 
 def test_archived_former_agent_stays_visible_but_cannot_receive_new_task(org_workspace):
@@ -819,6 +877,7 @@ def test_archived_former_agent_stays_visible_but_cannot_receive_new_task(org_wor
             "sourceAgentId": ceo["agentId"],
             "targetAgentId": created_agent_id,
             "messageType": "task",
+            "intent": "decision_request",
             "content": "归档后不应再接收任务。",
         }
     )

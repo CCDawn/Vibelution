@@ -24,12 +24,12 @@ describe("AppShell layout contract", () => {
     expect(styles.versionPill).toBeTypeOf("string");
   });
 
-  it("exposes the research preview from the primary navigation", () => {
-    expect(shellSource).toContain('to="/research"');
-    expect(shellSource).toContain('t("navResearch")');
+  it("exposes Teams from the primary navigation", () => {
+    expect(shellSource).toContain('to="/teams"');
+    expect(shellSource).toContain('t("navTeams")');
   });
 
-  it("collapses logs tools and git behind one hover utility menu", () => {
+  it("collapses logs git and files behind one hover utility menu", () => {
     const primaryNav = shellSource.slice(
       shellSource.indexOf("<nav className={styles.nav}>"),
       shellSource.indexOf("</nav>"),
@@ -47,7 +47,7 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain("hidden={!utilityOpen}");
     expect(shellSource).toContain('event.key === "Escape"');
     expect(shellSource).toContain('to="/logs"');
-    expect(shellSource).toContain('to="/agents/tools"');
+    expect(shellSource).not.toContain('to="/agents/tools"');
     expect(shellSource).not.toContain('to="/tools"');
     expect(shellSource).not.toContain('to="/memory"');
     expect(shellSource).toContain("Wrench");

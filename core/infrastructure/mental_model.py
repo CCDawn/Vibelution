@@ -773,8 +773,7 @@ class MentalModel:
         """用已恢复的 chat 历史为感知层提供会话连续性。"""
         context = self._build_conversation_context(messages)
         self._conversation_context = context
-        if context.get("last_mental_state"):
-            self._last_state_output = dict(context["last_mental_state"])
+        self._last_state_output = {}
 
     def clear_conversation_context(self) -> None:
         """清除会话连续性，避免跨会话串用上一段 chat 状态。"""

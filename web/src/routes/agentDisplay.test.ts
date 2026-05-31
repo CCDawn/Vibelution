@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agentDisplayInfo, sessionAgentDisplayInfo } from "./agentDisplay";
+import { agentDisplayInfo, participantAgentDisplayInfo, sessionAgentDisplayInfo } from "./agentDisplay";
 
 describe("agent display helpers", () => {
   it("keeps person names while replacing noisy session labels with clear chat roles", () => {
@@ -55,5 +55,28 @@ describe("agent display helpers", () => {
 
     expect(info.name).toBe("夏映白");
     expect(info.functionLabel).toBe("通用会话 Agent");
+  });
+
+  it("uses team participant role context before direct session role labels", () => {
+    const info = participantAgentDisplayInfo(
+      {
+        participantId: "session-alpha",
+        title: "Alpha",
+        agentCode: "A011",
+        teamRole: "research_lead",
+        teamMemberPurpose: "科研负责人",
+      },
+      {
+        agentId: "agent-alpha",
+        agentCode: "A011",
+        displayName: "Alpha",
+        primaryMode: "chat",
+      },
+      "zh",
+    );
+
+    expect(info.name).toBe("Alpha");
+    expect(info.functionLabel).toBe("科研负责人");
+    expect(info.meta).toBe("科研负责人 · A011");
   });
 });

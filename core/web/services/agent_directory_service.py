@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import re
+import secrets
 import shutil
 import tempfile
 import threading
@@ -13,8 +16,9 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
+from urllib.parse import quote
 
 from core.chat.chat_task_types import trim_lines
 
@@ -29,6 +33,81 @@ DEFAULT_MEMORY_POLICY_ID = "private"
 DEFAULT_AGENT_PRIMARY_MODE = "chat"
 AGENT_CODE_PREFIX = "A"
 AGENT_SHARED_WORKSPACE_PATH = "workspace/shared"
+AGENT_AVATAR_RELATIVE_DIR = PurePosixPath("workspace/avatars")
+AGENT_AVATAR_FILENAMES = (
+    "01-session-agent.png",
+    "02-diagnose-agent.png",
+    "03-inspect-agent.png",
+    "04-summarize-agent.png",
+    "05-broad-explorer.png",
+    "06-deep-investigator.png",
+    "07-evidence-reviewer.png",
+    "08-theme-synthesizer.png",
+    "09-card-planner.png",
+    "image2-1779953260549-43de200a.png",
+    "image2-1779954683508-9fcd1834.png",
+)
+AGENT_AVATAR_ROLE_DEFAULTS = (
+    (("chat",), "01-session-agent.png"),
+    (("general",), "01-session-agent.png"),
+    (("research", "broad"), "05-broad-explorer.png"),
+    (("research", "deep"), "06-deep-investigator.png"),
+    (("research", "theme"), "08-theme-synthesizer.png"),
+    (("research", "card"), "09-card-planner.png"),
+    (("research", "planner"), "09-card-planner.png"),
+    (("summar",), "04-summarize-agent.png"),
+    (("review",), "07-evidence-reviewer.png"),
+    (("evidence",), "07-evidence-reviewer.png"),
+    (("judge",), "07-evidence-reviewer.png"),
+    (("audit",), "03-inspect-agent.png"),
+    (("inspect",), "03-inspect-agent.png"),
+    (("diagnose",), "02-diagnose-agent.png"),
+    (("debug",), "02-diagnose-agent.png"),
+    (("baseline",), "02-diagnose-agent.png"),
+    (("candidate",), "03-inspect-agent.png"),
+)
+AGENT_PERSONA_PROFILE_TEXT_FIELDS = (
+    "gender",
+    "age",
+    "pronouns",
+    "personality",
+    "communicationStyle",
+    "background",
+    "collaborationPreference",
+    "identityNotes",
+)
+AGENT_PERSONA_PROFILE_FIELDS = (*AGENT_PERSONA_PROFILE_TEXT_FIELDS, "expertise")
+AGENT_PERSONA_PROFILE_TEXT_LINE_LIMITS = {
+    "gender": 1,
+    "age": 1,
+    "pronouns": 1,
+    "personality": 4,
+    "communicationStyle": 4,
+    "background": 6,
+    "collaborationPreference": 4,
+    "identityNotes": 6,
+}
+AGENT_TASK_PROFILE_TEXT_FIELDS = (
+    "mission",
+    "responsibilities",
+    "preferredTasks",
+    "avoidTasks",
+    "successCriteria",
+    "deliverables",
+    "constraints",
+    "handoffNotes",
+)
+AGENT_TASK_PROFILE_FIELDS = (*AGENT_TASK_PROFILE_TEXT_FIELDS, "taskTypes")
+AGENT_TASK_PROFILE_TEXT_LINE_LIMITS = {
+    "mission": 4,
+    "responsibilities": 8,
+    "preferredTasks": 8,
+    "avoidTasks": 6,
+    "successCriteria": 6,
+    "deliverables": 6,
+    "constraints": 6,
+    "handoffNotes": 6,
+}
 AGENT_WORKSPACE_SUBDIRS = (
     "conversation",
     "memory",
@@ -45,9 +124,15 @@ AGENT_WORKSPACE_SUBDIRS = (
 AGENT_TERRITORY_WRITE_SCOPES = ("private",)
 AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
 TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
-EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {"research_knowledge_query_tool"}
+EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {"research_knowledge_query_tool", "research_communication_edge_proposal_tool"}
 KNOWN_AGENT_PRIMARY_MODES = {"chat", "research", "self_evolution", "supervised_evolution", "general"}
 WRITE_RETRY_TIMEOUT_SECONDS = 2.0
+MAX_AGENT_AVATAR_IMAGE_BYTES = 5 * 1024 * 1024
+_AGENT_AVATAR_CONTENT_TYPE_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+}
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
 _AGENT_CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9-]{1,15}$")
 _AGENT_ID_LIKE_PATTERN = re.compile(r"^(agent[-_].+|[aA]\d{3,}|[A-Z][A-Z0-9-]{1,15})$")
@@ -122,6 +207,10 @@ class AgentArchivedError(AgentDirectoryError):
 
 class AgentMessageNotFoundError(AgentDirectoryError):
     """Raised when an Agent inbox message does not exist."""
+
+
+class AgentMemoryProposalNotFoundError(AgentDirectoryError):
+    """Raised when an Agent project-memory proposal does not exist."""
 
 
 @dataclass(frozen=True)
@@ -264,6 +353,7 @@ def create_agent_instance(
             "createdAt": now,
             "updatedAt": now,
         }
+        _ensure_agent_default_avatar(agent)
         policies = _memory_policies(state)
         policies[memory_policy_id] = default_memory_policy(memory_policy_id, agent_workspace)
         state["agents"] = list(state.get("agents") or []) + [agent]
@@ -408,6 +498,8 @@ def update_agent_instance(
     memory_policy: dict[str, Any] | None = None,
     delegation_policy: dict[str, Any] | None = None,
     supervision_policy: dict[str, Any] | None = None,
+    persona_profile: dict[str, Any] | None = None,
+    task_profile: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
     status: str | None = None,
     preserve_generated_display_name: bool = False,
@@ -416,6 +508,8 @@ def update_agent_instance(
     updated_memory_policy: dict[str, Any] | None = None
     updated_delegation_policy: dict[str, Any] | None = None
     updated_supervision_policy: dict[str, Any] | None = None
+    updated_persona_profile: dict[str, Any] | None = None
+    updated_task_profile: dict[str, Any] | None = None
     with _STATE_LOCK:
         state = load_state()
         agent = _find_agent(state, agent_id)
@@ -523,6 +617,17 @@ def update_agent_instance(
             updated_supervision_policy = normalize_supervision_policy(supervision_policy)
             metadata_payload["supervisionPolicy"] = updated_supervision_policy
             agent["metadata"] = metadata_payload
+        if persona_profile is not None:
+            metadata_payload = dict(agent.get("metadata") or {})
+            updated_persona_profile = normalize_persona_profile(persona_profile)
+            metadata_payload["personaProfile"] = updated_persona_profile
+            agent["metadata"] = metadata_payload
+        if task_profile is not None:
+            metadata_payload = dict(agent.get("metadata") or {})
+            updated_task_profile = normalize_task_profile(task_profile)
+            metadata_payload["taskProfile"] = updated_task_profile
+            agent["metadata"] = metadata_payload
+        _ensure_agent_default_avatar(agent)
         agent["updatedAt"] = utc_now_iso()
         save_state(state)
     _record_agent_event("agent.updated", agent)
@@ -534,6 +639,10 @@ def update_agent_instance(
         _record_agent_delegation_policy_event(agent, updated_delegation_policy)
     if updated_supervision_policy is not None:
         _record_agent_supervision_policy_event(agent, updated_supervision_policy)
+    if updated_persona_profile is not None:
+        _record_agent_persona_profile_event(agent, updated_persona_profile)
+    if updated_task_profile is not None:
+        _record_agent_task_profile_event(agent, updated_task_profile)
     return _agent_to_api(agent)
 
 
@@ -703,6 +812,7 @@ def repair_agent_directory() -> dict[str, Any]:
         state = load_state()
         changed = False
         display_name_repaired_agents: list[dict[str, Any]] = []
+        avatar_defaulted_agents: list[dict[str, Any]] = []
         territory_repaired_agents: list[dict[str, Any]] = []
         used_agent_codes: set[str] = set()
         policies = _memory_policies(state)
@@ -761,6 +871,10 @@ def repair_agent_directory() -> dict[str, Any]:
                 )
                 agent["metadata"] = _mark_display_name_generated(metadata)
                 changed = True
+            avatar_result = _ensure_agent_default_avatar(agent)
+            if avatar_result:
+                avatar_defaulted_agents.append(dict(agent))
+                changed = True
             normalized_code = _normalize_agent_code(agent.get("agentCode"))
             if normalized_code and normalized_code not in used_agent_codes:
                 if agent.get("agentCode") != normalized_code:
@@ -808,6 +922,8 @@ def repair_agent_directory() -> dict[str, Any]:
             save_state(state)
             for repaired_agent in display_name_repaired_agents:
                 _record_agent_event("agent.display_name_repaired", repaired_agent)
+            if avatar_defaulted_agents:
+                _record_agent_avatar_defaults_event(avatar_defaulted_agents)
             for repaired_agent in territory_repaired_agents:
                 _record_agent_territory_event("agent_territory.resolved", repaired_agent, outcome="repaired")
         return state
@@ -1290,6 +1406,133 @@ def write_group_context_event(agent_id: str, event: dict[str, Any]) -> dict[str,
     return event_payload
 
 
+def write_project_memory_update_proposal(
+    agent_id: str,
+    *,
+    lane_id: str,
+    update: str,
+    focus: str = "",
+    details: str = "",
+    related_files: list[str] | None = None,
+    source_session_id: str = "",
+    source_turn_id: str = "",
+) -> dict[str, Any]:
+    agent = get_agent(agent_id, include_archived=False)
+    if not agent:
+        raise AgentNotFoundError(f"Agent not found: {agent_id}")
+    normalized_lane_id = trim_lines(str(lane_id or ""), max_lines=1).strip()
+    normalized_update = trim_lines(str(update or ""), max_lines=8).strip()
+    if not normalized_lane_id:
+        raise AgentDirectoryError("Project memory update lane id is required.")
+    if not normalized_update:
+        raise AgentDirectoryError("Project memory update summary is required.")
+    now = utc_now_iso()
+    proposal_id = _new_event_id("memupd")
+    event_payload = {
+        "eventId": proposal_id,
+        "proposalId": proposal_id,
+        "kind": "project_memory_update",
+        "status": "pending",
+        "agentId": str(agent.get("agentId") or "").strip(),
+        "agentCode": str(agent.get("agentCode") or "").strip(),
+        "agentName": str(agent.get("displayName") or "").strip(),
+        "sessionId": str(source_session_id or agent.get("directSessionId") or "").strip(),
+        "turnId": str(source_turn_id or "").strip(),
+        "laneId": normalized_lane_id,
+        "focus": trim_lines(str(focus or ""), max_lines=2),
+        "update": normalized_update,
+        "details": trim_lines(str(details or normalized_update), max_lines=12),
+        "relatedFiles": _unique_string_list(list(related_files or []))[:12],
+        "createdAt": now,
+        "resolvedAt": "",
+        "resolvedBy": "",
+        "resolutionNote": "",
+    }
+    path = _agent_workspace_event_path(agent, "project_memory_updates.jsonl")
+    _append_jsonl(path, event_payload)
+    _record_memory_event("memory.event_written", event_payload, agent_id=str(agent.get("agentId") or ""))
+    _record_memory_event(
+        "project_memory_update.proposed",
+        event_payload,
+        agent_id=str(agent.get("agentId") or ""),
+        lifecycle=True,
+    )
+    return event_payload
+
+
+def list_project_memory_update_proposals(
+    *,
+    agent_id: str = "",
+    status: str = "pending",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    state = load_state()
+    normalized_agent_id = str(agent_id or "").strip()
+    if normalized_agent_id:
+        agents = [_find_agent(state, normalized_agent_id)]
+    else:
+        agents = [item for item in state.get("agents") or [] if isinstance(item, dict)]
+    normalized_status = str(status or "").strip().lower()
+    proposals: list[dict[str, Any]] = []
+    for agent in agents:
+        if not agent:
+            continue
+        path = _agent_workspace_event_path(agent, "project_memory_updates.jsonl")
+        for item in _read_jsonl(path):
+            if normalized_status and str(item.get("status") or "pending").strip().lower() != normalized_status:
+                continue
+            proposals.append(item)
+    proposals.sort(
+        key=lambda item: (
+            str(item.get("createdAt") or ""),
+            str(item.get("proposalId") or item.get("eventId") or ""),
+        )
+    )
+    return proposals[: max(1, int(limit or 1))]
+
+
+def resolve_project_memory_update_proposal(
+    agent_id: str,
+    proposal_id: str,
+    *,
+    status: str,
+    resolved_by: str = "",
+    resolution_note: str = "",
+) -> dict[str, Any]:
+    agent = get_agent(agent_id, include_archived=True)
+    if not agent:
+        raise AgentNotFoundError(f"Agent not found: {agent_id}")
+    normalized_proposal_id = str(proposal_id or "").strip()
+    if not normalized_proposal_id:
+        raise AgentMemoryProposalNotFoundError("Project memory update proposal id is required.")
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status not in {"pending", "applied", "rejected", "conflict", "superseded"}:
+        raise AgentDirectoryError("Unsupported project memory update proposal status.")
+    path = _agent_workspace_event_path(agent, "project_memory_updates.jsonl")
+    proposals = _read_jsonl(path)
+    for item in proposals:
+        if str(item.get("proposalId") or item.get("eventId") or "").strip() != normalized_proposal_id:
+            continue
+        item["status"] = normalized_status
+        if normalized_status == "pending":
+            item["resolvedAt"] = ""
+            item["resolvedBy"] = ""
+            item["resolutionNote"] = ""
+        else:
+            item["resolvedAt"] = utc_now_iso()
+            item["resolvedBy"] = trim_lines(str(resolved_by or "coordinator"), max_lines=1) or "coordinator"
+            item["resolutionNote"] = trim_lines(str(resolution_note or ""), max_lines=4)
+        _write_jsonl(path, proposals)
+        _record_memory_event(
+            "project_memory_update.resolved",
+            item,
+            agent_id=str(agent.get("agentId") or ""),
+            lifecycle=True,
+        )
+        return item
+    raise AgentMemoryProposalNotFoundError(f"Project memory update proposal not found: {proposal_id}")
+
+
 def write_agent_inbox_message(
     target_agent_id: str,
     *,
@@ -1308,7 +1551,7 @@ def write_agent_inbox_message(
     target_agent = get_agent(target_agent_id, include_archived=False)
     if not target_agent:
         raise AgentNotFoundError(f"Agent not found: {target_agent_id}")
-    normalized_content = trim_lines(str(content or ""), max_lines=20).strip()
+    normalized_content = str(content or "").strip()
     if not normalized_content:
         raise AgentDirectoryError("Agent inbox message content is required.")
     normalized_source_agent_id = str(source_agent_id or "").strip()
@@ -1514,8 +1757,15 @@ def build_agent_runtime_context_block(agent_id: str, *, limit: int = 6) -> str:
         f"AgentName: {agent.get('displayName') or ''}",
         f"AgentWorkspace: {agent.get('workspacePath') or ''}",
         f"MemoryRoot: {memory_policy.get('privateMemoryRoot') or ''}",
+        f"ProjectMemoryUpdatesPath: {memory_policy.get('projectMemoryUpdatesPath') or ''}",
         _format_tool_policy_summary(tool_policy),
     ]
+    persona_lines = _format_persona_profile_context(agent.get("personaProfile"))
+    if persona_lines:
+        lines.extend(persona_lines)
+    task_lines = _format_task_profile_context(agent.get("taskProfile"))
+    if task_lines:
+        lines.extend(task_lines)
     if events:
         lines.append("GroupContextEvents:")
         for event in events[-limit:]:
@@ -1577,6 +1827,140 @@ def default_tool_policy(policy_id: str = DEFAULT_TOOL_POLICY_ID) -> dict[str, An
     }
 
 
+def normalize_persona_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
+    raw = profile if isinstance(profile, dict) else {}
+    normalized: dict[str, Any] = {}
+    for field in AGENT_PERSONA_PROFILE_TEXT_FIELDS:
+        normalized[field] = trim_lines(
+            str(raw.get(field) or ""),
+            max_lines=AGENT_PERSONA_PROFILE_TEXT_LINE_LIMITS.get(field, 3),
+        ).strip()
+    expertise_values: list[str] = []
+    raw_expertise = raw.get("expertise")
+    if isinstance(raw_expertise, str):
+        candidates = re.split(r"[,，;；\n]+", raw_expertise)
+    elif isinstance(raw_expertise, (list, tuple)):
+        candidates = list(raw_expertise)
+    else:
+        candidates = []
+    seen: set[str] = set()
+    for item in candidates:
+        value = trim_lines(str(item or ""), max_lines=1).strip()
+        if not value or value in seen:
+            continue
+        expertise_values.append(value[:80].rstrip())
+        seen.add(value)
+        if len(expertise_values) >= 12:
+            break
+    normalized["expertise"] = expertise_values
+    return normalized
+
+
+def _persona_profile_has_content(profile: dict[str, Any]) -> bool:
+    return any(str(profile.get(field) or "").strip() for field in AGENT_PERSONA_PROFILE_TEXT_FIELDS) or bool(profile.get("expertise"))
+
+
+def _persona_profile_for_agent(agent: dict[str, Any]) -> dict[str, Any]:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    raw = metadata.get("personaProfile") if isinstance(metadata.get("personaProfile"), dict) else {}
+    return normalize_persona_profile(raw)
+
+
+def _format_persona_profile_context(profile: Any) -> list[str]:
+    normalized = normalize_persona_profile(profile if isinstance(profile, dict) else {})
+    if not _persona_profile_has_content(normalized):
+        return []
+    labels = {
+        "gender": "Gender",
+        "age": "Age",
+        "pronouns": "Pronouns",
+        "personality": "Personality",
+        "communicationStyle": "CommunicationStyle",
+        "background": "Background",
+        "collaborationPreference": "CollaborationPreference",
+        "identityNotes": "IdentityNotes",
+    }
+    lines = [
+        "AgentPersonaProfile:",
+        "- Contract: descriptive persona and collaboration guidance; do not use age/gender as capability, permission, or safety gates.",
+    ]
+    for field in AGENT_PERSONA_PROFILE_TEXT_FIELDS:
+        value = str(normalized.get(field) or "").strip()
+        if value:
+            lines.append(f"- {labels[field]}: {value}")
+    expertise = [str(item or "").strip() for item in list(normalized.get("expertise") or []) if str(item or "").strip()]
+    if expertise:
+        lines.append(f"- Expertise: {', '.join(expertise[:12])}")
+    return lines
+
+
+def normalize_task_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
+    raw = profile if isinstance(profile, dict) else {}
+    normalized: dict[str, Any] = {}
+    for field in AGENT_TASK_PROFILE_TEXT_FIELDS:
+        normalized[field] = trim_lines(
+            str(raw.get(field) or ""),
+            max_lines=AGENT_TASK_PROFILE_TEXT_LINE_LIMITS.get(field, 4),
+        ).strip()
+    task_types: list[str] = []
+    raw_task_types = raw.get("taskTypes")
+    if isinstance(raw_task_types, str):
+        candidates = re.split(r"[,，;；\n]+", raw_task_types)
+    elif isinstance(raw_task_types, (list, tuple)):
+        candidates = list(raw_task_types)
+    else:
+        candidates = []
+    seen: set[str] = set()
+    for item in candidates:
+        value = trim_lines(str(item or ""), max_lines=1).strip()
+        if not value or value in seen:
+            continue
+        task_types.append(value[:80].rstrip())
+        seen.add(value)
+        if len(task_types) >= 16:
+            break
+    normalized["taskTypes"] = task_types
+    return normalized
+
+
+def _task_profile_has_content(profile: dict[str, Any]) -> bool:
+    return any(str(profile.get(field) or "").strip() for field in AGENT_TASK_PROFILE_TEXT_FIELDS) or bool(profile.get("taskTypes"))
+
+
+def _task_profile_for_agent(agent: dict[str, Any]) -> dict[str, Any]:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    raw = metadata.get("taskProfile") if isinstance(metadata.get("taskProfile"), dict) else {}
+    return normalize_task_profile(raw)
+
+
+def _format_task_profile_context(profile: Any) -> list[str]:
+    normalized = normalize_task_profile(profile if isinstance(profile, dict) else {})
+    if not _task_profile_has_content(normalized):
+        return []
+    labels = {
+        "mission": "Mission",
+        "responsibilities": "Responsibilities",
+        "preferredTasks": "PreferredTasks",
+        "avoidTasks": "AvoidTasks",
+        "successCriteria": "SuccessCriteria",
+        "deliverables": "Deliverables",
+        "constraints": "Constraints",
+        "handoffNotes": "HandoffNotes",
+    }
+    lines = [
+        "AgentTaskProfile:",
+        "- Contract: descriptive task-fit and operating-scope guidance; do not use it as an automatic permission, routing, or scheduling gate.",
+    ]
+    task_types = [str(item or "").strip() for item in list(normalized.get("taskTypes") or []) if str(item or "").strip()]
+    if task_types:
+        lines.append(f"- TaskTypes: {', '.join(task_types[:16])}")
+    for field in AGENT_TASK_PROFILE_TEXT_FIELDS:
+        value = str(normalized.get(field) or "").strip()
+        if value:
+            lines.append(f"- {labels[field]}: {value}")
+    return lines
+
+
 def normalize_tool_policy(policy: dict[str, Any], policy_id: str = "") -> dict[str, Any]:
     raw_policy = policy if isinstance(policy, dict) else {}
     payload = default_tool_policy(policy_id or str(raw_policy.get("policyId") or raw_policy.get("id") or DEFAULT_TOOL_POLICY_ID))
@@ -1618,6 +2002,7 @@ def default_memory_policy(policy_id: str, agent_workspace_path: str) -> dict[str
         "episodicEventsPath": f"{workspace_path}/events/episodic_events.jsonl" if workspace_path else "",
         "groupContextEventsPath": f"{workspace_path}/events/group_context_events.jsonl" if workspace_path else "",
         "agentInboxMessagesPath": f"{workspace_path}/events/agent_inbox_messages.jsonl" if workspace_path else "",
+        "projectMemoryUpdatesPath": f"{workspace_path}/events/project_memory_updates.jsonl" if workspace_path else "",
         "toolObservationsPath": f"{workspace_path}/events/tool_observations.jsonl" if workspace_path else "",
         "summariesPath": f"{workspace_path}/memory/summaries.jsonl" if workspace_path else "",
         "readSharedGroups": [],
@@ -1635,6 +2020,7 @@ def normalize_memory_policy(policy: dict[str, Any], policy_id: str, agent_worksp
         ("episodicEventsPath", "events/episodic_events.jsonl"),
         ("groupContextEventsPath", "events/group_context_events.jsonl"),
         ("agentInboxMessagesPath", "events/agent_inbox_messages.jsonl"),
+        ("projectMemoryUpdatesPath", "events/project_memory_updates.jsonl"),
         ("toolObservationsPath", "events/tool_observations.jsonl"),
         ("summariesPath", "memory/summaries.jsonl"),
     ):
@@ -1722,8 +2108,250 @@ def registry_path() -> Path:
     return _project_root() / "workspace" / "agents" / "agents.json"
 
 
+def agent_avatar_image_url(avatar_image_path: object) -> str:
+    filename = agent_avatar_filename(avatar_image_path)
+    if not filename:
+        return ""
+    return f"/api/agents/avatar-image/{quote(filename)}"
+
+
+def list_agent_avatar_options() -> dict[str, Any]:
+    options: list[dict[str, Any]] = []
+    for filename in _available_agent_avatar_filenames():
+        path = str(AGENT_AVATAR_RELATIVE_DIR / filename)
+        file_path = resolve_agent_avatar_file(filename)
+        options.append(
+            {
+                "filename": filename,
+                "path": path,
+                "url": agent_avatar_image_url(path),
+                "source": "workspace",
+                "sizeBytes": file_path.stat().st_size if file_path.exists() else 0,
+            }
+        )
+    return {
+        "directory": str(AGENT_AVATAR_RELATIVE_DIR),
+        "options": options,
+        "count": len(options),
+    }
+
+
+def update_agent_avatar(
+    agent_id: str,
+    *,
+    avatar_image_path: str = "",
+    reset_to_default: bool = False,
+) -> dict[str, Any]:
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, agent_id)
+        if agent is None:
+            raise AgentNotFoundError(f"Agent not found: {agent_id}")
+        metadata = dict(agent.get("metadata") or {})
+        if reset_to_default:
+            default_path = _default_agent_avatar_path(agent)
+            if not default_path:
+                raise AgentDirectoryError("No default Agent avatar is available.")
+            metadata["avatarImagePath"] = default_path
+            metadata["avatarImageSource"] = "default"
+        else:
+            filename = agent_avatar_filename(avatar_image_path)
+            if not filename:
+                raise AgentDirectoryError("Invalid Agent avatar image path.")
+            path = resolve_agent_avatar_file(filename)
+            if not path.exists() or not path.is_file():
+                raise AgentDirectoryError("Agent avatar image does not exist.")
+            metadata["avatarImagePath"] = str(AGENT_AVATAR_RELATIVE_DIR / filename)
+            metadata["avatarImageSource"] = "custom"
+        agent["metadata"] = metadata
+        agent["updatedAt"] = utc_now_iso()
+        save_state(state)
+    _record_agent_avatar_updated_event(agent)
+    return _agent_to_api(agent)
+
+
+def store_agent_avatar_image(
+    agent_id: str,
+    *,
+    filename: str,
+    content_type: str,
+    data_base64: str,
+) -> dict[str, Any]:
+    with _STATE_LOCK:
+        state = load_state()
+        agent = _find_agent(state, agent_id)
+        if agent is None:
+            raise AgentNotFoundError(f"Agent not found: {agent_id}")
+    normalized_type = str(content_type or "").split(";")[0].strip().lower()
+    extension = _AGENT_AVATAR_CONTENT_TYPE_EXTENSIONS.get(normalized_type)
+    if not extension:
+        raise AgentDirectoryError("Agent avatar only supports PNG, JPG, or WebP images.")
+    payload = _decode_agent_avatar_payload(data_base64)
+    _validate_agent_avatar_signature(payload, normalized_type)
+
+    avatar_dir = (_project_root() / AGENT_AVATAR_RELATIVE_DIR).resolve()
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+    safe_stem = _sanitize_avatar_stem(filename or agent_id)
+    output_name = f"agent-avatar-{int(time.time())}-{secrets.token_hex(4)}-{safe_stem}{extension}"
+    output_path = resolve_agent_avatar_file(output_name)
+    output_path.write_bytes(payload)
+    relative_path = str(AGENT_AVATAR_RELATIVE_DIR / output_name)
+    updated = update_agent_avatar(agent_id, avatar_image_path=relative_path)
+    _record_agent_avatar_uploaded_event(updated, content_type=normalized_type, size_bytes=len(payload))
+    return {
+        "path": relative_path,
+        "url": agent_avatar_image_url(relative_path),
+        "contentType": normalized_type,
+        "sizeBytes": len(payload),
+        "agent": updated,
+    }
+
+
+def agent_avatar_filename(avatar_image_path: object) -> str:
+    value = str(avatar_image_path or "").strip().replace("\\", "/")
+    if not value:
+        return ""
+    path = PurePosixPath(value)
+    if path.is_absolute() or ".." in path.parts:
+        return ""
+    if path.parent != AGENT_AVATAR_RELATIVE_DIR:
+        return ""
+    filename = path.name
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", filename):
+        return ""
+    if Path(filename).suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+        return ""
+    return filename
+
+
+def resolve_agent_avatar_file(filename: str) -> Path:
+    safe_filename = agent_avatar_filename(str(AGENT_AVATAR_RELATIVE_DIR / str(filename or "")))
+    if not safe_filename:
+        raise FileNotFoundError("invalid Agent avatar image path")
+    avatar_dir = (_project_root() / AGENT_AVATAR_RELATIVE_DIR).resolve()
+    path = (avatar_dir / safe_filename).resolve()
+    if avatar_dir != path.parent:
+        raise FileNotFoundError("invalid Agent avatar image path")
+    return path
+
+
+def _agent_avatar_path_from_metadata(metadata: dict[str, Any]) -> str:
+    avatar_path = str(
+        metadata.get("avatarImagePath")
+        or metadata.get("agentAvatarImagePath")
+        or metadata.get("avatarPath")
+        or ""
+    ).strip()
+    filename = agent_avatar_filename(avatar_path)
+    return str(AGENT_AVATAR_RELATIVE_DIR / filename) if filename else ""
+
+
+def _sanitize_avatar_stem(filename: str) -> str:
+    raw_stem = Path(str(filename or "agent-avatar")).stem.lower()
+    stem = re.sub(r"[^a-z0-9_-]+", "-", raw_stem).strip("-_")
+    return stem[:40] or "agent-avatar"
+
+
+def _decode_agent_avatar_payload(data_base64: str) -> bytes:
+    try:
+        payload = base64.b64decode(str(data_base64 or ""), validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise AgentDirectoryError("Agent avatar image data is not valid base64.") from exc
+    if not payload:
+        raise AgentDirectoryError("Agent avatar image cannot be empty.")
+    if len(payload) > MAX_AGENT_AVATAR_IMAGE_BYTES:
+        raise AgentDirectoryError("Agent avatar image cannot exceed 5MB.")
+    return payload
+
+
+def _validate_agent_avatar_signature(payload: bytes, content_type: str) -> None:
+    if content_type == "image/png" and payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return
+    if content_type == "image/jpeg" and payload.startswith(b"\xff\xd8\xff"):
+        return
+    if content_type == "image/webp" and payload.startswith(b"RIFF") and payload[8:12] == b"WEBP":
+        return
+    raise AgentDirectoryError("Agent avatar image format does not match its content.")
+
+
+def _ensure_agent_default_avatar(agent: dict[str, Any]) -> bool:
+    metadata = dict(agent.get("metadata") or {})
+    current_path = _agent_avatar_path_from_metadata(metadata)
+    current_source = str(metadata.get("avatarImageSource") or metadata.get("agentAvatarImageSource") or "").strip()
+    default_path = _default_agent_avatar_path(agent)
+    if not default_path:
+        return False
+    if current_path and current_source != "default":
+        return False
+    if current_path == default_path and metadata.get("avatarImageSource") == "default":
+        return False
+    metadata["avatarImagePath"] = default_path
+    metadata["avatarImageSource"] = "default"
+    agent["metadata"] = metadata
+    return True
+
+
+def _default_agent_avatar_path(agent: dict[str, Any]) -> str:
+    filename = _default_agent_avatar_filename(agent)
+    return str(AGENT_AVATAR_RELATIVE_DIR / filename) if filename else ""
+
+
+def _default_agent_avatar_filename(agent: dict[str, Any]) -> str:
+    available = _available_agent_avatar_filenames()
+    if not available:
+        return ""
+    key = _agent_avatar_match_key(agent)
+    for tokens, filename in AGENT_AVATAR_ROLE_DEFAULTS:
+        if filename not in available:
+            continue
+        if all(token in key for token in tokens):
+            return filename
+    fallback_pool = [filename for filename in AGENT_AVATAR_FILENAMES if filename in available]
+    if not fallback_pool:
+        fallback_pool = available
+    stable_key = _normalize_agent_code(agent.get("agentCode")) or str(agent.get("agentId") or "")
+    checksum = sum(ord(char) for char in stable_key)
+    return fallback_pool[checksum % len(fallback_pool)]
+
+
+def _available_agent_avatar_filenames() -> list[str]:
+    avatar_dir = (_project_root() / AGENT_AVATAR_RELATIVE_DIR).resolve()
+    if not avatar_dir.exists() or not avatar_dir.is_dir():
+        return []
+    existing = {
+        item.name
+        for item in avatar_dir.iterdir()
+        if item.is_file() and agent_avatar_filename(str(AGENT_AVATAR_RELATIVE_DIR / item.name))
+    }
+    ordered = [filename for filename in AGENT_AVATAR_FILENAMES if filename in existing]
+    extra = sorted(existing.difference(ordered))
+    return ordered + extra
+
+
+def _agent_avatar_match_key(agent: dict[str, Any]) -> str:
+    metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+    parts = [
+        agent.get("primaryMode"),
+        agent.get("roleKey"),
+        agent.get("promptTemplateId"),
+        agent.get("profileId"),
+        agent.get("templateId"),
+        metadata.get("functionalDisplayName"),
+        metadata.get("researchAgentKey"),
+        metadata.get("selfEvolutionRole"),
+        metadata.get("supervisedRole"),
+        metadata.get("systemRole"),
+        metadata.get("researchOrgRole"),
+    ]
+    return " ".join(str(item or "").strip().lower() for item in parts if str(item or "").strip())
+
+
 def _agent_to_api(agent: dict[str, Any]) -> dict[str, Any]:
     workspace = str(agent.get("workspacePath") or "").strip()
+    metadata = dict(agent.get("metadata") or {})
+    avatar_path = _agent_avatar_path_from_metadata(metadata)
+    persona_profile = _persona_profile_for_agent({**agent, "metadata": metadata})
+    task_profile = _task_profile_for_agent({**agent, "metadata": metadata})
     return {
         "agentId": str(agent.get("agentId") or "").strip(),
         "agentCode": _normalize_agent_code(agent.get("agentCode"))
@@ -1742,13 +2370,21 @@ def _agent_to_api(agent: dict[str, Any]) -> dict[str, Any]:
         "workspaceTerritory": _agent_workspace_territory(agent),
         "toolPolicyId": str(agent.get("toolPolicyId") or DEFAULT_TOOL_POLICY_ID).strip() or DEFAULT_TOOL_POLICY_ID,
         "memoryPolicyId": str(agent.get("memoryPolicyId") or "").strip(),
+        "avatarImagePath": avatar_path,
+        "avatarImageUrl": agent_avatar_image_url(avatar_path),
+        "personaProfile": persona_profile,
+        "taskProfile": task_profile,
         "createdBy": str(agent.get("createdBy") or "").strip(),
         "status": str(agent.get("status") or "active").strip() or "active",
-        "metadata": dict(agent.get("metadata") or {}),
+        "metadata": metadata,
         "createdAt": str(agent.get("createdAt") or "").strip(),
         "updatedAt": str(agent.get("updatedAt") or "").strip(),
         "memoryPolicy": resolve_memory_policy_for_agent(str(agent.get("agentId") or "").strip()),
         "toolPolicy": resolve_tool_policy_for_agent(str(agent.get("agentId") or "").strip()),
+        "toolGovernanceRequests": _list_recent_tool_governance_requests_for_agent(
+            str(agent.get("agentId") or "").strip(),
+            limit=6,
+        ),
         "groupContextEvents": list_group_context_events_for_agent(str(agent.get("agentId") or "").strip(), limit=8),
         "agentInboxMessages": list_agent_inbox_messages_for_agent(
             str(agent.get("agentId") or "").strip(),
@@ -1779,6 +2415,15 @@ def _memory_policies(state: dict[str, Any]) -> dict[str, Any]:
         str(policy_id): normalize_memory_policy(policy if isinstance(policy, dict) else {}, str(policy_id), "")
         for policy_id, policy in policies.items()
     }
+
+
+def _list_recent_tool_governance_requests_for_agent(agent_id: str, *, limit: int = 6) -> list[dict[str, Any]]:
+    try:
+        from .agent_tool_governance_service import list_tool_governance_requests
+
+        return list_tool_governance_requests(agent_id=agent_id, status="", limit=limit)
+    except Exception:
+        return []
 
 
 def _workspace_path_for_policy(agent_workspace_path: str, existing_private_root: str = "") -> str:
@@ -2343,6 +2988,74 @@ def _record_agent_event(event_code: str, agent: dict[str, Any], *, lifecycle: bo
         return
 
 
+def _record_agent_avatar_defaults_event(agents: list[dict[str, Any]]) -> None:
+    try:
+        avatar_counts: dict[str, int] = {}
+        for agent in agents:
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            avatar_path = _agent_avatar_path_from_metadata(metadata)
+            if avatar_path:
+                avatar_counts[avatar_path] = avatar_counts.get(avatar_path, 0) + 1
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent_avatar",
+            "agent.avatar_defaults_assigned",
+            message="Default Agent avatars were assigned from workspace/avatars.",
+            level="info",
+            outcome="repaired",
+            fields={
+                "assignedCount": len(agents),
+                "avatarPaths": sorted(avatar_counts),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_avatar_updated_event(agent: dict[str, Any]) -> None:
+    try:
+        metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent_avatar",
+            "agent.avatar_updated",
+            message="Agent avatar was updated.",
+            level="info",
+            outcome="updated",
+            fields={
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "avatarImagePath": _agent_avatar_path_from_metadata(metadata),
+                "avatarImageSource": str(metadata.get("avatarImageSource") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_avatar_uploaded_event(agent: dict[str, Any], *, content_type: str, size_bytes: int) -> None:
+    try:
+        record_runtime_scene_event(
+            "agent_directory",
+            "agent_avatar",
+            "agent.avatar_uploaded",
+            message="Agent avatar image was uploaded.",
+            level="info",
+            outcome="uploaded",
+            fields={
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "contentType": str(content_type or "").strip(),
+                "sizeBytes": int(size_bytes or 0),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
 def _record_agent_purged_event(agent: dict[str, Any], result: dict[str, Any]) -> None:
     try:
         record_runtime_scene_event(
@@ -2511,6 +3224,56 @@ def _record_agent_supervision_policy_event(agent: dict[str, Any], policy: dict[s
                 "requiresReview": bool(policy.get("requiresReview", False)),
                 "reviewMode": str(policy.get("reviewMode") or "").strip(),
                 "evidenceLevel": str(policy.get("evidenceLevel") or "").strip(),
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_persona_profile_event(agent: dict[str, Any], profile: dict[str, Any]) -> None:
+    try:
+        normalized = normalize_persona_profile(profile)
+        record_runtime_scene_event(
+            "agent_directory",
+            "persona_profile",
+            "agent.persona_profile.updated",
+            message="Agent persona profile was updated.",
+            level="info",
+            outcome="updated",
+            fields={
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "fieldCount": sum(1 for field in AGENT_PERSONA_PROFILE_FIELDS if normalized.get(field)),
+                "expertiseCount": len(list(normalized.get("expertise") or [])),
+                "hasGender": bool(str(normalized.get("gender") or "").strip()),
+                "hasAge": bool(str(normalized.get("age") or "").strip()),
+                "source": "AgentDirectory",
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        return
+
+
+def _record_agent_task_profile_event(agent: dict[str, Any], profile: dict[str, Any]) -> None:
+    try:
+        normalized = normalize_task_profile(profile)
+        record_runtime_scene_event(
+            "agent_directory",
+            "task_profile",
+            "agent.task_profile.updated",
+            message="Agent task profile was updated.",
+            level="info",
+            outcome="updated",
+            fields={
+                "agentId": str(agent.get("agentId") or "").strip(),
+                "agentCode": _normalize_agent_code(agent.get("agentCode")),
+                "fieldCount": sum(1 for field in AGENT_TASK_PROFILE_FIELDS if normalized.get(field)),
+                "taskTypeCount": len(list(normalized.get("taskTypes") or [])),
+                "hasMission": bool(str(normalized.get("mission") or "").strip()),
+                "hasSuccessCriteria": bool(str(normalized.get("successCriteria") or "").strip()),
+                "source": "AgentDirectory",
             },
             lifecycle=True,
         )

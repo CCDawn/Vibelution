@@ -57,6 +57,11 @@ MODEL_LIBRARY_DETAIL_FIELDS = (
     "streaming",
     "tool_calling_mode",
     "discovery_enabled",
+    "supports_image_input",
+    "capability_status",
+    "capability_source",
+    "capability_checked_at",
+    "capability_error",
 )
 PUBLIC_PROVIDER_FIELDS = PUBLIC_INLINE_PROVIDER_FIELDS
 PROFILE_OVERRIDE_FIELDS = PROFILE_REFERENCE_OVERRIDE_FIELDS
@@ -327,6 +332,9 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "supports_image_input": False,
+            "capability_status": "unsupported",
+            "capability_source": "preset",
         },
     },
     "deepseek_v4_pro": {
@@ -354,6 +362,9 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+            "supports_image_input": False,
+            "capability_status": "unsupported",
+            "capability_source": "preset",
         },
     },
     "google_gemini_flash": {
@@ -434,6 +445,37 @@ LLM_MODEL_PRESETS = {
             "streaming": True,
             "tool_calling_mode": "auto",
             "discovery_enabled": True,
+        },
+    },
+    "xiaomi_mimo_v2_5_multimodal": {
+        "label": "小米 MiMo V2.5 多模态",
+        "category": "official",
+        "provider_id": "xiaomi_mimo_api_cn",
+        "model_id": "xiaomi_mimo_v2_5_multimodal",
+        "provider": {
+            "kind": "xiaomi",
+            "api_key_env": "MIMO_API_KEY",
+            "base_url": "https://api.xiaomimimo.com/v1",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 1000000,
+        },
+        "model": {
+            "model": "mimo-v2.5",
+            "label": "小米 MiMo V2.5 多模态",
+            "transport": "chat_completions",
+            "contract": "tool_chat",
+            "strict_compatibility": False,
+            "temperature": 0.7,
+            "max_output_tokens": 128000,
+            "timeout": 120,
+            "connect_timeout": 20,
+            "streaming": True,
+            "tool_calling_mode": "auto",
+            "discovery_enabled": True,
+            "supports_image_input": True,
+            "capability_status": "supported",
+            "capability_source": "preset",
         },
     },
     "dashscope_qwen3_6_plus": {
@@ -740,17 +782,12 @@ def _read_windows_user_env_var(name: str) -> str:
     if os.name != "nt":
         return ""
     try:
-        import subprocess
+        import winreg
 
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-Command", f"[Environment]::GetEnvironmentVariable('{name}', 'User')"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-        return result.stdout.strip()
-    except Exception:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            value, _value_type = winreg.QueryValueEx(key, name)
+        return str(value or "").strip()
+    except (OSError, ImportError, ValueError):
         return ""
 
 
@@ -825,13 +862,21 @@ def _coerce_model_library_detail(key: str, value):
         return None
     if key == "api_key_env":
         return str(value).strip()
-    if key in {"transport", "contract", "reasoning_state_field"}:
+    if key in {
+        "transport",
+        "contract",
+        "reasoning_state_field",
+        "capability_status",
+        "capability_source",
+        "capability_checked_at",
+        "capability_error",
+    }:
         return str(value).strip()
     if key == "temperature":
         return float(value)
     if key in {"max_output_tokens", "timeout", "connect_timeout"}:
         return int(value)
-    if key in {"streaming", "discovery_enabled", "strict_compatibility"}:
+    if key in {"streaming", "discovery_enabled", "strict_compatibility", "supports_image_input"}:
         if isinstance(value, bool):
             return value
         return str(value).strip().lower() in {"1", "true", "yes", "on"}

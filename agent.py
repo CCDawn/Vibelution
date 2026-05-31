@@ -4,6 +4,7 @@ import json
 import sys
 import time
 import traceback
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -74,7 +75,10 @@ from tools.token_manager import (
     EnhancedTokenCompressor, estimate_messages_tokens, estimate_tokens_precise,
     is_compression_requested, consume_compression_request, request_compression,
 )
-from tools.compression_strategy import CompressionLevel, get_compression_strategy
+from tools.compression_strategy import (
+    CompressionLevel,
+    get_compression_strategy,
+)
 from tools.memory_tools import get_current_goal
 from tools.rebirth_tools import handle_restart_request  # noqa: F401
 from tools.agent_tools import set_subagent_stream_sink  # noqa: F401
@@ -115,6 +119,14 @@ from core.pet_system import get_pet_system
 # 进化测试提示
 EVOLUTION_TEST_PROMPT = "制定重启任务，然后对重启任务打勾，然后运行 `trigger_self_restart_tool` 重启你自己。"
 
+_INTERNAL_TOOL_PROTOCOL_MARKERS = (
+    "spawn_agent_tool",
+    "_internal_delegate",
+)
+_TOOL_POLICY_FAILURE_RE = re.compile(
+    r"\[工具策略提示\]\s*`[^`]+`\s*不在该 Agent 的可见工具策略中。?",
+)
+
 
 def _record_agent_scene_event(phase: str, event_code: str, *, message: str, fields: Dict[str, Any] | None = None) -> None:
     try:
@@ -131,6 +143,17 @@ def _record_agent_scene_event(phase: str, event_code: str, *, message: str, fiel
         )
     except Exception:
         return
+
+
+def _context_compression_trigger_source(reason: str) -> str:
+    normalized = str(reason or "").strip().lower()
+    if not normalized:
+        return "auto"
+    if normalized.startswith("level:"):
+        return "auto"
+    if "context limit" in normalized or "context_length" in normalized or "超出最大上下文" in normalized:
+        return "provider_limit"
+    return "manual"
 
 
 SUBAGENT_RESULT_MARKER = "__VIBELUTION_SUBAGENT_RESULT__"
@@ -381,6 +404,18 @@ class SelfEvolvingAgent:
             return filter_llm_tools_for_current_agent(tools)
         except Exception:
             return list(tools or [])
+
+    def _is_tool_visible_to_current_agent(self, tool_name: str) -> bool:
+        name = str(tool_name or "").strip()
+        return bool(name and name in getattr(self, "key_tool_maps", set()))
+
+    def _hidden_tool_call_message(self, tool_name: str) -> str:
+        name = str(tool_name or "").strip() or "[unknown_tool]"
+        return (
+            f"[工具可见性提示] `{name}` 未暴露给当前 Agent。"
+            "请只使用当前工具 schema 或工具索引中列出的工具；"
+            "如果确实需要该能力，请让用户或能力管家调整该 Agent 的 ToolPolicy。"
+        )
 
     @staticmethod
     def _restart_allowed_tool_names() -> tuple[str, ...]:
@@ -753,6 +788,7 @@ class SelfEvolvingAgent:
                 saved_tokens=token_saved,
                 iteration=iteration,
                 summary_written=summary_written,
+                trigger_source=_context_compression_trigger_source(combined_reason),
             )
         except Exception:
             pass
@@ -834,6 +870,8 @@ class SelfEvolvingAgent:
             role = str(item.get("role") or "").strip().lower()
             raw_content = item.get("content")
             content = raw_content if isinstance(raw_content, list) else str(raw_content or "").strip()
+            if isinstance(content, str):
+                content = self._sanitize_seeded_chat_content(role, content)
             if not content:
                 continue
             if role in {"runtime_context", "runtime", "system"}:
@@ -851,6 +889,22 @@ class SelfEvolvingAgent:
             return
         self._active_turn_messages = restored
         self._active_turn_goal = "__chat_session__"
+
+    @staticmethod
+    def _sanitize_seeded_chat_content(role: str, content: str) -> str:
+        text = str(content or "")
+        if role.strip().lower() != "assistant":
+            return text
+        for marker in _INTERNAL_TOOL_PROTOCOL_MARKERS:
+            if marker in text:
+                return ""
+        cleaned = _TOOL_POLICY_FAILURE_RE.sub(
+            "[工具策略提示] 历史中有一次未授权工具调用已被省略。",
+            text,
+        )
+        if "Tool failed: spawn_agent_tool" in cleaned:
+            return ""
+        return cleaned.strip()
 
     def seed_runtime_context(self, content: str) -> None:
         """Add non-chat runtime context without making it a user/assistant message."""
@@ -1382,6 +1436,25 @@ class SelfEvolvingAgent:
                             **round_state.current_status(),
                         )
                         self._raise_if_turn_stop_requested()
+                        if not self._is_tool_visible_to_current_agent(tool_name):
+                            result = self._hidden_tool_call_message(tool_name)
+                            _debug_logger.warning(
+                                f"[工具可见性] XML 工具调用被拦截: {tool_name}",
+                                tag="TOOL",
+                            )
+                            _record_agent_scene_event(
+                                "tool_visibility",
+                                "agent.hidden_xml_tool_call.blocked",
+                                message="XML fallback tool call was blocked before ToolExecutor because it is not visible to the current Agent.",
+                                fields={
+                                    "agentId": str((getattr(self, "runtime_agent_binding", {}) or {}).get("agentId") or "").strip(),
+                                    "toolName": tool_name,
+                                    "visibleToolCount": len(getattr(self, "key_tool_maps", set()) or []),
+                                },
+                            )
+                            self._remember_tool_output(xtc, result, None)
+                            self.tool_lifecycle.handle_tool_result(xtc, result, None, messages)
+                            continue
                         self.tool_lifecycle.execute_tool(xtc, messages)
                     messages.append(AIMessage(content=raw_content))
                     continue

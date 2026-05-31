@@ -212,14 +212,22 @@
   white-space: nowrap;
 }
 
-.linkedRoomLine {
+.linkedRoomLine,
+.edgeLayerLine {
   display: block;
   overflow: hidden;
-  color: var(--accent-cool-2);
   font-size: 0.71rem;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.linkedRoomLine {
+  color: var(--accent-cool-2);
+}
+
+.edgeLayerLine {
+  color: var(--fg-muted);
 }
 
 .toolbarActions,
@@ -235,6 +243,12 @@
   font-weight: 700;
 }
 
+.toolbarActions .layerButtonActive {
+  border-color: color-mix(in srgb, var(--accent-cool) 48%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-cool) 15%, var(--surface-panel-strong));
+  color: var(--accent-cool-2);
+}
+
 .canvas {
   position: relative;
   min-height: 0;
@@ -246,21 +260,62 @@
   background-size: 32px 32px;
 }
 
+.canvasViewport {
+  position: relative;
+  box-sizing: content-box;
+  width: 1180px;
+  height: 760px;
+  padding-left: var(--canvas-offset-x, 0);
+  padding-top: var(--canvas-offset-y, 0);
+  transform: scale(var(--canvas-scale, 1));
+  transform-origin: 0 0;
+}
+
 .edges {
   position: absolute;
   inset: 0;
-  min-width: 1100px;
-  min-height: 720px;
+  width: 1180px;
+  height: 760px;
+  transform: translate(var(--canvas-offset-x, 0), var(--canvas-offset-y, 0));
   pointer-events: none;
+  z-index: 0;
+  overflow: visible;
+  color: var(--accent-cool, #5bb7ae);
 }
 
-.edges line {
-  stroke: color-mix(in srgb, var(--accent-cool) 52%, var(--fg-muted));
+.edges > path {
+  fill: none;
+  stroke: currentColor;
   stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  marker-end: url("#team-edge-arrow");
+  opacity: 0.78;
+}
+
+.edges > .edgeOrganization {
+  color: var(--accent-cool, #5bb7ae);
+  stroke-width: 2.15;
+  opacity: 0.9;
+}
+
+.edges > .edgeCommunication {
+  color: var(--fg-muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 8;
+  opacity: 0.5;
+}
+
+.edges marker path {
+  fill: currentColor;
+  stroke: none;
 }
 
 .node {
   position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
   display: grid;
   grid-template-columns: 20px 1fr;
   grid-template-rows: auto auto auto;
@@ -273,8 +328,21 @@
   border-radius: 8px;
   background: var(--surface-card);
   color: var(--fg-primary);
+  cursor: grab;
   text-align: left;
+  touch-action: none;
+  user-select: none;
   box-shadow: 0 8px 22px color-mix(in srgb, black 16%, transparent);
+}
+
+.canvasViewport .node {
+  transform:
+    translate(var(--canvas-offset-x, 0), var(--canvas-offset-y, 0))
+    translate(var(--node-x, 0), var(--node-y, 0));
+}
+
+.node:active {
+  cursor: grabbing;
 }
 
 .node strong,
@@ -308,6 +376,70 @@
 .node small {
   color: var(--fg-muted);
   font-size: 0.7rem;
+}
+
+.nodeRoleBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  max-width: 100%;
+  min-height: 18px;
+  padding: 1px 7px;
+  border: 1px solid var(--node-role-border, var(--border-soft));
+  border-radius: 999px;
+  background: var(--node-role-bg, color-mix(in srgb, var(--surface-panel-strong) 78%, transparent));
+  color: var(--node-role-fg, var(--fg-secondary));
+  font-size: 0.68rem;
+  font-weight: 780;
+  line-height: 1;
+}
+
+.nodeRoleBadgeLead {
+  --node-role-bg: color-mix(in srgb, var(--accent-success) 14%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, var(--accent-success) 45%, var(--border-soft));
+  --node-role-fg: color-mix(in srgb, var(--accent-success) 74%, var(--fg-primary));
+}
+
+.nodeRoleBadgeAdvisor {
+  --node-role-bg: color-mix(in srgb, var(--accent-cool) 14%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, var(--accent-cool) 46%, var(--border-soft));
+  --node-role-fg: var(--accent-cool-2);
+}
+
+.nodeRoleBadgeSteward {
+  --node-role-bg: color-mix(in srgb, #d8912d 16%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, #d8912d 52%, var(--border-soft));
+  --node-role-fg: color-mix(in srgb, #d8912d 82%, var(--fg-primary));
+}
+
+.nodeRoleBadgeResearch {
+  --node-role-bg: color-mix(in srgb, #7d6be8 15%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, #7d6be8 44%, var(--border-soft));
+  --node-role-fg: color-mix(in srgb, #9a8cff 76%, var(--fg-primary));
+}
+
+.nodeRoleBadgeSelf {
+  --node-role-bg: color-mix(in srgb, #d85c77 13%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, #d85c77 44%, var(--border-soft));
+  --node-role-fg: color-mix(in srgb, #e06f86 78%, var(--fg-primary));
+}
+
+.nodeRoleBadgeOpen {
+  --node-role-bg: color-mix(in srgb, var(--fg-muted) 8%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, var(--fg-muted) 30%, var(--border-soft));
+  --node-role-fg: var(--fg-muted);
+}
+
+.nodeRoleBadgeStale {
+  --node-role-bg: color-mix(in srgb, var(--accent-danger) 12%, var(--surface-panel));
+  --node-role-border: color-mix(in srgb, var(--accent-danger) 48%, var(--border-soft));
+  --node-role-fg: color-mix(in srgb, var(--accent-danger) 76%, var(--fg-primary));
+}
+
+.nodeRoleBadgeGeneral {
+  --node-role-bg: color-mix(in srgb, var(--surface-panel-strong) 86%, transparent);
+  --node-role-border: var(--border-soft);
+  --node-role-fg: var(--fg-secondary);
 }
 
 .nodeBound {

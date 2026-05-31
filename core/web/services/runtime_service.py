@@ -1479,9 +1479,11 @@ def _last_compression_payload(payload: dict) -> dict[str, object] | None:
         return None
     before = max(0, int(payload.get("beforeTokens") or 0))
     after = max(0, int(payload.get("afterTokens") or 0))
+    reason = str(payload.get("reason") or "").strip()
     return {
         "level": str(payload.get("level") or "").strip(),
-        "reason": str(payload.get("reason") or "").strip(),
+        "reason": reason,
+        "triggerSource": _compression_trigger_source_payload(payload.get("triggerSource"), reason),
         "beforeTokens": before,
         "afterTokens": after,
         "savedTokens": max(0, int(payload.get("savedTokens") or max(0, before - after))),
@@ -1489,6 +1491,18 @@ def _last_compression_payload(payload: dict) -> dict[str, object] | None:
         "summaryWritten": bool(payload.get("summaryWritten")),
         "timestamp": str(payload.get("timestamp") or "").strip(),
     }
+
+
+def _compression_trigger_source_payload(source: object, reason: str) -> str:
+    normalized_source = str(source or "").strip().lower()
+    if normalized_source in {"manual", "auto", "provider_limit"}:
+        return normalized_source
+    normalized_reason = str(reason or "").strip().lower()
+    if not normalized_reason or normalized_reason.startswith("level:"):
+        return "auto"
+    if "context limit" in normalized_reason or "context_length" in normalized_reason or "超出最大上下文" in normalized_reason:
+        return "provider_limit"
+    return "manual"
 
 
 def _active_tools(active_session: dict, runtime_state: dict) -> list[str]:

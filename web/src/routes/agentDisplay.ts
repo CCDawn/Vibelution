@@ -21,7 +21,7 @@ type SessionLike = Partial<Pick<
 
 type ParticipantLike = Partial<Pick<
   ChatRoomParticipant,
-  "participantId" | "agentId" | "agentCode" | "title" | "agentProfileId" | "agentTemplateId" | "agentTemplateLabel"
+  "participantId" | "agentId" | "agentCode" | "title" | "agentProfileId" | "agentTemplateId" | "agentTemplateLabel" | "teamRole" | "teamMemberPurpose"
 >>;
 
 const NOISY_LABELS = new Set([
@@ -168,6 +168,23 @@ export function participantAgentDisplayInfo(
   agent: AgentLike | undefined | null,
   lang: "zh" | "en",
 ): AgentDisplayInfo {
+  const teamRole = clean(participant.teamMemberPurpose) || clean(participant.teamRole);
+  if (teamRole) {
+    const name = clean(agent?.displayName) || clean(participant.title) || clean(participant.participantId);
+    const code = clean(participant.agentCode || agent?.agentCode);
+    const base = agentDisplayInfo(agent, lang, {
+      name,
+      templateLabel: participant.agentTemplateLabel,
+      profileId: participant.agentProfileId,
+      templateId: participant.agentTemplateId,
+    });
+    return {
+      name: base.name,
+      functionLabel: teamRole,
+      tone: base.tone,
+      meta: [teamRole, code].filter(Boolean).join(" · "),
+    };
+  }
   return agentDisplayInfo(
     agent,
     lang,

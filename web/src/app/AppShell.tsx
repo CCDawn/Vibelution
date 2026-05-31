@@ -38,6 +38,7 @@ import {
 } from "./systemStatus";
 import { applyWorkbenchDocumentLanguage } from "./documentLanguage";
 import { resolvePollingInterval } from "./pollingPolicy";
+import { recoverFromBuiltAssetResourceError } from "./routeChunkRecovery";
 import { nextWorkbenchTheme, readStoredWorkbenchTheme, writeStoredWorkbenchTheme } from "./themePreference";
 import { isWorkbenchDomainEnabled, isWorkbenchModeEnabled } from "./workbenchContract";
 import { requestWorkbenchExitGuard } from "./workbenchExitGuard";
@@ -928,6 +929,7 @@ export function AppShell() {
             tagName: target.tagName.toLowerCase(),
           },
         });
+        recoverFromBuiltAssetResourceError(resourceUrl);
         return;
       }
 
@@ -1320,8 +1322,8 @@ export function AppShell() {
               {t("navSelfEvolution")}
             </span>
           )}
-          <NavLink to="/research" className={linkClassName}>
-            {t("navResearch")}
+          <NavLink to="/teams" className={linkClassName}>
+            {t("navTeams")}
           </NavLink>
           <NavLink to="/agents" className={linkClassName}>
             {t("navAgents")}
@@ -1380,10 +1382,6 @@ export function AppShell() {
                 <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
                   <ScrollText size={16} />
                   <span>{t("navLogs")}</span>
-                </NavLink>
-                <NavLink to="/agents/tools" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
-                  <Wrench size={16} />
-                  <span>{t("navTools")}</span>
                 </NavLink>
                 <NavLink to="/git" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
                   <GitBranch size={16} />

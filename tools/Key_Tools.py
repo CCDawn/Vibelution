@@ -49,6 +49,8 @@ from core.infrastructure.workspace_cleaner import (
 )
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
+from tools.agent_tool_governance_tools import agent_tool_permission_request_tool as _agent_tool_permission_request_impl
+from tools.research_organization_tools import research_communication_edge_proposal_tool as _research_communication_edge_proposal_impl
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.token_manager import compress_context_tool as _compress_context_impl
@@ -851,6 +853,91 @@ def create_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def agent_tool_permission_request_tool(
+        target_agent: str,
+        grant_tools: str = "",
+        revoke_tools: str = "",
+        block_tools: str = "",
+        unblock_tools: str = "",
+        reason: str = "",
+        apply_mode: str = "auto",
+    ) -> str:
+        """
+        【Agent 工具权限治理】为另一个 Agent 提交受控 ToolPolicy 变更请求。
+
+        适合顾问 Agent、能力管家或团队负责人根据角色职责调整成员工具权限。低风险变更可自动应用；
+        高风险授权会进入待审批队列，不会绕过用户确认。最终结果统一落在目标 Agent 的 ToolPolicy。
+
+        Args:
+            target_agent: 目标 Agent 的 agentId、稳定代号或唯一名称
+            grant_tools: 要加入 allowedTools 的工具名，多个用逗号或换行分隔
+            revoke_tools: 要从 allowedTools 移除的工具名，多个用逗号或换行分隔
+            block_tools: 要加入 blockedTools 的工具名，多个用逗号或换行分隔
+            unblock_tools: 要从 blockedTools 移除的工具名，多个用逗号或换行分隔
+            reason: 变更理由，说明角色职责和任务场景
+            apply_mode: auto 或 review；auto 仍会让高风险变更等待审批
+
+        Returns:
+            JSON 格式的请求状态、风险等级、是否需要审批和 requestId
+        """
+        return _agent_tool_permission_request_impl(
+            target_agent=target_agent,
+            grant_tools=grant_tools,
+            revoke_tools=revoke_tools,
+            block_tools=block_tools,
+            unblock_tools=unblock_tools,
+            reason=reason,
+            apply_mode=apply_mode,
+        )
+
+    @tool
+    def research_communication_edge_proposal_tool(
+        action: str,
+        source_agent: str = "",
+        target_agent: str = "",
+        edge_id: str = "",
+        label: str = "",
+        allowed_message_types: str = "",
+        allowed_intents: str = "",
+        wake_strategy: str = "conditional",
+        max_forward_depth: int = 1,
+        reason: str = "",
+    ) -> str:
+        """
+        【科研通信边治理】提交新增、更新或删除科研组织通信边的受控提案。
+
+        适合 CEO、组织顾问或能力管家调整团队成员之间允许的消息类型、意图和唤醒策略。
+        本工具只创建提案，不直接应用变更；提案应用后会更新科研组织通信边，并同步 research-team 团队画布线。
+
+        Args:
+            action: create / update / delete
+            source_agent: 来源 Agent 的 agentId、稳定代号或唯一名称；删除时可与 target_agent 一起用于推导 edge_id
+            target_agent: 目标 Agent 的 agentId、稳定代号或唯一名称；删除时可与 source_agent 一起用于推导 edge_id
+            edge_id: 通信边 ID；更新/删除指定已有边时使用
+            label: 通信边显示名称
+            allowed_message_types: 允许的 messageType，多个用逗号或换行分隔，如 notice,request,report
+            allowed_intents: 允许的 researchOrgIntent，多个用逗号或换行分隔
+            wake_strategy: immediate / mailbox_only / conditional
+            max_forward_depth: 最大转发深度，0-5
+            reason: 变更理由，说明组织职责和风险
+
+        Returns:
+            JSON 格式的提案状态、proposalId、风险等级和待应用动作
+        """
+        return _research_communication_edge_proposal_impl(
+            action=action,
+            source_agent=source_agent,
+            target_agent=target_agent,
+            edge_id=edge_id,
+            label=label,
+            allowed_message_types=allowed_message_types,
+            allowed_intents=allowed_intents,
+            wake_strategy=wake_strategy,
+            max_forward_depth=max_forward_depth,
+            reason=reason,
+        )
+
+    @tool
     def image2_generate_tool(
         prompt: str,
         size: str = "1024x1024",
@@ -1035,6 +1122,8 @@ def create_key_tools() -> List[BaseTool]:
         get_session_files_tool,
         # Agent 间通信
         agent_message_tool,
+        agent_tool_permission_request_tool,
+        research_communication_edge_proposal_tool,
         image2_generate_tool,
         research_knowledge_query_tool,
         # 学习卸载 (P2)

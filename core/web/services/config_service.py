@@ -8,12 +8,14 @@ import os
 import secrets
 import subprocess
 import time
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
 import config.public_config as public_config_module
+from core.chat.chat_task_types import trim_lines
 from config.public_config import (
     CONFIG_PATH,
     UNCONFIGURED_MODEL_REF,
@@ -152,20 +154,20 @@ def _config_sections(lang: str, editor_sections: list[dict[str, Any]] | None = N
         },
         {
             "id": "profiles",
-            "title": text_for(lang, zh="LLM 配置", en="LLM Configs"),
+            "title": text_for(lang, zh="调用档案", en="Call Profiles"),
             "summary": text_for(
                 lang,
-                zh="查看每个调用点当前使用的模型、密钥状态，并直接做连接测试。",
-                en="Inspect the model and key state used by each LLM call site, then run direct connection checks.",
+                zh="按业务分区查看每个大模型调用档案使用的模型、密钥状态，并直接做连接测试。",
+                en="Inspect model and key state for each LLM call profile by business area, then run direct connection checks.",
             ),
         },
         {
             "id": "models",
-            "title": text_for(lang, zh="模型库", en="Models"),
+            "title": text_for(lang, zh="模型中心", en="Model Center"),
             "summary": text_for(
                 lang,
-                zh="新增、编辑、删除模型库项时继续复用 public config 的共享变更内核。",
-                en="Add, edit, and delete model library entries through the shared public config kernel.",
+                zh="集中管理模型库、服务商账号、密钥、能力检测和模型发现。",
+                en="Manage model inventory, provider accounts, keys, capability checks, and discovery in one place.",
             ),
         },
     ]
@@ -470,10 +472,119 @@ def _decorate_model_options(public_config: dict[str, Any], draft_meta: dict | No
         configured = bool(option.get("api_key_configured", False))
         resolved_configured, state = _api_key_display_state(api_key_env, configured, draft_meta)
         decorated = copy.deepcopy(option)
+        details = decorated.get("details") if isinstance(decorated.get("details"), dict) else {}
         decorated["api_key_configured"] = resolved_configured
         decorated["api_key_state"] = state
+        decorated["supports_image_input"] = details.get("supports_image_input")
+        decorated["capability_status"] = str(details.get("capability_status") or "").strip() or (
+            "supported" if details.get("supports_image_input") is True else "unsupported" if details.get("supports_image_input") is False else "unknown"
+        )
+        decorated["capability_source"] = str(details.get("capability_source") or "").strip()
+        decorated["capability_checked_at"] = str(details.get("capability_checked_at") or "").strip()
+        decorated["capability_error"] = str(details.get("capability_error") or "").strip()
         options.append(decorated)
     return options
+
+
+def _image_input_capability_result_details(result: dict[str, Any]) -> dict[str, Any]:
+    status = str(result.get("capability_status") or "").strip().lower()
+    if status not in {"supported", "unsupported", "unknown"}:
+        status = "supported" if result.get("supports_image_input") is True else "unsupported" if result.get("supports_image_input") is False else "unknown"
+    details: dict[str, Any] = {
+        "capability_status": status,
+        "capability_source": "runtime_probe",
+        "capability_checked_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    supports = result.get("supports_image_input")
+    if supports is not None:
+        details["supports_image_input"] = bool(supports)
+    error = trim_lines(result.get("message") or result.get("error") or "", max_lines=2)
+    if status != "supported" and error:
+        details["capability_error"] = error
+    return details
+
+
+def _model_option_probe_profile(option: dict[str, Any]) -> dict[str, Any]:
+    profile: dict[str, Any] = {
+        "provider": copy.deepcopy(option.get("provider") or {}),
+        "model": str(option.get("model") or "").strip(),
+        "api_key_env": str(option.get("api_key_env") or "").strip(),
+    }
+    details = option.get("details") if isinstance(option.get("details"), dict) else {}
+    for key in public_config_module.MODEL_LIBRARY_DETAIL_FIELDS:
+        if key == "api_key_env":
+            continue
+        if key in details:
+            profile[key] = copy.deepcopy(details[key])
+    return profile
+
+
+def _capability_probe_profile_id(model_id: str) -> str:
+    safe = "".join(ch if ch.isalnum() else "_" for ch in str(model_id or "").strip().lower()).strip("_")
+    return f"__capability_probe_{safe or 'model'}"
+
+
+def _public_config_for_model_capability_probe(public_config: dict[str, Any], option: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    model_id = str(option.get("model_id") or "").strip()
+    probe_profile_id = _capability_probe_profile_id(model_id)
+    probe_config = copy.deepcopy(public_config)
+    llm = probe_config.setdefault("llm", {})
+    profiles = llm.setdefault("profiles", {})
+    if not isinstance(profiles, dict):
+        raise ValueError("llm.profiles must be an object")
+    if str(option.get("source") or "").strip() == "model_library":
+        profiles[probe_profile_id] = {"model_ref": model_id}
+    else:
+        profiles[probe_profile_id] = _model_option_probe_profile(option)
+    return probe_config, probe_profile_id
+
+
+def _apply_image_input_capability_result_to_config(
+    public_config: dict[str, Any],
+    option: dict[str, Any],
+    result: dict[str, Any],
+) -> None:
+    model_id = str(option.get("model_id") or "").strip()
+    details = _image_input_capability_result_details(result)
+    source = str(option.get("source") or "").strip()
+    llm = public_config.setdefault("llm", {})
+    if source == "model_library":
+        model_library = llm.setdefault("model_library", {})
+        if isinstance(model_library, dict) and isinstance(model_library.get(model_id), dict):
+            entry = model_library[model_id]
+            if "supports_image_input" in details:
+                entry["supports_image_input"] = details["supports_image_input"]
+            entry["capability_status"] = details["capability_status"]
+            entry["capability_source"] = details["capability_source"]
+            entry["capability_checked_at"] = details["capability_checked_at"]
+            if details.get("capability_error"):
+                entry["capability_error"] = details["capability_error"]
+            else:
+                entry.pop("capability_error", None)
+
+    profiles = llm.setdefault("profiles", {})
+    if not isinstance(profiles, dict):
+        return
+    option_provider_signature = _provider_signature(option.get("provider"))
+    option_model = str(option.get("model") or "").strip()
+    for profile in profiles.values():
+        if not isinstance(profile, dict):
+            continue
+        selected = _selected_model_option(public_config, profile)
+        selected_id = str((selected or {}).get("model_id") or "").strip()
+        selected_signature = _provider_signature((selected or {}).get("provider") if selected else profile.get("provider"))
+        selected_model = str((selected or {}).get("model") or profile.get("model") or "").strip()
+        if selected_id != model_id and (selected_signature != option_provider_signature or selected_model != option_model):
+            continue
+        if "supports_image_input" in details:
+            profile["supports_image_input"] = details["supports_image_input"]
+        profile["capability_status"] = details["capability_status"]
+        profile["capability_source"] = details["capability_source"]
+        profile["capability_checked_at"] = details["capability_checked_at"]
+        if details.get("capability_error"):
+            profile["capability_error"] = details["capability_error"]
+        else:
+            profile.pop("capability_error", None)
 
 
 def _list_profile_cards(public_config: dict[str, Any], draft_meta: dict | None, lang: str) -> list[dict[str, Any]]:
@@ -1218,6 +1329,110 @@ def run_draft_llm_test(
     )
 
 
+def draft_check_model_image_input_capabilities(
+    public_config: dict[str, Any] | None,
+    *,
+    draft_meta: dict | None = None,
+    base_hash: str = "",
+    model_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    old_public = with_git_config_defaults(load_public_config())
+    current = _prepare_submitted_public_config(public_config, old_public)
+    current_meta = _normalize_draft_meta(draft_meta)
+    validate_llm_public_config(current)
+    requested_ids = {str(item or "").strip() for item in list(model_ids or []) if str(item or "").strip()}
+    options = [
+        option
+        for option in list_llm_model_options(current)
+        if not requested_ids or str(option.get("model_id") or "").strip() in requested_ids
+    ]
+    if requested_ids and len(options) != len(requested_ids):
+        found = {str(option.get("model_id") or "").strip() for option in options}
+        missing = sorted(requested_ids - found)
+        raise ValueError(f"unknown LLM model: {', '.join(missing)}")
+
+    results: list[dict[str, Any]] = []
+    for option in options:
+        model_id = str(option.get("model_id") or "").strip()
+        try:
+            probe_config, probe_profile_id = _public_config_for_model_capability_probe(current, option)
+            result = _run_draft_test_llm_connection(
+                probe_config,
+                probe_profile_id,
+                current_meta,
+                "image_input",
+            )
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "message": public_config_module.redact_llm_probe_error(str(exc)),
+                "capability": "image_input",
+                "capability_status": "unknown",
+                "supports_image_input": None,
+                "capability_reason": type(exc).__name__,
+                "error": public_config_module.redact_llm_probe_error(str(exc)),
+            }
+            _record_config_scene_event(
+                "llm_capability_batch",
+                "config.llm_capability_batch.item_failed",
+                message="Model image input capability check failed before result persistence.",
+                level="warning",
+                outcome="failed",
+                fields={
+                    "modelId": model_id,
+                    "model": str(option.get("model") or "").strip(),
+                    "providerKind": str(option.get("provider_kind") or "").strip(),
+                    "reason": type(exc).__name__,
+                },
+                lifecycle=True,
+            )
+        _apply_image_input_capability_result_to_config(current, option, result)
+        results.append(
+            {
+                "modelId": model_id,
+                "label": str(option.get("label") or "").strip(),
+                "model": str(option.get("model") or "").strip(),
+                "providerKind": str(option.get("provider_kind") or "").strip(),
+                "ok": bool(result.get("ok")),
+                "capability": "image_input",
+                "capabilityStatus": str(result.get("capability_status") or "").strip() or "unknown",
+                "supportsImageInput": result.get("supports_image_input"),
+                "reason": str(result.get("capability_reason") or "").strip(),
+                "message": str(result.get("message") or "").strip(),
+            }
+        )
+
+    supported_count = sum(1 for item in results if item.get("supportsImageInput") is True)
+    unsupported_count = sum(1 for item in results if item.get("supportsImageInput") is False)
+    unknown_count = len(results) - supported_count - unsupported_count
+    _record_config_scene_event(
+        "llm_capability_batch",
+        "config.llm_capability_batch.completed",
+        message="Model image input capability batch check completed.",
+        level="info" if unknown_count == 0 else "warning",
+        outcome="succeeded" if unknown_count == 0 else "partial",
+        fields={
+            "modelCount": len(results),
+            "supportedCount": supported_count,
+            "unsupportedCount": unsupported_count,
+            "unknownCount": unknown_count,
+        },
+        lifecycle=True,
+    )
+    workspace = _build_workspace(
+        current,
+        draft_meta=current_meta,
+        base_hash=str(base_hash or public_config_hash(old_public)).strip(),
+        message=text_for(
+            _resolve_workspace_language(current),
+            zh=f"已完成 {len(results)} 个模型的图像输入能力检测，保存到 config.toml 后生效。",
+            en=f"Checked image input capability for {len(results)} models. Save to config.toml to persist.",
+        ),
+    )
+    workspace["capabilityResults"] = results
+    return workspace
+
+
 def _normalize_discovered_models(data: Any) -> list[dict[str, Any]]:
     raw_models: list[Any]
     if isinstance(data, dict) and isinstance(data.get("data"), list):
@@ -1558,6 +1773,7 @@ __all__ = [
     "apply_config_workspace",
     "draft_add_model",
     "draft_add_profile",
+    "draft_check_model_image_input_capabilities",
     "draft_delete_model",
     "draft_update_model",
     "get_config_summary",

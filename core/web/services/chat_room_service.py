@@ -6,6 +6,7 @@ import json
 import queue
 import re
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -33,6 +34,10 @@ RUN_KIND = "chat_room_round"
 RUN_LEASES = [READONLY_CHAT_LEASE]
 DEFAULT_MODE = "round_robin"
 DEFAULT_PURPOSE = "discussion"
+_CASUAL_CHAT_TOPIC_RE = re.compile(
+    r"^\s*(?:你们好|大家好|你好|您好|hello|hi|hey|嗨|哈喽|在吗|有人吗|辛苦了)[。！!,.，\s]*$",
+    re.IGNORECASE,
+)
 CHAT_ROOM_PURPOSES = [
     {
         "id": "chat",
@@ -58,11 +63,36 @@ _CHAT_ROOM_STREAM_SUBSCRIBERS: dict[str, set[queue.Queue[dict[str, Any]]]] = {}
 _CHAT_ROOM_STREAM_HEARTBEAT_SECONDS = 15.0
 _CHAT_ROOM_STREAM_QUEUE_SIZE = 8
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
+_PARTICIPANT_CONTEXT_FIELDS = (
+    "teamId",
+    "teamName",
+    "teamPurpose",
+    "teamRole",
+    "teamMemberPurpose",
+    "teamResponsibilities",
+)
 
 AgentRunner = Callable[[dict[str, Any], str, dict[str, Any]], dict[str, Any]]
 _CHAT_ROOM_ROUND_CONTROLS_LOCK = threading.Lock()
 _CHAT_ROOM_ROUND_CONTROLS: dict[str, dict[str, str]] = {}
 _MISSING_SESSION_STATUS_MESSAGE = "缺少有效 Agent：当前会话引用的 Agent 已不存在或不可用。"
+
+
+def _perf_counter() -> float:
+    return time.perf_counter()
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, int(round((_perf_counter() - started_at) * 1000)))
+
+
+def _elapsed_ms_between(started_at: Any, ended_at: float | None = None) -> int:
+    try:
+        start_value = float(started_at)
+    except (TypeError, ValueError):
+        return 0
+    end_value = _perf_counter() if ended_at is None else float(ended_at)
+    return max(0, int(round((end_value - start_value) * 1000)))
 
 
 def _sync_agent_directory_project_root() -> None:
@@ -103,13 +133,50 @@ def list_chat_rooms(
     return rooms
 
 
-def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
+def list_chat_rooms_compact() -> list[dict[str, Any]]:
+    """Return room references without session repair or full room hydration."""
+
     state = _store().load()
-    session_summaries = _session_summary_index()
-    if _repair_room_participants_in_state(state, session_summaries=session_summaries):
-        _store().save(state)
+    rooms = [
+        _room_to_compact_reference(item)
+        for item in list(state.get("rooms") or [])
+        if isinstance(item, dict)
+    ]
+    rooms.sort(key=lambda item: str(item.get("updatedAt") or ""), reverse=True)
+    return rooms
+
+
+def get_chat_room_compact(room_id: str) -> dict[str, Any] | None:
+    """Return one room reference without session repair or full room hydration."""
+
+    normalized_room_id = str(room_id or "").strip()
+    if not normalized_room_id:
+        return None
+    state = _store().load()
+    room = _find_room(state, normalized_room_id)
+    return _room_to_compact_reference(room) if room else None
+
+
+def get_chat_room_detail(room_id: str) -> dict[str, Any] | None:
+    started_at = _perf_counter()
+    state = _store().load()
     room = _find_room(state, room_id)
-    return _room_to_api(room) if room else None
+    if not room:
+        _record_chat_room_detail_loaded("", started_at, repaired=False, found=False)
+        return None
+    session_summaries = _session_summary_index()
+    active_agent_indexes = _active_agent_participant_indexes()
+    repaired = _repair_room_participants(
+        room,
+        session_summaries=session_summaries,
+        active_agents_by_id=active_agent_indexes["by_id"],
+        active_agents_by_session_id=active_agent_indexes["by_session_id"],
+    )
+    if repaired:
+        _store().save(state)
+    detail = _room_to_api(room)
+    _record_chat_room_detail_loaded(str(detail.get("roomId") or room_id), started_at, repaired=repaired, found=True)
+    return detail
 
 
 def update_chat_room(
@@ -117,6 +184,7 @@ def update_chat_room(
     *,
     title: str | None = None,
     participant_session_ids: list[str] | None = None,
+    participant_contexts_by_agent_id: dict[str, dict[str, Any]] | None = None,
     mode: str | None = None,
     purpose: str | None = None,
     config: dict[str, Any] | None = None,
@@ -144,6 +212,10 @@ def update_chat_room(
             room["config"] = _safe_config(config)
         if participant_session_ids is not None:
             participants = _resolve_participants(participant_session_ids)
+            participants = _apply_participant_contexts(
+                participants,
+                participant_contexts_by_agent_id=participant_contexts_by_agent_id,
+            )
             if not participants:
                 raise ChatRoomValidationError(
                     text_for(lang, zh="至少需要一个可用会话才能更新群聊。", en="At least one session is required.")
@@ -346,6 +418,7 @@ def create_chat_room(
     title: str = "",
     participant_session_ids: list[str] | None = None,
     participant_agent_ids: list[str] | None = None,
+    participant_contexts_by_agent_id: dict[str, dict[str, Any]] | None = None,
     mode: str = DEFAULT_MODE,
     purpose: str = DEFAULT_PURPOSE,
     config: dict[str, Any] | None = None,
@@ -366,6 +439,10 @@ def create_chat_room(
             _resolve_agent_participants(participant_agent_ids)
             if participant_agent_ids
             else _resolve_participants(participant_session_ids)
+        )
+        participants = _apply_participant_contexts(
+            participants,
+            participant_contexts_by_agent_id=participant_contexts_by_agent_id,
         )
         if not participants:
             raise ChatRoomValidationError(
@@ -406,7 +483,10 @@ def start_chat_room_round(
     config: dict[str, Any] | None = None,
     agent_runner: AgentRunner | None = None,
     background: bool = False,
+    lightweight_response: bool = False,
 ) -> dict[str, Any]:
+    submit_started_at = _perf_counter()
+    submit_timings: dict[str, Any] = {}
     lang = get_web_language()
     normalized_room_id = str(room_id or "").strip()
     normalized_topic = trim_lines(topic or "", max_lines=6).strip()
@@ -414,27 +494,38 @@ def start_chat_room_round(
         raise ChatRoomValidationError(text_for(lang, zh="请输入本轮群聊议题。", en="Enter a room topic."))
 
     runner = agent_runner or _run_participant_agent
+    lock_wait_started_at = _perf_counter()
     with _CHAT_ROOM_LOCK:
+        lock_acquired_at = _perf_counter()
+        submit_timings["chatRoomLockWaitMs"] = _elapsed_ms_between(lock_wait_started_at, lock_acquired_at)
+        stage_started_at = _perf_counter()
         state = _store().load()
+        submit_timings["storeLoadMs"] = _elapsed_ms(stage_started_at)
         room = _find_room(state, normalized_room_id)
         if room is None:
             raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
         _raise_if_room_busy(room)
         round_mode = _normalize_mode(mode or room.get("mode") or DEFAULT_MODE)
-        round_purpose = _normalize_purpose(purpose or room.get("purpose") or DEFAULT_PURPOSE)
+        round_purpose = _resolve_round_purpose(normalized_topic, purpose or room.get("purpose") or DEFAULT_PURPOSE)
+        stage_started_at = _perf_counter()
         scheduler = _require_ready_mode(round_mode)
+        submit_timings["schedulerResolveMs"] = _elapsed_ms(stage_started_at)
         round_config = {**_safe_config(room.get("config")), **_safe_config(config)}
+        stage_started_at = _perf_counter()
         participants = _refresh_participants(
             room.get("participants") or [],
             include_recent_messages=True,
             session_summaries=_session_summary_index(),
         )
+        submit_timings["participantRefreshMs"] = _elapsed_ms(stage_started_at)
+        stage_started_at = _perf_counter()
         speakers = scheduler.select_speakers(
             participants,
             topic=normalized_topic,
             history=list(room.get("rounds") or []),
             config=round_config,
         )
+        submit_timings["speakerSelectMs"] = _elapsed_ms(stage_started_at)
         if not speakers:
             raise ChatRoomValidationError(
                 text_for(lang, zh="群聊没有可发言的参与者。", en="The chat room has no enabled speakers.")
@@ -468,22 +559,38 @@ def start_chat_room_round(
         room["status"] = "running"
         room["activeRoundId"] = round_id
         room["updatedAt"] = now
+        stage_started_at = _perf_counter()
         _store().save(state)
+        submit_timings["storeSaveMs"] = _elapsed_ms(stage_started_at)
+        submit_timings["chatRoomLockedMs"] = _elapsed_ms_between(lock_acquired_at)
 
+    stage_started_at = _perf_counter()
     _persist_chat_room_work_run(room, round_payload, status="running", summary="")
+    submit_timings["workRunPersistMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     _create_chat_room_round_control(normalized_room_id, round_id)
+    submit_timings["roundControlCreateMs"] = _elapsed_ms(stage_started_at)
+    submit_timings["submitElapsedBeforeStartLogMs"] = _elapsed_ms(submit_started_at)
     _record_room_event(
         "round",
         "chat_room.round.started",
         room,
         round_payload,
-        fields={"mode": round_mode, "purpose": round_purpose, "participantCount": len(speakers)},
+        fields={
+            "mode": round_mode,
+            "purpose": round_purpose,
+            "participantCount": len(speakers),
+            **submit_timings,
+        },
         outcome="running",
         lifecycle=True,
     )
+    stage_started_at = _perf_counter()
     _publish_chat_room_detail_snapshot(normalized_room_id)
+    submit_timings["initialSnapshotPublishMs"] = _elapsed_ms(stage_started_at)
 
     if background:
+        schedule_started_at = _perf_counter()
         _CHAT_ROOM_EXECUTOR.submit(
             _run_chat_room_round_background,
             normalized_room_id,
@@ -493,17 +600,28 @@ def start_chat_room_round(
             speakers,
             runner,
             lang,
+            _perf_counter(),
         )
+        submit_timings["scheduleSubmitMs"] = _elapsed_ms(schedule_started_at)
         _record_room_event(
             "round",
             "chat_room.round.background_started",
             room,
             round_payload,
-            fields={"mode": round_mode, "purpose": round_purpose, "participantCount": len(speakers)},
+            fields={
+                "mode": round_mode,
+                "purpose": round_purpose,
+                "participantCount": len(speakers),
+                **submit_timings,
+            },
             outcome="running",
             lifecycle=True,
         )
+        if lightweight_response:
+            return _accepted_chat_room_round_payload(room, round_payload)
+        detail_started_at = _perf_counter()
         detail = get_chat_room_detail(normalized_room_id)
+        submit_timings["returnDetailMs"] = _elapsed_ms(detail_started_at)
         if detail is None:
             raise ChatRoomNotFoundError(text_for(lang, zh="未找到群聊。", en="Chat room not found."))
         return detail
@@ -517,6 +635,24 @@ def start_chat_room_round(
         runner,
         lang,
     )
+
+
+def _accepted_chat_room_round_payload(room: dict[str, Any], round_payload: dict[str, Any]) -> dict[str, Any]:
+    """Return a small accepted-round payload for clients that refresh via SSE/refetch."""
+
+    accepted_at = str(round_payload.get("startedAt") or "").strip() or utc_now_iso()
+    return {
+        "accepted": True,
+        "roomId": str(room.get("roomId") or round_payload.get("roomId") or "").strip(),
+        "roundId": str(round_payload.get("roundId") or "").strip(),
+        "activeRoundId": str(round_payload.get("roundId") or "").strip(),
+        "status": str(round_payload.get("status") or "running").strip() or "running",
+        "topic": str(round_payload.get("topic") or "").strip(),
+        "mode": str(round_payload.get("mode") or "").strip(),
+        "purpose": str(round_payload.get("purpose") or "").strip(),
+        "speakerOrder": list(round_payload.get("speakerOrder") or []),
+        "acceptedAt": accepted_at,
+    }
 
 
 def stop_chat_room_round(room_id: str, *, reason: str = "") -> dict[str, Any]:
@@ -620,7 +756,21 @@ def _run_chat_room_round_background(
     speakers: list[dict[str, Any]],
     runner: AgentRunner,
     lang: str,
+    submitted_at_monotonic: float | None = None,
 ) -> None:
+    worker_started_at = _perf_counter()
+    _record_room_event(
+        "round",
+        "chat_room.round.worker_started",
+        room,
+        round_payload,
+        fields={
+            "participantCount": len(speakers),
+            "scheduleToWorkerStartedMs": _elapsed_ms_between(submitted_at_monotonic, worker_started_at),
+        },
+        outcome="running",
+        lifecycle=True,
+    )
     try:
         _execute_chat_room_round(room_id, round_id, room, round_payload, speakers, runner, lang)
     except Exception as exc:
@@ -642,6 +792,7 @@ def _execute_chat_room_round(
 
     messages: list[dict[str, Any]] = []
     for index, participant in enumerate(speakers):
+        speaker_started_at = _perf_counter()
         stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
         if stopped_detail is not None:
             _clear_chat_room_round_control(round_id)
@@ -660,7 +811,11 @@ def _execute_chat_room_round(
             "purpose": round_purpose,
             "speakerIndex": index,
         }
+        prompt_build_ms = _elapsed_ms(speaker_started_at)
+        context["speakerStartedAtMonotonic"] = speaker_started_at
+        context["promptBuildMs"] = prompt_build_ms
         message = _run_one_speaker(participant, prompt, context, runner)
+        speaker_run_ms = _elapsed_ms(speaker_started_at)
         stopped_detail = _stopped_chat_room_round_detail(normalized_room_id, round_id)
         if stopped_detail is not None:
             _clear_chat_room_round_control(round_id)
@@ -711,6 +866,10 @@ def _execute_chat_room_round(
                 "purpose": round_purpose,
                 "contentChars": len(message.get("content") or ""),
                 "errorType": message.get("errorType") or "",
+                "promptBuildMs": prompt_build_ms,
+                "speakerRunMs": speaker_run_ms,
+                **_participant_team_event_fields(participant),
+                **(message.get("timings") if isinstance(message.get("timings"), dict) else {}),
             },
             outcome=message["status"],
             level="info" if message["status"] == "completed" else "warning",
@@ -890,11 +1049,14 @@ def _run_one_speaker(
     context: dict[str, Any],
     runner: AgentRunner,
 ) -> dict[str, Any]:
-    timestamp = utc_now_iso()
+    speaker_started_at = context.get("speakerStartedAtMonotonic") or _perf_counter()
+    stage_started_at = _perf_counter()
     supervision_decision = _evaluate_speaker_supervision_policy(participant)
+    supervision_policy_ms = _elapsed_ms(stage_started_at)
     agent_directory_service.record_supervision_policy_decision(supervision_decision)
     supervision_payload = _supervision_decision_to_message(supervision_decision)
     if not supervision_decision.allowed:
+        timestamp = utc_now_iso()
         return {
             "messageId": _new_id("message", set()),
             "participantId": participant["participantId"],
@@ -907,12 +1069,22 @@ def _run_one_speaker(
             "summary": supervision_decision.reason,
             "timestamp": timestamp,
             "supervision": supervision_payload,
+            "timings": {
+                "supervisionPolicyMs": supervision_policy_ms,
+                "totalSpeakerMs": _elapsed_ms_between(speaker_started_at),
+            },
         }
     try:
+        stage_started_at = _perf_counter()
         result = runner(participant, prompt, context)
+        runner_ms = _elapsed_ms(stage_started_at)
         content = _result_visible_text(result)
         if not content:
             content = _result_summary(result) or "No visible response."
+        content = _strip_redundant_speaker_prefix(content, participant)
+        summary = _strip_redundant_speaker_prefix(_result_summary(result), participant)
+        result_timings = dict(result.get("timings") or {}) if isinstance(result, dict) else {}
+        timestamp = utc_now_iso()
         return {
             "messageId": _new_id("message", set()),
             "participantId": participant["participantId"],
@@ -922,13 +1094,21 @@ def _run_one_speaker(
             "speakerTitle": _participant_speaker_label(participant),
             "status": "completed",
             "content": content,
-            "summary": _result_summary(result),
+            "summary": summary,
             "timestamp": timestamp,
             "supervision": supervision_payload,
+            "timings": {
+                "supervisionPolicyMs": supervision_policy_ms,
+                "runnerMs": runner_ms,
+                "totalSpeakerMs": _elapsed_ms_between(speaker_started_at),
+                **result_timings,
+            },
         }
     except Exception as exc:
+        total_speaker_ms = _elapsed_ms_between(speaker_started_at)
         stop_reason = _chat_room_round_stop_reason(str(context.get("roundId") or "").strip())
         if stop_reason:
+            timestamp = utc_now_iso()
             return {
                 "messageId": _new_id("message", set()),
                 "participantId": participant["participantId"],
@@ -942,7 +1122,12 @@ def _run_one_speaker(
                 "timestamp": timestamp,
                 "errorType": type(exc).__name__,
                 "error": str(exc),
+                "timings": {
+                    "supervisionPolicyMs": supervision_policy_ms,
+                    "totalSpeakerMs": total_speaker_ms,
+                },
             }
+        timestamp = utc_now_iso()
         return {
             "messageId": _new_id("message", set()),
             "participantId": participant["participantId"],
@@ -956,6 +1141,10 @@ def _run_one_speaker(
             "errorType": type(exc).__name__,
             "timestamp": timestamp,
             "supervision": supervision_payload,
+            "timings": {
+                "supervisionPolicyMs": supervision_policy_ms,
+                "totalSpeakerMs": total_speaker_ms,
+            },
         }
 
 
@@ -982,11 +1171,18 @@ def _supervision_decision_to_message(decision: Any) -> dict[str, Any]:
 
 
 def _run_participant_agent(participant: dict[str, Any], prompt: str, context: dict[str, Any]) -> dict[str, Any]:
+    prepare_started_at = _perf_counter()
+    timings: dict[str, Any] = {}
     session_id = str(participant.get("sessionId") or "").strip()
+    stage_started_at = _perf_counter()
     session_workspace = _participant_workspace(session_id, context.get("roomId"), participant.get("participantId"))
+    timings["sessionWorkspaceMs"] = _elapsed_ms(stage_started_at)
+    stage_started_at = _perf_counter()
     _sync_agent_directory_project_root()
+    timings["agentDirectorySyncMs"] = _elapsed_ms(stage_started_at)
     agent_id = str(participant.get("agentId") or "").strip()
     round_id = str(context.get("roundId") or "").strip()
+    stage_started_at = _perf_counter()
     agent = agent_directory_service.get_agent(agent_id, include_archived=False) if agent_id else None
     if agent_id and not agent:
         historical_agent = agent_directory_service.get_agent(agent_id, include_archived=True)
@@ -1005,6 +1201,7 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
                 en="This room participant references an archived or unavailable Agent and cannot run as a speaker.",
             )
         )
+    timings["agentLookupMs"] = _elapsed_ms(stage_started_at)
     agent_context = None
     result: dict[str, Any] | Any
     with session_service.reserve_agent_execution_slot(
@@ -1013,41 +1210,66 @@ def _run_participant_agent(participant: dict[str, Any], prompt: str, context: di
         session_id=session_id,
         owner="chat_room_round",
     ):
+        stage_started_at = _perf_counter()
         agent_context = build_agent_context(agent_id, session_id=session_id, run_id=round_id) if agent_id else None
+        timings["agentContextBuildMs"] = _elapsed_ms(stage_started_at)
+        if agent_context is not None:
+            for timing_key, timing_value in dict(getattr(agent_context, "timings", {}) or {}).items():
+                normalized_key = str(timing_key or "").strip()
+                if normalized_key:
+                    timings[f"agentContext.{normalized_key}"] = timing_value
+        stage_started_at = _perf_counter()
         agent_workspace = (
             agent_directory_service._ensure_agent_workspace(str((agent or {}).get("workspacePath") or "")).resolve()
             if agent and str((agent or {}).get("workspacePath") or "").strip()
             else session_workspace
         )
+        timings["agentWorkspaceMs"] = _elapsed_ms(stage_started_at)
+        stage_started_at = _perf_counter()
         write_decision = evaluate_agent_workspace_write(agent_id, agent_workspace, purpose="chat_room_agent_workspace") if agent_id else None
+        timings["workspacePolicyMs"] = _elapsed_ms(stage_started_at)
         workspace = agent_workspace if not write_decision or write_decision.allowed else session_workspace
         agent_profile_id = (
             str((agent_context.profile_id if agent_context is not None else "") or "").strip()
             or str(participant.get("agentProfileId") or participant.get("agentTemplateId") or "primary").strip()
             or "primary"
         )
+        stage_started_at = _perf_counter()
         agent_config = session_service._session_agent_config_for_profile(agent_profile_id)
+        timings["agentConfigMs"] = _elapsed_ms(stage_started_at)
         with active_agent_runtime(
             agent_id,
             session_id=session_id,
             room_id=str(context.get("roomId") or "").strip(),
             round_id=round_id,
         ), session_service._session_tool_workspace_override(workspace):
+            stage_started_at = _perf_counter()
             agent_runtime = session_service.create_chat_agent(workspace_path=workspace, config=agent_config)
+            timings["agentCreateMs"] = _elapsed_ms(stage_started_at)
+            stage_started_at = _perf_counter()
             prepare_agent_turn(
                 agent_runtime,
                 interrupt_checker=lambda: _chat_room_round_stop_reason(round_id),
                 chat_history=participant.get("recentMessages") or [],
                 runtime_context=agent_context.context_block if agent_context is not None else "",
             )
+            timings["agentSeedMs"] = _elapsed_ms(stage_started_at)
+            timings["totalPrepareMs"] = _elapsed_ms(prepare_started_at)
+            stage_started_at = _perf_counter()
             result = run_existing_agent_single_turn(agent_runtime, initial_prompt=prompt, disable_tools=True)
+            timings["llmElapsedMs"] = _elapsed_ms(stage_started_at)
     if agent_context is not None and agent_context.agent_id:
+        stage_started_at = _perf_counter()
         record_agent_turn_result(
             agent_context.agent_id,
             session_id,
             result if isinstance(result, dict) else {},
             run_id=round_id,
         )
+        timings["agentTurnResultRecordMs"] = _elapsed_ms(stage_started_at)
+    if isinstance(result, dict):
+        result = dict(result)
+        result["timings"] = {**dict(result.get("timings") or {}), **timings}
     return result
 
 
@@ -1080,6 +1302,7 @@ def _record_participant_agent_unavailable_event(
                 "sessionId": str(participant.get("sessionId") or "").strip(),
                 "reason": normalized_reason,
                 "agentStatus": str(agent_status or "").strip(),
+                **_participant_team_event_fields(participant),
             },
             lifecycle=True,
         )
@@ -1098,6 +1321,8 @@ def _build_participant_prompt(
     prior_lines = _format_prior_room_messages(prior_messages)
     purpose = _normalize_purpose(round_payload.get("purpose") or room.get("purpose") or DEFAULT_PURPOSE)
     purpose_lines = _purpose_prompt_lines(purpose)
+    role_view = _participant_role_view(participant)
+    team_context_lines = _format_participant_team_context(participant)
     return "\n".join(
         [
             "你正在参加 Vibelution 的只读 Agent 群聊。",
@@ -1105,8 +1330,14 @@ def _build_participant_prompt(
             f"当前议题: {round_payload.get('topic') or ''}",
             f"调度模式: {round_payload.get('mode') or DEFAULT_MODE}",
             f"对话目的: {purpose}",
-            f"你的身份: {_participant_speaker_label(participant)}",
+            f"你的发言视角: {role_view}",
+            f"你的界面代号: {participant.get('agentCode') or ''}",
             f"来源会话: {participant.get('sessionId') or ''}",
+            "发言时直接代入这个角色，不要在正文开头写 Agent 编号、姓名、职位、标题或“某某 Agent：”；这些会由界面显示。",
+            "不要写“作为/我是/我的身份是…”来介绍自己，除非用户明确要求自我介绍。",
+            "",
+            "你的团队岗位上下文:",
+            team_context_lines or "- 当前群聊未绑定团队岗位；按会话 Agent 的可用上下文发言。",
             "",
             "你的会话近况:",
             recent_session_lines or "- 暂无可用会话消息。",
@@ -1129,6 +1360,7 @@ def _purpose_prompt_lines(purpose: str) -> list[str]:
         return [
             "- 像真实群聊一样回应当前用户话题，优先接住上一位发言者，不要写成任务报告。",
             "- 用 1-3 句自然短句表达；除非用户明确要求，不要使用标题、列表、表格或会议纪要格式。",
+            "- 如果只是问候或轻量寒暄，先自然回应，不要主动扩展成科研方向、组织调整或能力审查。",
             "- 如果会话近况与当前话题无关，只保留一句必要背景，不要把旧任务上下文搬进来。",
         ]
     if normalized == "meeting":
@@ -1142,6 +1374,31 @@ def _purpose_prompt_lines(purpose: str) -> list[str]:
         "- 可以提出建议或分歧，但保持紧凑，不要写成长篇报告。",
         "- 让发言接在上一位之后，避免孤立复述自己的会话近况。",
     ]
+
+
+def _strip_redundant_speaker_prefix(text: str, participant: dict[str, Any]) -> str:
+    content = str(text or "").strip()
+    if not content:
+        return ""
+    labels = [
+        _participant_speaker_label(participant),
+        _participant_role_view(participant),
+        str(participant.get("title") or "").strip(),
+        str(participant.get("agentCode") or "").strip(),
+    ]
+    for label in labels:
+        if not label:
+            continue
+        content = re.sub(rf"^\s*(?:\*\*)?{re.escape(label)}(?:\*\*)?\s*[:：]\s*", "", content, count=1).strip()
+    code = str(participant.get("agentCode") or "").strip()
+    if code:
+        content = re.sub(
+            rf"^\s*(?:\*\*)?{re.escape(code)}\s*[·\-]\s*[^\n:：]{{1,60}}(?:\*\*)?\s*[:：]\s*",
+            "",
+            content,
+            count=1,
+        ).strip()
+    return content
 
 
 def _format_recent_session_messages(messages: list[dict[str, Any]]) -> str:
@@ -1170,6 +1427,65 @@ def _participant_speaker_label(participant: dict[str, Any]) -> str:
     if code and title:
         return f"{code} · {title}"
     return title or code or str(participant.get("participantId") or "").strip()
+
+
+def _participant_role_view(participant: dict[str, Any]) -> str:
+    team_purpose = str(participant.get("teamMemberPurpose") or "").strip()
+    team_role = str(participant.get("teamRole") or "").strip()
+    if team_purpose and team_role and team_purpose != team_role:
+        return f"{team_role} / {team_purpose}"
+    if team_purpose or team_role:
+        return team_purpose or team_role
+    title = str(participant.get("title") or "").strip()
+    if title:
+        title = re.sub(r"\s*Agent\s*$", "", title, flags=re.IGNORECASE).strip()
+    return title or str(participant.get("participantId") or "").strip() or "群聊成员"
+
+
+def _format_participant_team_context(participant: dict[str, Any]) -> str:
+    team_name = str(participant.get("teamName") or "").strip()
+    team_id = str(participant.get("teamId") or "").strip()
+    team_purpose = trim_lines(participant.get("teamPurpose") or "", max_lines=2).strip()
+    team_role = trim_lines(participant.get("teamRole") or "", max_lines=1).strip()
+    member_purpose = trim_lines(participant.get("teamMemberPurpose") or "", max_lines=2).strip()
+    responsibilities = [
+        trim_lines(str(item or ""), max_lines=1).strip()
+        for item in list(participant.get("teamResponsibilities") or [])[:5]
+        if trim_lines(str(item or ""), max_lines=1).strip()
+    ]
+    lines: list[str] = []
+    if team_name or team_id:
+        lines.append(f"- 所属团队: {team_name or team_id}")
+    if team_purpose:
+        lines.append(f"- 团队目标: {team_purpose}")
+    if team_role:
+        lines.append(f"- 团队岗位: {team_role}")
+    if member_purpose:
+        lines.append(f"- 岗位职责: {member_purpose}")
+    if responsibilities:
+        lines.append(f"- 职责清单: {'；'.join(responsibilities)}")
+    if lines:
+        lines.append("- 你是在团队群聊中承担这个岗位的 Agent，不是普通直连会话 Agent。")
+    return "\n".join(lines)
+
+
+def _participant_team_event_fields(participant: dict[str, Any]) -> dict[str, Any]:
+    team_id = str(participant.get("teamId") or "").strip()
+    if not team_id:
+        return {}
+    responsibilities = [
+        trim_lines(str(item or ""), max_lines=1).strip()
+        for item in list(participant.get("teamResponsibilities") or [])[:5]
+        if trim_lines(str(item or ""), max_lines=1).strip()
+    ]
+    return {
+        "runContext": "team_room",
+        "teamId": team_id,
+        "teamName": str(participant.get("teamName") or "").strip(),
+        "teamRole": str(participant.get("teamRole") or "").strip(),
+        "teamMemberPurpose": str(participant.get("teamMemberPurpose") or "").strip(),
+        "teamResponsibilitiesCount": len(responsibilities),
+    }
 
 
 def _result_visible_text(result: Any) -> str:
@@ -1447,6 +1763,34 @@ def _resolve_participants(session_ids: list[str] | None) -> list[dict[str, Any]]
     return participants
 
 
+def _apply_participant_contexts(
+    participants: list[dict[str, Any]],
+    *,
+    participant_contexts_by_agent_id: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    contexts = participant_contexts_by_agent_id if isinstance(participant_contexts_by_agent_id, dict) else {}
+    if not contexts:
+        return participants
+    next_participants: list[dict[str, Any]] = []
+    for participant in participants:
+        item = dict(participant)
+        agent_id = str(item.get("agentId") or "").strip()
+        context = contexts.get(agent_id) if agent_id else None
+        if isinstance(context, dict):
+            for field in _PARTICIPANT_CONTEXT_FIELDS:
+                value = context.get(field)
+                if field == "teamResponsibilities":
+                    item[field] = [
+                        trim_lines(str(entry or ""), max_lines=1).strip()
+                        for entry in list(value or [])[:8]
+                        if trim_lines(str(entry or ""), max_lines=1).strip()
+                    ]
+                else:
+                    item[field] = trim_lines(str(value or ""), max_lines=4).strip()
+        next_participants.append(item)
+    return next_participants
+
+
 def _resolve_agent_participants(agent_ids: list[str] | None) -> list[dict[str, Any]]:
     lang = get_web_language()
     _sync_agent_directory_project_root()
@@ -1547,6 +1891,7 @@ def _participant_from_session(
         "kind": "session_agent",
         "agentId": str(summary.get("agentId") or detail.get("agentId") or "").strip(),
         "agentCode": str(summary.get("agentCode") or detail.get("agentCode") or "").strip(),
+        "agentAvatarImageUrl": str(summary.get("agentAvatarImageUrl") or detail.get("agentAvatarImageUrl") or "").strip(),
         "directSessionId": session_id,
         "sessionId": session_id,
         "title": title,
@@ -1572,12 +1917,18 @@ def _refresh_participants(
     *,
     include_recent_messages: bool = False,
     session_summaries: dict[str, dict[str, Any]] | None = None,
+    active_agents_by_id: dict[str, dict[str, Any]] | None = None,
+    active_agents_by_session_id: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     refreshed: list[dict[str, Any]] = []
     for item in participants:
         if not isinstance(item, dict):
             continue
-        active_agent = _active_agent_for_participant(item)
+        active_agent = _active_agent_for_participant(
+            item,
+            active_agents_by_id=active_agents_by_id,
+            active_agents_by_session_id=active_agents_by_session_id,
+        )
         current_direct_session_id = str((active_agent or {}).get("directSessionId") or "").strip()
         session_id = current_direct_session_id or str(item.get("sessionId") or item.get("directSessionId") or "").strip()
         summary = _session_summary(session_id, session_summaries=session_summaries)
@@ -1595,6 +1946,12 @@ def _refresh_participants(
             participant["agentCode"] = str(
                 (active_agent or {}).get("agentCode") or item.get("agentCode") or participant.get("agentCode") or ""
             ).strip()
+            participant["agentAvatarImageUrl"] = str(
+                (active_agent or {}).get("avatarImageUrl")
+                or item.get("agentAvatarImageUrl")
+                or participant.get("agentAvatarImageUrl")
+                or ""
+            ).strip()
             participant["directSessionId"] = str(
                 current_direct_session_id
                 or item.get("directSessionId")
@@ -1603,6 +1960,9 @@ def _refresh_participants(
                 or ""
             ).strip()
             participant["sessionId"] = str(current_direct_session_id or participant.get("sessionId") or "").strip()
+            for field in _PARTICIPANT_CONTEXT_FIELDS:
+                if field in item:
+                    participant[field] = item.get(field)
             refreshed.append(participant)
         else:
             fallback = dict(item)
@@ -1612,6 +1972,7 @@ def _refresh_participants(
             if active_agent:
                 fallback["agentId"] = str(active_agent.get("agentId") or fallback.get("agentId") or "").strip()
                 fallback["agentCode"] = str(active_agent.get("agentCode") or fallback.get("agentCode") or "").strip()
+                fallback["agentAvatarImageUrl"] = str(active_agent.get("avatarImageUrl") or fallback.get("agentAvatarImageUrl") or "").strip()
             session_id = str(fallback.get("sessionId") or fallback.get("directSessionId") or "").strip()
             if session_id and str(fallback.get("agentId") or "").strip():
                 detail = session_service.get_session_detail(session_id) or {}
@@ -1626,9 +1987,17 @@ def _refresh_participants(
     return refreshed
 
 
-def _active_agent_for_participant(participant: dict[str, Any]) -> dict[str, Any] | None:
+def _active_agent_for_participant(
+    participant: dict[str, Any],
+    *,
+    active_agents_by_id: dict[str, dict[str, Any]] | None = None,
+    active_agents_by_session_id: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     agent_id = str(participant.get("agentId") or "").strip()
     if agent_id:
+        if active_agents_by_id is not None:
+            agent = active_agents_by_id.get(agent_id)
+            return dict(agent) if isinstance(agent, dict) else None
         agent = agent_directory_service.get_agent(agent_id, include_archived=False)
         return dict(agent) if isinstance(agent, dict) else None
     session_ids = {
@@ -1637,6 +2006,12 @@ def _active_agent_for_participant(participant: dict[str, Any]) -> dict[str, Any]
     }
     session_ids.discard("")
     if not session_ids:
+        return None
+    if active_agents_by_session_id is not None:
+        for session_id in session_ids:
+            agent = active_agents_by_session_id.get(session_id)
+            if isinstance(agent, dict):
+                return dict(agent)
         return None
     try:
         agents = agent_directory_service.list_agents(include_archived=False)
@@ -1650,46 +2025,88 @@ def _active_agent_for_participant(participant: dict[str, Any]) -> dict[str, Any]
     return None
 
 
+def _active_agent_participant_indexes() -> dict[str, dict[str, dict[str, Any]]]:
+    try:
+        agents = agent_directory_service.list_agents(include_archived=False)
+    except Exception:
+        agents = []
+    by_id: dict[str, dict[str, Any]] = {}
+    by_session_id: dict[str, dict[str, Any]] = {}
+    for agent in agents:
+        if not isinstance(agent, dict):
+            continue
+        agent_id = str(agent.get("agentId") or "").strip()
+        if agent_id:
+            by_id[agent_id] = dict(agent)
+        session_id = str(agent.get("directSessionId") or "").strip()
+        if session_id:
+            by_session_id[session_id] = dict(agent)
+    return {"by_id": by_id, "by_session_id": by_session_id}
+
+
+def _repair_room_participants(
+    room: dict[str, Any],
+    *,
+    session_summaries: dict[str, dict[str, Any]] | None = None,
+    active_agents_by_id: dict[str, dict[str, Any]] | None = None,
+    active_agents_by_session_id: dict[str, dict[str, Any]] | None = None,
+) -> bool:
+    participants = list(room.get("participants") or [])
+    refreshed = _refresh_participants(
+        participants,
+        session_summaries=session_summaries,
+        active_agents_by_id=active_agents_by_id,
+        active_agents_by_session_id=active_agents_by_session_id,
+    )
+    previous_missing_sessions = {
+        str(item.get("sessionId") or item.get("directSessionId") or "").strip()
+        for item in participants
+        if isinstance(item, dict) and bool(item.get("agentMissing"))
+    }
+    newly_missing = [
+        item for item in refreshed
+        if isinstance(item, dict)
+        and bool(item.get("agentMissing"))
+        and str(item.get("sessionId") or item.get("directSessionId") or "").strip() not in previous_missing_sessions
+    ]
+    for participant in newly_missing:
+        _record_room_event(
+            "participant",
+            "chat_room.participant_agent_missing",
+            room,
+            fields={
+                "sessionId": str(participant.get("sessionId") or participant.get("directSessionId") or "").strip(),
+                "agentId": str(participant.get("agentId") or "").strip(),
+                "agentStatusCode": str(participant.get("agentStatusCode") or "").strip(),
+                "enabled": bool(participant.get("enabled")),
+            },
+            outcome="disabled",
+            level="warning",
+            lifecycle=True,
+        )
+    if refreshed == participants:
+        return False
+    room["participants"] = refreshed
+    room["updatedAt"] = utc_now_iso()
+    return True
+
+
 def _repair_room_participants_in_state(
     state: dict[str, Any],
     *,
     session_summaries: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
     changed = False
+    active_agent_indexes = _active_agent_participant_indexes()
     for room in list(state.get("rooms") or []):
         if not isinstance(room, dict):
             continue
-        participants = list(room.get("participants") or [])
-        refreshed = _refresh_participants(participants, session_summaries=session_summaries)
-        previous_missing_sessions = {
-            str(item.get("sessionId") or item.get("directSessionId") or "").strip()
-            for item in participants
-            if isinstance(item, dict) and bool(item.get("agentMissing"))
-        }
-        newly_missing = [
-            item for item in refreshed
-            if isinstance(item, dict)
-            and bool(item.get("agentMissing"))
-            and str(item.get("sessionId") or item.get("directSessionId") or "").strip() not in previous_missing_sessions
-        ]
-        for participant in newly_missing:
-            _record_room_event(
-                "participant",
-                "chat_room.participant_agent_missing",
-                room,
-                fields={
-                    "sessionId": str(participant.get("sessionId") or participant.get("directSessionId") or "").strip(),
-                    "agentId": str(participant.get("agentId") or "").strip(),
-                    "agentStatusCode": str(participant.get("agentStatusCode") or "").strip(),
-                    "enabled": bool(participant.get("enabled")),
-                },
-                outcome="disabled",
-                level="warning",
-                lifecycle=True,
-            )
-        if refreshed != participants:
-            room["participants"] = refreshed
-            room["updatedAt"] = utc_now_iso()
+        if _repair_room_participants(
+            room,
+            session_summaries=session_summaries,
+            active_agents_by_id=active_agent_indexes["by_id"],
+            active_agents_by_session_id=active_agent_indexes["by_session_id"],
+        ):
             changed = True
     return changed
 
@@ -1750,6 +2167,13 @@ def _normalize_purpose(purpose: Any) -> str:
     return normalized if normalized in allowed else DEFAULT_PURPOSE
 
 
+def _resolve_round_purpose(topic: str, purpose: Any) -> str:
+    normalized = _normalize_purpose(purpose)
+    if normalized == DEFAULT_PURPOSE and _CASUAL_CHAT_TOPIC_RE.match(str(topic or "")):
+        return "chat"
+    return normalized
+
+
 def _safe_config(config: Any) -> dict[str, Any]:
     return dict(config) if isinstance(config, dict) else {}
 
@@ -1770,6 +2194,39 @@ def _room_to_api(room: dict[str, Any]) -> dict[str, Any]:
     ]
     payload["availableModes"] = list_chat_room_modes()
     payload["availablePurposes"] = list_chat_room_purposes()
+    return payload
+
+
+def _room_to_compact_reference(room: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "roomId": str(room.get("roomId") or "").strip(),
+        "title": str(room.get("title") or "").strip(),
+        "mode": str(room.get("mode") or DEFAULT_MODE).strip() or DEFAULT_MODE,
+        "purpose": _normalize_purpose(room.get("purpose") or DEFAULT_PURPOSE),
+        "status": str(room.get("status") or "").strip(),
+        "activeRoundId": str(room.get("activeRoundId") or "").strip(),
+        "updatedAt": str(room.get("updatedAt") or "").strip(),
+        "participants": [
+            {
+                "participantId": str(item.get("participantId") or "").strip(),
+                "agentId": str(item.get("agentId") or "").strip(),
+                "agentCode": str(item.get("agentCode") or "").strip(),
+                "sessionId": str(item.get("sessionId") or item.get("directSessionId") or "").strip(),
+                "directSessionId": str(item.get("directSessionId") or item.get("sessionId") or "").strip(),
+                "enabled": bool(item.get("enabled", True)),
+            }
+            for item in list(room.get("participants") or [])
+            if isinstance(item, dict)
+        ],
+        "rounds": [
+            {
+                "roundId": str(item.get("roundId") or "").strip(),
+                "status": str(item.get("status") or "").strip(),
+            }
+            for item in list(room.get("rounds") or [])
+            if isinstance(item, dict)
+        ],
+    }
     return payload
 
 
@@ -1967,6 +2424,16 @@ def _record_room_event(
         "roomTitle": str(room.get("title") or "").strip(),
         "purpose": _normalize_purpose(room.get("purpose") or DEFAULT_PURPOSE),
     }
+    room_config = _safe_config(room.get("config"))
+    if str(room_config.get("source") or "").strip() == "team":
+        event_fields.update(
+            {
+                "runContext": "team_room",
+                "teamId": str(room_config.get("teamId") or "").strip(),
+                "teamName": str(room_config.get("teamName") or "").strip(),
+                "teamPurpose": str(room_config.get("teamPurpose") or "").strip(),
+            }
+        )
     if round_payload:
         event_fields.update(
             {
@@ -1987,6 +2454,25 @@ def _record_room_event(
             outcome=outcome,
             fields=event_fields,
             lifecycle=lifecycle,
+        )
+    except Exception:
+        return
+
+
+def _record_chat_room_detail_loaded(room_id: str, started_at: float, *, repaired: bool, found: bool) -> None:
+    try:
+        record_runtime_scene_event(
+            "chat_room",
+            "room_detail",
+            "chat_room.detail.loaded",
+            message="Chat room detail loaded.",
+            outcome="observed" if found else "missing",
+            fields={
+                "roomId": str(room_id or "").strip(),
+                "elapsedMs": _elapsed_ms(started_at),
+                "participantRepair": bool(repaired),
+                "found": bool(found),
+            },
         )
     except Exception:
         return

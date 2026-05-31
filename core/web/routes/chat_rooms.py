@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from starlette.responses import StreamingResponse
 
@@ -135,7 +135,7 @@ def chat_room_delete(room_id: str) -> dict:
 
 
 @router.post("/chat-rooms/{room_id}/rounds", status_code=status.HTTP_202_ACCEPTED)
-def chat_room_start_round(room_id: str, payload: ChatRoomRoundPayload) -> dict:
+def chat_room_start_round(room_id: str, payload: ChatRoomRoundPayload, request: Request) -> dict:
     try:
         return start_chat_room_round(
             room_id,
@@ -144,6 +144,7 @@ def chat_room_start_round(room_id: str, payload: ChatRoomRoundPayload) -> dict:
             purpose=payload.purpose,
             config=payload.config,
             background=True,
+            lightweight_response="respond-async" in str(request.headers.get("prefer") or "").lower(),
         )
     except ChatRoomNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

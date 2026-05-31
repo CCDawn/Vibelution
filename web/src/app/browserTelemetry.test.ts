@@ -49,6 +49,9 @@ describe("browser telemetry", () => {
     vi.stubGlobal("window", {
       location: {
         href: "http://127.0.0.1:8000/chat",
+        origin: "http://127.0.0.1:8000",
+        hostname: "127.0.0.1",
+        port: "8000",
         pathname: "/chat",
         search: "",
         hash: "",
@@ -79,6 +82,8 @@ describe("browser telemetry", () => {
 
     expect(snapshot).toMatchObject({
       pathname: "/chat",
+      telemetrySurface: "managed_workbench",
+      port: "8000",
       activeNavHref: "/chat",
       activeNavText: "对话",
       heading: "当前会话",
@@ -86,6 +91,32 @@ describe("browser telemetry", () => {
     });
     expect(snapshot).not.toHaveProperty("mainTextPreview");
     expect(JSON.stringify(snapshot)).not.toContain("用户对话正文");
+  });
+
+  it("marks Vite dev pages so backend diagnostics can ignore mixed-origin samples", () => {
+    vi.stubGlobal("window", {
+      location: {
+        href: "http://127.0.0.1:5173/chat",
+        origin: "http://127.0.0.1:5173",
+        hostname: "127.0.0.1",
+        port: "5173",
+        pathname: "/chat",
+        search: "",
+        hash: "",
+      },
+    });
+    vi.stubGlobal("document", {
+      title: "Vibelution 工作台",
+      readyState: "complete",
+      visibilityState: "visible",
+      querySelector: () => null,
+    });
+
+    expect(collectBrowserPageSnapshot()).toMatchObject({
+      href: "http://127.0.0.1:5173/chat",
+      telemetrySurface: "vite_dev",
+      port: "5173",
+    });
   });
 
   it("summarizes JS heap memory as bounded numeric telemetry fields", () => {

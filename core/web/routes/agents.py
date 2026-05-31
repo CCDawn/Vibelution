@@ -5,14 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.orchestration.context_engine import list_agent_runs_for_agent
-from core.web.services import agent_directory_service, session_service
+from core.web.services import agent_directory_service, agent_tool_governance_service, session_service
 from core.web.services.runtime_scene_service import list_runtime_scene_evidence_for_agent
 from core.web.services.agent_config_workspace_service import get_agent_config_workspace
 from core.web.services.agent_directory_service import (
     AgentDirectoryError,
+    AgentMemoryProposalNotFoundError,
     AgentMessageNotFoundError,
     AgentNotFoundError,
     archive_agent_instance,
@@ -20,11 +22,18 @@ from core.web.services.agent_directory_service import (
     ensure_agent_archive_allowed,
     ensure_agent_purge_allowed,
     get_agent,
+    list_agent_avatar_options,
     list_agent_inbox_messages_for_agent,
     list_agents,
+    list_project_memory_update_proposals,
     purge_archived_agent_instance,
+    resolve_agent_avatar_file,
+    resolve_project_memory_update_proposal,
+    store_agent_avatar_image,
+    update_agent_avatar,
     update_agent_instance,
     write_agent_inbox_message,
+    write_project_memory_update_proposal,
 )
 from core.web.services.agent_mode_binding_service import (
     AgentModeBindingError,
@@ -66,6 +75,8 @@ class AgentCreatePayload(BaseModel):
     primaryMode: str = ""
     roleKey: str = ""
     promptTemplateId: str = ""
+    personaProfile: dict[str, Any] = Field(default_factory=dict)
+    taskProfile: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -82,8 +93,21 @@ class AgentUpdatePayload(BaseModel):
     memoryPolicy: dict[str, Any] | None = None
     delegationPolicy: dict[str, Any] | None = None
     supervisionPolicy: dict[str, Any] | None = None
+    personaProfile: dict[str, Any] | None = None
+    taskProfile: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     status: str | None = None
+
+
+class AgentAvatarUpdatePayload(BaseModel):
+    avatarImagePath: str = ""
+    resetToDefault: bool = False
+
+
+class AgentAvatarUploadPayload(BaseModel):
+    filename: str = ""
+    contentType: str = ""
+    dataBase64: str = ""
 
 
 class AgentMessagePayload(BaseModel):
@@ -104,6 +128,38 @@ class AgentMessagePayload(BaseModel):
 class AgentMessageConsumePayload(BaseModel):
     consumedBySessionId: str = ""
     consumedByTurnId: str = ""
+
+
+class AgentProjectMemoryUpdatePayload(BaseModel):
+    laneId: str = ""
+    focus: str = ""
+    update: str = ""
+    details: str = ""
+    relatedFiles: list[str] = Field(default_factory=list)
+    sourceSessionId: str = ""
+    sourceTurnId: str = ""
+
+
+class AgentProjectMemoryUpdateResolvePayload(BaseModel):
+    status: str = ""
+    resolvedBy: str = "coordinator"
+    resolutionNote: str = ""
+
+
+class AgentToolGovernanceRequestPayload(BaseModel):
+    proposedByAgentId: str = ""
+    grantTools: list[str] = Field(default_factory=list)
+    revokeTools: list[str] = Field(default_factory=list)
+    blockTools: list[str] = Field(default_factory=list)
+    unblockTools: list[str] = Field(default_factory=list)
+    reason: str = ""
+    applyMode: str = "auto"
+
+
+class AgentToolGovernanceResolvePayload(BaseModel):
+    decision: str = ""
+    resolvedBy: str = "user"
+    resolutionNote: str = ""
 
 
 class PromptTemplateUpdatePayload(BaseModel):
@@ -158,8 +214,6 @@ def _config_agent_instances_present() -> bool:
     present_supervised: set[str] = set()
     present_self: set[str] = set()
     for agent in agents:
-        if str(agent.get("status") or "active").strip() == "archived":
-            continue
         metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
         mode = str(agent.get("primaryMode") or "").strip()
         role_key = str(agent.get("roleKey") or "").strip()
@@ -173,6 +227,16 @@ def _config_agent_instances_present() -> bool:
             self_role = self_role or role_key
         if self_role in self_roles:
             present_self.add(self_role)
+    try:
+        modes = get_mode_bindings_payload().get("modes") or {}
+        supervised_mode = dict(modes.get("supervised_evolution") or {})
+        self_mode = dict(modes.get("self_evolution") or {})
+        present_supervised.update(
+            item for item in list(supervised_mode.get("excludedSlots") or []) if item in supervised_roles
+        )
+        present_self.update(item for item in list(self_mode.get("excludedSlots") or []) if item in self_roles)
+    except Exception:
+        pass
     return supervised_roles.issubset(present_supervised) and self_roles.issubset(present_self)
 
 
@@ -182,10 +246,65 @@ def agent_list(includeArchived: bool = False) -> list[dict]:
     return list_agents(include_archived=includeArchived)
 
 
+@router.get("/agents/avatar-image/{filename}")
+def agent_avatar_image(filename: str) -> FileResponse:
+    try:
+        path = resolve_agent_avatar_file(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Agent avatar image not found") from exc
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Agent avatar image not found")
+    return FileResponse(path)
+
+
+@router.get("/agents/avatar-options")
+def agent_avatar_options() -> dict:
+    return list_agent_avatar_options()
+
+
 @router.get("/agents/config-workspace")
 def agent_config_workspace() -> dict:
     _ensure_config_agent_instances()
     return get_agent_config_workspace()
+
+
+@router.get("/agents/project-memory-updates")
+def agent_project_memory_update_list(status: str = "pending", agentId: str = "", limit: int = 50) -> list[dict]:
+    return list_project_memory_update_proposals(agent_id=agentId, status=status, limit=limit)
+
+
+@router.get("/agents/tool-governance-requests")
+def agent_tool_governance_request_list(status: str = "pending_review", agentId: str = "", limit: int = 50) -> list[dict]:
+    return agent_tool_governance_service.list_tool_governance_requests(agent_id=agentId, status=status, limit=limit)
+
+
+@router.patch("/agents/{agent_id}/avatar")
+def agent_avatar_update(agent_id: str, payload: AgentAvatarUpdatePayload) -> dict:
+    try:
+        return update_agent_avatar(
+            agent_id,
+            avatar_image_path=payload.avatarImagePath,
+            reset_to_default=payload.resetToDefault,
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/agents/{agent_id}/avatar-image")
+def agent_avatar_upload(agent_id: str, payload: AgentAvatarUploadPayload) -> dict:
+    try:
+        return store_agent_avatar_image(
+            agent_id,
+            filename=payload.filename,
+            content_type=payload.contentType,
+            data_base64=payload.dataBase64,
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/agents", status_code=status.HTTP_201_CREATED)
@@ -203,6 +322,10 @@ def agent_create(payload: AgentCreatePayload) -> dict:
             raise AgentDirectoryError("Agent was not created for the direct session.")
         if payload.metadata:
             agent = update_agent_instance(agent_id, metadata=payload.metadata)
+        if payload.personaProfile:
+            agent = update_agent_instance(agent_id, persona_profile=payload.personaProfile)
+        if payload.taskProfile:
+            agent = update_agent_instance(agent_id, task_profile=payload.taskProfile)
         if payload.templateId or payload.primaryMode or payload.roleKey or payload.promptTemplateId:
             agent = update_agent_instance(
                 agent_id,
@@ -238,6 +361,84 @@ def agent_runtime_evidence(agent_id: str, sessionId: str = "", runId: str = "", 
     if not get_agent(agent_id):
         raise HTTPException(status_code=404, detail="Agent not found")
     return list_runtime_scene_evidence_for_agent(agent_id, session_id=sessionId, run_id=runId, limit=limit)
+
+
+@router.post("/agents/{agent_id}/project-memory-updates", status_code=status.HTTP_201_CREATED)
+def agent_project_memory_update_create(agent_id: str, payload: AgentProjectMemoryUpdatePayload) -> dict:
+    try:
+        return write_project_memory_update_proposal(
+            agent_id,
+            lane_id=payload.laneId,
+            focus=payload.focus,
+            update=payload.update,
+            details=payload.details,
+            related_files=payload.relatedFiles,
+            source_session_id=payload.sourceSessionId,
+            source_turn_id=payload.sourceTurnId,
+        )
+    except AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch("/agents/{agent_id}/project-memory-updates/{proposal_id}")
+def agent_project_memory_update_resolve(
+    agent_id: str,
+    proposal_id: str,
+    payload: AgentProjectMemoryUpdateResolvePayload,
+) -> dict:
+    try:
+        return resolve_project_memory_update_proposal(
+            agent_id,
+            proposal_id,
+            status=payload.status,
+            resolved_by=payload.resolvedBy,
+            resolution_note=payload.resolutionNote,
+        )
+    except (AgentNotFoundError, AgentMemoryProposalNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AgentDirectoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/agents/{agent_id}/tool-governance-requests", status_code=status.HTTP_201_CREATED)
+def agent_tool_governance_request_create(agent_id: str, payload: AgentToolGovernanceRequestPayload) -> dict:
+    try:
+        return agent_tool_governance_service.submit_tool_governance_request(
+            agent_id,
+            proposed_by_agent_id=payload.proposedByAgentId,
+            grant_tools=payload.grantTools,
+            revoke_tools=payload.revokeTools,
+            block_tools=payload.blockTools,
+            unblock_tools=payload.unblockTools,
+            reason=payload.reason,
+            apply_mode=payload.applyMode,
+        )
+    except agent_directory_service.AgentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except agent_tool_governance_service.AgentToolGovernanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.patch("/agents/{agent_id}/tool-governance-requests/{request_id}")
+def agent_tool_governance_request_resolve(
+    agent_id: str,
+    request_id: str,
+    payload: AgentToolGovernanceResolvePayload,
+) -> dict:
+    try:
+        return agent_tool_governance_service.resolve_tool_governance_request(
+            agent_id,
+            request_id,
+            decision=payload.decision,
+            resolved_by=payload.resolvedBy,
+            resolution_note=payload.resolutionNote,
+        )
+    except (agent_directory_service.AgentNotFoundError, agent_tool_governance_service.AgentToolGovernanceNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except agent_tool_governance_service.AgentToolGovernanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/agents/{agent_id}/messages")
@@ -299,6 +500,19 @@ def agent_message_consume(agent_id: str, message_id: str, payload: AgentMessageC
 @router.patch("/agents/{agent_id}")
 def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
     try:
+        archive_summary: dict[str, Any] | None = None
+        if str(payload.status or "").strip() == "archived":
+            current = get_agent(agent_id)
+            if current and str(current.get("status") or "active").strip() != "archived":
+                ensure_agent_archive_allowed(agent_id)
+                room_cleanup = remove_agent_from_chat_rooms(agent_id)
+                mode_cleanup = remove_agent_from_mode_bindings(agent_id)
+                archive_summary = {
+                    "modeBindingsRepaired": len(mode_cleanup.get("repairWarnings") or []),
+                    "removedFromRoomIds": list(room_cleanup.get("changedRoomIds") or []),
+                    "dataRetention": "archived_only",
+                    "source": "patch_status",
+                }
         return update_agent_instance(
             agent_id,
             display_name=payload.displayName,
@@ -313,12 +527,16 @@ def agent_update(agent_id: str, payload: AgentUpdatePayload) -> dict:
             memory_policy=payload.memoryPolicy,
             delegation_policy=payload.delegationPolicy,
             supervision_policy=payload.supervisionPolicy,
+            persona_profile=payload.personaProfile,
+            task_profile=payload.taskProfile,
             metadata=payload.metadata,
             status=payload.status,
-        )
+        ) | ({"archiveSummary": archive_summary} if archive_summary else {})
     except AgentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except AgentDirectoryError as exc:
+    except ChatRoomBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (AgentDirectoryError, AgentModeBindingError, ChatRoomValidationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

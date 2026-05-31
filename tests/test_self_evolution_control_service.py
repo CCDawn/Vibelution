@@ -620,7 +620,7 @@ def test_self_evolution_agent_repair_preserves_all_fixed_roles(tmp_path, monkeyp
     }
 
 
-def test_self_evolution_agent_repair_reactivates_fixed_role_explicitly(tmp_path, monkeypatch):
+def test_self_evolution_agent_repair_does_not_reactivate_archived_fixed_role(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(service, "ROLLBACK_ROOT", tmp_path / "workspace" / "web_self_evolution")
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
@@ -628,22 +628,27 @@ def test_self_evolution_agent_repair_reactivates_fixed_role_explicitly(tmp_path,
     monkeypatch.setattr(agent_mode_binding_service, "PROJECT_ROOT", tmp_path)
     events = []
     monkeypatch.setattr(
-        agent_directory_service,
+        service,
         "record_runtime_scene_event",
         lambda *args, **kwargs: events.append((args, kwargs)) or {"accepted": True},
     )
 
     first = service.ensure_self_evolution_agent_instances()
     executor = next(agent for agent in first if agent["roleKey"] == "executor")
+    agent_mode_binding_service.remove_agent_from_mode_bindings(executor["agentId"])
     agent_directory_service.archive_agent_instance(executor["agentId"])
 
     second = service.ensure_self_evolution_agent_instances()
 
-    repaired = next(agent for agent in second if agent["roleKey"] == "executor")
-    assert repaired["agentId"] == executor["agentId"]
-    assert repaired["status"] == "active"
-    reactivated_events = [item for item in events if item[0][2] == "agent.reactivated"]
-    assert reactivated_events[-1][1]["fields"]["agentId"] == executor["agentId"]
+    assert executor["agentId"] not in {agent["agentId"] for agent in second}
+    assert agent_directory_service.get_agent(executor["agentId"], include_archived=True)["status"] == "archived"
+    payload = agent_mode_binding_service.get_mode_bindings_payload()["modes"]["self_evolution"]
+    assert payload["slots"]["executor"] == ""
+    assert "executor" in payload["excludedSlots"]
+    assert executor["agentId"] not in payload["availableAgentIds"]
+    skipped_events = [item for item in events if item[0][2] == "self_evolution.agent_instance.sync_skipped"]
+    assert skipped_events[-1][1]["fields"]["agentId"] == executor["agentId"]
+    assert skipped_events[-1][1]["fields"]["reason"] == "mode_binding_slot_excluded"
 
 
 def test_self_evolution_agent_bindings_block_archived_slot_replacement(tmp_path, monkeypatch):

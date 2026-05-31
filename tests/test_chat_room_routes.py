@@ -110,12 +110,56 @@ def test_chat_room_api_create_and_run_round(tmp_path, monkeypatch):
     assert started["status"] in {"running", "ready"}
     assert started["rounds"][-1]["status"] in {"running", "completed"}
 
-    detail = _wait_for_completed_room_round(room["roomId"])
+    detail = _wait_for_completed_room_round(room["roomId"], timeout=8.0)
     latest_round = detail["rounds"][-1]
     assert latest_round["topic"] == "确认第一版群聊行为"
     assert latest_round["purpose"] == "meeting"
     assert latest_round["status"] == "completed"
     assert [message["content"] for message in latest_round["messages"]] == ["Agent A 发言", "Agent B 发言"]
+
+
+def test_chat_room_round_prefer_async_returns_lightweight_acceptance(tmp_path, monkeypatch):
+    _seed_chat_sessions(tmp_path)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        chat_room_service,
+        "_run_participant_agent",
+        lambda participant, prompt, context: {
+            "status": "completed",
+            "raw_output": f"{participant['title']} 发言",
+            "summary": "ok",
+        },
+    )
+    room = client.post(
+        "/api/chat-rooms",
+        json={
+            "title": "轻量群聊",
+            "participantSessionIds": ["session-a", "session-b"],
+            "purpose": "chat",
+        },
+    ).json()
+
+    round_response = client.post(
+        f"/api/chat-rooms/{room['roomId']}/rounds",
+        headers={"Prefer": "respond-async"},
+        json={"topic": "用轻量响应启动群聊", "purpose": "meeting"},
+    )
+
+    assert round_response.status_code == 202
+    accepted = round_response.json()
+    assert accepted["accepted"] is True
+    assert accepted["roomId"] == room["roomId"]
+    assert accepted["activeRoundId"] == accepted["roundId"]
+    assert accepted["status"] == "running"
+    assert accepted["topic"] == "用轻量响应启动群聊"
+    assert accepted["purpose"] == "meeting"
+    assert accepted["speakerOrder"]
+    assert "rounds" not in accepted
+
+    detail = _wait_for_completed_room_round(room["roomId"])
+    assert detail["rounds"][-1]["roundId"] == accepted["roundId"]
+    assert detail["rounds"][-1]["status"] == "completed"
 
 
 def test_chat_room_api_creates_room_from_agent_ids(tmp_path, monkeypatch):

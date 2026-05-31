@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CircleSlash, FlaskConical, ListChecks, Power, RefreshCw, RotateCcw, Save, Search, Trash2, Wrench, X } from "lucide-react";
+import { CheckCircle2, CircleSlash, FlaskConical, Power, RefreshCw, Search, Trash2, Wrench } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
 import { queryKeys } from "../api/queryKeys";
@@ -25,7 +26,6 @@ import styles from "./ToolsRoute.module.css";
 
 type ToolFilter = "all" | "built_in" | "generated" | "llm" | "enabled";
 type ToolPolicyMode = "inherited" | "explicit_required" | "allowed" | "blocked" | "excluded";
-type EditableToolPolicyMode = "inherited" | "allowed" | "blocked";
 type ToolPermissionFilter = "all" | ToolPolicyMode;
 type Translate = (key: TranslationKey) => string;
 
@@ -204,42 +204,6 @@ function toolPolicyForAgent(agent: AgentInstance | null | undefined): ToolPolicy
   return agent?.toolPolicy ?? defaultToolPolicy(agent?.toolPolicyId || "default");
 }
 
-function uniqueToolList(values: string[]) {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort();
-}
-
-function copyToolPolicy(policy: ToolPolicy): ToolPolicy {
-  const normalized = {
-    ...defaultToolPolicy(policy.policyId),
-    ...policy,
-  };
-  return {
-    ...normalized,
-    allowedTools: [...(normalized.allowedTools ?? [])],
-    preferredTools: [...(normalized.preferredTools ?? [])],
-    blockedTools: [...(normalized.blockedTools ?? [])],
-    readScopes: [...(normalized.readScopes ?? [])],
-    writeScopes: [...(normalized.writeScopes ?? [])],
-    allowedCommandKinds: [...(normalized.allowedCommandKinds ?? [])],
-    blockedCommandPatterns: [...(normalized.blockedCommandPatterns ?? [])],
-    perToolRules: { ...(normalized.perToolRules ?? {}) },
-  };
-}
-
-function toolPolicyListSignature(values?: string[]) {
-  return uniqueToolList(values ?? []).join("\n");
-}
-
-function toolPolicyDraftDirty(base: ToolPolicy, draft: ToolPolicy | null) {
-  if (!draft) {
-    return false;
-  }
-  return (
-    toolPolicyListSignature(base.allowedTools) !== toolPolicyListSignature(draft.allowedTools) ||
-    toolPolicyListSignature(base.blockedTools) !== toolPolicyListSignature(draft.blockedTools)
-  );
-}
-
 function toolPolicyModeCounts(policy: ToolPolicy, tools: ToolRegistryItem[]) {
   return tools.reduce(
     (counts, tool) => {
@@ -304,25 +268,6 @@ function toolPolicyModeReason(mode: ToolPolicyMode, lang: string) {
     excluded: "The selected Agent uses an allow-list and this tool is not included.",
   };
   return (lang === "zh" ? zh : en)[mode];
-}
-
-function nextToolPolicy(policy: ToolPolicy, toolName: string, mode: EditableToolPolicyMode): ToolPolicy {
-  const allowed = new Set(policy.allowedTools ?? []);
-  const blocked = new Set(policy.blockedTools ?? []);
-  allowed.delete(toolName);
-  blocked.delete(toolName);
-  if (mode === "allowed") {
-    allowed.add(toolName);
-  }
-  if (mode === "blocked") {
-    blocked.add(toolName);
-  }
-  return {
-    ...defaultToolPolicy(policy.policyId),
-    ...policy,
-    allowedTools: uniqueToolList(Array.from(allowed)),
-    blockedTools: uniqueToolList(Array.from(blocked)),
-  };
 }
 
 function agentTestLabel(agent: ToolTestResponse["agent"] | null | undefined, lang: string) {
@@ -429,10 +374,8 @@ export function ToolsRoute() {
   const [searchText, setSearchText] = useState("");
   const [activeAgentScopeId, setActiveAgentScopeId] = useState(MAIN_AGENT_SCOPE_ID);
   const [activePolicyAgentId, setActivePolicyAgentId] = useState("");
-  const [policyDraft, setPolicyDraft] = useState<ToolPolicy | null>(null);
   const [permissionFilter, setPermissionFilter] = useState<ToolPermissionFilter>("all");
   const [permissionSearchText, setPermissionSearchText] = useState("");
-  const [selectedPolicyToolNames, setSelectedPolicyToolNames] = useState<string[]>([]);
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [leftPanelWidth, setLeftPanelWidth] = useState(() =>
     storedPaneWidth(TOOLS_LEFT_PANEL_WIDTH_KEY, TOOLS_LEFT_PANEL_DEFAULT_WIDTH, TOOLS_LEFT_PANEL_BOUNDS),
@@ -508,16 +451,12 @@ export function ToolsRoute() {
   );
   const activePolicyAgent = activeAgents.find((agent) => agent.agentId === activePolicyAgentId) ?? activeAgents[0] ?? null;
   const activePolicy = toolPolicyForAgent(activePolicyAgent);
-  const activePolicyBaseSignature = `${activePolicyAgent?.agentId ?? ""}:${activePolicy.policyId}:${toolPolicyListSignature(activePolicy.allowedTools)}:${toolPolicyListSignature(activePolicy.blockedTools)}`;
-  const effectivePolicy = policyDraft ?? activePolicy;
-  const policyDirty = toolPolicyDraftDirty(activePolicy, policyDraft);
-  const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(effectivePolicy, activeTool) : "inherited";
-  const policyModeCounts = useMemo(() => toolPolicyModeCounts(effectivePolicy, tools), [effectivePolicy, tools]);
-  const selectedPolicyToolNameSet = useMemo(() => new Set(selectedPolicyToolNames), [selectedPolicyToolNames]);
+  const activePolicyMode = activeTool && activePolicyAgent ? toolPolicyMode(activePolicy, activeTool) : "inherited";
+  const policyModeCounts = useMemo(() => toolPolicyModeCounts(activePolicy, tools), [activePolicy, tools]);
   const permissionTools = useMemo(() => {
     const query = permissionSearchText.trim().toLowerCase();
     return tools.filter((tool) => {
-      const mode = toolPolicyMode(effectivePolicy, tool);
+      const mode = toolPolicyMode(activePolicy, tool);
       if (permissionFilter !== "all" && mode !== permissionFilter) {
         return false;
       }
@@ -526,7 +465,7 @@ export function ToolsRoute() {
       }
       return `${tool.name} ${tool.description} ${tool.source} ${tool.status}`.toLowerCase().includes(query);
     });
-  }, [effectivePolicy, permissionFilter, permissionSearchText, tools]);
+  }, [activePolicy, permissionFilter, permissionSearchText, tools]);
   const scopedTools = useMemo(
     () => tools.filter((tool) => scopeStateForTool(tool, activeAgentScopeId).visible),
     [activeAgentScopeId, tools],
@@ -559,28 +498,6 @@ export function ToolsRoute() {
       setActivePolicyAgentId(activeAgents[0].agentId);
     }
   }, [activeAgents, activePolicyAgentId]);
-
-  useEffect(() => {
-    setPolicyDraft(activePolicyAgent ? copyToolPolicy(activePolicy) : null);
-    setSelectedPolicyToolNames([]);
-  }, [activePolicyAgent?.agentId]);
-
-  useEffect(() => {
-    setPolicyDraft((current) => {
-      if (!activePolicyAgent) {
-        return null;
-      }
-      if (current && toolPolicyDraftDirty(activePolicy, current)) {
-        return current;
-      }
-      return copyToolPolicy(activePolicy);
-    });
-  }, [activePolicyAgent?.agentId, activePolicyBaseSignature]);
-
-  useEffect(() => {
-    const knownToolNames = new Set(tools.map((tool) => tool.name));
-    setSelectedPolicyToolNames((current) => current.filter((toolName) => knownToolNames.has(toolName)));
-  }, [tools]);
 
   useEffect(() => {
     if (activeToolId && !visibleTools.some((tool) => tool.id === activeToolId)) {
@@ -648,32 +565,6 @@ export function ToolsRoute() {
     },
   });
 
-  const toolPolicyMutation = useMutation({
-    mutationFn: (payload: { agentId: string; policy: ToolPolicy }) =>
-      fetchJson<AgentInstance>(`/api/agents/${encodeURIComponent(payload.agentId)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ toolPolicy: payload.policy }),
-      }),
-    onSuccess: (agent) => {
-      setNotice({
-        tone: "success",
-        text: lang === "zh" ? `已更新 ${agent.displayName || agent.agentCode} 的工具权限` : `Updated tool permissions for ${agent.displayName || agent.agentCode}`,
-      });
-      queryClient.setQueryData<AgentInstance[]>(queryKeys.agents(), (current) =>
-        current?.map((item) => (item.agentId === agent.agentId ? agent : item)),
-      );
-      if (agent.agentId === activePolicyAgent?.agentId) {
-        setPolicyDraft(copyToolPolicy(toolPolicyForAgent(agent)));
-        setSelectedPolicyToolNames([]);
-      }
-      void queryClient.invalidateQueries({ queryKey: queryKeys.agents() });
-    },
-    onError: (error) => {
-      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
-    },
-  });
-
   const image2ModelMutation = useMutation({
     mutationFn: (modelRef: string) =>
       fetchJson<ToolImage2ModelConfig>("/api/tools/image2/default-model", {
@@ -702,7 +593,6 @@ export function ToolsRoute() {
   const activeCanToggle = Boolean(activeIsGenerated && activeTool?.validated && activeTool.status === "validated");
   const activeIsImage2Tool = activeTool?.name === IMAGE2_TOOL_NAME;
   const image2ModelConfig = image2ModelsQuery.data;
-  const selectedPolicyCount = selectedPolicyToolNames.length;
   const workspaceStyle = useMemo(
     () =>
       ({
@@ -756,65 +646,6 @@ export function ToolsRoute() {
     }
     event.preventDefault();
     setLeftPanelWidth(nextWidth);
-  }
-
-  function updateActiveToolPolicy(mode: EditableToolPolicyMode) {
-    if (!activeTool || !activePolicyAgent) {
-      return;
-    }
-    setPolicyDraft((current) => nextToolPolicy(current ?? activePolicy, activeTool.name, mode));
-  }
-
-  function togglePolicyToolSelection(toolName: string) {
-    setSelectedPolicyToolNames((current) =>
-      current.includes(toolName) ? current.filter((name) => name !== toolName) : uniqueToolList([...current, toolName]),
-    );
-  }
-
-  function selectVisiblePolicyTools() {
-    setSelectedPolicyToolNames((current) => uniqueToolList([...current, ...permissionTools.map((tool) => tool.name)]));
-  }
-
-  function setSelectedToolsPolicyMode(mode: EditableToolPolicyMode) {
-    if (!activePolicyAgent || !selectedPolicyToolNames.length) {
-      return;
-    }
-    setPolicyDraft((current) =>
-      selectedPolicyToolNames.reduce(
-        (policy, toolName) => nextToolPolicy(policy, toolName, mode),
-        current ?? activePolicy,
-      ),
-    );
-  }
-
-  function clearPolicyList(listName: "allowed" | "blocked") {
-    if (!activePolicyAgent) {
-      return;
-    }
-    setPolicyDraft((current) => {
-      const nextPolicy = copyToolPolicy(current ?? activePolicy);
-      if (listName === "allowed") {
-        nextPolicy.allowedTools = [];
-      } else {
-        nextPolicy.blockedTools = [];
-      }
-      return nextPolicy;
-    });
-  }
-
-  function resetPolicyDraft() {
-    setPolicyDraft(activePolicyAgent ? copyToolPolicy(activePolicy) : null);
-    setSelectedPolicyToolNames([]);
-  }
-
-  function applyPolicyDraft() {
-    if (!activePolicyAgent || !policyDraft || !policyDirty) {
-      return;
-    }
-    toolPolicyMutation.mutate({
-      agentId: activePolicyAgent.agentId,
-      policy: copyToolPolicy(policyDraft),
-    });
   }
 
   return (
@@ -920,7 +751,7 @@ export function ToolsRoute() {
           <div className={styles.toolList}>
             {visibleTools.map((tool) => {
               const isActive = tool.id === activeTool?.id;
-              const policyMode = activePolicyAgent ? toolPolicyMode(effectivePolicy, tool) : "inherited";
+              const policyMode = activePolicyAgent ? toolPolicyMode(activePolicy, tool) : "inherited";
               return (
                 <button
                   key={`${tool.source}-${tool.id}`}
@@ -963,18 +794,16 @@ export function ToolsRoute() {
             <div className={styles.panelHeader}>
               <div>
                 <p className={styles.panelEyebrow}>{lang === "zh" ? "Agent 工具权限" : "Agent tool permissions"}</p>
-                <h2>{lang === "zh" ? "批量分配工具权限" : "Bulk assign tool permissions"}</h2>
+                <h2>{lang === "zh" ? "只读权限观察" : "Read-only permission overview"}</h2>
               </div>
-              <span className={policyDirty ? styles.unsavedPill : styles.countPill}>
-                {policyDirty ? (lang === "zh" ? "有未应用修改" : "Unsaved draft") : (lang === "zh" ? "已同步" : "Synced")}
-              </span>
+              <span className={styles.countPill}>{lang === "zh" ? "编辑入口在 Agent 管理" : "Edit in Agent Center"}</span>
             </div>
             <div className={styles.bulkPolicyTopRow}>
               <label className={styles.agentPolicySelect}>
                 <span>{lang === "zh" ? "当前 Agent" : "Current Agent"}</span>
                 <select
                   value={activePolicyAgent?.agentId ?? ""}
-                  disabled={!activeAgents.length || policyDirty || toolPolicyMutation.isPending}
+                  disabled={!activeAgents.length}
                   onChange={(event) => setActivePolicyAgentId(event.target.value)}
                 >
                   {!activeAgents.length ? (
@@ -1027,88 +856,15 @@ export function ToolsRoute() {
                   </button>
                 ))}
               </div>
-              <div className={styles.bulkPolicyActions}>
-                <button
-                  type="button"
-                  className={styles.secondaryButton}
-                  disabled={!permissionTools.length}
-                  onClick={selectVisiblePolicyTools}
-                >
-                  <ListChecks size={15} />
-                  {lang === "zh" ? "选择当前结果" : "Select results"}
-                </button>
-                <button
-                  type="button"
-                  className={styles.secondaryButton}
-                  disabled={!selectedPolicyCount}
-                  onClick={() => setSelectedPolicyToolNames([])}
-                >
-                  <X size={15} />
-                  {lang === "zh" ? "清空选择" : "Clear selection"}
-                </button>
-              </div>
-            </div>
-            <div className={styles.bulkPolicyActions}>
-              <button
-                type="button"
-                className={styles.secondaryButton}
-                disabled={!selectedPolicyCount || toolPolicyMutation.isPending}
-                onClick={() => setSelectedToolsPolicyMode("allowed")}
-              >
-                <CheckCircle2 size={15} />
-                {lang === "zh" ? "选中设为允许" : "Allow selected"}
-              </button>
-              <button
-                type="button"
-                className={styles.secondaryButton}
-                disabled={!selectedPolicyCount || toolPolicyMutation.isPending}
-                onClick={() => setSelectedToolsPolicyMode("blocked")}
-              >
-                <CircleSlash size={15} />
-                {lang === "zh" ? "选中设为禁用" : "Block selected"}
-              </button>
-              <button
-                type="button"
-                className={styles.secondaryButton}
-                disabled={!selectedPolicyCount || toolPolicyMutation.isPending}
-                onClick={() => setSelectedToolsPolicyMode("inherited")}
-              >
-                <RefreshCw size={15} />
-                {lang === "zh" ? "选中设为默认" : "Default selected"}
-              </button>
-              <button
-                type="button"
-                className={styles.secondaryButton}
-                disabled={!activePolicyAgent || !effectivePolicy.allowedTools.length || toolPolicyMutation.isPending}
-                onClick={() => clearPolicyList("allowed")}
-              >
-                <X size={15} />
-                {lang === "zh" ? "清空允许清单" : "Clear allow-list"}
-              </button>
-              <button
-                type="button"
-                className={styles.secondaryButton}
-                disabled={!activePolicyAgent || !effectivePolicy.blockedTools.length || toolPolicyMutation.isPending}
-                onClick={() => clearPolicyList("blocked")}
-              >
-                <X size={15} />
-                {lang === "zh" ? "清空禁用清单" : "Clear block-list"}
-              </button>
             </div>
             <div className={styles.bulkPolicyList}>
               {permissionTools.map((tool) => {
-                const mode = toolPolicyMode(effectivePolicy, tool);
-                const selected = selectedPolicyToolNameSet.has(tool.name);
+                const mode = toolPolicyMode(activePolicy, tool);
                 return (
-                  <label
+                  <div
                     key={`policy-${tool.source}-${tool.id}`}
-                    className={selected ? `${styles.bulkPolicyToolRow} ${styles.bulkPolicyToolRowSelected}` : styles.bulkPolicyToolRow}
+                    className={styles.bulkPolicyToolRow}
                   >
-                    <input
-                      type="checkbox"
-                      checked={selected}
-                      onChange={() => togglePolicyToolSelection(tool.name)}
-                    />
                     <span className={styles.bulkPolicyToolCopy}>
                       <strong>{tool.name}</strong>
                       <span>{tool.description || t("toolsNoDescription")}</span>
@@ -1119,7 +875,7 @@ export function ToolsRoute() {
                       </span>
                       <span className={styles.sourcePill}>{displaySource(tool.source, lang)}</span>
                     </span>
-                  </label>
+                  </div>
                 );
               })}
               {!permissionTools.length ? (
@@ -1128,27 +884,13 @@ export function ToolsRoute() {
             </div>
             <div className={styles.bulkPolicyFooter}>
               <span>
-                {lang === "zh" ? "已选择" : "Selected"} <strong>{selectedPolicyCount}</strong> / {permissionTools.length}
+                {lang === "zh" ? "当前结果" : "Visible"} <strong>{permissionTools.length}</strong> / {tools.length}
               </span>
               <div className={styles.bulkPolicyActions}>
-                <button
-                  type="button"
-                  className={styles.secondaryButton}
-                  disabled={!policyDirty || toolPolicyMutation.isPending}
-                  onClick={resetPolicyDraft}
-                >
-                  <RotateCcw size={15} />
-                  {lang === "zh" ? "放弃草稿" : "Discard draft"}
-                </button>
-                <button
-                  type="button"
-                  className={styles.primaryButton}
-                  disabled={!policyDirty || !activePolicyAgent || toolPolicyMutation.isPending}
-                  onClick={applyPolicyDraft}
-                >
-                  <Save size={15} />
-                  {toolPolicyMutation.isPending ? (lang === "zh" ? "应用中" : "Applying") : (lang === "zh" ? "应用草稿" : "Apply draft")}
-                </button>
+                <Link className={styles.secondaryButton} to="/agents">
+                  <Wrench size={15} />
+                  {lang === "zh" ? "打开 Agent 策略页" : "Open Agent policies"}
+                </Link>
               </div>
             </div>
           </section>
@@ -1215,7 +957,7 @@ export function ToolsRoute() {
                     <span>{lang === "zh" ? "Agent" : "Agent"}</span>
                     <select
                       value={activePolicyAgent?.agentId ?? ""}
-                      disabled={!activeAgents.length || policyDirty || toolPolicyMutation.isPending}
+                      disabled={!activeAgents.length}
                       onChange={(event) => setActivePolicyAgentId(event.target.value)}
                     >
                       {activeAgents.map((agent) => (
@@ -1225,31 +967,12 @@ export function ToolsRoute() {
                       ))}
                     </select>
                   </label>
-                  <div className={styles.agentPolicyButtonGroup}>
-                    <button
-                      type="button"
-                      className={activePolicyMode === "inherited" ? styles.policyModeButtonActive : styles.policyModeButton}
-                      disabled={!activeTool || !activePolicyAgent || toolPolicyMutation.isPending}
-                      onClick={() => updateActiveToolPolicy("inherited")}
-                    >
-                      {toolPolicyModeLabel("inherited", lang)}
-                    </button>
-                    <button
-                      type="button"
-                      className={activePolicyMode === "allowed" ? styles.policyModeButtonActive : styles.policyModeButton}
-                      disabled={!activeTool || !activePolicyAgent || toolPolicyMutation.isPending}
-                      onClick={() => updateActiveToolPolicy("allowed")}
-                    >
-                      {toolPolicyModeLabel("allowed", lang)}
-                    </button>
-                    <button
-                      type="button"
-                      className={activePolicyMode === "blocked" ? styles.policyModeButtonActive : styles.policyModeButton}
-                      disabled={!activeTool || !activePolicyAgent || toolPolicyMutation.isPending}
-                      onClick={() => updateActiveToolPolicy("blocked")}
-                    >
-                      {toolPolicyModeLabel("blocked", lang)}
-                    </button>
+                  <div className={styles.agentPolicyButtonGroup} aria-label={lang === "zh" ? "只读权限状态" : "Read-only permission state"}>
+                    {(["inherited", "allowed", "blocked"] as const).map((mode) => (
+                      <span key={mode} className={activePolicyMode === mode ? styles.policyModeButtonActive : styles.policyModeButton}>
+                        {toolPolicyModeLabel(mode, lang)}
+                      </span>
+                    ))}
                   </div>
                 </div>
                 <div className={styles.policyMeta}>
@@ -1257,13 +980,13 @@ export function ToolsRoute() {
                     Agent: <strong>{activePolicyAgent ? `${activePolicyAgent.agentCode || ""} ${activePolicyAgent.displayName || activePolicyAgent.agentId}`.trim() : "-"}</strong>
                   </span>
                   <span>
-                    allowed: <strong>{effectivePolicy.allowedTools.length}</strong>
+                    allowed: <strong>{activePolicy.allowedTools.length}</strong>
                   </span>
                   <span>
-                    blocked: <strong>{effectivePolicy.blockedTools.length}</strong>
+                    blocked: <strong>{activePolicy.blockedTools.length}</strong>
                   </span>
                   <span>
-                    policy: <strong>{effectivePolicy.policyId || activePolicyAgent?.toolPolicyId || "-"}</strong>
+                    policy: <strong>{activePolicy.policyId || activePolicyAgent?.toolPolicyId || "-"}</strong>
                   </span>
                 </div>
                 <p>{toolPolicyModeReason(activePolicyMode, lang)}</p>
@@ -1398,8 +1121,7 @@ export function ToolsRoute() {
                 <button
                   type="button"
                   className={styles.secondaryButton}
-                  disabled={!activeTool || !activePolicyAgent || policyDirty || testMutation.isPending}
-                  title={policyDirty ? (lang === "zh" ? "先应用工具权限草稿再测试，避免用旧权限误判。" : "Apply the permission draft before testing to avoid stale policy results.") : undefined}
+                  disabled={!activeTool || !activePolicyAgent || testMutation.isPending}
                   onClick={() => {
                     if (activeTool && activePolicyAgent) {
                       testMutation.mutate({

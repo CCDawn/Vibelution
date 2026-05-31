@@ -44,8 +44,26 @@ def _get_bearer_token() -> str:
             response = client.get(_TOKEN_URL)
             response.raise_for_status()
             token = response.text.strip()
+    except httpx.ConnectError as e:
+        raise RuntimeError(
+            "本地 AutoGLM token 服务不可用，无法连接 "
+            f"{_TOKEN_URL}。这一步发生在调用外网搜索 API 之前，"
+            "因此当前不是外网搜索接口失败；请先启动或恢复本地 token 服务。"
+        ) from e
+    except httpx.TimeoutException as e:
+        raise RuntimeError(
+            "本地 AutoGLM token 服务响应超时，无法获取 token。"
+            f"请检查 {_TOKEN_URL} 是否卡住或负载过高。"
+        ) from e
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(
+            "本地 AutoGLM token 服务返回错误状态："
+            f"HTTP {e.response.status_code} {e.response.text[:200]}"
+        ) from e
+    except httpx.RequestError as e:
+        raise RuntimeError(f"本地 AutoGLM token 服务请求失败: {e}") from e
     except Exception as e:
-        raise RuntimeError(f"无法从本地服务获取 token: {e}")
+        raise RuntimeError(f"无法从本地服务获取 token: {type(e).__name__}: {e}") from e
 
     if not token:
         raise RuntimeError("获取到的 token 为空")

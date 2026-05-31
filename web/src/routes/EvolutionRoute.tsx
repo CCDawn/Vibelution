@@ -63,6 +63,7 @@ import {
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
+import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import {
   clampPaneSize,
   clampPaneWidth,
@@ -311,6 +312,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const evolutionWorkspaceCache = useMemo(() => createEvolutionWorkspaceCache(queryClient), [queryClient]);
   const evolutionTrack = useShellStore((state) => state.evolutionTrack);
   const setEvolutionTrack = useShellStore((state) => state.setEvolutionTrack);
   const rawEvolutionView = useShellStore((state) => state.evolutionView);
@@ -495,13 +497,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     onSuccess: async (snapshot) => {
       setActionFeedback("");
       setLiveActiveRun(snapshot);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkbench() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionActiveRun() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-      ]);
+      await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
     },
   });
   const startWorktreeRunMutation = useMutation({
@@ -532,21 +528,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     onSuccess: async (snapshot) => {
       setWorktreeRunFeedback(snapshot.latestMessage || t("startClosedLoopQueued"));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeActiveRun() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
-      ]);
+      await evolutionWorkspaceCache.afterWorktreeRunChanged();
     },
   });
   const invalidateSupervisedEvolution = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkbench() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionActiveRun() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-    ]);
+    await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
   };
   const pauseRunMutation = useMutation({
     onMutate: () => {
@@ -605,14 +591,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     },
   });
   const invalidateSelfEvolution = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfOverview() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfActiveRun() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfLatestRun() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfTransactions() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfAudit() }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
-    ]);
+    await evolutionWorkspaceCache.afterSelfEvolutionChanged();
   };
   const startSelfRunMutation = useMutation({
     onMutate: () => {
@@ -663,11 +642,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     },
     onSuccess: async (snapshot) => {
       setSelfActionFeedback(snapshot.latestMessage || t("startSelfWorktreeQueued"));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeActiveRun() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
-      ]);
+      await evolutionWorkspaceCache.afterWorktreeRunChanged();
     },
   });
   const stopSelfRunMutation = useMutation({
@@ -739,10 +714,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       if (payload.run) {
         setLiveSelfRun(requireEvolutionRunSnapshot(payload.run, "self-evolution handoff"));
       }
-      await Promise.all([
-        invalidateSelfEvolution(),
-        queryClient.invalidateQueries({ queryKey: queryKeys.sessions() }),
-      ]);
+      await evolutionWorkspaceCache.afterSelfHandoff();
       if (payload.status === "ready" && payload.content) {
         savePendingSelfEvolutionHandoff({
           sessionId: payload.sessionId || "",
@@ -786,11 +758,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     onSuccess: async (snapshot) => {
       setWorktreeRunFeedback(snapshot.latestMessage || t("selfWorktreeReviewApproved"));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeActiveRun() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorktreeRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
-      ]);
+      await evolutionWorkspaceCache.afterWorktreeRunChanged();
     },
   });
   const actionMutation = useMutation({
@@ -804,13 +772,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       }),
     onSuccess: async (payload) => {
       setActionFeedback(payload.summary);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkbench() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionActiveRun() }),
-      ]);
+      await evolutionWorkspaceCache.afterSupervisedWorkspaceChanged();
     },
   });
   const runs = runsQuery.data ?? EMPTY_RUNS;
@@ -1012,12 +974,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       if (payload.updated) {
         setProposalEditOpen(false);
       }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionProposal(payload.sessionId) }),
-      ]);
+      await evolutionWorkspaceCache.afterProposalChanged(payload.sessionId);
     },
   });
   const deleteProposalMutation = useMutation({
@@ -1037,12 +994,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       if (selectedPendingItemId === payload.sessionId) {
         setSelectedPendingItemId(null);
       }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionProposal(payload.sessionId) }),
-      ]);
+      await evolutionWorkspaceCache.afterProposalChanged(payload.sessionId);
     },
   });
   const bulkDeleteMutation = useMutation({
@@ -1069,12 +1021,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
           setSelectedPendingItemId(null);
         }
       }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionProposal(selectedProposalRunId ?? "__none__") }),
-      ]);
+      await evolutionWorkspaceCache.afterProposalChanged(selectedProposalRunId ?? "__none__");
     },
   });
   const deleteRunRecordMutation = useMutation({
@@ -1095,12 +1042,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       if (selectedPendingItemId === payload.sessionId) {
         setSelectedPendingItemId(null);
       }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionProposal(payload.sessionId) }),
-      ]);
+      await evolutionWorkspaceCache.afterProposalChanged(payload.sessionId);
     },
   });
   const bulkDeleteRunRecordsMutation = useMutation({
@@ -1130,12 +1072,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       if (selectedPendingItemId && deletedIds.has(selectedPendingItemId)) {
         setSelectedPendingItemId(null);
       }
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.evolutionProposal(selectedRunId ?? "__none__") }),
-      ]);
+      await evolutionWorkspaceCache.afterProposalChanged(selectedRunId ?? "__none__");
     },
   });
 
@@ -1255,14 +1192,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       const payload = JSON.parse(message.data) as SelfEvolutionRunStreamEvent;
       setLiveSelfRun(snapshot);
       if (payload.terminal) {
-        void Promise.all([
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfOverview() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfActiveRun() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfLatestRun() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfTransactions() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfAudit() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() }),
-        ]);
+        void evolutionWorkspaceCache.afterSelfEvolutionChanged();
         source.close();
       }
     };
@@ -1270,14 +1200,14 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     source.addEventListener("self_evolution_run", handleSnapshot as EventListener);
     source.onerror = () => {
       source.close();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.evolutionSelfLatestRun() });
+      void evolutionWorkspaceCache.refreshSelfLatestRun();
     };
 
     return () => {
       source.removeEventListener("self_evolution_run", handleSnapshot as EventListener);
       source.close();
     };
-  }, [monitoredSelfRun?.runId, monitoredSelfRun?.status, pageVisible, queryClient]);
+  }, [evolutionWorkspaceCache, monitoredSelfRun?.runId, monitoredSelfRun?.status, pageVisible]);
 
   useEffect(() => {
     if (!pageVisible) {
@@ -1297,13 +1227,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       const payload = JSON.parse(message.data) as EvolutionActiveRunStreamEvent;
       setLiveActiveRun(snapshot);
       if (payload.terminal) {
-        void Promise.all([
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionActiveRun() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionOverview() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionRuns() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionLibrary() }),
-          queryClient.invalidateQueries({ queryKey: queryKeys.evolutionWorkbench() }),
-        ]);
+        void evolutionWorkspaceCache.afterSupervisedRunTerminal();
         source.close();
       }
     };
@@ -1311,7 +1235,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     source.addEventListener("supervised_run", handleSnapshot as EventListener);
     source.onerror = () => {
       source.close();
-      void queryClient.invalidateQueries({ queryKey: queryKeys.evolutionActiveRun() });
+      void evolutionWorkspaceCache.refreshSupervisedActiveRun();
     };
 
     return () => {
@@ -1324,7 +1248,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     liveActiveRun?.runId,
     liveActiveRun?.status,
     pageVisible,
-    queryClient,
+    evolutionWorkspaceCache,
   ]);
 
   useEffect(() => {
