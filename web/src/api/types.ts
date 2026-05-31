@@ -116,6 +116,69 @@ export type TeamKnowledgeOverview = {
   updatedAt: string;
 };
 
+export type KnowledgeStewardOverview = {
+  schemaVersion: number;
+  steward: {
+    agentId: string;
+    agentCode: string;
+    displayName: string;
+    functionalDisplayName: string;
+    status: string;
+    directSessionId: string;
+    directChatPath: string;
+    managedDomain: string;
+    permissionBoundary: string;
+    protected: boolean;
+    taskProfile: {
+      mission?: string;
+      responsibilities?: string;
+      preferredTasks?: string;
+      avoidTasks?: string;
+      successCriteria?: string;
+      deliverables?: string;
+      constraints?: string;
+      handoffNotes?: string;
+      taskTypes?: string[];
+    };
+    toolPolicy: {
+      policyId: string;
+      allowedTools: string[];
+      preferredTools: string[];
+      networkAccess: string;
+      mutationAccess: string;
+      maxCallsPerTurn: number;
+    };
+    memoryPolicy: {
+      policyId: string;
+      readSharedGroups: string[];
+      writeSharedGroups: string[];
+      readKnowledgeBaseIds: string[];
+      proposeKnowledgeBaseIds: string[];
+      reviewKnowledgeBaseIds: string[];
+      rateKnowledgeBaseIds: string[];
+    };
+  };
+  governance: {
+    summary: {
+      taskCount: number;
+      openTaskCount: number;
+      proposalReviewCount: number;
+      ratingReviewCount: number;
+      sourceNeedsProposalCount: number;
+    };
+    openTasks: KnowledgeGovernanceTask[];
+  };
+  operatingBoundary: {
+    canDirectlyApplyKnowledge: boolean;
+    canDeleteKnowledge: boolean;
+    canChangeAcl: boolean;
+    canBypassReviewer: boolean;
+    formalKnowledgeRequiresReviewer: boolean;
+    knowledgeBodiesInPrompt: boolean;
+  };
+  updatedAt: string;
+};
+
 export type KnowledgeSourceArtifact = {
   sourceArtifactId: string;
   teamId: string;

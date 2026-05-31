@@ -17,6 +17,7 @@ from core.web.services.team_knowledge_service import (
     create_refinement_proposal,
     create_source_artifact,
     get_knowledge_trace,
+    get_knowledge_steward_overview,
     knowledge_permission_audit,
     list_ingestion_adapters,
     list_knowledge_governance_tasks,
@@ -123,6 +124,11 @@ class RatingSuggestionBulkReviewPayload(BaseModel):
 @router.get("/knowledge/overview")
 def knowledge_overview(agentId: str = "") -> dict:
     return list_knowledge_overview(agent_id=agentId)
+
+
+@router.get("/knowledge/steward/overview")
+def knowledge_steward_overview() -> dict:
+    return get_knowledge_steward_overview()
 
 
 @router.get("/knowledge/search")

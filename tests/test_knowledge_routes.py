@@ -274,3 +274,38 @@ def test_knowledge_governance_tasks_adapters_and_trace_routes(tmp_path, monkeypa
         },
     )
     assert blocked.status_code == 403
+
+
+def test_knowledge_steward_overview_surfaces_agent_boundary_and_queue(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Steward KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "Steward should see governance",
+            "content": "Knowledge steward overview should expose queue counts without applying knowledge.",
+        },
+    ).json()
+
+    response = client.get("/api/knowledge/steward/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["steward"]["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert payload["steward"]["functionalDisplayName"] == "知识库管理员"
+    assert payload["steward"]["permissionBoundary"] == "proposal_and_rating_suggestion_only"
+    assert payload["steward"]["protected"] is True
+    assert payload["steward"]["directChatPath"].startswith("/chat?session=")
+    assert "knowledge_governance_tasks_tool" in payload["steward"]["toolPolicy"]["allowedTools"]
+    assert "research_proposal_apply_tool" not in payload["steward"]["toolPolicy"]["allowedTools"]
+    assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert payload["operatingBoundary"]["canDeleteKnowledge"] is False
+    assert payload["operatingBoundary"]["canChangeAcl"] is False
+    assert payload["operatingBoundary"]["canBypassReviewer"] is False
+    assert payload["operatingBoundary"]["formalKnowledgeRequiresReviewer"] is True
+    assert payload["governance"]["summary"]["openTaskCount"] >= 1
+    assert any(task["targetId"] == proposal["proposalId"] for task in payload["governance"]["openTasks"])
