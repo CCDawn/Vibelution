@@ -50,7 +50,10 @@ from core.infrastructure.workspace_cleaner import (
 from tools.agent_tools import spawn_agent as _spawn_agent_impl
 from tools.agent_message_tools import agent_message_tool as _agent_message_impl
 from tools.agent_tool_governance_tools import agent_tool_permission_request_tool as _agent_tool_permission_request_impl
-from tools.research_organization_tools import research_communication_edge_proposal_tool as _research_communication_edge_proposal_impl
+from tools.research_organization_tools import (
+    research_agent_creation_proposal_tool as _research_agent_creation_proposal_impl,
+    research_communication_edge_proposal_tool as _research_communication_edge_proposal_impl,
+)
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.token_manager import compress_context_tool as _compress_context_impl
@@ -891,6 +894,59 @@ def create_key_tools() -> List[BaseTool]:
         )
 
     @tool
+    def research_agent_creation_proposal_tool(
+        display_name: str,
+        role: str = "research_specialist",
+        role_key: str = "",
+        employee_rank: str = "specialist",
+        prompt_template_id: str = "",
+        responsibilities: str = "",
+        allowed_tools: str = "",
+        read_shared_groups: str = "",
+        write_shared_groups: str = "",
+        communication_targets: str = "",
+        report_to: str = "CEO",
+        reason: str = "",
+    ) -> str:
+        """
+        【科研 Agent 创建治理】提交新增科研 Agent 的受控提案。
+
+        当目标岗位或成员尚不存在时，先用本工具创建 create_agent 提案；提案应用后才会生成 Agent。
+        不要先对不存在的 Agent 调用工具权限或通信边治理工具。新增 Agent 属于高风险组织变更，仍需用户门控应用。
+
+        Args:
+            display_name: 新 Agent 的人类可读名称，如 知识库管理员
+            role: 组织角色标识，如 research_knowledge_steward
+            role_key: 运行角色键，留空时使用 role
+            employee_rank: specialist / senior / lead / director 等职级
+            prompt_template_id: 可选提示词模板 ID
+            responsibilities: 职责清单，按换行或分号分隔
+            allowed_tools: 初始可用工具名，按逗号或换行分隔；留空使用最小研究默认工具
+            read_shared_groups: 可读共享记忆组，按逗号或换行分隔
+            write_shared_groups: 可写共享记忆组，按逗号或换行分隔
+            communication_targets: 默认沟通对象，按换行或分号分隔
+            report_to: 汇报对象，默认 CEO
+            reason: 创建理由，说明任务缺口和边界
+
+        Returns:
+            JSON 格式的提案状态、proposalId、风险等级和 create_agent 动作
+        """
+        return _research_agent_creation_proposal_impl(
+            display_name=display_name,
+            role=role,
+            role_key=role_key,
+            employee_rank=employee_rank,
+            prompt_template_id=prompt_template_id,
+            responsibilities=responsibilities,
+            allowed_tools=allowed_tools,
+            read_shared_groups=read_shared_groups,
+            write_shared_groups=write_shared_groups,
+            communication_targets=communication_targets,
+            report_to=report_to,
+            reason=reason,
+        )
+
+    @tool
     def research_communication_edge_proposal_tool(
         action: str,
         source_agent: str = "",
@@ -1123,6 +1179,7 @@ def create_key_tools() -> List[BaseTool]:
         # Agent 间通信
         agent_message_tool,
         agent_tool_permission_request_tool,
+        research_agent_creation_proposal_tool,
         research_communication_edge_proposal_tool,
         image2_generate_tool,
         research_knowledge_query_tool,

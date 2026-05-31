@@ -124,7 +124,11 @@ AGENT_WORKSPACE_SUBDIRS = (
 AGENT_TERRITORY_WRITE_SCOPES = ("private",)
 AGENT_TERRITORY_READ_SCOPES = ("private", "shared")
 TOOL_POLICY_WORKSPACE_SCOPES = ("private", "shared")
-EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {"research_knowledge_query_tool", "research_communication_edge_proposal_tool"}
+EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
+    "research_knowledge_query_tool",
+    "research_agent_creation_proposal_tool",
+    "research_communication_edge_proposal_tool",
+}
 KNOWN_AGENT_PRIMARY_MODES = {"chat", "research", "self_evolution", "supervised_evolution", "general"}
 WRITE_RETRY_TIMEOUT_SECONDS = 2.0
 MAX_AGENT_AVATAR_IMAGE_BYTES = 5 * 1024 * 1024

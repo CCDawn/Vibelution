@@ -2515,6 +2515,8 @@ class TestDelegationExposure:
     def test_llm_facing_tools_hide_long_tail_admin_tools(self):
         names = [tool.name for tool in create_llm_facing_tools()]
 
+        assert "research_agent_creation_proposal_tool" in names
+        assert "research_communication_edge_proposal_tool" in names
         assert "task_start_tool" not in names
         assert "task_output_tool" not in names
         assert "task_stop_tool" not in names

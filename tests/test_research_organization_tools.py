@@ -1,7 +1,72 @@
 import json
 
 from core.web.services import agent_directory_service, research_organization_service
-from tools.research_organization_tools import research_communication_edge_proposal_tool
+from tools.research_organization_tools import (
+    research_agent_creation_proposal_tool,
+    research_communication_edge_proposal_tool,
+)
+
+
+def test_research_agent_creation_tool_creates_user_gated_create_agent_proposal(monkeypatch):
+    proposer = {
+        "agentId": "agent-steward",
+        "agentCode": "A013",
+        "displayName": "白予安",
+        "metadata": {"systemRole": "capability_steward"},
+    }
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {"agentId": proposer["agentId"]})
+    created_payloads = []
+
+    def fake_create(payload):
+        created_payloads.append(payload)
+        return {
+            "proposal": {
+                "proposalId": "roprop-create-agent",
+                "status": "pending_user_confirmation",
+                "riskLevel": "high",
+                "requiresUserConfirmation": True,
+            }
+        }
+
+    monkeypatch.setattr(research_organization_service, "create_research_org_proposal", fake_create)
+
+    result = json.loads(
+        research_agent_creation_proposal_tool(
+            display_name="知识库管理员",
+            role="research_knowledge_steward",
+            responsibilities="维护科研数据库 schema；清理知识库写入队列",
+            allowed_tools="agent_message_tool,research_knowledge_query_tool",
+            read_shared_groups="project,research,agent_config",
+            write_shared_groups="research",
+            communication_targets="CEO;Capability Steward",
+            reason="数据库试水需要最小知识库治理角色。",
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "proposal_created"
+    assert result["proposalId"] == "roprop-create-agent"
+    assert result["requiresUserConfirmation"] is True
+    payload = created_payloads[0]
+    action = payload["actions"][0]
+    assert payload["proposedByAgentId"] == "agent-steward"
+    assert action["actionType"] == "create_agent"
+    assert action["displayName"] == "知识库管理员"
+    assert action["role"] == "research_knowledge_steward"
+    assert action["allowedTools"] == ["agent_message_tool", "research_knowledge_query_tool"]
+    assert action["readSharedGroups"] == ["project", "research", "agent_config"]
+    assert action["writeSharedGroups"] == ["research"]
+    assert action["communicationTargets"] == ["CEO", "Capability Steward"]
+
+
+def test_research_agent_creation_tool_requires_display_name(monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {"agentId": "agent-steward"})
+
+    result = json.loads(research_agent_creation_proposal_tool(display_name=""))
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["error"] == "display_name_required"
 
 
 def test_research_communication_edge_tool_creates_reviewable_proposal(monkeypatch):

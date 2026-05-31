@@ -458,12 +458,47 @@ def test_build_agent_context_includes_research_org_member_and_edge_context(tmp_p
     assert "Research Communication Protocol:" in packet.context_block
     assert "Every research_org message from an Agent must include metadata_json.researchOrgIntent" in packet.context_block
     assert "Reply format: Conclusion; Evidence; Risk; Decision needed; Next step." in packet.context_block
+    assert "research_agent_creation_proposal_tool" in packet.context_block
+    assert "only after that proposal is applied should you configure its tool permissions or communication edges" in packet.context_block
     assert "Organization Advisor can propose new Agents" in packet.context_block
-    assert "Capability Steward manages prompt/tool/memory policy recommendations" in packet.context_block
+    assert "Capability Steward can propose missing capability Agents" in packet.context_block
+    assert "prompt/tool/memory policy recommendations" in packet.context_block
     assert "Organization Capability Roster:" in packet.context_block
     assert "proposalActions=propose_create_agent" in packet.context_block
     assert "Team Onboarding Context:" in packet.context_block
     assert "You may treat other members' roster entries as their responsibilities, not as tools you can call." in packet.context_block
+
+
+def test_research_specialist_context_does_not_name_hidden_creation_tool(tmp_path, monkeypatch):
+    _use_tmp_project_root(tmp_path, monkeypatch)
+    _use_tmp_research_org_workspace(tmp_path, monkeypatch)
+
+    proposal = research_organization_service.create_research_org_proposal(
+        {
+            "riskLevel": "medium",
+            "actions": [
+                {
+                    "actionType": "create_agent",
+                    "displayName": "普通研究员",
+                    "role": "research_specialist",
+                    "roleKey": "research_specialist",
+                    "allowedTools": ["agent_message_tool"],
+                }
+            ],
+        }
+    )
+    applied = research_organization_service.apply_research_org_proposal(proposal["proposal"]["proposalId"])
+    specialist_id = applied["results"][0]["agentId"]
+
+    packet = context_engine.build_agent_context(
+        specialist_id,
+        session_id=agent_directory_service.get_agent(specialist_id)["directSessionId"],
+        run_id="turn-specialist",
+    )
+
+    assert "research_agent_creation_proposal_tool" not in packet.context_block
+    assert "report the gap to CEO, Organization Advisor, or Capability Steward" in packet.context_block
+    assert "peer-only tools hidden by your ToolPolicy" in packet.context_block
 
 
 def test_build_agent_context_filters_research_org_context_to_connected_subgraph(tmp_path, monkeypatch):
