@@ -89,7 +89,7 @@ describe("AppShell navigation telemetry", () => {
     expect(
       collectNavLinksUsingDocumentReload(
         source,
-        new Set(["/chat", "/supervised-evolution", "/self-evolution", "/teams", "/agents", "/logs", "/git", "/config"]),
+        new Set(["/chat", "/supervised-evolution", "/self-evolution", "/teams", "/memory", "/agents", "/logs", "/git", "/config"]),
       ),
     ).toEqual([]);
   });
@@ -107,11 +107,12 @@ describe("AppShell navigation telemetry", () => {
     expect(appShellSource).toContain('navigate("/chat")');
   });
 
-  it("keeps Agent management top-level while tool skill and memory stay inside Agent management", () => {
+  it("keeps Agent management top-level while memory is a separate primary surface", () => {
     expect(appShellSource).not.toContain('to="/agents/tools"');
     expect(appShellSource).not.toContain('to="/tools"');
     expect(appShellSource).not.toContain('to="/skills"');
-    expect(appShellSource).not.toContain('to="/memory"');
+    expect(appShellSource).toContain('to="/memory"');
+    expect(appShellSource).toContain('t("navMemory")');
     expect(appShellSource).toContain('to="/agents"');
     expect(appShellSource).toContain('t("navAgents")');
   });

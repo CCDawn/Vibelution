@@ -33,6 +33,13 @@ export const queryKeys = {
   memoryOverview: () => ["memory", "overview"] as const,
   knowledgeOverview: () => ["knowledge", "overview"] as const,
   knowledgeItems: (knowledgeBaseId: string) => ["knowledge", "items", knowledgeBaseId] as const,
+  knowledgeSearch: (knowledgeBaseId: string, query: string, tags: string) => ["knowledge", "search", knowledgeBaseId, query, tags] as const,
+  knowledgeRatingSuggestions: (knowledgeBaseId: string, status = "", priority = "") =>
+    ["knowledge", "rating-suggestions", knowledgeBaseId, status, priority] as const,
+  knowledgePermissionAudit: (agentId: string) => ["knowledge", "permissions", agentId] as const,
+  knowledgeGovernanceTasks: (agentId: string, status = "open") => ["knowledge", "governance-tasks", agentId, status] as const,
+  knowledgeIngestionAdapters: () => ["knowledge", "ingestion-adapters"] as const,
+  knowledgeTrace: (knowledgeBaseId: string, targetId: string) => ["knowledge", "trace", knowledgeBaseId, targetId] as const,
   researchThemeDiscoverySessions: () => ["research", "theme-discovery", "sessions"] as const,
   researchThemeDiscoverySession: (sessionId: string) => ["research", "theme-discovery", "sessions", sessionId] as const,
   researchThemeDiscoveryPrompts: () => ["research", "theme-discovery", "prompts"] as const,

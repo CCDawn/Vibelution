@@ -29,6 +29,11 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('t("navTeams")');
   });
 
+  it("exposes the Memory Library from the primary navigation", () => {
+    expect(shellSource).toContain('to="/memory"');
+    expect(shellSource).toContain('t("navMemory")');
+  });
+
   it("collapses logs git and files behind one hover utility menu", () => {
     const primaryNav = shellSource.slice(
       shellSource.indexOf("<nav className={styles.nav}>"),
@@ -38,7 +43,6 @@ describe("AppShell layout contract", () => {
     expect(primaryNav).not.toContain('to="/logs"');
     expect(primaryNav).not.toContain('to="/tools"');
     expect(primaryNav).not.toContain('to="/agents/tools"');
-    expect(primaryNav).not.toContain('to="/memory"');
     expect(primaryNav).not.toContain('to="/git"');
     expect(shellSource).toContain("utilityCluster");
     expect(shellSource).toContain("utilityClusterOpen");
@@ -49,7 +53,6 @@ describe("AppShell layout contract", () => {
     expect(shellSource).toContain('to="/logs"');
     expect(shellSource).not.toContain('to="/agents/tools"');
     expect(shellSource).not.toContain('to="/tools"');
-    expect(shellSource).not.toContain('to="/memory"');
     expect(shellSource).toContain("Wrench");
     expect(shellSource).toContain('to="/git"');
     expect(styles.utilityTrigger).toBeTypeOf("string");

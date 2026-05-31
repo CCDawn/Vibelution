@@ -13,6 +13,11 @@ EXPLICIT_ALLOW_TOOLS = {
     "research_knowledge_query_tool",
     "research_agent_creation_proposal_tool",
     "research_communication_edge_proposal_tool",
+    "knowledge_query_tool",
+    "knowledge_proposal_tool",
+    "knowledge_ingestion_tool",
+    "knowledge_governance_tasks_tool",
+    "knowledge_rating_suggestion_tool",
 }
 
 CATEGORY_LABELS = {
@@ -337,6 +342,24 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["team_knowledge_proposal"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "knowledge_ingestion_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "ingestion_package", "source_registration"],
+        "riskTags": ["team_knowledge_proposal"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "knowledge_governance_tasks_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "governance_queue", "read_only"],
+        "riskTags": ["team_knowledge_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "knowledge_rating_suggestion_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "rating_suggestion", "governance"],
+        "riskTags": ["team_knowledge_rating"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
 }
 
 TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
@@ -375,6 +398,9 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "research_knowledge_query_tool",
             "knowledge_query_tool",
             "knowledge_proposal_tool",
+            "knowledge_ingestion_tool",
+            "knowledge_governance_tasks_tool",
+            "knowledge_rating_suggestion_tool",
             "get_session_files_tool",
         ],
         "preferredToolNames": [
@@ -382,6 +408,8 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "web_fetch_tool",
             "research_knowledge_query_tool",
             "knowledge_query_tool",
+            "knowledge_governance_tasks_tool",
+            "knowledge_rating_suggestion_tool",
         ],
     },
     {

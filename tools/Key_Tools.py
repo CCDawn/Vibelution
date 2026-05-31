@@ -57,8 +57,11 @@ from tools.research_organization_tools import (
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.team_knowledge_tools import (
+    knowledge_governance_tasks_tool as _knowledge_governance_tasks_impl,
+    knowledge_ingestion_tool as _knowledge_ingestion_impl,
     knowledge_proposal_tool as _knowledge_proposal_impl,
     knowledge_query_tool as _knowledge_query_impl,
+    knowledge_rating_suggestion_tool as _knowledge_rating_suggestion_impl,
 )
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
@@ -1136,6 +1139,119 @@ def create_key_tools() -> List[BaseTool]:
             captured_by=captured_by,
         )
 
+    @tool
+    def knowledge_ingestion_tool(
+        knowledge_base_id: str,
+        source_type: str,
+        source_ref_json: str,
+        proposal_title: str,
+        excerpt: str = "",
+        proposal_content: str = "",
+        source_title: str = "",
+        source_summary: str = "",
+        proposal_summary: str = "",
+        tags: str = "",
+        evidence_range_json: str = "{}",
+        source_created_at: str = "",
+    ) -> str:
+        """
+        【团队知识半自动摄取】按标准适配器合同提交 SourceArtifact + pending RefinementProposal。
+
+        该工具不联网搜索、不解析 PDF、不直接创建正式知识；parser/searcher 只需把已有来源引用、摘录和候选内容交给本工具。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_ingestion_tool，且其团队/MemoryPolicy 允许向目标知识库提交时才可用。
+
+        Args:
+            knowledge_base_id: 目标团队知识库 ID
+            source_type: 来源类型，如 pdf_refinement / external_search_refinement / team_chat_refinement
+            source_ref_json: 来源引用 JSON 字符串
+            proposal_title: 待审提案标题
+            excerpt: 已提取的来源摘录
+            proposal_content: 可选候选知识正文；为空时使用 excerpt/source_summary
+            source_title: 可选来源标题
+            source_summary: 可选来源摘要
+            proposal_summary: 可选候选摘要
+            tags: 逗号分隔标签
+            evidence_range_json: 可选证据范围 JSON
+            source_created_at: 可选来源产生时间
+
+        Returns:
+            JSON 格式的摄取包结果，包含 SourceArtifact 和 pending RefinementProposal
+        """
+        return _knowledge_ingestion_impl(
+            knowledge_base_id=knowledge_base_id,
+            source_type=source_type,
+            source_ref_json=source_ref_json,
+            proposal_title=proposal_title,
+            excerpt=excerpt,
+            proposal_content=proposal_content,
+            source_title=source_title,
+            source_summary=source_summary,
+            proposal_summary=proposal_summary,
+            tags=tags,
+            evidence_range_json=evidence_range_json,
+            source_created_at=source_created_at,
+        )
+
+    @tool
+    def knowledge_governance_tasks_tool(status: str = "open") -> str:
+        """
+        【团队知识治理任务】读取当前 Agent 可见的知识治理任务队列。
+
+        队列由 pending proposal、pending rating suggestion 和尚未生成提案的 source artifact 派生；本工具只读，不会应用审核。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_governance_tasks_tool 时才可用。
+
+        Args:
+            status: open / closed / all，默认 open
+
+        Returns:
+            JSON 格式的治理任务列表
+        """
+        return _knowledge_governance_tasks_impl(status=status)
+
+    @tool
+    def knowledge_rating_suggestion_tool(
+        knowledge_base_id: str,
+        target_type: str,
+        importance_level: str,
+        stability: str,
+        review_priority: str,
+        marking_reason: str,
+        knowledge_item_id: str = "",
+        proposal_id: str = "",
+        confidence: float = 0.7,
+    ) -> str:
+        """
+        【团队知识评级建议】为候选或正式知识提交可审核的评级建议。
+
+        该工具只创建 RatingSuggestion，不会直接修改正式 KnowledgeItem。需要 Reviewer 在记忆库治理页或 API 中应用。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_rating_suggestion_tool，且其团队/MemoryPolicy 允许评级目标知识库时才可用。
+
+        Args:
+            knowledge_base_id: 目标团队知识库 ID
+            target_type: proposal 或 knowledge_item
+            importance_level: low / medium / high / critical
+            stability: temporary / evolving / stable / deprecated
+            review_priority: normal / elevated / urgent
+            marking_reason: 评级建议理由
+            knowledge_item_id: target_type=knowledge_item 时必填
+            proposal_id: target_type=proposal 时必填
+            confidence: 置信度 0-1
+
+        Returns:
+            JSON 格式的评级建议，状态为 pending
+        """
+        return _knowledge_rating_suggestion_impl(
+            knowledge_base_id=knowledge_base_id,
+            target_type=target_type,
+            importance_level=importance_level,
+            stability=stability,
+            review_priority=review_priority,
+            marking_reason=marking_reason,
+            knowledge_item_id=knowledge_item_id,
+            proposal_id=proposal_id,
+            confidence=confidence,
+        )
+
     # ── 学习卸载工具 (P2) ──────────────────────────────────────────────────
 
     @tool
@@ -1260,6 +1376,9 @@ def create_key_tools() -> List[BaseTool]:
         research_knowledge_query_tool,
         knowledge_query_tool,
         knowledge_proposal_tool,
+        knowledge_ingestion_tool,
+        knowledge_governance_tasks_tool,
+        knowledge_rating_suggestion_tool,
         # 学习卸载 (P2)
         record_learning_tool,
         search_memory_tool,

@@ -11,6 +11,9 @@ from core.chat.chat_task_types import trim_lines
 
 KNOWLEDGE_QUERY_TOOL_NAME = "knowledge_query_tool"
 KNOWLEDGE_PROPOSAL_TOOL_NAME = "knowledge_proposal_tool"
+KNOWLEDGE_INGESTION_TOOL_NAME = "knowledge_ingestion_tool"
+KNOWLEDGE_GOVERNANCE_TASKS_TOOL_NAME = "knowledge_governance_tasks_tool"
+KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME = "knowledge_rating_suggestion_tool"
 
 
 def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: int = 8) -> str:
@@ -37,28 +40,13 @@ def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: in
     try:
         from core.web.services import team_knowledge_service
 
-        overview = team_knowledge_service.list_knowledge_overview(agent_id=agent_id)
-        bases = [
-            base
-            for base in list(overview.get("knowledgeBases") or [])
-            if isinstance(base, dict)
-            and (not requested_base_id or str(base.get("knowledgeBaseId") or "") == requested_base_id)
-            and (not allowed_base_ids or str(base.get("knowledgeBaseId") or "") in allowed_base_ids)
-        ]
-        results: list[dict[str, Any]] = []
-        for base in bases:
-            base_id = str(base.get("knowledgeBaseId") or "").strip()
-            if not base_id:
-                continue
-            payload = team_knowledge_service.list_knowledge_items(base_id, agent_id=agent_id)
-            for item in list(payload.get("items") or []):
-                if not isinstance(item, dict) or not _matches_query(item, normalized_query):
-                    continue
-                results.append(_item_view(item, base))
-                if len(results) >= normalized_limit:
-                    break
-            if len(results) >= normalized_limit:
-                break
+        payload = team_knowledge_service.search_knowledge_items(
+            agent_id=agent_id,
+            query=normalized_query,
+            knowledge_base_id=requested_base_id,
+            limit=normalized_limit,
+        )
+        results = list(payload.get("results") or [])
         _record_event(
             "knowledge.tool.query.succeeded",
             runtime=runtime,
@@ -78,7 +66,7 @@ def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: in
                 "knowledgeBaseId": requested_base_id,
                 "query": normalized_query,
                 "limit": normalized_limit,
-                "summary": {"knowledgeBaseCount": len(bases), "resultCount": len(results)},
+                "summary": payload.get("summary") or {"resultCount": len(results)},
                 "results": results,
             }
         )
@@ -203,6 +191,214 @@ def knowledge_proposal_tool(
         )
 
 
+def knowledge_ingestion_tool(
+    knowledge_base_id: str,
+    source_type: str,
+    source_ref_json: str,
+    proposal_title: str,
+    excerpt: str = "",
+    proposal_content: str = "",
+    source_title: str = "",
+    source_summary: str = "",
+    proposal_summary: str = "",
+    tags: str = "",
+    evidence_range_json: str = "{}",
+    source_created_at: str = "",
+) -> str:
+    """
+    Submit a standard semi-automatic ingestion package.
+
+    The tool only creates SourceArtifact + pending RefinementProposal. It does
+    not parse files, search the web, or create formal KnowledgeItems.
+    """
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_INGESTION_TOOL_NAME)
+    if blocked:
+        return _json_result(blocked)
+    base_id = str(knowledge_base_id or "").strip()
+    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
+    allowed_base_ids = _policy_ids(memory_policy, "proposeKnowledgeBaseIds")
+    if base_id and allowed_base_ids and base_id not in allowed_base_ids:
+        return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
+    source_ref = _parse_json_object(source_ref_json, "source_ref_json")
+    if isinstance(source_ref, str):
+        return _json_result(_invalid_json_result(agent_id, source_ref))
+    evidence_range = _parse_json_object(evidence_range_json, "evidence_range_json")
+    if isinstance(evidence_range, str):
+        return _json_result(_invalid_json_result(agent_id, evidence_range))
+    try:
+        from core.web.services import team_knowledge_service
+
+        package = team_knowledge_service.create_ingestion_package(
+            base_id,
+            source_type=source_type,
+            source_ref=source_ref,
+            source_created_at=source_created_at,
+            captured_by=agent_id,
+            evidence_range=evidence_range,
+            source_title=source_title,
+            source_summary=source_summary,
+            excerpt=excerpt,
+            proposed_by_agent_id=agent_id,
+            proposal_title=proposal_title,
+            proposal_summary=proposal_summary,
+            proposal_content=proposal_content,
+            tags=_split_tags(tags),
+        )
+        _record_event(
+            "knowledge.tool.ingestion.submitted",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "knowledgeBaseId": base_id,
+                "sourceType": source_type,
+                "sourceArtifactId": (package.get("sourceArtifact") or {}).get("sourceArtifactId") or "",
+                "proposalId": (package.get("proposal") or {}).get("proposalId") or "",
+            },
+        )
+        return _json_result({"ok": True, "status": "submitted", "agentId": agent_id, "package": package})
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.ingestion.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"knowledgeBaseId": base_id, "errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "agentId": agent_id,
+                "knowledgeBaseId": base_id,
+            }
+        )
+
+
+def knowledge_governance_tasks_tool(status: str = "open") -> str:
+    """Read the current Agent's team knowledge governance task queue."""
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_GOVERNANCE_TASKS_TOOL_NAME)
+    if blocked:
+        return _json_result(blocked)
+    try:
+        from core.web.services import team_knowledge_service
+
+        payload = team_knowledge_service.list_knowledge_governance_tasks(agent_id=agent_id, status=status)
+        _record_event(
+            "knowledge.tool.governance_tasks.queried",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={"status": status, "taskCount": (payload.get("summary") or {}).get("taskCount", 0)},
+        )
+        return _json_result({"ok": True, "status": "succeeded", "agentId": agent_id, **payload})
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.governance_tasks.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "agentId": agent_id,
+            }
+        )
+
+
+def knowledge_rating_suggestion_tool(
+    knowledge_base_id: str,
+    target_type: str,
+    importance_level: str,
+    stability: str,
+    review_priority: str,
+    marking_reason: str,
+    knowledge_item_id: str = "",
+    proposal_id: str = "",
+    confidence: float = 0.7,
+) -> str:
+    """
+    Submit a reviewable rating suggestion for a proposal or formal item.
+
+    The tool never applies a rating directly. A reviewer must review/apply the
+    suggestion before a KnowledgeItem is updated.
+    """
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME)
+    if blocked:
+        return _json_result(blocked)
+    base_id = str(knowledge_base_id or "").strip()
+    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
+    allowed_base_ids = _policy_ids(memory_policy, "rateKnowledgeBaseIds") or _policy_ids(memory_policy, "reviewKnowledgeBaseIds")
+    if base_id and allowed_base_ids and base_id not in allowed_base_ids:
+        return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
+    try:
+        from core.web.services import team_knowledge_service
+
+        suggestion = team_knowledge_service.create_rating_suggestion(
+            base_id,
+            suggested_by_agent_id=agent_id,
+            target_type=target_type,
+            knowledge_item_id=knowledge_item_id,
+            proposal_id=proposal_id,
+            importance_level=importance_level,
+            confidence=confidence,
+            stability=stability,
+            review_priority=review_priority,
+            marking_reason=marking_reason,
+        )
+        _record_event(
+            "knowledge.tool.rating_suggestion.submitted",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "knowledgeBaseId": base_id,
+                "suggestionId": suggestion.get("suggestionId") or "",
+                "targetType": suggestion.get("targetType") or "",
+            },
+        )
+        return _json_result(
+            {
+                "ok": True,
+                "status": "submitted",
+                "agentId": agent_id,
+                "knowledgeBaseId": base_id,
+                "suggestion": suggestion,
+            }
+        )
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.rating_suggestion.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"knowledgeBaseId": base_id, "errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "agentId": agent_id,
+                "knowledgeBaseId": base_id,
+            }
+        )
+
+
 def _tool_policy_blocked(runtime: dict[str, Any], tool_name: str) -> dict[str, Any] | None:
     policy = runtime.get("toolPolicy") if isinstance(runtime.get("toolPolicy"), dict) else {}
     allowed = {str(item or "").strip() for item in policy.get("allowedTools") or [] if str(item or "").strip()}
@@ -237,43 +433,6 @@ def _parse_json_object(value: str, field: str) -> dict[str, Any] | str:
 
 def _policy_ids(policy: dict[str, Any], field: str) -> set[str]:
     return {str(item or "").strip() for item in policy.get(field) or [] if str(item or "").strip()}
-
-
-def _matches_query(item: dict[str, Any], query: str) -> bool:
-    if not query:
-        return True
-    haystack = " ".join(
-        [
-            str(item.get("title") or ""),
-            str(item.get("summary") or ""),
-            str(item.get("content") or ""),
-            " ".join(str(tag) for tag in list(item.get("tags") or [])),
-        ]
-    ).lower()
-    return query in haystack
-
-
-def _item_view(item: dict[str, Any], base: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "knowledgeItemId": str(item.get("knowledgeItemId") or "").strip(),
-        "knowledgeBaseId": str(item.get("knowledgeBaseId") or base.get("knowledgeBaseId") or "").strip(),
-        "knowledgeBaseName": str(base.get("name") or "").strip(),
-        "teamId": str(base.get("teamId") or "").strip(),
-        "teamName": str(base.get("teamName") or "").strip(),
-        "batchId": str(item.get("batchId") or "").strip(),
-        "sourceArtifactIds": [str(value) for value in list(item.get("sourceArtifactIds") or [])[:12] if str(value or "").strip()],
-        "title": trim_lines(str(item.get("title") or ""), max_lines=2),
-        "summary": trim_lines(str(item.get("summary") or ""), max_lines=4),
-        "content": trim_lines(str(item.get("content") or ""), max_lines=12),
-        "tags": [str(value) for value in list(item.get("tags") or [])[:12] if str(value or "").strip()],
-        "importanceLevel": str(item.get("importanceLevel") or "").strip(),
-        "confidence": item.get("confidence"),
-        "stability": str(item.get("stability") or "").strip(),
-        "scope": str(item.get("scope") or "").strip(),
-        "reviewPriority": str(item.get("reviewPriority") or "").strip(),
-        "appliedAt": str(item.get("appliedAt") or "").strip(),
-        "updatedAt": str(item.get("updatedAt") or "").strip(),
-    }
 
 
 def _split_tags(value: str) -> list[str]:

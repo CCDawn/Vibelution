@@ -1428,6 +1428,9 @@ export function AppShell() {
           <NavLink to="/teams" className={linkClassName}>
             {t("navTeams")}
           </NavLink>
+          <NavLink to="/memory" className={linkClassName}>
+            {t("navMemory")}
+          </NavLink>
           <NavLink to="/agents" className={linkClassName}>
             {t("navAgents")}
           </NavLink>

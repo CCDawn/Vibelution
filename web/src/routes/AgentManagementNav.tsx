@@ -3,14 +3,13 @@ import { NavLink } from "react-router-dom";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./AgentManagementNav.module.css";
 
-type AgentManagementSection = "agents" | "prompts" | "tools" | "skills" | "memory";
+type AgentManagementSection = "agents" | "prompts" | "tools" | "skills";
 
 const ITEMS: Array<{ key: AgentManagementSection; href: string }> = [
   { key: "agents", href: "/agents" },
   { key: "prompts", href: "/agents/prompts" },
   { key: "tools", href: "/agents/tools" },
   { key: "skills", href: "/agents/skills" },
-  { key: "memory", href: "/agents/memory" },
 ];
 
 function sectionLabel(section: AgentManagementSection, lang: string) {
@@ -19,14 +18,12 @@ function sectionLabel(section: AgentManagementSection, lang: string) {
     prompts: "提示词",
     tools: "工具",
     skills: "技能",
-    memory: "记忆",
   };
   const en = {
     agents: "Agents",
     prompts: "Prompts",
     tools: "Tools",
     skills: "Skills",
-    memory: "Memory",
   };
   return (lang === "zh" ? zh : en)[section];
 }
