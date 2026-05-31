@@ -76,7 +76,7 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("setSelectedWorktreeRunId(worktreeRuns[0]?.runId ?? null)");
     expect(routeSource).toContain("selectedWorktreeRun");
     expect(routeSource).toContain("worktreeRunPicker");
-    expect(routeSource).toContain("worktreeRuns.slice(0, 6).map");
+    expect(routeSource).toContain("worktreeRuns.slice(0, 4).map");
     expect(routeSource).toContain("aria-pressed={selected}");
     expect(routeSource).toContain("onClick={() => setSelectedWorktreeRunId(run.runId)}");
   });
@@ -88,8 +88,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("supervisedSourceOptions");
     expect(routeSource).toContain('value: `dataset:${item.name}`');
     expect(routeSource).toContain('value: `bundle:${item.name}`');
-    expect(routeSource).toContain("数据集是原始任务来源；评测包是已经物化好的可执行 case 包。");
+    expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
     expect(routeSource).toContain("sourceInventoryBar");
     expect(routeSource).toContain("primaryDatasets.map((item)");
+  });
+
+  it("keeps the supervised launch panel compact", () => {
+    expect(routeSource).toContain("sourceMetaSide");
+    expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
+    expect(routeSource).toContain("worktreeRuns.slice(0, 4).map");
   });
 });

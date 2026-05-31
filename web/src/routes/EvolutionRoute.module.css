@@ -457,6 +457,7 @@
 .compactFieldGrid {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) minmax(120px, 0.75fr);
+  align-items: start;
   gap: 10px;
 }
 
@@ -588,8 +589,7 @@
 }
 
 .sourceInventoryBar,
-.sourceMetaCompact,
-.sourceDetailGrid {
+.sourceMetaCompact {
   border: 1px solid var(--border-hairline);
   border-radius: 8px;
   background: var(--surface-card-subtle);
@@ -598,8 +598,8 @@
 .sourceInventoryBar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px 10px;
+  padding: 7px 10px;
 }
 
 .sourceInventoryBar span {
@@ -617,24 +617,22 @@
 
 .sourceMetaCompact {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(96px, auto);
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 9px 11px;
 }
 
-.sourceMetaCompact div,
-.sourceDetailGrid {
+.sourceMetaMain {
   min-width: 0;
 }
 
-.sourceMetaCompact div {
+.sourceMetaMain {
   display: grid;
-  gap: 3px;
+  gap: 2px;
 }
 
-.sourceMetaCompact span,
-.sourceDetailGrid span {
+.sourceMetaCompact span {
   color: var(--fg-tertiary);
   font-size: 0.82rem;
 }
@@ -645,10 +643,19 @@
   white-space: nowrap;
 }
 
-.sourceDetailGrid {
-  display: grid;
-  gap: 6px;
-  padding: 10px 12px;
+.sourceMetaMain span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sourceMetaSide {
+  justify-self: end;
+  padding: 5px 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-card-muted);
+  white-space: nowrap;
 }
 
 .sourceSummary {
@@ -797,7 +804,7 @@
 
 .controlFooter {
   display: grid;
-  gap: 8px;
+  gap: 7px;
 }
 
 .closedLoopStatus {
@@ -806,8 +813,8 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  min-height: 34px;
-  padding: 5px 8px;
+  min-height: 30px;
+  padding: 4px 8px;
   border: 1px solid var(--border-hairline);
   border-radius: 7px;
   background: var(--surface-card-subtle);
@@ -846,7 +853,7 @@
 .worktreeRunList {
   display: grid;
   gap: 4px;
-  max-height: 238px;
+  max-height: 164px;
   overflow: auto;
 }
 
@@ -856,8 +863,8 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  min-height: 36px;
-  padding: 5px 8px;
+  min-height: 32px;
+  padding: 4px 8px;
   border: 1px solid var(--border-hairline);
   border-radius: 7px;
   background: var(--surface-card-muted);
@@ -886,8 +893,8 @@
 .worktreeRunItemTop span {
   justify-self: start;
   max-width: 100%;
-  min-height: 22px;
-  padding: 0 8px;
+  min-height: 20px;
+  padding: 0 7px;
   border: 1px solid var(--border-soft);
   border-radius: 999px;
   background: var(--surface-card-subtle);
