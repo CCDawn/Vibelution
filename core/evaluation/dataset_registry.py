@@ -349,15 +349,16 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "kind": "terminal_bench_jsonl",
                 "description": (
                     "Terminal-Bench 2.0 官方任务子集，来自 harbor-framework/terminal-bench-2；"
-                    "用于真实多步终端/harness 评测，官方 Harbor sandbox 判分器后续接入。"
+                    "当前可用 Vibelution 自定义 harness 跑多步终端/ReAct 闭环，分数不是官方 Terminal-Bench 成绩；"
+                    "官方 Harbor sandbox 判分器后续接入。"
                 ),
                 "source_path": "workspace/evaluation/datasets/terminal_bench_core.jsonl",
                 "bundle_name": "terminal_bench_core_v1",
                 "scenario": "transaction",
                 "mode": "multi_step_react",
                 "timeout_seconds": 1800,
-                "runnable": False,
-                "adapter_status": "requires_harbor_task_environment",
+                "runnable": True,
+                "adapter_status": "custom_harness_ready",
                 "official_verifier_status": "harbor_pending",
                 "tags": ["terminal-bench", "tb2", "react", "harness", "official-seed"],
                 "source_track": "benchmark",
@@ -632,12 +633,12 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
             usability_status = "empty"
             usability_reason = "数据集当前没有可物化 case。"
         elif spec.official_verifier_status == "harbor_pending":
-            usability_status = "agent_harness_ready"
-            usability_reason = "可启动 agent harness 多步评测；官方 Harbor 判分器尚未接通。"
+            usability_status = "custom_harness_ready"
+            usability_reason = "可启动 Vibelution 自定义 harness 多步评测；结果不是 Terminal-Bench 官方成绩，官方 Harbor 判分器尚未接通。"
         else:
             usability_status = "ready"
             usability_reason = "数据集已有可运行 case。"
-        effective = usability_status in {"ready", "agent_harness_ready"}
+        effective = usability_status in {"ready", "agent_harness_ready", "custom_harness_ready"}
         visibility = "primary" if effective and spec.workbench_visible else "hidden"
         if not spec.workbench_visible:
             visibility_reason = "底层数据池不直接作为工作台评测入口展示。"
@@ -651,8 +652,8 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
             visibility_reason = "需要 Harbor/Docker 官方任务环境，已从主选择器隐藏。"
         elif usability_status in {"invalid", "blocked"}:
             visibility_reason = "当前不可运行，已从主选择器隐藏。"
-        elif usability_status == "agent_harness_ready":
-            visibility_reason = "可用于监督进化 harness 评测，但官方判分器未接通。"
+        elif usability_status == "custom_harness_ready":
+            visibility_reason = "可用于 Vibelution 自定义监督评测，但官方判分器未接通。"
         else:
             visibility_reason = "可直接用于监督进化运行。"
         boundary = dataset_intake_boundary(
@@ -676,6 +677,13 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 "usability_status": usability_status,
                 "usability_reason": usability_reason,
                 "official_verifier_status": spec.official_verifier_status,
+                "evaluation_mode": "custom_harness" if spec.official_verifier_status == "harbor_pending" else "official_or_not_required",
+                "score_label": (
+                    "Vibelution custom score (non-official)"
+                    if spec.official_verifier_status == "harbor_pending"
+                    else "official_or_local_score"
+                ),
+                "official_score_available": spec.official_verifier_status != "harbor_pending",
                 "visibility": visibility,
                 "visibility_reason": visibility_reason,
                 "selectable": effective,
@@ -1040,8 +1048,18 @@ def _build_terminal_bench_case(spec: DatasetSpec, row: Dict[str, Any], index: in
         "requires_react_trace": True,
         "requires_terminal_harness": True,
         "official_runner": "harbor_pending" if adapter == "official_seed" else "pending",
-        "requires_official_task_environment": adapter == "official_seed",
+        "requires_official_task_environment": False,
+        "official_task_environment_required_for": "official_verifier" if adapter == "official_seed" else "",
         "required_task_paths": ["/app"] if adapter == "official_seed" else [],
+        "evaluation_mode": "custom_harness" if adapter == "official_seed" else "local_harness",
+        "score_label": (
+            "Vibelution custom score (non-official Terminal-Bench score)"
+            if adapter == "official_seed"
+            else "Vibelution local smoke score"
+        ),
+        "official_score": None,
+        "official_score_available": False if adapter == "official_seed" else False,
+        "official_verifier_status": spec.official_verifier_status,
         "official_metadata": official_metadata,
         "allowed_tools": allowed_tools,
         "max_steps": max_steps,
@@ -1142,6 +1160,14 @@ def materialize_dataset_bundle(
             "source_path": str(source),
             "adapter_status": spec.adapter_status,
             "official_verifier_status": spec.official_verifier_status,
+            "evaluation_mode": "custom_harness" if spec.official_verifier_status == "harbor_pending" else "official_or_not_required",
+            "score_label": (
+                "Vibelution custom score (non-official Terminal-Bench score)"
+                if spec.official_verifier_status == "harbor_pending"
+                else "official_or_local_score"
+            ),
+            "official_score": None,
+            "official_score_available": spec.official_verifier_status != "harbor_pending",
             "runnable": spec.runnable,
             "review_required": spec.review_required,
             "source_track": spec.source_track,

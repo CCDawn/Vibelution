@@ -33,6 +33,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
+from core.web.routes import evolution as evolution_routes
 from core.web.services import (
     agent_mode_binding_service,
     agent_directory_service,
@@ -404,7 +405,7 @@ def _runtime_scene_local_index_parts(iso_value: str) -> tuple[str, str, str]:
 
 def test_runtime_summary_shape():
     response = client.get("/api/runtime/summary")
-    assert response.status_code == 200, response.json()
+    assert response.status_code == 202, response.json()
     payload = response.json()
     assert payload["agentName"] == "Vibelution"
     assert isinstance(payload["userName"], str)
@@ -4377,6 +4378,176 @@ def test_submit_session_contextual_confirmation_preserves_action_intent_in_promp
     assert payload["activeTask"]["title"] == "现在agent可以设置默认头像吗"
 
 
+def test_submit_session_plain_confirmation_uses_history_goal_not_agent_inbox_reply(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        task_status="reading",
+        active_task={
+            "task_id": "session-live-coding-task",
+            "kind": "coding",
+            "status": "reading",
+            "title": "[Agent 私信回复]\n来源 Agent: A013 · 白予安",
+            "goal": "[Agent 私信回复]\n来源 Agent: A013 · 白予安",
+            "latest_summary": "白予安回复说需要 CEO 确认后继续推进记忆系统开发。",
+            "read_files": ["core/web/services/session_service.py"],
+            "metadata": {"last_user_message_filtered": True},
+        },
+    )
+    state = load_chat_state(tmp_path)
+    messages = state["conversations"][0]["messages"]
+    messages.append(
+        {
+            "role": "user",
+            "content": "我现在需要对项目的记忆系统进行开发,需要你的团队,请你把这个作为目前的任务,分析一下如何进展",
+            "timestamp": "2026-05-31T17:03:58",
+        }
+    )
+    messages.append(
+        {
+            "role": "user",
+            "content": "[Agent 私信回复]\n来源 Agent: A013 · 白予安\n\n消息内容:\n需要 CEO 确认。",
+            "timestamp": "2026-05-31T17:08:50",
+            "metadata": {
+                "kind": "agent_inbox_message",
+                "inboxKind": "agent_inbox_reply",
+                "sourceAgentId": "agent-a013",
+                "targetAgentId": "agent-ceo",
+            },
+        }
+    )
+    messages.append(
+        {
+            "role": "assistant",
+            "content": "团队已完成前期组织诊断和能力评估，现在需要您的决策来推进下一阶段工作。请确认上述决策点。",
+            "timestamp": "2026-05-31T17:09:00",
+        }
+    )
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    captured: dict[str, object] = {}
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            captured["seeded"] = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            captured["prompt"] = initial_prompt
+            return {
+                "status": "completed",
+                "summary": "已收到确认，继续推进记忆系统开发组织任务。",
+                "raw_output": "已收到确认，继续推进记忆系统开发组织任务。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "确认"},
+    )
+
+    assert response.status_code == 202
+    prompt = str(captured["prompt"])
+    assert "用户确认：确认" in prompt
+    assert "请基于已确认的当前目标继续执行：我现在需要对项目的记忆系统进行开发" in prompt
+    assert "[Agent 私信回复]" not in prompt
+    state = load_chat_state(tmp_path)
+    active_task = state["conversations"][0]["active_task"]
+    assert active_task["goal"].startswith("我现在需要对项目的记忆系统进行开发")
+    assert "[Agent 私信回复]" not in active_task["goal"]
+
+
+def test_submit_session_agent_inbox_turn_preserves_inbox_prompt_without_history_fallback(tmp_path, monkeypatch):
+    _seed_chat_state(
+        tmp_path,
+        active_task={
+            "task_id": "session-live-coding-task",
+            "kind": "coding",
+            "status": "reading",
+            "title": "只需要创建记忆库管理员",
+            "goal": "只需要创建记忆库管理员",
+            "latest_summary": "等待团队私信回复。",
+        },
+    )
+    state = load_chat_state(tmp_path)
+    state["conversations"][0]["messages"].append(
+        {
+            "role": "user",
+            "content": "只需要创建记忆库管理员",
+            "timestamp": "2026-05-31T17:03:58",
+        }
+    )
+    save_chat_state(tmp_path, state)
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    captured: dict[str, object] = {}
+    lifecycle_events: list[tuple[str, dict]] = []
+
+    class DummyAgent:
+        def seed_chat_history(self, messages):
+            captured["seeded"] = list(messages)
+
+        def run_single_turn(self, initial_prompt=None, attachments=None):
+            captured["prompt"] = initial_prompt
+            return {
+                "status": "completed",
+                "summary": "已收到白予安的私信回复，并将其作为团队反馈处理。",
+                "raw_output": "已收到白予安的私信回复，并将其作为团队反馈处理。",
+                "outcome": "no_change",
+            }
+
+    def record_lifecycle_event(session_id, phase, **kwargs):
+        lifecycle_events.append((phase, dict(kwargs.get("fields") or {})))
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: DummyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_SESSION_EXECUTOR",
+        SimpleNamespace(submit=lambda fn, context: fn(context)),
+    )
+    monkeypatch.setattr(session_service, "_record_session_turn_lifecycle_event", record_lifecycle_event)
+
+    inbox_prompt = (
+        "[Agent 私信回复]\n"
+        "来源 Agent: A013 · 白予安\n"
+        "消息ID: agentmsg-20260601-000153-481642\n\n"
+        "消息内容:\n"
+        "记忆库管理员只需要配置 memory_tools 和 agent_message_tool。"
+    )
+    detail = session_service.submit_session_message(
+        "session-live",
+        inbox_prompt,
+        turn_mode="agent_inbox",
+        write_intent=False,
+        message_metadata={
+            "kind": "agent_inbox_message",
+            "inboxKind": "agent_inbox_reply",
+            "sourceAgentCode": "A013",
+            "sourceAgentName": "白予安",
+        },
+        message_source="agent_inbox",
+    )
+
+    assert detail["id"] == "session-live"
+    prompt = str(captured["prompt"])
+    assert prompt.startswith("[Agent 私信回复]")
+    assert "记忆库管理员只需要配置 memory_tools" in prompt
+    assert prompt != "只需要创建记忆库管理员"
+    assert not any(
+        phase == "user_message_filtered" and fields.get("fallbackSource") == "history"
+        for phase, fields in lifecycle_events
+    )
+    assert any(phase == "agent_inbox_prompt_preserved" for phase, _fields in lifecycle_events)
+    state = load_chat_state(tmp_path)
+    active_task = state["conversations"][0]["active_task"]
+    assert active_task["last_user_message"] == "只需要创建记忆库管理员"
+    assert active_task["metadata"]["last_user_message_reason"] == "agent_inbox_message"
+
+
 def test_submit_session_continue_recovers_context_when_active_task_goal_is_confirmation(tmp_path, monkeypatch):
     _seed_chat_state(
         tmp_path,
@@ -4772,6 +4943,70 @@ def test_edit_resubmit_session_message_allows_latest_user_message(tmp_path, monk
 
     session_service._set_session_running("session-live", False)
     session_service._clear_session_turn_control("session-live")
+    session_service._clear_session_live_output("session-live")
+
+
+def test_edit_resubmit_session_message_supersedes_running_turn(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    scheduled_contexts: list[dict] = []
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(session_service, "_schedule_session_turn", lambda context: scheduled_contexts.append(dict(context)))
+
+    first_response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "先执行旧任务"},
+    )
+    assert first_response.status_code == 202
+    assert len(scheduled_contexts) == 1
+    old_context = scheduled_contexts[0]
+    old_turn_id = old_context["turn_id"]
+    old_user_message_id = first_response.json()["messages"][-2]["id"]
+
+    response = client.post(
+        "/api/sessions/session-live/messages/edit-resubmit",
+        json={
+            "messageId": old_user_message_id,
+            "content": "改成执行新任务",
+            "mentalModelEnabled": False,
+        },
+    )
+
+    assert response.status_code == 202, response.json()
+    payload = response.json()
+    assert len(scheduled_contexts) == 2
+    new_turn_id = scheduled_contexts[1]["turn_id"]
+    assert new_turn_id != old_turn_id
+    assert payload["messages"][-2]["role"] == "user"
+    assert payload["messages"][-2]["content"] == "改成执行新任务"
+    assert payload["messages"][-1]["streaming"] is True
+    latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
+    assert latest_run["runId"] == new_turn_id
+    old_run = session_service._WORK_RUN_STORE.load_snapshot("chat_turn", old_turn_id)
+    assert old_run["status"] == "superseded"
+    assert old_run["finishedAt"]
+
+    class OldAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "completed",
+                "summary": "旧任务迟到结果不应写入。",
+                "raw_output": "旧任务迟到结果不应写入。",
+                "outcome": "done",
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: OldAgent())
+    session_service._run_session_turn(old_context)
+
+    detail = client.get("/api/sessions/session-live").json()
+    assert detail["currentPhase"] == "running"
+    assert "旧任务迟到结果不应写入" not in json.dumps(detail, ensure_ascii=False)
+    assert detail["messages"][-2]["content"] == "改成执行新任务"
+
+    session_service._set_session_running("session-live", False, turn_id=new_turn_id)
+    session_service._clear_session_turn_control("session-live", turn_id=new_turn_id)
     session_service._clear_session_live_output("session-live")
 
 
@@ -6397,6 +6632,29 @@ def test_stale_turn_live_output_does_not_overwrite_new_turn(tmp_path, monkeypatc
         session_service._set_session_running("session-live", False)
         session_service._clear_session_turn_control("session-live")
         session_service._clear_session_live_output("session-live")
+
+
+def test_stale_turn_live_output_clear_does_not_remove_new_turn(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    session_service._set_session_live_output(
+        "session-live",
+        turn_id="turn-new",
+        content="新轮正在输出。",
+    )
+
+    session_service._clear_session_live_output("session-live", turn_id="turn-old")
+    response = client.get("/api/sessions/session-live")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["messages"][-1]["streaming"] is True
+    assert payload["messages"][-1]["content"] == "新轮正在输出。"
+
+    session_service._clear_session_live_output("session-live", turn_id="turn-new")
+    response_after_clear = client.get("/api/sessions/session-live")
+    assert response_after_clear.status_code == 200
+    assert not response_after_clear.json()["messages"][-1].get("streaming")
 
 
 def test_session_detail_includes_live_thought_draft(tmp_path, monkeypatch):
@@ -9342,7 +9600,7 @@ def test_config_workspace_test_llm_uses_pending_draft_key(monkeypatch):
     }
     monkeypatch.delenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.delenv("VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
@@ -9402,7 +9660,7 @@ def test_config_workspace_test_llm_ignores_forged_pending_draft_key(monkeypatch)
     }
     monkeypatch.delenv("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.delenv("VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY", raising=False)
+    monkeypatch.delenv("VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
@@ -9753,7 +10011,7 @@ def test_config_workspace_batch_image_capability_records_unsupported(monkeypatch
     assert model["capability_error"] == "image input is not supported by this model route"
 
 
-def test_config_workspace_draft_model_rejects_path_api_key_env(monkeypatch):
+def test_config_workspace_draft_model_ignores_submitted_api_key_env(monkeypatch):
     public_config = copy.deepcopy(load_public_config())
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
@@ -9774,8 +10032,12 @@ def test_config_workspace_draft_model_rejects_path_api_key_env(monkeypatch):
         },
     )
 
-    assert response.status_code == 422
-    assert "PATH" in response.json()["detail"]
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    updated = payload["publicConfig"]["llm"]["model_library"]["deepseek_v4_pro"]
+    assert updated["api_key_env"] == "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY"
+    assert "PATH" not in payload["draftMeta"]["pending_api_keys"]
+    assert "VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY" in payload["draftMeta"]["pending_api_keys"]
 
 
 def test_config_workspace_draft_model_allows_approved_ai_pixel_relay_host(monkeypatch):
@@ -9797,7 +10059,7 @@ def test_config_workspace_draft_model_allows_approved_ai_pixel_relay_host(monkey
             "model": "gpt-5.5",
             "label": "GPT-5.5 via relay",
             "details": target,
-            "apiKeyEnv": "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY",
             "apiKey": "",
         },
     )
@@ -9836,7 +10098,7 @@ def test_config_workspace_draft_model_allows_custom_openai_compatible_relay(monk
                 "contract": "tool_chat",
                 "streaming": True,
             },
-            "apiKeyEnv": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY",
             "apiKey": "draft-secret",
         },
     )
@@ -9846,8 +10108,8 @@ def test_config_workspace_draft_model_allows_custom_openai_compatible_relay(monk
     updated = payload["publicConfig"]["llm"]["model_library"]["custom_relay"]
     assert updated["provider"]["kind"] == "openai_compatible"
     assert updated["provider"]["base_url"] == "https://relay.example.com/v1"
-    assert updated["api_key_env"] == "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY"
-    assert "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY" in payload["draftMeta"]["pending_api_keys"]
+    assert updated["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY"
+    assert "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY" in payload["draftMeta"]["pending_api_keys"]
 
 
 def test_config_workspace_draft_model_allows_custom_relay_responses(monkeypatch):
@@ -9878,7 +10140,7 @@ def test_config_workspace_draft_model_allows_custom_relay_responses(monkeypatch)
                 "contract": "tool_chat",
                 "streaming": True,
             },
-            "apiKeyEnv": "VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY",
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY",
             "apiKey": "draft-secret",
         },
     )
@@ -9889,7 +10151,7 @@ def test_config_workspace_draft_model_allows_custom_relay_responses(monkeypatch)
     assert updated["provider"]["kind"] == "relay"
     assert updated["provider"]["base_url"] == "https://ai-pixel.online"
     assert updated["transport"] == "responses"
-    assert updated["api_key_env"] == "VIBELUTION_LLM_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY"
+    assert updated["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_RESPONSES_MODEL_API_KEY"
 
 
 def test_config_workspace_draft_model_rejects_unknown_model_id(monkeypatch):
@@ -9908,13 +10170,57 @@ def test_config_workspace_draft_model_rejects_unknown_model_id(monkeypatch):
             "model": "gpt-5.5",
             "label": "Generated from profile",
             "details": public_config["llm"]["model_library"]["relay_openai_gpt_5_5"],
-            "apiKeyEnv": "VIBELUTION_LLM_RELAY_OPENAI_GPT_5_5_API_KEY",
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_RELAY_OPENAI_GPT_5_5_API_KEY",
             "apiKey": "",
         },
     )
 
     assert response.status_code == 422
     assert "unknown LLM model" in response.json()["detail"]
+
+
+def test_config_workspace_draft_update_model_migrates_to_unique_model_key(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["llm"]["model_library"]["custom_relay"] = {
+        "provider": {
+            "kind": "openai_compatible",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://relay.example.com/v1",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 65536,
+        },
+        "model": "custom-gpt",
+        "label": "Custom Relay",
+        "api_key_env": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+    }
+
+    monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
+    monkeypatch.setenv("VIBELUTION_LLM_CUSTOM_RELAY_API_KEY", "legacy-secret")
+    monkeypatch.delenv("VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY", raising=False)
+
+    response = client.post(
+        "/api/config/draft/update-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelId": "custom_relay",
+            "provider": public_config["llm"]["model_library"]["custom_relay"]["provider"],
+            "model": "custom-gpt",
+            "label": "Custom Relay",
+            "details": {},
+            "apiKeyEnv": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+            "apiKey": "",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    updated = payload["publicConfig"]["llm"]["model_library"]["custom_relay"]
+    assert updated["api_key_env"] == "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY"
+    assert "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY" in payload["draftMeta"]["pending_api_keys"]
+    assert payload["draftMeta"]["pending_cleared_api_keys"] == ["VIBELUTION_LLM_CUSTOM_RELAY_API_KEY"]
 
 
 def test_config_workspace_draft_model_auto_generates_custom_relay_model_id(monkeypatch):
@@ -9954,7 +10260,7 @@ def test_config_workspace_draft_model_auto_generates_custom_relay_model_id(monke
     model_library = response.json()["publicConfig"]["llm"]["model_library"]
     assert "gpt_5_5_gpt_5_5" in model_library
     assert "custom_openai_compatible_relay" not in model_library
-    assert model_library["gpt_5_5_gpt_5_5"]["api_key_env"] == "VIBELUTION_LLM_GPT_5_5_GPT_5_5_API_KEY"
+    assert model_library["gpt_5_5_gpt_5_5"]["api_key_env"] == "VIBELUTION_LLM_MODEL_GPT_5_5_GPT_5_5_API_KEY"
 
 
 def test_config_workspace_draft_model_rejects_custom_relay_localhost(monkeypatch):
@@ -9985,7 +10291,7 @@ def test_config_workspace_draft_model_rejects_custom_relay_localhost(monkeypatch
                 "contract": "tool_chat",
                 "streaming": True,
             },
-            "apiKeyEnv": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+            "apiKeyEnv": "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY",
             "apiKey": "",
         },
     )
@@ -10047,7 +10353,7 @@ def test_config_workspace_model_discovery_uses_configured_environment_key(monkey
     seen = {}
 
     monkeypatch.setattr(config_service, "load_public_config", lambda: copy.deepcopy(public_config))
-    monkeypatch.setenv("VIBELUTION_LLM_CUSTOM_RELAY_API_KEY", "env-secret")
+    monkeypatch.setenv("VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY", "env-secret")
 
     def fake_discover_model_list(api_base, *, api_key="", timeout=10, api_key_source=""):
         seen["api_base"] = api_base
@@ -10064,7 +10370,7 @@ def test_config_workspace_model_discovery_uses_configured_environment_key(monkey
             "draftMeta": {},
             "provider": {
                 "kind": "openai_compatible",
-                "api_key_env": "VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+                "api_key_env": "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY",
                 "base_url": "https://example.com/v1",
                 "compat_mode": "openai",
                 "requires_api_key": True,
@@ -10075,11 +10381,11 @@ def test_config_workspace_model_discovery_uses_configured_environment_key(monkey
     )
 
     assert response.status_code == 200, response.json()
-    assert response.json()["apiKeySource"] == "系统环境变量 VIBELUTION_LLM_CUSTOM_RELAY_API_KEY"
+    assert response.json()["apiKeySource"] == "系统环境变量 VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY"
     assert seen == {
         "api_base": "https://example.com/v1",
         "api_key": "env-secret",
-        "api_key_source": "系统环境变量 VIBELUTION_LLM_CUSTOM_RELAY_API_KEY",
+        "api_key_source": "系统环境变量 VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY",
     }
 
 
@@ -10204,7 +10510,7 @@ def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):
     assert response.status_code == 200
     persisted = response.json()
     assert public_config["ui"]["language"] == "en"
-    assert writes == [("VIBELUTION_LLM_DEEPSEEK_V4_PRO_API_KEY", "draft-secret")]
+    assert writes == [("VIBELUTION_LLM_MODEL_DEEPSEEK_V4_PRO_API_KEY", "draft-secret")]
     assert deletes == []
     assert persisted["baseHash"] == persisted["hash"]
     assert len(reloads) == 1
@@ -10215,6 +10521,68 @@ def test_config_workspace_apply_persists_changes_and_pending_env(monkeypatch):
     assert applied_event["primaryProviderKind"]
     assert applied_event["primaryTransport"]
     assert applied_event["primaryModel"] == config_service.build_effective_config(public_config).llm.get_profile(role="primary").model
+
+
+def test_config_workspace_apply_deletes_removed_model_key(monkeypatch):
+    public_config = copy.deepcopy(load_public_config())
+    public_config["llm"]["model_library"]["custom_relay"] = {
+        "provider": {
+            "kind": "openai_compatible",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://relay.example.com/v1",
+            "compat_mode": "openai",
+            "requires_api_key": True,
+            "context_window": 65536,
+        },
+        "model": "custom-gpt",
+        "label": "Custom Relay",
+        "api_key_env": "VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY",
+    }
+    writes = []
+    deletes = []
+
+    def fake_load_public_config():
+        return copy.deepcopy(public_config)
+
+    def fake_save_public_config(updated_public_config):
+        public_config.clear()
+        public_config.update(copy.deepcopy(updated_public_config))
+
+    monkeypatch.setattr(config_service, "load_public_config", fake_load_public_config)
+    monkeypatch.setattr(config_service, "save_public_config", fake_save_public_config)
+    monkeypatch.setattr(config_service, "_set_user_env_var", lambda name, value: writes.append((name, value)))
+    monkeypatch.setattr(config_service, "_delete_user_env_var", lambda name: deletes.append(name))
+    monkeypatch.setattr(
+        config_service,
+        "reload_config",
+        lambda config_path=None: config_service.build_effective_config(public_config),
+    )
+    monkeypatch.setattr(config_service, "_record_config_scene_event", lambda *args, **kwargs: None)
+
+    draft_response = client.post(
+        "/api/config/draft/delete-model",
+        json={
+            "publicConfig": public_config,
+            "draftMeta": {},
+            "baseHash": public_config_hash(public_config),
+            "modelId": "custom_relay",
+        },
+    )
+    assert draft_response.status_code == 200, draft_response.json()
+
+    response = client.put(
+        "/api/config/apply",
+        json={
+            "publicConfig": draft_response.json()["publicConfig"],
+            "draftMeta": draft_response.json()["draftMeta"],
+            "baseHash": public_config_hash(public_config),
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    assert writes == []
+    assert deletes == ["VIBELUTION_LLM_MODEL_CUSTOM_RELAY_API_KEY"]
+    assert "custom_relay" not in public_config["llm"]["model_library"]
 
 
 def test_config_workspace_apply_ignores_forged_pending_env(monkeypatch):
@@ -10811,9 +11179,11 @@ def test_evolution_workbench_route_exposes_dataset_choices_and_saved_state(tmp_p
     assert terminal_smoke["adapterStatus"] == "ready_local_smoke"
     assert "terminal-bench" in terminal_smoke["tags"]
     terminal_core = next(item for item in payload["datasets"] if item["name"] == "terminal_bench_core")
-    assert terminal_core["effective"] is True
-    assert terminal_core["selectable"] is True
-    assert terminal_core["adapterStatus"] == "ready_official_seed"
+    assert terminal_core["usabilityStatus"] == "custom_harness_ready"
+    assert terminal_core["evaluationMode"] == "custom_harness"
+    assert terminal_core["officialVerifierStatus"] == "harbor_pending"
+    assert terminal_core["officialScoreAvailable"] is False
+    assert "不是 Terminal-Bench 官方成绩" in terminal_core["usabilityReason"]
     assert payload["activeRun"] is None
 
 
@@ -11206,16 +11576,13 @@ def test_workbench_dataset_list_backfills_new_builtin_datasets(tmp_path, monkeyp
     assert response.status_code == 200
     rows = response.json()["datasets"]
     names = {item["name"] for item in rows}
-    assert names == {"supervised_dry_run", "terminal_bench_smoke", "terminal_bench_core"}
+    assert names == {"supervised_dry_run", "terminal_bench_smoke"}
     assert not any(item["name"] == "generated_cases" for item in rows)
     assert not any(item["name"] == "chat_reviewed_multiturn" for item in rows)
     assert any(item["name"] == "terminal_bench_smoke" for item in rows)
     terminal_row = next(item for item in rows if item["name"] == "terminal_bench_smoke")
     assert terminal_row["effective"] is True
     assert terminal_row["selectable"] is True
-    terminal_core = next(item for item in rows if item["name"] == "terminal_bench_core")
-    assert terminal_core["effective"] is True
-    assert terminal_core["adapterStatus"] == "ready_official_seed"
 
 
 def test_start_supervised_run_from_dataset_exposes_active_snapshot_and_sse(tmp_path, monkeypatch):
@@ -11465,6 +11832,22 @@ def test_start_supervised_run_rejects_second_active_run(tmp_path, monkeypatch):
     assert second.status_code == 409
 
     _reset_supervised_live_state()
+
+
+def test_retry_supervised_run_route_returns_new_retry_snapshot(monkeypatch):
+    _reset_supervised_live_state()
+    monkeypatch.setattr(evolution_routes, "retry_supervised_run", lambda run_id: {
+        "runId": "web-supervised-retry",
+        "status": "queued",
+        "retryOfRunId": run_id,
+    })
+
+    response = client.post("/api/evolution/runs/web-supervised-old/retry")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["runId"] == "web-supervised-retry"
+    assert payload["retryOfRunId"] == "web-supervised-old"
 
 
 def test_start_supervised_run_rejects_when_self_evolution_lease_active(tmp_path, monkeypatch):
@@ -12790,6 +13173,13 @@ def _write_supervised_decision_record(project_root: Path, session_id: str, overr
                     "baseline_report_path": "workspace/supervised_evolution/sessions/demo/baseline.json",
                     "candidate_report_path": "workspace/supervised_evolution/sessions/demo/candidate.json",
                 },
+                "intake_provenance": {
+                    "evaluation_mode": "custom_harness",
+                    "score_label": "Vibelution custom score (non-official)",
+                    "official_verifier_status": "harbor_pending",
+                    "official_score": None,
+                    "official_score_available": False,
+                },
             }
         ],
         "gates": [],
@@ -12820,6 +13210,13 @@ def _assert_seeded_case_diagnostic(diagnostic: dict) -> None:
         "evidencePaths": {
             "baseline_report_path": "workspace/supervised_evolution/sessions/demo/baseline.json",
             "candidate_report_path": "workspace/supervised_evolution/sessions/demo/candidate.json",
+        },
+        "evaluationMetadata": {
+            "evaluationMode": "custom_harness",
+            "scoreLabel": "Vibelution custom score (non-official)",
+            "officialVerifierStatus": "harbor_pending",
+            "officialScore": None,
+            "officialScoreAvailable": False,
         },
     }
 

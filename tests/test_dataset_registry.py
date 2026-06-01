@@ -48,13 +48,15 @@ def test_default_dataset_registry_lists_builtin_and_swe(tmp_path: Path):
     assert by_name["terminal_bench_smoke"]["visibility"] == "primary"
     assert by_name["terminal_bench_smoke"]["selectable"] is True
     assert by_name["terminal_bench_smoke"]["case_count"] >= 2
-    assert by_name["terminal_bench_core"]["runnable"] is False
-    assert by_name["terminal_bench_core"]["adapter_status"] == "requires_harbor_task_environment"
+    assert by_name["terminal_bench_core"]["runnable"] is True
+    assert by_name["terminal_bench_core"]["adapter_status"] == "custom_harness_ready"
     assert by_name["terminal_bench_core"]["official_verifier_status"] == "harbor_pending"
-    assert by_name["terminal_bench_core"]["effective"] is False
-    assert by_name["terminal_bench_core"]["usability_status"] == "requires_official_task_environment"
-    assert by_name["terminal_bench_core"]["visibility"] == "hidden"
-    assert "没有 /app sandbox" in by_name["terminal_bench_core"]["usability_reason"]
+    assert by_name["terminal_bench_core"]["evaluation_mode"] == "custom_harness"
+    assert by_name["terminal_bench_core"]["official_score_available"] is False
+    assert by_name["terminal_bench_core"]["effective"] is True
+    assert by_name["terminal_bench_core"]["usability_status"] == "custom_harness_ready"
+    assert by_name["terminal_bench_core"]["visibility"] == "primary"
+    assert "不是 Terminal-Bench 官方成绩" in by_name["terminal_bench_core"]["usability_reason"]
     assert by_name["terminal_bench_core"]["case_count"] >= 5
     assert by_name["swe_bench_lite"]["runnable"] is False
     assert by_name["swe_bench_lite"]["adapter_status"] == "requires_swe_harness"
@@ -276,8 +278,8 @@ def test_dataset_status_distinguishes_effective_empty_missing_and_harness(tmp_pa
     assert by_name["swe_bench_lite"]["usability_status"] == "requires_external_harness"
     assert by_name["swe_bench_lite"]["selectable"] is False
     assert "源文件不存在" in by_name["swe_bench_lite"]["usability_reason"]
-    assert by_name["terminal_bench_core"]["effective"] is False
-    assert by_name["terminal_bench_core"]["usability_status"] == "requires_official_task_environment"
+    assert by_name["terminal_bench_core"]["effective"] is True
+    assert by_name["terminal_bench_core"]["usability_status"] == "custom_harness_ready"
     assert by_name["terminal_bench_core"]["official_verifier_status"] == "harbor_pending"
 
 
@@ -500,15 +502,22 @@ def test_materialize_terminal_bench_core_preserves_official_metadata(tmp_path: P
     case = bundle["cases"][0]
 
     assert result.bundle_name == "terminal_bench_core_v1"
-    assert result.runnable is False
-    assert result.adapter_status == "requires_harbor_task_environment"
+    assert result.runnable is True
+    assert result.adapter_status == "custom_harness_ready"
     assert result.case_count == 2
     assert bundle["dataset"]["name"] == "terminal_bench_core"
     assert bundle["dataset"]["official_verifier_status"] == "harbor_pending"
+    assert bundle["dataset"]["evaluation_mode"] == "custom_harness"
+    assert bundle["dataset"]["official_score"] is None
+    assert bundle["dataset"]["official_score_available"] is False
     assert case["mode"] == "multi_step_react"
     assert case["terminal_bench_adapter"] == "official_seed"
     assert case["official_runner"] == "harbor_pending"
-    assert case["requires_official_task_environment"] is True
+    assert case["requires_official_task_environment"] is False
+    assert case["official_task_environment_required_for"] == "official_verifier"
+    assert case["evaluation_mode"] == "custom_harness"
+    assert case["official_score"] is None
+    assert case["official_score_available"] is False
     assert "/app" in case["required_task_paths"]
     assert case["official_metadata"]["dataset"] == "terminal-bench@2.0"
     assert case["official_metadata"]["repo"].endswith("terminal-bench-2")

@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   Pause,
   Play,
+  RefreshCw,
   Sparkles,
   Square,
   Save,
@@ -63,6 +64,8 @@ import {
   selectSupervisedRunStreamTarget,
   shouldIgnoreActiveRunSnapshot,
 } from "./evolutionLiveRun";
+import { buildSupervisedRunRecordDisplay } from "./supervisedRunRecordLabel";
+import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import {
   clampPaneSize,
@@ -187,8 +190,12 @@ function isSelfRunLockedStatus(status: string) {
   return ["queued", "running", "stopping", "paused"].includes(String(status || "").trim().toLowerCase());
 }
 
-function statusIcon(status: string) {
+function statusIcon(status: string, decision = "") {
   const normalized = String(status).trim().toLowerCase();
+  const normalizedDecision = String(decision).trim().toUpperCase();
+  if (normalizedDecision === "INCONCLUSIVE") {
+    return <TriangleAlert size={16} />;
+  }
   if (normalized === "success") {
     return <CheckCircle2 size={16} />;
   }
@@ -234,11 +241,22 @@ function formatTurnRange(startTurn: number, endTurn: number) {
 }
 
 function datasetUsabilityLabel(
-  dataset: { effective?: boolean; usabilityStatus?: string; adapterStatus?: string; caseCount?: number | null },
+  dataset: {
+    effective?: boolean;
+    usabilityStatus?: string;
+    adapterStatus?: string;
+    officialVerifierStatus?: string;
+    evaluationMode?: string;
+    scoreLabel?: string;
+    caseCount?: number | null;
+  },
   lang: string,
 ) {
   const status = String(dataset.usabilityStatus || "").trim();
   const caseCount = typeof dataset.caseCount === "number" ? dataset.caseCount : null;
+  if (status === "custom_harness_ready" || status === "agent_harness_ready") {
+    return lang === "zh" ? `自定义评测 ${caseCount ?? 0} 例` : `custom eval ${caseCount ?? 0} cases`;
+  }
   if (dataset.effective) {
     return lang === "zh" ? `可用 ${caseCount ?? 0} 例` : `usable ${caseCount ?? 0} cases`;
   }
@@ -250,6 +268,9 @@ function datasetUsabilityLabel(
   }
   if (status === "requires_external_harness") {
     return lang === "zh" ? "需外部 harness" : "needs harness";
+  }
+  if (String(dataset.officialVerifierStatus || "").trim() === "harbor_pending") {
+    return lang === "zh" ? "官方判分待接" : "official verifier pending";
   }
   if (status === "invalid") {
     return lang === "zh" ? "格式异常" : "invalid";
@@ -581,6 +602,20 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       await invalidateSupervisedEvolution();
     },
   });
+  const retryRunMutation = useMutation({
+    onMutate: () => {
+      setActionFeedback("");
+    },
+    mutationFn: (runId: string) =>
+      fetchJson<EvolutionActiveRun>(`/api/evolution/runs/${runId}/retry`, {
+        method: "POST",
+      }).then((snapshot) => requireEvolutionRunSnapshot(snapshot, "supervised retry")),
+    onSuccess: async (snapshot) => {
+      setActionFeedback(snapshot.latestMessage || "");
+      setLiveActiveRun(snapshot);
+      await invalidateSupervisedEvolution();
+    },
+  });
   const terminateRunMutation = useMutation({
     onMutate: () => {
       setActionFeedback("");
@@ -879,17 +914,53 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     ? `${monitoredRun.currentCaseIndex ?? "--"}/${monitoredRun.caseTotal ?? "--"} ${monitoredRun.currentCaseId}`
     : "--";
   const monitoredTaskLabel = monitoredRun?.currentTask || monitoredRun?.latestMessage || "--";
+  const monitoredStatusLabel = monitoredRun?.decision === "INCONCLUSIVE"
+    ? decisionLabel(monitoredRun.decision)
+    : statusLabel(monitoredRun?.status || "");
+  const monitoredControlSummary = monitoredRun
+    ? buildSupervisedRunControlSummary(monitoredRun, lang, {
+      statusLabel,
+      roleLabel: runRoleLabel,
+    })
+    : null;
+  const supervisedTabSummaries = {
+    live: {
+      status: monitoredRun ? monitoredStatusLabel : statusLabel("idle"),
+      detail: monitoredControlSummary?.stageLabel || (lang === "zh" ? "等待启动" : "Waiting to start"),
+      count: monitoredRun ? 1 : 0,
+    },
+    runs: {
+      status: overviewLatestRunId || (lang === "zh" ? "暂无运行" : "No runs"),
+      detail: lang === "zh" ? `${runs.length} 条记录` : `${runs.length} records`,
+      count: runs.length,
+    },
+    library: {
+      status: lang === "zh" ? `${pendingItems.length} 待推进` : `${pendingItems.length} pending`,
+      detail: lang === "zh" ? `${libraryItems.length} 已入库` : `${libraryItems.length} stored`,
+      count: pendingItems.length + libraryItems.length,
+    },
+    review: {
+      status: highlightedReviewPending ? t("selfWorktreeReviewPending") : (lang === "zh" ? "无阻塞 review" : "No blocking review"),
+      detail: activeWorktreeRun
+        ? statusLabel(activeWorktreeRun.status)
+        : lang === "zh" ? `${worktreeRuns.length} 个候选` : `${worktreeRuns.length} candidates`,
+      count: highlightedReviewPending ? 1 : worktreeRuns.length,
+    },
+  };
   const pauseSupervisedAction = monitoredRun?.actionStates?.pause;
   const resumeSupervisedAction = monitoredRun?.actionStates?.resume;
+  const retrySupervisedAction = monitoredRun?.actionStates?.retry;
   const terminateSupervisedAction = monitoredRun?.actionStates?.terminate;
   const deleteSupervisedAction = monitoredRun?.actionStates?.delete;
   const canPauseSupervisedRun = Boolean(monitoredRun && pauseSupervisedAction?.enabled);
   const canResumeSupervisedRun = Boolean(monitoredRun && resumeSupervisedAction?.enabled);
+  const canRetrySupervisedRun = Boolean(monitoredRun && retrySupervisedAction?.enabled);
   const canTerminateSupervisedRun = Boolean(monitoredRun && terminateSupervisedAction?.enabled);
   const canDeleteSupervisedRun = Boolean(monitoredRun && deleteSupervisedAction?.enabled);
   const supervisedControlError =
     pauseRunMutation.error?.message
     ?? resumeRunMutation.error?.message
+    ?? retryRunMutation.error?.message
     ?? terminateRunMutation.error?.message
     ?? deleteRunMutation.error?.message
     ?? worktreeActionMutation.error?.message
@@ -942,6 +1013,13 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
     selectedSourceOption?.kind === "dataset"
       ? (selectedSourceOption.dataset.usabilityReason || selectedSourceOption.dataset.description || "--")
       : (selectedSourceOption?.bundle.benchmark || selectedSourceOption?.bundle.declaredName || "--");
+  const selectedSourceEvaluationText =
+    selectedSourceOption?.kind === "dataset"
+      && String(selectedSourceOption.dataset.evaluationMode || "").trim() === "custom_harness"
+      ? (lang === "zh"
+        ? `${selectedSourceOption.dataset.scoreLabel || "Vibelution 自定义分数"}；非官方 Terminal-Bench 成绩`
+        : `${selectedSourceOption.dataset.scoreLabel || "Vibelution custom score"}; not an official Terminal-Bench score`)
+      : "";
   const normalizedLibrarySearch = librarySearchInput.trim().toLowerCase();
   const filterLibraryEntries = (entries: EvolutionLibraryEntry[]) =>
     entries.filter((item) => {
@@ -2149,6 +2227,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
               activeView={evolutionView}
               overviewIntakeMode={overview?.intakeMode}
               configIntakeMode={configQuery.data?.intakeMode}
+              tabSummaries={supervisedTabSummaries}
             />
           ) : null}
         </div>
@@ -2286,6 +2365,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     <div className={styles.sourceMetaMain}>
                       <strong>{selectedSourceOption.label}</strong>
                       <span>{selectedSourceStatusText}</span>
+                      {selectedSourceEvaluationText ? <span>{selectedSourceEvaluationText}</span> : null}
                     </div>
                     <span className={styles.sourceMetaSide}>
                       {selectedSourceKindLabel} · {selectedSourceCaseText}
@@ -2484,7 +2564,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
                 {monitoredRun ? (
                   <div className={styles.liveStatusRow}>
-                    <span className={styles.statusPill}>{statusLabel(monitoredRun.status)}</span>
+                    <span className={styles.statusPill}>{monitoredStatusLabel}</span>
                     <span className={styles.secondaryPill}>{sourceKindLabel(monitoredRun.sourceKind)}</span>
                   </div>
                 ) : (
@@ -2517,6 +2597,16 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         aria-label={t("resumeSupervisedRun")}
                       >
                         {resumeRunMutation.isPending ? <LoaderCircle size={15} /> : <Play size={15} />}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.compactIconAction}
+                        disabled={!canRetrySupervisedRun || retryRunMutation.isPending}
+                        title={disabledReason(retrySupervisedAction) || t("retrySupervisedRun")}
+                        onClick={() => monitoredRun && retryRunMutation.mutate(monitoredRun.runId)}
+                        aria-label={t("retrySupervisedRun")}
+                      >
+                        {retryRunMutation.isPending ? <LoaderCircle size={15} /> : <RefreshCw size={15} />}
                       </button>
                       <button
                         type="button"
@@ -2569,12 +2659,23 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   ) : null}
 
                   <div className={styles.monitorSummary}>
-                    <div className={styles.liveSummaryRow}>
-                      <span className={styles.statusIcon}>{statusIcon(monitoredRun.status)}</span>
-                      <p className={styles.heroSummary} title={monitoredRun.latestMessage}>
-                        {monitoredRun.latestMessage}
-                      </p>
+                    <div className={`${styles.liveSummaryRow} ${monitoredControlSummary ? styles[`runSummaryTone_${monitoredControlSummary.tone}`] : ""}`}>
+                      <span className={styles.statusIcon}>{statusIcon(monitoredRun.status, monitoredRun.decision)}</span>
+                      <div className={styles.runControlSummaryBody}>
+                        <p className={styles.heroSummary}>
+                          {monitoredControlSummary?.headline || monitoredRun.latestMessage}
+                        </p>
+                        {monitoredControlSummary?.reason ? (
+                          <p className={styles.runControlReason}>{monitoredControlSummary.reason}</p>
+                        ) : null}
+                      </div>
                     </div>
+                    {monitoredControlSummary?.nextAction ? (
+                      <div className={styles.runNextActionStrip}>
+                        <strong>{t("nextRecommendedAction")}</strong>
+                        <span>{monitoredControlSummary.nextAction}</span>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className={styles.monitorMetricsDense}>
@@ -2584,7 +2685,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                     </article>
                     <article className={styles.metricTile}>
                       <span>{t("activeRunPhase")}</span>
-                      <strong>{statusLabel(monitoredRun.currentPhase || monitoredRun.status)}</strong>
+                      <strong>{monitoredControlSummary?.stageLabel || statusLabel(monitoredRun.currentPhase || monitoredRun.status)}</strong>
                     </article>
                     <article className={styles.metricTile}>
                       <span>{t("activeRunCurrentCase")}</span>
@@ -2595,8 +2696,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       <strong>{monitoredRun.currentRole || "--"}</strong>
                     </article>
                     <article className={styles.metricTile}>
-                      <span>{t("activeRunCurrentTask")}</span>
-                      <strong title={monitoredTaskLabel}>{monitoredTaskLabel}</strong>
+                      <span>{t("activeRunResult")}</span>
+                      <strong>{monitoredControlSummary?.resultLabel || monitoredTaskLabel}</strong>
                     </article>
                     <article className={styles.metricTile}>
                       <span>{t("latestLiveMessage")}</span>
@@ -2741,7 +2842,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                                 <strong>{caseIoEntryLabel(entry.kind, entry.label, entry.status)}</strong>
                                 <span className={styles.formHint}>{compactTimestamp(entry.timestamp)}</span>
                               </div>
-                              <pre className={styles.ioContent} title={entry.content}>{entry.content}</pre>
+                              <pre className={styles.ioContent}>{entry.content}</pre>
                             </article>
                           ))}
                         </div>
@@ -2913,7 +3014,12 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                 </div>
               ) : (
                 <div className={styles.runListScrollable}>
-                  {filteredRuns.map((run) => (
+                  {filteredRuns.map((run) => {
+                    const runDisplay = buildSupervisedRunRecordDisplay(run, lang, {
+                      statusLabel,
+                      decisionLabel,
+                    });
+                    return (
                     <article
                       key={run.id}
                       className={
@@ -2941,8 +3047,11 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         className={styles.runCardButton}
                         onClick={() => setSelectedRunId(run.id)}
                       >
-                        <div className={styles.listRowTop}>
-                          <strong>{run.id}</strong>
+                        <div className={`${styles.listRowTop} ${styles.runRecordTitleRow}`}>
+                          <div className={styles.runRecordIdentity}>
+                            <strong>{runDisplay.title}</strong>
+                            <span>{runDisplay.idLabel}</span>
+                          </div>
                           <span className={styles.secondaryPill}>{decisionLabel(run.decision)}</span>
                         </div>
                         <div className={styles.metaRow}>
@@ -2950,7 +3059,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                           <span>{run.outcomeSemantics.proposalStatusLabel}</span>
                         </div>
                         <div className={styles.scoreRow}>
-                          <span>{run.bundleName || "--"}</span>
+                          <span>{runDisplay.subtitle}</span>
                           <strong>{run.candidateScore}</strong>
                         </div>
                         <p>{run.summary}</p>
@@ -2963,7 +3072,8 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                         <p className={styles.noticeText}>{run.deleteBlockReason}</p>
                       ) : null}
                     </article>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </section>
@@ -2986,7 +3096,10 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                   <div className={styles.detailHeader}>
                     <div>
                       <p className={styles.eyebrow}>{t("runDetail")}</p>
-                      <h2 className={styles.detailTitle}>{selectedRun.id}</h2>
+                      <h2 className={styles.detailTitle}>
+                        {buildSupervisedRunRecordDisplay(selectedRun, lang, { statusLabel, decisionLabel }).title}
+                      </h2>
+                      <p className={styles.detailSubtleId}>{selectedRun.id}</p>
                     </div>
                     <div className={styles.detailHeaderActions}>
                       <span className={styles.statusPill}>{decisionLabel(selectedRun.decision)}</span>
