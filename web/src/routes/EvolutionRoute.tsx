@@ -2829,7 +2829,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
                       )}
                     </div>
 
-                    <div className={`${styles.detailSection} ${styles.detailSectionCompact}`}>
+                    <div className={`${styles.detailSection} ${styles.detailSectionCompact} ${styles.transcriptSection}`}>
                       <h3>{t("currentCaseTranscript")}</h3>
                       {monitoredCaseTranscript.length > 0 ? (
                         <div className={styles.ioTranscript}>
