@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 - 2026-06-01
+
+- Tightened supervised evolution real-run selection so `terminal_bench_core` is marked as requiring the official Harbor/Docker Terminal-Bench `/app` sandbox and verifier, hidden from the primary picker, and blocked during start/retry preflight.
+- Kept `terminal_bench_smoke` as the currently runnable multi-step ReAct harness option for closed-loop validation while official Terminal-Bench runner integration remains pending.
+- Preserved harness evidence for failed or cancelled supervised runs before temporary worktrees are removed, including conversation/debug logs, payloads, and runtime-scene lifecycle traces.
+- Fixed supervised evolution request payload roles so user task input is sent as provider `user` content instead of drifting into a system message.
+- Clarified supervised retry control flow by separating the local retry implementation from the runtime-manager wrapper and covering official-environment retry blocking with tests.
+
 ## 0.7.0 - 2026-05-31
 
 - Added Memory Platform P1 for team knowledge bases: JSON/JSONL persistence for knowledge bases, source artifacts, refinement proposals, batches, formal items, and audit records under each team workspace.

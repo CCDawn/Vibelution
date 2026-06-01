@@ -45,10 +45,12 @@ def test_chat_user_message_uses_chat_protocol_header():
 def test_supervised_evolution_request_message_uses_supervised_label():
     msg = build_supervised_evolution_request_message("case: lint regression probe")
 
-    assert isinstance(msg, SystemMessage)
+    assert isinstance(msg, dict)
+    assert msg["role"] == "user"
     assert RuntimeInputKind.SUPERVISED_EVOLUTION_REQUEST.value == "supervised_evolution_request"
-    assert "监督进化请求" in msg.content
-    assert "lint regression probe" in msg.content
+    assert "监督进化请求" in msg["content"]
+    assert "lint regression probe" in msg["content"]
+    assert _message_to_openai_dict(msg)["role"] == "user"
 
 
 def test_is_external_request_message_uses_protocol_header_only():
