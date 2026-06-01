@@ -72,6 +72,7 @@ SCOPES = {"agent", "team", "project", "global"}
 REVIEW_PRIORITIES = {"normal", "elevated", "urgent"}
 SUGGESTION_STATUSES = {"pending", "applied", "rejected"}
 _SAFE_ID_FRAGMENT = re.compile(r"[^A-Za-z0-9_.-]+")
+_SEARCH_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_.-]+|[\u4e00-\u9fff]")
 _LOCK = threading.RLock()
 
 
@@ -1273,6 +1274,7 @@ def search_knowledge_items(
     stability: str = "",
     created_from: str = "",
     created_to: str = "",
+    search_mode: str = "exact",
     limit: int = 25,
 ) -> dict[str, Any]:
     _sync_roots()
@@ -1285,6 +1287,9 @@ def search_knowledge_items(
         raise TeamKnowledgeError(f"Unsupported source type: {source_type}")
     normalized_importance = _enum_value(importance_level, IMPORTANCE_LEVELS, "importance level") if importance_level else ""
     normalized_stability = _enum_value(stability, STABILITY_VALUES, "stability") if stability else ""
+    normalized_search_mode = str(search_mode or "exact").strip().lower()
+    if normalized_search_mode not in {"exact", "semantic", "hybrid"}:
+        raise TeamKnowledgeError(f"Unsupported knowledge search mode: {search_mode}")
     bounded_limit = max(1, min(100, int(limit or 25)))
     results: list[dict[str, Any]] = []
     scanned_bases = 0
@@ -1317,16 +1322,34 @@ def search_knowledge_items(
                     created_from=created_from,
                     created_to=created_to,
                     artifacts_by_id=artifacts_by_id,
+                    search_mode=normalized_search_mode,
                 ):
                     continue
-                results.append(_search_item_view(item, base, team, artifacts_by_id))
+                view = _search_item_view(item, base, team, artifacts_by_id)
+                score = _semantic_match_score(view, normalized_query) if normalized_query else 1.0
+                if normalized_query and normalized_search_mode == "semantic" and score <= 0:
+                    continue
+                if normalized_query and normalized_search_mode == "hybrid" and score <= 0:
+                    haystack = " ".join(
+                        [
+                            str(view.get("title") or ""),
+                            str(view.get("summary") or ""),
+                            str(view.get("content") or ""),
+                        ]
+                    ).lower()
+                    if normalized_query not in haystack:
+                        continue
+                view["semanticScore"] = score
+                view["searchMode"] = normalized_search_mode
+                view["matchReason"] = _search_match_reason(view, normalized_query, score)
+                results.append(view)
                 if len(results) >= bounded_limit:
                     break
             if len(results) >= bounded_limit:
                 break
         if len(results) >= bounded_limit:
             break
-    results.sort(key=lambda item: str(item.get("updatedAt") or item.get("createdAt") or ""), reverse=True)
+    results.sort(key=lambda item: (float(item.get("semanticScore") or 0.0), str(item.get("updatedAt") or item.get("createdAt") or "")), reverse=True)
     _record_event(
         "knowledge.search.executed",
         normalized_team_id,
@@ -1348,12 +1371,195 @@ def search_knowledge_items(
             "stability": normalized_stability,
             "createdFrom": str(created_from or "").strip(),
             "createdTo": str(created_to or "").strip(),
+            "searchMode": normalized_search_mode,
             "limit": bounded_limit,
         },
         "summary": {"resultCount": len(results), "scannedKnowledgeBaseCount": scanned_bases},
         "results": results,
         "updatedAt": utc_now_iso(),
     }
+
+
+def get_knowledge_operations_health(*, agent_id: str = "") -> dict[str, Any]:
+    """Return operational health for accessible team knowledge bases."""
+
+    _sync_roots()
+    normalized_agent_id = str(agent_id or "").strip()
+    rows: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = []
+    for team in team_service.list_teams_compact(include_archived=True).get("teams") or []:
+        team_id = str(team.get("teamId") or "").strip()
+        if not team_id:
+            continue
+        for base in _knowledge_bases_for_team(team_id):
+            if not _can_access(team, base, normalized_agent_id, "read"):
+                continue
+            base_id = str(base.get("knowledgeBaseId") or "")
+            artifacts = _source_artifacts_for_base(team_id, base_id)
+            proposals = [
+                proposal
+                for proposal in _read_jsonl(_proposals_path(team_id))
+                if str(proposal.get("targetKnowledgeBaseId") or "") == base_id
+            ]
+            items = [
+                item
+                for item in _read_jsonl(_items_path(team_id))
+                if str(item.get("knowledgeBaseId") or "") == base_id
+            ]
+            suggestions = [
+                suggestion
+                for suggestion in _read_jsonl(_rating_suggestions_path(team_id))
+                if str(suggestion.get("knowledgeBaseId") or "") == base_id
+            ]
+            proposal_source_ids = {
+                str(source_id or "")
+                for proposal in proposals
+                for source_id in list(proposal.get("sourceArtifactIds") or [])
+                if str(source_id or "").strip()
+            }
+            orphan_sources = [item for item in artifacts if str(item.get("sourceArtifactId") or "") not in proposal_source_ids]
+            pending_proposals = [item for item in proposals if str(item.get("status") or "") == "pending"]
+            pending_suggestions = [item for item in suggestions if str(item.get("status") or "") == "pending"]
+            unrated_items = [
+                item
+                for item in items
+                if not str(item.get("markedAt") or "").strip()
+                and str(item.get("importanceLevel") or "medium") == "medium"
+                and str(item.get("reviewPriority") or "normal") == "normal"
+            ]
+            health = "ok"
+            if pending_proposals or pending_suggestions:
+                health = "warning"
+            if orphan_sources and not proposals:
+                health = "attention"
+            row = {
+                "teamId": team_id,
+                "teamName": str(team.get("name") or ""),
+                "knowledgeBaseId": base_id,
+                "knowledgeBaseName": str(base.get("name") or ""),
+                "health": health,
+                "counts": {
+                    "sourceArtifactCount": len(artifacts),
+                    "orphanSourceCount": len(orphan_sources),
+                    "proposalCount": len(proposals),
+                    "pendingProposalCount": len(pending_proposals),
+                    "formalItemCount": len(items),
+                    "unratedItemCount": len(unrated_items),
+                    "pendingRatingSuggestionCount": len(pending_suggestions),
+                },
+                "nextReviewTargetIds": [
+                    *[str(item.get("proposalId") or "") for item in pending_proposals[:3]],
+                    *[str(item.get("suggestionId") or "") for item in pending_suggestions[:3]],
+                    *[str(item.get("sourceArtifactId") or "") for item in orphan_sources[:3]],
+                ],
+            }
+            rows.append(row)
+            if orphan_sources:
+                findings.append(_knowledge_health_finding("orphan_sources", "warning", row, len(orphan_sources), "Registered sources still need refinement proposals."))
+            if pending_proposals:
+                findings.append(_knowledge_health_finding("pending_proposals", "warning", row, len(pending_proposals), "Pending proposals need reviewer decisions."))
+            if pending_suggestions:
+                findings.append(_knowledge_health_finding("pending_rating_suggestions", "info", row, len(pending_suggestions), "Rating suggestions are waiting for reviewer confirmation."))
+            if unrated_items:
+                findings.append(_knowledge_health_finding("unrated_items", "info", row, len(unrated_items), "Formal knowledge items still use default importance metadata."))
+    summary = {
+        "knowledgeBaseCount": len(rows),
+        "attentionCount": sum(1 for row in rows if row["health"] == "attention"),
+        "warningCount": sum(1 for row in rows if row["health"] == "warning"),
+        "okCount": sum(1 for row in rows if row["health"] == "ok"),
+        "findingCount": len(findings),
+        "orphanSourceCount": sum(int(row["counts"]["orphanSourceCount"]) for row in rows),
+        "pendingProposalCount": sum(int(row["counts"]["pendingProposalCount"]) for row in rows),
+        "pendingRatingSuggestionCount": sum(int(row["counts"]["pendingRatingSuggestionCount"]) for row in rows),
+        "unratedItemCount": sum(int(row["counts"]["unratedItemCount"]) for row in rows),
+    }
+    _record_event(
+        "knowledge.operations.health.viewed",
+        "",
+        "",
+        actor_agent_id=normalized_agent_id,
+        fields={"knowledgeBaseCount": summary["knowledgeBaseCount"], "findingCount": summary["findingCount"]},
+    )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": normalized_agent_id,
+        "knowledgeBases": rows,
+        "findings": findings,
+        "summary": summary,
+        "updatedAt": utc_now_iso(),
+    }
+
+
+def get_knowledge_governance_plan(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
+    """Return a read-only governance plan derived from health and steward workbench state."""
+
+    normalized_agent_id = str(agent_id or "").strip()
+    bounded_limit = max(1, min(50, int(limit or 12)))
+    workbench = get_knowledge_steward_workbench(agent_id=normalized_agent_id, limit=bounded_limit)
+    health = get_knowledge_operations_health(agent_id=normalized_agent_id)
+    actions: list[dict[str, Any]] = []
+    for item in list(workbench.get("nextActions") or []):
+        actions.append(
+            {
+                "planActionId": f"plan:{item.get('actionId')}",
+                "kind": str(item.get("recommendedAction") or ""),
+                "priority": str(item.get("priority") or "normal"),
+                "knowledgeBaseId": str(item.get("knowledgeBaseId") or ""),
+                "knowledgeBaseName": str(item.get("knowledgeBaseName") or ""),
+                "targetId": str(item.get("targetId") or ""),
+                "title": str(item.get("title") or ""),
+                "recommendedTool": _recommended_tool_for_action(str(item.get("recommendedAction") or "")),
+                "nextStep": str(item.get("nextStep") or ""),
+                "requiresReviewer": bool(item.get("requiresReviewer")),
+                "mutatesFormalKnowledge": False,
+            }
+        )
+    for finding in list(health.get("findings") or []):
+        if str(finding.get("findingType") or "") == "unrated_items":
+            actions.append(
+                {
+                    "planActionId": f"plan:{finding.get('findingId')}",
+                    "kind": "suggest_rating_metadata",
+                    "priority": "normal",
+                    "knowledgeBaseId": str(finding.get("knowledgeBaseId") or ""),
+                    "knowledgeBaseName": str(finding.get("knowledgeBaseName") or ""),
+                    "targetId": "",
+                    "title": "Suggest rating metadata for default-marked formal knowledge.",
+                    "recommendedTool": "knowledge_rating_suggestion_tool",
+                    "nextStep": "Inspect formal items and submit pending rating suggestions for reviewer confirmation.",
+                    "requiresReviewer": True,
+                    "mutatesFormalKnowledge": False,
+                }
+            )
+    actions = actions[:bounded_limit]
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": normalized_agent_id,
+        "mode": "recommendations_only",
+        "actions": actions,
+        "summary": {
+            "actionCount": len(actions),
+            "healthFindingCount": int((health.get("summary") or {}).get("findingCount") or 0),
+            "workbenchRecommendationCount": int((workbench.get("summary") or {}).get("recommendationCount") or 0),
+        },
+        "operatingBoundary": {
+            "canDirectlyApplyKnowledge": False,
+            "canDeleteKnowledge": False,
+            "canChangeAcl": False,
+            "canBypassReviewer": False,
+            "formalKnowledgeRequiresReviewer": True,
+            "planOnly": True,
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_event(
+        "knowledge.governance.plan.viewed",
+        "",
+        "",
+        actor_agent_id=normalized_agent_id,
+        fields={"actionCount": len(actions), "healthFindingCount": payload["summary"]["healthFindingCount"]},
+    )
+    return payload
 
 
 def knowledge_permission_audit(*, agent_id: str = "") -> dict[str, Any]:
@@ -1631,6 +1837,66 @@ def _require_proposal(team_id: str, knowledge_base_id: str, proposal_id: str) ->
     return proposal
 
 
+def _search_text_for_payload(payload: Any) -> str:
+    values: list[str] = []
+
+    def collect(value: Any) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                values.append(text)
+            return
+        if isinstance(value, (int, float)):
+            values.append(str(value))
+            return
+        if isinstance(value, dict):
+            for nested in value.values():
+                collect(nested)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for nested in value:
+                collect(nested)
+
+    collect(payload)
+    return " ".join(values).lower()
+
+
+def _tokenize_search_text(text: str) -> set[str]:
+    return {
+        match.group(0).lower()
+        for match in _SEARCH_TOKEN_PATTERN.finditer(str(text or "").lower())
+        if match.group(0).strip()
+    }
+
+
+def _semantic_match_score(payload: Any, query: str) -> float:
+    normalized_query = str(query or "").strip().lower()
+    if not normalized_query:
+        return 1.0
+    haystack = payload if isinstance(payload, str) else _search_text_for_payload(payload)
+    if normalized_query in haystack:
+        return 1.0
+    query_tokens = _tokenize_search_text(normalized_query)
+    if not query_tokens:
+        return 0.0
+    haystack_tokens = _tokenize_search_text(haystack)
+    if not haystack_tokens:
+        return 0.0
+    return round(len(query_tokens.intersection(haystack_tokens)) / len(query_tokens), 4)
+
+
+def _search_match_reason(view: dict[str, Any], query: str, score: float) -> str:
+    if not str(query or "").strip():
+        return "no_query"
+    if str(query or "").strip().lower() in _search_text_for_payload(view):
+        return "exact_phrase"
+    if score > 0:
+        return "token_overlap"
+    return "metadata_filter"
+
+
 def _item_matches_filters(
     item: dict[str, Any],
     *,
@@ -1643,17 +1909,18 @@ def _item_matches_filters(
     created_from: str,
     created_to: str,
     artifacts_by_id: dict[str, dict[str, Any]],
+    search_mode: str = "exact",
 ) -> bool:
     if query:
-        haystack = " ".join(
-            [
-                str(item.get("title") or ""),
-                str(item.get("summary") or ""),
-                str(item.get("content") or ""),
-                " ".join(str(tag) for tag in list(item.get("tags") or [])),
-            ]
-        ).lower()
-        if query not in haystack:
+        normalized_search_mode = str(search_mode or "exact").strip().lower()
+        haystack = _search_text_for_payload([item, list(artifacts_by_id.values())])
+        exact_match = query in haystack
+        semantic_score = _semantic_match_score(haystack, query)
+        if normalized_search_mode == "exact" and not exact_match:
+            return False
+        if normalized_search_mode == "semantic" and semantic_score <= 0:
+            return False
+        if normalized_search_mode == "hybrid" and not exact_match and semantic_score <= 0:
             return False
     if tags and not tags.issubset({str(tag or "").strip().lower() for tag in list(item.get("tags") or [])}):
         return False
@@ -1859,6 +2126,36 @@ def _steward_workbench_stage(
         "items": stage_recommendations[:6],
         "status": "clear" if open_count == 0 else ("actionable" if executable_count else "needs_permission_or_reviewer"),
     }
+
+
+def _knowledge_health_finding(
+    finding_type: str,
+    severity: str,
+    row: dict[str, Any],
+    count: int,
+    message: str,
+) -> dict[str, Any]:
+    return {
+        "findingId": f"khealth:{row.get('knowledgeBaseId')}:{finding_type}",
+        "findingType": finding_type,
+        "severity": severity,
+        "teamId": str(row.get("teamId") or ""),
+        "teamName": str(row.get("teamName") or ""),
+        "knowledgeBaseId": str(row.get("knowledgeBaseId") or ""),
+        "knowledgeBaseName": str(row.get("knowledgeBaseName") or ""),
+        "count": int(count),
+        "message": message,
+        "nextReviewTargetIds": [str(value) for value in list(row.get("nextReviewTargetIds") or []) if str(value or "").strip()],
+    }
+
+
+def _recommended_tool_for_action(action: str) -> str:
+    return {
+        "review_proposal": "knowledge_governance_tasks_tool",
+        "review_rating_suggestion": "knowledge_governance_tasks_tool",
+        "draft_refinement_proposal": "knowledge_proposal_tool",
+        "suggest_rating_metadata": "knowledge_rating_suggestion_tool",
+    }.get(str(action or "").strip(), "knowledge_query_tool")
 
 
 def _priority_rank(priority: str) -> int:

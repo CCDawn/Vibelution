@@ -479,3 +479,101 @@ def test_ingestion_package_preserves_team_chat_room_guard(knowledge_env):
 
     assert package["sourceArtifact"]["sourceRef"]["roomId"] == knowledge_env["team"]["linkedChatRoomId"]
     assert package["proposal"]["status"] == "pending"
+
+
+def test_semantic_search_matches_token_overlap_without_exact_substring(knowledge_env):
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Planner cadence",
+        content="Governance planner health signals should be visible before reviewer action.",
+        tags=["ops"],
+    )
+    team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+
+    exact = team_knowledge_service.search_knowledge_items(
+        agent_id=knowledge_env["member"]["agentId"],
+        knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+        query="health governance missing",
+        search_mode="exact",
+    )
+    semantic = team_knowledge_service.search_knowledge_items(
+        agent_id=knowledge_env["member"]["agentId"],
+        knowledge_base_id=knowledge_env["base"]["knowledgeBaseId"],
+        query="health governance missing",
+        search_mode="semantic",
+    )
+
+    assert exact["summary"]["resultCount"] == 0
+    assert semantic["summary"]["resultCount"] == 1
+    assert semantic["results"][0]["semanticScore"] > 0
+    assert semantic["results"][0]["matchReason"] == "token_overlap"
+
+
+def test_operations_health_reports_orphan_pending_and_unrated_items(knowledge_env):
+    source = team_knowledge_service.create_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "orphan"},
+        title="Orphan source",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Pending health proposal",
+        content="Pending proposal should be reported.",
+    )
+    applied = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    pending_rating = team_knowledge_service.create_rating_suggestion(
+        knowledge_env["base"]["knowledgeBaseId"],
+        suggested_by_agent_id=knowledge_env["lead"]["agentId"],
+        target_type="knowledge_item",
+        knowledge_item_id=applied["item"]["knowledgeItemId"],
+        importance_level="high",
+        stability="stable",
+        review_priority="elevated",
+    )
+
+    health = team_knowledge_service.get_knowledge_operations_health(agent_id=knowledge_env["member"]["agentId"])
+
+    assert health["summary"]["knowledgeBaseCount"] == 1
+    assert health["summary"]["orphanSourceCount"] == 1
+    assert health["summary"]["pendingRatingSuggestionCount"] == 1
+    assert health["summary"]["unratedItemCount"] == 1
+    finding_types = {finding["findingType"] for finding in health["findings"]}
+    assert {"orphan_sources", "pending_rating_suggestions", "unrated_items"}.issubset(finding_types)
+    assert source["sourceArtifactId"] in health["knowledgeBases"][0]["nextReviewTargetIds"]
+    assert pending_rating["suggestionId"] in health["knowledgeBases"][0]["nextReviewTargetIds"]
+
+
+def test_governance_plan_is_read_only_and_links_tools(knowledge_env):
+    team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Plan proposal",
+        content="Governance plan should recommend review without applying.",
+    )
+
+    plan = team_knowledge_service.get_knowledge_governance_plan(agent_id=knowledge_env["lead"]["agentId"], limit=4)
+
+    assert plan["mode"] == "recommendations_only"
+    assert plan["operatingBoundary"]["planOnly"] is True
+    assert plan["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert plan["operatingBoundary"]["canDeleteKnowledge"] is False
+    assert plan["actions"]
+    assert plan["actions"][0]["mutatesFormalKnowledge"] is False
+    assert plan["actions"][0]["recommendedTool"] == "knowledge_governance_tasks_tool"

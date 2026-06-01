@@ -1626,6 +1626,27 @@
   min-width: 0;
 }
 
+.healthStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.healthStrip span {
+  min-width: 0;
+  padding: 5px 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-muted);
+  color: var(--fg-secondary);
+  font-size: 0.7rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .knowledgeRow {
   display: grid;
   grid-template-columns: minmax(82px, 0.32fr) minmax(0, 0.72fr) minmax(0, 1.15fr) auto auto;

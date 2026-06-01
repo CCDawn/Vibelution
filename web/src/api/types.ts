@@ -429,6 +429,9 @@ export type KnowledgeSearchResult = KnowledgeItem & {
   knowledgeBaseName: string;
   teamName: string;
   sourceTypes: string[];
+  semanticScore: number;
+  searchMode: "exact" | "semantic" | "hybrid" | string;
+  matchReason: string;
   sourceSummaries: Array<{
     sourceArtifactId: string;
     sourceType: string;
@@ -517,6 +520,85 @@ export type KnowledgeGovernanceTasksPayload = {
     proposalReviewCount: number;
     ratingReviewCount: number;
     sourceNeedsProposalCount: number;
+  };
+  updatedAt: string;
+};
+
+export type KnowledgeOperationsHealthPayload = {
+  schemaVersion: number;
+  agentId: string;
+  knowledgeBases: Array<{
+    teamId: string;
+    teamName: string;
+    knowledgeBaseId: string;
+    knowledgeBaseName: string;
+    health: "ok" | "attention" | "warning" | string;
+    counts: {
+      sourceArtifactCount: number;
+      orphanSourceCount: number;
+      proposalCount: number;
+      pendingProposalCount: number;
+      formalItemCount: number;
+      unratedItemCount: number;
+      pendingRatingSuggestionCount: number;
+    };
+    nextReviewTargetIds: string[];
+  }>;
+  findings: Array<{
+    findingId: string;
+    findingType: string;
+    severity: string;
+    teamId: string;
+    teamName: string;
+    knowledgeBaseId: string;
+    knowledgeBaseName: string;
+    count: number;
+    message: string;
+    nextReviewTargetIds: string[];
+  }>;
+  summary: {
+    knowledgeBaseCount: number;
+    attentionCount: number;
+    warningCount: number;
+    okCount: number;
+    findingCount: number;
+    orphanSourceCount: number;
+    pendingProposalCount: number;
+    pendingRatingSuggestionCount: number;
+    unratedItemCount: number;
+  };
+  updatedAt: string;
+};
+
+export type KnowledgeGovernancePlanPayload = {
+  schemaVersion: number;
+  agentId: string;
+  mode: "recommendations_only" | string;
+  actions: Array<{
+    planActionId: string;
+    kind: string;
+    priority: string;
+    knowledgeBaseId: string;
+    knowledgeBaseName: string;
+    targetId: string;
+    title: string;
+    recommendedTool: string;
+    nextStep: string;
+    requiresReviewer: boolean;
+    mutatesFormalKnowledge: boolean;
+  }>;
+  summary: {
+    actionCount: number;
+    healthFindingCount: number;
+    workbenchRecommendationCount: number;
+  };
+  operatingBoundary: {
+    canDirectlyApplyKnowledge: boolean;
+    canDeleteKnowledge: boolean;
+    canChangeAcl: boolean;
+    canBypassReviewer: boolean;
+    formalKnowledgeRequiresReviewer: boolean;
+    planOnly: boolean;
   };
   updatedAt: string;
 };
@@ -2251,6 +2333,38 @@ export type TeamListPayload = {
     teamsPath: string;
     teamRoot: string;
   };
+};
+
+export type TeamTemplateSummary = {
+  templateId: string;
+  name: string;
+  description: string;
+  purpose: string;
+  defaultTeamName: string;
+  roleCount: number;
+  safetyLevel: string;
+  chatRoom: {
+    mode: string;
+    purpose: string;
+  };
+};
+
+export type TeamTemplateListPayload = {
+  schemaVersion: number;
+  templates: TeamTemplateSummary[];
+  summary: {
+    templateCount: number;
+  };
+  updatedAt: string;
+};
+
+export type TeamTemplateInstantiatePayload = {
+  schemaVersion: number;
+  template: TeamTemplateSummary;
+  team: Team;
+  createdAgents: AgentInstance[];
+  linkedChatRoom?: Team["linkedChatRoom"];
+  updatedAt: string;
 };
 
 export type ConversationSummary = {

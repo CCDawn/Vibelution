@@ -25,9 +25,11 @@ import { queryKeys } from "../api/queryKeys";
 import {
   KnowledgeItemsPayload,
   KnowledgeItem,
+  KnowledgeGovernancePlanPayload,
   KnowledgeGovernanceTasksPayload,
   KnowledgeIngestionAdaptersPayload,
   KnowledgeIngestionPackageResponse,
+  KnowledgeOperationsHealthPayload,
   KnowledgePermissionAuditPayload,
   KnowledgeRatingSuggestionBulkReviewResponse,
   KnowledgeRatingSuggestion,
@@ -285,6 +287,15 @@ type Copy = {
   stewardNextActions: string;
   acceptanceChecklist: string;
   executable: string;
+  operationsHealth: string;
+  healthFindings: string;
+  governancePlan: string;
+  planOnly: string;
+  searchMode: string;
+  exactSearch: string;
+  semanticSearch: string;
+  hybridSearch: string;
+  semanticScore: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
@@ -349,6 +360,7 @@ type RatingDraft = {
 type KnowledgeSearchDraft = {
   query: string;
   tags: string;
+  searchMode: "exact" | "semantic" | "hybrid";
 };
 type RatingSuggestionStatusFilter = "pending" | "applied" | "rejected" | "all";
 type RatingSuggestionPriorityFilter = "all" | "urgent" | "elevated" | "normal";
@@ -605,6 +617,15 @@ const COPY: Record<"zh" | "en", Copy> = {
     stewardNextActions: "下一步动作",
     acceptanceChecklist: "验收清单",
     executable: "可执行",
+    operationsHealth: "运行健康",
+    healthFindings: "健康发现",
+    governancePlan: "治理计划",
+    planOnly: "只读计划",
+    searchMode: "检索模式",
+    exactSearch: "精确",
+    semanticSearch: "语义",
+    hybridSearch: "混合",
+    semanticScore: "相关度",
   },
   en: {
     eyebrow: "Memory Library",
@@ -839,6 +860,15 @@ const COPY: Record<"zh" | "en", Copy> = {
     stewardNextActions: "Next actions",
     acceptanceChecklist: "Acceptance checklist",
     executable: "Executable",
+    operationsHealth: "Operations health",
+    healthFindings: "Health findings",
+    governancePlan: "Governance plan",
+    planOnly: "Plan only",
+    searchMode: "Search mode",
+    exactSearch: "Exact",
+    semanticSearch: "Semantic",
+    hybridSearch: "Hybrid",
+    semanticScore: "Relevance",
   },
 };
 
@@ -1275,6 +1305,7 @@ function newKnowledgeSearchDraft(): KnowledgeSearchDraft {
   return {
     query: "",
     tags: "",
+    searchMode: "hybrid",
   };
 }
 
@@ -1475,6 +1506,20 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchIntervalInBackground: false,
     enabled: forcedView === "knowledge",
   });
+  const knowledgeOperationsHealthQuery = useQuery({
+    queryKey: queryKeys.knowledgeOperationsHealth(""),
+    queryFn: () => fetchJson<KnowledgeOperationsHealthPayload>("/api/knowledge/operations/health"),
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
+    refetchIntervalInBackground: false,
+    enabled: forcedView === "knowledge",
+  });
+  const knowledgeGovernancePlanQuery = useQuery({
+    queryKey: queryKeys.knowledgeGovernancePlan(""),
+    queryFn: () => fetchJson<KnowledgeGovernancePlanPayload>("/api/knowledge/governance/plan?limit=8"),
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
+    refetchIntervalInBackground: false,
+    enabled: forcedView === "knowledge",
+  });
 
   const memoryMutation = useMutation({
     mutationFn: async (draft: EditDraft) => {
@@ -1572,6 +1617,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       }));
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1597,6 +1644,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setProposalDraft(newProposalDraft());
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1629,6 +1678,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setIngestionDraft(newIngestionDraft());
       setKnowledgeFeedback({ tone: "success", text: `${copy.mutationDone} · ${payload.proposal.title}` });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1651,6 +1702,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
       void queryClient.invalidateQueries({ queryKey: queryKeys.memoryOverview() });
     },
     onError: (error) => {
@@ -1678,6 +1731,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       setKnowledgeFeedback({ tone: "success", text: copy.mutationDone });
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOverview() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1699,6 +1754,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1724,6 +1781,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       void queryClient.invalidateQueries({ queryKey: ["knowledge", "rating-suggestions"] });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeItems(activeKnowledgeBaseId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseId, knowledgeSearchDraft.query, knowledgeSearchDraft.tags) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeOperationsHealth("") });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.knowledgeGovernancePlan("") });
     },
     onError: (error) => {
       setKnowledgeFeedback({ tone: "error", text: `${copy.mutationFailed}: ${error instanceof Error ? error.message : String(error)}` });
@@ -1736,6 +1795,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const knowledgeSteward = knowledgeStewardQuery.data;
   const knowledgeStewardRecommendations = knowledgeStewardRecommendationsQuery.data?.recommendations ?? [];
   const knowledgeStewardWorkbench = knowledgeStewardWorkbenchQuery.data;
+  const knowledgeOperationsHealth = knowledgeOperationsHealthQuery.data;
+  const knowledgeGovernancePlan = knowledgeGovernancePlanQuery.data;
   const knowledgeBases = knowledgeOverview?.knowledgeBases ?? [];
   const activeKnowledgeBase: TeamKnowledgeBase | null =
     knowledgeBases.find((base) => base.knowledgeBaseId === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
@@ -1749,7 +1810,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
   const knowledgeItems = knowledgeItemsQuery.data?.items ?? [];
   const knowledgeSearchQuery = useQuery({
-    queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseForItems, knowledgeSearchDraft.query, knowledgeSearchDraft.tags),
+    queryKey: queryKeys.knowledgeSearch(activeKnowledgeBaseForItems, knowledgeSearchDraft.query, `${knowledgeSearchDraft.tags}:${knowledgeSearchDraft.searchMode}`),
     queryFn: () => {
       const params = new URLSearchParams();
       if (activeKnowledgeBaseForItems) {
@@ -1759,6 +1820,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         params.set("query", knowledgeSearchDraft.query.trim());
       }
       commaList(knowledgeSearchDraft.tags).forEach((tag) => params.append("tags", tag));
+      params.set("searchMode", knowledgeSearchDraft.searchMode);
       params.set("limit", "12");
       return fetchJson<KnowledgeSearchPayload>(`/api/knowledge/search?${params.toString()}`);
     },
@@ -3507,6 +3569,22 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <span>{copy.tags}</span>
                 <input value={knowledgeSearchDraft.tags} onChange={(event) => setKnowledgeSearchDraft({ ...knowledgeSearchDraft, tags: event.target.value })} />
               </label>
+              <label>
+                <span>{copy.searchMode}</span>
+                <select
+                  value={knowledgeSearchDraft.searchMode}
+                  onChange={(event) =>
+                    setKnowledgeSearchDraft({
+                      ...knowledgeSearchDraft,
+                      searchMode: event.target.value as KnowledgeSearchDraft["searchMode"],
+                    })
+                  }
+                >
+                  <option value="exact">{copy.exactSearch}</option>
+                  <option value="semantic">{copy.semanticSearch}</option>
+                  <option value="hybrid">{copy.hybridSearch}</option>
+                </select>
+              </label>
             </div>
             <div className={styles.knowledgeProposalList}>
               {knowledgeSearchResults.map((item) => (
@@ -3515,12 +3593,78 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <span>{item.summary || item.content}</span>
                   <span className={styles.statusPill}>{item.importanceLevel}</span>
                   <small>{item.teamName} · {item.knowledgeBaseName} · {item.sourceTypes.join(", ") || copy.sourceArtifacts}</small>
+                  <small>{copy.semanticScore}: {Math.round(Number(item.semanticScore || 0) * 100)}% · {item.matchReason}</small>
                 </section>
               ))}
               {!knowledgeSearchQuery.isPending && !knowledgeSearchResults.length ? (
                 <section className={styles.emptyDetail}>
                   <Search size={20} />
                   <strong>{copy.noMatches}</strong>
+                </section>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.operationsHealth}</p>
+                <h2>{copy.healthFindings}</h2>
+              </div>
+              <span className={styles.countPill}>{knowledgeOperationsHealth?.summary.findingCount ?? 0}</span>
+            </div>
+            <div className={styles.healthStrip}>
+              <span>{copy.knowledgeBases}: {knowledgeOperationsHealth?.summary.knowledgeBaseCount ?? 0}</span>
+              <span>{copy.pendingProposals}: {knowledgeOperationsHealth?.summary.pendingProposalCount ?? 0}</span>
+              <span>{copy.ratingSuggestions}: {knowledgeOperationsHealth?.summary.pendingRatingSuggestionCount ?? 0}</span>
+              <span>{copy.formalKnowledge}: {knowledgeOperationsHealth?.summary.unratedItemCount ?? 0}</span>
+            </div>
+            <div className={styles.knowledgeProposalList}>
+              {(knowledgeOperationsHealth?.findings ?? []).slice(0, 8).map((finding) => (
+                <section key={finding.findingId} className={styles.knowledgeRow}>
+                  <span className={styles.statusPill}>{finding.severity}</span>
+                  <strong>{finding.findingType}</strong>
+                  <span>{finding.message}</span>
+                  <small>{finding.knowledgeBaseName} · {finding.count}</small>
+                  <small>{finding.nextReviewTargetIds.slice(0, 2).join(", ") || "-"}</small>
+                </section>
+              ))}
+              {!knowledgeOperationsHealthQuery.isPending && !(knowledgeOperationsHealth?.findings ?? []).length ? (
+                <section className={styles.emptyDetail}>
+                  <CheckCircle2 size={20} />
+                  <strong>{copy.noIssues}</strong>
+                </section>
+              ) : null}
+            </div>
+          </section>
+
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.governancePlan}</p>
+                <h2>{copy.planOnly}</h2>
+              </div>
+              <span className={styles.statusPillMuted}>{knowledgeGovernancePlan?.mode ?? "recommendations_only"}</span>
+            </div>
+            <div className={styles.healthStrip}>
+              <span>{copy.noDirectApply}: {knowledgeGovernancePlan?.operatingBoundary.canDirectlyApplyKnowledge ? copy.yes : copy.no}</span>
+              <span>{copy.reviewerRequired}: {knowledgeGovernancePlan?.operatingBoundary.formalKnowledgeRequiresReviewer ? copy.yes : copy.no}</span>
+              <span>{copy.stewardNextActions}: {knowledgeGovernancePlan?.summary.actionCount ?? 0}</span>
+            </div>
+            <div className={styles.knowledgeProposalList}>
+              {(knowledgeGovernancePlan?.actions ?? []).slice(0, 8).map((action) => (
+                <section key={action.planActionId} className={styles.knowledgeRow}>
+                  <span className={styles.statusPill}>{action.priority}</span>
+                  <strong>{action.title}</strong>
+                  <span>{action.nextStep}</span>
+                  <small>{action.kind} · {action.recommendedTool}</small>
+                  <small>{action.mutatesFormalKnowledge ? copy.createsKnowledgeItem : copy.planOnly}</small>
+                </section>
+              ))}
+              {!knowledgeGovernancePlanQuery.isPending && !(knowledgeGovernancePlan?.actions ?? []).length ? (
+                <section className={styles.emptyDetail}>
+                  <CheckCircle2 size={20} />
+                  <strong>{copy.noIssues}</strong>
                 </section>
               ) : null}
             </div>

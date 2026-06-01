@@ -143,10 +143,12 @@ def test_knowledge_search_permission_audit_and_rating_suggestion_routes(tmp_path
 
     search_response = client.get(
         "/api/knowledge/search",
-        params={"agentId": member["agentId"], "query": "rating suggestions", "tags": "governance"},
+        params={"agentId": member["agentId"], "query": "rating governance missing", "tags": "governance", "searchMode": "semantic"},
     )
     assert search_response.status_code == 200
     assert search_response.json()["summary"]["resultCount"] == 1
+    assert search_response.json()["filters"]["searchMode"] == "semantic"
+    assert search_response.json()["results"][0]["semanticScore"] > 0
 
     suggestion_response = client.post(
         f"/api/knowledge-bases/{base['knowledgeBaseId']}/rating-suggestions",
@@ -387,3 +389,44 @@ def test_knowledge_steward_workbench_groups_next_actions(tmp_path, monkeypatch):
         for item in stage["items"]
     )
     assert payload["acceptanceChecklist"][1]["id"] == "proposal_reviewed"
+
+
+def test_knowledge_operations_health_and_governance_plan_routes_are_read_only(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Plan KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    source = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
+        json={
+            "sourceType": "manual_user_entry",
+            "sourceRef": {"note": "plan route source"},
+            "title": "Plan route source",
+            "actorAgentId": member["agentId"],
+        },
+    ).json()
+    client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "Plan route proposal",
+            "content": "Governance plan should be read-only.",
+        },
+    )
+
+    health_response = client.get("/api/knowledge/operations/health", params={"agentId": lead["agentId"]})
+    plan_response = client.get("/api/knowledge/governance/plan", params={"agentId": lead["agentId"], "limit": 6})
+    items_response = client.get(f"/api/knowledge-bases/{base['knowledgeBaseId']}/items", params={"agentId": member["agentId"]})
+
+    assert health_response.status_code == 200
+    assert health_response.json()["summary"]["orphanSourceCount"] == 1
+    assert any(finding["findingType"] == "orphan_sources" for finding in health_response.json()["findings"])
+    assert source["sourceArtifactId"] in health_response.json()["knowledgeBases"][0]["nextReviewTargetIds"]
+    assert plan_response.status_code == 200
+    payload = plan_response.json()
+    assert payload["mode"] == "recommendations_only"
+    assert payload["operatingBoundary"]["planOnly"] is True
+    assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert all(action["mutatesFormalKnowledge"] is False for action in payload["actions"])
+    assert items_response.json()["summary"]["itemCount"] == 0
