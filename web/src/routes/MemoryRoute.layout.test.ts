@@ -69,6 +69,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("/review");
     expect(routeSource).toContain("/api/knowledge/search");
     expect(routeSource).toContain("/api/knowledge/governance/tasks");
+    expect(routeSource).toContain("/api/knowledge/operations/health");
+    expect(routeSource).toContain("/api/knowledge/governance/plan");
     expect(routeSource).toContain("/api/knowledge/steward/overview");
     expect(routeSource).toContain("/api/knowledge/steward/recommendations");
     expect(routeSource).toContain("/api/knowledge/steward/workbench");
@@ -88,6 +90,11 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.ingestionPackage");
     expect(routeSource).toContain("copy.submitIngestionPackage");
     expect(routeSource).toContain("copy.governanceTasks");
+    expect(routeSource).toContain("copy.operationsHealth");
+    expect(routeSource).toContain("copy.governancePlan");
+    expect(routeSource).toContain("copy.planOnly");
+    expect(routeSource).toContain("searchMode");
+    expect(routeSource).toContain("semanticScore");
     expect(routeSource).toContain("copy.ingestionAdapters");
     expect(routeSource).toContain("copy.traceability");
     expect(routeSource).toContain("copy.knowledgeSteward");
@@ -98,6 +105,8 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.stewardStageGrid");
     expect(routeSource).toContain("knowledgeStewardWorkbenchQuery");
     expect(routeSource).toContain("knowledgeStewardRecommendationsQuery");
+    expect(routeSource).toContain("knowledgeOperationsHealthQuery");
+    expect(routeSource).toContain("knowledgeGovernancePlanQuery");
     expect(routeSource).toContain("copy.noDirectApply");
     expect(routeSource).toContain("copy.reviewerRequired");
     expect(routeSource).toContain("copy.recommendationsOnly");

@@ -16,6 +16,8 @@ from core.web.services.team_knowledge_service import (
     create_rating_suggestion,
     create_refinement_proposal,
     create_source_artifact,
+    get_knowledge_governance_plan,
+    get_knowledge_operations_health,
     get_knowledge_trace,
     get_knowledge_steward_overview,
     get_knowledge_steward_workbench,
@@ -153,6 +155,26 @@ def knowledge_steward_workbench(agentId: str = "", limit: int = 12) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.get("/knowledge/operations/health")
+def knowledge_operations_health(agentId: str = "") -> dict:
+    try:
+        return get_knowledge_operations_health(agent_id=agentId)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/knowledge/governance/plan")
+def knowledge_governance_plan(agentId: str = "", limit: int = 12) -> dict:
+    try:
+        return get_knowledge_governance_plan(agent_id=agentId, limit=limit)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/knowledge/search")
 def knowledge_search(
     agentId: str = "",
@@ -166,6 +188,7 @@ def knowledge_search(
     stability: str = "",
     createdFrom: str = "",
     createdTo: str = "",
+    searchMode: str = "exact",
     limit: int = 25,
 ) -> dict:
     try:
@@ -181,6 +204,7 @@ def knowledge_search(
             stability=stability,
             created_from=createdFrom,
             created_to=createdTo,
+            search_mode=searchMode,
             limit=limit,
         )
     except TeamKnowledgePermissionError as exc:

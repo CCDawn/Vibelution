@@ -28,6 +28,8 @@ def _seed_team_knowledge(tmp_path, monkeypatch):
                 "knowledge_proposal_tool",
                 "knowledge_ingestion_tool",
                 "knowledge_governance_tasks_tool",
+                "knowledge_operations_health_tool",
+                "knowledge_governance_plan_tool",
                 "knowledge_steward_recommendations_tool",
                 "knowledge_steward_workbench_tool",
             ]
@@ -52,6 +54,8 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
             "knowledge_query_tool",
             "knowledge_proposal_tool",
             "knowledge_rating_suggestion_tool",
+            "knowledge_operations_health_tool",
+            "knowledge_governance_plan_tool",
             "knowledge_steward_recommendations_tool",
             "knowledge_steward_workbench_tool",
             "agent_message_tool",
@@ -65,6 +69,8 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
         "knowledge_query_tool",
         "knowledge_proposal_tool",
         "knowledge_rating_suggestion_tool",
+        "knowledge_operations_health_tool",
+        "knowledge_governance_plan_tool",
         "knowledge_steward_recommendations_tool",
         "knowledge_steward_workbench_tool",
         "agent_message_tool",
@@ -72,6 +78,8 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
     assert "knowledge_query_tool" not in [tool.name for tool in visible]
     assert "knowledge_proposal_tool" not in [tool.name for tool in visible]
     assert "knowledge_rating_suggestion_tool" not in [tool.name for tool in visible]
+    assert "knowledge_operations_health_tool" not in [tool.name for tool in visible]
+    assert "knowledge_governance_plan_tool" not in [tool.name for tool in visible]
     assert "knowledge_steward_recommendations_tool" not in [tool.name for tool in visible]
     assert "knowledge_steward_workbench_tool" not in [tool.name for tool in visible]
 
@@ -173,6 +181,30 @@ def test_knowledge_steward_workbench_tool_reads_grouped_workflow(tmp_path, monke
     assert result["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
     assert any(stage["stageId"] == "source_to_proposal" for stage in result["stages"])
     assert any(action["targetId"] == source["sourceArtifactId"] for action in result["nextActions"])
+
+
+def test_knowledge_operations_health_and_plan_tools_are_read_only(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    source = team_knowledge_service.create_source_artifact(
+        env["base"]["knowledgeBaseId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "health tool"},
+        title="Health tool source",
+        actor_agent_id=env["member"]["agentId"],
+    )
+
+    with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
+        health = json.loads(team_knowledge_tools.knowledge_operations_health_tool())
+        plan = json.loads(team_knowledge_tools.knowledge_governance_plan_tool(limit=3))
+
+    assert health["ok"] is True
+    assert health["summary"]["orphanSourceCount"] == 1
+    assert source["sourceArtifactId"] in health["knowledgeBases"][0]["nextReviewTargetIds"]
+    assert plan["ok"] is True
+    assert plan["mode"] == "recommendations_only"
+    assert plan["operatingBoundary"]["planOnly"] is True
+    assert all(action["mutatesFormalKnowledge"] is False for action in plan["actions"])
+    assert team_knowledge_service.list_knowledge_items(env["base"]["knowledgeBaseId"], agent_id=env["member"]["agentId"])["summary"]["itemCount"] == 0
 
 
 def test_knowledge_query_tool_reads_applied_items_only(tmp_path, monkeypatch):

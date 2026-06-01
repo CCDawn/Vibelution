@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.4 - 2026-06-01
+
+- Added knowledge operations health APIs, Agent tools, and UI panels that surface orphan sources, pending proposals, pending rating suggestions, and unrated formal items without mutating knowledge.
+- Added read-only governance plan APIs, Agent tools, and Memory Library visualization with explicit `planOnly` boundaries and recommended next tools.
+- Added `exact` / `semantic` / `hybrid` knowledge search mode support with lightweight local token-overlap scoring and visible match reasons.
+- Logged health and governance plan reads through `knowledge.operations.health.viewed`, `knowledge.governance.plan.viewed`, `knowledge.tool.operations_health.queried`, and `knowledge.tool.governance_plan.queried`.
+
 ## 0.7.3 - 2026-06-01
 
 - Added the Knowledge Steward workbench API at `/api/knowledge/steward/workbench`, aggregating steward identity, open governance tasks, read-only recommendations, staged next actions, and acceptance checklist evidence.

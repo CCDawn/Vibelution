@@ -57,8 +57,10 @@ from tools.research_organization_tools import (
 from tools.image2_tools import image2_generate_tool as _image2_generate_impl
 from tools.research_knowledge_tools import research_knowledge_query_tool as _research_knowledge_query_impl
 from tools.team_knowledge_tools import (
+    knowledge_governance_plan_tool as _knowledge_governance_plan_impl,
     knowledge_governance_tasks_tool as _knowledge_governance_tasks_impl,
     knowledge_ingestion_tool as _knowledge_ingestion_impl,
+    knowledge_operations_health_tool as _knowledge_operations_health_impl,
     knowledge_proposal_tool as _knowledge_proposal_impl,
     knowledge_query_tool as _knowledge_query_impl,
     knowledge_rating_suggestion_tool as _knowledge_rating_suggestion_impl,
@@ -1211,6 +1213,35 @@ def create_key_tools() -> List[BaseTool]:
         return _knowledge_governance_tasks_impl(status=status)
 
     @tool
+    def knowledge_operations_health_tool() -> str:
+        """
+        【知识库运行健康】读取当前 Agent 可见团队知识库的来源、提案、评级和正式知识健康状态。
+
+        本工具只读，不会审核、应用、删除、改 ACL 或写入正式知识。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_operations_health_tool 时才可用。
+
+        Returns:
+            JSON 格式的知识库运行健康摘要和 finding 列表
+        """
+        return _knowledge_operations_health_impl()
+
+    @tool
+    def knowledge_governance_plan_tool(limit: int = 8) -> str:
+        """
+        【知识库治理计划】读取只读治理计划和下一步建议。
+
+        计划会引用推荐工具，但不会直接执行审核、应用、删除、改 ACL 或写入正式知识；正式知识仍需要 reviewer 确认。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_governance_plan_tool 时才可用。
+
+        Args:
+            limit: 返回计划动作数量上限，默认 8
+
+        Returns:
+            JSON 格式的只读治理计划
+        """
+        return _knowledge_governance_plan_impl(limit=limit)
+
+    @tool
     def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
         """
         【知识库管理员建议】读取 Knowledge Steward 派生的治理建议。
@@ -1413,6 +1444,8 @@ def create_key_tools() -> List[BaseTool]:
         knowledge_proposal_tool,
         knowledge_ingestion_tool,
         knowledge_governance_tasks_tool,
+        knowledge_operations_health_tool,
+        knowledge_governance_plan_tool,
         knowledge_steward_recommendations_tool,
         knowledge_steward_workbench_tool,
         knowledge_rating_suggestion_tool,

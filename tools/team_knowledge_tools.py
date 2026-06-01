@@ -13,6 +13,8 @@ KNOWLEDGE_QUERY_TOOL_NAME = "knowledge_query_tool"
 KNOWLEDGE_PROPOSAL_TOOL_NAME = "knowledge_proposal_tool"
 KNOWLEDGE_INGESTION_TOOL_NAME = "knowledge_ingestion_tool"
 KNOWLEDGE_GOVERNANCE_TASKS_TOOL_NAME = "knowledge_governance_tasks_tool"
+KNOWLEDGE_OPERATIONS_HEALTH_TOOL_NAME = "knowledge_operations_health_tool"
+KNOWLEDGE_GOVERNANCE_PLAN_TOOL_NAME = "knowledge_governance_plan_tool"
 KNOWLEDGE_STEWARD_RECOMMENDATIONS_TOOL_NAME = "knowledge_steward_recommendations_tool"
 KNOWLEDGE_STEWARD_WORKBENCH_TOOL_NAME = "knowledge_steward_workbench_tool"
 KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME = "knowledge_rating_suggestion_tool"
@@ -303,6 +305,88 @@ def knowledge_governance_tasks_tool(status: str = "open") -> str:
     except Exception as exc:
         _record_event(
             "knowledge.tool.governance_tasks.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "agentId": agent_id,
+            }
+        )
+
+
+def knowledge_operations_health_tool() -> str:
+    """Read operational health for accessible team knowledge bases."""
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_OPERATIONS_HEALTH_TOOL_NAME)
+    if blocked:
+        return _json_result(blocked)
+    try:
+        from core.web.services import team_knowledge_service
+
+        payload = team_knowledge_service.get_knowledge_operations_health(agent_id=agent_id)
+        _record_event(
+            "knowledge.tool.operations_health.queried",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "knowledgeBaseCount": (payload.get("summary") or {}).get("knowledgeBaseCount", 0),
+                "findingCount": (payload.get("summary") or {}).get("findingCount", 0),
+            },
+        )
+        return _json_result({"ok": True, "status": "succeeded", "agentId": agent_id, **payload})
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.operations_health.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "agentId": agent_id,
+            }
+        )
+
+
+def knowledge_governance_plan_tool(limit: int = 8) -> str:
+    """Read a read-only governance plan for accessible team knowledge bases."""
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_GOVERNANCE_PLAN_TOOL_NAME)
+    if blocked:
+        return _json_result(blocked)
+    try:
+        from core.web.services import team_knowledge_service
+
+        payload = team_knowledge_service.get_knowledge_governance_plan(agent_id=agent_id, limit=limit)
+        _record_event(
+            "knowledge.tool.governance_plan.queried",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "actionCount": (payload.get("summary") or {}).get("actionCount", 0),
+                "healthFindingCount": (payload.get("summary") or {}).get("healthFindingCount", 0),
+            },
+        )
+        return _json_result({"ok": True, "status": "succeeded", "agentId": agent_id, **payload})
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.governance_plan.failed",
             runtime=runtime,
             level="error",
             outcome="failed",

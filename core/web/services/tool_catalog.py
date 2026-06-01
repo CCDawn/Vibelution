@@ -17,6 +17,8 @@ EXPLICIT_ALLOW_TOOLS = {
     "knowledge_proposal_tool",
     "knowledge_ingestion_tool",
     "knowledge_governance_tasks_tool",
+    "knowledge_operations_health_tool",
+    "knowledge_governance_plan_tool",
     "knowledge_steward_recommendations_tool",
     "knowledge_steward_workbench_tool",
     "knowledge_rating_suggestion_tool",
@@ -353,6 +355,18 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
     "knowledge_governance_tasks_tool": {
         "category": "memory_context",
         "capabilityTags": ["team_knowledge", "governance_queue", "read_only"],
+        "riskTags": ["team_knowledge_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "knowledge_operations_health_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "operations_health", "read_only"],
+        "riskTags": ["team_knowledge_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
+    "knowledge_governance_plan_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "governance_plan", "read_only"],
         "riskTags": ["team_knowledge_access"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
