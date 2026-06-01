@@ -75,6 +75,74 @@ export type MemoryMutationResponse = {
   item: MemoryItem;
 };
 
+export type MemoryKnowledgeGraphNode = {
+  id: string;
+  type:
+    | "project"
+    | "team"
+    | "agent"
+    | "agent_private_memory"
+    | "knowledge_base"
+    | "knowledge_item"
+    | "source_artifact"
+    | "refinement_proposal"
+    | "knowledge_batch"
+    | "rating_suggestion"
+    | "runtime_scene"
+    | "evolution"
+    | "supervision"
+    | "tag"
+    | "concept"
+    | string;
+  label: string;
+  summary: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  metadata: Record<string, unknown>;
+};
+
+export type MemoryKnowledgeGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  label: string;
+  weight: number;
+  metadata: Record<string, unknown>;
+};
+
+export type MemoryKnowledgeGraphPayload = {
+  schemaVersion: number;
+  mode: "read_only_project_memory_graph" | string;
+  agentId: string;
+  summary: {
+    nodeCount: number;
+    edgeCount: number;
+    truncated: boolean;
+    nodeTypeCounts: Record<string, number>;
+    edgeTypeCounts: Record<string, number>;
+    elapsedMs: number;
+  };
+  nodes: MemoryKnowledgeGraphNode[];
+  edges: MemoryKnowledgeGraphEdge[];
+  filters: {
+    teamId?: string;
+    knowledgeBaseId?: string;
+    include?: string[];
+    limit?: number;
+  };
+  operatingBoundary: {
+    readOnly: boolean;
+    gpuPreferred: boolean;
+    layoutWorker: boolean;
+    honorsKnowledgeAcl: boolean;
+    fullContentIncluded: boolean;
+    canEditGraph: boolean;
+    canApplyKnowledge: boolean;
+  };
+};
+
 export type MemoryUsageContractDomain = {
   domainId: string;
   label: string;

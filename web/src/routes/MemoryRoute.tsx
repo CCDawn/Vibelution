@@ -7,6 +7,7 @@ import {
   Eye,
   FileText,
   Link2,
+  Network,
   Pencil,
   RefreshCw,
   Search,
@@ -17,7 +18,7 @@ import {
   Undo2,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { NavLink, useSearchParams } from "react-router-dom";
 
 import { fetchJson } from "../api/client";
@@ -44,6 +45,7 @@ import {
   KnowledgeStewardWorkbenchPayload,
   KnowledgeTracePayload,
   MemoryItem,
+  MemoryKnowledgeGraphPayload,
   MemoryMutationResponse,
   MemoryOverview,
   MemorySection,
@@ -54,6 +56,8 @@ import {
 import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
 import { useAppI18n } from "../i18n/useAppI18n";
 import styles from "./MemoryRoute.module.css";
+
+const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
 
 type Copy = {
   eyebrow: string;
@@ -303,11 +307,25 @@ type Copy = {
   writeBoundary: string;
   forbiddenActions: string;
   currentContractState: string;
+  graphView: string;
+  graphSubtitle: string;
+  knowledgeGraph: string;
+  graphNodes: string;
+  graphEdges: string;
+  graphGpu: string;
+  graphWorker: string;
+  graphReadOnly: string;
+  graphAcl: string;
+  graphSearchPlaceholder: string;
+  graphNodeTypes: string;
+  graphSelectedNode: string;
+  graphNoSelection: string;
+  graphCanvasFallback: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
 type ManageFilterMode = "all" | "prompt" | "editable" | "changed" | "missing";
-export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge";
+export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph";
 type MemoryChannel = "conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read";
 type ChannelFilter = MemoryChannel | "";
 type MemoryPair = {
@@ -639,6 +657,20 @@ const COPY: Record<"zh" | "en", Copy> = {
     writeBoundary: "写入边界",
     forbiddenActions: "禁止动作",
     currentContractState: "当前状态",
+    graphView: "知识图谱",
+    graphSubtitle: "以只读 3D 结构网观察 Project、Team、Agent、记忆、知识库、来源、进化和监督关系。",
+    knowledgeGraph: "项目知识图谱",
+    graphNodes: "节点",
+    graphEdges: "连线",
+    graphGpu: "GPU 渲染",
+    graphWorker: "Worker 布局",
+    graphReadOnly: "只读",
+    graphAcl: "ACL 感知",
+    graphSearchPlaceholder: "搜索节点、类型、状态或摘要",
+    graphNodeTypes: "节点类型",
+    graphSelectedNode: "选中节点",
+    graphNoSelection: "选择一个节点查看摘要、时间戳、权限和关联信息。",
+    graphCanvasFallback: "3D 画布正在接入；当前先展示可过滤的只读图谱结构。",
   },
   en: {
     eyebrow: "Memory Library",
@@ -888,6 +920,20 @@ const COPY: Record<"zh" | "en", Copy> = {
     writeBoundary: "Write boundary",
     forbiddenActions: "Forbidden actions",
     currentContractState: "Current state",
+    graphView: "Knowledge graph",
+    graphSubtitle: "Observe Project, Team, Agent, memory, knowledge, source, evolution, and supervision links as a read-only 3D network.",
+    knowledgeGraph: "Project knowledge graph",
+    graphNodes: "Nodes",
+    graphEdges: "Edges",
+    graphGpu: "GPU rendering",
+    graphWorker: "Worker layout",
+    graphReadOnly: "Read-only",
+    graphAcl: "ACL-aware",
+    graphSearchPlaceholder: "Search nodes, types, status, or summaries",
+    graphNodeTypes: "Node types",
+    graphSelectedNode: "Selected node",
+    graphNoSelection: "Select a node to inspect summary, timestamps, permissions, and links.",
+    graphCanvasFallback: "The 3D canvas is being connected; this view shows the filterable read-only graph structure first.",
   },
 };
 
@@ -1361,6 +1407,7 @@ const MEMORY_VIEWS: Array<{ key: MemoryRouteView; href: string }> = [
   { key: "manage", href: "/memory/manage" },
   { key: "sources", href: "/memory/sources" },
   { key: "knowledge", href: "/memory/knowledge" },
+  { key: "graph", href: "/memory/graph" },
 ];
 
 function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
@@ -1375,6 +1422,9 @@ function memoryViewLabel(copy: Copy, view: MemoryRouteView) {
   }
   if (view === "knowledge") {
     return copy.knowledgeView;
+  }
+  if (view === "graph") {
+    return copy.graphView;
   }
   return copy.overviewView;
 }
@@ -1391,6 +1441,9 @@ function memoryViewSubtitle(copy: Copy, view: MemoryRouteView) {
   }
   if (view === "knowledge") {
     return copy.knowledgeSubtitle;
+  }
+  if (view === "graph") {
+    return copy.graphSubtitle;
   }
   return copy.overviewSubtitle;
 }
@@ -1484,6 +1537,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [ratingSuggestionPriority, setRatingSuggestionPriority] = useState<RatingSuggestionPriorityFilter>("all");
   const [selectedRatingSuggestionIds, setSelectedRatingSuggestionIds] = useState<string[]>([]);
   const [traceTargetId, setTraceTargetId] = useState("");
+  const [graphSearchText, setGraphSearchText] = useState("");
+  const [selectedGraphNodeId, setSelectedGraphNodeId] = useState("");
   const [knowledgeFeedback, setKnowledgeFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
     tone: "idle",
     text: "",
@@ -1509,6 +1564,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchInterval: resolvePollingInterval(pageVisible, 45_000),
     refetchIntervalInBackground: false,
     enabled: forcedView === "knowledge",
+  });
+
+  const memoryKnowledgeGraphQuery = useQuery({
+    queryKey: queryKeys.memoryKnowledgeGraph(),
+    queryFn: () => fetchJson<MemoryKnowledgeGraphPayload>("/api/memory/knowledge-graph"),
+    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
+    refetchIntervalInBackground: false,
+    enabled: forcedView === "graph",
   });
 
   const knowledgeStewardQuery = useQuery({
@@ -1909,6 +1972,24 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const permissionAudit = permissionAuditQuery.data;
   const governanceTasks = governanceTasksQuery.data?.tasks ?? [];
   const ingestionAdapters = ingestionAdaptersQuery.data?.adapters ?? [];
+  const graphPayload = memoryKnowledgeGraphQuery.data;
+  const graphSearch = graphSearchText.trim().toLowerCase();
+  const filteredGraphNodes = useMemo(() => {
+    const nodes = graphPayload?.nodes ?? [];
+    if (!graphSearch) {
+      return nodes;
+    }
+    return nodes.filter((node) =>
+      [node.label, node.type, node.status, node.summary].some((value) => String(value || "").toLowerCase().includes(graphSearch)),
+    );
+  }, [graphPayload?.nodes, graphSearch]);
+  const graphVisibleNodeIds = useMemo(() => new Set(filteredGraphNodes.map((node) => node.id)), [filteredGraphNodes]);
+  const filteredGraphEdges = useMemo(
+    () => (graphPayload?.edges ?? []).filter((edge) => graphVisibleNodeIds.has(edge.source) && graphVisibleNodeIds.has(edge.target)),
+    [graphPayload?.edges, graphVisibleNodeIds],
+  );
+  const selectedGraphNode = filteredGraphNodes.find((node) => node.id === selectedGraphNodeId) ?? filteredGraphNodes[0] ?? null;
+  const graphTypeEntries = Object.entries(graphPayload?.summary.nodeTypeCounts ?? {}).sort((left, right) => right[1] - left[1]);
   const allPairs = useMemo(() => flattenSections(sections), [sections]);
   const runtimePairs = useMemo(
     () =>
@@ -4199,6 +4280,137 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     </>
   );
 
+  const renderGraphView = () => (
+    <>
+      <div className={styles.summaryGrid}>
+        <section className={styles.summaryCard}>
+          <span>{copy.graphNodes}</span>
+          <strong>{graphPayload?.summary.nodeCount ?? 0}</strong>
+        </section>
+        <section className={styles.summaryCard}>
+          <span>{copy.graphEdges}</span>
+          <strong>{graphPayload?.summary.edgeCount ?? 0}</strong>
+        </section>
+        <section className={styles.summaryCard}>
+          <span>{copy.graphGpu}</span>
+          <strong>{graphPayload?.operatingBoundary.gpuPreferred ? copy.yes : copy.no}</strong>
+        </section>
+        <section className={styles.summaryCard}>
+          <span>{copy.graphWorker}</span>
+          <strong>{graphPayload?.operatingBoundary.layoutWorker ? copy.yes : copy.no}</strong>
+        </section>
+        <section className={styles.summaryCard}>
+          <span>{copy.graphReadOnly}</span>
+          <strong>{graphPayload?.operatingBoundary.readOnly ? copy.yes : copy.no}</strong>
+        </section>
+        <section className={styles.summaryCard}>
+          <span>{copy.graphAcl}</span>
+          <strong>{graphPayload?.operatingBoundary.honorsKnowledgeAcl ? copy.yes : copy.no}</strong>
+        </section>
+      </div>
+
+      <div className={`${styles.workspace} ${styles.graphWorkspace}`}>
+        <aside className={styles.sourcePanel}>
+          <div className={styles.panelHeader}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.knowledgeGraph}</p>
+              <h2>{copy.filters}</h2>
+            </div>
+            <span className={styles.countPill}>{filteredGraphNodes.length}</span>
+          </div>
+          <label className={styles.searchBox}>
+            <Search size={15} />
+            <input
+              value={graphSearchText}
+              onChange={(event) => setGraphSearchText(event.target.value)}
+              placeholder={copy.graphSearchPlaceholder}
+            />
+          </label>
+          <section className={styles.managementPanel}>
+            <div className={styles.managementHeader}>
+              <div>
+                <p className={styles.panelEyebrow}>{copy.graphNodeTypes}</p>
+                <h2>{copy.graphNodes}</h2>
+              </div>
+            </div>
+            <div className={styles.graphTypeList}>
+              {graphTypeEntries.map(([type, count]) => (
+                <span key={type}>
+                  <strong>{type}</strong>
+                  <small>{count}</small>
+                </span>
+              ))}
+            </div>
+          </section>
+        </aside>
+
+        <main className={styles.graphCanvasPanel}>
+          <div className={styles.graphCanvasToolbar}>
+            <div>
+              <p className={styles.panelEyebrow}>{copy.knowledgeGraph}</p>
+              <strong>Three.js / WebGL / Worker</strong>
+            </div>
+            <span>{copy.graphReadOnly} · {copy.graphAcl}</span>
+          </div>
+          <Suspense fallback={<div className={styles.graphCanvasFallback}><strong>{copy.loading}</strong></div>}>
+            <MemoryGraphCanvas
+              nodes={filteredGraphNodes}
+              edges={filteredGraphEdges}
+              selectedNodeId={selectedGraphNode?.id ?? ""}
+              onSelectNode={setSelectedGraphNodeId}
+              fallbackText={copy.graphCanvasFallback}
+            />
+          </Suspense>
+          <div className={styles.graphNodeList}>
+            {filteredGraphNodes.slice(0, 80).map((node) => (
+              <button
+                key={node.id}
+                type="button"
+                className={selectedGraphNode?.id === node.id ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+                onClick={() => setSelectedGraphNodeId(node.id)}
+              >
+                <strong>{node.label}</strong>
+                <span>{node.type} · {node.status || "-"}</span>
+              </button>
+            ))}
+          </div>
+        </main>
+
+        <aside className={styles.detailPanel}>
+          <div className={styles.detailHeader}>
+            <p className={styles.panelEyebrow}>{copy.graphSelectedNode}</p>
+            <h2>{selectedGraphNode?.label ?? copy.graphNoSelection}</h2>
+          </div>
+          {selectedGraphNode ? (
+            <>
+              <section className={styles.selectedConfigSummary}>
+                <strong>{selectedGraphNode.type}</strong>
+                <p>{selectedGraphNode.summary || selectedGraphNode.id}</p>
+              </section>
+              <div className={styles.detailMeta}>
+                <span>{copy.status}: {selectedGraphNode.status || "-"}</span>
+                <span>{copy.sourceOrigin}: {selectedGraphNode.id}</span>
+                <span>{copy.generatedAt}: {formatTimestamp(selectedGraphNode.createdAt || selectedGraphNode.updatedAt, lang)}</span>
+              </div>
+              <details className={styles.rawPanel}>
+                <summary>
+                  <FileText size={15} />
+                  <span>metadata</span>
+                </summary>
+                <pre>{JSON.stringify(selectedGraphNode.metadata ?? {}, null, 2)}</pre>
+              </details>
+            </>
+          ) : (
+            <section className={styles.emptyDetail}>
+              <Network size={22} />
+              <strong>{copy.graphNoSelection}</strong>
+            </section>
+          )}
+        </aside>
+      </div>
+    </>
+  );
+
   return (
     <section className={styles.route}>
       <header className={styles.header}>
@@ -4226,7 +4438,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               ? renderManageView()
               : forcedView === "knowledge"
                 ? renderKnowledgeView()
-                : renderSourcesView()}
+                : forcedView === "graph"
+                  ? renderGraphView()
+                  : renderSourcesView()}
       </div>
     </section>
   );

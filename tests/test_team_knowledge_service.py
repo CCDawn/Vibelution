@@ -1,6 +1,6 @@
 import pytest
 
-from core.web.services import agent_directory_service, chat_room_service, team_knowledge_service, team_service
+from core.web.services import agent_directory_service, chat_room_service, memory_graph_service, team_knowledge_service, team_service
 
 
 @pytest.fixture()
@@ -9,6 +9,7 @@ def knowledge_env(tmp_path, monkeypatch):
     monkeypatch.setattr(chat_room_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
     lead = agent_directory_service.create_agent_instance(display_name="Lead Agent", direct_session_id="session-lead")
     member = agent_directory_service.create_agent_instance(display_name="Member Agent", direct_session_id="session-member")
     outsider = agent_directory_service.create_agent_instance(display_name="Outsider Agent", direct_session_id="session-outsider")
@@ -382,6 +383,68 @@ def test_governance_tasks_adapters_and_trace_are_readable(knowledge_env):
     assert trace["targetType"] == "proposal"
     assert trace["summary"]["sourceArtifacts"] == 1
     assert trace["summary"]["proposals"] == 1
+
+
+def test_memory_knowledge_graph_links_project_agents_team_and_knowledge_without_bodies(knowledge_env):
+    source = team_knowledge_service.create_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_type="agent_authored",
+        source_ref={"agentId": knowledge_env["member"]["agentId"], "excerpt": "do not expose source body"},
+        title="Graph source",
+        summary="Graph source summary.",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Graph proposal",
+        summary="Graph proposal summary.",
+        content="SECRET FORMAL KNOWLEDGE BODY SHOULD NOT LEAK",
+        tags=["graph"],
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+
+    graph = memory_graph_service.get_memory_knowledge_graph(agent_id=knowledge_env["member"]["agentId"])
+    node_types = {node["type"] for node in graph["nodes"]}
+    edge_types = {edge["type"] for edge in graph["edges"]}
+    payload_text = str(graph)
+
+    assert graph["mode"] == "read_only_project_memory_graph"
+    assert graph["operatingBoundary"]["readOnly"] is True
+    assert graph["operatingBoundary"]["gpuPreferred"] is True
+    assert {"project", "team", "agent", "agent_private_memory", "knowledge_base", "knowledge_item", "source_artifact"}.issubset(node_types)
+    assert {"project_has_team", "team_has_agent", "team_owns_knowledge_base", "knowledge_base_contains_item"}.issubset(edge_types)
+    assert reviewed["item"]["knowledgeItemId"] in payload_text
+    assert "SECRET FORMAL KNOWLEDGE BODY SHOULD NOT LEAK" not in payload_text
+    assert "do not expose source body" not in payload_text
+
+
+def test_memory_knowledge_graph_honors_team_knowledge_acl(knowledge_env):
+    team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Visible only to members",
+        content="hidden body",
+    )
+
+    member_graph = memory_graph_service.get_memory_knowledge_graph(agent_id=knowledge_env["member"]["agentId"])
+    outsider_graph = memory_graph_service.get_memory_knowledge_graph(agent_id=knowledge_env["outsider"]["agentId"])
+
+    assert any(
+        node["type"] == "knowledge_base" and node["metadata"]["knowledgeBaseId"] == knowledge_env["base"]["knowledgeBaseId"]
+        for node in member_graph["nodes"]
+    )
+    assert not any(
+        node["type"] == "knowledge_base" and node["metadata"].get("knowledgeBaseId") == knowledge_env["base"]["knowledgeBaseId"]
+        for node in outsider_graph["nodes"]
+    )
 
 
 def test_steward_recommendations_are_read_only_actions(knowledge_env):

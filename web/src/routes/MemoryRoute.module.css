@@ -668,6 +668,177 @@
   grid-template-columns: minmax(180px, 230px) minmax(620px, 1.15fr) minmax(300px, 0.72fr);
 }
 
+.graphWorkspace {
+  grid-template-columns: minmax(210px, 260px) minmax(520px, 1fr) minmax(300px, 0.42fr);
+}
+
+.graphCanvasPanel {
+  display: grid;
+  grid-template-rows: auto minmax(280px, 0.86fr) minmax(120px, 0.42fr);
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-canvas) 84%, var(--surface-panel));
+}
+
+.graphCanvasToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--fg-secondary);
+}
+
+.graphCanvasToolbar strong,
+.graphCanvasToolbar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphCanvasFallback {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 280px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--accent-cool) 18%, transparent), transparent 42%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-panel) 26%, transparent), transparent);
+  color: var(--fg-secondary);
+  text-align: center;
+}
+
+.graphCanvasMount {
+  min-width: 0;
+  min-height: 280px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent-cool) 12%, transparent), transparent 42%),
+    color-mix(in srgb, var(--bg-canvas) 90%, black);
+  cursor: grab;
+  touch-action: none;
+}
+
+.graphCanvasMount:active {
+  cursor: grabbing;
+}
+
+.graphCanvasMount canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.graphCanvasFallback svg {
+  color: var(--accent-cool);
+}
+
+.graphCanvasFallback strong {
+  max-width: 520px;
+  color: var(--fg-primary);
+  font-size: 0.95rem;
+}
+
+.graphCanvasFallback span {
+  color: var(--fg-tertiary);
+  font-size: 0.78rem;
+}
+
+.graphNodeList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  align-content: start;
+  gap: 6px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.graphNodeList .itemButton {
+  display: grid;
+  gap: 3px;
+  min-height: 52px;
+  padding: 7px;
+}
+
+.graphNodeList .itemButton strong,
+.graphNodeList .itemButton span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphNodeList .itemButton span {
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+}
+
+.graphTypeList {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.graphTypeList span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-muted);
+}
+
+.graphTypeList strong,
+.graphTypeList small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphTypeList strong {
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+}
+
+.graphTypeList small {
+  color: var(--accent-cool);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.detailMeta {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-card);
+}
+
+.detailMeta span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .manageFormPanel {
   overflow: auto;
 }
@@ -2538,6 +2709,10 @@
     grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
   }
 
+  .graphWorkspace {
+    grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  }
+
   .detailPanel {
     grid-column: 1 / -1;
     max-height: 46vh;
@@ -2577,6 +2752,7 @@
   .effectiveGrid,
   .workspace,
   .knowledgeWorkspace,
+  .graphWorkspace,
   .knowledgeFormGrid,
   .knowledgeRow,
   .stewardGrid,

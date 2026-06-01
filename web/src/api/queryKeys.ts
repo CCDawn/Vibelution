@@ -33,6 +33,7 @@ export const queryKeys = {
   fileContent: (path: string) => ["files", "content", path] as const,
   memoryOverview: () => ["memory", "overview"] as const,
   memoryUsageContract: () => ["memory", "usage-contract"] as const,
+  memoryKnowledgeGraph: () => ["memory", "knowledge-graph"] as const,
   knowledgeOverview: () => ["knowledge", "overview"] as const,
   knowledgeStewardOverview: () => ["knowledge", "steward", "overview"] as const,
   knowledgeStewardRecommendations: (agentId = "") => ["knowledge", "steward", "recommendations", agentId] as const,

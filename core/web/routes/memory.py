@@ -13,6 +13,7 @@ from core.web.services.memory_service import (
     restore_memory_item,
     update_memory_item,
 )
+from core.web.services.memory_graph_service import get_memory_knowledge_graph
 
 
 router = APIRouter(tags=["memory"])
@@ -32,6 +33,23 @@ def memory_overview() -> dict:
 @router.get("/memory/usage-contract")
 def memory_usage_contract() -> dict:
     return get_memory_usage_contract()
+
+
+@router.get("/memory/knowledge-graph")
+def memory_knowledge_graph(
+    agentId: str = "",
+    teamId: str = "",
+    knowledgeBaseId: str = "",
+    include: str = "",
+    limit: int = 800,
+) -> dict:
+    return get_memory_knowledge_graph(
+        agent_id=agentId,
+        team_id=teamId,
+        knowledge_base_id=knowledgeBaseId,
+        include=include,
+        limit=limit,
+    )
 
 
 @router.post("/memory/items", status_code=status.HTTP_201_CREATED)
