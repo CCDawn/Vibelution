@@ -75,6 +75,46 @@ export type MemoryMutationResponse = {
   item: MemoryItem;
 };
 
+export type MemoryUsageContractDomain = {
+  domainId: string;
+  label: string;
+  owner: string;
+  storage: string;
+  readsThrough: string[];
+  writesThrough: string[];
+  canRegisterSource: boolean;
+  canCreateFormalKnowledge: boolean;
+  promptDefault: string;
+  boundary: string;
+};
+
+export type MemoryUsageContractPayload = {
+  schemaVersion: number;
+  generatedAt: string;
+  projectRoot: string;
+  principles: string[];
+  domains: MemoryUsageContractDomain[];
+  flow: Array<{
+    stepId: string;
+    label: string;
+    creates: string[];
+    requiresReviewer: boolean;
+  }>;
+  forbiddenActions: string[];
+  runtimeAccess: {
+    summaryInPromptAllowed: boolean;
+    knowledgeBodiesInPromptByDefault: boolean;
+    explicitReadChannels: string[];
+    agentToolBoundary: Record<string, string>;
+  };
+  currentState: {
+    knowledge: Record<string, number | string | boolean>;
+    operationsHealth: Record<string, number | string | boolean>;
+    governancePlan: Record<string, number | string | boolean>;
+    operatingBoundary: Record<string, boolean | string | number>;
+  };
+};
+
 export type KnowledgeBasePermissions = {
   canRead: boolean;
   canPropose: boolean;

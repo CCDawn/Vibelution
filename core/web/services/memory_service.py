@@ -61,6 +61,147 @@ def get_memory_overview() -> dict[str, Any]:
     return overview
 
 
+def get_memory_usage_contract() -> dict[str, Any]:
+    """Return the cross-system contract for using Agent and Team memory."""
+
+    root = PROJECT_ROOT.resolve()
+    try:
+        from core.web.services.team_knowledge_service import (
+            get_knowledge_governance_plan,
+            get_knowledge_operations_health,
+            list_knowledge_overview,
+        )
+
+        knowledge_overview = list_knowledge_overview()
+        operations_health = get_knowledge_operations_health()
+        governance_plan = get_knowledge_governance_plan(limit=8)
+    except Exception:
+        knowledge_overview = {"summary": {}}
+        operations_health = {"summary": {}}
+        governance_plan = {"summary": {}, "operatingBoundary": {}}
+    contract = {
+        "schemaVersion": 1,
+        "generatedAt": _now_iso(),
+        "projectRoot": str(root),
+        "principles": [
+            "Agent private memory stays agent-scoped and is not mixed into Team knowledge files.",
+            "Team knowledge is Team-scoped, permissioned, source-backed, and tool-readable by default.",
+            "Evidence is not knowledge; proposals are not formal knowledge; formal knowledge requires reviewer confirmation.",
+            "Evolution systems may register runtime evidence and proposals, but must not directly apply formal knowledge.",
+            "Formal knowledge bodies are not injected into prompts by default; Agents use explicit query tools.",
+        ],
+        "domains": [
+            {
+                "domainId": "agent_private_memory",
+                "label": "Agent private memory",
+                "owner": "Agent",
+                "storage": "workspace/agents/{agentId}/memory",
+                "readsThrough": ["MemoryPolicy", "Agent runtime context", "/api/memory/overview"],
+                "writesThrough": ["Agent-private memory tools", "manual memory management"],
+                "canRegisterSource": False,
+                "canCreateFormalKnowledge": False,
+                "promptDefault": "agent_runtime_dependent",
+                "boundary": "Private identity, working notes, and agent-local continuity do not become Team knowledge automatically.",
+            },
+            {
+                "domainId": "team_knowledge",
+                "label": "Team knowledge base",
+                "owner": "Team",
+                "storage": "workspace/teams/{teamId}/knowledge",
+                "readsThrough": ["knowledge_query_tool", "/api/knowledge/search", "/api/knowledge/overview"],
+                "writesThrough": ["SourceArtifact", "RefinementProposal", "review/apply", "rating suggestion review"],
+                "canRegisterSource": True,
+                "canCreateFormalKnowledge": True,
+                "promptDefault": "not_in_prompt",
+                "boundary": "Team member may read/propose; review roles apply or rate. Cross-Team access requires explicit ACL or policy.",
+            },
+            {
+                "domainId": "team_chat",
+                "label": "Team chat refinement",
+                "owner": "Team chat room",
+                "storage": "chat room history + SourceArtifact",
+                "readsThrough": ["team_chat_refinement sourceRef", "traceability view"],
+                "writesThrough": ["source registration", "refinement proposal"],
+                "canRegisterSource": True,
+                "canCreateFormalKnowledge": False,
+                "promptDefault": "conversation_context_only",
+                "boundary": "Group chat can become evidence and proposal material, but cannot become formal knowledge without review.",
+            },
+            {
+                "domainId": "self_evolution",
+                "label": "Self evolution evidence",
+                "owner": "Self evolution runtime",
+                "storage": "workspace/evolution + logs/runtime_scenes",
+                "readsThrough": ["memory overview", "runtime scene logs", "knowledge proposal tools"],
+                "writesThrough": ["runtime_evidence_refinement SourceArtifact", "RefinementProposal"],
+                "canRegisterSource": True,
+                "canCreateFormalKnowledge": False,
+                "promptDefault": "bounded_runtime_context",
+                "boundary": "Self evolution may record validated lessons as evidence/proposals; reviewer confirmation gates formal knowledge.",
+            },
+            {
+                "domainId": "supervised_evolution",
+                "label": "Supervised evolution evidence",
+                "owner": "Supervised evolution workbench",
+                "storage": "workspace/supervised_evolution + logs/runtime_scenes",
+                "readsThrough": ["evaluation bundles", "decision records", "runtime scene logs"],
+                "writesThrough": ["runtime_evidence_refinement SourceArtifact", "RefinementProposal"],
+                "canRegisterSource": True,
+                "canCreateFormalKnowledge": False,
+                "promptDefault": "bounded_evaluation_context",
+                "boundary": "Case traces and decisions are evidence; they do not mutate Team KB without a proposal review.",
+            },
+            {
+                "domainId": "external_artifacts",
+                "label": "External search and PDF",
+                "owner": "Research/parser pipeline",
+                "storage": "SourceArtifact + RefinementProposal",
+                "readsThrough": ["pdf_refinement", "external_search_refinement"],
+                "writesThrough": ["ingestion package", "proposal tool"],
+                "canRegisterSource": True,
+                "canCreateFormalKnowledge": False,
+                "promptDefault": "not_in_prompt",
+                "boundary": "Parsers and searchers produce source-backed proposals only; they do not write formal knowledge directly.",
+            },
+        ],
+        "flow": [
+            {"stepId": "source", "label": "Register source", "creates": ["SourceArtifact"], "requiresReviewer": False},
+            {"stepId": "proposal", "label": "Refine proposal", "creates": ["RefinementProposal"], "requiresReviewer": False},
+            {"stepId": "review", "label": "Review/apply", "creates": ["KnowledgeBatch", "KnowledgeItem"], "requiresReviewer": True},
+            {"stepId": "rating", "label": "Suggest/review rating", "creates": ["RatingSuggestion", "KnowledgeItem metadata"], "requiresReviewer": True},
+            {"stepId": "query", "label": "Explicit query", "creates": [], "requiresReviewer": False},
+        ],
+        "forbiddenActions": [
+            "Evolution runtime directly creates KnowledgeItem.",
+            "Parser/search pipeline directly creates KnowledgeItem.",
+            "Team chat transcript directly becomes formal knowledge.",
+            "Team knowledge body is injected into prompts by default.",
+            "Agent private memory is silently promoted into Team knowledge.",
+            "Cross-Team read/write occurs without ACL, Team role, or MemoryPolicy permission.",
+        ],
+        "runtimeAccess": {
+            "summaryInPromptAllowed": True,
+            "knowledgeBodiesInPromptByDefault": False,
+            "explicitReadChannels": ["research", "explicit_read"],
+            "agentToolBoundary": {
+                "query": "knowledge_query_tool",
+                "proposal": "knowledge_proposal_tool or knowledge_ingestion_tool",
+                "health": "knowledge_operations_health_tool",
+                "plan": "knowledge_governance_plan_tool",
+                "ratingSuggestion": "knowledge_rating_suggestion_tool",
+            },
+        },
+        "currentState": {
+            "knowledge": knowledge_overview.get("summary") or {},
+            "operationsHealth": operations_health.get("summary") or {},
+            "governancePlan": governance_plan.get("summary") or {},
+            "operatingBoundary": governance_plan.get("operatingBoundary") or {},
+        },
+    }
+    _record_memory_contract_viewed_event(contract)
+    return contract
+
+
 def create_user_memory_item(payload: dict[str, Any]) -> dict[str, Any]:
     """Create a user-authored memory item in the management layer."""
 
@@ -1557,6 +1698,28 @@ def _record_memory_overview_perf_event(root: Path, overview: dict[str, Any], *, 
                 "sectionCount": len(section_metrics),
                 "itemCount": int((overview.get("summary") or {}).get("itemCount") or 0),
                 "sections": section_metrics,
+            },
+            lifecycle=True,
+        )
+    except Exception:
+        pass
+
+
+def _record_memory_contract_viewed_event(contract: dict[str, Any]) -> None:
+    try:
+        from core.web.services.runtime_scene_service import record_runtime_scene_event
+
+        record_runtime_scene_event(
+            "memory_service",
+            "memory_contract",
+            "memory.usage_contract.viewed",
+            message="Memory usage contract viewed",
+            outcome="observed",
+            fields={
+                "domainCount": len(contract.get("domains") or []),
+                "forbiddenActionCount": len(contract.get("forbiddenActions") or []),
+                "knowledgeBaseCount": int(((contract.get("currentState") or {}).get("knowledge") or {}).get("knowledgeBaseCount") or 0),
+                "formalKnowledgeRequiresReviewer": bool(((contract.get("currentState") or {}).get("operatingBoundary") or {}).get("formalKnowledgeRequiresReviewer")),
             },
             lifecycle=True,
         )

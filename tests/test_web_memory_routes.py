@@ -220,6 +220,49 @@ def test_memory_overview_marks_research_knowledge_base_missing_before_first_sear
     assert '"status": "missing"' in research_item["content"]
 
 
+def test_memory_usage_contract_aligns_team_agent_and_evolution_boundaries(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Contract Agent")
+    team = team_service.create_team(name="Contract Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    base = team_knowledge_service.create_knowledge_base(team["teamId"], name="Contract KB", actor_agent_id=agent["agentId"])
+    source = team_knowledge_service.create_source_artifact(
+        base["knowledgeBaseId"],
+        source_type="runtime_evidence_refinement",
+        source_ref={"runId": "self-run-1"},
+        title="Runtime evidence",
+        actor_agent_id=agent["agentId"],
+    )
+    team_knowledge_service.create_refinement_proposal(
+        base["knowledgeBaseId"],
+        source_artifact_ids=[source["sourceArtifactId"]],
+        proposed_by_agent_id=agent["agentId"],
+        title="Runtime lesson proposal",
+        content="Evolution evidence should wait for review.",
+    )
+
+    response = client.get("/api/memory/usage-contract")
+
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+    domains = {item["domainId"]: item for item in payload["domains"]}
+    assert payload["schemaVersion"] == 1
+    assert domains["agent_private_memory"]["canCreateFormalKnowledge"] is False
+    assert domains["team_knowledge"]["canCreateFormalKnowledge"] is True
+    assert domains["self_evolution"]["canRegisterSource"] is True
+    assert domains["self_evolution"]["canCreateFormalKnowledge"] is False
+    assert domains["supervised_evolution"]["canCreateFormalKnowledge"] is False
+    assert payload["runtimeAccess"]["knowledgeBodiesInPromptByDefault"] is False
+    assert "Evolution runtime directly creates KnowledgeItem." in payload["forbiddenActions"]
+    assert payload["currentState"]["knowledge"]["knowledgeBaseCount"] == 1
+    assert payload["currentState"]["knowledge"]["pendingProposalCount"] == 1
+    assert payload["currentState"]["operatingBoundary"]["formalKnowledgeRequiresReviewer"] is True
+    items = team_knowledge_service.list_knowledge_items(base["knowledgeBaseId"], agent_id=agent["agentId"])
+    assert items["summary"]["itemCount"] == 0
+
+
 def test_git_entity_change_snapshot_uses_insert_order_for_append_only_table(tmp_path):
     db_path = tmp_path / "agent_brain.db"
     with sqlite3.connect(db_path) as conn:

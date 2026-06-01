@@ -1513,6 +1513,114 @@
   padding: 10px;
 }
 
+.usageContractPanel {
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid color-mix(in srgb, var(--accent-warm) 24%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
+}
+
+.contractPrinciples,
+.contractForbiddenList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.contractPrinciples span,
+.contractForbiddenList span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 4px 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-muted);
+  color: var(--fg-secondary);
+  font-size: 0.69rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contractDomainGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+.contractDomainRow {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.72fr) minmax(0, 0.9fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.contractDomainRow div,
+.contractDomainRow span,
+.contractDomainRow small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contractDomainRow strong {
+  display: block;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contractDomainRow span,
+.contractDomainRow small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.contractStateGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.contractStateGrid section {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-muted);
+}
+
+.contractStateGrid span,
+.contractStateGrid small {
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.contractStateGrid strong {
+  color: var(--fg-primary);
+  font-size: 1rem;
+}
+
 .knowledgeFormGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
