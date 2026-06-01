@@ -17,6 +17,7 @@ EXPLICIT_ALLOW_TOOLS = {
     "knowledge_proposal_tool",
     "knowledge_ingestion_tool",
     "knowledge_governance_tasks_tool",
+    "knowledge_steward_recommendations_tool",
     "knowledge_rating_suggestion_tool",
 }
 
@@ -354,6 +355,12 @@ TOOL_CATALOG: dict[str, dict[str, Any]] = {
         "riskTags": ["team_knowledge_access"],
         "permissionTier": HIGH_PERMISSION_TIER,
     },
+    "knowledge_steward_recommendations_tool": {
+        "category": "memory_context",
+        "capabilityTags": ["team_knowledge", "steward_recommendations", "governance", "read_only"],
+        "riskTags": ["team_knowledge_access"],
+        "permissionTier": HIGH_PERMISSION_TIER,
+    },
     "knowledge_rating_suggestion_tool": {
         "category": "memory_context",
         "capabilityTags": ["team_knowledge", "rating_suggestion", "governance"],
@@ -400,6 +407,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "knowledge_proposal_tool",
             "knowledge_ingestion_tool",
             "knowledge_governance_tasks_tool",
+            "knowledge_steward_recommendations_tool",
             "knowledge_rating_suggestion_tool",
             "get_session_files_tool",
         ],
@@ -409,6 +417,7 @@ TOOL_BUNDLE_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "research_knowledge_query_tool",
             "knowledge_query_tool",
             "knowledge_governance_tasks_tool",
+            "knowledge_steward_recommendations_tool",
             "knowledge_rating_suggestion_tool",
         ],
     },

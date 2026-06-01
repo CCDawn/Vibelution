@@ -62,6 +62,7 @@ from tools.team_knowledge_tools import (
     knowledge_proposal_tool as _knowledge_proposal_impl,
     knowledge_query_tool as _knowledge_query_impl,
     knowledge_rating_suggestion_tool as _knowledge_rating_suggestion_impl,
+    knowledge_steward_recommendations_tool as _knowledge_steward_recommendations_impl,
 )
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
@@ -1209,6 +1210,23 @@ def create_key_tools() -> List[BaseTool]:
         return _knowledge_governance_tasks_impl(status=status)
 
     @tool
+    def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
+        """
+        【知识库管理员建议】读取 Knowledge Steward 派生的治理建议。
+
+        建议由 open governance tasks 派生，只读返回 review_proposal、review_rating_suggestion、draft_refinement_proposal 等下一步动作。
+        本工具不会审核、应用、删除、改 ACL 或直接写正式知识；正式知识仍需要 reviewer 确认。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_steward_recommendations_tool 时才可用。
+
+        Args:
+            limit: 返回建议数量上限，默认 8
+
+        Returns:
+            JSON 格式的知识治理建议列表和 recommendationsOnly 边界
+        """
+        return _knowledge_steward_recommendations_impl(limit=limit)
+
+    @tool
     def knowledge_rating_suggestion_tool(
         knowledge_base_id: str,
         target_type: str,
@@ -1378,6 +1396,7 @@ def create_key_tools() -> List[BaseTool]:
         knowledge_proposal_tool,
         knowledge_ingestion_tool,
         knowledge_governance_tasks_tool,
+        knowledge_steward_recommendations_tool,
         knowledge_rating_suggestion_tool,
         # 学习卸载 (P2)
         record_learning_tool,
