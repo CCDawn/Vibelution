@@ -21,6 +21,10 @@ type MemoryGraphCanvasProps = {
 
 type DragMode = "rotate" | "pan" | "";
 
+const LABEL_ALWAYS_TYPES = new Set(["project", "team", "knowledge_base", "evolution", "supervision"]);
+const DENSE_LABEL_LIMIT = 12;
+const SEARCH_LABEL_LIMIT = 28;
+
 const NODE_COLORS: Record<string, number> = {
   project: 0xf2c94c,
   team: 0x6fcf97,
@@ -63,6 +67,41 @@ function trimText(value: unknown, limit: number) {
   return `${text.slice(0, Math.max(0, limit - 1)).trim()}...`;
 }
 
+function buildDegreeMap(edges: MemoryKnowledgeGraphEdge[]) {
+  const degree = new Map<string, number>();
+  for (const edge of edges) {
+    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
+    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
+  }
+  return degree;
+}
+
+function pickVisibleLabelIds(nodes: MemoryKnowledgeGraphNode[], edges: MemoryKnowledgeGraphEdge[], selectedNodeId: string) {
+  const degree = buildDegreeMap(edges);
+  const visible = new Set<string>();
+  const isSearchSized = nodes.length <= SEARCH_LABEL_LIMIT;
+  const budget = isSearchSized ? Math.min(SEARCH_LABEL_LIMIT, nodes.length) : DENSE_LABEL_LIMIT;
+
+  for (const node of nodes) {
+    if (LABEL_ALWAYS_TYPES.has(node.type)) {
+      visible.add(node.id);
+    }
+  }
+  if (selectedNodeId) {
+    visible.add(selectedNodeId);
+  }
+  if (visible.size < budget) {
+    [...nodes]
+      .sort((left, right) => (degree.get(right.id) ?? 0) - (degree.get(left.id) ?? 0))
+      .slice(0, Math.max(0, budget - visible.size))
+      .forEach((node) => visible.add(node.id));
+  }
+  if (isSearchSized) {
+    nodes.slice(0, budget).forEach((node) => visible.add(node.id));
+  }
+  return visible;
+}
+
 function createGlowTexture() {
   const canvas = document.createElement("canvas");
   canvas.width = 96;
@@ -85,7 +124,9 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
   const labelLayerRef = useRef<HTMLDivElement | null>(null);
   const [webglReady, setWebglReady] = useState(true);
   const [positions, setPositions] = useState<Map<string, THREE.Vector3>>(new Map());
-  const positionsArray = useMemo(() => Array.from(positions.entries()), [positions]);
+  const degree = useMemo(() => buildDegreeMap(edges), [edges]);
+  const visibleLabelIds = useMemo(() => pickVisibleLabelIds(nodes, edges, selectedNodeId), [nodes, edges, selectedNodeId]);
+  const searchSizedLabels = nodes.length <= SEARCH_LABEL_LIMIT;
 
   useEffect(() => {
     if (typeof Worker === "undefined") {
@@ -138,7 +179,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     rimLight.position.set(-18, 10, 28);
     scene.add(rimLight);
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     renderer.setClearColor(0x000000, 0);
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
@@ -146,10 +187,10 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
 
     const nodeObjects = new Map<string, THREE.Mesh>();
     const hitObjects = new Map<string, THREE.Mesh>();
-    const sphere = new THREE.SphereGeometry(0.42, 24, 24);
-    const haloSphere = new THREE.SphereGeometry(0.58, 24, 24);
+    const sphere = new THREE.SphereGeometry(0.42, 16, 16);
+    const haloSphere = new THREE.SphereGeometry(0.58, 16, 16);
     const hitSphere = new THREE.SphereGeometry(1, 12, 12);
-    const ringGeometry = new THREE.TorusGeometry(0.7, 0.025, 8, 36);
+    const ringGeometry = new THREE.TorusGeometry(0.7, 0.025, 8, 24);
     const glowTexture = createGlowTexture();
     const labelLayer = labelLayerRef.current;
     if (labelLayer) {
@@ -157,7 +198,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     }
     const labelElements = new Map<string, HTMLButtonElement>();
     for (const node of nodes) {
-      const degree = edges.filter((edge) => edge.source === node.id || edge.target === node.id).length;
+      const nodeDegree = degree.get(node.id) ?? 0;
       const color = NODE_COLORS[node.type] ?? 0xdfe6e9;
       const material = new THREE.MeshStandardMaterial({
         color,
@@ -167,7 +208,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         metalness: 0.18,
       });
       const mesh = new THREE.Mesh(sphere, material);
-      const size = 1.32 + Math.min(2.8, Math.sqrt(degree + 1) * 0.34);
+      const size = 1.32 + Math.min(2.8, Math.sqrt(nodeDegree + 1) * 0.34);
       mesh.scale.setScalar(node.type === "project" ? 2.8 : size);
       const position = positions.get(node.id) ?? new THREE.Vector3();
       mesh.position.copy(position);
@@ -228,20 +269,22 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       root.add(hitMesh);
       hitObjects.set(node.id, hitMesh);
 
-      if (labelLayer) {
+      if (labelLayer && visibleLabelIds.has(node.id)) {
+        const showDetail = selectedNodeId === node.id || searchSizedLabels;
         const label = document.createElement("button");
         label.type = "button";
         label.className = styles.graphNodeBadge;
         label.dataset.selected = selectedNodeId === node.id ? "true" : "false";
+        label.dataset.detail = showDetail ? "true" : "false";
         label.dataset.nodeType = node.type;
         const typeMark = document.createElement("span");
         typeMark.className = styles.graphNodeBadgeType;
         typeMark.textContent = NODE_SHORT_LABELS[node.type] ?? node.type.slice(0, 2).toUpperCase();
         const title = document.createElement("strong");
-        title.textContent = trimText(node.label, 32);
+        title.textContent = trimText(node.label, showDetail ? 32 : 24);
         const summary = document.createElement("small");
-        summary.textContent = trimText(node.summary || node.status || node.type, 72);
-        label.replaceChildren(typeMark, title, summary);
+        summary.textContent = trimText(node.summary || node.status || node.type, showDetail ? 72 : 40);
+        label.replaceChildren(typeMark, title, ...(showDetail ? [summary] : []));
         label.title = `${node.label} · ${node.type}`;
         label.setAttribute("aria-label", `${node.label} ${node.type}`);
         label.tabIndex = -1;
@@ -420,7 +463,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       renderer.dispose();
       container.replaceChildren();
     };
-  }, [nodes, edges, positions, positionsArray, selectedNodeId, onSelectNode]);
+  }, [nodes, edges, positions, selectedNodeId, onSelectNode, degree, visibleLabelIds, searchSizedLabels]);
 
   if (!webglReady || !nodes.length) {
     return (

@@ -15,19 +15,19 @@ type LayoutNode = {
 
 const TYPE_RADIUS: Record<string, number> = {
   project: 0,
-  team: 5.5,
-  agent: 8.5,
-  agent_private_memory: 10.5,
-  knowledge_base: 13,
-  knowledge_item: 17,
-  source_artifact: 20,
-  refinement_proposal: 15,
-  knowledge_batch: 16,
-  rating_suggestion: 18,
-  runtime_scene: 22,
-  evolution: 24,
-  supervision: 24,
-  tag: 19,
+  team: 7,
+  agent: 12,
+  agent_private_memory: 16,
+  knowledge_base: 20,
+  knowledge_item: 24,
+  source_artifact: 28,
+  refinement_proposal: 22,
+  knowledge_batch: 24,
+  rating_suggestion: 26,
+  runtime_scene: 34,
+  evolution: 30,
+  supervision: 30,
+  tag: 28,
 };
 
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
@@ -51,16 +51,17 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   const typeEntries = Array.from(byType.entries());
   typeEntries.forEach(([type, group], typeIndex) => {
     const radius = TYPE_RADIUS[type] ?? 12 + typeIndex * 1.8;
-    const vertical = (typeIndex - typeEntries.length / 2) * 1.2;
+    const vertical = (typeIndex - typeEntries.length / 2) * 1.55;
     group.forEach((node, index) => {
       const count = Math.max(1, group.length);
       const angle = (index / count) * Math.PI * 2 + typeIndex * 0.47;
-      const degreeBoost = Math.min(3.8, Math.sqrt(degree.get(node.id) ?? 0));
+      const layerSpread = Math.min(5.5, Math.sqrt(count) * 1.35);
+      const degreeBoost = Math.min(4.8, Math.sqrt(degree.get(node.id) ?? 0));
       positions.push({
         id: node.id,
-        x: Math.cos(angle) * (radius + degreeBoost),
-        y: vertical + Math.sin(angle * 1.7) * 2.4,
-        z: Math.sin(angle) * (radius + degreeBoost),
+        x: Math.cos(angle) * (radius + layerSpread + degreeBoost),
+        y: vertical + Math.sin(angle * 1.7) * 3.2,
+        z: Math.sin(angle) * (radius + layerSpread + degreeBoost),
       });
     });
   });

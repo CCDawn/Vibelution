@@ -8,6 +8,7 @@ import appShellSource from "../app/AppShell.tsx?raw";
 import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
 
 const memoryCssSource = readFileSync(new URL("./MemoryRoute.module.css", import.meta.url), "utf-8");
+const graphWorkerSource = readFileSync(new URL("./memoryGraphLayout.worker.ts", import.meta.url), "utf-8");
 
 describe("MemoryRoute layout contract", () => {
   it("reads the read-only memory overview endpoint through the shared query key", () => {
@@ -87,12 +88,20 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasSource).toContain("graphNodeBadge");
     expect(graphCanvasSource).toContain('DragMode = "rotate" | "pan"');
     expect(graphCanvasSource).toContain('event.button === 1 ? "pan" : "rotate"');
+    expect(graphCanvasSource).toContain("DENSE_LABEL_LIMIT");
+    expect(graphCanvasSource).toContain("SEARCH_LABEL_LIMIT");
+    expect(graphCanvasSource).toContain("pickVisibleLabelIds");
+    expect(graphCanvasSource).toContain("setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))");
+    expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.42, 16, 16)");
     expect(graphCanvasSource).toContain("translate(-50%, calc(-100% - 20px))");
     expect(graphCanvasSource).toContain("trimText(node.summary");
     expect(graphCanvasSource).toContain("hitObjects");
     expect(graphCanvasSource).toContain("TorusGeometry");
+    expect(graphWorkerSource).toContain("layerSpread");
+    expect(graphWorkerSource).toContain("runtime_scene: 34");
     expect(memoryCssSource).toContain(".graphCanvasShell");
     expect(memoryCssSource).toContain(".graphNodeBadge");
+    expect(memoryCssSource).toContain('[data-detail="true"]');
     expect(memoryCssSource).toContain(".graphNodeBadgeType");
     expect(memoryCssSource).toContain(".graphInteractionHint");
     expect(memoryCssSource).toContain(".graphNodeTypeMark");
