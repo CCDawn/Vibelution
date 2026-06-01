@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   Clock3,
   Gauge,
@@ -19,6 +21,7 @@ import {
   GitMerge,
   SearchCheck,
   ShieldCheck,
+  Wrench,
   X,
 } from "lucide-react";
 import { type CSSProperties, type KeyboardEvent, type PointerEvent, useEffect, useMemo, useState } from "react";
@@ -66,6 +69,7 @@ import {
 } from "./evolutionLiveRun";
 import { buildSupervisedRunRecordDisplay } from "./supervisedRunRecordLabel";
 import { buildSupervisedRunControlSummary } from "./supervisedRunSummary";
+import { buildSupervisedCaseTraceItems, type SupervisedCaseTraceItem } from "./supervisedCaseTrace";
 import { createEvolutionWorkspaceCache } from "./evolutionWorkspaceCache";
 import {
   clampPaneSize,
@@ -436,6 +440,7 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   const [libraryListCollapsed, setLibraryListCollapsed] = useState(false);
   const [liveLaunchCollapsed, setLiveLaunchCollapsed] = useState(false);
   const [liveRunCollapsed, setLiveRunCollapsed] = useState(false);
+  const [expandedCaseTraceItems, setExpandedCaseTraceItems] = useState<Record<string, boolean>>({});
   const configQuery = useQuery({
     queryKey: queryKeys.configPublic(),
     queryFn: () => fetchJson<ConfigSummary>("/api/config/public"),
@@ -900,8 +905,21 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
   );
   const monitoredRunStatus = String(monitoredRun?.status || "").toLowerCase();
   const monitoredCaseTranscript = monitoredRun?.currentCaseIo?.transcript ?? [];
+  const monitoredCaseTraceItems = useMemo(
+    () =>
+      buildSupervisedCaseTraceItems(monitoredCaseTranscript, {
+        input: lang === "zh" ? "当前 case 输入" : "Case input",
+        thought: lang === "zh" ? "思考过程" : "Reasoning trace",
+        tool: lang === "zh" ? "工具调用" : "Tool call",
+        assistant: lang === "zh" ? "回答" : "Answer",
+        error: lang === "zh" ? "错误 / 恢复" : "Error / recovery",
+        raw: lang === "zh" ? "内容" : "Content",
+        state: lang === "zh" ? "状态" : "State",
+      }),
+    [lang, monitoredCaseTranscript],
+  );
   const monitoredCaseHasOutput = Boolean(
-    monitoredRun?.currentCaseIo?.latestOutput || monitoredCaseTranscript.length > 0,
+    monitoredRun?.currentCaseIo?.latestOutput || monitoredCaseTraceItems.length > 0,
   );
   const monitoredCaseHasVisibleIo = Boolean(
     monitoredRun?.currentCasePrompt || monitoredRun?.currentCaseIo?.latestInput || monitoredCaseHasOutput,
@@ -1755,6 +1773,61 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
       return outputLabel || t("ioEntryError");
     }
     return t("currentCaseOutput");
+  }
+
+  function caseTraceIcon(item: SupervisedCaseTraceItem) {
+    if (item.tone === "tool") {
+      return <Wrench size={15} />;
+    }
+    if (item.tone === "assistant") {
+      return <Sparkles size={15} />;
+    }
+    if (item.tone === "error") {
+      return <TriangleAlert size={15} />;
+    }
+    if (item.tone === "input") {
+      return <Play size={14} />;
+    }
+    return <Activity size={15} />;
+  }
+
+  function caseTraceItemExpanded(item: SupervisedCaseTraceItem) {
+    return expandedCaseTraceItems[item.key] ?? item.defaultOpen;
+  }
+
+  function toggleCaseTraceItem(item: SupervisedCaseTraceItem) {
+    setExpandedCaseTraceItems((current) => ({
+      ...current,
+      [item.key]: !(current[item.key] ?? item.defaultOpen),
+    }));
+  }
+
+  function renderCaseTraceSection(section: SupervisedCaseTraceItem["sections"][number], index: number) {
+    if (section.kind === "state") {
+      return (
+        <div key={`${section.label}-${index}`} className={styles.caseTraceStateGrid}>
+          {section.rows.map((row) => (
+            <dl key={`${section.label}-${row.label}`} className={styles.caseTraceStateRow}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            </dl>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div
+        key={`${section.label}-${index}`}
+        className={
+          section.kind === "json"
+            ? `${styles.caseTraceSection} ${styles.caseTraceSectionJson}`
+            : styles.caseTraceSection
+        }
+      >
+        <span>{section.label}</span>
+        <pre>{section.content}</pre>
+      </div>
+    );
   }
 
   function triggerRunAction(sessionId: string, action: string) {
@@ -2831,20 +2904,38 @@ export function EvolutionRoute({ forcedTrack, forcedView }: EvolutionRouteProps)
 
                     <div className={`${styles.detailSection} ${styles.detailSectionCompact} ${styles.transcriptSection}`}>
                       <h3>{t("currentCaseTranscript")}</h3>
-                      {monitoredCaseTranscript.length > 0 ? (
-                        <div className={styles.ioTranscript}>
-                          {monitoredCaseTranscript.map((entry, index) => (
-                            <article
-                              key={`${entry.timestamp}-${entry.kind}-${entry.label}-${index}`}
-                              className={styles.ioEntry}
-                            >
-                              <div className={styles.ioMetaRow}>
-                                <strong>{caseIoEntryLabel(entry.kind, entry.label, entry.status)}</strong>
-                                <span className={styles.formHint}>{compactTimestamp(entry.timestamp)}</span>
-                              </div>
-                              <pre className={styles.ioContent}>{entry.content}</pre>
-                            </article>
-                          ))}
+                      {monitoredCaseTraceItems.length > 0 ? (
+                        <div className={styles.caseTraceTimeline}>
+                          {monitoredCaseTraceItems.map((entry) => {
+                            const expanded = caseTraceItemExpanded(entry);
+                            return (
+                              <article
+                                key={entry.key}
+                                className={`${styles.caseTraceTurn} ${styles[`caseTraceTurn_${entry.tone}`]}`}
+                              >
+                                <button
+                                  type="button"
+                                  className={styles.caseTraceSummary}
+                                  aria-expanded={expanded}
+                                  onClick={() => toggleCaseTraceItem(entry)}
+                                >
+                                  <span className={styles.caseTraceIcon}>{caseTraceIcon(entry)}</span>
+                                  <span className={styles.caseTraceTitle}>{entry.title}</span>
+                                  <span className={styles.caseTracePreview}>{entry.preview}</span>
+                                  {entry.status ? <span className={styles.caseTraceStatus}>{statusLabel(entry.status)}</span> : null}
+                                  {entry.timestamp ? (
+                                    <span className={styles.caseTraceTime}>{compactTimestamp(entry.timestamp)}</span>
+                                  ) : null}
+                                  {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                                </button>
+                                {expanded ? (
+                                  <div className={styles.caseTraceBody}>
+                                    {entry.sections.map((section, sectionIndex) => renderCaseTraceSection(section, sectionIndex))}
+                                  </div>
+                                ) : null}
+                              </article>
+                            );
+                          })}
                         </div>
                       ) : (
                         <p className={styles.noticeText}>{t("caseIoWaiting")}</p>

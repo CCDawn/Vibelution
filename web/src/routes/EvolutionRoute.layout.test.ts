@@ -136,6 +136,17 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(stylesSource).not.toContain("max-height: 340px");
   });
 
+  it("renders supervised case transcript as expandable chat-style trace items", () => {
+    expect(routeSource).toContain("buildSupervisedCaseTraceItems");
+    expect(routeSource).toContain("caseTraceItemExpanded");
+    expect(routeSource).toContain("toggleCaseTraceItem");
+    expect(routeSource).toContain("renderCaseTraceSection");
+    expect(routeSource).toContain("styles.caseTraceTimeline");
+    expect(stylesSource).toContain(".caseTraceTimeline::before");
+    expect(stylesSource).toContain(".caseTraceSummary");
+    expect(stylesSource).toContain(".caseTraceStateGrid");
+  });
+
   it("keeps the proposal library summary in three columns at common desktop widths", () => {
     expect(stylesSource).toContain(".librarySummaryBar");
     expect(stylesSource).toContain("minmax(300px, 1fr) minmax(260px, 0.8fr) minmax(300px, 0.9fr)");
