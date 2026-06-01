@@ -13,6 +13,7 @@ KNOWLEDGE_QUERY_TOOL_NAME = "knowledge_query_tool"
 KNOWLEDGE_PROPOSAL_TOOL_NAME = "knowledge_proposal_tool"
 KNOWLEDGE_INGESTION_TOOL_NAME = "knowledge_ingestion_tool"
 KNOWLEDGE_GOVERNANCE_TASKS_TOOL_NAME = "knowledge_governance_tasks_tool"
+KNOWLEDGE_STEWARD_RECOMMENDATIONS_TOOL_NAME = "knowledge_steward_recommendations_tool"
 KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME = "knowledge_rating_suggestion_tool"
 
 
@@ -301,6 +302,47 @@ def knowledge_governance_tasks_tool(status: str = "open") -> str:
     except Exception as exc:
         _record_event(
             "knowledge.tool.governance_tasks.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "agentId": agent_id,
+            }
+        )
+
+
+def knowledge_steward_recommendations_tool(limit: int = 8) -> str:
+    """Read the current Agent's Knowledge Steward governance recommendations."""
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_STEWARD_RECOMMENDATIONS_TOOL_NAME)
+    if blocked:
+        return _json_result(blocked)
+    try:
+        from core.web.services import team_knowledge_service
+
+        payload = team_knowledge_service.list_knowledge_steward_recommendations(agent_id=agent_id, limit=limit)
+        _record_event(
+            "knowledge.tool.steward_recommendations.queried",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "recommendationCount": (payload.get("summary") or {}).get("recommendationCount", 0),
+                "visibleRecommendationCount": (payload.get("summary") or {}).get("visibleRecommendationCount", 0),
+            },
+        )
+        return _json_result({"ok": True, "status": "succeeded", "agentId": agent_id, **payload})
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.steward_recommendations.failed",
             runtime=runtime,
             level="error",
             outcome="failed",
