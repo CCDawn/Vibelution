@@ -21,6 +21,7 @@ from core.web.services.team_knowledge_service import (
     knowledge_permission_audit,
     list_ingestion_adapters,
     list_knowledge_governance_tasks,
+    list_knowledge_steward_recommendations,
     list_knowledge_items,
     list_knowledge_overview,
     list_rating_suggestions,
@@ -129,6 +130,16 @@ def knowledge_overview(agentId: str = "") -> dict:
 @router.get("/knowledge/steward/overview")
 def knowledge_steward_overview() -> dict:
     return get_knowledge_steward_overview()
+
+
+@router.get("/knowledge/steward/recommendations")
+def knowledge_steward_recommendations(agentId: str = "", limit: int = 12) -> dict:
+    try:
+        return list_knowledge_steward_recommendations(agent_id=agentId, limit=limit)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/knowledge/search")

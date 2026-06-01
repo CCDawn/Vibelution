@@ -179,6 +179,52 @@ export type KnowledgeStewardOverview = {
   updatedAt: string;
 };
 
+export type KnowledgeStewardRecommendation = {
+  recommendationId: string;
+  taskId: string;
+  taskType: string;
+  recommendedAction: "review_proposal" | "review_rating_suggestion" | "draft_refinement_proposal" | "inspect_task" | string;
+  priority: string;
+  teamId: string;
+  teamName: string;
+  knowledgeBaseId: string;
+  knowledgeBaseName: string;
+  targetId: string;
+  targetStatus: string;
+  title: string;
+  summary: string;
+  reason: string;
+  nextStep: string;
+  requiresReviewer: boolean;
+  canExecuteWithCurrentActor: boolean;
+  sourceArtifactIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type KnowledgeStewardRecommendationsPayload = {
+  schemaVersion: number;
+  agentId: string;
+  stewardAgentId: string;
+  recommendations: KnowledgeStewardRecommendation[];
+  summary: {
+    recommendationCount: number;
+    visibleRecommendationCount: number;
+    proposalReviewCount: number;
+    ratingReviewCount: number;
+    proposalDraftCount: number;
+  };
+  operatingBoundary: {
+    canDirectlyApplyKnowledge: boolean;
+    canDeleteKnowledge: boolean;
+    canChangeAcl: boolean;
+    canBypassReviewer: boolean;
+    recommendationsOnly: boolean;
+    formalKnowledgeRequiresReviewer: boolean;
+  };
+  updatedAt: string;
+};
+
 export type KnowledgeSourceArtifact = {
   sourceArtifactId: string;
   teamId: string;

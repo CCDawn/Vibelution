@@ -384,6 +384,51 @@ def test_governance_tasks_adapters_and_trace_are_readable(knowledge_env):
     assert trace["summary"]["proposals"] == 1
 
 
+def test_steward_recommendations_are_read_only_actions(knowledge_env):
+    orphan_source = team_knowledge_service.create_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "needs proposal"},
+        title="Source without proposal",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Proposal needing review",
+        content="Reviewer should inspect this candidate.",
+    )
+    applied = team_knowledge_service.review_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=knowledge_env["lead"]["agentId"],
+    )
+    team_knowledge_service.create_rating_suggestion(
+        knowledge_env["base"]["knowledgeBaseId"],
+        suggested_by_agent_id=knowledge_env["lead"]["agentId"],
+        target_type="knowledge_item",
+        knowledge_item_id=applied["item"]["knowledgeItemId"],
+        importance_level="critical",
+        confidence=0.9,
+        stability="stable",
+        review_priority="urgent",
+        marking_reason="Core knowledge should be marked critical.",
+    )
+
+    payload = team_knowledge_service.list_knowledge_steward_recommendations(agent_id=knowledge_env["lead"]["agentId"])
+
+    actions = {item["recommendedAction"] for item in payload["recommendations"]}
+    assert "draft_refinement_proposal" in actions
+    assert "review_rating_suggestion" in actions
+    assert any(item["targetId"] == orphan_source["sourceArtifactId"] for item in payload["recommendations"])
+    assert payload["operatingBoundary"]["recommendationsOnly"] is True
+    assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert payload["summary"]["proposalDraftCount"] == 1
+    assert payload["summary"]["ratingReviewCount"] == 1
+
+
 def test_ingestion_package_preserves_team_chat_room_guard(knowledge_env):
     with pytest.raises(team_knowledge_service.TeamKnowledgeError, match="linked chat room"):
         team_knowledge_service.create_ingestion_package(

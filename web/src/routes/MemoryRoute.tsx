@@ -38,6 +38,7 @@ import {
   KnowledgeSearchPayload,
   KnowledgeSourceArtifact,
   KnowledgeStewardOverview,
+  KnowledgeStewardRecommendationsPayload,
   KnowledgeTracePayload,
   MemoryItem,
   MemoryMutationResponse,
@@ -274,6 +275,10 @@ type Copy = {
   openGovernanceTasks: string;
   noDirectApply: string;
   reviewerRequired: string;
+  stewardRecommendations: string;
+  stewardRecommendationHint: string;
+  recommendationsOnly: string;
+  recommendedAction: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
@@ -585,6 +590,10 @@ const COPY: Record<"zh" | "en", Copy> = {
     openGovernanceTasks: "待处理治理任务",
     noDirectApply: "不直接落正式知识",
     reviewerRequired: "正式知识需要审核角色确认",
+    stewardRecommendations: "治理建议",
+    stewardRecommendationHint: "只生成建议，不自动审核或落正式知识。",
+    recommendationsOnly: "仅建议",
+    recommendedAction: "建议动作",
   },
   en: {
     eyebrow: "Memory Library",
@@ -810,6 +819,10 @@ const COPY: Record<"zh" | "en", Copy> = {
     openGovernanceTasks: "Open governance tasks",
     noDirectApply: "No direct formal write",
     reviewerRequired: "Formal knowledge requires reviewer confirmation",
+    stewardRecommendations: "Governance recommendations",
+    stewardRecommendationHint: "Recommendations only; no automatic review or formal writes.",
+    recommendationsOnly: "Recommendations only",
+    recommendedAction: "Recommended action",
   },
 };
 
@@ -1432,6 +1445,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchIntervalInBackground: false,
     enabled: forcedView === "knowledge",
   });
+  const knowledgeStewardRecommendationsQuery = useQuery({
+    queryKey: queryKeys.knowledgeStewardRecommendations(""),
+    queryFn: () => fetchJson<KnowledgeStewardRecommendationsPayload>("/api/knowledge/steward/recommendations?limit=6"),
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
+    refetchIntervalInBackground: false,
+    enabled: forcedView === "knowledge",
+  });
 
   const memoryMutation = useMutation({
     mutationFn: async (draft: EditDraft) => {
@@ -1691,6 +1711,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const sections = overview?.sections ?? [];
   const knowledgeOverview = knowledgeOverviewQuery.data;
   const knowledgeSteward = knowledgeStewardQuery.data;
+  const knowledgeStewardRecommendations = knowledgeStewardRecommendationsQuery.data?.recommendations ?? [];
   const knowledgeBases = knowledgeOverview?.knowledgeBases ?? [];
   const activeKnowledgeBase: TeamKnowledgeBase | null =
     knowledgeBases.find((base) => base.knowledgeBaseId === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
@@ -3324,6 +3345,34 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
           ))}
           <span>{copy.allowedTools}</span>
           <small>{(knowledgeSteward?.steward.toolPolicy.allowedTools ?? []).join(", ") || "-"}</small>
+        </div>
+        <div className={styles.stewardRecommendations}>
+          <div className={styles.stewardRecommendationHeader}>
+            <span>{copy.stewardRecommendations}</span>
+            <small>
+              {knowledgeStewardRecommendationsQuery.data?.operatingBoundary.recommendationsOnly ? copy.recommendationsOnly : copy.stewardRecommendationHint}
+            </small>
+          </div>
+          {knowledgeStewardRecommendations.map((recommendation) => (
+            <section key={recommendation.recommendationId} className={styles.stewardRecommendationRow}>
+              <span className={styles.statusPill}>{recommendation.priority}</span>
+              <strong>{recommendation.title}</strong>
+              <span>{recommendation.reason}</span>
+              <small>
+                {copy.recommendedAction}: {recommendation.recommendedAction} · {recommendation.knowledgeBaseName}
+              </small>
+              <button type="button" className={styles.detailActionButton} onClick={() => setTraceTargetId(recommendation.targetId)}>
+                <Eye size={14} />
+                <span>{copy.traceability}</span>
+              </button>
+            </section>
+          ))}
+          {!knowledgeStewardRecommendationsQuery.isPending && !knowledgeStewardRecommendations.length ? (
+            <section className={styles.emptyDetail}>
+              <CheckCircle2 size={20} />
+              <strong>{copy.noIssues}</strong>
+            </section>
+          ) : null}
         </div>
       </section>
       {knowledgeFeedback.tone !== "idle" ? (

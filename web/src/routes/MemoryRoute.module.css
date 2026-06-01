@@ -1768,6 +1768,69 @@
   white-space: nowrap;
 }
 
+.stewardRecommendations {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stewardRecommendationHeader,
+.stewardRecommendationRow {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 0.8fr) minmax(220px, 1.4fr) minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stewardRecommendationHeader {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  padding: 0 2px;
+}
+
+.stewardRecommendationHeader span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.stewardRecommendationHeader small {
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.72rem;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stewardRecommendationRow {
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-elevated) 64%, transparent);
+}
+
+.stewardRecommendationRow strong,
+.stewardRecommendationRow span,
+.stewardRecommendationRow small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stewardRecommendationRow strong {
+  color: var(--fg-primary);
+  font-size: 0.76rem;
+}
+
+.stewardRecommendationRow span,
+.stewardRecommendationRow small {
+  color: var(--fg-secondary);
+  font-size: 0.71rem;
+}
+
 .permissionMatrix {
   display: grid;
   gap: 6px;
@@ -2217,6 +2280,15 @@
     grid-template-columns: 1fr;
   }
 
+  .stewardRecommendationHeader,
+  .stewardRecommendationRow {
+    grid-template-columns: 1fr;
+  }
+
+  .stewardRecommendationHeader small {
+    text-align: left;
+  }
+
   .overviewGrid,
   .effectiveGrid {
     grid-template-columns: 1fr;
@@ -2287,6 +2359,11 @@
 
   .stewardToolRows {
     display: grid;
+  }
+
+  .stewardRecommendationHeader,
+  .stewardRecommendationRow {
+    grid-template-columns: 1fr;
   }
 
   .sourcePanel,
