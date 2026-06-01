@@ -36,8 +36,26 @@ const NODE_COLORS: Record<string, number> = {
   tag: 0xb2bec3,
 };
 
+const NODE_SHORT_LABELS: Record<string, string> = {
+  project: "P",
+  team: "T",
+  agent: "A",
+  agent_private_memory: "M",
+  knowledge_base: "KB",
+  knowledge_item: "KI",
+  source_artifact: "S",
+  refinement_proposal: "R",
+  knowledge_batch: "B",
+  rating_suggestion: "!",
+  runtime_scene: "RT",
+  evolution: "E",
+  supervision: "SV",
+  tag: "#",
+};
+
 export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, fallbackText }: MemoryGraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const labelLayerRef = useRef<HTMLDivElement | null>(null);
   const [webglReady, setWebglReady] = useState(true);
   const [positions, setPositions] = useState<Map<string, THREE.Vector3>>(new Map());
   const positionsArray = useMemo(() => Array.from(positions.entries()), [positions]);
@@ -83,7 +101,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     camera.position.set(0, 12, 46);
     const root = new THREE.Group();
     scene.add(root);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.82));
     const light = new THREE.DirectionalLight(0xffffff, 1.2);
     light.position.set(12, 18, 16);
     scene.add(light);
@@ -95,24 +113,91 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     container.replaceChildren(renderer.domElement);
 
     const nodeObjects = new Map<string, THREE.Mesh>();
-    const sphere = new THREE.SphereGeometry(0.32, 16, 16);
+    const hitObjects = new Map<string, THREE.Mesh>();
+    const sphere = new THREE.SphereGeometry(0.42, 24, 24);
+    const haloSphere = new THREE.SphereGeometry(0.58, 24, 24);
+    const hitSphere = new THREE.SphereGeometry(1, 12, 12);
+    const ringGeometry = new THREE.TorusGeometry(0.7, 0.025, 8, 36);
+    const labelLayer = labelLayerRef.current;
+    if (labelLayer) {
+      labelLayer.replaceChildren();
+    }
+    const labelElements = new Map<string, HTMLButtonElement>();
     for (const node of nodes) {
       const degree = edges.filter((edge) => edge.source === node.id || edge.target === node.id).length;
+      const color = NODE_COLORS[node.type] ?? 0xdfe6e9;
       const material = new THREE.MeshStandardMaterial({
-        color: NODE_COLORS[node.type] ?? 0xdfe6e9,
-        emissive: selectedNodeId === node.id ? 0xffffff : 0x000000,
-        emissiveIntensity: selectedNodeId === node.id ? 0.28 : 0,
-        roughness: 0.45,
-        metalness: 0.08,
+        color,
+        emissive: color,
+        emissiveIntensity: selectedNodeId === node.id ? 0.58 : 0.2,
+        roughness: 0.32,
+        metalness: 0.18,
       });
       const mesh = new THREE.Mesh(sphere, material);
-      const size = 0.9 + Math.min(2.2, Math.sqrt(degree + 1) * 0.22);
-      mesh.scale.setScalar(node.type === "project" ? 2.1 : size);
+      const size = 1.15 + Math.min(2.5, Math.sqrt(degree + 1) * 0.3);
+      mesh.scale.setScalar(node.type === "project" ? 2.55 : size);
       const position = positions.get(node.id) ?? new THREE.Vector3();
       mesh.position.copy(position);
       mesh.userData.nodeId = node.id;
       root.add(mesh);
       nodeObjects.set(node.id, mesh);
+
+      const halo = new THREE.Mesh(
+        haloSphere,
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: selectedNodeId === node.id ? 0.28 : 0.1,
+          depthWrite: false,
+        }),
+      );
+      halo.position.copy(position);
+      halo.scale.setScalar((node.type === "project" ? 2.7 : size) * 1.2);
+      root.add(halo);
+
+      if (selectedNodeId === node.id || node.type === "project" || node.type === "team" || node.type === "knowledge_base") {
+        const ring = new THREE.Mesh(
+          ringGeometry,
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: selectedNodeId === node.id ? 0.9 : 0.48,
+            depthWrite: false,
+          }),
+        );
+        ring.position.copy(position);
+        ring.scale.setScalar(node.type === "project" ? 2.4 : Math.max(1.1, size));
+        ring.lookAt(camera.position);
+        root.add(ring);
+      }
+
+      const hitMesh = new THREE.Mesh(
+        hitSphere,
+        new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+      );
+      hitMesh.position.copy(position);
+      hitMesh.scale.setScalar(Math.max(1.25, (node.type === "project" ? 2.75 : size) * 1.35));
+      hitMesh.userData.nodeId = node.id;
+      root.add(hitMesh);
+      hitObjects.set(node.id, hitMesh);
+
+      if (labelLayer) {
+        const label = document.createElement("button");
+        label.type = "button";
+        label.className = styles.graphNodeBadge;
+        label.dataset.selected = selectedNodeId === node.id ? "true" : "false";
+        label.dataset.nodeType = node.type;
+        label.textContent = NODE_SHORT_LABELS[node.type] ?? node.type.slice(0, 2).toUpperCase();
+        label.title = `${node.label} · ${node.type}`;
+        label.setAttribute("aria-label", `${node.label} ${node.type}`);
+        label.tabIndex = -1;
+        label.addEventListener("click", (event) => {
+          event.stopPropagation();
+          onSelectNode(node.id);
+        });
+        labelLayer.appendChild(label);
+        labelElements.set(node.id, label);
+      }
     }
 
     const linePositions: number[] = [];
@@ -128,7 +213,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     lineGeometry.setAttribute("position", new THREE.Float32BufferAttribute(linePositions, 3));
     const lines = new THREE.LineSegments(
       lineGeometry,
-      new THREE.LineBasicMaterial({ color: 0x8aa0b5, transparent: true, opacity: 0.36 }),
+      new THREE.LineBasicMaterial({ color: 0x7897ad, transparent: true, opacity: 0.42 }),
     );
     root.add(lines);
 
@@ -137,6 +222,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     let width = 1;
     let height = 1;
     let dragging = false;
+    let moved = false;
     let lastX = 0;
     let lastY = 0;
     let raf = 0;
@@ -150,6 +236,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     };
     const onPointerDown = (event: PointerEvent) => {
       dragging = true;
+      moved = false;
       lastX = event.clientX;
       lastY = event.clientY;
       renderer.domElement.setPointerCapture(event.pointerId);
@@ -160,6 +247,9 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       }
       const dx = event.clientX - lastX;
       const dy = event.clientY - lastY;
+      if (Math.abs(dx) + Math.abs(dy) > 3) {
+        moved = true;
+      }
       lastX = event.clientX;
       lastY = event.clientY;
       root.rotation.y += dx * 0.006;
@@ -171,11 +261,14 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       renderer.domElement.releasePointerCapture(event.pointerId);
     };
     const onClick = (event: MouseEvent) => {
+      if (moved) {
+        return;
+      }
       const rect = renderer.domElement.getBoundingClientRect();
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const hit = raycaster.intersectObjects(Array.from(nodeObjects.values()), false)[0];
+      const hit = raycaster.intersectObjects(Array.from(hitObjects.values()), false)[0];
       const nodeId = String(hit?.object?.userData?.nodeId ?? "");
       if (nodeId) {
         onSelectNode(nodeId);
@@ -187,7 +280,31 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     };
     const animate = () => {
       if (!dragging) {
-        root.rotation.y += 0.0018;
+        root.rotation.y += 0.0012;
+      }
+      for (const object of root.children) {
+        if (object instanceof THREE.Mesh && object.geometry === ringGeometry) {
+          object.lookAt(camera.position);
+        }
+      }
+      if (labelLayer) {
+        const rect = container.getBoundingClientRect();
+        const projected = new THREE.Vector3();
+        root.updateMatrixWorld(true);
+        camera.updateMatrixWorld(true);
+        for (const [nodeId, label] of labelElements) {
+          const position = positions.get(nodeId);
+          if (!position) {
+            label.style.opacity = "0";
+            continue;
+          }
+          projected.copy(position).applyMatrix4(root.matrixWorld).project(camera);
+          const x = (projected.x * 0.5 + 0.5) * rect.width;
+          const y = (-projected.y * 0.5 + 0.5) * rect.height;
+          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
+          label.style.opacity = projected.z < 1 ? "1" : "0";
+          label.style.zIndex = String(Math.max(1, Math.round((1 - projected.z) * 100)));
+        }
       }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(animate);
@@ -210,9 +327,18 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       renderer.domElement.removeEventListener("click", onClick);
       renderer.domElement.removeEventListener("wheel", onWheel);
       sphere.dispose();
+      haloSphere.dispose();
+      hitSphere.dispose();
+      ringGeometry.dispose();
       lineGeometry.dispose();
       for (const object of nodeObjects.values()) {
         (object.material as THREE.Material).dispose();
+      }
+      for (const object of hitObjects.values()) {
+        (object.material as THREE.Material).dispose();
+      }
+      if (labelLayer) {
+        labelLayer.replaceChildren();
       }
       renderer.dispose();
       container.replaceChildren();
@@ -226,7 +352,12 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       </div>
     );
   }
-  return <div ref={containerRef} className={styles.graphCanvasMount} aria-label="memory knowledge graph 3d canvas" />;
+  return (
+    <div className={styles.graphCanvasShell}>
+      <div ref={containerRef} className={styles.graphCanvasMount} aria-label="memory knowledge graph 3d canvas" />
+      <div ref={labelLayerRef} className={styles.graphCanvasLabels} />
+    </div>
+  );
 }
 
 function deterministicPositions(nodes: MemoryKnowledgeGraphNode[], edges: MemoryKnowledgeGraphEdge[]) {

@@ -59,6 +59,23 @@ import styles from "./MemoryRoute.module.css";
 
 const MemoryGraphCanvas = lazy(() => import("./MemoryGraphCanvas").then((module) => ({ default: module.MemoryGraphCanvas })));
 
+const GRAPH_NODE_TYPE_LABELS: Record<string, string> = {
+  project: "Project",
+  team: "Team",
+  agent: "Agent",
+  agent_private_memory: "Memory",
+  knowledge_base: "KB",
+  knowledge_item: "Item",
+  source_artifact: "Source",
+  refinement_proposal: "Proposal",
+  knowledge_batch: "Batch",
+  rating_suggestion: "Rating",
+  runtime_scene: "Runtime",
+  evolution: "Evolution",
+  supervision: "Supervision",
+  tag: "Tag",
+};
+
 type Copy = {
   eyebrow: string;
   title: string;
@@ -4335,7 +4352,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <div className={styles.graphTypeList}>
               {graphTypeEntries.map(([type, count]) => (
-                <span key={type}>
+                <span key={type} data-node-type={type}>
                   <strong>{type}</strong>
                   <small>{count}</small>
                 </span>
@@ -4367,10 +4384,12 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 key={node.id}
                 type="button"
                 className={selectedGraphNode?.id === node.id ? `${styles.itemButton} ${styles.itemButtonActive}` : styles.itemButton}
+                data-node-type={node.type}
                 onClick={() => setSelectedGraphNodeId(node.id)}
               >
+                <span className={styles.graphNodeTypeMark}>{GRAPH_NODE_TYPE_LABELS[node.type] ?? node.type.slice(0, 10)}</span>
                 <strong>{node.label}</strong>
-                <span>{node.type} · {node.status || "-"}</span>
+                <small>{node.status || "-"}</small>
               </button>
             ))}
           </div>
