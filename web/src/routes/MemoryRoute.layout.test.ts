@@ -74,6 +74,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.graphWorker");
     expect(routeSource).toContain("copy.graphReadOnly");
     expect(routeSource).toContain("copy.graphAcl");
+    expect(routeSource).toContain("copy.graphInteractionHint");
     expect(routeSource).toContain("graphSearchText");
     expect(routeSource).toContain("selectedGraphNodeId");
     expect(routeSource).toContain("styles.graphWorkspace");
@@ -84,10 +85,16 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("data-node-type");
     expect(graphCanvasSource).toContain("graphCanvasLabels");
     expect(graphCanvasSource).toContain("graphNodeBadge");
+    expect(graphCanvasSource).toContain('DragMode = "rotate" | "pan"');
+    expect(graphCanvasSource).toContain('event.button === 1 ? "pan" : "rotate"');
+    expect(graphCanvasSource).toContain("translate(-50%, calc(-100% - 20px))");
+    expect(graphCanvasSource).toContain("trimText(node.summary");
     expect(graphCanvasSource).toContain("hitObjects");
     expect(graphCanvasSource).toContain("TorusGeometry");
     expect(memoryCssSource).toContain(".graphCanvasShell");
     expect(memoryCssSource).toContain(".graphNodeBadge");
+    expect(memoryCssSource).toContain(".graphNodeBadgeType");
+    expect(memoryCssSource).toContain(".graphInteractionHint");
     expect(memoryCssSource).toContain(".graphNodeTypeMark");
     expect(memoryCssSource).toContain('[data-node-type="knowledge_base"]');
     expect(routerSource).toContain('path: "memory/graph"');
