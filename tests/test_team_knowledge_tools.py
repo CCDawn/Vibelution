@@ -29,6 +29,7 @@ def _seed_team_knowledge(tmp_path, monkeypatch):
                 "knowledge_ingestion_tool",
                 "knowledge_governance_tasks_tool",
                 "knowledge_steward_recommendations_tool",
+                "knowledge_steward_workbench_tool",
             ]
         },
         memory_policy={
@@ -52,6 +53,7 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
             "knowledge_proposal_tool",
             "knowledge_rating_suggestion_tool",
             "knowledge_steward_recommendations_tool",
+            "knowledge_steward_workbench_tool",
             "agent_message_tool",
         }
     ]
@@ -64,12 +66,14 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
         "knowledge_proposal_tool",
         "knowledge_rating_suggestion_tool",
         "knowledge_steward_recommendations_tool",
+        "knowledge_steward_workbench_tool",
         "agent_message_tool",
     }
     assert "knowledge_query_tool" not in [tool.name for tool in visible]
     assert "knowledge_proposal_tool" not in [tool.name for tool in visible]
     assert "knowledge_rating_suggestion_tool" not in [tool.name for tool in visible]
     assert "knowledge_steward_recommendations_tool" not in [tool.name for tool in visible]
+    assert "knowledge_steward_workbench_tool" not in [tool.name for tool in visible]
 
 
 def test_knowledge_proposal_tool_submits_source_and_pending_candidate(tmp_path, monkeypatch):
@@ -149,6 +153,26 @@ def test_knowledge_steward_recommendations_tool_reads_read_only_actions(tmp_path
     assert result["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
     assert any(item["targetId"] == proposal["proposalId"] for item in result["recommendations"])
     assert result["recommendations"][0]["recommendedAction"] == "review_proposal"
+
+
+def test_knowledge_steward_workbench_tool_reads_grouped_workflow(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    source = team_knowledge_service.create_source_artifact(
+        env["base"]["knowledgeBaseId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "tool workbench source"},
+        title="Tool workbench source",
+        actor_agent_id=env["member"]["agentId"],
+    )
+
+    with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
+        result = json.loads(team_knowledge_tools.knowledge_steward_workbench_tool(limit=4))
+
+    assert result["ok"] is True
+    assert result["operatingBoundary"]["recommendationsOnly"] is True
+    assert result["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert any(stage["stageId"] == "source_to_proposal" for stage in result["stages"])
+    assert any(action["targetId"] == source["sourceArtifactId"] for action in result["nextActions"])
 
 
 def test_knowledge_query_tool_reads_applied_items_only(tmp_path, monkeypatch):

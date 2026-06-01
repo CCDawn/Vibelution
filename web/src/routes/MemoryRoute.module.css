@@ -1831,6 +1831,98 @@
   font-size: 0.71rem;
 }
 
+.stewardWorkbench {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding-top: 2px;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 68%, transparent);
+}
+
+.stewardStageGrid,
+.stewardActionGrid,
+.stewardChecklist {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stewardStageGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stewardStageCard,
+.stewardActionRow {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-elevated) 62%, transparent);
+}
+
+.stewardStageCard {
+  display: grid;
+  gap: 4px;
+}
+
+.stewardStageCard div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.stewardStageCard strong,
+.stewardActionRow strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-primary);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stewardStageCard p,
+.stewardStageCard small,
+.stewardActionRow small,
+.stewardChecklist span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.7rem;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stewardStageCard code {
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stewardActionRow {
+  display: grid;
+  grid-template-columns: auto minmax(140px, 0.6fr) minmax(220px, 1.4fr);
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  color: inherit;
+  text-align: left;
+}
+
+.stewardChecklist {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stewardChecklist span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .permissionMatrix {
   display: grid;
   gap: 6px;
@@ -2285,6 +2377,12 @@
     grid-template-columns: 1fr;
   }
 
+  .stewardStageGrid,
+  .stewardActionRow,
+  .stewardChecklist {
+    grid-template-columns: 1fr;
+  }
+
   .stewardRecommendationHeader small {
     text-align: left;
   }
@@ -2363,6 +2461,12 @@
 
   .stewardRecommendationHeader,
   .stewardRecommendationRow {
+    grid-template-columns: 1fr;
+  }
+
+  .stewardStageGrid,
+  .stewardActionRow,
+  .stewardChecklist {
     grid-template-columns: 1fr;
   }
 

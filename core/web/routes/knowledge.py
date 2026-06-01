@@ -18,6 +18,7 @@ from core.web.services.team_knowledge_service import (
     create_source_artifact,
     get_knowledge_trace,
     get_knowledge_steward_overview,
+    get_knowledge_steward_workbench,
     knowledge_permission_audit,
     list_ingestion_adapters,
     list_knowledge_governance_tasks,
@@ -136,6 +137,16 @@ def knowledge_steward_overview() -> dict:
 def knowledge_steward_recommendations(agentId: str = "", limit: int = 12) -> dict:
     try:
         return list_knowledge_steward_recommendations(agent_id=agentId, limit=limit)
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/knowledge/steward/workbench")
+def knowledge_steward_workbench(agentId: str = "", limit: int = 12) -> dict:
+    try:
+        return get_knowledge_steward_workbench(agent_id=agentId, limit=limit)
     except TeamKnowledgePermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:

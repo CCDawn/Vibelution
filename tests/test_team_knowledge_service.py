@@ -429,6 +429,36 @@ def test_steward_recommendations_are_read_only_actions(knowledge_env):
     assert payload["summary"]["ratingReviewCount"] == 1
 
 
+def test_steward_workbench_groups_actions_without_applying_knowledge(knowledge_env):
+    source = team_knowledge_service.create_source_artifact(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_type="manual_user_entry",
+        source_ref={"note": "workbench source"},
+        title="Workbench source without proposal",
+        actor_agent_id=knowledge_env["member"]["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=knowledge_env["member"]["agentId"],
+        title="Workbench proposal",
+        content="Workbench should show this proposal without applying it.",
+    )
+
+    payload = team_knowledge_service.get_knowledge_steward_workbench(agent_id=knowledge_env["lead"]["agentId"], limit=5)
+
+    assert payload["operatingBoundary"]["recommendationsOnly"] is True
+    assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert payload["summary"]["openTaskCount"] >= 2
+    assert {stage["stageId"] for stage in payload["stages"]} == {"source_to_proposal", "proposal_review", "rating_review"}
+    source_stage = next(stage for stage in payload["stages"] if stage["stageId"] == "source_to_proposal")
+    proposal_stage = next(stage for stage in payload["stages"] if stage["stageId"] == "proposal_review")
+    assert any(item["targetId"] == source["sourceArtifactId"] for item in source_stage["items"])
+    assert any(item["targetId"] == proposal["proposalId"] for item in proposal_stage["items"])
+    assert payload["acceptanceChecklist"][0]["required"] is True
+    assert not team_knowledge_service.list_knowledge_items(knowledge_env["base"]["knowledgeBaseId"], agent_id=knowledge_env["lead"]["agentId"])["items"]
+
+
 def test_ingestion_package_preserves_team_chat_room_guard(knowledge_env):
     with pytest.raises(team_knowledge_service.TeamKnowledgeError, match="linked chat room"):
         team_knowledge_service.create_ingestion_package(
