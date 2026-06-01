@@ -420,6 +420,114 @@ def test_stop_requested_run_cancels_active_harness_without_waiting_for_checkpoin
     assert service.get_active_supervised_run() is None
 
 
+def test_retry_supervised_run_starts_new_run_from_finished_decision(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    decision_path = tmp_path / "workspace" / "supervised_evolution" / "decisions" / "supervised_old.json"
+    decision_path.parent.mkdir(parents=True)
+    decision_path.write_text('{"baseline_runs":[],"candidate_runs":[]}', encoding="utf-8")
+    source_run_id = "web-supervised-old"
+    source_snapshot = {
+        "runId": source_run_id,
+        "status": "done",
+        "currentPhase": "done",
+        "runtimeStatus": "idle",
+        "sourceKind": "dataset",
+        "datasetName": "terminal_bench_smoke",
+        "datasetLimit": 1,
+        "bundleName": "terminal_bench_smoke_v1",
+        "keepWorktree": False,
+        "decisionPath": str(decision_path),
+        "eventTail": [],
+    }
+    service.persist_manager_run_snapshot("supervised", source_snapshot, active_run_id="")
+    monkeypatch.setattr(service, "supervised_agent_bindings", lambda: {"baseline": {"agentId": "a-base"}})
+    monkeypatch.setattr(service, "_RUN_EXECUTOR", _ImmediateExecutor())
+    observed: dict[str, object] = {}
+
+    def fake_run_workbench_session(**kwargs):
+        observed.update(kwargs)
+        raise service.SupervisedEvolutionCancelled("stop after capture", session_id="retry_session")
+
+    monkeypatch.setattr(service, "run_workbench_session", fake_run_workbench_session)
+
+    snapshot = service.retry_supervised_run(source_run_id)
+
+    assert snapshot["runId"] != source_run_id
+    assert snapshot["retryOfRunId"] == source_run_id
+    assert snapshot["resumeFromDecisionPath"] == str(decision_path)
+    assert observed["resume_from_decision_path"] == decision_path
+    assert observed["bundle_name"] == "terminal_bench_smoke_v1"
+    assert observed["agent_bindings"]["baseline"]["agentId"] == "a-base"
+
+
+def test_start_supervised_run_blocks_official_terminal_bench_bundle(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "terminal_bench_core_v1.json"
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_path.write_text(
+        (
+            '{"bundle_name":"terminal_bench_core_v1",'
+            '"dataset":{"official_verifier_status":"harbor_pending"},'
+            '"cases":[{"case_id":"tb2","official_runner":"harbor_pending",'
+            '"requires_official_task_environment":true}]}'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(service.shutil, "which", lambda name: None)
+    monkeypatch.setattr(service, "_docker_daemon_available", lambda: False)
+
+    with pytest.raises(service.SupervisedRunValidationError) as exc:
+        service.start_supervised_run(
+            {
+                "sourceKind": "bundle",
+                "bundleName": "terminal_bench_core_v1",
+            }
+        )
+
+    assert "Harbor/Docker" in str(exc.value)
+    assert "/app sandbox" in str(exc.value)
+
+
+def test_retry_supervised_run_blocks_official_terminal_bench_bundle(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    decision_path = tmp_path / "workspace" / "supervised_evolution" / "decisions" / "supervised_old.json"
+    decision_path.parent.mkdir(parents=True)
+    decision_path.write_text('{"baseline_runs":[],"candidate_runs":[]}', encoding="utf-8")
+    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "terminal_bench_core_v1.json"
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_path.write_text(
+        (
+            '{"bundle_name":"terminal_bench_core_v1",'
+            '"dataset":{"official_verifier_status":"harbor_pending"},'
+            '"cases":[{"case_id":"tb2","official_runner":"harbor_pending",'
+            '"requires_official_task_environment":true}]}'
+        ),
+        encoding="utf-8",
+    )
+    source_run_id = "web-supervised-old"
+    service.persist_manager_run_snapshot(
+        "supervised",
+        {
+            "runId": source_run_id,
+            "status": "failed",
+            "sourceKind": "bundle",
+            "bundleName": "terminal_bench_core_v1",
+            "decisionPath": str(decision_path),
+        },
+        active_run_id="",
+    )
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(service.shutil, "which", lambda name: None)
+    monkeypatch.setattr(service, "_docker_daemon_available", lambda: False)
+
+    with pytest.raises(service.SupervisedRunValidationError) as exc:
+        service.retry_supervised_run(source_run_id)
+
+    assert "Harbor/Docker" in str(exc.value)
+    assert "/app sandbox" in str(exc.value)
+
+
 def test_handle_progress_event_updates_current_case_io_snapshot():
     run_id = _seed_running_run()
 
@@ -495,6 +603,12 @@ def _checkpoint_in_thread(run_id: str, result: dict[str, object]) -> None:
         service._checkpoint_supervised_run(run_id, {"phase": "case_boundary", "case_id": "case_1"})
     except Exception as exc:  # pragma: no cover - surfaced through assertion
         result["error"] = exc
+
+
+class _ImmediateExecutor:
+    def submit(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+        return None
 
 
 def test_runtime_manager_start_supervised_run_submits_command(monkeypatch):

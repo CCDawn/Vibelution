@@ -214,6 +214,7 @@ class DatasetSpec:
     timeout_seconds: int = 600
     runnable: bool = True
     adapter_status: str = "ready"
+    official_verifier_status: str = "not_required"
     tags: List[str] = None
     review_required: bool = False
     source_track: str = ""
@@ -355,8 +356,9 @@ def _default_registry_payload() -> Dict[str, Any]:
                 "scenario": "transaction",
                 "mode": "multi_step_react",
                 "timeout_seconds": 1800,
-                "runnable": True,
-                "adapter_status": "ready_official_seed",
+                "runnable": False,
+                "adapter_status": "requires_harbor_task_environment",
+                "official_verifier_status": "harbor_pending",
                 "tags": ["terminal-bench", "tb2", "react", "harness", "official-seed"],
                 "source_track": "benchmark",
                 "allowed_downstream_uses": ["supervised_evaluation", "regression_observation"],
@@ -466,7 +468,12 @@ def _merge_registry_payload(existing: Dict[str, Any]) -> Dict[str, Any]:
             merged.append(default_item)
             continue
         changed = False
-        protected_keys = protected_dataset_boundary_fields()
+        protected_keys = protected_dataset_boundary_fields() | {
+            "runnable",
+            "adapter_status",
+            "official_verifier_status",
+            "workbench_visible",
+        }
         for key, value in default_item.items():
             if key not in existing_item or key in protected_keys:
                 if existing_item.get(key) == value:
@@ -536,6 +543,7 @@ def _dataset_specs_from_payload(payload: Dict[str, Any]) -> List[DatasetSpec]:
                 timeout_seconds=int(item.get("timeout_seconds") or 600),
                 runnable=bool(item.get("runnable", True)),
                 adapter_status=str(item.get("adapter_status") or "ready"),
+                official_verifier_status=str(item.get("official_verifier_status") or "not_required").strip(),
                 tags=list(item.get("tags") or []),
                 review_required=bool(item.get("review_required", False)),
                 source_track=str(item.get("source_track") or "").strip(),
@@ -608,6 +616,12 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 usability_reason = "需要接入外部 SWE harness，且当前源文件不存在。"
             else:
                 usability_reason = "需要接入外部 SWE harness 后才能真实判分。"
+        elif not spec.runnable and spec.adapter_status == "requires_harbor_task_environment":
+            usability_status = "requires_official_task_environment"
+            if not available:
+                usability_reason = "需要接入 Harbor/Docker 官方任务环境，且当前源文件不存在。"
+            else:
+                usability_reason = "需要接入 Harbor/Docker 官方任务环境，当前 harness 没有 /app sandbox 和官方判分器。"
         elif not available:
             usability_status = "missing_source"
             usability_reason = "数据集源文件不存在。"
@@ -617,10 +631,13 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
         elif case_count == 0:
             usability_status = "empty"
             usability_reason = "数据集当前没有可物化 case。"
+        elif spec.official_verifier_status == "harbor_pending":
+            usability_status = "agent_harness_ready"
+            usability_reason = "可启动 agent harness 多步评测；官方 Harbor 判分器尚未接通。"
         else:
             usability_status = "ready"
             usability_reason = "数据集已有可运行 case。"
-        effective = usability_status == "ready"
+        effective = usability_status in {"ready", "agent_harness_ready"}
         visibility = "primary" if effective and spec.workbench_visible else "hidden"
         if not spec.workbench_visible:
             visibility_reason = "底层数据池不直接作为工作台评测入口展示。"
@@ -630,8 +647,12 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
             visibility_reason = "缺少本地源文件，已从主选择器隐藏。"
         elif usability_status == "requires_external_harness":
             visibility_reason = "需要外部 harness，已从主选择器隐藏。"
+        elif usability_status == "requires_official_task_environment":
+            visibility_reason = "需要 Harbor/Docker 官方任务环境，已从主选择器隐藏。"
         elif usability_status in {"invalid", "blocked"}:
             visibility_reason = "当前不可运行，已从主选择器隐藏。"
+        elif usability_status == "agent_harness_ready":
+            visibility_reason = "可用于监督进化 harness 评测，但官方判分器未接通。"
         else:
             visibility_reason = "可直接用于监督进化运行。"
         boundary = dataset_intake_boundary(
@@ -654,6 +675,7 @@ def list_dataset_status(project_root: Optional[Path] = None) -> List[Dict[str, A
                 "case_count": case_count,
                 "usability_status": usability_status,
                 "usability_reason": usability_reason,
+                "official_verifier_status": spec.official_verifier_status,
                 "visibility": visibility,
                 "visibility_reason": visibility_reason,
                 "selectable": effective,
@@ -1018,6 +1040,8 @@ def _build_terminal_bench_case(spec: DatasetSpec, row: Dict[str, Any], index: in
         "requires_react_trace": True,
         "requires_terminal_harness": True,
         "official_runner": "harbor_pending" if adapter == "official_seed" else "pending",
+        "requires_official_task_environment": adapter == "official_seed",
+        "required_task_paths": ["/app"] if adapter == "official_seed" else [],
         "official_metadata": official_metadata,
         "allowed_tools": allowed_tools,
         "max_steps": max_steps,
@@ -1117,6 +1141,7 @@ def materialize_dataset_bundle(
             "kind": spec.kind,
             "source_path": str(source),
             "adapter_status": spec.adapter_status,
+            "official_verifier_status": spec.official_verifier_status,
             "runnable": spec.runnable,
             "review_required": spec.review_required,
             "source_track": spec.source_track,

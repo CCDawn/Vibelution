@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import shutil
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -228,6 +229,75 @@ def get_supervised_workbench() -> dict[str, Any]:
     }
 
 
+def _official_task_environment_block_reason(bundle_path: Path, *, lang: str) -> str:
+    """Return a user-facing block reason when a bundle requires the official task sandbox."""
+
+    try:
+        payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    dataset = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
+    cases = [item for item in list(payload.get("cases") or []) if isinstance(item, dict)]
+    official_pending = str(dataset.get("official_verifier_status") or "").strip() == "harbor_pending"
+    requires_official_env = any(
+        bool(case.get("requires_official_task_environment"))
+        or str(case.get("official_runner") or "").strip() == "harbor_pending"
+        for case in cases
+    )
+    if not official_pending and not requires_official_env:
+        return ""
+
+    missing: list[str] = []
+    if shutil.which("uv") is None:
+        missing.append("uv")
+    if shutil.which("docker") is None:
+        missing.append("docker")
+    if not _docker_daemon_available():
+        missing.append("docker daemon")
+    missing_text = "、".join(dict.fromkeys(missing))
+    suffix = f" 当前缺少：{missing_text}。" if missing_text else ""
+    return text_for(
+        lang,
+        zh=(
+            "这个 bundle 需要 Harbor/Docker 官方 Terminal-Bench 任务环境，当前监督 harness 还没有提供 "
+            "/app sandbox 与官方判分器；不能作为真实评测启动。请先使用 terminal_bench_smoke，"
+            "或接入官方 runner 后再运行。"
+            f"{suffix}"
+        ),
+        en=(
+            "This bundle requires the official Harbor/Docker Terminal-Bench task environment. "
+            "The supervised harness does not currently provide the /app sandbox or official verifier, "
+            "so it cannot be started as a real evaluation. Use terminal_bench_smoke first, or wire "
+            f"the official runner before running it. Missing: {missing_text or 'official task environment'}."
+        ),
+    )
+
+
+def _docker_daemon_available() -> bool:
+    docker = shutil.which("docker")
+    if not docker:
+        return False
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            [docker, "version", "--format", "{{.Server.Version}}"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+            check=False,
+            creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
+        )
+    except Exception:
+        return False
+    return proc.returncode == 0 and bool((proc.stdout or "").strip())
+
+
 def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
     """Start a live supervised run and return the initial snapshot."""
 
@@ -269,6 +339,21 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
                     en=f"Supervised bundle does not exist: {bundle_name}",
                 )
             )
+        block_reason = _official_task_environment_block_reason(bundle_path, lang=lang)
+        if block_reason:
+            _record_supervised_scene_event(
+                "preflight",
+                "supervised_run.preflight.official_environment_blocked",
+                message=block_reason,
+                level="warning",
+                outcome="blocked",
+                fields={
+                    "bundleName": bundle_name,
+                    "sourceKind": source_kind,
+                },
+                lifecycle=True,
+            )
+            raise SupervisedRunValidationError(block_reason)
         dataset_name = ""
         dataset_limit = None
 
@@ -324,6 +409,114 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
                 lang,
                 zh=f"无法启动监督任务：{type(exc).__name__}: {exc}",
                 en=f"Failed to start supervised run: {type(exc).__name__}: {exc}",
+            ),
+        )
+        raise
+    return get_supervised_run_snapshot(context["runId"])
+
+
+def _local_retry_supervised_run(run_id: str) -> dict[str, Any]:
+    """Start a new supervised run that reuses successful roles from a finished run."""
+
+    lang = get_web_language()
+    normalized = str(run_id or "").strip()
+    if not normalized:
+        raise SupervisedRunValidationError(text_for(lang, zh="缺少监督 run id。", en="Missing supervised run id."))
+    previous = _load_supervised_run_for_retry(normalized)
+    if previous is None:
+        raise SupervisedRunNotFoundError(text_for(lang, zh="未找到监督记录。", en="Supervised run not found."))
+
+    status = str(previous.get("status") or "").strip().lower()
+    if status not in {"done", "failed", "cancelled"}:
+        raise SupervisedRunStateError(
+            text_for(lang, zh="只有已结束的监督记录才能重跑失败项。", en="Only a finished supervised run can rerun failed items.")
+        )
+    decision_path = str(previous.get("decisionPath") or "").strip()
+    if not decision_path:
+        raise SupervisedRunValidationError(
+            text_for(lang, zh="这条监督记录没有 decision 文件，不能重跑失败项。", en="This supervised run has no decision file to reuse for rerun.")
+        )
+    resolved_decision_path = _resolve_retry_decision_path(decision_path)
+    if not resolved_decision_path.exists():
+        raise SupervisedRunValidationError(
+            text_for(lang, zh="续跑来源 decision 文件不存在。", en="The source decision file for retry does not exist.")
+        )
+
+    _raise_if_supervised_lease_conflict(lang=lang)
+    agent_bindings = supervised_agent_bindings()
+    context = {
+        "runId": f"web-supervised-{uuid4().hex[:12]}",
+        "lang": lang,
+        "sourceKind": str(previous.get("sourceKind") or "bundle").strip() or "bundle",
+        "datasetName": str(previous.get("datasetName") or "").strip(),
+        "datasetLimit": previous.get("datasetLimit") if previous.get("datasetLimit") != "" else None,
+        "bundleName": str(previous.get("bundleName") or "").strip(),
+        "keepWorktree": bool(previous.get("keepWorktree")),
+        "startedAt": _now_timestamp(),
+        "agentBindings": agent_bindings,
+        "retryOfRunId": normalized,
+        "resumeFromDecisionPath": str(resolved_decision_path),
+    }
+    if not context["bundleName"]:
+        raise SupervisedRunValidationError(
+            text_for(lang, zh="这条监督记录缺少 bundle 名称，不能重跑失败项。", en="This supervised run has no bundle name to rerun.")
+        )
+    bundle_path = resolve_workbench_bundle_path(PROJECT_ROOT, context["bundleName"])
+    block_reason = _official_task_environment_block_reason(bundle_path, lang=lang)
+    if block_reason:
+        _record_supervised_scene_event(
+            "preflight",
+            "supervised_run.preflight.official_environment_blocked",
+            message=block_reason,
+            level="warning",
+            outcome="blocked",
+            fields={
+                "bundleName": context["bundleName"],
+                "sourceKind": context["sourceKind"],
+                "retryOfRunId": normalized,
+            },
+            lifecycle=True,
+        )
+        raise SupervisedRunValidationError(block_reason)
+    state = _initial_run_state(context)
+    state["retryOfRunId"] = normalized
+    state["resumeFromDecisionPath"] = str(resolved_decision_path)
+    state["latestMessage"] = text_for(
+        lang,
+        zh="已创建重跑任务：成功项会复用，失败或缺失项会重跑。",
+        en="Queued rerun. Successful roles will be reused; failed or missing roles will rerun.",
+    )
+    state["currentTask"] = state["latestMessage"]
+    state["eventTail"][0]["event"] = "retry_queued"
+    state["eventTail"][0]["title"] = "失败项重跑已排队"
+    state["eventTail"][0]["summary"] = state["latestMessage"]
+    state["eventTail"][0]["retryOfRunId"] = normalized
+
+    with _RUN_STATE_LOCK:
+        active = _current_active_run_locked()
+        if active is not None and str(active.get("status") or "").strip().lower() in _ACTIVE_RUN_STATUSES:
+            raise SupervisedRunBusyError(
+                text_for(
+                    lang,
+                    zh="当前已有监督任务在运行，请等这一轮结束后再重跑失败项。",
+                    en="A supervised run is already active. Wait for it to finish before retrying.",
+                )
+            )
+        _RUN_STATES[context["runId"]] = state
+        _RUN_CONTROLLERS[context["runId"]] = _SupervisedRunController()
+        global _ACTIVE_RUN_ID
+        _ACTIVE_RUN_ID = context["runId"]
+
+    _publish_run_snapshot(context["runId"])
+    try:
+        _RUN_EXECUTOR.submit(_run_supervised_session, context)
+    except Exception as exc:
+        _mark_run_failed(
+            context["runId"],
+            text_for(
+                lang,
+                zh=f"无法启动失败项重跑：{type(exc).__name__}: {exc}",
+                en=f"Failed to start supervised retry: {type(exc).__name__}: {exc}",
             ),
         )
         raise
@@ -1035,6 +1228,11 @@ def _run_supervised_session(context: dict[str, Any]) -> None:
             cancel_checker=lambda: _supervised_run_cancel_reason(run_id),
             project_root=PROJECT_ROOT,
             agent_bindings=context.get("agentBindings") or {},
+            resume_from_decision_path=(
+                Path(str(context.get("resumeFromDecisionPath") or ""))
+                if str(context.get("resumeFromDecisionPath") or "").strip()
+                else None
+            ),
         )
     except _SupervisedRunInterrupted:
         return
@@ -1273,7 +1471,7 @@ def _handle_progress_event(run_id: str, event: dict[str, Any]) -> None:
                         f"for the {state['currentRole']} role."
                     ),
                 )
-        elif event_type == "role_finish":
+        elif event_type in {"role_finish", "role_reused"}:
             if status not in {"paused", "stopping", "cancelled"}:
                 state["status"] = "running"
             state["currentPhase"] = "stopping" if stop_requested else "pause_requested" if pause_requested else "running"
@@ -1423,6 +1621,8 @@ def _initial_run_state(context: dict[str, Any]) -> dict[str, Any]:
         "lineageSummary": "",
         "activeAdvisoryCount": 0,
         "agentBindings": _agent_bindings_snapshot(context.get("agentBindings") or {}),
+        "retryOfRunId": str(context.get("retryOfRunId") or "").strip(),
+        "resumeFromDecisionPath": str(context.get("resumeFromDecisionPath") or "").strip(),
         "pauseRequested": False,
         "pauseRequestedAt": "",
         "pausedAt": "",
@@ -1527,6 +1727,7 @@ def _supervised_action_states(payload: dict[str, Any], *, lang: str) -> dict[str
     status = str(payload.get("status") or "").strip().lower()
     pause_requested = bool(payload.get("pauseRequested"))
     stop_requested = bool(payload.get("stopRequested"))
+    decision_path = str(payload.get("decisionPath") or "").strip()
 
     def enabled_state() -> dict[str, Any]:
         return {"enabled": True, "reason": ""}
@@ -1590,11 +1791,23 @@ def _supervised_action_states(payload: dict[str, Any], *, lang: str) -> dict[str
             text_for(lang, zh="这条监督记录状态暂不支持直接删除。", en="This supervised run state cannot be deleted directly.")
         )
 
+    if status in {"done", "failed", "cancelled"} and decision_path:
+        retry_state = enabled_state()
+    elif status in {"queued", "running", "paused", "stopping"}:
+        retry_state = disabled_state(
+            text_for(lang, zh="这条监督任务仍在执行或暂停中，结束后才能重跑失败项。", en="This run is still active. Rerun is available after it finishes.")
+        )
+    else:
+        retry_state = disabled_state(
+            text_for(lang, zh="这条监督记录没有可复用的 decision，不能重跑失败项。", en="This record has no reusable decision for rerun.")
+        )
+
     return {
         "pause": pause_state,
         "resume": resume_state,
         "terminate": terminate_state,
         "delete": delete_state,
+        "retry": retry_state,
     }
 
 
@@ -1603,6 +1816,25 @@ def _require_run_locked(run_id: str, *, lang: str) -> dict[str, Any]:
     if state is None:
         raise SupervisedRunNotFoundError(text_for(lang, zh="未找到监督记录。", en="Supervised run not found."))
     return state
+
+
+def _load_supervised_run_for_retry(run_id: str) -> dict[str, Any] | None:
+    with _RUN_STATE_LOCK:
+        state = _RUN_STATES.get(run_id)
+        if state is not None:
+            return _clone_locked(state)
+    stored = load_manager_run_snapshot("supervised", run_id)
+    return _clone_locked(stored) if isinstance(stored, dict) else None
+
+
+def _resolve_retry_decision_path(value: str) -> Path:
+    raw = str(value or "").strip()
+    if not raw:
+        return Path()
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return (PROJECT_ROOT / path).resolve()
 
 
 def _raise_if_supervised_lease_conflict(*, lang: str) -> None:
@@ -1869,6 +2101,7 @@ def _dataset_payload(item: dict[str, Any]) -> dict[str, Any]:
         "caseCount": item.get("case_count"),
         "usabilityStatus": str(item.get("usability_status") or "").strip(),
         "usabilityReason": str(item.get("usability_reason") or "").strip(),
+        "officialVerifierStatus": str(item.get("official_verifier_status") or "").strip(),
         "visibility": str(item.get("visibility") or "").strip(),
         "visibilityReason": str(item.get("visibility_reason") or "").strip(),
         "selectable": bool(item.get("selectable", item.get("effective"))),
@@ -1967,7 +2200,7 @@ def _record_supervised_progress_scene_event(run_id: str, item: dict[str, Any]) -
         else "failed"
         if level == "error"
         else "succeeded"
-        if event_name in {"role_finish", "session_finish"}
+        if event_name in {"role_finish", "role_reused", "session_finish"}
         else "observed"
     )
     lifecycle = event_name in {"session_start", "session_finish", "session_error", "session_cancelled"}
@@ -2015,6 +2248,7 @@ def _event_title(event: dict[str, Any]) -> str:
     return {
         "session_start": "监督任务开始",
         "role_start": "Case 开始",
+        "role_reused": "Case 复用",
         "role_finish": "Case 完成",
         "session_error": "监督任务异常",
         "session_cancelled": "监督任务终止",
@@ -2030,7 +2264,7 @@ def _event_status(event: dict[str, Any]) -> str:
         return "cancelled"
     if event_type == "session_finish":
         return "done"
-    if event_type == "role_finish":
+    if event_type in {"role_finish", "role_reused"}:
         raw_status = str(event.get("status") or "").strip().lower()
         return raw_status or "running"
     return "running"
@@ -2053,6 +2287,11 @@ def _event_summary(event: dict[str, Any]) -> str:
         return (
             f"{event.get('case_id')} {event.get('role')} status={event.get('status')} "
             f"reason={event.get('reason')}"
+        )
+    if event_type == "role_reused":
+        return (
+            f"{event.get('case_id')} {event.get('role')} reused status={event.get('status')} "
+            f"report={event.get('report_path') or '-'}"
         )
     if event_type == "session_error":
         return (
@@ -2195,6 +2434,7 @@ def _now_timestamp() -> str:
 
 _LOCAL_GET_SUPERVISED_WORKBENCH = get_supervised_workbench
 _LOCAL_START_SUPERVISED_RUN = start_supervised_run
+_LOCAL_RETRY_SUPERVISED_RUN = _local_retry_supervised_run
 _LOCAL_GET_ACTIVE_SUPERVISED_RUN = get_active_supervised_run
 _LOCAL_GET_SUPERVISED_RUN_SNAPSHOT = get_supervised_run_snapshot
 _LOCAL_REQUEST_PAUSE_SUPERVISED_RUN = request_pause_supervised_run
@@ -2369,6 +2609,25 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
         message="Supervised run started from web UI.",
         outcome="succeeded",
         fields=_supervised_snapshot_event_fields(snapshot),
+        lifecycle=True,
+    )
+    return snapshot
+
+
+def retry_supervised_run(run_id: str) -> dict[str, Any]:
+    if _runtime_manager_live_control_enabled():
+        return _submit_supervised_runtime_manager_command("retry_supervised_run", run_id=run_id)
+    snapshot = _LOCAL_RETRY_SUPERVISED_RUN(run_id)
+    _record_supervised_scene_event(
+        "control",
+        "supervised_run.retry_started",
+        run_id=str(snapshot.get("runId") or ""),
+        message="Supervised run retry started; successful roles will be reused.",
+        outcome="succeeded",
+        fields={
+            **_supervised_snapshot_event_fields(snapshot),
+            "retryOfRunId": str(snapshot.get("retryOfRunId") or ""),
+        },
         lifecycle=True,
     )
     return snapshot

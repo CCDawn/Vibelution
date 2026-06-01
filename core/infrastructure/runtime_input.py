@@ -87,9 +87,14 @@ def build_chat_user_multimodal_message(content: str, image_urls: list[str]) -> D
     return {"role": "user", "content": blocks or [{"type": "text", "text": text}]}
 
 
-def build_supervised_evolution_request_message(content: str) -> SystemMessage:
-    """构建监督进化请求消息。"""
-    return build_runtime_input_message(RuntimeInput(RuntimeInputKind.SUPERVISED_EVOLUTION_REQUEST, content))
+def build_supervised_evolution_request_message(content: str) -> Dict[str, Any]:
+    """构建监督进化请求消息。
+
+    监督 case 的任务文本来自评测数据集，本质上仍是本轮 agent 要执行的用户/任务输入，
+    不能进入 provider system role；否则会和运行时控制提示混在一起。
+    """
+    title = _TITLES[RuntimeInputKind.SUPERVISED_EVOLUTION_REQUEST]
+    return {"role": "user", "content": f"## {title}\n{content.strip()}"}
 
 
 def build_runtime_notice_message(content: str) -> SystemMessage:

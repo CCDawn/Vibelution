@@ -183,6 +183,8 @@ class HarnessResult:
     last_observation: Dict[str, Any]
     post_restart_observation: Dict[str, Any]
     evolution_summary: Dict[str, Any]
+    preserved_evidence_path: str = ""
+    preserved_evidence_files: List[str] = field(default_factory=list)
     agent_binding: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -1997,6 +1999,51 @@ def write_report(result: HarnessResult, path: Optional[Path] = None) -> Path:
     return path
 
 
+def preserve_harness_evidence(result: HarnessResult, report_path: Path) -> None:
+    """Copy compact postmortem evidence out of the disposable worktree before cleanup."""
+
+    worktree_path = Path(result.worktree_path)
+    if not worktree_path.exists():
+        return
+    evidence_dir = report_path.with_suffix("")
+    evidence_dir = evidence_dir.parent / f"{evidence_dir.name}_evidence"
+    copied: List[str] = []
+    sources = [
+        ("log_info", worktree_path / "log_info"),
+        ("logs", worktree_path / "logs"),
+    ]
+    for label, source_dir in sources:
+        if not source_dir.exists() or not source_dir.is_dir():
+            continue
+        target_dir = evidence_dir / label
+        patterns = (
+            ("conversation_*.jsonl", "debug_*.log", "payloads/**")
+            if label == "log_info"
+            else ("agent_realtime.log", "runtime_scenes/**/timeline.jsonl", "runtime_scenes/**/lifecycle.jsonl")
+        )
+        for pattern in patterns:
+            for source in source_dir.glob(pattern):
+                if source.is_dir():
+                    for child in source.rglob("*"):
+                        if child.is_file():
+                            rel = child.relative_to(source_dir)
+                            target = target_dir / rel
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.copy2(child, target)
+                            copied.append((Path(label) / rel).as_posix())
+                    continue
+                if not source.is_file():
+                    continue
+                rel = source.relative_to(source_dir)
+                target = target_dir / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+                copied.append((Path(label) / rel).as_posix())
+    if copied:
+        result.preserved_evidence_path = str(evidence_dir)
+        result.preserved_evidence_files = sorted(dict.fromkeys(copied))
+
+
 def run_harness(
     *,
     repo_root: Path,
@@ -2333,6 +2380,10 @@ def run_harness(
     )
 
     report_path = write_report(result)
+    if result.status in {"failed", "timeout", "cancelled"} or not keep_worktree:
+        preserve_harness_evidence(result, report_path)
+        if result.preserved_evidence_path:
+            write_report(result, report_path)
     print(f"[harness] report: {report_path}")
 
     if not keep_worktree:

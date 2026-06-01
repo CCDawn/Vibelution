@@ -118,6 +118,7 @@ def run_workbench_session(
     cancel_checker: Callable[[], object] | None = None,
     project_root: Path | None = None,
     agent_bindings: dict[str, Any] | None = None,
+    resume_from_decision_path: Path | None = None,
 ) -> SupervisedWorkbenchRunResult:
     from .supervised_evolution import format_decision_record_summary, run_supervised_evolution_session
 
@@ -135,6 +136,8 @@ def run_workbench_session(
         kwargs["project_root"] = project_root
     if agent_bindings is not None:
         kwargs["agent_bindings"] = agent_bindings
+    if resume_from_decision_path is not None:
+        kwargs["resume_from_decision_path"] = resume_from_decision_path
     decision = run_supervised_evolution_session(**kwargs)
     lineage_index_path = (decision.policy_action or {}).get("lineage_index_path")
     return SupervisedWorkbenchRunResult(
@@ -160,6 +163,18 @@ def prepare_dataset_run(project_root: Path, dataset_name: str, dataset_limit: in
     materialized = materialize_dataset_bundle(dataset_name, project_root=project_root, limit=dataset_limit)
     adapter_status = getattr(materialized, "adapter_status", "-")
     runnable = bool(getattr(materialized, "runnable", False))
+    if adapter_status == "requires_harbor_task_environment":
+        blocked_message = (
+            f"{dataset_name} 是 Terminal-Bench 官方任务种子，但当前只物化了 case 元数据；"
+            "还没有接入 Harbor/Docker /app sandbox 和官方判分器。请先使用 terminal_bench_smoke，"
+            "或完成官方任务环境接入后再运行。"
+        )
+    else:
+        blocked_message = (
+            ""
+            if runnable
+            else f"{dataset_name} 已登记，但 adapter_status={adapter_status}，当前不能直接运行。"
+        )
     return DatasetRunPreparation(
         dataset_name=getattr(materialized, "dataset_name", dataset_name),
         dataset_limit=dataset_limit,
@@ -167,11 +182,7 @@ def prepare_dataset_run(project_root: Path, dataset_name: str, dataset_limit: in
         runnable=runnable,
         adapter_status=adapter_status,
         summary=format_materialization_summary(materialized, dataset_name),
-        blocked_message=(
-            ""
-            if runnable
-            else f"{dataset_name} 已登记，但 adapter_status={adapter_status}，当前不能直接运行。"
-        ),
+        blocked_message=blocked_message,
     )
 
 

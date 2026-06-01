@@ -466,8 +466,19 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
     monkeypatch.setattr("scripts.evolution_harness.subprocess.Popen", fake_popen)
     monkeypatch.setattr("scripts.evolution_harness.start_stream_reader", lambda *args, **kwargs: type("Thread", (), {"join": lambda self, timeout=None: None})())
     monkeypatch.setattr("scripts.evolution_harness.terminate_harness_processes", lambda path: process.terminate())
-    monkeypatch.setattr("scripts.evolution_harness.write_report", lambda result, path=None: tmp_path / "report.json")
+    report_path = tmp_path / "report.json"
+
+    def fake_write_report(result, path=None):
+        target = path or report_path
+        target.write_text("{}", encoding="utf-8")
+        return target
+
+    monkeypatch.setattr("scripts.evolution_harness.write_report", fake_write_report)
     monkeypatch.setattr("scripts.evolution_harness.remove_worktree", lambda repo_root, path: None)
+    log_info = worktree / "log_info"
+    log_info.mkdir()
+    (log_info / "conversation_case.jsonl").write_text('{"type":"external_request","content":"probe"}\n', encoding="utf-8")
+    (log_info / "debug_case.log").write_text("[debug] probe\n", encoding="utf-8")
 
     result = run_harness(
         repo_root=tmp_path,
@@ -499,6 +510,11 @@ def test_run_harness_returns_cancelled_when_cancel_checker_requests_stop(monkeyp
     assert env["VIBELUTION_AGENT_DIRECT_SESSION_ID"] == "session-baseline"
     assert env["VIBELUTION_AGENT_WORKSPACE_PATH"] == "workspace/agents/agent-supervised-baseline"
     assert env["VIBELUTION_SUPERVISED_ROLE"] == "baseline"
+    assert result.preserved_evidence_path
+    evidence_dir = Path(result.preserved_evidence_path)
+    assert (evidence_dir / "log_info" / "conversation_case.jsonl").exists()
+    assert (evidence_dir / "log_info" / "debug_case.log").exists()
+    assert "log_info/conversation_case.jsonl" in result.preserved_evidence_files
 
 
 def test_should_finish_post_restart_observation_waits_for_meaningful_child_event():
