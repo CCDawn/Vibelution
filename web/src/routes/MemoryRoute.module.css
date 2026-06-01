@@ -710,6 +710,12 @@
   white-space: nowrap;
 }
 
+.graphInteractionHint {
+  flex: 1 1 auto;
+  max-width: 62%;
+  text-align: right;
+}
+
 .graphCanvasShell {
   position: relative;
   min-width: 0;
@@ -782,38 +788,77 @@
 
 .graphNodeBadge {
   position: absolute;
-  display: inline-flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
   align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, white);
-  border-radius: 999px;
+  column-gap: 5px;
+  row-gap: 1px;
+  width: min(210px, max-content);
+  max-width: 210px;
+  min-height: 34px;
+  padding: 4px 7px 4px 5px;
+  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 48%, white);
+  border-radius: 8px;
   background:
-    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), transparent 30%),
-    color-mix(in srgb, white 72%, var(--node-color, var(--accent-cool)) 28%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), color-mix(in srgb, white 76%, var(--node-color, var(--accent-cool)) 10%)),
+    color-mix(in srgb, white 78%, var(--node-color, var(--accent-cool)) 22%);
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--node-color, var(--accent-cool)) 12%, transparent),
-    0 10px 20px color-mix(in srgb, var(--node-color, var(--accent-cool)) 26%, transparent);
-  color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 74%, black);
-  font-size: 0.52rem;
-  font-weight: 920;
+    0 0 0 3px color-mix(in srgb, var(--node-color, var(--accent-cool)) 8%, transparent),
+    0 12px 24px color-mix(in srgb, var(--node-color, var(--accent-cool)) 16%, transparent);
+  color: var(--fg-primary);
+  text-align: left;
   line-height: 1;
   pointer-events: auto;
   transform-origin: center;
 }
 
 .graphNodeBadge[data-selected="true"] {
-  width: 28px;
-  height: 28px;
+  max-width: 240px;
+  min-height: 40px;
   border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, white);
   background:
-    radial-gradient(circle at 36% 28%, #fff, transparent 32%),
-    color-mix(in srgb, white 58%, var(--node-color, var(--accent-cool)) 42%);
+    linear-gradient(180deg, #fff, color-mix(in srgb, white 70%, var(--node-color, var(--accent-cool)) 16%)),
+    color-mix(in srgb, white 64%, var(--node-color, var(--accent-cool)) 36%);
   box-shadow:
     0 0 0 4px color-mix(in srgb, var(--node-color, var(--accent-cool)) 16%, transparent),
     0 0 28px color-mix(in srgb, var(--node-color, var(--accent-cool)) 42%, transparent);
+}
+
+.graphNodeBadgeType {
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 35% 28%, rgba(255, 255, 255, 0.96), transparent 32%),
+    color-mix(in srgb, white 60%, var(--node-color, var(--accent-cool)) 40%);
+  color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, black);
+  font-size: 0.54rem;
+  font-weight: 920;
+}
+
+.graphNodeBadge strong,
+.graphNodeBadge small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphNodeBadge strong {
+  color: var(--fg-primary);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.graphNodeBadge small {
+  color: var(--fg-tertiary);
+  font-size: 0.58rem;
+  line-height: 1.15;
 }
 
 .graphCanvasFallback svg {

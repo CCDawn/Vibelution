@@ -337,6 +337,7 @@ type Copy = {
   graphNodeTypes: string;
   graphSelectedNode: string;
   graphNoSelection: string;
+  graphInteractionHint: string;
   graphCanvasFallback: string;
 };
 
@@ -687,6 +688,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphNodeTypes: "节点类型",
     graphSelectedNode: "选中节点",
     graphNoSelection: "选择一个节点查看摘要、时间戳、权限和关联信息。",
+    graphInteractionHint: "左键移动视角 · 中键拖动图谱 · 滚轮缩放",
     graphCanvasFallback: "3D 画布正在接入；当前先展示可过滤的只读图谱结构。",
   },
   en: {
@@ -950,6 +952,7 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphNodeTypes: "Node types",
     graphSelectedNode: "Selected node",
     graphNoSelection: "Select a node to inspect summary, timestamps, permissions, and links.",
+    graphInteractionHint: "Left drag view · Middle drag graph · Wheel zoom",
     graphCanvasFallback: "The 3D canvas is being connected; this view shows the filterable read-only graph structure first.",
   },
 };
@@ -4367,7 +4370,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <p className={styles.panelEyebrow}>{copy.knowledgeGraph}</p>
               <strong>Three.js / WebGL / Worker</strong>
             </div>
-            <span>{copy.graphReadOnly} · {copy.graphAcl}</span>
+            <span className={styles.graphInteractionHint}>
+              {copy.graphReadOnly} · {copy.graphAcl} · {copy.graphInteractionHint}
+            </span>
           </div>
           <Suspense fallback={<div className={styles.graphCanvasFallback}><strong>{copy.loading}</strong></div>}>
             <MemoryGraphCanvas

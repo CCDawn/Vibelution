@@ -19,6 +19,8 @@ type MemoryGraphCanvasProps = {
   fallbackText: string;
 };
 
+type DragMode = "rotate" | "pan" | "";
+
 const NODE_COLORS: Record<string, number> = {
   project: 0xf2c94c,
   team: 0x6fcf97,
@@ -52,6 +54,14 @@ const NODE_SHORT_LABELS: Record<string, string> = {
   supervision: "SV",
   tag: "#",
 };
+
+function trimText(value: unknown, limit: number) {
+  const text = String(value || "").trim();
+  if (text.length <= limit) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, limit - 1)).trim()}...`;
+}
 
 function createGlowTexture() {
   const canvas = document.createElement("canvas");
@@ -116,7 +126,9 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 1000);
     camera.position.set(0, 12, 46);
+    camera.lookAt(0, 0, 0);
     const root = new THREE.Group();
+    root.position.set(0, 2.4, 0);
     scene.add(root);
     scene.add(new THREE.AmbientLight(0xffffff, 0.9));
     const light = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -222,7 +234,14 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         label.className = styles.graphNodeBadge;
         label.dataset.selected = selectedNodeId === node.id ? "true" : "false";
         label.dataset.nodeType = node.type;
-        label.textContent = NODE_SHORT_LABELS[node.type] ?? node.type.slice(0, 2).toUpperCase();
+        const typeMark = document.createElement("span");
+        typeMark.className = styles.graphNodeBadgeType;
+        typeMark.textContent = NODE_SHORT_LABELS[node.type] ?? node.type.slice(0, 2).toUpperCase();
+        const title = document.createElement("strong");
+        title.textContent = trimText(node.label, 32);
+        const summary = document.createElement("small");
+        summary.textContent = trimText(node.summary || node.status || node.type, 72);
+        label.replaceChildren(typeMark, title, summary);
         label.title = `${node.label} · ${node.type}`;
         label.setAttribute("aria-label", `${node.label} ${node.type}`);
         label.tabIndex = -1;
@@ -256,7 +275,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     const pointer = new THREE.Vector2();
     let width = 1;
     let height = 1;
-    let dragging = false;
+    let dragMode: DragMode = "";
     let moved = false;
     let lastX = 0;
     let lastY = 0;
@@ -270,14 +289,18 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       renderer.setSize(width, height, false);
     };
     const onPointerDown = (event: PointerEvent) => {
-      dragging = true;
+      if (event.button !== 0 && event.button !== 1) {
+        return;
+      }
+      event.preventDefault();
+      dragMode = event.button === 1 ? "pan" : "rotate";
       moved = false;
       lastX = event.clientX;
       lastY = event.clientY;
       renderer.domElement.setPointerCapture(event.pointerId);
     };
     const onPointerMove = (event: PointerEvent) => {
-      if (!dragging) {
+      if (!dragMode) {
         return;
       }
       const dx = event.clientX - lastX;
@@ -287,13 +310,23 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       }
       lastX = event.clientX;
       lastY = event.clientY;
+      if (dragMode === "pan") {
+        const worldPerPixel = (camera.position.z / Math.max(1, height)) * 1.18;
+        root.position.x += dx * worldPerPixel;
+        root.position.y -= dy * worldPerPixel;
+        root.position.y = Math.max(-28, Math.min(28, root.position.y));
+        root.position.x = Math.max(-36, Math.min(36, root.position.x));
+        return;
+      }
       root.rotation.y += dx * 0.006;
       root.rotation.x += dy * 0.004;
       root.rotation.x = Math.max(-1.2, Math.min(1.2, root.rotation.x));
     };
     const onPointerUp = (event: PointerEvent) => {
-      dragging = false;
-      renderer.domElement.releasePointerCapture(event.pointerId);
+      dragMode = "";
+      if (renderer.domElement.hasPointerCapture(event.pointerId)) {
+        renderer.domElement.releasePointerCapture(event.pointerId);
+      }
     };
     const onClick = (event: MouseEvent) => {
       if (moved) {
@@ -312,9 +345,15 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       camera.position.z = Math.max(16, Math.min(90, camera.position.z + event.deltaY * 0.025));
+      camera.lookAt(0, 0, 0);
+    };
+    const preventAuxClick = (event: MouseEvent) => {
+      if (event.button === 1) {
+        event.preventDefault();
+      }
     };
     const animate = () => {
-      if (!dragging) {
+      if (!dragMode) {
         root.rotation.y += 0.0012;
       }
       for (const object of root.children) {
@@ -336,7 +375,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
           projected.copy(position).applyMatrix4(root.matrixWorld).project(camera);
           const x = (projected.x * 0.5 + 0.5) * rect.width;
           const y = (-projected.y * 0.5 + 0.5) * rect.height;
-          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%) scale(${selectedNodeId === nodeId ? 1.08 : 1})`;
+          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, calc(-100% - 20px)) scale(${selectedNodeId === nodeId ? 1.08 : 1})`;
           label.style.opacity = projected.z < 1 ? (selectedNodeId === nodeId ? "1" : "0.86") : "0";
           label.style.zIndex = String(Math.max(1, Math.round((1 - projected.z) * 100)));
         }
@@ -351,6 +390,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerup", onPointerUp);
     renderer.domElement.addEventListener("click", onClick);
+    renderer.domElement.addEventListener("auxclick", preventAuxClick);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
     animate();
     return () => {
@@ -360,6 +400,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       renderer.domElement.removeEventListener("click", onClick);
+      renderer.domElement.removeEventListener("auxclick", preventAuxClick);
       renderer.domElement.removeEventListener("wheel", onWheel);
       sphere.dispose();
       haloSphere.dispose();
