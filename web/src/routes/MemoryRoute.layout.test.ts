@@ -42,9 +42,9 @@ describe("MemoryRoute layout contract", () => {
     expect(detailPanelIndex).toBeGreaterThan(sourcesPanelsIndex);
   });
 
-  it("splits memory into overview, effective scope, management, source audit, and team knowledge views", () => {
+  it("splits memory into overview, effective scope, management, source audit, team knowledge, and graph views", () => {
     expect(routeSource).toContain(
-      'export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge"',
+      'export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph"',
     );
     expect(routeSource).toContain("MEMORY_VIEWS");
     expect(routeSource).toContain("styles.subnav");
@@ -53,10 +53,31 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("renderManageView()");
     expect(routeSource).toContain("renderSourcesView()");
     expect(routeSource).toContain("renderKnowledgeView()");
+    expect(routeSource).toContain("renderGraphView()");
     expect(routeSource).toContain('forcedView === "overview"');
     expect(routeSource).toContain('forcedView === "effective"');
     expect(routeSource).toContain('forcedView === "manage"');
     expect(routeSource).toContain('forcedView === "knowledge"');
+    expect(routeSource).toContain('forcedView === "graph"');
+  });
+
+  it("wires the read-only 3D memory knowledge graph API and canvas shell", () => {
+    expect(routeSource).toContain("queryKeys.memoryKnowledgeGraph()");
+    expect(routeSource).toContain('fetchJson<MemoryKnowledgeGraphPayload>("/api/memory/knowledge-graph")');
+    expect(routeSource).toContain("MemoryGraphCanvas");
+    expect(routeSource).toContain("copy.graphGpu");
+    expect(routeSource).toContain("copy.graphWorker");
+    expect(routeSource).toContain("copy.graphReadOnly");
+    expect(routeSource).toContain("copy.graphAcl");
+    expect(routeSource).toContain("graphSearchText");
+    expect(routeSource).toContain("selectedGraphNodeId");
+    expect(routeSource).toContain("styles.graphWorkspace");
+    expect(routeSource).toContain("styles.graphCanvasPanel");
+    expect(routeSource).toContain("styles.graphTypeList");
+    expect(routerSource).toContain('path: "memory/graph"');
+    expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
+    expect(routerSource).toContain('path: "agents/memory/graph"');
+    expect(routerSource).toContain('<LegacyMemoryRedirect to="/memory/graph" />');
   });
 
   it("wires the team knowledge platform to scoped overview, source, proposal, review, search, and governance APIs", () => {

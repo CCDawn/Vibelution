@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from core.web.app import create_app
 from core.web.control import CONTROL_TOKEN_HEADER, get_control_token
-from core.web.services import agent_directory_service, memory_service, runtime_scene_service, team_knowledge_service, team_service
+from core.web.services import agent_directory_service, memory_graph_service, memory_service, runtime_scene_service, team_knowledge_service, team_service
 
 
 client = TestClient(create_app(), headers={CONTROL_TOKEN_HEADER: get_control_token()})
@@ -202,6 +202,46 @@ def test_memory_overview_endpoint_groups_agent_memory_sources(tmp_path, monkeypa
     assert project_items["overview.html"]["contentType"] == "html"
     assert project_items["overview.html"]["summary"].startswith("HTML 页面：")
     assert "<html" not in project_items["overview.html"]["summary"].lower()
+
+
+def test_memory_knowledge_graph_endpoint_returns_read_only_project_structure(tmp_path, monkeypatch):
+    monkeypatch.setattr(agent_directory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_graph_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(memory_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(team_knowledge_service, "PROJECT_ROOT", tmp_path)
+    agent = agent_directory_service.create_agent_instance(display_name="Graph Agent", direct_session_id="session-graph")
+    team = team_service.create_team(name="Graph Team", members=[{"agentId": agent["agentId"], "role": "lead"}])
+    knowledge_base = team_knowledge_service.create_knowledge_base(
+        team["teamId"],
+        name="Graph Knowledge",
+        actor_agent_id=agent["agentId"],
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        knowledge_base["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=agent["agentId"],
+        title="Graph API proposal",
+        content="GRAPH API BODY MUST STAY OUT",
+    )
+    team_knowledge_service.review_refinement_proposal(
+        knowledge_base["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=agent["agentId"],
+    )
+
+    response = client.get("/api/memory/knowledge-graph", params={"agentId": agent["agentId"]})
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["operatingBoundary"]["readOnly"] is True
+    assert payload["operatingBoundary"]["layoutWorker"] is True
+    assert payload["operatingBoundary"]["fullContentIncluded"] is False
+    assert payload["summary"]["nodeTypeCounts"]["agent"] >= 1
+    assert payload["summary"]["nodeTypeCounts"]["knowledge_base"] == 1
+    assert payload["summary"]["nodeTypeCounts"]["knowledge_item"] == 1
+    assert "GRAPH API BODY MUST STAY OUT" not in str(payload)
 
 
 def test_memory_overview_marks_research_knowledge_base_missing_before_first_search(tmp_path, monkeypatch):
@@ -401,7 +441,8 @@ def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path
     overview = client.get("/api/memory/overview").json()
     user_section = next(section for section in overview["sections"] if section["id"] == "user-managed-memory")
     assert user_section["items"] == []
-    event_codes = [event["eventCode"] for event in recorded_events]
+    management_events = [event for event in recorded_events if event["phase"] == "memory_management"]
+    event_codes = [event["eventCode"] for event in management_events]
     assert event_codes == [
         "memory.create",
         "memory.update",
@@ -409,7 +450,7 @@ def test_memory_management_api_persists_user_items_and_system_overrides(tmp_path
         "memory.restore",
         "memory.delete",
     ]
-    assert all(event["component"] == "memory_service" for event in recorded_events)
-    assert all(event["phase"] == "memory_management" for event in recorded_events)
-    assert all(event["lifecycle"] is True for event in recorded_events)
-    assert all("content" not in event.get("fields", {}) for event in recorded_events)
+    assert all(event["component"] == "memory_service" for event in management_events)
+    assert all(event["phase"] == "memory_management" for event in management_events)
+    assert all(event["lifecycle"] is True for event in management_events)
+    assert all("content" not in event.get("fields", {}) for event in management_events)
