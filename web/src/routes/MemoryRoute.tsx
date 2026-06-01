@@ -47,6 +47,7 @@ import {
   MemoryMutationResponse,
   MemoryOverview,
   MemorySection,
+  MemoryUsageContractPayload,
   TeamKnowledgeBase,
   TeamKnowledgeOverview,
 } from "../api/types";
@@ -296,6 +297,12 @@ type Copy = {
   semanticSearch: string;
   hybridSearch: string;
   semanticScore: string;
+  usageContract: string;
+  memoryDomains: string;
+  allowedUse: string;
+  writeBoundary: string;
+  forbiddenActions: string;
+  currentContractState: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
@@ -626,6 +633,12 @@ const COPY: Record<"zh" | "en", Copy> = {
     semanticSearch: "语义",
     hybridSearch: "混合",
     semanticScore: "相关度",
+    usageContract: "使用契约",
+    memoryDomains: "系统域",
+    allowedUse: "允许使用",
+    writeBoundary: "写入边界",
+    forbiddenActions: "禁止动作",
+    currentContractState: "当前状态",
   },
   en: {
     eyebrow: "Memory Library",
@@ -869,6 +882,12 @@ const COPY: Record<"zh" | "en", Copy> = {
     semanticSearch: "Semantic",
     hybridSearch: "Hybrid",
     semanticScore: "Relevance",
+    usageContract: "Usage contract",
+    memoryDomains: "System domains",
+    allowedUse: "Allowed use",
+    writeBoundary: "Write boundary",
+    forbiddenActions: "Forbidden actions",
+    currentContractState: "Current state",
   },
 };
 
@@ -1476,6 +1495,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchInterval: resolvePollingInterval(pageVisible, 30_000),
     refetchIntervalInBackground: false,
   });
+  const memoryUsageContractQuery = useQuery({
+    queryKey: queryKeys.memoryUsageContract(),
+    queryFn: () => fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract"),
+    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
+    refetchIntervalInBackground: false,
+    enabled: forcedView === "knowledge",
+  });
 
   const knowledgeOverviewQuery = useQuery({
     queryKey: queryKeys.knowledgeOverview(),
@@ -1790,6 +1816,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
 
   const overview = overviewQuery.data;
+  const memoryUsageContract = memoryUsageContractQuery.data;
   const sections = overview?.sections ?? [];
   const knowledgeOverview = knowledgeOverviewQuery.data;
   const knowledgeSteward = knowledgeStewardQuery.data;
@@ -3386,6 +3413,58 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <strong>{step.value}</strong>
               <span>{step.label}</span>
             </div>
+          ))}
+        </div>
+      </section>
+      <section className={styles.usageContractPanel} aria-label={copy.usageContract}>
+        <div className={styles.managementHeader}>
+          <div>
+            <p className={styles.panelEyebrow}>{copy.usageContract}</p>
+            <h2>{copy.memoryDomains}</h2>
+          </div>
+          <span className={styles.countPill}>{memoryUsageContract?.domains.length ?? 0}</span>
+        </div>
+        <div className={styles.contractPrinciples}>
+          {(memoryUsageContract?.principles ?? []).slice(0, 5).map((principle) => (
+            <span key={principle}>{principle}</span>
+          ))}
+        </div>
+        <div className={styles.contractDomainGrid}>
+          {(memoryUsageContract?.domains ?? []).map((domain) => (
+            <section key={domain.domainId} className={styles.contractDomainRow}>
+              <div>
+                <strong>{domain.label}</strong>
+                <small>{domain.owner} · {domain.storage}</small>
+              </div>
+              <span>{copy.allowedUse}: {domain.readsThrough.slice(0, 2).join(", ")}</span>
+              <span>{copy.writeBoundary}: {domain.canCreateFormalKnowledge ? copy.reviewerRequired : domain.boundary}</span>
+              <code>{domain.promptDefault}</code>
+            </section>
+          ))}
+        </div>
+        <div className={styles.contractStateGrid}>
+          <section>
+            <span>{copy.currentContractState}</span>
+            <strong>{Number(memoryUsageContract?.currentState.knowledge.knowledgeBaseCount ?? 0)}</strong>
+            <small>{copy.knowledgeBases}</small>
+          </section>
+          <section>
+            <span>{copy.healthFindings}</span>
+            <strong>{Number(memoryUsageContract?.currentState.operationsHealth.findingCount ?? 0)}</strong>
+            <small>{copy.operationsHealth}</small>
+          </section>
+          <section>
+            <span>{copy.governancePlan}</span>
+            <strong>{Number(memoryUsageContract?.currentState.governancePlan.actionCount ?? 0)}</strong>
+            <small>{copy.planOnly}</small>
+          </section>
+        </div>
+        <div className={styles.contractForbiddenList} aria-label={copy.forbiddenActions}>
+          {(memoryUsageContract?.forbiddenActions ?? []).slice(0, 6).map((action) => (
+            <span key={action}>
+              <XCircle size={13} />
+              {action}
+            </span>
           ))}
         </div>
       </section>

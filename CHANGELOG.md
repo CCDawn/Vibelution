@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.5 - 2026-06-01
+
+- Added `/api/memory/usage-contract` as the cross-system contract for how Agent private memory, Team knowledge, Team chat, self evolution, supervised evolution, and external artifacts use the memory platform.
+- Visualized the usage contract in `/agents/memory/knowledge`, including system domains, allowed read/write paths, prompt defaults, current contract state, and forbidden actions.
+- Locked the evolution boundary in tests: evolution evidence may register sources and proposals, but it cannot directly create formal Team knowledge without reviewer confirmation.
+- Logged contract reads through `memory.usage_contract.viewed`.
+
 ## 0.7.4 - 2026-06-01
 
 - Added knowledge operations health APIs, Agent tools, and UI panels that surface orphan sources, pending proposals, pending rating suggestions, and unrated formal items without mutating knowledge.

@@ -9,6 +9,7 @@ from core.web.services.memory_service import (
     create_user_memory_item,
     delete_memory_item,
     get_memory_overview,
+    get_memory_usage_contract,
     restore_memory_item,
     update_memory_item,
 )
@@ -26,6 +27,11 @@ class MemoryItemPayload(BaseModel):
 @router.get("/memory/overview")
 def memory_overview() -> dict:
     return get_memory_overview()
+
+
+@router.get("/memory/usage-contract")
+def memory_usage_contract() -> dict:
+    return get_memory_usage_contract()
 
 
 @router.post("/memory/items", status_code=status.HTTP_201_CREATED)

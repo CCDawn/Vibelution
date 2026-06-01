@@ -60,6 +60,8 @@ describe("MemoryRoute layout contract", () => {
   });
 
   it("wires the team knowledge platform to scoped overview, source, proposal, review, search, and governance APIs", () => {
+    expect(routeSource).toContain("queryKeys.memoryUsageContract()");
+    expect(routeSource).toContain('fetchJson<MemoryUsageContractPayload>("/api/memory/usage-contract")');
     expect(routeSource).toContain("queryKeys.knowledgeOverview()");
     expect(routeSource).toContain('fetchJson<TeamKnowledgeOverview>("/api/knowledge/overview")');
     expect(routeSource).toContain('sourceType: "manual_user_entry"');
@@ -90,6 +92,11 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.ingestionPackage");
     expect(routeSource).toContain("copy.submitIngestionPackage");
     expect(routeSource).toContain("copy.governanceTasks");
+    expect(routeSource).toContain("copy.usageContract");
+    expect(routeSource).toContain("copy.memoryDomains");
+    expect(routeSource).toContain("copy.forbiddenActions");
+    expect(routeSource).toContain("styles.usageContractPanel");
+    expect(routeSource).toContain("styles.contractDomainGrid");
     expect(routeSource).toContain("copy.operationsHealth");
     expect(routeSource).toContain("copy.governancePlan");
     expect(routeSource).toContain("copy.planOnly");
@@ -107,6 +114,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("knowledgeStewardRecommendationsQuery");
     expect(routeSource).toContain("knowledgeOperationsHealthQuery");
     expect(routeSource).toContain("knowledgeGovernancePlanQuery");
+    expect(routeSource).toContain("memoryUsageContractQuery");
     expect(routeSource).toContain("copy.noDirectApply");
     expect(routeSource).toContain("copy.reviewerRequired");
     expect(routeSource).toContain("copy.recommendationsOnly");
