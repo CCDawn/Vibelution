@@ -669,12 +669,14 @@
 }
 
 .graphWorkspace {
-  grid-template-columns: minmax(210px, 260px) minmax(520px, 1fr) minmax(300px, 0.42fr);
+  grid-template-columns: minmax(210px, 250px) minmax(760px, 1fr) minmax(260px, 0.34fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: min(74vh, 820px);
 }
 
 .graphCanvasPanel {
   display: grid;
-  grid-template-rows: auto minmax(280px, 0.86fr) minmax(120px, 0.42fr);
+  grid-template-rows: auto minmax(430px, 1fr) minmax(86px, 0.18fr);
   gap: 8px;
   min-height: 0;
   overflow: hidden;
@@ -701,11 +703,37 @@
   white-space: nowrap;
 }
 
+.graphCanvasShell {
+  position: relative;
+  min-width: 0;
+  min-height: 430px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, transparent);
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 48% 54%, color-mix(in srgb, var(--accent-cool) 18%, transparent), transparent 34%),
+    linear-gradient(135deg, color-mix(in srgb, var(--bg-canvas) 92%, white), color-mix(in srgb, var(--surface-panel) 86%, var(--accent-cool) 4%));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 38%, transparent);
+}
+
+.graphCanvasShell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--border-soft) 38%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 38%, transparent) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: radial-gradient(circle at center, black 0%, transparent 72%);
+  opacity: 0.32;
+}
+
 .graphCanvasFallback {
   display: grid;
   place-items: center;
   gap: 8px;
-  min-height: 280px;
+  min-height: 430px;
   padding: 18px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
   border-radius: 8px;
@@ -717,14 +745,13 @@
 }
 
 .graphCanvasMount {
+  position: absolute;
+  inset: 0;
   min-width: 0;
-  min-height: 280px;
+  min-height: 100%;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
-  border-radius: 8px;
-  background:
-    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent-cool) 12%, transparent), transparent 42%),
-    color-mix(in srgb, var(--bg-canvas) 90%, black);
+  border: 0;
+  background: transparent;
   cursor: grab;
   touch-action: none;
 }
@@ -737,6 +764,40 @@
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.graphCanvasLabels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.graphNodeBadge {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 42%, white);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-panel) 84%, var(--node-color, var(--accent-cool)) 16%);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--node-color, var(--accent-cool)) 24%, transparent);
+  color: var(--fg-primary);
+  font-size: 0.58rem;
+  font-weight: 850;
+  line-height: 1;
+  pointer-events: auto;
+  transform-origin: center;
+}
+
+.graphNodeBadge[data-selected="true"] {
+  min-width: 32px;
+  height: 24px;
+  border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, white);
+  background: color-mix(in srgb, white 68%, var(--node-color, var(--accent-cool)) 32%);
 }
 
 .graphCanvasFallback svg {
@@ -755,32 +816,63 @@
 }
 
 .graphNodeList {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-  align-content: start;
+  display: flex;
+  align-items: stretch;
   gap: 6px;
   min-height: 0;
+  padding: 2px 2px 4px;
   overflow: auto;
 }
 
 .graphNodeList .itemButton {
+  flex: 0 0 176px;
   display: grid;
-  gap: 3px;
-  min-height: 52px;
-  padding: 7px;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 3px 7px;
+  min-height: 58px;
+  padding: 7px 8px;
+  border-color: color-mix(in srgb, var(--node-color, var(--border-soft)) 32%, var(--border-soft));
+  background: color-mix(in srgb, var(--surface-card) 82%, var(--node-color, transparent) 8%);
 }
 
 .graphNodeList .itemButton strong,
-.graphNodeList .itemButton span {
+.graphNodeList .itemButton small {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.graphNodeList .itemButton span {
+.graphNodeList .itemButton strong {
+  align-self: end;
+}
+
+.graphNodeList .itemButton small {
+  grid-column: 2;
   color: var(--fg-tertiary);
   font-size: 0.72rem;
+}
+
+.graphNodeTypeMark {
+  grid-row: 1 / span 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  width: 42px;
+  min-width: 0;
+  height: 36px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 48%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--node-color, var(--accent-cool)) 14%, white);
+  color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 78%, black);
+  font-size: 0.62rem;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .graphTypeList {
@@ -799,6 +891,19 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-panel-muted);
+}
+
+.graphTypeList span::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--node-color, var(--accent-cool));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-color, var(--accent-cool)) 16%, transparent);
+}
+
+.graphTypeList span {
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .graphTypeList strong,
@@ -837,6 +942,62 @@
   font-size: 0.76rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+[data-node-type="project"] {
+  --node-color: #f2c94c;
+}
+
+[data-node-type="team"] {
+  --node-color: #35b779;
+}
+
+[data-node-type="agent"] {
+  --node-color: #1594c7;
+}
+
+[data-node-type="agent_private_memory"] {
+  --node-color: #2d9cdb;
+}
+
+[data-node-type="knowledge_base"] {
+  --node-color: #9b51e0;
+}
+
+[data-node-type="knowledge_item"] {
+  --node-color: #e58b32;
+}
+
+[data-node-type="source_artifact"] {
+  --node-color: #d94e4e;
+}
+
+[data-node-type="refinement_proposal"] {
+  --node-color: #7f52d9;
+}
+
+[data-node-type="knowledge_batch"] {
+  --node-color: #27ae60;
+}
+
+[data-node-type="rating_suggestion"] {
+  --node-color: #c99a1c;
+}
+
+[data-node-type="runtime_scene"] {
+  --node-color: #626b73;
+}
+
+[data-node-type="evolution"] {
+  --node-color: #00a884;
+}
+
+[data-node-type="supervision"] {
+  --node-color: #d85f97;
+}
+
+[data-node-type="tag"] {
+  --node-color: #8795a1;
 }
 
 .manageFormPanel {

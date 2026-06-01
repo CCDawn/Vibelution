@@ -1,8 +1,13 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import routeSource from "./MemoryRoute.tsx?raw";
 import routerSource from "../app/router.tsx?raw";
 import appShellSource from "../app/AppShell.tsx?raw";
+import graphCanvasSource from "./MemoryGraphCanvas.tsx?raw";
+
+const memoryCssSource = readFileSync(new URL("./MemoryRoute.module.css", import.meta.url), "utf-8");
 
 describe("MemoryRoute layout contract", () => {
   it("reads the read-only memory overview endpoint through the shared query key", () => {
@@ -74,6 +79,17 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("styles.graphWorkspace");
     expect(routeSource).toContain("styles.graphCanvasPanel");
     expect(routeSource).toContain("styles.graphTypeList");
+    expect(routeSource).toContain("GRAPH_NODE_TYPE_LABELS");
+    expect(routeSource).toContain("styles.graphNodeTypeMark");
+    expect(routeSource).toContain("data-node-type");
+    expect(graphCanvasSource).toContain("graphCanvasLabels");
+    expect(graphCanvasSource).toContain("graphNodeBadge");
+    expect(graphCanvasSource).toContain("hitObjects");
+    expect(graphCanvasSource).toContain("TorusGeometry");
+    expect(memoryCssSource).toContain(".graphCanvasShell");
+    expect(memoryCssSource).toContain(".graphNodeBadge");
+    expect(memoryCssSource).toContain(".graphNodeTypeMark");
+    expect(memoryCssSource).toContain('[data-node-type="knowledge_base"]');
     expect(routerSource).toContain('path: "memory/graph"');
     expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
     expect(routerSource).toContain('path: "agents/memory/graph"');
