@@ -165,9 +165,8 @@ def prepare_dataset_run(project_root: Path, dataset_name: str, dataset_limit: in
     runnable = bool(getattr(materialized, "runnable", False))
     if adapter_status == "requires_harbor_task_environment":
         blocked_message = (
-            f"{dataset_name} 是 Terminal-Bench 官方任务种子，但当前只物化了 case 元数据；"
-            "还没有接入 Harbor/Docker /app sandbox 和官方判分器。请先使用 terminal_bench_smoke，"
-            "或完成官方任务环境接入后再运行。"
+            f"{dataset_name} 是 Terminal-Bench 官方任务种子，但当前只允许官方 Harbor/Docker /app sandbox "
+            "和官方判分器模式；本地自定义 harness 未启用。"
         )
     else:
         blocked_message = (

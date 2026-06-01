@@ -223,6 +223,9 @@ def _case_evidence_payload(
         "evidence_paths": dict(getattr(case_summary, "evidence_paths", {}) or {}),
         "intake_provenance": dict(getattr(case_summary, "intake_provenance", {}) or {}),
     }
+    evaluation_metadata = _case_evaluation_metadata(case_summary)
+    if evaluation_metadata:
+        evidence["evaluation_metadata"] = evaluation_metadata
     if proposal_payload is not None:
         evidence["proposal_id"] = str(proposal_payload.get("proposal_id") or "")
         evidence["proposal_status"] = str(proposal_payload.get("status") or "")
@@ -232,6 +235,26 @@ def _case_evidence_payload(
     if proposal_path is not None:
         evidence["proposal_path"] = str(proposal_path)
     return evidence
+
+
+def _case_evaluation_metadata(case_summary: Any) -> Dict[str, Any]:
+    intake = getattr(case_summary, "intake_provenance", None)
+    if not isinstance(intake, dict):
+        return {}
+    evaluation_mode = str(intake.get("evaluation_mode") or "").strip()
+    official_status = str(intake.get("official_verifier_status") or "").strip()
+    score_label = str(intake.get("score_label") or "").strip()
+    metadata: Dict[str, Any] = {}
+    if evaluation_mode:
+        metadata["evaluation_mode"] = evaluation_mode
+    if score_label:
+        metadata["score_label"] = score_label
+    if official_status:
+        metadata["official_verifier_status"] = official_status
+    if evaluation_mode == "custom_harness" or official_status == "harbor_pending":
+        metadata["official_score"] = None
+        metadata["official_score_available"] = False
+    return metadata
 
 
 def _write_proposal(
@@ -261,6 +284,7 @@ def _write_proposal(
         policy_action=decision.decision,
         proposal_status=status,
     )
+    evaluation_metadata = _case_evaluation_metadata(case_summary)
     proposal_payload = {
         "proposal_id": proposal_id,
         "session_id": decision.session_id,
@@ -284,6 +308,7 @@ def _write_proposal(
         "failure_taxonomy": list(getattr(case_summary, "failure_taxonomy", []) or []),
         "evidence_paths": dict(getattr(case_summary, "evidence_paths", {}) or {}),
         "intake_provenance": dict(getattr(case_summary, "intake_provenance", {}) or {}),
+        "evaluation_metadata": evaluation_metadata,
         "status": status,
         "supervised_decision": decision.decision,
         "policy_action": decision.decision,

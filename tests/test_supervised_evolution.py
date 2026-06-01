@@ -188,6 +188,11 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
         "holdout_allowed": false,
         "raw_chat_direct_training_allowed": false
       },
+      "evaluation_mode": "custom_harness",
+      "score_label": "Vibelution custom score (non-official)",
+      "official_verifier_status": "harbor_pending",
+      "official_score": null,
+      "official_score_available": false,
       "baseline_prompt": "baseline",
       "candidate_prompt": "candidate"
     }
@@ -259,6 +264,10 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert case_summary.score_breakdown["delta"]["overall_score"] == 0.0
     assert case_summary.failure_taxonomy == ["no_failure_detected"]
     assert case_summary.intake_provenance["source_track"] == "generated"
+    assert case_summary.intake_provenance["evaluation_mode"] == "custom_harness"
+    assert case_summary.intake_provenance["official_verifier_status"] == "harbor_pending"
+    assert case_summary.intake_provenance["official_score"] is None
+    assert case_summary.intake_provenance["official_score_available"] is False
     assert case_summary.intake_provenance["provenance"]["source_trace_id"] == "trace_001"
     assert case_summary.intake_provenance["intake_boundary"]["contract"] == "generated_case"
     assert Path(case_summary.evidence_paths["baseline_report_path"]).exists()
@@ -274,6 +283,16 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert policy_record["case_evidence"][0]["failure_taxonomy"] == decision.case_summaries[0].failure_taxonomy
     assert policy_record["case_evidence"][0]["evidence_paths"] == decision.case_summaries[0].evidence_paths
     assert policy_record["case_evidence"][0]["intake_provenance"] == decision.case_summaries[0].intake_provenance
+    assert policy_record["case_evidence"][0]["evaluation_metadata"] == {
+        "evaluation_mode": "custom_harness",
+        "score_label": "Vibelution custom score (non-official)",
+        "official_verifier_status": "harbor_pending",
+        "official_score": None,
+        "official_score_available": False,
+    }
+    proposal = json.loads(Path(decision.policy_action["proposal_paths"][0]).read_text(encoding="utf-8"))
+    assert proposal["evaluation_metadata"]["evaluation_mode"] == "custom_harness"
+    assert proposal["evaluation_metadata"]["official_score"] is None
     lineage_index_path = Path(decision.policy_action["lineage_index_path"])
     assert lineage_index_path.exists()
     lineage_index = json.loads(lineage_index_path.read_text(encoding="utf-8"))
@@ -288,6 +307,117 @@ def test_run_supervised_evolution_session_persists_decision_record(tmp_path: Pat
     assert "runtime(avg):" in rendered
     assert "guarded tools:" in rendered
     assert "policy:" in rendered
+
+
+def test_run_supervised_evolution_session_reuses_successful_roles_when_retrying(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json"
+    bundle_path.write_text(
+        json.dumps(
+            {
+                "benchmark": "dry",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "cases": [
+                    {
+                        "case_id": "probe",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "baseline",
+                        "candidate_prompt": "candidate",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def first_runner(**kwargs):
+        if kwargs["prompt"] == "baseline":
+            return _fake_result("success", "baseline ok", "baseline")
+        return _fake_result("failed", "candidate failed", "candidate-failed")
+
+    first = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=first_runner,
+    )
+    calls: list[str] = []
+    progress: list[dict] = []
+
+    def retry_runner(**kwargs):
+        calls.append(kwargs["prompt"])
+        return _fake_result("success", "candidate ok", "candidate-retry")
+
+    retry = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=retry_runner,
+        resume_from_decision_path=Path(first.decision_path or ""),
+        progress_callback=progress.append,
+    )
+
+    assert calls == ["candidate"]
+    assert retry.baseline_runs[0].reason == "baseline ok"
+    assert retry.candidate_runs[0].reason == "candidate ok"
+    assert retry.summary["reused_run_count"] == 1
+    assert any(item.get("event") == "role_reused" and item.get("role") == "baseline" for item in progress)
+
+
+def test_llm_auth_failure_is_inconclusive_without_transaction_noise(tmp_path: Path):
+    bundle_dir = tmp_path / "workspace" / "evaluation" / "bundles"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_dir / f"{DEFAULT_BUNDLE_NAME}.json").write_text(
+        json.dumps(
+            {
+                "benchmark": "dry",
+                "bundle_name": DEFAULT_BUNDLE_NAME,
+                "cases": [
+                    {
+                        "case_id": "llm-auth",
+                        "scenario": "transaction",
+                        "mode": "single_turn",
+                        "baseline_prompt": "baseline",
+                        "candidate_prompt": "candidate",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def auth_failure_runner(**kwargs):
+        return _fake_result_with_summary(
+            "failed",
+            "LLM 调用失败，未生成可评估输出；请检查 provider 日志",
+            str(kwargs["prompt"]),
+            validation={"passed": 0, "failed": 0, "last": None},
+            transaction={"opened": False, "closed": False, "status": None, "txn_id": None},
+            guarded_tools={"total": 0, "restart_guarded": 0},
+            llm_failure={
+                "detected": True,
+                "category": "llm_error",
+                "retryable": False,
+                "error_type": "auth_error",
+                "message": "auth_error: 认证失败，请检查 provider 凭据",
+            },
+        )
+
+    decision = run_supervised_evolution_session(
+        bundle_name=DEFAULT_BUNDLE_NAME,
+        project_root=tmp_path,
+        harness_runner=auth_failure_runner,
+    )
+
+    assert decision.decision == "INCONCLUSIVE"
+    assert decision.reason == "LLM provider 认证失败，当前监督评测不可判定"
+    assert decision.gates[0].name == "infrastructure"
+    assert decision.gates[0].metrics["failure_reason"] == decision.reason
+    case = decision.case_summaries[0]
+    assert case.difference_metrics["baseline_transaction_issue"] is False
+    assert case.difference_metrics["candidate_transaction_issue"] is False
+    assert "shared_transaction_issue" not in case.difference_reasons
 
 
 def test_run_supervised_evolution_session_persists_agent_bindings(tmp_path: Path):

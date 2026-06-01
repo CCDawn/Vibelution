@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.2 - 2026-06-01
+
+- Allowed `terminal_bench_core` to run through the Vibelution custom harness as a non-official Terminal-Bench evaluation, while keeping Harbor/Docker official verifier status pending.
+- Marked dataset, bundle, case, decision, proposal, API, and UI payloads with `evaluation_mode=custom_harness`, `official_verifier_status=harbor_pending`, `official_score=null`, and a Vibelution custom score label.
+- Kept explicit official-mode launches blocked until the Harbor/Docker `/app` sandbox and official verifier are wired in.
+- Logged custom-harness Terminal-Bench starts through `supervised_run.preflight.custom_harness_non_official` for later diagnosis.
+
 ## 0.7.1 - 2026-06-01
 
 - Tightened supervised evolution real-run selection so `terminal_bench_core` is marked as requiring the official Harbor/Docker Terminal-Bench `/app` sandbox and verifier, hidden from the primary picker, and blocked during start/retry preflight.

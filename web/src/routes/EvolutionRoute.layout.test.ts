@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+// @ts-expect-error Vitest runs this contract in Node; the web project intentionally omits global Node types.
+import { readFileSync } from "node:fs";
 import routeSource from "./EvolutionRoute.tsx?raw";
+
+const stylesSource = readFileSync(new URL("./EvolutionRoute.module.css", import.meta.url), "utf-8");
 
 describe("EvolutionRoute library user flow contract", () => {
   it("shows self-evolution candidates as local pending details instead of proposal details", () => {
@@ -93,9 +97,45 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(routeSource).toContain("primaryDatasets.map((item)");
   });
 
+  it("separates inconclusive terminal status and harness-only datasets from success wording", () => {
+    expect(routeSource).toContain('normalizedDecision === "INCONCLUSIVE"');
+    expect(routeSource).toContain("statusIcon(monitoredRun.status, monitoredRun.decision)");
+    expect(routeSource).toContain("monitoredStatusLabel");
+    expect(routeSource).toContain('status === "agent_harness_ready"');
+    expect(routeSource).toContain('status === "custom_harness_ready"');
+    expect(routeSource).toContain("自定义评测");
+    expect(routeSource).toContain("非官方 Terminal-Bench 成绩");
+  });
+
+  it("labels supervised retry as rerunning failed items", () => {
+    expect(routeSource).toContain("retryRunMutation");
+    expect(routeSource).toContain("`/api/evolution/runs/${runId}/retry`");
+  });
+
   it("keeps the supervised launch panel compact", () => {
     expect(routeSource).toContain("sourceMetaSide");
     expect(routeSource).toContain("数据集会先物化，评测包可直接运行。");
     expect(routeSource).toContain("worktreeRuns.slice(0, 4).map");
+  });
+
+  it("keeps the supervised live console as a dense desktop split before narrow layouts", () => {
+    const desktopBreakpoint = stylesSource.slice(
+      stylesSource.indexOf("@media (max-width: 1360px)"),
+      stylesSource.indexOf("@media (max-width: 1200px)"),
+    );
+    expect(stylesSource).toContain("@media (max-width: 1360px)");
+    expect(desktopBreakpoint).toContain('"launch resize-launch io resize-run run"');
+    expect(desktopBreakpoint).not.toContain('"io io"\n      "launch run"');
+  });
+
+  it("keeps the proposal library summary in three columns at common desktop widths", () => {
+    expect(stylesSource).toContain(".librarySummaryBar");
+    expect(stylesSource).toContain("minmax(300px, 1fr) minmax(260px, 0.8fr) minmax(300px, 0.9fr)");
+  });
+
+  it("does not put long live supervised text into native title tooltips", () => {
+    expect(routeSource).not.toContain("title={monitoredRun.latestMessage}");
+    expect(routeSource).not.toContain("title={monitoredTaskLabel}");
+    expect(routeSource).not.toContain("title={entry.content}");
   });
 });

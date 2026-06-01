@@ -2692,6 +2692,7 @@ export type EvolutionCaseDiagnostic = {
   expectedFinalState?: Record<string, unknown>;
   expectedInfeasibleOutcome?: Record<string, unknown>;
   dynamicEvents?: Array<Record<string, unknown>>;
+  evaluationMetadata?: Record<string, unknown>;
 };
 
 export type EvolutionDatasetOption = {
@@ -2703,6 +2704,10 @@ export type EvolutionDatasetOption = {
   caseCount: number | null;
   usabilityStatus: string;
   usabilityReason: string;
+  officialVerifierStatus?: string;
+  evaluationMode?: string;
+  scoreLabel?: string;
+  officialScoreAvailable?: boolean;
   visibility: string;
   visibilityReason: string;
   selectable: boolean;

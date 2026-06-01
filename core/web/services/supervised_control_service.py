@@ -229,7 +229,7 @@ def get_supervised_workbench() -> dict[str, Any]:
     }
 
 
-def _official_task_environment_block_reason(bundle_path: Path, *, lang: str) -> str:
+def _official_task_environment_block_reason(bundle_path: Path, *, lang: str, require_official: bool = False) -> str:
     """Return a user-facing block reason when a bundle requires the official task sandbox."""
 
     try:
@@ -247,6 +247,8 @@ def _official_task_environment_block_reason(bundle_path: Path, *, lang: str) -> 
         for case in cases
     )
     if not official_pending and not requires_official_env:
+        return ""
+    if not require_official:
         return ""
 
     missing: list[str] = []
@@ -273,6 +275,62 @@ def _official_task_environment_block_reason(bundle_path: Path, *, lang: str) -> 
             f"the official runner before running it. Missing: {missing_text or 'official task environment'}."
         ),
     )
+
+
+def _custom_harness_evaluation_notice(bundle_path: Path, *, lang: str) -> dict[str, Any]:
+    """Return a notice payload when a Terminal-Bench seed bundle is run without the official verifier."""
+
+    try:
+        payload = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    dataset = payload.get("dataset") if isinstance(payload.get("dataset"), dict) else {}
+    official_status = str(dataset.get("official_verifier_status") or "").strip()
+    evaluation_mode = str(dataset.get("evaluation_mode") or "").strip()
+    if official_status != "harbor_pending" and evaluation_mode != "custom_harness":
+        return {}
+    return {
+        "evaluationMode": evaluation_mode or "custom_harness",
+        "officialVerifierStatus": official_status or "harbor_pending",
+        "officialScoreAvailable": False,
+        "scoreLabel": str(dataset.get("score_label") or "Vibelution custom score (non-official)").strip(),
+        "message": text_for(
+            lang,
+            zh="将使用 Vibelution 自定义 harness 运行；结果不是 Terminal-Bench 官方成绩。",
+            en="This run will use the Vibelution custom harness; results are not official Terminal-Bench scores.",
+        ),
+    }
+
+
+def _record_custom_harness_evaluation_notice(
+    bundle_path: Path,
+    *,
+    lang: str,
+    bundle_name: str,
+    source_kind: str,
+    retry_of_run_id: str = "",
+) -> dict[str, Any]:
+    notice = _custom_harness_evaluation_notice(bundle_path, lang=lang)
+    if not notice:
+        return {}
+    fields = {
+        "bundleName": bundle_name,
+        "sourceKind": source_kind,
+        "retryOfRunId": retry_of_run_id,
+        **notice,
+    }
+    _record_supervised_scene_event(
+        "preflight",
+        "supervised_run.preflight.custom_harness_non_official",
+        message=str(notice.get("message") or ""),
+        level="info",
+        outcome="observed",
+        fields=fields,
+        lifecycle=True,
+    )
+    return notice
 
 
 def _docker_daemon_available() -> bool:
@@ -303,6 +361,8 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
 
     lang = get_web_language()
     source_kind = str(payload.get("sourceKind") or "").strip().lower()
+    requested_evaluation_mode = str(payload.get("evaluationMode") or "").strip().lower()
+    require_official = requested_evaluation_mode in {"official", "official_verifier", "harbor", "harbor_official"}
     keep_worktree = bool(payload.get("keepWorktree"))
     dataset_name = str(payload.get("datasetName") or "").strip()
     dataset_limit = _coerce_dataset_limit(payload.get("datasetLimit"))
@@ -339,7 +399,7 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
                     en=f"Supervised bundle does not exist: {bundle_name}",
                 )
             )
-        block_reason = _official_task_environment_block_reason(bundle_path, lang=lang)
+        block_reason = _official_task_environment_block_reason(bundle_path, lang=lang, require_official=require_official)
         if block_reason:
             _record_supervised_scene_event(
                 "preflight",
@@ -354,6 +414,12 @@ def start_supervised_run(payload: dict[str, Any]) -> dict[str, Any]:
                 lifecycle=True,
             )
             raise SupervisedRunValidationError(block_reason)
+        _record_custom_harness_evaluation_notice(
+            bundle_path,
+            lang=lang,
+            bundle_name=bundle_name,
+            source_kind=source_kind,
+        )
         dataset_name = ""
         dataset_limit = None
 
@@ -462,7 +528,7 @@ def _local_retry_supervised_run(run_id: str) -> dict[str, Any]:
             text_for(lang, zh="这条监督记录缺少 bundle 名称，不能重跑失败项。", en="This supervised run has no bundle name to rerun.")
         )
     bundle_path = resolve_workbench_bundle_path(PROJECT_ROOT, context["bundleName"])
-    block_reason = _official_task_environment_block_reason(bundle_path, lang=lang)
+    block_reason = _official_task_environment_block_reason(bundle_path, lang=lang, require_official=False)
     if block_reason:
         _record_supervised_scene_event(
             "preflight",
@@ -478,6 +544,13 @@ def _local_retry_supervised_run(run_id: str) -> dict[str, Any]:
             lifecycle=True,
         )
         raise SupervisedRunValidationError(block_reason)
+    _record_custom_harness_evaluation_notice(
+        bundle_path,
+        lang=lang,
+        bundle_name=context["bundleName"],
+        source_kind=context["sourceKind"],
+        retry_of_run_id=normalized,
+    )
     state = _initial_run_state(context)
     state["retryOfRunId"] = normalized
     state["resumeFromDecisionPath"] = str(resolved_decision_path)
@@ -2102,6 +2175,9 @@ def _dataset_payload(item: dict[str, Any]) -> dict[str, Any]:
         "usabilityStatus": str(item.get("usability_status") or "").strip(),
         "usabilityReason": str(item.get("usability_reason") or "").strip(),
         "officialVerifierStatus": str(item.get("official_verifier_status") or "").strip(),
+        "evaluationMode": str(item.get("evaluation_mode") or "").strip(),
+        "scoreLabel": str(item.get("score_label") or "").strip(),
+        "officialScoreAvailable": bool(item.get("official_score_available", False)),
         "visibility": str(item.get("visibility") or "").strip(),
         "visibilityReason": str(item.get("visibility_reason") or "").strip(),
         "selectable": bool(item.get("selectable", item.get("effective"))),

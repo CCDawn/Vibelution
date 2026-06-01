@@ -189,6 +189,9 @@ def build_case_diagnostic(case: dict[str, Any]) -> dict[str, Any] | None:
     failure_taxonomy = case.get("failure_taxonomy") if isinstance(case.get("failure_taxonomy"), list) else []
     evidence_paths = case.get("evidence_paths") if isinstance(case.get("evidence_paths"), dict) else {}
     intake_provenance = case.get("intake_provenance") if isinstance(case.get("intake_provenance"), dict) else {}
+    evaluation_metadata = case.get("evaluation_metadata") if isinstance(case.get("evaluation_metadata"), dict) else {}
+    if not evaluation_metadata:
+        evaluation_metadata = _case_evaluation_metadata(intake_provenance)
     case_type = str(case.get("case_type") or intake_provenance.get("case_type") or "static").strip()
     expected_final_state = _case_dict_field(case, intake_provenance, "expected_final_state")
     expected_infeasible_outcome = _case_dict_field(case, intake_provenance, "expected_infeasible_outcome")
@@ -229,6 +232,8 @@ def build_case_diagnostic(case: dict[str, Any]) -> dict[str, Any] | None:
         diagnostic["failureTaxonomy"] = [str(item) for item in failure_taxonomy]
     if evidence_paths:
         diagnostic["evidencePaths"] = evidence_paths
+    if evaluation_metadata:
+        diagnostic["evaluationMetadata"] = evaluation_metadata
     return diagnostic
 
 
@@ -248,6 +253,23 @@ def _case_dict_field(case: dict[str, Any], intake_provenance: dict[str, Any], ke
     if not isinstance(value, dict):
         value = intake_provenance.get(key)
     return value if isinstance(value, dict) else {}
+
+
+def _case_evaluation_metadata(intake_provenance: dict[str, Any]) -> dict[str, Any]:
+    evaluation_mode = str(intake_provenance.get("evaluation_mode") or "").strip()
+    official_status = str(intake_provenance.get("official_verifier_status") or "").strip()
+    score_label = str(intake_provenance.get("score_label") or "").strip()
+    metadata: dict[str, Any] = {}
+    if evaluation_mode:
+        metadata["evaluationMode"] = evaluation_mode
+    if score_label:
+        metadata["scoreLabel"] = score_label
+    if official_status:
+        metadata["officialVerifierStatus"] = official_status
+    if evaluation_mode == "custom_harness" or official_status == "harbor_pending":
+        metadata["officialScore"] = None
+        metadata["officialScoreAvailable"] = False
+    return metadata
 
 
 def _list_of_dicts(value: Any) -> list[dict[str, Any]]:

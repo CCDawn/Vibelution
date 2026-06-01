@@ -460,16 +460,53 @@ def test_retry_supervised_run_starts_new_run_from_finished_decision(monkeypatch,
     assert observed["agent_bindings"]["baseline"]["agentId"] == "a-base"
 
 
-def test_start_supervised_run_blocks_official_terminal_bench_bundle(monkeypatch, tmp_path):
+def test_start_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "terminal_bench_core_v1.json"
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     bundle_path.write_text(
         (
             '{"bundle_name":"terminal_bench_core_v1",'
-            '"dataset":{"official_verifier_status":"harbor_pending"},'
+            '"dataset":{"official_verifier_status":"harbor_pending","evaluation_mode":"custom_harness",'
+            '"score_label":"Vibelution custom score"},'
             '"cases":[{"case_id":"tb2","official_runner":"harbor_pending",'
-            '"requires_official_task_environment":true}]}'
+            '"requires_official_task_environment":false}]}'
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
+    monkeypatch.setattr(service.shutil, "which", lambda name: None)
+    monkeypatch.setattr(service, "_docker_daemon_available", lambda: False)
+    monkeypatch.setattr(service, "supervised_agent_bindings", lambda: {})
+    monkeypatch.setattr(service, "_RUN_EXECUTOR", _ImmediateExecutor())
+    calls: list[object] = []
+
+    def fake_run_workbench_session(**kwargs):
+        calls.append(kwargs)
+        raise service.SupervisedEvolutionCancelled("stop after capture", session_id="custom_tb")
+
+    monkeypatch.setattr(service, "run_workbench_session", fake_run_workbench_session)
+
+    snapshot = service.start_supervised_run(
+        {
+            "sourceKind": "bundle",
+            "bundleName": "terminal_bench_core_v1",
+        }
+    )
+
+    assert snapshot["bundleName"] == "terminal_bench_core_v1"
+    assert calls and calls[0]["bundle_name"] == "terminal_bench_core_v1"
+
+
+def test_start_supervised_run_blocks_official_terminal_bench_bundle_when_requested(monkeypatch, tmp_path):
+    monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
+    bundle_path = tmp_path / "workspace" / "evaluation" / "bundles" / "terminal_bench_core_v1.json"
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    bundle_path.write_text(
+        (
+            '{"bundle_name":"terminal_bench_core_v1",'
+            '"dataset":{"official_verifier_status":"harbor_pending","evaluation_mode":"custom_harness"},'
+            '"cases":[{"case_id":"tb2","official_runner":"harbor_pending"}]}'
         ),
         encoding="utf-8",
     )
@@ -482,6 +519,7 @@ def test_start_supervised_run_blocks_official_terminal_bench_bundle(monkeypatch,
             {
                 "sourceKind": "bundle",
                 "bundleName": "terminal_bench_core_v1",
+                "evaluationMode": "official",
             }
         )
 
@@ -489,7 +527,7 @@ def test_start_supervised_run_blocks_official_terminal_bench_bundle(monkeypatch,
     assert "/app sandbox" in str(exc.value)
 
 
-def test_retry_supervised_run_blocks_official_terminal_bench_bundle(monkeypatch, tmp_path):
+def test_retry_supervised_run_allows_custom_terminal_bench_bundle(monkeypatch, tmp_path):
     monkeypatch.setattr(service, "PROJECT_ROOT", tmp_path)
     decision_path = tmp_path / "workspace" / "supervised_evolution" / "decisions" / "supervised_old.json"
     decision_path.parent.mkdir(parents=True)
@@ -499,9 +537,9 @@ def test_retry_supervised_run_blocks_official_terminal_bench_bundle(monkeypatch,
     bundle_path.write_text(
         (
             '{"bundle_name":"terminal_bench_core_v1",'
-            '"dataset":{"official_verifier_status":"harbor_pending"},'
+            '"dataset":{"official_verifier_status":"harbor_pending","evaluation_mode":"custom_harness"},'
             '"cases":[{"case_id":"tb2","official_runner":"harbor_pending",'
-            '"requires_official_task_environment":true}]}'
+            '"requires_official_task_environment":false}]}'
         ),
         encoding="utf-8",
     )
@@ -520,12 +558,20 @@ def test_retry_supervised_run_blocks_official_terminal_bench_bundle(monkeypatch,
     monkeypatch.setattr(service, "_runtime_manager_live_control_enabled", lambda: False)
     monkeypatch.setattr(service.shutil, "which", lambda name: None)
     monkeypatch.setattr(service, "_docker_daemon_available", lambda: False)
+    monkeypatch.setattr(service, "supervised_agent_bindings", lambda: {})
+    monkeypatch.setattr(service, "_RUN_EXECUTOR", _ImmediateExecutor())
+    calls: list[object] = []
 
-    with pytest.raises(service.SupervisedRunValidationError) as exc:
-        service.retry_supervised_run(source_run_id)
+    def fake_run_workbench_session(**kwargs):
+        calls.append(kwargs)
+        raise service.SupervisedEvolutionCancelled("stop after capture", session_id="custom_tb_retry")
 
-    assert "Harbor/Docker" in str(exc.value)
-    assert "/app sandbox" in str(exc.value)
+    monkeypatch.setattr(service, "run_workbench_session", fake_run_workbench_session)
+
+    snapshot = service.retry_supervised_run(source_run_id)
+
+    assert snapshot["retryOfRunId"] == source_run_id
+    assert calls and calls[0]["bundle_name"] == "terminal_bench_core_v1"
 
 
 def test_handle_progress_event_updates_current_case_io_snapshot():

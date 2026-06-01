@@ -276,6 +276,61 @@ def _to_supervised_run(
     )
 
 
+def _supervised_run_from_payload(payload: Dict[str, Any]) -> Optional[SupervisedEvolutionRun]:
+    if not isinstance(payload, dict):
+        return None
+    role = str(payload.get("role") or "").strip()
+    case_id = str(payload.get("case_id") or "").strip()
+    if not role or not case_id:
+        return None
+    return SupervisedEvolutionRun(
+        role=role,
+        case_id=case_id,
+        status=str(payload.get("status") or "").strip(),
+        reason=str(payload.get("reason") or "").strip(),
+        started_at=str(payload.get("started_at") or "").strip(),
+        ended_at=str(payload.get("ended_at") or "").strip(),
+        scenario=str(payload.get("scenario") or "").strip(),
+        mode=str(payload.get("mode") or "").strip(),
+        prompt=str(payload.get("prompt") or "").strip(),
+        worktree_path=str(payload.get("worktree_path") or "").strip(),
+        checkpoint_commit=str(payload.get("checkpoint_commit") or "").strip(),
+        report_path=str(payload.get("report_path") or "").strip() or None,
+        restarts_observed=int(payload.get("restarts_observed") or 0),
+        new_conversation_files=[
+            str(item)
+            for item in list(payload.get("new_conversation_files") or [])
+            if str(item).strip()
+        ],
+        new_debug_files=[
+            str(item)
+            for item in list(payload.get("new_debug_files") or [])
+            if str(item).strip()
+        ],
+        evolution_summary=payload.get("evolution_summary") if isinstance(payload.get("evolution_summary"), dict) else {},
+        agent_binding=payload.get("agent_binding") if isinstance(payload.get("agent_binding"), dict) else {},
+    )
+
+
+def _load_resume_runs(decision_path: Optional[Path]) -> Dict[tuple[str, str], SupervisedEvolutionRun]:
+    if decision_path is None:
+        return {}
+    path = Path(decision_path)
+    if not path.exists():
+        raise FileNotFoundError(f"续跑来源 decision 不存在: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("续跑来源 decision 格式错误：根节点必须是对象")
+    reusable: Dict[tuple[str, str], SupervisedEvolutionRun] = {}
+    for key in ("baseline_runs", "candidate_runs"):
+        for item in list(payload.get(key) or []):
+            run = _supervised_run_from_payload(item)
+            if run is None or run.status != "success":
+                continue
+            reusable[(run.role, run.case_id)] = run
+    return reusable
+
+
 def _materialized_prompt_from_result(result: HarnessResult) -> str:
     command = getattr(result, "command", None)
     if not isinstance(command, list):
@@ -361,6 +416,8 @@ def _extract_run_metrics(item: SupervisedEvolutionRun) -> Dict[str, Any]:
         "new_logs": len(item.new_conversation_files) + len(item.new_debug_files),
         "llm_failure_detected": bool(llm_failure.get("detected")),
         "llm_failure_category": str(llm_failure.get("category") or ""),
+        "llm_failure_error_type": str(llm_failure.get("error_type") or ""),
+        "llm_failure_message": str(llm_failure.get("message") or ""),
         "llm_failure_retryable": bool(llm_failure.get("retryable")),
     }
 
@@ -680,6 +737,13 @@ def _build_case_intake_provenance(case_payload: Dict[str, Any]) -> Dict[str, Any
     if not isinstance(case_payload, dict) or not case_payload:
         return {}
     provenance: Dict[str, Any] = {}
+    metadata_keys = {
+        "evaluation_mode",
+        "score_label",
+        "official_verifier_status",
+        "official_score",
+        "official_score_available",
+    }
     for key in (
         "case_type",
         "generated",
@@ -696,9 +760,16 @@ def _build_case_intake_provenance(case_payload: Dict[str, Any]) -> Dict[str, Any
         "expected_final_state",
         "expected_infeasible_outcome",
         "dynamic_events",
+        "evaluation_mode",
+        "score_label",
+        "official_verifier_status",
+        "official_score",
+        "official_score_available",
     ):
         value = case_payload.get(key)
-        if value not in (None, "", [], {}):
+        if key in metadata_keys and key in case_payload:
+            provenance[key] = value
+        elif value not in (None, "", [], {}):
             provenance[key] = value
     return provenance
 
@@ -737,6 +808,39 @@ def _build_case_score_breakdown(
             "difference_metric_keys": sorted(difference_metrics.keys()),
         },
     }
+
+
+def _bundle_evaluation_metadata(bundle: Dict[str, Any]) -> Dict[str, Any]:
+    dataset = bundle.get("dataset") if isinstance(bundle.get("dataset"), dict) else {}
+    evaluation_mode = str(dataset.get("evaluation_mode") or "").strip()
+    official_status = str(dataset.get("official_verifier_status") or "").strip()
+    score_label = str(dataset.get("score_label") or "").strip()
+    if not evaluation_mode and official_status == "harbor_pending":
+        evaluation_mode = "custom_harness"
+    if not score_label and evaluation_mode == "custom_harness":
+        score_label = "Vibelution custom score (non-official Terminal-Bench score)"
+    metadata: Dict[str, Any] = {}
+    if evaluation_mode:
+        metadata["evaluation_mode"] = evaluation_mode
+    if score_label:
+        metadata["score_label"] = score_label
+    if official_status:
+        metadata["official_verifier_status"] = official_status
+    if evaluation_mode == "custom_harness" or official_status == "harbor_pending":
+        metadata["official_score"] = None
+        metadata["official_score_available"] = False
+    return metadata
+
+
+def _apply_bundle_evaluation_metadata(cases: List[Dict[str, Any]], bundle: Dict[str, Any]) -> None:
+    metadata = _bundle_evaluation_metadata(bundle)
+    if not metadata:
+        return
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        for key, value in metadata.items():
+            case.setdefault(key, value)
 
 
 def _apply_expected_outcome_scores(
@@ -922,11 +1026,45 @@ def _has_transaction_issue(metrics: Dict[str, Any]) -> bool:
         return False
     if not bool(metrics.get("transaction_required")):
         return False
+    if (
+        bool(metrics.get("llm_failure_detected"))
+        and not bool(metrics.get("transaction_opened"))
+        and int(metrics.get("guarded_tools") or 0) == 0
+    ):
+        return False
     return (
         not bool(metrics.get("transaction_opened"))
         or not bool(metrics.get("transaction_closed"))
         or str(metrics.get("transaction_status") or "") not in {"", "success"}
     )
+
+
+def _llm_failure_reason(metrics_items: List[Dict[str, Any]]) -> str:
+    messages = [
+        str(item.get("llm_failure_message") or "").strip()
+        for item in metrics_items
+        if bool(item.get("llm_failure_detected")) and str(item.get("llm_failure_message") or "").strip()
+    ]
+    error_types = {
+        str(item.get("llm_failure_error_type") or "").strip().lower()
+        for item in metrics_items
+        if bool(item.get("llm_failure_detected"))
+    }
+    categories = {
+        str(item.get("llm_failure_category") or "").strip().lower()
+        for item in metrics_items
+        if bool(item.get("llm_failure_detected"))
+    }
+    joined = " ".join([*messages, *error_types, *categories]).lower()
+    if "auth" in joined or "认证" in joined or "credential" in joined or "api key" in joined:
+        return "LLM provider 认证失败，当前监督评测不可判定"
+    if "rate" in joined or "quota" in joined or "429" in joined or "限流" in joined:
+        return "LLM provider 限流或配额异常，当前监督评测不可判定"
+    if "timeout" in joined or "timed out" in joined or "超时" in joined:
+        return "LLM provider 超时，当前监督评测不可判定"
+    if "provider_transport_error" in categories or "transport" in categories or "connection" in joined or "network" in joined:
+        return "LLM provider 传输异常，当前监督评测不可判定"
+    return "LLM 调用失败，当前监督评测不可判定"
 
 
 def _has_restart_miss(metrics: Dict[str, Any]) -> bool:
@@ -1099,6 +1237,7 @@ def _evaluate_gates(
         if item["llm_failure_category"] == "provider_transport_error"
     )
     if baseline_llm_failures or candidate_llm_failures:
+        llm_reason = _llm_failure_reason([*baseline_metrics, *candidate_metrics])
         gates.append(
             DecisionGate(
                 name="infrastructure",
@@ -1112,6 +1251,7 @@ def _evaluate_gates(
                     "baseline_llm_failures": baseline_llm_failures,
                     "candidate_llm_failures": candidate_llm_failures,
                     "provider_transport_failures": provider_transport_failures,
+                    "failure_reason": llm_reason,
                 },
             )
         )
@@ -1147,7 +1287,7 @@ def _evaluate_gates(
                 metrics={},
             )
         )
-        return gates, "INCONCLUSIVE", "LLM provider 传输异常，当前监督评测不可判定", score_delta
+        return gates, "INCONCLUSIVE", llm_reason, score_delta
 
     baseline_commit_detected = sum(1 for item in baseline_metrics if item["commit_detected"])
     candidate_commit_detected = sum(1 for item in candidate_metrics if item["commit_detected"])
@@ -1511,6 +1651,7 @@ def run_supervised_evolution_session(
     checkpoint_callback: Optional[CheckpointCallback] = None,
     cancel_checker: Optional[CancelChecker] = None,
     agent_bindings: Optional[Dict[str, Any]] = None,
+    resume_from_decision_path: Optional[Path] = None,
 ) -> SupervisedEvolutionDecision:
     root = (project_root or get_workspace().project_root).resolve()
     bundle_path = resolve_supervised_bundle_path(bundle_name, project_root=root)
@@ -1526,6 +1667,9 @@ def run_supervised_evolution_session(
     baseline_runs: List[SupervisedEvolutionRun] = []
     candidate_runs: List[SupervisedEvolutionRun] = []
     cases = bundle["cases"]
+    _apply_bundle_evaluation_metadata(cases, bundle)
+    reusable_runs = _load_resume_runs(resume_from_decision_path)
+    evaluation_metadata = _bundle_evaluation_metadata(bundle)
 
     _emit_progress(
         progress_callback,
@@ -1539,6 +1683,7 @@ def run_supervised_evolution_session(
             "active_advisory_count": advisory_context.get("active_count", 0),
             "active_advisory_lines": advisory_lines,
             "agent_bindings": normalized_agent_bindings,
+            **evaluation_metadata,
         },
     )
     _run_checkpoint(
@@ -1549,6 +1694,7 @@ def run_supervised_evolution_session(
             "bundle_name": str(bundle.get("bundle_name") or bundle_name),
             "case_total": len(cases),
             "agent_bindings": normalized_agent_bindings,
+            **evaluation_metadata,
         },
     )
 
@@ -1567,6 +1713,40 @@ def run_supervised_evolution_session(
             ("candidate", candidate_prompt, candidate_runs),
         ):
             role_agent_binding = dict(normalized_agent_bindings.get(role) or {})
+            reusable = reusable_runs.get((role, case_id))
+            if reusable is not None:
+                sink.append(reusable)
+                _emit_progress(
+                    progress_callback,
+                    {
+                        "event": "role_reused",
+                        "session_id": session_id,
+                        "case_index": case_index,
+                        "case_total": len(cases),
+                        "case_id": case_id,
+                        "role": role,
+                        "status": reusable.status,
+                        "reason": "复用上一次成功结果，跳过重跑。",
+                        "report_path": reusable.report_path or "",
+                        "worktree_path": reusable.worktree_path,
+                        "agent_binding": reusable.agent_binding or role_agent_binding,
+                    },
+                )
+                _run_checkpoint(
+                    checkpoint_callback,
+                    {
+                        "phase": "role_boundary",
+                        "session_id": session_id,
+                        "bundle_name": str(bundle.get("bundle_name") or bundle_name),
+                        "case_index": case_index,
+                        "case_total": len(cases),
+                        "case_id": case_id,
+                        "role": role,
+                        "reused": True,
+                        "agent_binding": reusable.agent_binding or role_agent_binding,
+                    },
+                )
+                continue
             _run_checkpoint(
                 checkpoint_callback,
                 {
@@ -1765,6 +1945,13 @@ def run_supervised_evolution_session(
             "case_count": len(cases),
             "baseline_successes": sum(1 for item in baseline_runs if item.status == "success"),
             "candidate_successes": sum(1 for item in candidate_runs if item.status == "success"),
+            "resume_from_decision_path": str(resume_from_decision_path or ""),
+            "reused_run_count": len([
+                item
+                for item in baseline_runs + candidate_runs
+                if (item.role, item.case_id) in reusable_runs and reusable_runs[(item.role, item.case_id)] is item
+            ]),
+            **evaluation_metadata,
         },
     )
     decision_path = dirs["decisions"] / f"{session_id}.json"
