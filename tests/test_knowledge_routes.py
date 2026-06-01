@@ -309,3 +309,41 @@ def test_knowledge_steward_overview_surfaces_agent_boundary_and_queue(tmp_path, 
     assert payload["operatingBoundary"]["formalKnowledgeRequiresReviewer"] is True
     assert payload["governance"]["summary"]["openTaskCount"] >= 1
     assert any(task["targetId"] == proposal["proposalId"] for task in payload["governance"]["openTasks"])
+
+
+def test_knowledge_steward_recommendations_are_read_only(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Steward Recommendation KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    source = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
+        json={
+            "sourceType": "manual_user_entry",
+            "sourceRef": {"note": "needs proposal"},
+            "title": "Source needs steward recommendation",
+            "actorAgentId": member["agentId"],
+        },
+    ).json()
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "Steward recommendation proposal",
+            "content": "Knowledge steward should recommend review without applying it.",
+        },
+    ).json()
+
+    response = client.get("/api/knowledge/steward/recommendations", params={"agentId": lead["agentId"]})
+
+    assert response.status_code == 200
+    payload = response.json()
+    actions = {item["recommendedAction"] for item in payload["recommendations"]}
+    assert "review_proposal" in actions
+    assert "draft_refinement_proposal" in actions
+    assert any(item["targetId"] == proposal["proposalId"] for item in payload["recommendations"])
+    assert any(item["targetId"] == source["sourceArtifactId"] for item in payload["recommendations"])
+    assert payload["operatingBoundary"]["recommendationsOnly"] is True
+    assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert payload["operatingBoundary"]["canBypassReviewer"] is False

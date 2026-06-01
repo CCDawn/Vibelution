@@ -70,6 +70,7 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("/api/knowledge/search");
     expect(routeSource).toContain("/api/knowledge/governance/tasks");
     expect(routeSource).toContain("/api/knowledge/steward/overview");
+    expect(routeSource).toContain("/api/knowledge/steward/recommendations");
     expect(routeSource).toContain("/api/knowledge/ingestion-adapters");
     expect(routeSource).toContain("/trace/");
     expect(routeSource).toContain("/rating-suggestions");
@@ -91,8 +92,11 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.knowledgeSteward");
     expect(routeSource).toContain("knowledgeStewardQuery");
     expect(routeSource).toContain("styles.knowledgeStewardPanel");
+    expect(routeSource).toContain("styles.stewardRecommendations");
+    expect(routeSource).toContain("knowledgeStewardRecommendationsQuery");
     expect(routeSource).toContain("copy.noDirectApply");
     expect(routeSource).toContain("copy.reviewerRequired");
+    expect(routeSource).toContain("copy.recommendationsOnly");
   });
 
   it("shows a priority review queue on the default memory overview", () => {

@@ -676,6 +676,60 @@ def list_knowledge_governance_tasks(*, agent_id: str = "", status: str = "open")
     }
 
 
+def list_knowledge_steward_recommendations(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
+    """Return read-only steward recommendations derived from open governance tasks."""
+
+    _sync_roots()
+    steward = agent_directory_service.get_agent(agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID)
+    steward_id = str((steward or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID).strip()
+    normalized_agent_id = str(agent_id or "").strip()
+    bounded_limit = max(1, min(50, int(limit or 12)))
+    tasks_payload = list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
+    recommendations = [_steward_recommendation_from_task(task) for task in list(tasks_payload.get("tasks") or [])]
+    recommendations.sort(
+        key=lambda item: (
+            _priority_rank(str(item.get("priority") or "")),
+            str(item.get("updatedAt") or item.get("createdAt") or ""),
+        ),
+        reverse=True,
+    )
+    visible_recommendations = recommendations[:bounded_limit]
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": normalized_agent_id,
+        "stewardAgentId": steward_id,
+        "recommendations": visible_recommendations,
+        "summary": {
+            "recommendationCount": len(recommendations),
+            "visibleRecommendationCount": len(visible_recommendations),
+            "proposalReviewCount": sum(1 for item in recommendations if item.get("recommendedAction") == "review_proposal"),
+            "ratingReviewCount": sum(1 for item in recommendations if item.get("recommendedAction") == "review_rating_suggestion"),
+            "proposalDraftCount": sum(1 for item in recommendations if item.get("recommendedAction") == "draft_refinement_proposal"),
+        },
+        "operatingBoundary": {
+            "canDirectlyApplyKnowledge": False,
+            "canDeleteKnowledge": False,
+            "canChangeAcl": False,
+            "canBypassReviewer": False,
+            "recommendationsOnly": True,
+            "formalKnowledgeRequiresReviewer": True,
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_event(
+        "knowledge.steward.recommendations.viewed",
+        "",
+        "",
+        actor_agent_id=steward_id,
+        fields={
+            "agentId": normalized_agent_id,
+            "recommendationCount": payload["summary"]["recommendationCount"],
+            "visibleRecommendationCount": payload["summary"]["visibleRecommendationCount"],
+        },
+    )
+    return payload
+
+
 def get_knowledge_trace(knowledge_base_id: str, target_id: str, *, agent_id: str = "") -> dict[str, Any]:
     """Return the source -> proposal -> batch -> item -> rating trail for one knowledge object."""
 
@@ -1610,6 +1664,58 @@ def _governance_task(
             "canRate": bool(permissions.get("canRate")),
             "canPropose": bool(permissions.get("canPropose")),
         },
+    }
+
+
+def _steward_recommendation_from_task(task: dict[str, Any]) -> dict[str, Any]:
+    task_type = str(task.get("taskType") or "").strip()
+    priority = str(task.get("priority") or "normal").strip()
+    permissions = task.get("permissions") if isinstance(task.get("permissions"), dict) else {}
+    if task_type == "proposal_review":
+        recommended_action = "review_proposal"
+        reason = "Pending refinement proposal needs a reviewer before it can become formal knowledge."
+        next_step = "Open the trace, inspect source evidence, then approve or reject as a review-capable Agent."
+        requires_reviewer = True
+        can_execute = bool(permissions.get("canReview"))
+    elif task_type == "rating_review":
+        recommended_action = "review_rating_suggestion"
+        reason = "Pending importance or stability suggestion needs reviewer confirmation before item metadata changes."
+        next_step = "Compare the suggestion with the target evidence, then apply or reject the rating suggestion."
+        requires_reviewer = True
+        can_execute = bool(permissions.get("canRate"))
+    elif task_type == "source_needs_proposal":
+        recommended_action = "draft_refinement_proposal"
+        reason = "Registered source evidence has not yet been refined into a proposal."
+        next_step = "Draft a refinement proposal that summarizes the source without creating formal knowledge directly."
+        requires_reviewer = False
+        can_execute = bool(permissions.get("canPropose"))
+    else:
+        recommended_action = "inspect_task"
+        reason = "Governance task needs manual inspection."
+        next_step = "Inspect the task and choose the smallest review-safe action."
+        requires_reviewer = True
+        can_execute = False
+    return {
+        "recommendationId": f"krec:{task.get('taskId')}",
+        "taskId": str(task.get("taskId") or ""),
+        "taskType": task_type,
+        "recommendedAction": recommended_action,
+        "priority": priority if priority in REVIEW_PRIORITIES else "normal",
+        "teamId": str(task.get("teamId") or ""),
+        "teamName": str(task.get("teamName") or ""),
+        "knowledgeBaseId": str(task.get("knowledgeBaseId") or ""),
+        "knowledgeBaseName": str(task.get("knowledgeBaseName") or ""),
+        "targetId": str(task.get("targetId") or ""),
+        "targetStatus": str(task.get("targetStatus") or ""),
+        "title": trim_lines(str(task.get("title") or recommended_action), max_lines=1),
+        "summary": trim_lines(str(task.get("summary") or ""), max_lines=3),
+        "reason": reason,
+        "nextStep": next_step,
+        "requiresReviewer": requires_reviewer,
+        "canExecuteWithCurrentActor": can_execute,
+        "sourceArtifactIds": [str(value) for value in list(task.get("sourceArtifactIds") or [])[:12] if str(value or "").strip()],
+        "createdAt": str(task.get("createdAt") or ""),
+        "updatedAt": str(task.get("updatedAt") or task.get("createdAt") or ""),
     }
 
 
