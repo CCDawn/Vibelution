@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3 - 2026-06-01
+
+- Added the Knowledge Steward workbench API at `/api/knowledge/steward/workbench`, aggregating steward identity, open governance tasks, read-only recommendations, staged next actions, and acceptance checklist evidence.
+- Added ToolPolicy-gated `knowledge_steward_workbench_tool` for the protected Knowledge Steward Agent so Agents can inspect the unified governance workflow without applying, deleting, changing ACLs, or bypassing reviewers.
+- Visualized the steward workbench in `/agents/memory/knowledge`, including governance stages, next actions, and the review-safe acceptance checklist.
+- Logged workbench reads through `knowledge.steward.workbench.viewed` and tool reads through `knowledge.tool.steward_workbench.queried`.
+
 ## 0.7.2 - 2026-06-01
 
 - Allowed `terminal_bench_core` to run through the Vibelution custom harness as a non-official Terminal-Bench evaluation, while keeping Harbor/Docker official verifier status pending.

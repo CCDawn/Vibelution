@@ -63,6 +63,7 @@ from tools.team_knowledge_tools import (
     knowledge_query_tool as _knowledge_query_impl,
     knowledge_rating_suggestion_tool as _knowledge_rating_suggestion_impl,
     knowledge_steward_recommendations_tool as _knowledge_steward_recommendations_impl,
+    knowledge_steward_workbench_tool as _knowledge_steward_workbench_impl,
 )
 from tools.token_manager import compress_context_tool as _compress_context_impl
 from tools.python_intelligence_tools import (
@@ -1227,6 +1228,22 @@ def create_key_tools() -> List[BaseTool]:
         return _knowledge_steward_recommendations_impl(limit=limit)
 
     @tool
+    def knowledge_steward_workbench_tool(limit: int = 8) -> str:
+        """
+        【知识库管理员工作台】读取 Knowledge Steward 的统一治理工作台。
+
+        返回管理员身份、治理阶段、下一步建议、验收清单和权限边界；只读，不会审核、应用、删除、改 ACL 或直接写正式知识。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_steward_workbench_tool 时才可用。
+
+        Args:
+            limit: 每批返回建议数量上限，默认 8
+
+        Returns:
+            JSON 格式的知识库管理员工作台状态
+        """
+        return _knowledge_steward_workbench_impl(limit=limit)
+
+    @tool
     def knowledge_rating_suggestion_tool(
         knowledge_base_id: str,
         target_type: str,
@@ -1397,6 +1414,7 @@ def create_key_tools() -> List[BaseTool]:
         knowledge_ingestion_tool,
         knowledge_governance_tasks_tool,
         knowledge_steward_recommendations_tool,
+        knowledge_steward_workbench_tool,
         knowledge_rating_suggestion_tool,
         # 学习卸载 (P2)
         record_learning_tool,

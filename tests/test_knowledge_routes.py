@@ -347,3 +347,43 @@ def test_knowledge_steward_recommendations_are_read_only(tmp_path, monkeypatch):
     assert payload["operatingBoundary"]["recommendationsOnly"] is True
     assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
     assert payload["operatingBoundary"]["canBypassReviewer"] is False
+
+
+def test_knowledge_steward_workbench_groups_next_actions(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "Steward Workbench KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    source = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/source-artifacts",
+        json={
+            "sourceType": "manual_user_entry",
+            "sourceRef": {"note": "workbench source"},
+            "title": "Workbench source",
+            "actorAgentId": member["agentId"],
+        },
+    ).json()
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "Workbench proposal",
+            "content": "Workbench route should show next actions without applying.",
+        },
+    ).json()
+
+    response = client.get("/api/knowledge/steward/workbench", params={"agentId": lead["agentId"], "limit": 6})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["steward"]["agentId"] == agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID
+    assert payload["operatingBoundary"]["recommendationsOnly"] is True
+    assert payload["operatingBoundary"]["canDirectlyApplyKnowledge"] is False
+    assert any(action["targetId"] == proposal["proposalId"] for action in payload["nextActions"])
+    assert any(
+        item["targetId"] == source["sourceArtifactId"]
+        for stage in payload["stages"]
+        for item in stage["items"]
+    )
+    assert payload["acceptanceChecklist"][1]["id"] == "proposal_reviewed"

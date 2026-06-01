@@ -730,6 +730,111 @@ def list_knowledge_steward_recommendations(*, agent_id: str = "", limit: int = 1
     return payload
 
 
+def get_knowledge_steward_workbench(*, agent_id: str = "", limit: int = 12) -> dict[str, Any]:
+    """Return the Knowledge Steward's consolidated read-only workbench."""
+
+    _sync_roots()
+    normalized_agent_id = str(agent_id or "").strip()
+    bounded_limit = max(1, min(50, int(limit or 12)))
+    overview = get_knowledge_steward_overview()
+    tasks_payload = list_knowledge_governance_tasks(agent_id=normalized_agent_id, status="open")
+    recommendations_payload = list_knowledge_steward_recommendations(agent_id=normalized_agent_id, limit=bounded_limit)
+    recommendations = list(recommendations_payload.get("recommendations") or [])
+    tasks = list(tasks_payload.get("tasks") or [])
+    stages = [
+        _steward_workbench_stage(
+            "source_to_proposal",
+            "Source evidence to proposal",
+            "Turn registered evidence into pending refinement proposals without creating formal knowledge.",
+            "draft_refinement_proposal",
+            recommendations,
+            tasks,
+            expected_task_type="source_needs_proposal",
+            next_tool="knowledge_ingestion_tool or knowledge_proposal_tool",
+        ),
+        _steward_workbench_stage(
+            "proposal_review",
+            "Proposal review",
+            "Inspect source evidence and wait for a reviewer-capable Agent to approve or reject proposals.",
+            "review_proposal",
+            recommendations,
+            tasks,
+            expected_task_type="proposal_review",
+            next_tool="review_refinement_proposal API / UI reviewer action",
+        ),
+        _steward_workbench_stage(
+            "rating_review",
+            "Rating review",
+            "Confirm or reject importance, confidence, stability, and priority suggestions.",
+            "review_rating_suggestion",
+            recommendations,
+            tasks,
+            expected_task_type="rating_review",
+            next_tool="rating suggestion review API / UI reviewer action",
+        ),
+    ]
+    next_actions = [
+        {
+            "actionId": f"next:{item.get('recommendationId') or index}",
+            "recommendedAction": str(item.get("recommendedAction") or ""),
+            "priority": str(item.get("priority") or "normal"),
+            "title": str(item.get("title") or ""),
+            "knowledgeBaseId": str(item.get("knowledgeBaseId") or ""),
+            "knowledgeBaseName": str(item.get("knowledgeBaseName") or ""),
+            "targetId": str(item.get("targetId") or ""),
+            "requiresReviewer": bool(item.get("requiresReviewer")),
+            "canExecuteWithCurrentActor": bool(item.get("canExecuteWithCurrentActor")),
+            "nextStep": str(item.get("nextStep") or ""),
+        }
+        for index, item in enumerate(recommendations[: min(6, bounded_limit)])
+    ]
+    payload = {
+        "schemaVersion": SCHEMA_VERSION,
+        "agentId": normalized_agent_id,
+        "steward": overview.get("steward") or {},
+        "summary": {
+            **dict(tasks_payload.get("summary") or {}),
+            **{
+                "recommendationCount": int((recommendations_payload.get("summary") or {}).get("recommendationCount") or 0),
+                "visibleRecommendationCount": int((recommendations_payload.get("summary") or {}).get("visibleRecommendationCount") or 0),
+                "stageCount": len(stages),
+                "blockedStageCount": sum(1 for stage in stages if int(stage.get("openCount") or 0) and not int(stage.get("executableCount") or 0)),
+            },
+        },
+        "stages": stages,
+        "nextActions": next_actions,
+        "acceptanceChecklist": [
+            {"id": "source_registered", "label": "Every candidate keeps SourceArtifact ids and timestamps.", "required": True},
+            {"id": "proposal_reviewed", "label": "Formal knowledge is created only after reviewer approval.", "required": True},
+            {"id": "rating_reviewed", "label": "Importance and stability marks stay pending until reviewed.", "required": True},
+            {"id": "trace_available", "label": "Trace view can reconstruct source -> proposal -> batch/item -> rating.", "required": True},
+        ],
+        "operatingBoundary": {
+            **dict(overview.get("operatingBoundary") or {}),
+            "recommendationsOnly": True,
+            "canDirectlyApplyKnowledge": False,
+            "canDeleteKnowledge": False,
+            "canChangeAcl": False,
+            "canBypassReviewer": False,
+            "formalKnowledgeRequiresReviewer": True,
+        },
+        "updatedAt": utc_now_iso(),
+    }
+    _record_event(
+        "knowledge.steward.workbench.viewed",
+        "",
+        "",
+        actor_agent_id=str((payload.get("steward") or {}).get("agentId") or agent_directory_service.KNOWLEDGE_STEWARD_AGENT_ID),
+        fields={
+            "agentId": normalized_agent_id,
+            "openTaskCount": int(payload["summary"].get("openTaskCount") or 0),
+            "recommendationCount": int(payload["summary"].get("recommendationCount") or 0),
+            "stageCount": len(stages),
+        },
+    )
+    return payload
+
+
 def get_knowledge_trace(knowledge_base_id: str, target_id: str, *, agent_id: str = "") -> dict[str, Any]:
     """Return the source -> proposal -> batch -> item -> rating trail for one knowledge object."""
 
@@ -1716,6 +1821,43 @@ def _steward_recommendation_from_task(task: dict[str, Any]) -> dict[str, Any]:
         "sourceArtifactIds": [str(value) for value in list(task.get("sourceArtifactIds") or [])[:12] if str(value or "").strip()],
         "createdAt": str(task.get("createdAt") or ""),
         "updatedAt": str(task.get("updatedAt") or task.get("createdAt") or ""),
+    }
+
+
+def _steward_workbench_stage(
+    stage_id: str,
+    title: str,
+    description: str,
+    recommended_action: str,
+    recommendations: list[dict[str, Any]],
+    tasks: list[dict[str, Any]],
+    *,
+    expected_task_type: str,
+    next_tool: str,
+) -> dict[str, Any]:
+    stage_recommendations = [
+        item
+        for item in recommendations
+        if str(item.get("recommendedAction") or "") == recommended_action
+    ]
+    stage_tasks = [
+        item
+        for item in tasks
+        if str(item.get("taskType") or "") == expected_task_type
+    ]
+    open_count = len(stage_tasks)
+    executable_count = sum(1 for item in stage_recommendations if bool(item.get("canExecuteWithCurrentActor")))
+    return {
+        "stageId": stage_id,
+        "title": title,
+        "description": description,
+        "recommendedAction": recommended_action,
+        "nextTool": next_tool,
+        "openCount": open_count,
+        "executableCount": executable_count,
+        "blockedCount": max(0, open_count - executable_count),
+        "items": stage_recommendations[:6],
+        "status": "clear" if open_count == 0 else ("actionable" if executable_count else "needs_permission_or_reviewer"),
     }
 
 

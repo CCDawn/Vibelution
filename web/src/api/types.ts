@@ -225,6 +225,51 @@ export type KnowledgeStewardRecommendationsPayload = {
   updatedAt: string;
 };
 
+export type KnowledgeStewardWorkbenchPayload = {
+  schemaVersion: number;
+  agentId: string;
+  steward: KnowledgeStewardOverview["steward"];
+  summary: KnowledgeGovernanceTasksPayload["summary"] & {
+    recommendationCount: number;
+    visibleRecommendationCount: number;
+    stageCount: number;
+    blockedStageCount: number;
+  };
+  stages: Array<{
+    stageId: string;
+    title: string;
+    description: string;
+    recommendedAction: string;
+    nextTool: string;
+    openCount: number;
+    executableCount: number;
+    blockedCount: number;
+    status: "clear" | "actionable" | "needs_permission_or_reviewer" | string;
+    items: KnowledgeStewardRecommendation[];
+  }>;
+  nextActions: Array<{
+    actionId: string;
+    recommendedAction: string;
+    priority: string;
+    title: string;
+    knowledgeBaseId: string;
+    knowledgeBaseName: string;
+    targetId: string;
+    requiresReviewer: boolean;
+    canExecuteWithCurrentActor: boolean;
+    nextStep: string;
+  }>;
+  acceptanceChecklist: Array<{
+    id: string;
+    label: string;
+    required: boolean;
+  }>;
+  operatingBoundary: KnowledgeStewardRecommendationsPayload["operatingBoundary"] & {
+    knowledgeBodiesInPrompt?: boolean;
+  };
+  updatedAt: string;
+};
+
 export type KnowledgeSourceArtifact = {
   sourceArtifactId: string;
   teamId: string;

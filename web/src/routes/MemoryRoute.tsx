@@ -39,6 +39,7 @@ import {
   KnowledgeSourceArtifact,
   KnowledgeStewardOverview,
   KnowledgeStewardRecommendationsPayload,
+  KnowledgeStewardWorkbenchPayload,
   KnowledgeTracePayload,
   MemoryItem,
   MemoryMutationResponse,
@@ -279,6 +280,11 @@ type Copy = {
   stewardRecommendationHint: string;
   recommendationsOnly: string;
   recommendedAction: string;
+  stewardWorkbench: string;
+  stewardStages: string;
+  stewardNextActions: string;
+  acceptanceChecklist: string;
+  executable: string;
 };
 
 type FilterMode = "all" | "prompt" | "visible" | "manual" | "missing";
@@ -594,6 +600,11 @@ const COPY: Record<"zh" | "en", Copy> = {
     stewardRecommendationHint: "只生成建议，不自动审核或落正式知识。",
     recommendationsOnly: "仅建议",
     recommendedAction: "建议动作",
+    stewardWorkbench: "管理员工作台",
+    stewardStages: "治理阶段",
+    stewardNextActions: "下一步动作",
+    acceptanceChecklist: "验收清单",
+    executable: "可执行",
   },
   en: {
     eyebrow: "Memory Library",
@@ -823,6 +834,11 @@ const COPY: Record<"zh" | "en", Copy> = {
     stewardRecommendationHint: "Recommendations only; no automatic review or formal writes.",
     recommendationsOnly: "Recommendations only",
     recommendedAction: "Recommended action",
+    stewardWorkbench: "Steward workbench",
+    stewardStages: "Governance stages",
+    stewardNextActions: "Next actions",
+    acceptanceChecklist: "Acceptance checklist",
+    executable: "Executable",
   },
 };
 
@@ -1452,6 +1468,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchIntervalInBackground: false,
     enabled: forcedView === "knowledge",
   });
+  const knowledgeStewardWorkbenchQuery = useQuery({
+    queryKey: queryKeys.knowledgeStewardWorkbench(""),
+    queryFn: () => fetchJson<KnowledgeStewardWorkbenchPayload>("/api/knowledge/steward/workbench?limit=8"),
+    refetchInterval: resolvePollingInterval(pageVisible, 45_000),
+    refetchIntervalInBackground: false,
+    enabled: forcedView === "knowledge",
+  });
 
   const memoryMutation = useMutation({
     mutationFn: async (draft: EditDraft) => {
@@ -1712,6 +1735,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const knowledgeOverview = knowledgeOverviewQuery.data;
   const knowledgeSteward = knowledgeStewardQuery.data;
   const knowledgeStewardRecommendations = knowledgeStewardRecommendationsQuery.data?.recommendations ?? [];
+  const knowledgeStewardWorkbench = knowledgeStewardWorkbenchQuery.data;
   const knowledgeBases = knowledgeOverview?.knowledgeBases ?? [];
   const activeKnowledgeBase: TeamKnowledgeBase | null =
     knowledgeBases.find((base) => base.knowledgeBaseId === activeKnowledgeBaseId) ?? knowledgeBases[0] ?? null;
@@ -3373,6 +3397,44 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
               <strong>{copy.noIssues}</strong>
             </section>
           ) : null}
+        </div>
+        <div className={styles.stewardWorkbench}>
+          <div className={styles.stewardRecommendationHeader}>
+            <span>{copy.stewardWorkbench}</span>
+            <small>{copy.reviewerRequired}</small>
+          </div>
+          <div className={styles.stewardStageGrid} aria-label={copy.stewardStages}>
+            {(knowledgeStewardWorkbench?.stages ?? []).map((stage) => (
+              <section key={stage.stageId} className={styles.stewardStageCard}>
+                <div>
+                  <span className={stage.status === "clear" ? styles.statusPillMuted : styles.statusPill}>{stage.status}</span>
+                  <strong>{stage.title}</strong>
+                </div>
+                <p>{stage.description}</p>
+                <small>
+                  {copy.openGovernanceTasks}: {stage.openCount} · {copy.executable}: {stage.executableCount}
+                </small>
+                <code>{stage.nextTool}</code>
+              </section>
+            ))}
+          </div>
+          <div className={styles.stewardActionGrid} aria-label={copy.stewardNextActions}>
+            {(knowledgeStewardWorkbench?.nextActions ?? []).slice(0, 4).map((action) => (
+              <button key={action.actionId} type="button" className={styles.stewardActionRow} onClick={() => setTraceTargetId(action.targetId)}>
+                <span className={styles.statusPill}>{action.priority}</span>
+                <strong>{action.title}</strong>
+                <small>{action.nextStep}</small>
+              </button>
+            ))}
+          </div>
+          <div className={styles.stewardChecklist} aria-label={copy.acceptanceChecklist}>
+            {(knowledgeStewardWorkbench?.acceptanceChecklist ?? []).map((item) => (
+              <span key={item.id}>
+                <CheckCircle2 size={13} />
+                {item.label}
+              </span>
+            ))}
+          </div>
         </div>
       </section>
       {knowledgeFeedback.tone !== "idle" ? (
