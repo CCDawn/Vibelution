@@ -4448,7 +4448,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
         {renderSubnav()}
       </div>
 
-      <div className={styles.viewStack}>
+      <div className={forcedView === "graph" ? `${styles.viewStack} ${styles.graphViewStack}` : styles.viewStack}>
         {forcedView === "overview"
           ? renderOverviewView()
           : forcedView === "effective"

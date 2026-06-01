@@ -129,6 +129,12 @@
   overflow: auto;
 }
 
+.graphViewStack {
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: stretch;
+  overflow: hidden;
+}
+
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -671,12 +677,13 @@
 .graphWorkspace {
   grid-template-columns: minmax(210px, 250px) minmax(760px, 1fr) minmax(260px, 0.34fr);
   grid-template-rows: minmax(0, 1fr);
-  height: min(74vh, 820px);
+  height: auto;
+  min-height: 0;
 }
 
 .graphCanvasPanel {
   display: grid;
-  grid-template-rows: auto minmax(430px, 1fr) minmax(86px, 0.18fr);
+  grid-template-rows: auto minmax(0, 1fr) 56px;
   gap: 8px;
   min-height: 0;
   overflow: hidden;
@@ -706,7 +713,7 @@
 .graphCanvasShell {
   position: relative;
   min-width: 0;
-  min-height: 430px;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, transparent);
   border-radius: 8px;
@@ -733,7 +740,7 @@
   display: grid;
   place-items: center;
   gap: 8px;
-  min-height: 430px;
+  min-height: 360px;
   padding: 18px;
   border: 1px solid color-mix(in srgb, var(--accent-cool) 24%, transparent);
   border-radius: 8px;
@@ -778,26 +785,35 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  height: 20px;
-  padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 42%, white);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, white);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--surface-panel) 84%, var(--node-color, var(--accent-cool)) 16%);
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--node-color, var(--accent-cool)) 24%, transparent);
-  color: var(--fg-primary);
-  font-size: 0.58rem;
-  font-weight: 850;
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, 0.95), transparent 30%),
+    color-mix(in srgb, white 72%, var(--node-color, var(--accent-cool)) 28%);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node-color, var(--accent-cool)) 12%, transparent),
+    0 10px 20px color-mix(in srgb, var(--node-color, var(--accent-cool)) 26%, transparent);
+  color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 74%, black);
+  font-size: 0.52rem;
+  font-weight: 920;
   line-height: 1;
   pointer-events: auto;
   transform-origin: center;
 }
 
 .graphNodeBadge[data-selected="true"] {
-  min-width: 32px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, white);
-  background: color-mix(in srgb, white 68%, var(--node-color, var(--accent-cool)) 32%);
+  background:
+    radial-gradient(circle at 36% 28%, #fff, transparent 32%),
+    color-mix(in srgb, white 58%, var(--node-color, var(--accent-cool)) 42%);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--node-color, var(--accent-cool)) 16%, transparent),
+    0 0 28px color-mix(in srgb, var(--node-color, var(--accent-cool)) 42%, transparent);
 }
 
 .graphCanvasFallback svg {
@@ -818,21 +834,22 @@
 .graphNodeList {
   display: flex;
   align-items: stretch;
-  gap: 6px;
+  gap: 5px;
   min-height: 0;
-  padding: 2px 2px 4px;
+  padding: 0 2px 3px;
   overflow: auto;
 }
 
 .graphNodeList .itemButton {
-  flex: 0 0 176px;
+  flex: 0 0 150px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto auto;
+  grid-template-rows: 1fr;
   align-content: center;
-  gap: 3px 7px;
-  min-height: 58px;
-  padding: 7px 8px;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 5px 7px;
   border-color: color-mix(in srgb, var(--node-color, var(--border-soft)) 32%, var(--border-soft));
   background: color-mix(in srgb, var(--surface-card) 82%, var(--node-color, transparent) 8%);
 }
@@ -846,30 +863,31 @@
 }
 
 .graphNodeList .itemButton strong {
-  align-self: end;
+  align-self: center;
+  font-size: 0.78rem;
 }
 
 .graphNodeList .itemButton small {
+  display: none;
   grid-column: 2;
   color: var(--fg-tertiary);
   font-size: 0.72rem;
 }
 
 .graphNodeTypeMark {
-  grid-row: 1 / span 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   align-self: center;
-  width: 42px;
+  width: 34px;
   min-width: 0;
-  height: 36px;
+  height: 28px;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 48%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--node-color, var(--accent-cool)) 14%, white);
   color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 78%, black);
-  font-size: 0.62rem;
+  font-size: 0.58rem;
   font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -53,6 +53,23 @@ const NODE_SHORT_LABELS: Record<string, string> = {
   tag: "#",
 };
 
+function createGlowTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 96;
+  canvas.height = 96;
+  const context = canvas.getContext("2d");
+  if (context) {
+    const gradient = context.createRadialGradient(48, 48, 4, 48, 48, 48);
+    gradient.addColorStop(0, "rgba(255,255,255,0.95)");
+    gradient.addColorStop(0.24, "rgba(255,255,255,0.52)");
+    gradient.addColorStop(0.58, "rgba(255,255,255,0.14)");
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, 96, 96);
+  }
+  return new THREE.CanvasTexture(canvas);
+}
+
 export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, fallbackText }: MemoryGraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const labelLayerRef = useRef<HTMLDivElement | null>(null);
@@ -101,10 +118,13 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     camera.position.set(0, 12, 46);
     const root = new THREE.Group();
     scene.add(root);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.82));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.9));
     const light = new THREE.DirectionalLight(0xffffff, 1.2);
     light.position.set(12, 18, 16);
     scene.add(light);
+    const rimLight = new THREE.PointLight(0xffffff, 0.85, 120);
+    rimLight.position.set(-18, 10, 28);
+    scene.add(rimLight);
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x000000, 0);
@@ -118,6 +138,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     const haloSphere = new THREE.SphereGeometry(0.58, 24, 24);
     const hitSphere = new THREE.SphereGeometry(1, 12, 12);
     const ringGeometry = new THREE.TorusGeometry(0.7, 0.025, 8, 36);
+    const glowTexture = createGlowTexture();
     const labelLayer = labelLayerRef.current;
     if (labelLayer) {
       labelLayer.replaceChildren();
@@ -134,25 +155,39 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         metalness: 0.18,
       });
       const mesh = new THREE.Mesh(sphere, material);
-      const size = 1.15 + Math.min(2.5, Math.sqrt(degree + 1) * 0.3);
-      mesh.scale.setScalar(node.type === "project" ? 2.55 : size);
+      const size = 1.32 + Math.min(2.8, Math.sqrt(degree + 1) * 0.34);
+      mesh.scale.setScalar(node.type === "project" ? 2.8 : size);
       const position = positions.get(node.id) ?? new THREE.Vector3();
       mesh.position.copy(position);
       mesh.userData.nodeId = node.id;
       root.add(mesh);
       nodeObjects.set(node.id, mesh);
 
+      const glow = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: glowTexture,
+          color,
+          transparent: true,
+          opacity: selectedNodeId === node.id ? 0.46 : 0.24,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      );
+      glow.position.copy(position);
+      glow.scale.setScalar((node.type === "project" ? 7.5 : size * 3.25) * (selectedNodeId === node.id ? 1.25 : 1));
+      root.add(glow);
+
       const halo = new THREE.Mesh(
         haloSphere,
         new THREE.MeshBasicMaterial({
           color,
           transparent: true,
-          opacity: selectedNodeId === node.id ? 0.28 : 0.1,
+          opacity: selectedNodeId === node.id ? 0.2 : 0.065,
           depthWrite: false,
         }),
       );
       halo.position.copy(position);
-      halo.scale.setScalar((node.type === "project" ? 2.7 : size) * 1.2);
+      halo.scale.setScalar((node.type === "project" ? 2.95 : size) * 1.08);
       root.add(halo);
 
       if (selectedNodeId === node.id || node.type === "project" || node.type === "team" || node.type === "knowledge_base") {
@@ -176,7 +211,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
       );
       hitMesh.position.copy(position);
-      hitMesh.scale.setScalar(Math.max(1.25, (node.type === "project" ? 2.75 : size) * 1.35));
+      hitMesh.scale.setScalar(Math.max(1.5, (node.type === "project" ? 3.05 : size) * 1.45));
       hitMesh.userData.nodeId = node.id;
       root.add(hitMesh);
       hitObjects.set(node.id, hitMesh);
@@ -301,8 +336,8 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
           projected.copy(position).applyMatrix4(root.matrixWorld).project(camera);
           const x = (projected.x * 0.5 + 0.5) * rect.width;
           const y = (-projected.y * 0.5 + 0.5) * rect.height;
-          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
-          label.style.opacity = projected.z < 1 ? "1" : "0";
+          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%) scale(${selectedNodeId === nodeId ? 1.08 : 1})`;
+          label.style.opacity = projected.z < 1 ? (selectedNodeId === nodeId ? "1" : "0.86") : "0";
           label.style.zIndex = String(Math.max(1, Math.round((1 - projected.z) * 100)));
         }
       }
@@ -330,6 +365,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       haloSphere.dispose();
       hitSphere.dispose();
       ringGeometry.dispose();
+      glowTexture.dispose();
       lineGeometry.dispose();
       for (const object of nodeObjects.values()) {
         (object.material as THREE.Material).dispose();
