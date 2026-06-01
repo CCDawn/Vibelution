@@ -790,13 +790,12 @@
   position: absolute;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-rows: auto auto;
   align-items: center;
   column-gap: 5px;
   row-gap: 1px;
-  width: min(210px, max-content);
-  max-width: 210px;
-  min-height: 34px;
+  width: min(150px, max-content);
+  max-width: 150px;
+  min-height: 28px;
   padding: 4px 7px 4px 5px;
   border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 48%, white);
   border-radius: 8px;
@@ -813,6 +812,13 @@
   transform-origin: center;
 }
 
+.graphNodeBadge[data-detail="true"] {
+  grid-template-rows: auto auto;
+  width: min(210px, max-content);
+  max-width: 210px;
+  min-height: 34px;
+}
+
 .graphNodeBadge[data-selected="true"] {
   max-width: 240px;
   min-height: 40px;
@@ -826,7 +832,6 @@
 }
 
 .graphNodeBadgeType {
-  grid-row: 1 / span 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -839,6 +844,10 @@
   color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, black);
   font-size: 0.54rem;
   font-weight: 920;
+}
+
+.graphNodeBadge[data-detail="true"] .graphNodeBadgeType {
+  grid-row: 1 / span 2;
 }
 
 .graphNodeBadge strong,
