@@ -160,7 +160,8 @@
 
 .dashboardIo {
   grid-area: io;
-  grid-template-rows: auto minmax(0, var(--evolution-live-io-height, 340px)) 12px minmax(0, 1fr);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden !important;
 }
 
@@ -1184,12 +1185,15 @@
 }
 
 .ioStack {
-  display: grid;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
   min-height: 0;
 }
 
 .liveIoPane {
+  height: 100%;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
@@ -1227,10 +1231,22 @@
 
 .ioTranscript {
   display: grid;
+  align-content: start;
   gap: 8px;
-  max-height: 340px;
+  min-height: 0;
   overflow: auto;
   padding-right: 4px;
+}
+
+.transcriptSection {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.transcriptSection .ioTranscript {
+  flex: 1 1 0;
 }
 
 .ioEntry {

@@ -128,6 +128,14 @@ describe("EvolutionRoute library user flow contract", () => {
     expect(desktopBreakpoint).not.toContain('"io io"\n      "launch run"');
   });
 
+  it("lets the supervised case transcript fill the lower vertical space", () => {
+    expect(routeSource).toContain("styles.transcriptSection");
+    expect(stylesSource).toContain(".transcriptSection");
+    expect(stylesSource).toContain("flex: 1 1 0");
+    expect(stylesSource).toContain(".transcriptSection .ioTranscript");
+    expect(stylesSource).not.toContain("max-height: 340px");
+  });
+
   it("keeps the proposal library summary in three columns at common desktop widths", () => {
     expect(stylesSource).toContain(".librarySummaryBar");
     expect(stylesSource).toContain("minmax(300px, 1fr) minmax(260px, 0.8fr) minmax(300px, 0.9fr)");
