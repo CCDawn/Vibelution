@@ -724,8 +724,8 @@
   border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, transparent);
   border-radius: 8px;
   background:
-    radial-gradient(circle at 48% 54%, color-mix(in srgb, var(--accent-cool) 18%, transparent), transparent 34%),
-    linear-gradient(135deg, color-mix(in srgb, var(--bg-canvas) 92%, white), color-mix(in srgb, var(--surface-panel) 86%, var(--accent-cool) 4%));
+    radial-gradient(circle at 48% 54%, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 38%),
+    linear-gradient(135deg, color-mix(in srgb, var(--bg-canvas) 96%, white), color-mix(in srgb, var(--surface-panel) 92%, var(--accent-cool) 2%));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, white 38%, transparent);
 }
 
@@ -739,7 +739,7 @@
     linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 38%, transparent) 1px, transparent 1px);
   background-size: 38px 38px;
   mask-image: radial-gradient(circle at center, black 0%, transparent 72%);
-  opacity: 0.32;
+  opacity: 0.2;
 }
 
 .graphCanvasFallback {
@@ -803,8 +803,8 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.92), color-mix(in srgb, white 76%, var(--node-color, var(--accent-cool)) 10%)),
     color-mix(in srgb, white 78%, var(--node-color, var(--accent-cool)) 22%);
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--node-color, var(--accent-cool)) 8%, transparent),
-    0 12px 24px color-mix(in srgb, var(--node-color, var(--accent-cool)) 16%, transparent);
+    0 1px 0 color-mix(in srgb, white 74%, transparent) inset,
+    0 8px 18px rgba(15, 23, 42, 0.12);
   color: var(--fg-primary);
   text-align: left;
   line-height: 1;
@@ -827,8 +827,8 @@
     linear-gradient(180deg, #fff, color-mix(in srgb, white 70%, var(--node-color, var(--accent-cool)) 16%)),
     color-mix(in srgb, white 64%, var(--node-color, var(--accent-cool)) 36%);
   box-shadow:
-    0 0 0 4px color-mix(in srgb, var(--node-color, var(--accent-cool)) 16%, transparent),
-    0 0 28px color-mix(in srgb, var(--node-color, var(--accent-cool)) 42%, transparent);
+    0 0 0 2px color-mix(in srgb, var(--node-color, var(--accent-cool)) 20%, transparent),
+    0 10px 22px rgba(15, 23, 42, 0.16);
 }
 
 .graphNodeBadgeType {
