@@ -335,6 +335,9 @@ type Copy = {
   graphAcl: string;
   graphSearchPlaceholder: string;
   graphNodeTypes: string;
+  graphVisibleNodes: string;
+  graphVisibleEdges: string;
+  graphClearFocus: string;
   graphSelectedNode: string;
   graphNoSelection: string;
   graphInteractionHint: string;
@@ -686,6 +689,9 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphAcl: "ACL 感知",
     graphSearchPlaceholder: "搜索节点、类型、状态或摘要",
     graphNodeTypes: "节点类型",
+    graphVisibleNodes: "当前节点",
+    graphVisibleEdges: "当前连线",
+    graphClearFocus: "清除聚焦",
     graphSelectedNode: "选中节点",
     graphNoSelection: "选择一个节点查看摘要、时间戳、权限和关联信息。",
     graphInteractionHint: "左键移动视角 · 中键拖动图谱 · 滚轮缩放",
@@ -950,6 +956,9 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphAcl: "ACL-aware",
     graphSearchPlaceholder: "Search nodes, types, status, or summaries",
     graphNodeTypes: "Node types",
+    graphVisibleNodes: "Visible nodes",
+    graphVisibleEdges: "Visible edges",
+    graphClearFocus: "Clear focus",
     graphSelectedNode: "Selected node",
     graphNoSelection: "Select a node to inspect summary, timestamps, permissions, and links.",
     graphInteractionHint: "Left drag view · Middle drag graph · Wheel zoom",
@@ -1558,6 +1567,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const [selectedRatingSuggestionIds, setSelectedRatingSuggestionIds] = useState<string[]>([]);
   const [traceTargetId, setTraceTargetId] = useState("");
   const [graphSearchText, setGraphSearchText] = useState("");
+  const [activeGraphNodeType, setActiveGraphNodeType] = useState("");
   const [selectedGraphNodeId, setSelectedGraphNodeId] = useState("");
   const [knowledgeFeedback, setKnowledgeFeedback] = useState<{ tone: "idle" | "success" | "error"; text: string }>({
     tone: "idle",
@@ -1994,7 +2004,7 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   const ingestionAdapters = ingestionAdaptersQuery.data?.adapters ?? [];
   const graphPayload = memoryKnowledgeGraphQuery.data;
   const graphSearch = graphSearchText.trim().toLowerCase();
-  const filteredGraphNodes = useMemo(() => {
+  const graphNodesMatchingSearch = useMemo(() => {
     const nodes = graphPayload?.nodes ?? [];
     if (!graphSearch) {
       return nodes;
@@ -2003,13 +2013,30 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
       [node.label, node.type, node.status, node.summary].some((value) => String(value || "").toLowerCase().includes(graphSearch)),
     );
   }, [graphPayload?.nodes, graphSearch]);
+  const filteredGraphNodes = useMemo(
+    () => graphNodesMatchingSearch.filter((node) => (activeGraphNodeType ? node.type === activeGraphNodeType : true)),
+    [activeGraphNodeType, graphNodesMatchingSearch],
+  );
   const graphVisibleNodeIds = useMemo(() => new Set(filteredGraphNodes.map((node) => node.id)), [filteredGraphNodes]);
   const filteredGraphEdges = useMemo(
     () => (graphPayload?.edges ?? []).filter((edge) => graphVisibleNodeIds.has(edge.source) && graphVisibleNodeIds.has(edge.target)),
     [graphPayload?.edges, graphVisibleNodeIds],
   );
-  const selectedGraphNode = filteredGraphNodes.find((node) => node.id === selectedGraphNodeId) ?? filteredGraphNodes[0] ?? null;
-  const graphTypeEntries = Object.entries(graphPayload?.summary.nodeTypeCounts ?? {}).sort((left, right) => right[1] - left[1]);
+  const selectedGraphNode = selectedGraphNodeId ? filteredGraphNodes.find((node) => node.id === selectedGraphNodeId) ?? null : null;
+  const graphTypeEntries = useMemo(
+    () => Object.entries(graphPayload?.summary.nodeTypeCounts ?? {}).sort((left, right) => right[1] - left[1]),
+    [graphPayload?.summary.nodeTypeCounts],
+  );
+  useEffect(() => {
+    if (activeGraphNodeType && !graphTypeEntries.some(([type]) => type === activeGraphNodeType)) {
+      setActiveGraphNodeType("");
+    }
+  }, [activeGraphNodeType, graphTypeEntries]);
+  useEffect(() => {
+    if (selectedGraphNodeId && !filteredGraphNodes.some((node) => node.id === selectedGraphNodeId)) {
+      setSelectedGraphNodeId("");
+    }
+  }, [filteredGraphNodes, selectedGraphNodeId]);
   const allPairs = useMemo(() => flattenSections(sections), [sections]);
   const runtimePairs = useMemo(
     () =>
@@ -4304,12 +4331,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     <>
       <div className={styles.summaryGrid}>
         <section className={styles.summaryCard}>
-          <span>{copy.graphNodes}</span>
-          <strong>{graphPayload?.summary.nodeCount ?? 0}</strong>
+          <span>{copy.graphVisibleNodes}</span>
+          <strong>{filteredGraphNodes.length}</strong>
+          <small>{copy.graphNodes}: {graphPayload?.summary.nodeCount ?? 0}</small>
         </section>
         <section className={styles.summaryCard}>
-          <span>{copy.graphEdges}</span>
-          <strong>{graphPayload?.summary.edgeCount ?? 0}</strong>
+          <span>{copy.graphVisibleEdges}</span>
+          <strong>{filteredGraphEdges.length}</strong>
+          <small>{copy.graphEdges}: {graphPayload?.summary.edgeCount ?? 0}</small>
         </section>
         <section className={styles.summaryCard}>
           <span>{copy.graphGpu}</span>
@@ -4355,12 +4384,31 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
             </div>
             <div className={styles.graphTypeList}>
               {graphTypeEntries.map(([type, count]) => (
-                <span key={type} data-node-type={type}>
+                <button
+                  key={type}
+                  type="button"
+                  data-active={activeGraphNodeType === type ? "true" : "false"}
+                  data-node-type={type}
+                  onClick={() => setActiveGraphNodeType((current) => (current === type ? "" : type))}
+                >
                   <strong>{type}</strong>
                   <small>{count}</small>
-                </span>
+                </button>
               ))}
             </div>
+            {activeGraphNodeType || graphSearchText ? (
+              <button
+                type="button"
+                className={styles.graphClearFocusButton}
+                onClick={() => {
+                  setActiveGraphNodeType("");
+                  setGraphSearchText("");
+                }}
+              >
+                <XCircle size={14} />
+                {copy.graphClearFocus}
+              </button>
+            ) : null}
           </section>
         </aside>
 
