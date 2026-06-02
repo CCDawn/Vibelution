@@ -1485,6 +1485,10 @@ export function AppShell() {
                 <span>{t("topUtilityMenuHint")}</span>
               </div>
               <div className={styles.utilityButtonGrid}>
+                <NavLink to="/launcher" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
+                  <Power size={16} />
+                  <span>{lang === "zh" ? "启动器" : "Launcher"}</span>
+                </NavLink>
                 <NavLink to="/logs" className={({ isActive }) => isActive ? `${styles.utilityButton} ${styles.utilityButtonActive}` : styles.utilityButton} role="menuitem" onClick={closeUtilityMenu}>
                   <ScrollText size={16} />
                   <span>{t("navLogs")}</span>

@@ -1,0 +1,393 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ExternalLink, LoaderCircle, Play, RefreshCw, Square } from "lucide-react";
+import { useMemo, useState } from "react";
+
+import {
+  getLauncherStatus,
+  restartLauncherBundle,
+  startLauncherBundle,
+  stopLauncherBundle,
+} from "../api/launcher";
+import { queryKeys } from "../api/queryKeys";
+import type { LauncherComponentState, LauncherOperation } from "../api/types";
+import { resolvePollingInterval, usePageVisibility } from "../app/pollingPolicy";
+import { useAppI18n } from "../i18n/useAppI18n";
+import styles from "./LauncherRoute.module.css";
+
+type LauncherNotice = {
+  tone: "neutral" | "success" | "warning" | "error";
+  text: string;
+};
+
+const COMPONENT_ORDER = new Map([
+  ["backend", 0],
+  ["frontend", 1],
+  ["browser", 2],
+]);
+
+function sortComponents(components: LauncherComponentState[]) {
+  return [...components].sort((left, right) => {
+    const leftOrder = COMPONENT_ORDER.get(left.id) ?? 99;
+    const rightOrder = COMPONENT_ORDER.get(right.id) ?? 99;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function compactDate(value: string, locale: string) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(locale, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
+}
+
+function stateTone(state: string, ok = true) {
+  const normalized = state.trim().toLowerCase();
+  if (!ok || normalized.includes("fail") || normalized.includes("error") || normalized.includes("conflict")) {
+    return "error";
+  }
+  if (normalized.includes("run") || normalized.includes("ready") || normalized.includes("ok") || normalized.includes("healthy")) {
+    return "success";
+  }
+  if (normalized.includes("start") || normalized.includes("stop") || normalized.includes("queue") || normalized.includes("restart")) {
+    return "warning";
+  }
+  return "neutral";
+}
+
+export function LauncherRoute() {
+  const { lang } = useAppI18n();
+  const queryClient = useQueryClient();
+  const pageVisible = usePageVisibility();
+  const locale = lang === "zh" ? "zh-CN" : "en-US";
+  const copy = lang === "zh"
+    ? {
+        eyebrow: "Launcher",
+        title: "项目启动器",
+        subtitle: "统一控制前端、后端和浏览器生命周期",
+        refresh: "刷新",
+        start: "启动",
+        stop: "停止",
+        restart: "重启",
+        open: "打开",
+        bundle: "项目整体",
+        controlPlane: "控制面",
+        components: "组件",
+        lastOperation: "最近动作",
+        backend: "后端",
+        frontend: "前端",
+        browser: "浏览器",
+        desired: "期望",
+        observed: "观察",
+        phase: "阶段",
+        overall: "整体",
+        adapter: "适配器",
+        independent: "独立",
+        nextPhase: "下一阶段",
+        stable: "稳定控制面",
+        pid: "PID",
+        required: "必需",
+        state: "状态",
+        detail: "细节",
+        port: "端口",
+        listening: "监听",
+        owner: "占用 PID",
+        dist: "dist",
+        orphaned: "孤儿进程",
+        managed: "受管",
+        alive: "存活",
+        healthy: "健康",
+        yes: "是",
+        no: "否",
+        unavailable: "不可用",
+        loadFailed: "Launcher 状态读取失败",
+        loading: "正在读取 Launcher 状态",
+        commandDone: "命令已提交",
+      }
+    : {
+        eyebrow: "Launcher",
+        title: "Project Launcher",
+        subtitle: "Control frontend, backend, and browser as one lifecycle bundle",
+        refresh: "Refresh",
+        start: "Start",
+        stop: "Stop",
+        restart: "Restart",
+        open: "Open",
+        bundle: "Project Bundle",
+        controlPlane: "Control Plane",
+        components: "Components",
+        lastOperation: "Last Operation",
+        backend: "Backend",
+        frontend: "Frontend",
+        browser: "Browser",
+        desired: "Desired",
+        observed: "Observed",
+        phase: "Phase",
+        overall: "Overall",
+        adapter: "Adapter",
+        independent: "Independent",
+        nextPhase: "Next Phase",
+        stable: "Stable Control Plane",
+        pid: "PID",
+        required: "Required",
+        state: "State",
+        detail: "Detail",
+        port: "Port",
+        listening: "Listening",
+        owner: "Owner PID",
+        dist: "dist",
+        orphaned: "Orphaned",
+        managed: "Managed",
+        alive: "Alive",
+        healthy: "Healthy",
+        yes: "Yes",
+        no: "No",
+        unavailable: "Unavailable",
+        loadFailed: "Launcher status failed",
+        loading: "Loading Launcher status",
+        commandDone: "Command submitted",
+      };
+
+  const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
+  const statusQuery = useQuery({
+    queryKey: queryKeys.launcherStatus(),
+    queryFn: getLauncherStatus,
+    refetchInterval: resolvePollingInterval(pageVisible, 4_000),
+    refetchIntervalInBackground: false,
+  });
+  const controlMutation = useMutation({
+    mutationFn: async (operation: LauncherOperation) => {
+      if (operation === "start") {
+        return startLauncherBundle();
+      }
+      if (operation === "stop") {
+        return stopLauncherBundle();
+      }
+      return restartLauncherBundle(false);
+    },
+    onSuccess: (response) => {
+      setNotice({
+        tone: response.accepted ? "success" : "warning",
+        text: response.message || copy.commandDone,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
+
+  const status = statusQuery.data;
+  const bundle = status?.projectBundle;
+  const componentRows = useMemo(() => sortComponents(bundle?.components ?? []), [bundle?.components]);
+  const busy = controlMutation.isPending;
+  const headerTone = stateTone(bundle?.overallState ?? status?.launcher.phase ?? "", Boolean(bundle));
+  const transitionAt = compactDate(bundle?.lastOperation.transitionAt ?? "", locale);
+
+  return (
+    <section className={styles.route} aria-label={copy.title}>
+      <header className={styles.header}>
+        <div>
+          <p className={styles.eyebrow}>{copy.eyebrow}</p>
+          <h1 className={styles.title}>{copy.title}</h1>
+          <p className={styles.subtitle}>{bundle?.statusLine || status?.launcher.message || copy.subtitle}</p>
+        </div>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => void statusQuery.refetch()}
+            disabled={statusQuery.isFetching}
+            title={copy.refresh}
+          >
+            {statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
+            <span>{copy.refresh}</span>
+          </button>
+          <button
+            type="button"
+            className={styles.primaryButton}
+            onClick={() => controlMutation.mutate("start")}
+            disabled={busy}
+            title={copy.start}
+          >
+            <Play size={15} />
+            <span>{copy.start}</span>
+          </button>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => controlMutation.mutate("stop")}
+            disabled={busy}
+            title={copy.stop}
+          >
+            <Square size={15} />
+            <span>{copy.stop}</span>
+          </button>
+          <button
+            type="button"
+            className={styles.secondaryButton}
+            onClick={() => controlMutation.mutate("restart")}
+            disabled={busy}
+            title={copy.restart}
+          >
+            <RefreshCw size={15} />
+            <span>{copy.restart}</span>
+          </button>
+          {bundle?.url ? (
+            <a className={styles.secondaryButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
+              <ExternalLink size={15} />
+              <span>{copy.open}</span>
+            </a>
+          ) : null}
+        </div>
+      </header>
+
+      <div className={styles.summaryStrip} data-tone={headerTone}>
+        <Metric label={copy.desired} value={bundle?.desiredState || copy.unavailable} />
+        <Metric label={copy.observed} value={bundle?.observedState || copy.unavailable} />
+        <Metric label={copy.phase} value={bundle?.phase || status?.launcher.phase || copy.unavailable} />
+        <Metric label={copy.overall} value={bundle?.overallState || copy.unavailable} />
+      </div>
+
+      {statusQuery.isError ? <p className={styles.notice} data-tone="error">{copy.loadFailed}</p> : null}
+      {notice.text ? <p className={styles.notice} data-tone={notice.tone}>{notice.text}</p> : null}
+      {statusQuery.isPending && !status ? <p className={styles.notice} data-tone="neutral">{copy.loading}</p> : null}
+
+      <div className={styles.workspace}>
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.bundle}</p>
+            <strong>{bundle?.id || "vibelution"}</strong>
+          </div>
+          <dl className={styles.specGrid}>
+            <Spec label="schema" value={String(bundle?.schemaVersion ?? "-")} />
+            <Spec label="mode" value={bundle?.mode || "-"} />
+            <Spec label="url" value={bundle?.url || "-"} />
+            <Spec label="reason" value={bundle?.lastReason || "-"} />
+            <Spec label="failure" value={bundle?.failureMessage || "-"} />
+          </dl>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.controlPlane}</p>
+            <strong>{status?.launcher.mode || "-"}</strong>
+          </div>
+          <dl className={styles.specGrid}>
+            <Spec label={copy.stable} value={status?.launcher.stableControlPlane ? copy.yes : copy.no} />
+            <Spec label={copy.independent} value={status?.launcher.controlPlane.independent ? copy.yes : copy.no} />
+            <Spec label={copy.adapter} value={status?.launcher.controlPlane.adapter || "-"} />
+            <Spec label={copy.nextPhase} value={status?.launcher.controlPlane.nextPhase || "-"} />
+          </dl>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.lastOperation}</p>
+            <strong>{bundle?.lastOperation.reason || "-"}</strong>
+          </div>
+          <dl className={styles.specGrid}>
+            <Spec label="source" value={bundle?.lastOperation.source || "-"} />
+            <Spec label="transition" value={transitionAt} />
+            <Spec label="manager" value={status?.runtimeManager.runtimeState || "-"} />
+            <Spec label="proof" value={status?.lifecycleProof.overallLabel || "-"} />
+          </dl>
+        </section>
+
+        <section className={`${styles.panel} ${styles.componentPanel}`}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.components}</p>
+            <strong>{componentRows.length}</strong>
+          </div>
+          <div className={styles.componentTable} role="table" aria-label={copy.components}>
+            <div className={styles.componentHead} role="row">
+              <span role="columnheader">{copy.state}</span>
+              <span role="columnheader">{copy.pid}</span>
+              <span role="columnheader">{copy.required}</span>
+              <span role="columnheader">{copy.detail}</span>
+            </div>
+            {componentRows.map((component) => (
+              <div key={component.id} className={styles.componentRow} role="row" data-tone={stateTone(component.state, component.ok)}>
+                <span role="cell">
+                  <strong>{component.id}</strong>
+                  <small>{component.state}</small>
+                </span>
+                <span role="cell">{component.pid || "-"}</span>
+                <span role="cell">{component.requiredForRunning ? copy.yes : copy.no}</span>
+                <span role="cell">{component.detail || "-"}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.backend}</p>
+            <strong>{bundle?.backend.healthy ? copy.healthy : copy.unavailable}</strong>
+          </div>
+          <dl className={styles.specGrid}>
+            <Spec label={copy.pid} value={String(bundle?.backend.pid || "-")} />
+            <Spec label={copy.port} value={String(bundle?.backend.port || "-")} />
+            <Spec label={copy.listening} value={bundle?.backend.portListening ? copy.yes : copy.no} />
+            <Spec label={copy.owner} value={String(bundle?.backend.portOwnerPid || "-")} />
+          </dl>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.frontend}</p>
+            <strong>{bundle?.frontend.distReady ? "ready" : copy.unavailable}</strong>
+          </div>
+          <dl className={styles.specGrid}>
+            <Spec label="mode" value={bundle?.frontend.mode || "-"} />
+            <Spec label={copy.dist} value={bundle?.frontend.distReady ? copy.yes : copy.no} />
+            <Spec label={copy.orphaned} value={bundle?.frontend.orphaned ? copy.yes : copy.no} />
+          </dl>
+        </section>
+
+        <section className={styles.panel}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.browser}</p>
+            <strong>{bundle?.browser.alive ? copy.alive : copy.unavailable}</strong>
+          </div>
+          <dl className={styles.specGrid}>
+            <Spec label={copy.managed} value={bundle?.browser.managed ? copy.yes : copy.no} />
+            <Spec label={copy.pid} value={String(bundle?.browser.windowPid || "-")} />
+            <Spec label={copy.alive} value={bundle?.browser.alive ? copy.yes : copy.no} />
+          </dl>
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.metric}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function Spec({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd>{value}</dd>
+    </>
+  );
+}

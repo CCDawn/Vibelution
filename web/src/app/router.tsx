@@ -16,6 +16,7 @@ const ChatCodingRoute = lazyRoute(() => import("../routes/ChatCodingRoute").then
 const ConfigRoute = lazyRoute(() => import("../routes/ConfigRoute").then((module) => ({ default: module.ConfigRoute })));
 const EvolutionRoute = lazyRoute(() => import("../routes/EvolutionRoute").then((module) => ({ default: module.EvolutionRoute })));
 const GitRoute = lazyRoute(() => import("../routes/GitRoute").then((module) => ({ default: module.GitRoute })));
+const LauncherRoute = lazyRoute(() => import("../routes/LauncherRoute").then((module) => ({ default: module.LauncherRoute })));
 const LogsRoute = lazyRoute(() => import("../routes/LogsRoute").then((module) => ({ default: module.LogsRoute })));
 const MemoryRoute = lazyRoute(() => import("../routes/MemoryRoute").then((module) => ({ default: module.MemoryRoute })));
 const PetRoute = lazyRoute(() => import("../routes/PetRoute").then((module) => ({ default: module.PetRoute })));
@@ -119,6 +120,7 @@ export const router = createBrowserRouter([
       { path: "memory/knowledge", element: lazyElement(<MemoryRoute forcedView="knowledge" />) },
       { path: "memory/graph", element: lazyElement(<MemoryRoute forcedView="graph" />) },
       { path: "teams", element: lazyElement(<TeamsRoute />) },
+      { path: "launcher", element: lazyElement(<LauncherRoute />) },
       { path: "git", element: lazyElement(<GitRoute />) },
       { path: "logs", element: lazyElement(<LogsRoute />) },
       { path: "research", element: <LegacyTeamsRedirect /> },
