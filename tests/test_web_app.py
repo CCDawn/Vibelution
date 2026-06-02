@@ -662,6 +662,9 @@ def test_launcher_status_exposes_project_bundle(monkeypatch):
                 "browserWindowAlive": True,
                 "url": "http://127.0.0.1:8000",
                 "statusLine": "工作台正在运行。",
+                "lastReason": "launcher_start_button",
+                "lastSource": "launcher_api",
+                "lastTransitionAt": "2026-06-02T12:00:00Z",
             },
             "runtimeManager": {"running": True, "managerPid": 2001},
             "lifecycleProof": {"overallState": "running"},
@@ -673,11 +676,17 @@ def test_launcher_status_exposes_project_bundle(monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["launcher"]["mode"] == "runtime_manager_adapter"
+    assert payload["launcher"]["phase"] == "phase_1b"
+    assert payload["launcher"]["controlPlane"]["adapter"] == "runtime_manager"
+    assert payload["projectBundle"]["schemaVersion"] == 1
     assert payload["projectBundle"]["mode"] == "bundled"
     assert payload["projectBundle"]["observedState"] == "open"
+    assert payload["projectBundle"]["lastOperation"]["source"] == "launcher_api"
     assert payload["projectBundle"]["backend"]["pid"] == 3001
     assert payload["projectBundle"]["frontend"]["mode"] == "bundled_static_dist"
     assert payload["projectBundle"]["browser"]["windowPid"] == 4001
+    assert [component["id"] for component in payload["projectBundle"]["components"]] == ["backend", "frontend", "browser"]
+    assert payload["projectBundle"]["components"][0]["requiredForRunning"] is True
 
 
 def test_launcher_start_queues_open_workbench_and_records_lifecycle(monkeypatch):
@@ -748,6 +757,78 @@ def test_launcher_restart_blocks_unconfirmed_active_work(monkeypatch):
     event_codes = [item[2] for item in scene_events]
     assert "launcher.bundle.restart.requested" in event_codes
     assert "launcher.bundle.restart.blocked_active_work" in event_codes
+
+
+def test_launcher_stop_delegates_runtime_shutdown_and_normalizes_response(monkeypatch):
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
+    monkeypatch.setattr(
+        launcher_service,
+        "request_runtime_shutdown",
+        lambda: {
+            "accepted": True,
+            "mode": "runtime_manager",
+            "message": "closing",
+            "chatTurns": [],
+            "chatRoomRounds": [],
+            "evolutionRuns": [],
+        },
+    )
+
+    response = client.post("/api/launcher/stop")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["operation"] == "stop"
+    assert payload["launcherMode"] == "runtime_manager_adapter"
+    assert payload["mode"] == "runtime_manager"
+    assert payload["chatTurns"] == []
+    event_codes = [item[2] for item in scene_events]
+    assert "launcher.bundle.stop.requested" in event_codes
+    assert "launcher.bundle.stop.accepted" in event_codes
+
+
+def test_launcher_restart_delegates_runtime_restart_and_normalizes_response(monkeypatch):
+    scene_events: list[tuple[str, str, str, dict]] = []
+
+    def record_scene_event(component, phase, event_code, **kwargs):
+        scene_events.append((component, phase, event_code, kwargs))
+        return {"accepted": True}
+
+    monkeypatch.setattr(launcher_service, "record_runtime_scene_event", record_scene_event, raising=False)
+    monkeypatch.setattr(
+        launcher_service,
+        "request_runtime_restart",
+        lambda confirmed_active_work=False: {
+            "accepted": True,
+            "mode": "runtime_manager",
+            "commandId": "cmd-launcher-restart",
+            "message": "restarting",
+            "chatTurns": [],
+            "chatRoomRounds": [],
+            "evolutionRuns": [],
+        },
+    )
+
+    response = client.post("/api/launcher/restart?confirmedActiveWork=true")
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["accepted"] is True
+    assert payload["operation"] == "restart"
+    assert payload["commandId"] == "cmd-launcher-restart"
+    assert payload["launcherMode"] == "runtime_manager_adapter"
+    event_codes = [item[2] for item in scene_events]
+    assert "launcher.bundle.restart.requested" in event_codes
+    assert "launcher.bundle.restart.accepted" in event_codes
+    accepted_event = next(item for item in scene_events if item[2] == "launcher.bundle.restart.accepted")
+    assert accepted_event[3]["fields"]["commandId"] == "cmd-launcher-restart"
 
 
 def test_runtime_restart_blocks_unconfirmed_active_work(monkeypatch):
