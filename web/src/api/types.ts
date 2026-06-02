@@ -1669,6 +1669,78 @@ export type ShutdownResponse = RuntimeControlResponse;
 
 export type RuntimeRestartResponse = RuntimeControlResponse;
 
+export type LauncherOperation = "start" | "stop" | "restart";
+
+export type LauncherComponentState = {
+  id: "backend" | "frontend" | "browser" | string;
+  ok: boolean;
+  state: string;
+  requiredForRunning: boolean;
+  pid: number;
+  detail: string;
+};
+
+export type LauncherProjectBundleState = {
+  schemaVersion: number;
+  id: string;
+  mode: "bundled" | string;
+  desiredState: string;
+  observedState: string;
+  phase: string;
+  overallState: string;
+  statusLine: string;
+  url: string;
+  lastReason: string;
+  failureMessage: string;
+  lastOperation: {
+    reason: string;
+    source: string;
+    transitionAt: string;
+  };
+  components: LauncherComponentState[];
+  backend: {
+    pid: number;
+    alive: boolean;
+    healthy: boolean;
+    port: number;
+    portListening: boolean;
+    portOwnerPid: number;
+    portConflict: boolean;
+  };
+  frontend: {
+    mode: "bundled_static_dist" | string;
+    distReady: boolean;
+    orphaned: boolean;
+  };
+  browser: {
+    managed: boolean;
+    windowPid: number;
+    alive: boolean;
+  };
+};
+
+export type LauncherStatus = {
+  launcher: {
+    mode: string;
+    phase: string;
+    stableControlPlane: boolean;
+    controlPlane: {
+      independent: boolean;
+      adapter: string;
+      nextPhase: string;
+    };
+    message: string;
+  };
+  projectBundle: LauncherProjectBundleState;
+  runtimeManager: RuntimeSummary["runtimeManager"];
+  lifecycleProof: RuntimeLifecycleProof;
+};
+
+export type LauncherControlResponse = RuntimeControlResponse & {
+  launcherMode: string;
+  operation: LauncherOperation;
+};
+
 export type SessionSummary = {
   id: string;
   title: string;
