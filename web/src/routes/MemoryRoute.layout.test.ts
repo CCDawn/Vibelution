@@ -83,6 +83,13 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("copy.graphVisibleNodes");
     expect(routeSource).toContain("copy.graphVisibleEdges");
     expect(routeSource).toContain("copy.graphClearFocus");
+    expect(routeSource).toContain("selectedGraphRelations");
+    expect(routeSource).toContain("copy.graphRelations");
+    expect(routeSource).toContain("copy.graphIncoming");
+    expect(routeSource).toContain("copy.graphOutgoing");
+    expect(routeSource).toContain("copy.graphNoRelations");
+    expect(routeSource).toContain("styles.graphRelationPanel");
+    expect(routeSource).toContain("styles.graphRelationGroup");
     expect(routeSource).toContain("styles.graphClearFocusButton");
     expect(routeSource).toContain("styles.graphWorkspace");
     expect(routeSource).toContain("styles.graphCanvasPanel");
@@ -136,6 +143,9 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".graphTypeList button");
     expect(memoryCssSource).toContain('[data-active="true"]');
     expect(memoryCssSource).toContain(".graphClearFocusButton");
+    expect(memoryCssSource).toContain(".graphRelationPanel");
+    expect(memoryCssSource).toContain(".graphRelationGroup button");
+    expect(memoryCssSource).toContain(".graphRelationEmpty");
     expect(memoryCssSource).toContain('[data-node-type="knowledge_base"]');
     expect(routerSource).toContain('path: "memory/graph"');
     expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
