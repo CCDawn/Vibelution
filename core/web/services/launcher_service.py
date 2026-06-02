@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any, Literal, TypedDict
 
 from core.runtime_manager import ensure_daemon_running, submit_command
+from core.runtime_manager.constants import LAUNCHER_STATE_PATH
+from core.runtime_manager.workbench_controller import _is_process_alive
 
 from .i18n import get_web_language, text_for
 from .runtime_scene_service import record_runtime_scene_event
@@ -231,6 +234,7 @@ def _guardian_adapter_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
     runtime_manager = runtime.get("runtimeManager") if isinstance(runtime.get("runtimeManager"), dict) else {}
     workbench = runtime.get("workbench") if isinstance(runtime.get("workbench"), dict) else {}
     lifecycle = runtime.get("lifecycleProof") if isinstance(runtime.get("lifecycleProof"), dict) else {}
+    supervisor = _launcher_supervisor_snapshot()
     manager_running = bool(runtime_manager.get("running"))
     manager_pid = int(runtime_manager.get("managerPid") or 0)
     browser_managed = bool(workbench.get("browserManaged", True))
@@ -253,8 +257,8 @@ def _guardian_adapter_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
             "desktop_supervisor",
             owner="powershell_launcher",
             adapter="vibelution_launcher.ps1",
-            status="adapter",
-            detail="Desktop monitor and supervisor process are still started by the legacy PowerShell launcher.",
+            status=str(supervisor.get("status") or "unknown"),
+            detail=str(supervisor.get("detail") or ""),
         ),
         _guardian_responsibility(
             "backend_process",
@@ -289,8 +293,46 @@ def _guardian_adapter_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
         ),
         "ownedCount": sum(1 for item in responsibilities if item["owner"] in {"launcher_api", "runtime_scene_service"}),
         "adapterCount": sum(1 for item in responsibilities if item["owner"] not in {"launcher_api", "runtime_scene_service"}),
+        "supervisor": supervisor,
         "responsibilities": responsibilities,
     }
+
+
+def _launcher_supervisor_snapshot() -> dict[str, Any]:
+    state = _load_launcher_state()
+    supervisor_pid = int(state.get("supervisorPid") or 0)
+    alive = _is_process_alive(supervisor_pid)
+    stdout_path = str(state.get("supervisorStdout") or "").strip()
+    stderr_path = str(state.get("supervisorStderr") or "").strip()
+    runtime_scene_id = str(state.get("runtimeSceneId") or "").strip()
+    runtime_scene_dir = str(state.get("runtimeSceneDir") or "").strip()
+    status = "running" if alive else "stopped" if supervisor_pid > 0 else "not_started"
+    if not state:
+        detail = "Launcher state is unavailable; supervisor health cannot be observed yet."
+    elif alive:
+        detail = f"Supervisor process is alive pid={supervisor_pid}."
+    elif supervisor_pid > 0:
+        detail = f"Supervisor pid={supervisor_pid} is recorded but no longer alive."
+    else:
+        detail = "Supervisor process has not been recorded in launcher state."
+    return {
+        "pid": supervisor_pid,
+        "alive": alive,
+        "status": status,
+        "stdoutPath": stdout_path,
+        "stderrPath": stderr_path,
+        "runtimeSceneId": runtime_scene_id,
+        "runtimeSceneDir": runtime_scene_dir,
+        "detail": detail,
+    }
+
+
+def _load_launcher_state() -> dict[str, Any]:
+    try:
+        payload = json.loads(LAUNCHER_STATE_PATH.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _guardian_responsibility(

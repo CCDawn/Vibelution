@@ -35,6 +35,16 @@ type LauncherStatusWithGuardian = Awaited<ReturnType<typeof getLauncherStatus>> 
     statusLine: string;
     ownedCount: number;
     adapterCount: number;
+    supervisor?: {
+      pid: number;
+      alive: boolean;
+      status: string;
+      stdoutPath: string;
+      stderrPath: string;
+      runtimeSceneId: string;
+      runtimeSceneDir: string;
+      detail: string;
+    };
     responsibilities: LauncherGuardianResponsibility[];
   };
 };
@@ -140,6 +150,10 @@ export function LauncherRoute() {
         targetMode: "目标模式",
         owned: "已纳入",
         legacyAdapter: "旧适配",
+        supervisor: "Supervisor",
+        stdout: "stdout",
+        stderr: "stderr",
+        scene: "现场",
       }
     : {
         eyebrow: "Launcher",
@@ -188,6 +202,10 @@ export function LauncherRoute() {
         targetMode: "Target Mode",
         owned: "Owned",
         legacyAdapter: "Legacy Adapter",
+        supervisor: "Supervisor",
+        stdout: "stdout",
+        stderr: "stderr",
+        scene: "Scene",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
@@ -349,6 +367,14 @@ export function LauncherRoute() {
             <strong>{copy.legacyAdapter}: {guardian?.adapterCount ?? 0}</strong>
             <strong>{copy.targetMode}: {guardian?.targetMode || "-"}</strong>
           </div>
+          <dl className={styles.supervisorGrid}>
+            <Spec label={copy.supervisor} value={guardian?.supervisor?.status || "-"} />
+            <Spec label={copy.pid} value={String(guardian?.supervisor?.pid || "-")} />
+            <Spec label={copy.alive} value={guardian?.supervisor?.alive ? copy.yes : copy.no} />
+            <Spec label={copy.scene} value={guardian?.supervisor?.runtimeSceneId || "-"} />
+            <Spec label={copy.stdout} value={guardian?.supervisor?.stdoutPath || "-"} />
+            <Spec label={copy.stderr} value={guardian?.supervisor?.stderrPath || "-"} />
+          </dl>
           <div className={styles.guardianTable} role="table" aria-label={copy.guardian}>
             <div className={styles.guardianHead} role="row">
               <span role="columnheader">{copy.responsibility}</span>

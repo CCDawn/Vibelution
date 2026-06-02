@@ -266,6 +266,40 @@
   font-weight: 650;
 }
 
+.supervisorGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px 10px;
+  min-width: 0;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+}
+
+.supervisorGrid dt,
+.supervisorGrid dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.supervisorGrid dt {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.supervisorGrid dd {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
 .guardianTable {
   display: grid;
   min-width: 0;
@@ -392,6 +426,10 @@
     grid-column: 1 / -1;
   }
 
+  .supervisorGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .guardianHead,
   .guardianRow {
     grid-template-columns: minmax(150px, 1.1fr) minmax(110px, 0.8fr) minmax(90px, 0.6fr);
@@ -425,6 +463,10 @@
   }
 
   .guardianSummary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .supervisorGrid {
     grid-template-columns: minmax(0, 1fr);
   }
 
