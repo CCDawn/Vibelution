@@ -92,11 +92,13 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasSource).toContain("SEARCH_LABEL_LIMIT");
     expect(graphCanvasSource).toContain("pickVisibleLabelIds");
     expect(graphCanvasSource).toContain("setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))");
-    expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.42, 16, 16)");
+    expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.34, 16, 16)");
+    expect(graphCanvasSource).not.toContain("createGlowTexture");
+    expect(graphCanvasSource).not.toContain("AdditiveBlending");
+    expect(graphCanvasSource).not.toContain("TorusGeometry");
     expect(graphCanvasSource).toContain("translate(-50%, calc(-100% - 20px))");
     expect(graphCanvasSource).toContain("trimText(node.summary");
     expect(graphCanvasSource).toContain("hitObjects");
-    expect(graphCanvasSource).toContain("TorusGeometry");
     expect(graphWorkerSource).toContain("layerSpread");
     expect(graphWorkerSource).toContain("runtime_scene: 34");
     expect(memoryCssSource).toContain(".graphCanvasShell");
