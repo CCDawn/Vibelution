@@ -182,6 +182,16 @@
   white-space: nowrap;
 }
 
+.summaryCard small {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.63rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pipelinePanel {
   display: grid;
   gap: 5px;
@@ -986,9 +996,9 @@
   min-width: 0;
 }
 
-.graphTypeList span {
+.graphTypeList button {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   min-height: 24px;
@@ -996,19 +1006,25 @@
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface-panel-muted);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
-.graphTypeList span::before {
+.graphTypeList button:hover,
+.graphTypeList button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 58%, var(--border-soft));
+  background: color-mix(in srgb, var(--node-color, var(--accent-cool)) 14%, var(--surface-panel));
+}
+
+.graphTypeList button::before {
   content: "";
   width: 8px;
   height: 8px;
   border-radius: 999px;
   background: var(--node-color, var(--accent-cool));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-color, var(--accent-cool)) 16%, transparent);
-}
-
-.graphTypeList span {
-  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .graphTypeList strong,
@@ -1028,6 +1044,28 @@
   color: var(--accent-cool);
   font-size: 0.72rem;
   font-weight: 800;
+}
+
+.graphClearFocusButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 28px;
+  margin-top: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--fg-secondary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.graphClearFocusButton:hover {
+  border-color: color-mix(in srgb, var(--accent-warm) 45%, var(--border-soft));
+  color: var(--fg-primary);
 }
 
 .detailMeta {
