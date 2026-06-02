@@ -829,15 +829,15 @@
   max-width: 150px;
   min-height: 28px;
   padding: 4px 7px 4px 5px;
-  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 48%, white);
+  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 38%, rgba(226, 232, 240, 0.3));
   border-radius: 8px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), color-mix(in srgb, white 76%, var(--node-color, var(--accent-cool)) 10%)),
-    color-mix(in srgb, white 78%, var(--node-color, var(--accent-cool)) 22%);
+    linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(2, 6, 23, 0.82)),
+    color-mix(in srgb, #0f172a 82%, var(--node-color, var(--accent-cool)) 18%);
   box-shadow:
-    0 1px 0 color-mix(in srgb, white 74%, transparent) inset,
-    0 8px 18px rgba(15, 23, 42, 0.12);
-  color: var(--fg-primary);
+    0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 10px 24px rgba(2, 6, 23, 0.28);
+  color: rgba(226, 232, 240, 0.94);
   text-align: left;
   line-height: 1;
   pointer-events: auto;
@@ -854,13 +854,13 @@
 .graphNodeBadge[data-selected="true"] {
   max-width: 240px;
   min-height: 40px;
-  border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, white);
+  border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 70%, rgba(226, 232, 240, 0.62));
   background:
-    linear-gradient(180deg, #fff, color-mix(in srgb, white 70%, var(--node-color, var(--accent-cool)) 16%)),
-    color-mix(in srgb, white 64%, var(--node-color, var(--accent-cool)) 36%);
+    linear-gradient(180deg, color-mix(in srgb, #172033 82%, var(--node-color, var(--accent-cool)) 18%), #07111f),
+    color-mix(in srgb, #0f172a 74%, var(--node-color, var(--accent-cool)) 26%);
   box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--node-color, var(--accent-cool)) 20%, transparent),
-    0 10px 22px rgba(15, 23, 42, 0.16);
+    0 0 0 2px color-mix(in srgb, var(--node-color, var(--accent-cool)) 18%, transparent),
+    0 12px 28px rgba(2, 6, 23, 0.34);
 }
 
 .graphNodeBadgeType {
@@ -871,9 +871,10 @@
   height: 24px;
   border-radius: 999px;
   background:
-    radial-gradient(circle at 35% 28%, rgba(255, 255, 255, 0.96), transparent 32%),
-    color-mix(in srgb, white 60%, var(--node-color, var(--accent-cool)) 40%);
-  color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, black);
+    radial-gradient(circle at 35% 28%, rgba(248, 250, 252, 0.82), transparent 28%),
+    radial-gradient(circle at 68% 72%, rgba(2, 6, 23, 0.28), transparent 38%),
+    color-mix(in srgb, var(--node-color, var(--accent-cool)) 72%, #0f172a);
+  color: rgba(248, 250, 252, 0.94);
   font-size: 0.54rem;
   font-weight: 920;
 }
@@ -891,13 +892,13 @@
 }
 
 .graphNodeBadge strong {
-  color: var(--fg-primary);
+  color: rgba(241, 245, 249, 0.96);
   font-size: 0.68rem;
   font-weight: 850;
 }
 
 .graphNodeBadge small {
-  color: var(--fg-tertiary);
+  color: rgba(203, 213, 225, 0.68);
   font-size: 0.58rem;
   line-height: 1.15;
 }
