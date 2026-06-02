@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from core.runtime_manager import ensure_daemon_running, submit_command
 
@@ -16,6 +16,21 @@ from .runtime_service import (
 )
 
 
+LauncherOperation = Literal["start", "stop", "restart"]
+
+
+class LauncherCommandResponse(TypedDict, total=False):
+    accepted: bool
+    mode: str
+    launcherMode: str
+    commandId: str
+    operation: LauncherOperation
+    message: str
+    chatTurns: list[dict[str, object]]
+    chatRoomRounds: list[dict[str, object]]
+    evolutionRuns: list[dict[str, object]]
+
+
 def get_launcher_status() -> dict[str, Any]:
     """Return the launcher-facing project bundle lifecycle status."""
 
@@ -23,8 +38,13 @@ def get_launcher_status() -> dict[str, Any]:
     return {
         "launcher": {
             "mode": "runtime_manager_adapter",
-            "phase": "phase_1a",
+            "phase": "phase_1b",
             "stableControlPlane": False,
+            "controlPlane": {
+                "independent": False,
+                "adapter": "runtime_manager",
+                "nextPhase": "standalone_launcher_process",
+            },
             "message": text_for(
                 get_web_language(),
                 zh="Launcher 入口已建立，当前仍通过 runtime manager 适配层控制项目整体生命周期。",
@@ -75,6 +95,8 @@ def request_launcher_start() -> dict[str, Any]:
     return {
         "accepted": True,
         "mode": "runtime_manager_adapter",
+        "launcherMode": "runtime_manager_adapter",
+        "operation": "start",
         "commandId": command_id,
         "message": text_for(
             get_web_language(),
@@ -101,7 +123,7 @@ def request_launcher_stop() -> dict[str, Any]:
         outcome="accepted",
         fields={"mode": str(result.get("mode") or "runtime_manager_adapter")},
     )
-    return {"launcherMode": "runtime_manager_adapter", **result}
+    return _launcher_command_response("stop", result)
 
 
 def request_launcher_restart(*, confirmed_active_work: bool = False) -> dict[str, Any]:
@@ -133,14 +155,39 @@ def request_launcher_restart(*, confirmed_active_work: bool = False) -> dict[str
         outcome="accepted",
         fields={"mode": str(result.get("mode") or "runtime_manager_adapter"), "commandId": str(result.get("commandId") or "")},
     )
-    return {"launcherMode": "runtime_manager_adapter", **result}
+    return _launcher_command_response("restart", result)
 
 
 def _project_bundle_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
     workbench = runtime.get("workbench") if isinstance(runtime.get("workbench"), dict) else {}
     lifecycle = runtime.get("lifecycleProof") if isinstance(runtime.get("lifecycleProof"), dict) else {}
     frontend_dist_ready = not bool(workbench.get("frontendOrphaned"))
+    backend_component = _component_state(
+        "backend",
+        ok=bool(workbench.get("backendHealthy")) and not bool(workbench.get("backendPortConflict")),
+        state="running" if bool(workbench.get("backendAlive")) else "stopped",
+        required_for_running=True,
+        pid=int(workbench.get("backendPid") or 0),
+        detail=str(workbench.get("failureMessage") or ""),
+    )
+    frontend_component = _component_state(
+        "frontend",
+        ok=frontend_dist_ready,
+        state="ready" if frontend_dist_ready else "orphaned",
+        required_for_running=True,
+        pid=0,
+        detail="",
+    )
+    browser_component = _component_state(
+        "browser",
+        ok=bool(workbench.get("browserWindowAlive")) or not bool(workbench.get("browserManaged", True)),
+        state="running" if bool(workbench.get("browserWindowAlive")) else "stopped",
+        required_for_running=bool(workbench.get("browserManaged", True)),
+        pid=int(workbench.get("browserWindowPid") or 0),
+        detail="",
+    )
     return {
+        "schemaVersion": 1,
         "id": "vibelution-project",
         "mode": "bundled",
         "desiredState": str(workbench.get("desiredState") or "closed"),
@@ -151,6 +198,12 @@ def _project_bundle_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
         "url": str(workbench.get("url") or ""),
         "lastReason": str(workbench.get("lastReason") or ""),
         "failureMessage": str(workbench.get("failureMessage") or ""),
+        "lastOperation": {
+            "reason": str(workbench.get("lastReason") or ""),
+            "source": str(workbench.get("lastSource") or ""),
+            "transitionAt": str(workbench.get("lastTransitionAt") or ""),
+        },
+        "components": [backend_component, frontend_component, browser_component],
         "backend": {
             "pid": int(workbench.get("backendPid") or 0),
             "alive": bool(workbench.get("backendAlive")),
@@ -171,6 +224,43 @@ def _project_bundle_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
             "alive": bool(workbench.get("browserWindowAlive")),
         },
     }
+
+
+def _component_state(
+    component_id: str,
+    *,
+    ok: bool,
+    state: str,
+    required_for_running: bool,
+    pid: int,
+    detail: str,
+) -> dict[str, object]:
+    return {
+        "id": component_id,
+        "ok": bool(ok),
+        "state": str(state or "unknown"),
+        "requiredForRunning": bool(required_for_running),
+        "pid": int(pid or 0),
+        "detail": str(detail or ""),
+    }
+
+
+def _launcher_command_response(operation: LauncherOperation, result: dict[str, Any]) -> LauncherCommandResponse:
+    payload: LauncherCommandResponse = {
+        "accepted": bool(result.get("accepted")),
+        "mode": str(result.get("mode") or "runtime_manager_adapter"),
+        "launcherMode": "runtime_manager_adapter",
+        "operation": operation,
+        "message": str(result.get("message") or ""),
+    }
+    command_id = str(result.get("commandId") or "").strip()
+    if command_id:
+        payload["commandId"] = command_id
+    for key in ("chatTurns", "chatRoomRounds", "evolutionRuns"):
+        value = result.get(key)
+        if isinstance(value, list):
+            payload[key] = value
+    return payload
 
 
 def _record_launcher_event(
