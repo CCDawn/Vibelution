@@ -25,6 +25,7 @@ from .routes.evolution import router as evolution_router
 from .routes.files import router as files_router
 from .routes.git import router as git_router
 from .routes.knowledge import router as knowledge_router
+from .routes.launcher import router as launcher_router
 from .routes.logs import router as logs_router
 from .routes.memory import router as memory_router
 from .routes.pet import router as pet_router
@@ -205,6 +206,7 @@ def create_app() -> FastAPI:
         return control_token_payload()
 
     app.include_router(runtime_router, prefix="/api")
+    app.include_router(launcher_router, prefix="/api")
     app.include_router(agents_router, prefix="/api")
     app.include_router(conversations_router, prefix="/api")
     app.include_router(sessions_router, prefix="/api")
