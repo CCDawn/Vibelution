@@ -1,0 +1,361 @@
+.route {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  background: color-mix(in srgb, var(--surface-page) 94%, var(--bg-canvas));
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--route-topbar-gap);
+  min-width: 0;
+  padding: var(--route-topbar-padding);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--surface-header, rgba(22, 25, 28, 0.78));
+}
+
+.header > div:first-child {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.eyebrow,
+.panelEyebrow {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.title {
+  margin: 0;
+  color: var(--fg-primary);
+  font-family: var(--font-body);
+  font-size: var(--route-topbar-title-size);
+  font-weight: 760;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.subtitle {
+  min-width: 0;
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: var(--route-topbar-subtitle-size);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.primaryButton,
+.secondaryButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  color: var(--fg-secondary);
+  font-size: 0.84rem;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.primaryButton {
+  border-color: color-mix(in srgb, var(--accent-primary) 62%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent-primary) 18%, var(--surface-panel));
+  color: var(--fg-primary);
+}
+
+.secondaryButton {
+  background: var(--surface-card, rgba(20, 23, 26, 0.72));
+}
+
+.primaryButton:hover,
+.secondaryButton:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-primary);
+  background: var(--surface-panel-hover, rgba(34, 39, 44, 0.9));
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled {
+  opacity: 0.56;
+  cursor: default;
+}
+
+.summaryStrip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--route-summary-gap);
+  padding: 8px 12px 0;
+}
+
+.metric,
+.panel {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-panel, rgba(27, 31, 35, 0.78));
+}
+
+.metric {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: var(--route-summary-padding);
+}
+
+.metric span,
+.specGrid dt,
+.componentHead {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.metric strong,
+.panelHeader strong,
+.specGrid dd {
+  min-width: 0;
+  color: var(--fg-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summaryStrip[data-tone="success"] .metric:first-child {
+  border-color: color-mix(in srgb, var(--state-success) 38%, var(--border-soft));
+}
+
+.summaryStrip[data-tone="warning"] .metric:first-child {
+  border-color: color-mix(in srgb, var(--state-warning) 42%, var(--border-soft));
+}
+
+.summaryStrip[data-tone="error"] .metric:first-child {
+  border-color: color-mix(in srgb, var(--state-error) 42%, var(--border-soft));
+}
+
+.notice {
+  margin: 8px 14px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 88%, transparent);
+  color: var(--fg-secondary);
+  font-size: 0.86rem;
+}
+
+.notice[data-tone="success"] {
+  border-color: color-mix(in srgb, var(--state-success) 34%, transparent);
+  color: var(--state-success);
+}
+
+.notice[data-tone="warning"] {
+  border-color: color-mix(in srgb, var(--state-warning) 34%, transparent);
+  color: var(--state-warning);
+}
+
+.notice[data-tone="error"] {
+  border-color: color-mix(in srgb, var(--state-error) 34%, transparent);
+  color: var(--state-error);
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(240px, 1fr));
+  grid-auto-rows: minmax(132px, auto);
+  gap: var(--route-summary-gap);
+  min-height: 0;
+  padding: var(--route-workspace-padding);
+  overflow: auto;
+}
+
+.panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+}
+
+.componentPanel {
+  grid-column: span 3;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.specGrid {
+  display: grid;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+  gap: 7px 10px;
+  min-width: 0;
+  margin: 10px 0 0;
+}
+
+.specGrid dt,
+.specGrid dd {
+  min-width: 0;
+  margin: 0;
+  line-height: 1.25;
+}
+
+.specGrid dd {
+  font-size: 0.82rem;
+}
+
+.componentTable {
+  display: grid;
+  min-width: 0;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+}
+
+.componentHead,
+.componentRow {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.2fr) 80px 86px minmax(0, 2fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.componentHead {
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-card) 82%, transparent);
+}
+
+.componentRow {
+  color: var(--fg-secondary);
+  font-size: 0.84rem;
+}
+
+.componentRow + .componentRow {
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 72%, transparent);
+}
+
+.componentRow[data-tone="success"] {
+  border-left: 3px solid var(--state-success);
+}
+
+.componentRow[data-tone="warning"] {
+  border-left: 3px solid var(--state-warning);
+}
+
+.componentRow[data-tone="error"] {
+  border-left: 3px solid var(--state-error);
+}
+
+.componentRow span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.componentRow span:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.componentRow strong {
+  color: var(--fg-primary);
+}
+
+.componentRow small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spin {
+  animation: launcherSpin 900ms linear infinite;
+}
+
+@keyframes launcherSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1100px) {
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+
+  .workspace {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+
+  .componentPanel {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .header > div:first-child {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subtitle {
+    white-space: normal;
+  }
+
+  .summaryStrip,
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .componentPanel {
+    grid-column: span 1;
+  }
+
+  .componentHead,
+  .componentRow {
+    grid-template-columns: minmax(0, 1fr) 56px 62px;
+  }
+
+  .componentHead span:last-child,
+  .componentRow span:last-child {
+    display: none;
+  }
+}
