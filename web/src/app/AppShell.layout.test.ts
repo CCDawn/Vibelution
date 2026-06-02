@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import styles from "./AppShell.module.css";
 import indexHtml from "../../index.html?raw";
 import manifestSource from "../../public/manifest.webmanifest?raw";
 import shellSource from "./AppShell.tsx?raw";
+
+const shellStyles = readFileSync(fileURLToPath(new URL("./AppShell.module.css", import.meta.url)), "utf8");
 
 describe("AppShell layout contract", () => {
   it("renders one compact status summary chip while keeping the detailed guide panel", () => {
@@ -15,6 +19,15 @@ describe("AppShell layout contract", () => {
   it("keeps the global shell top bar compact", () => {
     expect(styles.statusSummaryChip).toBeTypeOf("string");
     expect(styles.statusSummaryCount).toBeTypeOf("string");
+  });
+
+  it("keeps the global shell background in the layered starfield treatment", () => {
+    expect(shellStyles).toContain("--shell-star-color");
+    expect(shellStyles).toContain("--shell-star-faint");
+    expect(shellStyles).toContain("--shell-nebula-cool");
+    expect(shellStyles).toContain(".shell::before");
+    expect(shellStyles).toContain(".shell::after");
+    expect(shellStyles).toContain("radial-gradient(circle at 8% 18%");
   });
 
   it("shows the current app version in the brand area", () => {

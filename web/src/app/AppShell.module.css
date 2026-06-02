@@ -14,12 +14,72 @@
   --shell-panel-soft: rgba(27, 32, 41, 0.98);
   --shell-card: rgba(18, 22, 29, 0.82);
   --shell-shadow: rgba(0, 0, 0, 0.28);
+  --shell-star-color: rgba(221, 234, 255, 0.74);
+  --shell-star-muted: rgba(130, 168, 220, 0.34);
+  --shell-star-faint: rgba(177, 205, 255, 0.2);
+  --shell-nebula-cool: rgba(58, 109, 174, 0.18);
+  --shell-nebula-warm: rgba(141, 103, 198, 0.11);
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
-    linear-gradient(180deg, var(--bg-canvas) 0%, var(--shell-page-end) 100%);
-  background-size: 36px 36px, 36px 36px, auto;
+    radial-gradient(ellipse at 52% -18%, rgba(92, 132, 214, 0.14) 0 18%, transparent 52%),
+    radial-gradient(circle at 16% 18%, var(--shell-nebula-cool) 0 11%, transparent 34%),
+    radial-gradient(circle at 82% 8%, var(--shell-nebula-warm) 0 9%, transparent 31%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012) 1px, transparent 1px),
+    linear-gradient(180deg, #090b11 0%, var(--bg-canvas) 46%, var(--shell-page-end) 100%);
+  background-size: auto, auto, auto, 42px 42px, 42px 42px, auto;
   color: var(--fg-primary);
+}
+
+.shell::before,
+.shell::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.shell::before {
+  opacity: 0.95;
+  background-image:
+    radial-gradient(circle at 8% 18%, var(--shell-star-color) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 22% 72%, var(--shell-star-muted) 0 1px, transparent 1.4px),
+    radial-gradient(circle at 38% 28%, rgba(255, 255, 255, 0.52) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 67% 12%, rgba(204, 224, 255, 0.55) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 82% 64%, rgba(255, 255, 255, 0.42) 0 1px, transparent 1.5px),
+    radial-gradient(circle at 92% 34%, var(--shell-star-muted) 0 1px, transparent 1.4px),
+    radial-gradient(circle, var(--shell-star-faint) 0 0.8px, transparent 1.2px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.16) 0 0.7px, transparent 1px);
+  background-size:
+    263px 211px,
+    307px 239px,
+    359px 293px,
+    421px 271px,
+    331px 367px,
+    503px 317px,
+    89px 113px,
+    137px 173px;
+  background-position:
+    0 0,
+    28px 34px,
+    76px 12px,
+    120px 48px,
+    38px 90px,
+    144px 24px,
+    0 0,
+    44px 58px;
+  filter: drop-shadow(0 0 5px rgba(143, 180, 255, 0.28));
+}
+
+.shell::after {
+  opacity: 0.78;
+  background:
+    radial-gradient(ellipse at 50% 102%, rgba(74, 106, 176, 0.16), transparent 42%),
+    radial-gradient(circle at 20% 88%, rgba(91, 183, 174, 0.12), transparent 28%),
+    radial-gradient(circle at 78% 82%, rgba(91, 141, 239, 0.1), transparent 30%),
+    linear-gradient(115deg, transparent 0 34%, rgba(138, 174, 236, 0.04) 46%, transparent 64%),
+    linear-gradient(180deg, rgba(3, 5, 10, 0.08), rgba(3, 5, 10, 0.42));
+  mix-blend-mode: screen;
 }
 
 .shell[data-theme="light"] {
@@ -31,8 +91,26 @@
   --shell-panel-soft: #f7f7f8;
   --shell-card: #f7f7f8;
   --shell-shadow: rgba(15, 23, 42, 0.12);
+  --shell-star-color: rgba(37, 99, 235, 0.2);
+  --shell-star-muted: rgba(15, 118, 110, 0.14);
+  --shell-star-faint: rgba(37, 99, 235, 0.08);
+  --shell-nebula-cool: rgba(37, 99, 235, 0.09);
+  --shell-nebula-warm: rgba(15, 118, 110, 0.08);
   background:
+    radial-gradient(ellipse at 52% -18%, rgba(37, 99, 235, 0.08) 0 18%, transparent 52%),
+    radial-gradient(circle at 16% 18%, var(--shell-nebula-cool) 0 11%, transparent 34%),
+    radial-gradient(circle at 82% 8%, var(--shell-nebula-warm) 0 9%, transparent 31%),
     linear-gradient(180deg, #ffffff 0%, #f7f7f8 100%);
+}
+
+.shell[data-theme="light"]::before {
+  opacity: 0.34;
+  filter: none;
+}
+
+.shell[data-theme="light"]::after {
+  opacity: 0.28;
+  mix-blend-mode: multiply;
 }
 
 .shutdownOverlay {
@@ -1311,7 +1389,7 @@
   min-width: 0;
   overflow: hidden;
   position: relative;
-  z-index: 0;
+  z-index: 1;
   padding-top: var(--shell-topbar-height);
 }
 
