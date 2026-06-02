@@ -1068,6 +1068,94 @@
   color: var(--fg-primary);
 }
 
+.graphRelationPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-cool) 18%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-panel) 72%, transparent);
+}
+
+.graphRelationHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.graphRelationHeader p {
+  margin: 0;
+}
+
+.graphRelationHeader strong {
+  color: var(--accent-cool);
+  font-size: 0.78rem;
+}
+
+.graphRelationGroup {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.graphRelationGroup > span {
+  color: var(--fg-tertiary);
+  font-size: 0.64rem;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.graphRelationGroup button {
+  display: grid;
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--node-color, var(--accent-cool)) 30%, var(--border-soft));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--node-color, var(--accent-cool)) 8%, var(--surface-card));
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.graphRelationGroup button:hover {
+  border-color: color-mix(in srgb, var(--node-color, var(--accent-cool)) 58%, var(--border-soft));
+  background: color-mix(in srgb, var(--node-color, var(--accent-cool)) 14%, var(--surface-panel));
+}
+
+.graphRelationGroup small,
+.graphRelationGroup strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graphRelationGroup small {
+  color: var(--fg-tertiary);
+  font-size: 0.66rem;
+}
+
+.graphRelationGroup strong {
+  color: var(--fg-primary);
+  font-size: 0.72rem;
+}
+
+.graphRelationEmpty {
+  margin: 0;
+  color: var(--fg-tertiary);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
 .detailMeta {
   display: grid;
   gap: 5px;

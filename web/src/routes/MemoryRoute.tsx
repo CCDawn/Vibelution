@@ -45,6 +45,8 @@ import {
   KnowledgeStewardWorkbenchPayload,
   KnowledgeTracePayload,
   MemoryItem,
+  MemoryKnowledgeGraphEdge,
+  MemoryKnowledgeGraphNode,
   MemoryKnowledgeGraphPayload,
   MemoryMutationResponse,
   MemoryOverview,
@@ -339,6 +341,10 @@ type Copy = {
   graphVisibleEdges: string;
   graphClearFocus: string;
   graphSelectedNode: string;
+  graphRelations: string;
+  graphIncoming: string;
+  graphOutgoing: string;
+  graphNoRelations: string;
   graphNoSelection: string;
   graphInteractionHint: string;
   graphCanvasFallback: string;
@@ -349,6 +355,10 @@ type ManageFilterMode = "all" | "prompt" | "editable" | "changed" | "missing";
 export type MemoryRouteView = "overview" | "effective" | "manage" | "sources" | "knowledge" | "graph";
 type MemoryChannel = "conversation" | "research" | "self_evolution" | "supervised_evolution" | "explicit_read";
 type ChannelFilter = MemoryChannel | "";
+type GraphRelation = {
+  edge: MemoryKnowledgeGraphEdge;
+  neighbor: MemoryKnowledgeGraphNode;
+};
 type MemoryPair = {
   section: MemorySection;
   item: MemoryItem;
@@ -693,6 +703,10 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphVisibleEdges: "当前连线",
     graphClearFocus: "清除聚焦",
     graphSelectedNode: "选中节点",
+    graphRelations: "关联关系",
+    graphIncoming: "入边",
+    graphOutgoing: "出边",
+    graphNoRelations: "当前节点没有可见关联。",
     graphNoSelection: "选择一个节点查看摘要、时间戳、权限和关联信息。",
     graphInteractionHint: "左键移动视角 · 中键拖动图谱 · 滚轮缩放",
     graphCanvasFallback: "3D 画布正在接入；当前先展示可过滤的只读图谱结构。",
@@ -960,6 +974,10 @@ const COPY: Record<"zh" | "en", Copy> = {
     graphVisibleEdges: "Visible edges",
     graphClearFocus: "Clear focus",
     graphSelectedNode: "Selected node",
+    graphRelations: "Relations",
+    graphIncoming: "Incoming",
+    graphOutgoing: "Outgoing",
+    graphNoRelations: "This node has no visible relations.",
     graphNoSelection: "Select a node to inspect summary, timestamps, permissions, and links.",
     graphInteractionHint: "Left drag view · Middle drag graph · Wheel zoom",
     graphCanvasFallback: "The 3D canvas is being connected; this view shows the filterable read-only graph structure first.",
@@ -2023,6 +2041,28 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     [graphPayload?.edges, graphVisibleNodeIds],
   );
   const selectedGraphNode = selectedGraphNodeId ? filteredGraphNodes.find((node) => node.id === selectedGraphNodeId) ?? null : null;
+  const graphNodeById = useMemo(() => new Map((graphPayload?.nodes ?? []).map((node) => [node.id, node])), [graphPayload?.nodes]);
+  const selectedGraphRelations = useMemo(() => {
+    if (!selectedGraphNode) {
+      return { incoming: [] as GraphRelation[], outgoing: [] as GraphRelation[] };
+    }
+    const graphEdges = graphPayload?.edges ?? [];
+    const incoming = graphEdges
+      .filter((edge) => edge.target === selectedGraphNode.id)
+      .flatMap((edge) => {
+        const neighbor = graphNodeById.get(edge.source);
+        return neighbor ? [{ edge, neighbor }] : [];
+      })
+      .slice(0, 8);
+    const outgoing = graphEdges
+      .filter((edge) => edge.source === selectedGraphNode.id)
+      .flatMap((edge) => {
+        const neighbor = graphNodeById.get(edge.target);
+        return neighbor ? [{ edge, neighbor }] : [];
+      })
+      .slice(0, 8);
+    return { incoming, outgoing };
+  }, [graphNodeById, graphPayload?.edges, selectedGraphNode]);
   const graphTypeEntries = useMemo(
     () => Object.entries(graphPayload?.summary.nodeTypeCounts ?? {}).sort((left, right) => right[1] - left[1]),
     [graphPayload?.summary.nodeTypeCounts],
@@ -4464,6 +4504,54 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <span>{copy.sourceOrigin}: {selectedGraphNode.id}</span>
                 <span>{copy.generatedAt}: {formatTimestamp(selectedGraphNode.createdAt || selectedGraphNode.updatedAt, lang)}</span>
               </div>
+              <section className={styles.graphRelationPanel}>
+                <div className={styles.graphRelationHeader}>
+                  <p className={styles.panelEyebrow}>{copy.graphRelations}</p>
+                  <strong>{selectedGraphRelations.incoming.length + selectedGraphRelations.outgoing.length}</strong>
+                </div>
+                {!selectedGraphRelations.incoming.length && !selectedGraphRelations.outgoing.length ? (
+                  <p className={styles.graphRelationEmpty}>{copy.graphNoRelations}</p>
+                ) : (
+                  <>
+                    <div className={styles.graphRelationGroup}>
+                      <span>{copy.graphIncoming}</span>
+                      {selectedGraphRelations.incoming.map((relation) => (
+                        <button
+                          key={relation.edge.id}
+                          type="button"
+                          data-node-type={relation.neighbor.type}
+                          onClick={() => {
+                            setGraphSearchText("");
+                            setActiveGraphNodeType("");
+                            setSelectedGraphNodeId(relation.neighbor.id);
+                          }}
+                        >
+                          <small>{relation.edge.label || relation.edge.type}</small>
+                          <strong>{relation.neighbor.label}</strong>
+                        </button>
+                      ))}
+                    </div>
+                    <div className={styles.graphRelationGroup}>
+                      <span>{copy.graphOutgoing}</span>
+                      {selectedGraphRelations.outgoing.map((relation) => (
+                        <button
+                          key={relation.edge.id}
+                          type="button"
+                          data-node-type={relation.neighbor.type}
+                          onClick={() => {
+                            setGraphSearchText("");
+                            setActiveGraphNodeType("");
+                            setSelectedGraphNodeId(relation.neighbor.id);
+                          }}
+                        >
+                          <small>{relation.edge.label || relation.edge.type}</small>
+                          <strong>{relation.neighbor.label}</strong>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
               <details className={styles.rawPanel}>
                 <summary>
                   <FileText size={15} />
