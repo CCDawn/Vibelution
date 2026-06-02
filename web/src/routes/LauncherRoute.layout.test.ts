@@ -32,11 +32,15 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("controlPlane");
     expect(routeSource).toContain("guardianAdapter");
     expect(routeSource).toContain("guardianTable");
+    expect(routeSource).toContain("supervisorGrid");
+    expect(routeSource).toContain("guardian?.supervisor?.stdoutPath");
+    expect(routeSource).toContain("guardian?.supervisor?.stderrPath");
     expect(routeSource).not.toContain("hero");
     expect(routeSource).not.toContain("cardGrid");
     expect(styles.summaryStrip).toBeTypeOf("string");
     expect(styles.componentTable).toBeTypeOf("string");
     expect(styles.guardianTable).toBeTypeOf("string");
+    expect(styles.supervisorGrid).toBeTypeOf("string");
     expect(styles.specGrid).toBeTypeOf("string");
   });
 
