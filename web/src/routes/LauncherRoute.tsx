@@ -19,6 +19,26 @@ type LauncherNotice = {
   text: string;
 };
 
+type LauncherGuardianResponsibility = {
+  id: string;
+  owner: string;
+  adapter: string;
+  status: string;
+  detail: string;
+};
+
+type LauncherStatusWithGuardian = Awaited<ReturnType<typeof getLauncherStatus>> & {
+  guardianAdapter?: {
+    schemaVersion: number;
+    mode: string;
+    targetMode: string;
+    statusLine: string;
+    ownedCount: number;
+    adapterCount: number;
+    responsibilities: LauncherGuardianResponsibility[];
+  };
+};
+
 const COMPONENT_ORDER = new Map([
   ["backend", 0],
   ["frontend", 1],
@@ -85,6 +105,7 @@ export function LauncherRoute() {
         bundle: "项目整体",
         controlPlane: "控制面",
         components: "组件",
+        guardian: "守护归并",
         lastOperation: "最近动作",
         backend: "后端",
         frontend: "前端",
@@ -101,6 +122,7 @@ export function LauncherRoute() {
         required: "必需",
         state: "状态",
         detail: "细节",
+        responsibility: "职责",
         port: "端口",
         listening: "监听",
         owner: "占用 PID",
@@ -115,6 +137,9 @@ export function LauncherRoute() {
         loadFailed: "Launcher 状态读取失败",
         loading: "正在读取 Launcher 状态",
         commandDone: "命令已提交",
+        targetMode: "目标模式",
+        owned: "已纳入",
+        legacyAdapter: "旧适配",
       }
     : {
         eyebrow: "Launcher",
@@ -128,6 +153,7 @@ export function LauncherRoute() {
         bundle: "Project Bundle",
         controlPlane: "Control Plane",
         components: "Components",
+        guardian: "Guardian Merge",
         lastOperation: "Last Operation",
         backend: "Backend",
         frontend: "Frontend",
@@ -144,6 +170,7 @@ export function LauncherRoute() {
         required: "Required",
         state: "State",
         detail: "Detail",
+        responsibility: "Responsibility",
         port: "Port",
         listening: "Listening",
         owner: "Owner PID",
@@ -158,6 +185,9 @@ export function LauncherRoute() {
         loadFailed: "Launcher status failed",
         loading: "Loading Launcher status",
         commandDone: "Command submitted",
+        targetMode: "Target Mode",
+        owned: "Owned",
+        legacyAdapter: "Legacy Adapter",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
@@ -190,8 +220,9 @@ export function LauncherRoute() {
     },
   });
 
-  const status = statusQuery.data;
+  const status = statusQuery.data as LauncherStatusWithGuardian | undefined;
   const bundle = status?.projectBundle;
+  const guardian = status?.guardianAdapter;
   const componentRows = useMemo(() => sortComponents(bundle?.components ?? []), [bundle?.components]);
   const busy = controlMutation.isPending;
   const headerTone = stateTone(bundle?.overallState ?? status?.launcher.phase ?? "", Boolean(bundle));
@@ -305,6 +336,39 @@ export function LauncherRoute() {
             <Spec label="manager" value={status?.runtimeManager.runtimeState || "-"} />
             <Spec label="proof" value={status?.lifecycleProof.overallLabel || "-"} />
           </dl>
+        </section>
+
+        <section className={`${styles.panel} ${styles.guardianPanel}`}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.guardian}</p>
+            <strong>{guardian?.mode || "-"}</strong>
+          </div>
+          <div className={styles.guardianSummary}>
+            <span>{guardian?.statusLine || "-"}</span>
+            <strong>{copy.owned}: {guardian?.ownedCount ?? 0}</strong>
+            <strong>{copy.legacyAdapter}: {guardian?.adapterCount ?? 0}</strong>
+            <strong>{copy.targetMode}: {guardian?.targetMode || "-"}</strong>
+          </div>
+          <div className={styles.guardianTable} role="table" aria-label={copy.guardian}>
+            <div className={styles.guardianHead} role="row">
+              <span role="columnheader">{copy.responsibility}</span>
+              <span role="columnheader">owner</span>
+              <span role="columnheader">{copy.adapter}</span>
+              <span role="columnheader">{copy.state}</span>
+              <span role="columnheader">{copy.detail}</span>
+            </div>
+            {(guardian?.responsibilities ?? []).map((item) => (
+              <div key={item.id} className={styles.guardianRow} role="row" data-tone={stateTone(item.status)}>
+                <span role="cell">
+                  <strong>{item.id}</strong>
+                </span>
+                <span role="cell">{item.owner}</span>
+                <span role="cell">{item.adapter}</span>
+                <span role="cell">{item.status}</span>
+                <span role="cell">{item.detail}</span>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className={`${styles.panel} ${styles.componentPanel}`}>
