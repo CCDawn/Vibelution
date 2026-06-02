@@ -4,6 +4,7 @@ import { resetControlTokenForTests } from "./client";
 import {
   getLauncherStatus,
   launcherRestartEndpoint,
+  reattachLauncherSupervisor,
   restartLauncherBundle,
   startLauncherBundle,
 } from "./launcher";
@@ -77,5 +78,29 @@ describe("launcher api helpers", () => {
 
     expect(payload.commandId).toBe("cmd-1");
     expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/restart?confirmedActiveWork=true");
+  });
+
+  it("requests guarded supervisor reattach through the launcher endpoint", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          header: "X-Vibelution-Control-Token",
+          controlToken: "test-token",
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ accepted: true, operation: "supervisor_reattach", commandId: "cmd-supervisor" }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = await reattachLauncherSupervisor();
+
+    expect(payload.operation).toBe("supervisor_reattach");
+    expect(payload.commandId).toBe("cmd-supervisor");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/launcher/supervisor/reattach");
+    const requestInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(requestInit.method).toBe("POST");
   });
 });

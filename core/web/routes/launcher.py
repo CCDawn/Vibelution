@@ -9,6 +9,7 @@ from core.web.services.launcher_service import (
     request_launcher_restart,
     request_launcher_start,
     request_launcher_stop,
+    request_launcher_supervisor_reattach,
 )
 from core.web.services.runtime_service import RuntimeRestartActiveWorkBlocked
 
@@ -44,3 +45,8 @@ def launcher_restart(confirmed_active_work: bool = Query(default=False, alias="c
                 "activeWorkRuns": exc.active_work_runs,
             },
         ) from exc
+
+
+@router.post("/launcher/supervisor/reattach", status_code=202)
+def launcher_supervisor_reattach() -> dict:
+    return request_launcher_supervisor_reattach()

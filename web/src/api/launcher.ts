@@ -28,3 +28,15 @@ export function restartLauncherBundle(confirmedActiveWork = false) {
     method: "POST",
   });
 }
+
+export type LauncherSupervisorControlResponse = Omit<LauncherControlResponse, "operation"> & {
+  operation: "supervisor_reattach";
+  blockedReason?: string;
+  blockers?: string[];
+};
+
+export function reattachLauncherSupervisor() {
+  return fetchJson<LauncherSupervisorControlResponse>(`${LAUNCHER_ENDPOINT}/supervisor/reattach`, {
+    method: "POST",
+  });
+}

@@ -19,6 +19,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("startLauncherBundle");
     expect(routeSource).toContain("stopLauncherBundle");
     expect(routeSource).toContain("restartLauncherBundle(false)");
+    expect(routeSource).toContain("reattachLauncherSupervisor");
     expect(routeSource).toContain("queryKeys.launcherStatus()");
     expect(routeSource).toContain("queryKeys.runtimeSummary()");
   });
@@ -33,6 +34,7 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("guardianAdapter");
     expect(routeSource).toContain("guardianTable");
     expect(routeSource).toContain("supervisorGrid");
+    expect(routeSource).toContain("supervisorToolbar");
     expect(routeSource).toContain("guardian?.supervisor?.stdoutPath");
     expect(routeSource).toContain("guardian?.supervisor?.stderrPath");
     expect(routeSource).not.toContain("hero");
@@ -41,6 +43,7 @@ describe("LauncherRoute layout contract", () => {
     expect(styles.componentTable).toBeTypeOf("string");
     expect(styles.guardianTable).toBeTypeOf("string");
     expect(styles.supervisorGrid).toBeTypeOf("string");
+    expect(styles.supervisorToolbar).toBeTypeOf("string");
     expect(styles.specGrid).toBeTypeOf("string");
   });
 
@@ -52,5 +55,6 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain('controlMutation.mutate("start")');
     expect(routeSource).toContain('controlMutation.mutate("stop")');
     expect(routeSource).toContain('controlMutation.mutate("restart")');
+    expect(routeSource).toContain("supervisorMutation.mutate()");
   });
 });
