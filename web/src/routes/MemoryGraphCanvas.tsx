@@ -104,6 +104,14 @@ function pickVisibleLabelIds(nodes: MemoryKnowledgeGraphNode[], edges: MemoryKno
   return visible;
 }
 
+function tintColor(color: number, tint: number) {
+  return new THREE.Color(color).lerp(new THREE.Color(0xf8fafc), tint);
+}
+
+function shadeColor(color: number, shade: number) {
+  return new THREE.Color(color).lerp(new THREE.Color(0x020617), shade);
+}
+
 export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, fallbackText }: MemoryGraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const labelLayerRef = useRef<HTMLDivElement | null>(null);
@@ -167,12 +175,97 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     renderer.domElement.style.height = "100%";
     container.replaceChildren(renderer.domElement);
 
-    const nodeObjects = new Map<string, THREE.Mesh>();
+    const nodeMaterials: THREE.Material[] = [];
     const hitObjects = new Map<string, THREE.Mesh>();
     const planetGeometry = new THREE.SphereGeometry(0.3, 18, 18);
+    const planetSurfaceGeometry = new THREE.SphereGeometry(0.305, 14, 10);
     const starGeometry = new THREE.IcosahedronGeometry(0.42, 1);
+    const starFacetGeometry = new THREE.IcosahedronGeometry(0.428, 1);
     const satelliteGeometry = new THREE.DodecahedronGeometry(0.28, 0);
+    const satelliteFacetGeometry = new THREE.DodecahedronGeometry(0.286, 0);
     const hitSphere = new THREE.SphereGeometry(1, 12, 12);
+    const trackMaterial = <T extends THREE.Material>(material: T) => {
+      nodeMaterials.push(material);
+      return material;
+    };
+    const createStellarBody = (color: number, selected: boolean) => {
+      const body = new THREE.Group();
+      const core = new THREE.Mesh(
+        starGeometry,
+        trackMaterial(new THREE.MeshStandardMaterial({
+          color: tintColor(color, selected ? 0.24 : 0.14),
+          emissive: color,
+          emissiveIntensity: selected ? 0.26 : 0.14,
+          flatShading: true,
+          roughness: 0.46,
+          metalness: 0.04,
+        })),
+      );
+      const facets = new THREE.Mesh(
+        starFacetGeometry,
+        trackMaterial(new THREE.MeshBasicMaterial({
+          color: tintColor(color, 0.42),
+          transparent: true,
+          opacity: selected ? 0.28 : 0.18,
+          wireframe: true,
+          depthWrite: false,
+        })),
+      );
+      body.add(core, facets);
+      return body;
+    };
+    const createPlanetBody = (color: number, selected: boolean, nodeDegree: number) => {
+      const body = new THREE.Group();
+      const base = new THREE.Mesh(
+        planetGeometry,
+        trackMaterial(new THREE.MeshStandardMaterial({
+          color,
+          emissive: shadeColor(color, 0.62),
+          emissiveIntensity: selected ? 0.08 : 0.018,
+          roughness: 0.82,
+          metalness: 0.03,
+        })),
+      );
+      const surface = new THREE.Mesh(
+        planetSurfaceGeometry,
+        trackMaterial(new THREE.MeshBasicMaterial({
+          color: tintColor(color, 0.34),
+          transparent: true,
+          opacity: selected ? 0.22 : 0.14,
+          wireframe: true,
+          depthWrite: false,
+        })),
+      );
+      surface.rotation.set(0.34 + nodeDegree * 0.021, 0.12, 0.48);
+      body.add(base, surface);
+      return body;
+    };
+    const createSatelliteBody = (color: number, selected: boolean) => {
+      const body = new THREE.Group();
+      const rock = new THREE.Mesh(
+        satelliteGeometry,
+        trackMaterial(new THREE.MeshStandardMaterial({
+          color: shadeColor(color, 0.12),
+          emissive: shadeColor(color, 0.7),
+          emissiveIntensity: selected ? 0.06 : 0.01,
+          flatShading: true,
+          roughness: 0.96,
+          metalness: 0.08,
+        })),
+      );
+      const facets = new THREE.Mesh(
+        satelliteFacetGeometry,
+        trackMaterial(new THREE.MeshBasicMaterial({
+          color: tintColor(color, 0.24),
+          transparent: true,
+          opacity: selected ? 0.2 : 0.11,
+          wireframe: true,
+          depthWrite: false,
+        })),
+      );
+      body.add(rock, facets);
+      return body;
+    };
     const labelLayer = labelLayerRef.current;
     if (labelLayer) {
       labelLayer.replaceChildren();
@@ -183,26 +276,22 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       const color = NODE_COLORS[node.type] ?? 0xdfe6e9;
       const isStellar = STELLAR_NODE_TYPES.has(node.type);
       const isSatellite = SATELLITE_NODE_TYPES.has(node.type);
-      const material = new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: isStellar ? (selectedNodeId === node.id ? 0.22 : 0.1) : selectedNodeId === node.id ? 0.1 : 0.015,
-        roughness: isStellar ? 0.58 : 0.78,
-        metalness: isSatellite ? 0.18 : 0.05,
-      });
-      const geometry = isStellar ? starGeometry : isSatellite ? satelliteGeometry : planetGeometry;
-      const mesh = new THREE.Mesh(geometry, material);
+      const selected = selectedNodeId === node.id;
+      const body = isStellar
+        ? createStellarBody(color, selected)
+        : isSatellite
+          ? createSatelliteBody(color, selected)
+          : createPlanetBody(color, selected, nodeDegree);
       const size = isStellar
         ? 1.05 + Math.min(1.25, Math.sqrt(nodeDegree + 1) * 0.16)
         : 0.78 + Math.min(1.55, Math.sqrt(nodeDegree + 1) * 0.2);
-      const selectedScale = selectedNodeId === node.id ? 1.16 : 1;
-      mesh.scale.setScalar((node.type === "project" ? 1.86 : size) * selectedScale);
+      const selectedScale = selected ? 1.16 : 1;
+      body.scale.setScalar((node.type === "project" ? 1.86 : size) * selectedScale);
       const position = positions.get(node.id) ?? new THREE.Vector3();
-      mesh.position.copy(position);
-      mesh.rotation.set(nodeDegree * 0.13, nodeDegree * 0.19, nodeDegree * 0.07);
-      mesh.userData.nodeId = node.id;
-      root.add(mesh);
-      nodeObjects.set(node.id, mesh);
+      body.position.copy(position);
+      body.rotation.set(nodeDegree * 0.13, nodeDegree * 0.19, nodeDegree * 0.07);
+      body.userData.nodeId = node.id;
+      root.add(body);
 
       const hitMesh = new THREE.Mesh(
         hitSphere,
@@ -386,13 +475,14 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       renderer.domElement.removeEventListener("auxclick", preventAuxClick);
       renderer.domElement.removeEventListener("wheel", onWheel);
       planetGeometry.dispose();
+      planetSurfaceGeometry.dispose();
       starGeometry.dispose();
+      starFacetGeometry.dispose();
       satelliteGeometry.dispose();
+      satelliteFacetGeometry.dispose();
       hitSphere.dispose();
       lineGeometry.dispose();
-      for (const object of nodeObjects.values()) {
-        (object.material as THREE.Material).dispose();
-      }
+      nodeMaterials.forEach((material) => material.dispose());
       for (const object of hitObjects.values()) {
         (object.material as THREE.Material).dispose();
       }

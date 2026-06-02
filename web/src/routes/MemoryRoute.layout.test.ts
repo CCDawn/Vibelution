@@ -92,6 +92,14 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasSource).toContain("SEARCH_LABEL_LIMIT");
     expect(graphCanvasSource).toContain("STELLAR_NODE_TYPES");
     expect(graphCanvasSource).toContain("SATELLITE_NODE_TYPES");
+    expect(graphCanvasSource).toContain("createStellarBody");
+    expect(graphCanvasSource).toContain("createPlanetBody");
+    expect(graphCanvasSource).toContain("createSatelliteBody");
+    expect(graphCanvasSource).toContain("planetSurfaceGeometry");
+    expect(graphCanvasSource).toContain("starFacetGeometry");
+    expect(graphCanvasSource).toContain("satelliteFacetGeometry");
+    expect(graphCanvasSource).toContain("wireframe: true");
+    expect(graphCanvasSource).toContain("flatShading: true");
     expect(graphCanvasSource).toContain("pickVisibleLabelIds");
     expect(graphCanvasSource).toContain("setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))");
     expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.3, 18, 18)");
@@ -110,6 +118,8 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain("#06101d");
     expect(memoryCssSource).toContain("91px 91px");
     expect(memoryCssSource).toContain(".graphNodeBadge");
+    expect(memoryCssSource).toContain("#0f172a 82%");
+    expect(memoryCssSource).not.toContain("backdrop-filter");
     expect(memoryCssSource).toContain('[data-detail="true"]');
     expect(memoryCssSource).toContain(".graphNodeBadgeType");
     expect(memoryCssSource).toContain(".graphInteractionHint");
