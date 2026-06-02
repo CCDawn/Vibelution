@@ -24,6 +24,8 @@ type DragMode = "rotate" | "pan" | "";
 const LABEL_ALWAYS_TYPES = new Set(["project", "team", "knowledge_base", "evolution", "supervision"]);
 const DENSE_LABEL_LIMIT = 12;
 const SEARCH_LABEL_LIMIT = 28;
+const STELLAR_NODE_TYPES = new Set(["project", "evolution", "supervision"]);
+const SATELLITE_NODE_TYPES = new Set(["runtime_scene", "source_artifact", "tag"]);
 
 const NODE_COLORS: Record<string, number> = {
   project: 0xf2c94c,
@@ -167,7 +169,9 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
 
     const nodeObjects = new Map<string, THREE.Mesh>();
     const hitObjects = new Map<string, THREE.Mesh>();
-    const sphere = new THREE.SphereGeometry(0.34, 16, 16);
+    const planetGeometry = new THREE.SphereGeometry(0.3, 18, 18);
+    const starGeometry = new THREE.IcosahedronGeometry(0.42, 1);
+    const satelliteGeometry = new THREE.DodecahedronGeometry(0.28, 0);
     const hitSphere = new THREE.SphereGeometry(1, 12, 12);
     const labelLayer = labelLayerRef.current;
     if (labelLayer) {
@@ -177,19 +181,25 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     for (const node of nodes) {
       const nodeDegree = degree.get(node.id) ?? 0;
       const color = NODE_COLORS[node.type] ?? 0xdfe6e9;
+      const isStellar = STELLAR_NODE_TYPES.has(node.type);
+      const isSatellite = SATELLITE_NODE_TYPES.has(node.type);
       const material = new THREE.MeshStandardMaterial({
         color,
         emissive: color,
-        emissiveIntensity: selectedNodeId === node.id ? 0.12 : 0.02,
-        roughness: 0.76,
-        metalness: 0.04,
+        emissiveIntensity: isStellar ? (selectedNodeId === node.id ? 0.22 : 0.1) : selectedNodeId === node.id ? 0.1 : 0.015,
+        roughness: isStellar ? 0.58 : 0.78,
+        metalness: isSatellite ? 0.18 : 0.05,
       });
-      const mesh = new THREE.Mesh(sphere, material);
-      const size = 0.9 + Math.min(1.85, Math.sqrt(nodeDegree + 1) * 0.24);
+      const geometry = isStellar ? starGeometry : isSatellite ? satelliteGeometry : planetGeometry;
+      const mesh = new THREE.Mesh(geometry, material);
+      const size = isStellar
+        ? 1.05 + Math.min(1.25, Math.sqrt(nodeDegree + 1) * 0.16)
+        : 0.78 + Math.min(1.55, Math.sqrt(nodeDegree + 1) * 0.2);
       const selectedScale = selectedNodeId === node.id ? 1.16 : 1;
-      mesh.scale.setScalar((node.type === "project" ? 2 : size) * selectedScale);
+      mesh.scale.setScalar((node.type === "project" ? 1.86 : size) * selectedScale);
       const position = positions.get(node.id) ?? new THREE.Vector3();
       mesh.position.copy(position);
+      mesh.rotation.set(nodeDegree * 0.13, nodeDegree * 0.19, nodeDegree * 0.07);
       mesh.userData.nodeId = node.id;
       root.add(mesh);
       nodeObjects.set(node.id, mesh);
@@ -375,7 +385,9 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       renderer.domElement.removeEventListener("click", onClick);
       renderer.domElement.removeEventListener("auxclick", preventAuxClick);
       renderer.domElement.removeEventListener("wheel", onWheel);
-      sphere.dispose();
+      planetGeometry.dispose();
+      starGeometry.dispose();
+      satelliteGeometry.dispose();
       hitSphere.dispose();
       lineGeometry.dispose();
       for (const object of nodeObjects.values()) {

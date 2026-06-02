@@ -721,12 +721,15 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent-cool) 28%, transparent);
+  border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 8px;
   background:
-    radial-gradient(circle at 48% 54%, color-mix(in srgb, var(--accent-cool) 7%, transparent), transparent 38%),
-    linear-gradient(135deg, color-mix(in srgb, var(--bg-canvas) 96%, white), color-mix(in srgb, var(--surface-panel) 92%, var(--accent-cool) 2%));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 38%, transparent);
+    radial-gradient(circle at 62% 36%, rgba(96, 165, 250, 0.18), transparent 28%),
+    radial-gradient(circle at 30% 72%, rgba(45, 212, 191, 0.12), transparent 34%),
+    linear-gradient(135deg, #06101d 0%, #0b1726 46%, #07111f 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 28px 90px rgba(15, 23, 42, 0.34);
 }
 
 .graphCanvasShell::before {
@@ -735,11 +738,40 @@
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(color-mix(in srgb, var(--border-soft) 38%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--border-soft) 38%, transparent) 1px, transparent 1px);
-  background-size: 38px 38px;
-  mask-image: radial-gradient(circle at center, black 0%, transparent 72%);
-  opacity: 0.2;
+    radial-gradient(circle at 12% 18%, rgba(255, 255, 255, 0.78) 0 1px, transparent 1.7px),
+    radial-gradient(circle at 78% 24%, rgba(191, 219, 254, 0.64) 0 1px, transparent 1.8px),
+    radial-gradient(circle at 42% 78%, rgba(255, 255, 255, 0.46) 0 1px, transparent 1.9px),
+    radial-gradient(circle at 18% 68%, rgba(148, 163, 184, 0.5) 0 1px, transparent 1.8px),
+    linear-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.1) 1px, transparent 1px);
+  background-position:
+    0 0,
+    21px 17px,
+    8px 29px,
+    32px 4px,
+    0 0,
+    0 0;
+  background-size:
+    91px 91px,
+    127px 127px,
+    151px 151px,
+    173px 173px,
+    44px 44px,
+    44px 44px;
+  mask-image: radial-gradient(circle at center, black 0%, black 52%, transparent 82%);
+  opacity: 0.82;
+}
+
+.graphCanvasShell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, transparent 0%, rgba(96, 165, 250, 0.08) 42%, transparent 62%),
+    radial-gradient(circle at 50% 48%, transparent 0%, rgba(2, 6, 23, 0.28) 78%);
+  mix-blend-mode: screen;
+  opacity: 0.7;
 }
 
 .graphCanvasFallback {

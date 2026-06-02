@@ -90,9 +90,13 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasSource).toContain('event.button === 1 ? "pan" : "rotate"');
     expect(graphCanvasSource).toContain("DENSE_LABEL_LIMIT");
     expect(graphCanvasSource).toContain("SEARCH_LABEL_LIMIT");
+    expect(graphCanvasSource).toContain("STELLAR_NODE_TYPES");
+    expect(graphCanvasSource).toContain("SATELLITE_NODE_TYPES");
     expect(graphCanvasSource).toContain("pickVisibleLabelIds");
     expect(graphCanvasSource).toContain("setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))");
-    expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.34, 16, 16)");
+    expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.3, 18, 18)");
+    expect(graphCanvasSource).toContain("new THREE.IcosahedronGeometry(0.42, 1)");
+    expect(graphCanvasSource).toContain("new THREE.DodecahedronGeometry(0.28, 0)");
     expect(graphCanvasSource).not.toContain("createGlowTexture");
     expect(graphCanvasSource).not.toContain("AdditiveBlending");
     expect(graphCanvasSource).not.toContain("TorusGeometry");
@@ -102,6 +106,9 @@ describe("MemoryRoute layout contract", () => {
     expect(graphWorkerSource).toContain("layerSpread");
     expect(graphWorkerSource).toContain("runtime_scene: 34");
     expect(memoryCssSource).toContain(".graphCanvasShell");
+    expect(memoryCssSource).toContain(".graphCanvasShell::after");
+    expect(memoryCssSource).toContain("#06101d");
+    expect(memoryCssSource).toContain("91px 91px");
     expect(memoryCssSource).toContain(".graphNodeBadge");
     expect(memoryCssSource).toContain('[data-detail="true"]');
     expect(memoryCssSource).toContain(".graphNodeBadgeType");
