@@ -20,6 +20,7 @@ from .runtime_service import (
 
 
 LauncherOperation = Literal["start", "stop", "restart"]
+LauncherSupervisorOperation = Literal["supervisor_reattach"]
 
 
 class LauncherCommandResponse(TypedDict, total=False):
@@ -32,6 +33,17 @@ class LauncherCommandResponse(TypedDict, total=False):
     chatTurns: list[dict[str, object]]
     chatRoomRounds: list[dict[str, object]]
     evolutionRuns: list[dict[str, object]]
+
+
+class LauncherSupervisorCommandResponse(TypedDict, total=False):
+    accepted: bool
+    mode: str
+    launcherMode: str
+    commandId: str
+    operation: LauncherSupervisorOperation
+    message: str
+    blockedReason: str
+    blockers: list[str]
 
 
 def get_launcher_status() -> dict[str, Any]:
@@ -160,6 +172,88 @@ def request_launcher_restart(*, confirmed_active_work: bool = False) -> dict[str
         fields={"mode": str(result.get("mode") or "runtime_manager_adapter"), "commandId": str(result.get("commandId") or "")},
     )
     return _launcher_command_response("restart", result)
+
+
+def request_launcher_supervisor_reattach() -> LauncherSupervisorCommandResponse:
+    """Request the legacy launcher adapter to reattach supervisor for a live bundle."""
+
+    runtime = get_runtime_summary()
+    state = _load_launcher_state()
+    supervisor = _launcher_supervisor_snapshot()
+    blockers = _launcher_supervisor_reattach_blockers(runtime=runtime, state=state, supervisor=supervisor)
+    _record_launcher_event(
+        "launcher.supervisor.reattach.requested",
+        phase="supervisor",
+        message="Launcher supervisor reattach requested.",
+        fields={
+            "source": "launcher_api",
+            "supervisorPid": int(supervisor.get("pid") or 0),
+            "supervisorAlive": bool(supervisor.get("alive")),
+            "blockers": blockers,
+        },
+    )
+    if blockers:
+        blocked_reason = "; ".join(blockers)
+        _record_launcher_event(
+            "launcher.supervisor.reattach.blocked",
+            phase="supervisor",
+            message="Launcher supervisor reattach blocked by guard checks.",
+            outcome="blocked",
+            level="warning",
+            fields={"source": "launcher_api", "blockers": blockers},
+        )
+        return {
+            "accepted": False,
+            "mode": "runtime_manager_adapter",
+            "launcherMode": "runtime_manager_adapter",
+            "operation": "supervisor_reattach",
+            "message": text_for(
+                get_web_language(),
+                zh=f"Supervisor 重新接管未提交：{blocked_reason}",
+                en=f"Supervisor reattach was not queued: {blocked_reason}",
+            ),
+            "blockedReason": blocked_reason,
+            "blockers": blockers,
+        }
+
+    try:
+        ensure_daemon_running()
+        command = submit_command(
+            "open_workbench",
+            args={"reason": "launcher_supervisor_reattach", "source": "launcher_api", "noBrowser": False},
+            requested_by="launcher_api",
+        )
+    except Exception as exc:
+        _record_launcher_event(
+            "launcher.supervisor.reattach.failed",
+            phase="supervisor",
+            message="Launcher supervisor reattach could not be queued.",
+            outcome="failed",
+            level="error",
+            fields={"mode": "runtime_manager_adapter", "errorType": type(exc).__name__, "errorMessage": str(exc)},
+        )
+        raise
+
+    command_id = str(command.get("commandId") or "")
+    _record_launcher_event(
+        "launcher.supervisor.reattach.accepted",
+        phase="supervisor",
+        message="Launcher supervisor reattach queued through the workbench adapter.",
+        outcome="accepted",
+        fields={"mode": "runtime_manager_adapter", "commandId": command_id},
+    )
+    return {
+        "accepted": True,
+        "mode": "runtime_manager_adapter",
+        "launcherMode": "runtime_manager_adapter",
+        "operation": "supervisor_reattach",
+        "commandId": command_id,
+        "message": text_for(
+            get_web_language(),
+            zh="已请求 Launcher 重新接管 supervisor。",
+            en="Launcher supervisor reattach has been requested.",
+        ),
+    }
 
 
 def _project_bundle_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
@@ -333,6 +427,33 @@ def _load_launcher_state() -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _launcher_supervisor_reattach_blockers(
+    *,
+    runtime: dict[str, Any],
+    state: dict[str, Any],
+    supervisor: dict[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    workbench = runtime.get("workbench") if isinstance(runtime.get("workbench"), dict) else {}
+    if not state:
+        blockers.append("launcher_state_missing")
+    if not str(state.get("sessionId") or "").strip():
+        blockers.append("session_id_missing")
+    if not str(state.get("runtimeSceneId") or "").strip() or not str(state.get("runtimeSceneDir") or "").strip():
+        blockers.append("runtime_scene_missing")
+    if bool(supervisor.get("alive")):
+        blockers.append("supervisor_already_alive")
+    if not bool(workbench.get("backendAlive")):
+        blockers.append("backend_not_alive")
+    if not bool(workbench.get("backendHealthy")):
+        blockers.append("backend_not_healthy")
+    if str(workbench.get("observedState") or "").strip().lower() != "open":
+        blockers.append("workbench_not_open")
+    if not bool(workbench.get("browserWindowAlive")):
+        blockers.append("browser_window_not_alive")
+    return blockers
 
 
 def _guardian_responsibility(

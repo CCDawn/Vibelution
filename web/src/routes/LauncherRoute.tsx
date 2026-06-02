@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import {
   getLauncherStatus,
+  reattachLauncherSupervisor,
   restartLauncherBundle,
   startLauncherBundle,
   stopLauncherBundle,
@@ -147,6 +148,7 @@ export function LauncherRoute() {
         loadFailed: "Launcher 状态读取失败",
         loading: "正在读取 Launcher 状态",
         commandDone: "命令已提交",
+        reattachSupervisor: "重新接管",
         targetMode: "目标模式",
         owned: "已纳入",
         legacyAdapter: "旧适配",
@@ -199,6 +201,7 @@ export function LauncherRoute() {
         loadFailed: "Launcher status failed",
         loading: "Loading Launcher status",
         commandDone: "Command submitted",
+        reattachSupervisor: "Reattach",
         targetMode: "Target Mode",
         owned: "Owned",
         legacyAdapter: "Legacy Adapter",
@@ -237,14 +240,29 @@ export function LauncherRoute() {
       setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
     },
   });
+  const supervisorMutation = useMutation({
+    mutationFn: reattachLauncherSupervisor,
+    onSuccess: (response) => {
+      setNotice({
+        tone: response.accepted ? "success" : "warning",
+        text: response.message || copy.commandDone,
+      });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.launcherStatus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.runtimeSummary() });
+    },
+    onError: (error) => {
+      setNotice({ tone: "error", text: error instanceof Error ? error.message : String(error) });
+    },
+  });
 
   const status = statusQuery.data as LauncherStatusWithGuardian | undefined;
   const bundle = status?.projectBundle;
   const guardian = status?.guardianAdapter;
   const componentRows = useMemo(() => sortComponents(bundle?.components ?? []), [bundle?.components]);
-  const busy = controlMutation.isPending;
+  const busy = controlMutation.isPending || supervisorMutation.isPending;
   const headerTone = stateTone(bundle?.overallState ?? status?.launcher.phase ?? "", Boolean(bundle));
   const transitionAt = compactDate(bundle?.lastOperation.transitionAt ?? "", locale);
+  const canRequestSupervisorReattach = Boolean(status && guardian?.supervisor && !guardian.supervisor.alive);
 
   return (
     <section className={styles.route} aria-label={copy.title}>
@@ -366,6 +384,19 @@ export function LauncherRoute() {
             <strong>{copy.owned}: {guardian?.ownedCount ?? 0}</strong>
             <strong>{copy.legacyAdapter}: {guardian?.adapterCount ?? 0}</strong>
             <strong>{copy.targetMode}: {guardian?.targetMode || "-"}</strong>
+          </div>
+          <div className={styles.supervisorToolbar}>
+            <span>{guardian?.supervisor?.detail || "-"}</span>
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={() => supervisorMutation.mutate()}
+              disabled={busy || !canRequestSupervisorReattach}
+              title={copy.reattachSupervisor}
+            >
+              {supervisorMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
+              <span>{copy.reattachSupervisor}</span>
+            </button>
           </div>
           <dl className={styles.supervisorGrid}>
             <Spec label={copy.supervisor} value={guardian?.supervisor?.status || "-"} />
