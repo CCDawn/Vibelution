@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from core.web.services.rag_retrieval_service import RagRetrievalError, retrieve_rag_contexts
 from core.web.services.team_knowledge_service import (
     TeamKnowledgeError,
     TeamKnowledgeNotFoundError,
@@ -212,6 +213,38 @@ def knowledge_search(
     except TeamKnowledgeNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except TeamKnowledgeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/knowledge/rag/retrieve")
+def knowledge_rag_retrieve(
+    agentId: str = "",
+    query: str = "",
+    teamId: str = "",
+    knowledgeBaseId: str = "",
+    tags: list[str] = Query(default=[]),
+    retrievalMode: str = "hybrid",
+    provider: str = "local",
+    topK: int = 5,
+    maxContextChars: int = 1200,
+) -> dict:
+    try:
+        return retrieve_rag_contexts(
+            agent_id=agentId,
+            query=query,
+            team_id=teamId,
+            knowledge_base_id=knowledgeBaseId,
+            tags=tags,
+            retrieval_mode=retrievalMode,
+            provider=provider,
+            top_k=topK,
+            max_context_chars=maxContextChars,
+        )
+    except TeamKnowledgePermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except TeamKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RagRetrievalError, TeamKnowledgeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

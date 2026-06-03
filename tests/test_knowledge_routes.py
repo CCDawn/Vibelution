@@ -204,6 +204,67 @@ def test_knowledge_search_permission_audit_and_rating_suggestion_routes(tmp_path
     assert audit_response.json()["summary"]["knowledgeBaseCount"] == 1
 
 
+def test_knowledge_rag_retrieve_route_returns_contexts_and_citations(tmp_path, monkeypatch):
+    client, team, lead, member, _outsider = _setup(tmp_path, monkeypatch)
+    base = client.post(
+        f"/api/teams/{team['teamId']}/knowledge-bases",
+        json={"name": "RAG Route KB", "actorAgentId": lead["agentId"]},
+    ).json()
+    proposal = client.post(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals",
+        json={
+            "proposedByAgentId": member["agentId"],
+            "title": "RAG route context",
+            "summary": "RAG route should expose compact context candidates.",
+            "content": "RAG route retrieval returns cited context blocks without injecting prompt text by default.",
+            "tags": ["rag", "route"],
+        },
+    ).json()
+    applied = client.patch(
+        f"/api/knowledge-bases/{base['knowledgeBaseId']}/refinement-proposals/{proposal['proposalId']}/review",
+        json={"status": "approved", "reviewedByAgentId": lead["agentId"]},
+    ).json()
+
+    response = client.get(
+        "/api/knowledge/rag/retrieve",
+        params={
+            "agentId": member["agentId"],
+            "query": "rag route citations",
+            "knowledgeBaseId": base["knowledgeBaseId"],
+            "retrievalMode": "hybrid",
+            "provider": "local",
+            "topK": 3,
+            "maxContextChars": 240,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schemaVersion"] == 1
+    assert payload["request"]["retrievalMode"] == "hybrid"
+    assert payload["request"]["provider"] == "local"
+    assert payload["summary"]["contextCount"] == 1
+    assert payload["summary"]["citationCount"] == 1
+    context = payload["contexts"][0]
+    assert context["source"]["teamId"] == team["teamId"]
+    assert context["source"]["knowledgeBaseId"] == base["knowledgeBaseId"]
+    assert context["source"]["knowledgeItemId"] == applied["item"]["knowledgeItemId"]
+    assert payload["citations"][0]["contextId"] == context["contextId"]
+    assert payload["retrievalPolicy"]["injectsPromptByDefault"] is False
+
+
+def test_knowledge_rag_retrieve_route_rejects_invalid_mode(tmp_path, monkeypatch):
+    client, _team, _lead, member, _outsider = _setup(tmp_path, monkeypatch)
+
+    response = client.get(
+        "/api/knowledge/rag/retrieve",
+        params={"agentId": member["agentId"], "query": "rag", "retrievalMode": "vector_magic"},
+    )
+
+    assert response.status_code == 422
+    assert "Unsupported RAG retrieval mode" in response.json()["detail"]
+
+
 def test_knowledge_ingestion_package_route_creates_pending_candidate_only(tmp_path, monkeypatch):
     client, team, lead, member, outsider = _setup(tmp_path, monkeypatch)
     base = client.post(
