@@ -200,7 +200,8 @@
 }
 
 .componentPanel,
-.guardianPanel {
+.guardianPanel,
+.evidencePanel {
   grid-column: span 3;
 }
 
@@ -240,6 +241,83 @@
   overflow: hidden;
   border: 1px solid var(--border-soft);
   border-radius: 8px;
+}
+
+.evidenceStack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 10px;
+}
+
+.evidenceLine,
+.evidenceList {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 6px 10px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card) 72%, transparent);
+}
+
+.evidenceList {
+  grid-template-rows: auto;
+}
+
+.evidenceLine > span,
+.evidenceList > span {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.evidenceLine strong,
+.evidenceLine small,
+.evidenceItem strong,
+.evidenceItem small,
+.evidenceList > small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidenceLine strong,
+.evidenceItem strong {
+  color: var(--fg-primary);
+  font-size: 0.82rem;
+}
+
+.evidenceLine small,
+.evidenceItem small,
+.evidenceList > small {
+  grid-column: 2;
+  color: var(--fg-secondary);
+  font-size: 0.76rem;
+}
+
+.evidenceItem {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.72fr) minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.evidenceItem + .evidenceItem {
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--border-soft) 66%, transparent);
+}
+
+.evidenceItem[data-tone="success"] strong {
+  color: var(--state-success);
+}
+
+.evidenceItem[data-tone="error"] strong {
+  color: var(--state-error);
 }
 
 .guardianSummary {
@@ -432,7 +510,8 @@
   }
 
   .componentPanel,
-  .guardianPanel {
+  .guardianPanel,
+  .evidencePanel {
     grid-column: span 2;
   }
 
@@ -476,8 +555,21 @@
   }
 
   .componentPanel,
-  .guardianPanel {
+  .guardianPanel,
+  .evidencePanel {
     grid-column: span 1;
+  }
+
+  .evidenceLine,
+  .evidenceList,
+  .evidenceItem {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .evidenceLine small,
+  .evidenceItem small,
+  .evidenceList > small {
+    grid-column: 1;
   }
 
   .guardianSummary {

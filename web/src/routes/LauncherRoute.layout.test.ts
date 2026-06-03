@@ -31,7 +31,12 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).toContain("projectBundle");
     expect(routeSource).toContain("lastOperation");
     expect(routeSource).toContain("controlPlane");
+    expect(routeSource).toContain("controlPlaneEvidence");
+    expect(routeSource).toContain("controlEvidence");
     expect(routeSource).toContain("guardianAdapter");
+    expect(routeSource).toContain("evidencePanel");
+    expect(routeSource).toContain("evidenceStack");
+    expect(routeSource).toContain("EvidenceList");
     expect(routeSource).toContain("guardianTable");
     expect(routeSource).toContain("supervisorGrid");
     expect(routeSource).toContain("supervisorToolbar");
@@ -41,6 +46,8 @@ describe("LauncherRoute layout contract", () => {
     expect(routeSource).not.toContain("cardGrid");
     expect(styles.summaryStrip).toBeTypeOf("string");
     expect(styles.componentTable).toBeTypeOf("string");
+    expect(styles.evidencePanel).toBeTypeOf("string");
+    expect(styles.evidenceStack).toBeTypeOf("string");
     expect(styles.guardianTable).toBeTypeOf("string");
     expect(styles.supervisorGrid).toBeTypeOf("string");
     expect(styles.supervisorToolbar).toBeTypeOf("string");

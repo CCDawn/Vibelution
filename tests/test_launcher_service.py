@@ -68,6 +68,100 @@ def test_launcher_status_exposes_guardian_adapter_migration_contract(tmp_path, m
     assert responsibilities["runtime_scene_logging"]["owner"] == "runtime_scene_service"
 
 
+def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
+    runtime_dir = tmp_path / ".runtime" / "runtime-manager"
+    inbox_dir = runtime_dir / "inbox"
+    processing_dir = runtime_dir / "processing"
+    results_dir = runtime_dir / "results"
+    for directory in (inbox_dir, processing_dir, results_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+    state_path = runtime_dir / "state.json"
+    events_path = runtime_dir / "events.jsonl"
+    state_path.write_text(
+        json.dumps(
+            {
+                "stateVersion": 7,
+                "runtimeState": "running",
+                "managerPid": 3210,
+                "updatedAt": "2026-06-03T00:00:00+00:00",
+                "command": {
+                    "activeCommandId": "cmd-active",
+                    "activeType": "open_workbench",
+                    "requestedBy": "launcher_api",
+                    "startedAt": "2026-06-03T00:00:01+00:00",
+                    "noBrowser": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (inbox_dir / "cmd-pending.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-pending",
+                "type": "restart_workbench",
+                "requestedBy": "launcher_api",
+                "requestedAt": "2026-06-03T00:00:02+00:00",
+                "args": {"reason": "launcher_restart", "source": "launcher_api"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (processing_dir / "cmd-processing.json").write_text(
+        json.dumps({"commandId": "cmd-processing", "type": "close_workbench", "requestedBy": "web_ui"}),
+        encoding="utf-8",
+    )
+    (results_dir / "cmd-result.json").write_text(
+        json.dumps(
+            {
+                "commandId": "cmd-result",
+                "ok": True,
+                "completed": True,
+                "message": "Workbench opened.",
+                "stateVersion": 8,
+            }
+        ),
+        encoding="utf-8",
+    )
+    events_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "command.completed", "at": "2026-06-03T00:00:03+00:00", "payload": {"commandId": "cmd-result", "ok": True, "message": "done"}}),
+                json.dumps({"type": "daemon.stopped", "at": "2026-06-03T00:00:04+00:00", "payload": {"commandId": "cmd-stop"}}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher_service, "STATE_PATH", state_path)
+    monkeypatch.setattr(launcher_service, "INBOX_DIR", inbox_dir)
+    monkeypatch.setattr(launcher_service, "PROCESSING_DIR", processing_dir)
+    monkeypatch.setattr(launcher_service, "RESULTS_DIR", results_dir)
+    monkeypatch.setattr(launcher_service, "EVENTS_PATH", events_path)
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", tmp_path / ".runtime" / "launcher" / "state.json")
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(
+        launcher_service,
+        "get_runtime_summary",
+        lambda: {
+            "workbench": {},
+            "runtimeManager": {"running": True, "runtimeState": "running", "managerPid": 3210},
+            "lifecycleProof": {},
+        },
+    )
+
+    payload = launcher_service.get_launcher_status()
+
+    evidence = payload["controlPlaneEvidence"]
+    assert evidence["schemaVersion"] == 1
+    assert evidence["state"]["stateVersion"] == 7
+    assert evidence["state"]["activeCommand"]["commandId"] == "cmd-active"
+    assert evidence["queue"]["pendingCount"] == 1
+    assert evidence["queue"]["processingCount"] == 1
+    assert evidence["queue"]["pending"][0]["reason"] == "launcher_restart"
+    assert evidence["results"]["recent"][0]["commandId"] == "cmd-result"
+    assert evidence["events"]["recent"][0]["type"] == "daemon.stopped"
+
+
 def test_launcher_supervisor_snapshot_reports_recorded_dead_pid(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)

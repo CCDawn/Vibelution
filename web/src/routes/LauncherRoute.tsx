@@ -28,7 +28,57 @@ type LauncherGuardianResponsibility = {
   detail: string;
 };
 
+type LauncherControlPlaneCommand = {
+  commandId: string;
+  type: string;
+  requestedBy: string;
+  requestedAt: string;
+  reason: string;
+  source: string;
+  noBrowser: boolean;
+  stopManager: boolean;
+};
+
+type LauncherControlPlaneResult = {
+  commandId: string;
+  ok: boolean;
+  completed: boolean;
+  message: string;
+  errorType: string;
+  stateVersion: number;
+};
+
+type LauncherControlPlaneEvent = {
+  type: string;
+  at: string;
+  commandId: string;
+  ok: boolean | null;
+  message: string;
+};
+
 type LauncherStatusWithGuardian = Awaited<ReturnType<typeof getLauncherStatus>> & {
+  controlPlaneEvidence?: {
+    schemaVersion: number;
+    state: {
+      stateVersion: number;
+      runtimeState: string;
+      managerPid: number;
+      updatedAt: string;
+      activeCommand: LauncherControlPlaneCommand;
+    };
+    queue: {
+      pendingCount: number;
+      processingCount: number;
+      pending: LauncherControlPlaneCommand[];
+      processing: LauncherControlPlaneCommand[];
+    };
+    results: {
+      recent: LauncherControlPlaneResult[];
+    };
+    events: {
+      recent: LauncherControlPlaneEvent[];
+    };
+  };
   guardianAdapter?: {
     schemaVersion: number;
     mode: string;
@@ -115,6 +165,7 @@ export function LauncherRoute() {
         open: "打开",
         bundle: "项目整体",
         controlPlane: "控制面",
+        controlEvidence: "控制面证据",
         components: "组件",
         guardian: "守护归并",
         lastOperation: "最近动作",
@@ -156,6 +207,11 @@ export function LauncherRoute() {
         stdout: "stdout",
         stderr: "stderr",
         scene: "现场",
+        pending: "待执行",
+        processing: "执行中",
+        activeCommand: "当前命令",
+        recentResults: "最近结果",
+        recentEvents: "最近事件",
       }
     : {
         eyebrow: "Launcher",
@@ -168,6 +224,7 @@ export function LauncherRoute() {
         open: "Open",
         bundle: "Project Bundle",
         controlPlane: "Control Plane",
+        controlEvidence: "Control Evidence",
         components: "Components",
         guardian: "Guardian Merge",
         lastOperation: "Last Operation",
@@ -209,6 +266,11 @@ export function LauncherRoute() {
         stdout: "stdout",
         stderr: "stderr",
         scene: "Scene",
+        pending: "Pending",
+        processing: "Processing",
+        activeCommand: "Active Command",
+        recentResults: "Recent Results",
+        recentEvents: "Recent Events",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
@@ -258,6 +320,7 @@ export function LauncherRoute() {
   const status = statusQuery.data as LauncherStatusWithGuardian | undefined;
   const bundle = status?.projectBundle;
   const guardian = status?.guardianAdapter;
+  const evidence = status?.controlPlaneEvidence;
   const componentRows = useMemo(() => sortComponents(bundle?.components ?? []), [bundle?.components]);
   const busy = controlMutation.isPending || supervisorMutation.isPending;
   const headerTone = stateTone(bundle?.overallState ?? status?.launcher.phase ?? "", Boolean(bundle));
@@ -346,6 +409,44 @@ export function LauncherRoute() {
             <Spec label="reason" value={bundle?.lastReason || "-"} />
             <Spec label="failure" value={bundle?.failureMessage || "-"} />
           </dl>
+        </section>
+
+        <section className={`${styles.panel} ${styles.evidencePanel}`}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.controlEvidence}</p>
+            <strong>{evidence?.state.runtimeState || "-"}</strong>
+          </div>
+          <dl className={styles.specGrid}>
+            <Spec label="state" value={String(evidence?.state.stateVersion ?? "-")} />
+            <Spec label="manager" value={String(evidence?.state.managerPid || "-")} />
+            <Spec label={copy.pending} value={String(evidence?.queue.pendingCount ?? 0)} />
+            <Spec label={copy.processing} value={String(evidence?.queue.processingCount ?? 0)} />
+          </dl>
+          <div className={styles.evidenceStack}>
+            <EvidenceLine
+              label={copy.activeCommand}
+              primary={evidence?.state.activeCommand?.commandId || "-"}
+              secondary={[evidence?.state.activeCommand?.type, evidence?.state.activeCommand?.requestedBy].filter(Boolean).join(" / ") || "-"}
+            />
+            <EvidenceList
+              label={copy.recentResults}
+              items={(evidence?.results.recent ?? []).slice(0, 3).map((item) => ({
+                id: item.commandId,
+                primary: item.commandId || "-",
+                secondary: `${item.ok ? "ok" : "failed"} · ${item.message || item.errorType || "-"}`,
+                tone: item.ok ? "success" : "error",
+              }))}
+            />
+            <EvidenceList
+              label={copy.recentEvents}
+              items={(evidence?.events.recent ?? []).slice(0, 3).map((item) => ({
+                id: `${item.at}-${item.type}-${item.commandId}`,
+                primary: item.type || "-",
+                secondary: [item.commandId, compactDate(item.at, locale)].filter(Boolean).join(" · ") || "-",
+                tone: item.ok === false ? "error" : item.ok === true ? "success" : "neutral",
+              }))}
+            />
+          </div>
         </section>
 
         <section className={styles.panel}>
@@ -510,5 +611,35 @@ function Spec({ label, value }: { label: string; value: string }) {
       <dt>{label}</dt>
       <dd>{value}</dd>
     </>
+  );
+}
+
+function EvidenceLine({ label, primary, secondary }: { label: string; primary: string; secondary: string }) {
+  return (
+    <div className={styles.evidenceLine}>
+      <span>{label}</span>
+      <strong>{primary}</strong>
+      <small>{secondary}</small>
+    </div>
+  );
+}
+
+function EvidenceList({
+  label,
+  items,
+}: {
+  label: string;
+  items: Array<{ id: string; primary: string; secondary: string; tone: "neutral" | "success" | "error" }>;
+}) {
+  return (
+    <div className={styles.evidenceList}>
+      <span>{label}</span>
+      {items.length ? items.map((item) => (
+        <div key={item.id || item.primary} className={styles.evidenceItem} data-tone={item.tone}>
+          <strong>{item.primary}</strong>
+          <small>{item.secondary}</small>
+        </div>
+      )) : <small>-</small>}
+    </div>
   );
 }
