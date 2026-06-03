@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from core.runtime_manager import ensure_daemon_running, submit_command
-from core.runtime_manager.constants import LAUNCHER_STATE_PATH
+from core.runtime_manager.constants import EVENTS_PATH, INBOX_DIR, LAUNCHER_STATE_PATH, PROCESSING_DIR, RESULTS_DIR, STATE_PATH
 from core.runtime_manager.workbench_controller import _is_process_alive
 
 from .i18n import get_web_language, text_for
@@ -67,6 +68,7 @@ def get_launcher_status() -> dict[str, Any]:
             ),
         },
         "projectBundle": _project_bundle_from_runtime(runtime),
+        "controlPlaneEvidence": _control_plane_evidence(),
         "guardianAdapter": _guardian_adapter_from_runtime(runtime),
         "runtimeManager": runtime.get("runtimeManager") or {},
         "lifecycleProof": runtime.get("lifecycleProof") or {},
@@ -427,6 +429,145 @@ def _load_launcher_state() -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _control_plane_evidence() -> dict[str, Any]:
+    state = _load_json_file(STATE_PATH)
+    pending_commands = _recent_command_files(INBOX_DIR, limit=5)
+    processing_commands = _recent_command_files(PROCESSING_DIR, limit=5)
+    recent_results = _recent_result_files(RESULTS_DIR, limit=5)
+    recent_events = _recent_runtime_manager_events(EVENTS_PATH, limit=8)
+    active_command = state.get("command") if isinstance(state.get("command"), dict) else {}
+    return {
+        "schemaVersion": 1,
+        "state": {
+            "stateVersion": int(state.get("stateVersion") or 0),
+            "runtimeState": str(state.get("runtimeState") or ""),
+            "managerPid": int(state.get("managerPid") or 0),
+            "updatedAt": str(state.get("updatedAt") or ""),
+            "activeCommand": _command_summary(active_command),
+        },
+        "queue": {
+            "pendingCount": _file_count(INBOX_DIR),
+            "processingCount": _file_count(PROCESSING_DIR),
+            "pending": pending_commands,
+            "processing": processing_commands,
+        },
+        "results": {
+            "recent": recent_results,
+        },
+        "events": {
+            "recent": recent_events,
+        },
+    }
+
+
+def _load_json_file(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _file_count(directory: Path) -> int:
+    try:
+        return sum(1 for path in directory.glob("*.json") if path.is_file())
+    except OSError:
+        return 0
+
+
+def _recent_command_files(directory: Path, *, limit: int) -> list[dict[str, Any]]:
+    commands: list[dict[str, Any]] = []
+    try:
+        files = sorted((path for path in directory.glob("*.json") if path.is_file()), key=lambda path: path.stat().st_mtime, reverse=True)
+    except OSError:
+        return commands
+    for path in files[: max(0, limit)]:
+        payload = _load_json_file(path)
+        if payload:
+            commands.append(_command_summary(payload))
+    return commands
+
+
+def _recent_result_files(directory: Path, *, limit: int) -> list[dict[str, Any]]:
+    results: list[dict[str, Any]] = []
+    try:
+        files = sorted((path for path in directory.glob("*.json") if path.is_file()), key=lambda path: path.stat().st_mtime, reverse=True)
+    except OSError:
+        return results
+    for path in files[: max(0, limit)]:
+        payload = _load_json_file(path)
+        if payload:
+            results.append(_result_summary(payload))
+    return results
+
+
+def _recent_runtime_manager_events(path: Path, *, limit: int) -> list[dict[str, Any]]:
+    if limit <= 0:
+        return []
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            size = handle.tell()
+            handle.seek(max(0, size - 65536))
+            raw = handle.read()
+    except OSError:
+        return []
+    lines = raw.decode("utf-8", errors="replace").splitlines()
+    events: list[dict[str, Any]] = []
+    for line in reversed(lines):
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        event_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+        events.append(
+            {
+                "type": str(payload.get("type") or ""),
+                "at": str(payload.get("at") or ""),
+                "commandId": str(event_payload.get("commandId") or ""),
+                "ok": bool(event_payload.get("ok")) if "ok" in event_payload else None,
+                "message": _truncate(str(event_payload.get("message") or ""), 180),
+            }
+        )
+        if len(events) >= limit:
+            break
+    return events
+
+
+def _command_summary(command: dict[str, Any]) -> dict[str, Any]:
+    args = command.get("args") if isinstance(command.get("args"), dict) else {}
+    return {
+        "commandId": str(command.get("commandId") or command.get("activeCommandId") or ""),
+        "type": str(command.get("type") or command.get("activeType") or ""),
+        "requestedBy": str(command.get("requestedBy") or ""),
+        "requestedAt": str(command.get("requestedAt") or command.get("startedAt") or ""),
+        "reason": str(args.get("reason") or ""),
+        "source": str(args.get("source") or ""),
+        "noBrowser": bool(command.get("noBrowser") if "noBrowser" in command else args.get("noBrowser")),
+        "stopManager": bool(command.get("stopManager") if "stopManager" in command else args.get("stopManager")),
+    }
+
+
+def _result_summary(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "commandId": str(result.get("commandId") or ""),
+        "ok": bool(result.get("ok")),
+        "completed": bool(result.get("completed")),
+        "message": _truncate(str(result.get("message") or ""), 220),
+        "errorType": str(result.get("errorType") or ""),
+        "stateVersion": int(result.get("stateVersion") or 0),
+    }
+
+
+def _truncate(value: str, limit: int) -> str:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)] + "…"
 
 
 def _launcher_supervisor_reattach_blockers(
