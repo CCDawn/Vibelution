@@ -1657,7 +1657,7 @@ def _require_base_with_team(knowledge_base_id: str) -> tuple[dict[str, Any], dic
             continue
         base = _find_knowledge_base(team_id, normalized_id)
         if base:
-            return team, base
+            return team_service.get_team(team_id), base
     raise TeamKnowledgeNotFoundError("Knowledge base not found.")
 
 
