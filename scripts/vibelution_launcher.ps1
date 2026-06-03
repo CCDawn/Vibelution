@@ -3843,8 +3843,6 @@ function Start-ManagedBrowser {
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-session-crashed-bubble",
-        "--disable-gpu",
-        "--disable-direct-composition",
         "--disable-background-networking",
         "--disable-background-mode",
         "--disable-component-update",

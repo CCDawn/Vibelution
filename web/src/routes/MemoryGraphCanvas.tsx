@@ -169,7 +169,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     light.position.set(12, 18, 16);
     scene.add(light);
 
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    renderer.setPixelRatio(1);
     renderer.setClearColor(0x000000, 0);
     renderer.domElement.style.width = "100%";
     renderer.domElement.style.height = "100%";
@@ -177,13 +177,13 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
 
     const nodeMaterials: THREE.Material[] = [];
     const hitObjects = new Map<string, THREE.Mesh>();
-    const planetGeometry = new THREE.SphereGeometry(0.3, 18, 18);
-    const planetSurfaceGeometry = new THREE.SphereGeometry(0.305, 14, 10);
+    const planetGeometry = new THREE.SphereGeometry(0.3, 12, 10);
+    const planetSurfaceGeometry = new THREE.SphereGeometry(0.305, 10, 8);
     const starGeometry = new THREE.IcosahedronGeometry(0.42, 1);
     const starFacetGeometry = new THREE.IcosahedronGeometry(0.428, 1);
     const satelliteGeometry = new THREE.DodecahedronGeometry(0.28, 0);
     const satelliteFacetGeometry = new THREE.DodecahedronGeometry(0.286, 0);
-    const hitSphere = new THREE.SphereGeometry(1, 12, 12);
+    const hitSphere = new THREE.SphereGeometry(1, 8, 8);
     const trackMaterial = <T extends THREE.Material>(material: T) => {
       nodeMaterials.push(material);
       return material;
@@ -356,7 +356,65 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     let moved = false;
     let lastX = 0;
     let lastY = 0;
-    let raf = 0;
+    let renderRaf = 0;
+    let interactionRaf = 0;
+    let renderRequested = false;
+    let interactionActive = false;
+    const updateLabels = () => {
+      if (!labelLayer) {
+        return;
+      }
+      const rect = container.getBoundingClientRect();
+      const projected = new THREE.Vector3();
+      root.updateMatrixWorld(true);
+      camera.updateMatrixWorld(true);
+      for (const [nodeId, label] of labelElements) {
+        const position = positions.get(nodeId);
+        if (!position) {
+          label.style.opacity = "0";
+          continue;
+        }
+        projected.copy(position).applyMatrix4(root.matrixWorld).project(camera);
+        const x = (projected.x * 0.5 + 0.5) * rect.width;
+        const y = (-projected.y * 0.5 + 0.5) * rect.height;
+        label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, calc(-100% - 20px)) scale(${selectedNodeId === nodeId ? 1.08 : 1})`;
+        label.style.opacity = projected.z < 1 ? (selectedNodeId === nodeId ? "1" : "0.86") : "0";
+        label.style.zIndex = String(Math.max(1, Math.round((1 - projected.z) * 100)));
+      }
+    };
+    const renderFrame = () => {
+      updateLabels();
+      renderer.render(scene, camera);
+    };
+    const requestRender = () => {
+      if (renderRequested) {
+        return;
+      }
+      renderRequested = true;
+      renderRaf = requestAnimationFrame(() => {
+        renderRequested = false;
+        renderFrame();
+      });
+    };
+    const renderInteractionFrame = () => {
+      if (!interactionActive) {
+        return;
+      }
+      renderFrame();
+      interactionRaf = requestAnimationFrame(renderInteractionFrame);
+    };
+    const startInteractionLoop = () => {
+      if (interactionActive) {
+        return;
+      }
+      interactionActive = true;
+      interactionRaf = requestAnimationFrame(renderInteractionFrame);
+    };
+    const stopInteractionLoop = () => {
+      interactionActive = false;
+      cancelAnimationFrame(interactionRaf);
+      requestRender();
+    };
     const resize = () => {
       const rect = container.getBoundingClientRect();
       width = Math.max(1, rect.width);
@@ -364,6 +422,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       renderer.setSize(width, height, false);
+      requestRender();
     };
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0 && event.button !== 1) {
@@ -375,6 +434,7 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       lastX = event.clientX;
       lastY = event.clientY;
       renderer.domElement.setPointerCapture(event.pointerId);
+      startInteractionLoop();
     };
     const onPointerMove = (event: PointerEvent) => {
       if (!dragMode) {
@@ -393,14 +453,17 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
         root.position.y -= dy * worldPerPixel;
         root.position.y = Math.max(-28, Math.min(28, root.position.y));
         root.position.x = Math.max(-36, Math.min(36, root.position.x));
+        requestRender();
         return;
       }
       root.rotation.y += dx * 0.006;
       root.rotation.x += dy * 0.004;
       root.rotation.x = Math.max(-1.2, Math.min(1.2, root.rotation.x));
+      requestRender();
     };
     const onPointerUp = (event: PointerEvent) => {
       dragMode = "";
+      stopInteractionLoop();
       if (renderer.domElement.hasPointerCapture(event.pointerId)) {
         renderer.domElement.releasePointerCapture(event.pointerId);
       }
@@ -423,37 +486,12 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
       event.preventDefault();
       camera.position.z = Math.max(16, Math.min(90, camera.position.z + event.deltaY * 0.025));
       camera.lookAt(0, 0, 0);
+      requestRender();
     };
     const preventAuxClick = (event: MouseEvent) => {
       if (event.button === 1) {
         event.preventDefault();
       }
-    };
-    const animate = () => {
-      if (!dragMode) {
-        root.rotation.y += 0.0012;
-      }
-      if (labelLayer) {
-        const rect = container.getBoundingClientRect();
-        const projected = new THREE.Vector3();
-        root.updateMatrixWorld(true);
-        camera.updateMatrixWorld(true);
-        for (const [nodeId, label] of labelElements) {
-          const position = positions.get(nodeId);
-          if (!position) {
-            label.style.opacity = "0";
-            continue;
-          }
-          projected.copy(position).applyMatrix4(root.matrixWorld).project(camera);
-          const x = (projected.x * 0.5 + 0.5) * rect.width;
-          const y = (-projected.y * 0.5 + 0.5) * rect.height;
-          label.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, calc(-100% - 20px)) scale(${selectedNodeId === nodeId ? 1.08 : 1})`;
-          label.style.opacity = projected.z < 1 ? (selectedNodeId === nodeId ? "1" : "0.86") : "0";
-          label.style.zIndex = String(Math.max(1, Math.round((1 - projected.z) * 100)));
-        }
-      }
-      renderer.render(scene, camera);
-      raf = requestAnimationFrame(animate);
     };
     resize();
     const resizeObserver = new ResizeObserver(resize);
@@ -464,9 +502,10 @@ export function MemoryGraphCanvas({ nodes, edges, selectedNodeId, onSelectNode, 
     renderer.domElement.addEventListener("click", onClick);
     renderer.domElement.addEventListener("auxclick", preventAuxClick);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
-    animate();
+    requestRender();
     return () => {
-      cancelAnimationFrame(raf);
+      cancelAnimationFrame(renderRaf);
+      cancelAnimationFrame(interactionRaf);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       renderer.domElement.removeEventListener("pointermove", onPointerMove);

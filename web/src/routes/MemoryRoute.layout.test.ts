@@ -117,8 +117,10 @@ describe("MemoryRoute layout contract", () => {
     expect(graphCanvasSource).toContain("wireframe: true");
     expect(graphCanvasSource).toContain("flatShading: true");
     expect(graphCanvasSource).toContain("pickVisibleLabelIds");
-    expect(graphCanvasSource).toContain("setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))");
-    expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.3, 18, 18)");
+    expect(graphCanvasSource).toContain("setPixelRatio(1)");
+    expect(graphCanvasSource).toContain("renderInteractionFrame");
+    expect(graphCanvasSource).toContain("requestRender");
+    expect(graphCanvasSource).toContain("new THREE.SphereGeometry(0.3, 12, 10)");
     expect(graphCanvasSource).toContain("new THREE.IcosahedronGeometry(0.42, 1)");
     expect(graphCanvasSource).toContain("new THREE.DodecahedronGeometry(0.28, 0)");
     expect(graphCanvasSource).not.toContain("createGlowTexture");
@@ -131,6 +133,8 @@ describe("MemoryRoute layout contract", () => {
     expect(graphWorkerSource).toContain("runtime_scene: 34");
     expect(memoryCssSource).toContain(".graphCanvasShell");
     expect(memoryCssSource).toContain(".graphCanvasShell::after");
+    expect(memoryCssSource).toContain("min-height: 360px");
+    expect(memoryCssSource).toContain("min-height: 320px");
     expect(memoryCssSource).toContain("#06101d");
     expect(memoryCssSource).toContain("91px 91px");
     expect(memoryCssSource).toContain(".graphNodeBadge");
