@@ -57,6 +57,13 @@ def test_tool_registry_marks_research_knowledge_tool_as_explicit_allow(tmp_path,
     assert tool["permissionPolicy"]["requiresExplicitAllow"] is True
     assert "ToolPolicy.allowedTools" in tool["permissionPolicy"]["reason"]
 
+    rag_tool = next(item for item in payload["tools"] if item["name"] == "knowledge_rag_retrieve_tool")
+    assert rag_tool["source"] == "built_in"
+    assert rag_tool["llmVisible"] is True
+    assert rag_tool["category"] == "memory_context"
+    assert rag_tool["permissionPolicy"]["requiresExplicitAllow"] is True
+    assert "ToolPolicy.allowedTools" in rag_tool["permissionPolicy"]["reason"]
+
 
 def test_tool_registry_exposes_agent_scoped_tool_views(tmp_path, monkeypatch):
     monkeypatch.setattr(registry, "GENERATED_TOOLS_PATH", tmp_path / "generated_tools.json")

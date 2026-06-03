@@ -136,6 +136,7 @@ EXPLICIT_TOOL_POLICY_REQUIRED_TOOLS = {
     "knowledge_proposal_tool",
     "knowledge_governance_plan_tool",
     "knowledge_query_tool",
+    "knowledge_rag_retrieve_tool",
     "knowledge_operations_health_tool",
     "knowledge_rating_suggestion_tool",
     "knowledge_steward_recommendations_tool",

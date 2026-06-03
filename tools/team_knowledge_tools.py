@@ -18,6 +18,7 @@ KNOWLEDGE_GOVERNANCE_PLAN_TOOL_NAME = "knowledge_governance_plan_tool"
 KNOWLEDGE_STEWARD_RECOMMENDATIONS_TOOL_NAME = "knowledge_steward_recommendations_tool"
 KNOWLEDGE_STEWARD_WORKBENCH_TOOL_NAME = "knowledge_steward_workbench_tool"
 KNOWLEDGE_RATING_SUGGESTION_TOOL_NAME = "knowledge_rating_suggestion_tool"
+KNOWLEDGE_RAG_RETRIEVE_TOOL_NAME = "knowledge_rag_retrieve_tool"
 
 
 def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: int = 8) -> str:
@@ -89,6 +90,92 @@ def knowledge_query_tool(query: str = "", knowledge_base_id: str = "", limit: in
                 "error": type(exc).__name__,
                 "message": trim_lines(str(exc), max_lines=2),
                 "agentId": agent_id,
+            }
+        )
+
+
+def knowledge_rag_retrieve_tool(
+    query: str = "",
+    knowledge_base_id: str = "",
+    retrieval_mode: str = "hybrid",
+    provider: str = "local",
+    top_k: int = 5,
+    max_context_chars: int = 1200,
+) -> str:
+    """
+    Retrieve compact, cited RAG context candidates from formal Team Knowledge.
+
+    The tool is read-only. It does not mutate formal knowledge and does not
+    inject retrieved content into prompts by default.
+    """
+
+    runtime = _current_runtime()
+    agent_id = str(runtime.get("agentId") or "").strip()
+    blocked = _tool_policy_blocked(runtime, KNOWLEDGE_RAG_RETRIEVE_TOOL_NAME)
+    if blocked:
+        return _json_result(blocked)
+    requested_base_id = str(knowledge_base_id or "").strip()
+    memory_policy = runtime.get("memoryPolicy") if isinstance(runtime.get("memoryPolicy"), dict) else {}
+    allowed_base_ids = _policy_ids(memory_policy, "readKnowledgeBaseIds")
+    if requested_base_id and allowed_base_ids and requested_base_id not in allowed_base_ids:
+        return _json_result(_blocked_result(agent_id, "knowledge_base_not_in_memory_policy"))
+
+    try:
+        from core.web.services import rag_retrieval_service
+
+        payload = rag_retrieval_service.retrieve_rag_contexts(
+            agent_id=agent_id,
+            query=trim_lines(str(query or ""), max_lines=4).strip(),
+            knowledge_base_id=requested_base_id,
+            retrieval_mode=retrieval_mode,
+            provider=provider,
+            top_k=top_k,
+            max_context_chars=max_context_chars,
+        )
+        contexts = list(payload.get("contexts") or [])
+        citations = list(payload.get("citations") or [])
+        _record_event(
+            "knowledge.tool.rag_retrieve.succeeded",
+            runtime=runtime,
+            outcome="succeeded",
+            fields={
+                "knowledgeBaseId": requested_base_id,
+                "queryLength": len(trim_lines(str(query or ""), max_lines=4).strip()),
+                "contextCount": len(contexts),
+                "citationCount": len(citations),
+                "retrievalMode": str((payload.get("request") or {}).get("retrievalMode") or retrieval_mode),
+                "provider": str((payload.get("request") or {}).get("provider") or provider),
+            },
+        )
+        return _json_result(
+            {
+                "ok": True,
+                "status": "succeeded",
+                "agentId": agent_id,
+                "knowledgeBaseId": requested_base_id,
+                "summary": payload.get("summary") or {"contextCount": len(contexts), "citationCount": len(citations)},
+                "contexts": contexts,
+                "citations": citations,
+                "retrievalPolicy": payload.get("retrievalPolicy") or {},
+                "request": payload.get("request") or {},
+            }
+        )
+    except Exception as exc:
+        _record_event(
+            "knowledge.tool.rag_retrieve.failed",
+            runtime=runtime,
+            level="error",
+            outcome="failed",
+            fields={"knowledgeBaseId": requested_base_id, "errorType": type(exc).__name__},
+        )
+        return _json_result(
+            {
+                "ok": False,
+                "status": "failed",
+                "error": type(exc).__name__,
+                "message": trim_lines(str(exc), max_lines=2),
+                "agentId": agent_id,
+                "knowledgeBaseId": requested_base_id,
             }
         )
 
