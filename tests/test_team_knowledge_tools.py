@@ -52,6 +52,7 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
         if tool.name
         in {
             "knowledge_query_tool",
+            "knowledge_rag_retrieve_tool",
             "knowledge_proposal_tool",
             "knowledge_rating_suggestion_tool",
             "knowledge_operations_health_tool",
@@ -67,6 +68,7 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
 
     assert {tool.name for tool in tools} == {
         "knowledge_query_tool",
+        "knowledge_rag_retrieve_tool",
         "knowledge_proposal_tool",
         "knowledge_rating_suggestion_tool",
         "knowledge_operations_health_tool",
@@ -76,6 +78,7 @@ def test_team_knowledge_tools_are_llm_facing_but_hidden_without_explicit_allow(t
         "agent_message_tool",
     }
     assert "knowledge_query_tool" not in [tool.name for tool in visible]
+    assert "knowledge_rag_retrieve_tool" not in [tool.name for tool in visible]
     assert "knowledge_proposal_tool" not in [tool.name for tool in visible]
     assert "knowledge_rating_suggestion_tool" not in [tool.name for tool in visible]
     assert "knowledge_operations_health_tool" not in [tool.name for tool in visible]
@@ -246,6 +249,70 @@ def test_knowledge_query_tool_honors_memory_policy_base_ids(tmp_path, monkeypatc
     with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
         result = json.loads(
             team_knowledge_tools.knowledge_query_tool(
+                query="",
+                knowledge_base_id=other_base["knowledgeBaseId"],
+            )
+        )
+
+    assert result["ok"] is False
+    assert result["status"] == "blocked"
+    assert result["error"] == "knowledge_base_not_in_memory_policy"
+
+
+def test_knowledge_rag_retrieve_tool_returns_contexts_with_citations(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    agent_directory_service.update_agent_instance(
+        env["member"]["agentId"],
+        tool_policy={"allowedTools": ["knowledge_rag_retrieve_tool"]},
+        memory_policy={"readKnowledgeBaseIds": [env["base"]["knowledgeBaseId"]]},
+    )
+    proposal = team_knowledge_service.create_refinement_proposal(
+        env["base"]["knowledgeBaseId"],
+        source_artifact_ids=[],
+        proposed_by_agent_id=env["member"]["agentId"],
+        title="RAG tool knowledge",
+        content="RAG tool retrieval should return cited context candidates.",
+        tags=["rag-tool"],
+    )
+    reviewed = team_knowledge_service.review_refinement_proposal(
+        env["base"]["knowledgeBaseId"],
+        proposal["proposalId"],
+        status="approved",
+        reviewed_by_agent_id=env["lead"]["agentId"],
+    )
+
+    with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
+        result = json.loads(
+            team_knowledge_tools.knowledge_rag_retrieve_tool(
+                query="rag tool context",
+                knowledge_base_id=env["base"]["knowledgeBaseId"],
+                retrieval_mode="hybrid",
+                provider="local",
+                top_k=3,
+                max_context_chars=240,
+            )
+        )
+
+    assert result["ok"] is True
+    assert result["summary"]["contextCount"] == 1
+    assert result["summary"]["citationCount"] == 1
+    assert result["contexts"][0]["source"]["knowledgeItemId"] == reviewed["item"]["knowledgeItemId"]
+    assert result["citations"][0]["contextId"] == result["contexts"][0]["contextId"]
+    assert result["retrievalPolicy"]["injectsPromptByDefault"] is False
+
+
+def test_knowledge_rag_retrieve_tool_honors_memory_policy_base_ids(tmp_path, monkeypatch):
+    env = _seed_team_knowledge(tmp_path, monkeypatch)
+    agent_directory_service.update_agent_instance(
+        env["member"]["agentId"],
+        tool_policy={"allowedTools": ["knowledge_rag_retrieve_tool"]},
+        memory_policy={"readKnowledgeBaseIds": [env["base"]["knowledgeBaseId"]]},
+    )
+    other_base = team_knowledge_service.create_knowledge_base(env["team"]["teamId"], name="Other RAG KB", actor_agent_id=env["lead"]["agentId"])
+
+    with agent_directory_service.active_agent_runtime(env["member"]["agentId"], session_id="session-knowledge"):
+        result = json.loads(
+            team_knowledge_tools.knowledge_rag_retrieve_tool(
                 query="",
                 knowledge_base_id=other_base["knowledgeBaseId"],
             )

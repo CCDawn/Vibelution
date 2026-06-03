@@ -63,6 +63,7 @@ from tools.team_knowledge_tools import (
     knowledge_operations_health_tool as _knowledge_operations_health_impl,
     knowledge_proposal_tool as _knowledge_proposal_impl,
     knowledge_query_tool as _knowledge_query_impl,
+    knowledge_rag_retrieve_tool as _knowledge_rag_retrieve_impl,
     knowledge_rating_suggestion_tool as _knowledge_rating_suggestion_impl,
     knowledge_steward_recommendations_tool as _knowledge_steward_recommendations_impl,
     knowledge_steward_workbench_tool as _knowledge_steward_workbench_impl,
@@ -1091,6 +1092,41 @@ def create_key_tools() -> List[BaseTool]:
         return _knowledge_query_impl(query=query, knowledge_base_id=knowledge_base_id, limit=limit)
 
     @tool
+    def knowledge_rag_retrieve_tool(
+        query: str = "",
+        knowledge_base_id: str = "",
+        retrieval_mode: str = "hybrid",
+        provider: str = "local",
+        top_k: int = 5,
+        max_context_chars: int = 1200,
+    ) -> str:
+        """
+        【团队知识 RAG 检索】只读检索已审核团队正式知识，并返回可引用的紧凑上下文候选。
+
+        该工具返回 contexts 与 citations，不读取 pending proposal，不写入知识库，也不会默认注入 prompt。
+        只有 Agent 的 ToolPolicy.allowedTools 显式包含 knowledge_rag_retrieve_tool，且其团队/MemoryPolicy 允许读取目标知识库时才可用。
+
+        Args:
+            query: 查询关键词，可为空以查看最近正式知识
+            knowledge_base_id: 可选知识库 ID；为空时检索当前 Agent 可访问的知识库
+            retrieval_mode: exact / semantic / hybrid，默认 hybrid
+            provider: 当前支持 local
+            top_k: 最多返回上下文数量，范围 1-20
+            max_context_chars: 单条上下文最大字符数
+
+        Returns:
+            JSON 格式的 RAG context candidates、citations 和 retrievalPolicy
+        """
+        return _knowledge_rag_retrieve_impl(
+            query=query,
+            knowledge_base_id=knowledge_base_id,
+            retrieval_mode=retrieval_mode,
+            provider=provider,
+            top_k=top_k,
+            max_context_chars=max_context_chars,
+        )
+
+    @tool
     def knowledge_proposal_tool(
         knowledge_base_id: str,
         source_type: str,
@@ -1441,6 +1477,7 @@ def create_key_tools() -> List[BaseTool]:
         image2_generate_tool,
         research_knowledge_query_tool,
         knowledge_query_tool,
+        knowledge_rag_retrieve_tool,
         knowledge_proposal_tool,
         knowledge_ingestion_tool,
         knowledge_governance_tasks_tool,

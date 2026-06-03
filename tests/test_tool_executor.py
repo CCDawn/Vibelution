@@ -99,6 +99,8 @@ class TestToolExecutorInit:
 
         assert "research_knowledge_query_tool" in canonical_names
         assert "research_knowledge_query_tool" in llm_names
+        assert "knowledge_rag_retrieve_tool" in canonical_names
+        assert "knowledge_rag_retrieve_tool" in llm_names
 
     def test_tools_package_does_not_reexport_compat_aliases(self):
         """tools 包入口不再把底层 helper 伪装成 agent 工具别名。"""
@@ -485,6 +487,23 @@ class TestToolExecutorTimeout:
 
         assert action is None
         assert "research_knowledge_query_tool" in str(result)
+        assert "显式授权" in str(result)
+
+    def test_knowledge_rag_retrieve_tool_requires_explicit_tool_policy_allow(self, executor, monkeypatch):
+        from core.web.services import agent_directory_service
+
+        monkeypatch.setattr(agent_directory_service, "current_agent_runtime", lambda: {
+            "agentId": "agent-policy",
+            "toolPolicy": {
+                "policyId": "tool-agent-policy",
+                "allowedTools": [],
+                "blockedTools": [],
+            },
+        })
+        result, action = executor.execute("knowledge_rag_retrieve_tool", {"query": "governed context"})
+
+        assert action is None
+        assert "knowledge_rag_retrieve_tool" in str(result)
         assert "显式授权" in str(result)
 
     def test_spawn_agent_tool_internal_flag_is_not_forwarded_to_tool(self, executor):
