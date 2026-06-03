@@ -3105,6 +3105,10 @@
     grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
   }
 
+  .graphCanvasShell {
+    min-height: 360px;
+  }
+
   .detailPanel {
     grid-column: 1 / -1;
     max-height: 46vh;
@@ -3171,6 +3175,10 @@
   .itemPanel,
   .detailPanel {
     overflow: visible;
+  }
+
+  .graphCanvasShell {
+    min-height: 320px;
   }
 
   .detailPanel {
