@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.15 - 2026-06-04
+
+- Added per-turn `llmUsage` to chat session details, sourced from provider usage metadata only.
+- Changed Chat/Coding status display so "本轮真实输入" shows provider-observed input tokens, while missing provider usage is shown as unavailable instead of estimated.
+- Kept session history context as a separate estimate and added runtime-scene events for recorded versus missing LLM usage.
+
+## 0.10.14 - 2026-06-04
+
+- Increased Launcher route information density by replacing repeated lifecycle cards with a compact lifecycle matrix.
+- Consolidated control-plane evidence, recent command results, recent events, and guardian responsibilities into tighter console tables.
+- Fixed narrow viewport Launcher layout so panels keep natural height and no longer visually overlap.
+
 ## 0.10.13 - 2026-06-04
 
 - Changed the desktop launch chain so Start Menu / desktop entry opens the Launcher control surface first instead of directly starting the full workbench lifecycle.

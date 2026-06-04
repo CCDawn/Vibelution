@@ -26,31 +26,30 @@ describe("LauncherRoute layout contract", () => {
 
   it("renders a dense lifecycle console rather than a landing page", () => {
     expect(routeSource).toContain("summaryStrip");
-    expect(routeSource).toContain("componentTable");
+    expect(routeSource).toContain("statusTable");
+    expect(routeSource).toContain("matrixPanel");
     expect(routeSource).toContain("specGrid");
     expect(routeSource).toContain("projectBundle");
-    expect(routeSource).toContain("lastOperation");
+    expect(routeSource).toContain("StatusRow");
+    expect(routeSource).toContain("statusRows");
     expect(routeSource).toContain("controlPlane");
     expect(routeSource).toContain("controlPlaneEvidence");
     expect(routeSource).toContain("controlEvidence");
     expect(routeSource).toContain("guardianAdapter");
-    expect(routeSource).toContain("evidencePanel");
-    expect(routeSource).toContain("evidenceStack");
-    expect(routeSource).toContain("EvidenceList");
+    expect(routeSource).toContain("activityPanel");
+    expect(routeSource).toContain("CompactList");
     expect(routeSource).toContain("guardianTable");
-    expect(routeSource).toContain("supervisorGrid");
-    expect(routeSource).toContain("supervisorToolbar");
+    expect(routeSource).toContain("diagnosticsPanel");
     expect(routeSource).toContain("guardian?.supervisor?.stdoutPath");
     expect(routeSource).toContain("guardian?.supervisor?.stderrPath");
     expect(routeSource).not.toContain("hero");
     expect(routeSource).not.toContain("cardGrid");
     expect(styles.summaryStrip).toBeTypeOf("string");
-    expect(styles.componentTable).toBeTypeOf("string");
-    expect(styles.evidencePanel).toBeTypeOf("string");
-    expect(styles.evidenceStack).toBeTypeOf("string");
+    expect(styles.statusTable).toBeTypeOf("string");
+    expect(styles.matrixPanel).toBeTypeOf("string");
+    expect(styles.activityPanel).toBeTypeOf("string");
     expect(styles.guardianTable).toBeTypeOf("string");
-    expect(styles.supervisorGrid).toBeTypeOf("string");
-    expect(styles.supervisorToolbar).toBeTypeOf("string");
+    expect(styles.diagnosticsPanel).toBeTypeOf("string");
     expect(styles.specGrid).toBeTypeOf("string");
   });
 

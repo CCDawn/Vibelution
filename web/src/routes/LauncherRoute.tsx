@@ -100,6 +100,16 @@ type LauncherStatusWithGuardian = Awaited<ReturnType<typeof getLauncherStatus>> 
   };
 };
 
+type StatusRow = {
+  id: string;
+  label: string;
+  status: string;
+  pid: string;
+  mode: string;
+  detail: string;
+  ok: boolean;
+};
+
 const COMPONENT_ORDER = new Map([
   ["backend", 0],
   ["frontend", 1],
@@ -148,6 +158,10 @@ function stateTone(state: string, ok = true) {
   return "neutral";
 }
 
+function boolText(value: boolean | undefined, yes: string, no: string) {
+  return value ? yes : no;
+}
+
 export function LauncherRoute() {
   const { lang } = useAppI18n();
   const queryClient = useQueryClient();
@@ -163,15 +177,15 @@ export function LauncherRoute() {
         stop: "停止",
         restart: "重启",
         open: "打开",
-        bundle: "项目整体",
+        lifecycle: "生命周期",
+        matrix: "生命周期矩阵",
         controlPlane: "控制面",
-        controlEvidence: "控制面证据",
-        components: "组件",
+        controlEvidence: "证据",
         guardian: "守护归并",
-        lastOperation: "最近动作",
-        backend: "后端",
-        frontend: "前端",
-        browser: "浏览器",
+        diagnostics: "诊断详情",
+        activeCommand: "当前命令",
+        recentResults: "最近结果",
+        recentEvents: "最近事件",
         desired: "期望",
         observed: "观察",
         phase: "阶段",
@@ -181,16 +195,13 @@ export function LauncherRoute() {
         nextPhase: "下一阶段",
         stable: "稳定控制面",
         pid: "PID",
-        required: "必需",
         state: "状态",
         detail: "细节",
-        responsibility: "职责",
+        unit: "单元",
+        mode: "模式",
         port: "端口",
         listening: "监听",
         owner: "占用 PID",
-        dist: "dist",
-        orphaned: "孤儿进程",
-        managed: "受管",
         alive: "存活",
         healthy: "健康",
         yes: "是",
@@ -209,9 +220,12 @@ export function LauncherRoute() {
         scene: "现场",
         pending: "待执行",
         processing: "执行中",
-        activeCommand: "当前命令",
-        recentResults: "最近结果",
-        recentEvents: "最近事件",
+        queue: "队列",
+        reason: "原因",
+        source: "来源",
+        transition: "转换",
+        proof: "证明",
+        schema: "schema",
       }
     : {
         eyebrow: "Launcher",
@@ -222,15 +236,15 @@ export function LauncherRoute() {
         stop: "Stop",
         restart: "Restart",
         open: "Open",
-        bundle: "Project Bundle",
+        lifecycle: "Lifecycle",
+        matrix: "Lifecycle Matrix",
         controlPlane: "Control Plane",
-        controlEvidence: "Control Evidence",
-        components: "Components",
+        controlEvidence: "Evidence",
         guardian: "Guardian Merge",
-        lastOperation: "Last Operation",
-        backend: "Backend",
-        frontend: "Frontend",
-        browser: "Browser",
+        diagnostics: "Diagnostics",
+        activeCommand: "Active Command",
+        recentResults: "Recent Results",
+        recentEvents: "Recent Events",
         desired: "Desired",
         observed: "Observed",
         phase: "Phase",
@@ -240,16 +254,13 @@ export function LauncherRoute() {
         nextPhase: "Next Phase",
         stable: "Stable Control Plane",
         pid: "PID",
-        required: "Required",
         state: "State",
         detail: "Detail",
-        responsibility: "Responsibility",
+        unit: "Unit",
+        mode: "Mode",
         port: "Port",
         listening: "Listening",
         owner: "Owner PID",
-        dist: "dist",
-        orphaned: "Orphaned",
-        managed: "Managed",
         alive: "Alive",
         healthy: "Healthy",
         yes: "Yes",
@@ -268,9 +279,12 @@ export function LauncherRoute() {
         scene: "Scene",
         pending: "Pending",
         processing: "Processing",
-        activeCommand: "Active Command",
-        recentResults: "Recent Results",
-        recentEvents: "Recent Events",
+        queue: "Queue",
+        reason: "Reason",
+        source: "Source",
+        transition: "Transition",
+        proof: "Proof",
+        schema: "schema",
       };
 
   const [notice, setNotice] = useState<LauncherNotice>({ tone: "neutral", text: "" });
@@ -326,6 +340,72 @@ export function LauncherRoute() {
   const headerTone = stateTone(bundle?.overallState ?? status?.launcher.phase ?? "", Boolean(bundle));
   const transitionAt = compactDate(bundle?.lastOperation.transitionAt ?? "", locale);
   const canRequestSupervisorReattach = Boolean(status && guardian?.supervisor && !guardian.supervisor.alive);
+  const statusRows = useMemo<StatusRow[]>(() => {
+    const componentById = new Map(componentRows.map((component) => [component.id, component]));
+    const backend = componentById.get("backend");
+    const frontend = componentById.get("frontend");
+    const browser = componentById.get("browser");
+    return [
+      {
+        id: "project",
+        label: bundle?.id || "vibelution-project",
+        status: `${bundle?.desiredState || "-"} / ${bundle?.observedState || "-"}`,
+        pid: "-",
+        mode: bundle?.mode || "-",
+        detail: bundle?.statusLine || status?.launcher.message || "-",
+        ok: Boolean(bundle) && bundle?.overallState !== "failed",
+      },
+      {
+        id: "backend",
+        label: "backend",
+        status: backend?.state || (bundle?.backend.healthy ? "healthy" : "-"),
+        pid: String(bundle?.backend.pid || backend?.pid || "-"),
+        mode: `${copy.port} ${bundle?.backend.port || "-"} · ${copy.owner} ${bundle?.backend.portOwnerPid || "-"}`,
+        detail: `${copy.listening}: ${boolText(bundle?.backend.portListening, copy.yes, copy.no)} · ${copy.alive}: ${boolText(bundle?.backend.alive, copy.yes, copy.no)}`,
+        ok: Boolean(backend?.ok ?? bundle?.backend.healthy),
+      },
+      {
+        id: "frontend",
+        label: "frontend",
+        status: frontend?.state || (bundle?.frontend.distReady ? "ready" : "-"),
+        pid: String(frontend?.pid || "-"),
+        mode: bundle?.frontend.mode || "-",
+        detail: `dist: ${boolText(bundle?.frontend.distReady, copy.yes, copy.no)} · orphaned: ${boolText(bundle?.frontend.orphaned, copy.yes, copy.no)}`,
+        ok: Boolean(frontend?.ok ?? bundle?.frontend.distReady),
+      },
+      {
+        id: "browser",
+        label: "browser",
+        status: browser?.state || (bundle?.browser.alive ? "alive" : "stopped"),
+        pid: String(bundle?.browser.windowPid || browser?.pid || "-"),
+        mode: `managed: ${boolText(bundle?.browser.managed, copy.yes, copy.no)}`,
+        detail: browser?.detail || `${copy.alive}: ${boolText(bundle?.browser.alive, copy.yes, copy.no)}`,
+        ok: Boolean(browser?.ok ?? !bundle?.browser.alive),
+      },
+      {
+        id: "runtime_manager",
+        label: "runtime_manager",
+        status: status?.runtimeManager.runtimeState || "-",
+        pid: String(status?.runtimeManager.managerPid || "-"),
+        mode: `state ${status?.runtimeManager.stateVersion ?? "-"}`,
+        detail: evidence?.state.updatedAt ? compactDate(evidence.state.updatedAt, locale) : "-",
+        ok: Boolean(status?.runtimeManager.running),
+      },
+      {
+        id: "supervisor",
+        label: "supervisor",
+        status: guardian?.supervisor?.status || "-",
+        pid: String(guardian?.supervisor?.pid || "-"),
+        mode: guardian?.mode || "-",
+        detail: guardian?.supervisor?.detail || guardian?.statusLine || "-",
+        ok: Boolean(guardian?.supervisor?.alive),
+      },
+    ];
+  }, [bundle, componentRows, copy, evidence?.state.updatedAt, guardian, locale, status]);
+
+  const activeCommand = evidence?.state.activeCommand;
+  const recentResults = (evidence?.results.recent ?? []).slice(0, 3);
+  const recentEvents = (evidence?.events.recent ?? []).slice(0, 3);
 
   return (
     <section className={styles.route} aria-label={copy.title}>
@@ -336,48 +416,24 @@ export function LauncherRoute() {
           <p className={styles.subtitle}>{bundle?.statusLine || status?.launcher.message || copy.subtitle}</p>
         </div>
         <div className={styles.actions}>
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            onClick={() => void statusQuery.refetch()}
-            disabled={statusQuery.isFetching}
-            title={copy.refresh}
-          >
+          <button type="button" className={styles.iconButton} onClick={() => void statusQuery.refetch()} disabled={statusQuery.isFetching} title={copy.refresh}>
             {statusQuery.isFetching ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
             <span>{copy.refresh}</span>
           </button>
-          <button
-            type="button"
-            className={styles.primaryButton}
-            onClick={() => controlMutation.mutate("start")}
-            disabled={busy}
-            title={copy.start}
-          >
+          <button type="button" className={styles.primaryButton} onClick={() => controlMutation.mutate("start")} disabled={busy} title={copy.start}>
             <Play size={15} />
             <span>{copy.start}</span>
           </button>
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            onClick={() => controlMutation.mutate("stop")}
-            disabled={busy}
-            title={copy.stop}
-          >
+          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("stop")} disabled={busy} title={copy.stop}>
             <Square size={15} />
             <span>{copy.stop}</span>
           </button>
-          <button
-            type="button"
-            className={styles.secondaryButton}
-            onClick={() => controlMutation.mutate("restart")}
-            disabled={busy}
-            title={copy.restart}
-          >
+          <button type="button" className={styles.iconButton} onClick={() => controlMutation.mutate("restart")} disabled={busy} title={copy.restart}>
             <RefreshCw size={15} />
             <span>{copy.restart}</span>
           </button>
           {bundle?.url ? (
-            <a className={styles.secondaryButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
+            <a className={styles.iconButton} href={bundle.url} target="_blank" rel="noreferrer" title={copy.open}>
               <ExternalLink size={15} />
               <span>{copy.open}</span>
             </a>
@@ -390,6 +446,8 @@ export function LauncherRoute() {
         <Metric label={copy.observed} value={bundle?.observedState || copy.unavailable} />
         <Metric label={copy.phase} value={bundle?.phase || status?.launcher.phase || copy.unavailable} />
         <Metric label={copy.overall} value={bundle?.overallState || copy.unavailable} />
+        <Metric label={copy.queue} value={`${evidence?.queue.pendingCount ?? 0}/${evidence?.queue.processingCount ?? 0}`} />
+        <Metric label={copy.guardian} value={`${guardian?.ownedCount ?? 0}/${guardian?.adapterCount ?? 0}`} />
       </div>
 
       {statusQuery.isError ? <p className={styles.notice} data-tone="error">{copy.loadFailed}</p> : null}
@@ -397,21 +455,47 @@ export function LauncherRoute() {
       {statusQuery.isPending && !status ? <p className={styles.notice} data-tone="neutral">{copy.loading}</p> : null}
 
       <div className={styles.workspace}>
+        <section className={`${styles.panel} ${styles.matrixPanel}`}>
+          <div className={styles.panelHeader}>
+            <p className={styles.panelEyebrow}>{copy.lifecycle}</p>
+            <strong>{copy.matrix}</strong>
+          </div>
+          <div className={styles.statusTable} role="table" aria-label={copy.matrix}>
+            <div className={styles.statusHead} role="row">
+              <span role="columnheader">{copy.unit}</span>
+              <span role="columnheader">{copy.state}</span>
+              <span role="columnheader">{copy.pid}</span>
+              <span role="columnheader">{copy.mode}</span>
+              <span role="columnheader">{copy.detail}</span>
+            </div>
+            {statusRows.map((row) => (
+              <div key={row.id} className={styles.statusRow} role="row" data-tone={stateTone(row.status, row.ok)}>
+                <span role="cell"><strong>{row.label}</strong></span>
+                <span role="cell">{row.status}</span>
+                <span role="cell">{row.pid}</span>
+                <span role="cell">{row.mode}</span>
+                <span role="cell">{row.detail}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className={styles.panel}>
           <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.bundle}</p>
-            <strong>{bundle?.id || "vibelution"}</strong>
+            <p className={styles.panelEyebrow}>{copy.controlPlane}</p>
+            <strong>{status?.launcher.mode || "-"}</strong>
           </div>
           <dl className={styles.specGrid}>
-            <Spec label="schema" value={String(bundle?.schemaVersion ?? "-")} />
-            <Spec label="mode" value={bundle?.mode || "-"} />
-            <Spec label="url" value={bundle?.url || "-"} />
-            <Spec label="reason" value={bundle?.lastReason || "-"} />
-            <Spec label="failure" value={bundle?.failureMessage || "-"} />
+            <Spec label={copy.stable} value={boolText(status?.launcher.stableControlPlane, copy.yes, copy.no)} />
+            <Spec label={copy.independent} value={boolText(status?.launcher.controlPlane.independent, copy.yes, copy.no)} />
+            <Spec label={copy.adapter} value={status?.launcher.controlPlane.adapter || "-"} />
+            <Spec label={copy.nextPhase} value={status?.launcher.controlPlane.nextPhase || "-"} />
+            <Spec label={copy.reason} value={bundle?.lastOperation.reason || bundle?.lastReason || "-"} />
+            <Spec label={copy.transition} value={transitionAt} />
           </dl>
         </section>
 
-        <section className={`${styles.panel} ${styles.evidencePanel}`}>
+        <section className={styles.panel}>
           <div className={styles.panelHeader}>
             <p className={styles.panelEyebrow}>{copy.controlEvidence}</p>
             <strong>{evidence?.state.runtimeState || "-"}</strong>
@@ -422,57 +506,41 @@ export function LauncherRoute() {
             <Spec label={copy.pending} value={String(evidence?.queue.pendingCount ?? 0)} />
             <Spec label={copy.processing} value={String(evidence?.queue.processingCount ?? 0)} />
           </dl>
-          <div className={styles.evidenceStack}>
-            <EvidenceLine
-              label={copy.activeCommand}
-              primary={evidence?.state.activeCommand?.commandId || "-"}
-              secondary={[evidence?.state.activeCommand?.type, evidence?.state.activeCommand?.requestedBy].filter(Boolean).join(" / ") || "-"}
-            />
-            <EvidenceList
-              label={copy.recentResults}
-              items={(evidence?.results.recent ?? []).slice(0, 3).map((item) => ({
-                id: item.commandId,
-                primary: item.commandId || "-",
-                secondary: `${item.ok ? "ok" : "failed"} · ${item.message || item.errorType || "-"}`,
-                tone: item.ok ? "success" : "error",
-              }))}
-            />
-            <EvidenceList
-              label={copy.recentEvents}
-              items={(evidence?.events.recent ?? []).slice(0, 3).map((item) => ({
-                id: `${item.at}-${item.type}-${item.commandId}`,
-                primary: item.type || "-",
-                secondary: [item.commandId, compactDate(item.at, locale)].filter(Boolean).join(" · ") || "-",
-                tone: item.ok === false ? "error" : item.ok === true ? "success" : "neutral",
-              }))}
-            />
+          <div className={styles.commandLine}>
+            <span>{copy.activeCommand}</span>
+            <strong>{activeCommand?.commandId || "-"}</strong>
+            <small>{[activeCommand?.type, activeCommand?.requestedBy, activeCommand?.reason].filter(Boolean).join(" · ") || "-"}</small>
           </div>
         </section>
 
-        <section className={styles.panel}>
+        <section className={`${styles.panel} ${styles.activityPanel}`}>
           <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.controlPlane}</p>
-            <strong>{status?.launcher.mode || "-"}</strong>
+            <p className={styles.panelEyebrow}>{copy.recentResults}</p>
+            <strong>{recentResults.length}</strong>
           </div>
-          <dl className={styles.specGrid}>
-            <Spec label={copy.stable} value={status?.launcher.stableControlPlane ? copy.yes : copy.no} />
-            <Spec label={copy.independent} value={status?.launcher.controlPlane.independent ? copy.yes : copy.no} />
-            <Spec label={copy.adapter} value={status?.launcher.controlPlane.adapter || "-"} />
-            <Spec label={copy.nextPhase} value={status?.launcher.controlPlane.nextPhase || "-"} />
-          </dl>
+          <CompactList
+            items={recentResults.map((item) => ({
+              id: item.commandId,
+              primary: item.commandId || "-",
+              secondary: `${item.ok ? "ok" : "failed"} · ${item.message || item.errorType || "-"}`,
+              tone: item.ok ? "success" : "error",
+            }))}
+          />
         </section>
 
-        <section className={styles.panel}>
+        <section className={`${styles.panel} ${styles.activityPanel}`}>
           <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.lastOperation}</p>
-            <strong>{bundle?.lastOperation.reason || "-"}</strong>
+            <p className={styles.panelEyebrow}>{copy.recentEvents}</p>
+            <strong>{recentEvents.length}</strong>
           </div>
-          <dl className={styles.specGrid}>
-            <Spec label="source" value={bundle?.lastOperation.source || "-"} />
-            <Spec label="transition" value={transitionAt} />
-            <Spec label="manager" value={status?.runtimeManager.runtimeState || "-"} />
-            <Spec label="proof" value={status?.lifecycleProof.overallLabel || "-"} />
-          </dl>
+          <CompactList
+            items={recentEvents.map((item) => ({
+              id: `${item.at}-${item.type}-${item.commandId}`,
+              primary: item.type || "-",
+              secondary: [item.commandId, compactDate(item.at, locale)].filter(Boolean).join(" · ") || "-",
+              tone: item.ok === false ? "error" : item.ok === true ? "success" : "neutral",
+            }))}
+          />
         </section>
 
         <section className={`${styles.panel} ${styles.guardianPanel}`}>
@@ -485,31 +553,14 @@ export function LauncherRoute() {
             <strong>{copy.owned}: {guardian?.ownedCount ?? 0}</strong>
             <strong>{copy.legacyAdapter}: {guardian?.adapterCount ?? 0}</strong>
             <strong>{copy.targetMode}: {guardian?.targetMode || "-"}</strong>
-          </div>
-          <div className={styles.supervisorToolbar}>
-            <span>{guardian?.supervisor?.detail || "-"}</span>
-            <button
-              type="button"
-              className={styles.secondaryButton}
-              onClick={() => supervisorMutation.mutate()}
-              disabled={busy || !canRequestSupervisorReattach}
-              title={copy.reattachSupervisor}
-            >
+            <button type="button" className={styles.iconButton} onClick={() => supervisorMutation.mutate()} disabled={busy || !canRequestSupervisorReattach} title={copy.reattachSupervisor}>
               {supervisorMutation.isPending ? <LoaderCircle size={15} className={styles.spin} /> : <RefreshCw size={15} />}
               <span>{copy.reattachSupervisor}</span>
             </button>
           </div>
-          <dl className={styles.supervisorGrid}>
-            <Spec label={copy.supervisor} value={guardian?.supervisor?.status || "-"} />
-            <Spec label={copy.pid} value={String(guardian?.supervisor?.pid || "-")} />
-            <Spec label={copy.alive} value={guardian?.supervisor?.alive ? copy.yes : copy.no} />
-            <Spec label={copy.scene} value={guardian?.supervisor?.runtimeSceneId || "-"} />
-            <Spec label={copy.stdout} value={guardian?.supervisor?.stdoutPath || "-"} />
-            <Spec label={copy.stderr} value={guardian?.supervisor?.stderrPath || "-"} />
-          </dl>
           <div className={styles.guardianTable} role="table" aria-label={copy.guardian}>
             <div className={styles.guardianHead} role="row">
-              <span role="columnheader">{copy.responsibility}</span>
+              <span role="columnheader">{copy.unit}</span>
               <span role="columnheader">owner</span>
               <span role="columnheader">{copy.adapter}</span>
               <span role="columnheader">{copy.state}</span>
@@ -517,9 +568,7 @@ export function LauncherRoute() {
             </div>
             {(guardian?.responsibilities ?? []).map((item) => (
               <div key={item.id} className={styles.guardianRow} role="row" data-tone={stateTone(item.status)}>
-                <span role="cell">
-                  <strong>{item.id}</strong>
-                </span>
+                <span role="cell"><strong>{item.id}</strong></span>
                 <span role="cell">{item.owner}</span>
                 <span role="cell">{item.adapter}</span>
                 <span role="cell">{item.status}</span>
@@ -529,68 +578,23 @@ export function LauncherRoute() {
           </div>
         </section>
 
-        <section className={`${styles.panel} ${styles.componentPanel}`}>
-          <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.components}</p>
-            <strong>{componentRows.length}</strong>
-          </div>
-          <div className={styles.componentTable} role="table" aria-label={copy.components}>
-            <div className={styles.componentHead} role="row">
-              <span role="columnheader">{copy.state}</span>
-              <span role="columnheader">{copy.pid}</span>
-              <span role="columnheader">{copy.required}</span>
-              <span role="columnheader">{copy.detail}</span>
-            </div>
-            {componentRows.map((component) => (
-              <div key={component.id} className={styles.componentRow} role="row" data-tone={stateTone(component.state, component.ok)}>
-                <span role="cell">
-                  <strong>{component.id}</strong>
-                  <small>{component.state}</small>
-                </span>
-                <span role="cell">{component.pid || "-"}</span>
-                <span role="cell">{component.requiredForRunning ? copy.yes : copy.no}</span>
-                <span role="cell">{component.detail || "-"}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.backend}</p>
-            <strong>{bundle?.backend.healthy ? copy.healthy : copy.unavailable}</strong>
-          </div>
-          <dl className={styles.specGrid}>
-            <Spec label={copy.pid} value={String(bundle?.backend.pid || "-")} />
-            <Spec label={copy.port} value={String(bundle?.backend.port || "-")} />
-            <Spec label={copy.listening} value={bundle?.backend.portListening ? copy.yes : copy.no} />
-            <Spec label={copy.owner} value={String(bundle?.backend.portOwnerPid || "-")} />
+        <details className={`${styles.panel} ${styles.diagnosticsPanel}`}>
+          <summary>
+            <span>{copy.diagnostics}</span>
+            <strong>{status?.lifecycleProof.overallLabel || "-"}</strong>
+          </summary>
+          <dl className={styles.diagnosticsGrid}>
+            <Spec label={copy.schema} value={String(bundle?.schemaVersion ?? "-")} />
+            <Spec label="bundle mode" value={bundle?.mode || "-"} />
+            <Spec label="url" value={bundle?.url || "-"} />
+            <Spec label={copy.source} value={bundle?.lastOperation.source || "-"} />
+            <Spec label={copy.proof} value={status?.lifecycleProof.summary || "-"} />
+            <Spec label={copy.supervisor} value={guardian?.supervisor?.status || "-"} />
+            <Spec label={copy.scene} value={guardian?.supervisor?.runtimeSceneId || "-"} />
+            <Spec label={copy.stdout} value={guardian?.supervisor?.stdoutPath || "-"} />
+            <Spec label={copy.stderr} value={guardian?.supervisor?.stderrPath || "-"} />
           </dl>
-        </section>
-
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.frontend}</p>
-            <strong>{bundle?.frontend.distReady ? "ready" : copy.unavailable}</strong>
-          </div>
-          <dl className={styles.specGrid}>
-            <Spec label="mode" value={bundle?.frontend.mode || "-"} />
-            <Spec label={copy.dist} value={bundle?.frontend.distReady ? copy.yes : copy.no} />
-            <Spec label={copy.orphaned} value={bundle?.frontend.orphaned ? copy.yes : copy.no} />
-          </dl>
-        </section>
-
-        <section className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <p className={styles.panelEyebrow}>{copy.browser}</p>
-            <strong>{bundle?.browser.alive ? copy.alive : copy.unavailable}</strong>
-          </div>
-          <dl className={styles.specGrid}>
-            <Spec label={copy.managed} value={bundle?.browser.managed ? copy.yes : copy.no} />
-            <Spec label={copy.pid} value={String(bundle?.browser.windowPid || "-")} />
-            <Spec label={copy.alive} value={bundle?.browser.alive ? copy.yes : copy.no} />
-          </dl>
-        </section>
+        </details>
       </div>
     </section>
   );
@@ -614,28 +618,15 @@ function Spec({ label, value }: { label: string; value: string }) {
   );
 }
 
-function EvidenceLine({ label, primary, secondary }: { label: string; primary: string; secondary: string }) {
-  return (
-    <div className={styles.evidenceLine}>
-      <span>{label}</span>
-      <strong>{primary}</strong>
-      <small>{secondary}</small>
-    </div>
-  );
-}
-
-function EvidenceList({
-  label,
+function CompactList({
   items,
 }: {
-  label: string;
   items: Array<{ id: string; primary: string; secondary: string; tone: "neutral" | "success" | "error" }>;
 }) {
   return (
-    <div className={styles.evidenceList}>
-      <span>{label}</span>
+    <div className={styles.compactList}>
       {items.length ? items.map((item) => (
-        <div key={item.id || item.primary} className={styles.evidenceItem} data-tone={item.tone}>
+        <div key={item.id || item.primary} className={styles.compactItem} data-tone={item.tone}>
           <strong>{item.primary}</strong>
           <small>{item.secondary}</small>
         </div>
