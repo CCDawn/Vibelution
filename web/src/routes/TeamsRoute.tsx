@@ -318,6 +318,7 @@ export function TeamsRoute() {
   const [lockedCanvasViewportStyle, setLockedCanvasViewportStyle] = useState<CanvasViewportStyle | null>(null);
   const canvasFrameRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<NodeDragState | null>(null);
+  const dragFrameRef = useRef(0);
 
   const teamsQuery = useQuery({
     queryKey: queryKeys.teams(),
@@ -430,6 +431,10 @@ export function TeamsRoute() {
   useEffect(() => {
     setNodePositionDrafts({});
     dragStateRef.current = null;
+    if (dragFrameRef.current) {
+      window.cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = 0;
+    }
   }, [selectedTeam?.teamId, canvas?.updatedAt]);
 
   useEffect(() => {
@@ -696,6 +701,30 @@ export function TeamsRoute() {
     };
   }
 
+  function commitNodeDragPosition(dragState: NodeDragState) {
+    setNodePositionDrafts((current) => {
+      const currentPosition = current[dragState.nodeId];
+      if (currentPosition?.x === dragState.currentX && currentPosition?.y === dragState.currentY) {
+        return current;
+      }
+      return {
+        ...current,
+        [dragState.nodeId]: { x: dragState.currentX, y: dragState.currentY },
+      };
+    });
+  }
+
+  function requestNodeDragFrame(dragState: NodeDragState) {
+    if (dragFrameRef.current) {
+      return;
+    }
+    dragFrameRef.current = window.requestAnimationFrame(() => {
+      dragFrameRef.current = 0;
+      const activeDrag = dragStateRef.current;
+      commitNodeDragPosition(activeDrag ?? dragState);
+    });
+  }
+
   function moveNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
     const dragState = dragStateRef.current;
     if (!dragState) {
@@ -708,10 +737,7 @@ export function TeamsRoute() {
     dragState.moved = dragState.moved || Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2;
     dragState.currentX = nextX;
     dragState.currentY = nextY;
-    setNodePositionDrafts((current) => ({
-      ...current,
-      [dragState.nodeId]: { x: nextX, y: nextY },
-    }));
+    requestNodeDragFrame(dragState);
   }
 
   function finishNodeDrag(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -721,9 +747,14 @@ export function TeamsRoute() {
     }
     event.currentTarget.releasePointerCapture(event.pointerId);
     dragStateRef.current = null;
+    if (dragFrameRef.current) {
+      window.cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = 0;
+    }
     if (!dragState.moved) {
       return;
     }
+    commitNodeDragPosition(dragState);
     saveCanvas({
       ...canvas,
       nodes: canvas.nodes.map((node) => (node.id === dragState.nodeId ? { ...node, x: dragState.currentX, y: dragState.currentY } : node)),

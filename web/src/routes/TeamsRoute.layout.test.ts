@@ -155,9 +155,14 @@ describe("TeamsRoute layout contract", () => {
   it("lets users drag canvas nodes and persist their positions", () => {
     expect(routeSource).toContain("nodePositionDrafts");
     expect(routeSource).toContain("dragStateRef");
+    expect(routeSource).toContain("dragFrameRef");
     expect(routeSource).toContain("startNodeDrag");
     expect(routeSource).toContain("moveNodeDrag");
     expect(routeSource).toContain("finishNodeDrag");
+    expect(routeSource).toContain("requestNodeDragFrame");
+    expect(routeSource).toContain("window.requestAnimationFrame");
+    expect(routeSource).toContain("window.cancelAnimationFrame");
+    expect(routeSource).toContain("commitNodeDragPosition(dragState)");
     expect(routeSource).toContain("setPointerCapture(event.pointerId)");
     expect(routeSource).toContain("releasePointerCapture(event.pointerId)");
     expect(routeSource).toContain("nodes: canvas.nodes.map((node) => (node.id === dragState.nodeId");
