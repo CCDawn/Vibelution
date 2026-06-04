@@ -237,6 +237,38 @@ def test_workbench_controller_trusts_only_launcher_marked_backend(monkeypatch):
     assert workbench_controller._pid_is_repo_workbench_backend(49780) is False
 
 
+def test_observe_workbench_keeps_launcher_control_surface_out_of_project_lifecycle(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "sessionRole": "launcher_control_surface",
+                "sessionId": "launcher-session",
+                "url": "http://127.0.0.1:8000",
+                "backendPid": 3200,
+                "browserWindowPid": 4500,
+                "browserManaged": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(workbench_controller, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(workbench_controller, "_is_process_alive", lambda pid: int(pid) in {3200, 4500})
+    monkeypatch.setattr(workbench_controller, "_is_backend_healthy", lambda url: True)
+    monkeypatch.setattr(workbench_controller, "_listening_pid_for_port", lambda port: 3200)
+    monkeypatch.setattr(workbench_controller, "_port_is_listening_socket", lambda port: True)
+    monkeypatch.setattr(workbench_controller, "_repo_workbench_backend_kind", lambda pid: "managed_workbench_backend")
+
+    snapshot = workbench_controller.observe_workbench()
+
+    assert snapshot["sessionRole"] == "launcher_control_surface"
+    assert snapshot["observedState"] == "closed"
+    assert snapshot["backendHealthy"] is True
+    assert snapshot["browserWindowAlive"] is True
+    assert snapshot["frontendOrphaned"] is False
+
+
 def test_load_runtime_snapshot_aligns_legacy_open_session(monkeypatch):
     saved_states: list[dict] = []
 

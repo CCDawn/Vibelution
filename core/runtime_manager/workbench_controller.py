@@ -194,6 +194,7 @@ def observe_workbench() -> dict[str, Any]:
     browser_launch_pid = int(launcher_state.get("browserLaunchPid") or 0)
     browser_window_pid = int(launcher_state.get("browserWindowPid") or 0)
     browser_managed = bool(launcher_state.get("browserManaged", True))
+    session_role = str(launcher_state.get("sessionRole") or "workbench").strip() or "workbench"
 
     backend_alive = _is_process_alive(state_backend_pid)
     health_probe_url = url if launcher_state else DEFAULT_URL
@@ -220,11 +221,13 @@ def observe_workbench() -> dict[str, Any]:
     )
     backend_observed = (backend_alive and not port_conflict) or port_owner_trusted or trusted_health
     backend_pid = state_backend_pid if backend_alive else port_owner_pid if port_owner_trusted else 0
-    if not backend_observed and not browser_window_alive:
+    if session_role == "launcher_control_surface":
+        observed_state = "closed"
+    elif not backend_observed and not browser_window_alive:
         observed_state = "closed"
     else:
         observed_state = "open"
-    frontend_orphaned = bool(browser_managed and browser_window_alive and not backend_observed)
+    frontend_orphaned = bool(session_role != "launcher_control_surface" and browser_managed and browser_window_alive and not backend_observed)
     backend_missing = bool(observed_state == "open" and not backend_observed)
     if port_owner_residual:
         lifecycle_consistency = "residual_backend"
@@ -242,6 +245,7 @@ def observe_workbench() -> dict[str, Any]:
     return {
         "launcherStatePresent": bool(launcher_state),
         "sessionId": str(launcher_state.get("sessionId") or "").strip(),
+        "sessionRole": session_role,
         "backendPid": backend_pid,
         "backendLaunchPid": backend_launch_pid,
         "browserLaunchPid": browser_launch_pid,
