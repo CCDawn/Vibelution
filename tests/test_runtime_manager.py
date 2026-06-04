@@ -2498,6 +2498,99 @@ def test_handle_open_workbench_retries_stale_browser_only_session(monkeypatch):
     assert success_payload["retry"] == "stale_session_cleanup"
 
 
+def test_handle_open_workbench_accepts_trusted_backend_when_health_probe_lags(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {},
+        "workbench": {
+            "desiredState": "closed",
+            "observedState": "closed",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    observations = _repeat_last(
+        [
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "closed",
+                "launcherStatePresent": False,
+                "browserManaged": True,
+                "browserWindowAlive": False,
+                "backendPid": 0,
+                "browserLaunchPid": 0,
+                "browserWindowPid": 0,
+                "backendHealthy": False,
+                "backendObserved": False,
+                "backendPort": 8000,
+                "backendPortListening": False,
+                "backendPortOwnerPid": 0,
+                "backendPortOwnerTrusted": False,
+                "backendPortConflict": False,
+                "sessionId": "",
+                "url": "http://127.0.0.1:8000",
+            },
+            {
+                "observedState": "open",
+                "launcherStatePresent": True,
+                "browserManaged": True,
+                "browserWindowAlive": True,
+                "backendPid": 31216,
+                "browserLaunchPid": 36760,
+                "browserWindowPid": 36760,
+                "backendHealthy": False,
+                "backendObserved": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "backendPortOwnerPid": 31216,
+                "backendPortOwnerTrusted": True,
+                "backendPortConflict": False,
+                "backendPortOwnerKind": "managed_workbench_backend",
+                "sessionId": "fresh-session",
+                "url": "http://127.0.0.1:8000",
+                "healthUrl": "http://127.0.0.1:8000/api/health",
+            },
+        ]
+    )
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_open_workbench(command_id="cmd-open", args={})
+
+    assert result["ok"] is True
+    assert result["message"] == "Workbench opened."
+    assert events[0][0] == "workbench.open.verification_succeeded"
+    assert events[0][1]["backendHealthy"] is False
+    assert events[0][1]["backendReady"] is True
+    assert events[0][1]["backendReadySource"] == "launcher_confirmed_port"
+
+
 def test_handle_open_workbench_no_browser_succeeds_when_backend_is_ready(monkeypatch):
     runtime_daemon = daemon.RuntimeManagerDaemon()
     state = {
@@ -3026,8 +3119,8 @@ def test_handle_restart_workbench_surfaces_launcher_error(monkeypatch):
     monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
     monkeypatch.setattr(
         daemon,
-        "restart_workbench",
-        lambda **kwargs: subprocess.CompletedProcess(args=[], returncode=1, stdout=None, stderr="launcher failed"),
+        "close_workbench",
+        lambda: subprocess.CompletedProcess(args=[], returncode=1, stdout=None, stderr="launcher failed"),
     )
 
     with pytest.raises(RuntimeError, match="launcher failed"):
@@ -3045,7 +3138,8 @@ def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_
         },
     }
     events: list[tuple[str, dict]] = []
-    restart_calls: list[bool] = []
+    close_calls: list[str] = []
+    open_calls: list[bool] = []
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
@@ -3074,8 +3168,16 @@ def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_
     monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
     monkeypatch.setattr(
         daemon,
-        "restart_workbench",
-        lambda *, no_browser: restart_calls.append(no_browser)
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(daemon, "_wait_for_close_verification", lambda: (True, daemon.observe_workbench(), 1))
+    monkeypatch.setattr(daemon, "_wait_for_open_verification", lambda *, no_browser: (True, daemon.observe_workbench(), 1))
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_cleanup_residual_workbench_processes", lambda self: {"count": 0, "items": []})
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda *, no_browser: open_calls.append(no_browser)
         or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
@@ -3085,10 +3187,13 @@ def test_handle_restart_workbench_preserves_visible_browser_when_no_browser_was_
     )
 
     assert result["ok"] is True
-    assert restart_calls == [False]
+    assert close_calls == ["close"]
+    assert open_calls == [False]
     assert events[0][0] == "workbench.restart.no_browser_overridden"
     assert events[0][1]["browserWindowPid"] == 29999
     assert events[0][1]["effectiveNoBrowser"] is False
+    assert "workbench.restart.close_verification_succeeded" in [event[0] for event in events]
+    assert "workbench.restart.open_verification_succeeded" in [event[0] for event in events]
 
 
 def test_handle_restart_workbench_keeps_headless_restart_headless(monkeypatch):
@@ -3101,7 +3206,8 @@ def test_handle_restart_workbench_keeps_headless_restart_headless(monkeypatch):
             "phase": "steady",
         },
     }
-    restart_calls: list[bool] = []
+    close_calls: list[str] = []
+    open_calls: list[bool] = []
 
     monkeypatch.setattr(daemon, "load_state", lambda: state)
     monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
@@ -3130,8 +3236,16 @@ def test_handle_restart_workbench_keeps_headless_restart_headless(monkeypatch):
     monkeypatch.setattr(daemon, "_append_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         daemon,
-        "restart_workbench",
-        lambda *, no_browser: restart_calls.append(no_browser)
+        "close_workbench",
+        lambda: close_calls.append("close") or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(daemon, "_wait_for_close_verification", lambda: (True, daemon.observe_workbench(), 1))
+    monkeypatch.setattr(daemon, "_wait_for_open_verification", lambda *, no_browser: (True, daemon.observe_workbench(), 1))
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_cleanup_residual_workbench_processes", lambda self: {"count": 0, "items": []})
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda *, no_browser: open_calls.append(no_browser)
         or subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
     )
 
@@ -3141,7 +3255,89 @@ def test_handle_restart_workbench_keeps_headless_restart_headless(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert restart_calls == [True]
+    assert close_calls == ["close"]
+    assert open_calls == [True]
+
+
+def test_handle_restart_workbench_accepts_trusted_backend_when_health_probe_lags(monkeypatch):
+    runtime_daemon = daemon.RuntimeManagerDaemon()
+    state = {
+        "command": {"activeCommandId": "cmd-restart"},
+        "workbench": {
+            "desiredState": "open",
+            "observedState": "open",
+            "phase": "steady",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+    open_observation = {
+        "observedState": "open",
+        "launcherStatePresent": True,
+        "browserManaged": True,
+        "browserWindowAlive": True,
+        "backendPid": 31216,
+        "browserLaunchPid": 36760,
+        "browserWindowPid": 36760,
+        "backendAlive": True,
+        "backendHealthy": False,
+        "backendObserved": True,
+        "backendPort": 8000,
+        "backendPortListening": True,
+        "backendPortOwnerPid": 31216,
+        "backendPortOwnerTrusted": True,
+        "backendPortConflict": False,
+        "backendPortOwnerKind": "managed_workbench_backend",
+        "sessionId": "fresh-session",
+        "url": "http://127.0.0.1:8000",
+        "healthUrl": "http://127.0.0.1:8000/api/health",
+    }
+    closed_observation = {
+        "observedState": "closed",
+        "launcherStatePresent": False,
+        "browserManaged": True,
+        "browserWindowAlive": False,
+        "backendPid": 0,
+        "browserLaunchPid": 0,
+        "browserWindowPid": 0,
+        "backendAlive": False,
+        "backendHealthy": False,
+        "backendObserved": False,
+        "backendPort": 8000,
+        "backendPortListening": False,
+        "backendPortOwnerPid": 0,
+        "backendPortOwnerTrusted": False,
+        "backendPortConflict": False,
+        "sessionId": "",
+        "url": "http://127.0.0.1:8000",
+    }
+    observations = _repeat_last([open_observation, closed_observation, open_observation])
+
+    monkeypatch.setattr(daemon, "load_state", lambda: state)
+    monkeypatch.setattr(daemon, "save_state", lambda next_state: next_state)
+    monkeypatch.setattr(daemon, "now_iso", lambda: "2026-06-04T15:29:00+00:00")
+    monkeypatch.setattr(daemon, "observe_workbench", observations)
+    monkeypatch.setattr(daemon, "build_evolution_summary", lambda: {"self": {}, "supervised": {}})
+    monkeypatch.setattr(daemon, "_append_event", lambda event_type, payload: events.append((event_type, payload)))
+    monkeypatch.setattr(daemon.RuntimeManagerDaemon, "_cleanup_residual_workbench_processes", lambda self: {"count": 0, "items": []})
+    monkeypatch.setattr(
+        daemon,
+        "close_workbench",
+        lambda: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(daemon, "_wait_for_close_verification", lambda: (True, closed_observation, 1))
+    monkeypatch.setattr(
+        daemon,
+        "open_workbench",
+        lambda *, no_browser: subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+    )
+
+    result = runtime_daemon._handle_restart_workbench(command_id="cmd-restart", args={"reason": "launcher_restart"})
+
+    assert result["ok"] is True
+    success_payload = next(payload for event_type, payload in events if event_type == "workbench.restart.open_verification_succeeded")
+    assert success_payload["backendHealthy"] is False
+    assert success_payload["backendReady"] is True
+    assert success_payload["backendReadySource"] == "launcher_confirmed_port"
 
 
 def test_handle_close_workbench_records_shutdown_source(monkeypatch):
