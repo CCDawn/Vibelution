@@ -858,8 +858,8 @@ if ($browserText -notmatch "Start-GuiProcessWithoutConsole") {
 if ($browserText -notmatch "gui_process_without_console" -or $browserText -notmatch "console_window_suppressed") {
     throw "Start-ManagedBrowser does not log the no-console launch strategy."
 }
-if (-not $browserText.Contains('--app=$url')) {
-    throw "Start-ManagedBrowser should keep using an app window so the web manifest can theme the chrome."
+if ($browserText -notmatch '--app=\\$resolvedAppUrl') {
+    throw "Start-ManagedBrowser should keep using a resolved app window URL so the web manifest can theme the chrome."
 }
 if ($browserText -notmatch '--force-dark-mode') {
     throw "Start-ManagedBrowser should request dark app chrome for the managed browser window."
@@ -870,7 +870,7 @@ if ($browserText -match '--kiosk') {
 if ($browserText -notmatch '--start-fullscreen' -or $browserText -notmatch 'fullscreenForced') {
     throw "Start-ManagedBrowser should only request fullscreen through the configured fullscreen mode."
 }
-if ($browserText -notmatch 'app_chrome_theme' -or $browserText -notmatch 'window_mode' -or $browserText -notmatch 'fullscreen_forced') {
+if ($browserText -notmatch 'app_chrome_theme' -or $browserText -notmatch 'app_url' -or $browserText -notmatch 'window_purpose' -or $browserText -notmatch 'window_mode' -or $browserText -notmatch 'fullscreen_forced') {
     throw "Start-ManagedBrowser should log the managed app chrome strategy."
 }
 
@@ -1914,6 +1914,73 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
+def test_launcher_control_surface_opens_launcher_without_runtime_manager_or_supervisor(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+$controlAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Open-LauncherControlSurface"
+}, $true)
+if ($null -eq $controlAst) {
+    throw "Open-LauncherControlSurface was not found."
+}
+$controlText = $controlAst.Extent.Text
+foreach ($required in @(
+    '$controlSurfaceUrl = "$url/launcher"',
+    "Start-ManagedBackend",
+    "Start-ManagedBrowser",
+    "launcher_control_surface",
+    "launcher.control_surface.ready",
+    'supervisor_started = $false'
+)) {
+    if ($controlText -notmatch [regex]::Escape($required)) {
+        throw "Launcher control surface is missing '$required'."
+    }
+}
+if ($controlText -match "Start-Supervisor") {
+    throw "Launcher control surface should not start the workbench supervisor."
+}
+if ($controlText -match "Invoke-RuntimeManagerClient" -or $controlText -match "open_workbench") {
+    throw "Launcher control surface should not queue runtime manager open_workbench."
+}
+
+$scriptText = $ast.EndBlock.Extent.Text
+if ($scriptText -notmatch '\\$runtimeManagerClientActions\\s*=\\s*@\\("toggle", "start", "stop", "restart", "status"\\)') {
+    throw "Runtime-manager client actions changed unexpectedly."
+}
+if ($scriptText -match '\\$runtimeManagerClientActions\\s*=\\s*@\\([^\\)]*"launcher"') {
+    throw "launcher action must stay out of runtime-manager client actions."
+}
+if ($scriptText -notmatch '"launcher"\\s*\\{\\s*Open-LauncherControlSurface\\s*\\}') {
+    throw "launcher action does not open the Launcher control surface."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_launcher_runtime_manager_client_failure_exits_launcher(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
@@ -2687,6 +2754,7 @@ foreach ($name in @(
     "ConvertTo-LauncherComparableText",
     "Test-CommandLineMentionsWorkbenchScript",
     "Test-CommandLineLooksLikeManagedBackend",
+    "Test-ProcessLooksLikeManagedBackend",
     "Get-ObjectPropertyValue",
     "Get-ManagedBackendCandidatePids"
 )) {
@@ -2729,6 +2797,12 @@ function Get-CimInstance {
             CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser --managed-by-launcher"
         }
     }
+    if ($Filter -match "ProcessId = 6544") {
+        return [pscustomobject]@{
+            ProcessId = 6544
+            CommandLine = "`"C:\\Python312\\python.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser --managed-by-launcher"
+        }
+    }
     return @()
 }
 function Test-WebHealthy { return [bool]$script:healthy }
@@ -2736,6 +2810,90 @@ function Test-WebHealthy { return [bool]$script:healthy }
 $pids = @(Get-ManagedBackendCandidatePids)
 if (($pids -join ",") -ne "6544,14916") {
     throw "Expected tracked launch and listener PIDs, got $($pids -join ',')."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
+def test_launcher_backend_candidates_ignore_reused_tracked_pid(tmp_path):
+    result = _run_launcher_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$LauncherPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $LauncherPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Launcher script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($name in @(
+    "ConvertTo-LauncherComparableText",
+    "Test-CommandLineMentionsWorkbenchScript",
+    "Test-CommandLineLooksLikeManagedBackend",
+    "Test-ProcessLooksLikeManagedBackend",
+    "Get-ObjectPropertyValue",
+    "Get-ManagedBackendCandidatePids"
+)) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$name was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$script:port = 8000
+function Get-State {
+    return [pscustomobject]@{
+        backendPid = 384
+        backendLaunchPid = 34848
+        port = 8000
+    }
+}
+function Test-ProcessAlive {
+    param([int]$ProcessId)
+    return $ProcessId -in @(384, 34848)
+}
+function Get-ListeningPid { param([int]$Port) return $null }
+function Get-CimInstance {
+    param([string]$ClassName, [string]$Filter, [string]$ErrorAction)
+    if ($Filter -match "ProcessId = 384") {
+        return [pscustomobject]@{
+            ProcessId = 384
+            Name = "svchost.exe"
+            CommandLine = ""
+        }
+    }
+    if ($Filter -match "ProcessId = 34848") {
+        return [pscustomobject]@{
+            ProcessId = 34848
+            Name = "pythonw.exe"
+            CommandLine = "`"C:\\Python312\\pythonw.exe`" scripts/web_workbench.py --host 127.0.0.1 --port 8000 --no-browser --managed-by-launcher"
+        }
+    }
+    return @()
+}
+
+$pids = @(Get-ManagedBackendCandidatePids)
+if (($pids -join ",") -ne "34848") {
+    throw "Expected reused tracked PID to be ignored, got $($pids -join ',')."
 }
 
 Write-Output "ok"
@@ -2770,6 +2928,7 @@ foreach ($name in @(
     "ConvertTo-LauncherComparableText",
     "Test-CommandLineMentionsWorkbenchScript",
     "Test-CommandLineLooksLikeManagedBackend",
+    "Test-ProcessLooksLikeManagedBackend",
     "Get-ObjectPropertyValue",
     "Get-ManagedBackendCandidatePids"
 )) {
@@ -2842,6 +3001,7 @@ foreach ($name in @(
     "ConvertTo-LauncherComparableText",
     "Test-CommandLineMentionsWorkbenchScript",
     "Test-CommandLineLooksLikeManagedBackend",
+    "Test-ProcessLooksLikeManagedBackend",
     "Get-ObjectPropertyValue",
     "Get-ManagedBackendCandidatePids"
 )) {
@@ -3813,12 +3973,25 @@ Write-Output $payload
     assert payload["getStateCalls"] == 1
 
 
-def test_desktop_entry_maps_open_to_start_without_monitor(tmp_path):
+def test_desktop_entry_maps_open_to_launcher_without_monitor(tmp_path):
     calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="open")
 
     assert calls == [
         {
-            "action": "start",
+            "action": "launcher",
+            "argv": [],
+            "noBrowser": False,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
+        }
+    ]
+
+
+def test_desktop_entry_maps_start_to_launcher_without_monitor(tmp_path):
+    calls = _run_desktop_entry_with_fake_launcher(tmp_path, action="start")
+
+    assert calls == [
+        {
+            "action": "launcher",
             "argv": [],
             "noBrowser": False,
             "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
@@ -4068,6 +4241,9 @@ if ($gateText -notmatch 'return\\s+\\$false') {
 if (-not (Test-DesktopEntryStartAction -LauncherAction "start")) {
     throw "start should be gated."
 }
+if (-not (Test-DesktopEntryStartAction -LauncherAction "launcher")) {
+    throw "launcher should be gated."
+}
 if (Test-DesktopEntryStartAction -LauncherAction "stop") {
     throw "stop should not be gated."
 }
@@ -4143,9 +4319,22 @@ def test_desktop_entry_forwards_no_browser_and_skips_monitor(tmp_path):
 
     assert calls == [
         {
-            "action": "start",
+            "action": "launcher",
             "argv": [],
             "noBrowser": True,
+            "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
+        }
+    ]
+
+
+def test_vbs_desktop_entry_defaults_to_launcher_action(tmp_path):
+    calls, _events = _run_vbs_desktop_entry_with_fake_powershell_entry(tmp_path, [])
+
+    assert calls == [
+        {
+            "action": "launcher",
+            "argv": [],
+            "noBrowser": False,
             "pythonExe": str(tmp_path / "project" / ".venv" / "Scripts" / "python.exe"),
         }
     ]

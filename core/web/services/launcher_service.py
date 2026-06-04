@@ -51,6 +51,7 @@ def get_launcher_status() -> dict[str, Any]:
     """Return the launcher-facing project bundle lifecycle status."""
 
     runtime = get_runtime_summary()
+    launcher_state = _load_launcher_state()
     return {
         "launcher": {
             "mode": "runtime_manager_adapter",
@@ -67,7 +68,7 @@ def get_launcher_status() -> dict[str, Any]:
                 en="Launcher entrypoint is available and currently controls the project bundle through the runtime-manager adapter.",
             ),
         },
-        "projectBundle": _project_bundle_from_runtime(runtime),
+        "projectBundle": _project_bundle_from_runtime(runtime, launcher_state=launcher_state),
         "controlPlaneEvidence": _control_plane_evidence(),
         "guardianAdapter": _guardian_adapter_from_runtime(runtime),
         "runtimeManager": runtime.get("runtimeManager") or {},
@@ -258,8 +259,25 @@ def request_launcher_supervisor_reattach() -> LauncherSupervisorCommandResponse:
     }
 
 
-def _project_bundle_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
-    workbench = runtime.get("workbench") if isinstance(runtime.get("workbench"), dict) else {}
+def _project_bundle_from_runtime(runtime: dict[str, Any], *, launcher_state: dict[str, Any] | None = None) -> dict[str, Any]:
+    workbench = dict(runtime.get("workbench") if isinstance(runtime.get("workbench"), dict) else {})
+    if isinstance(launcher_state, dict) and str(launcher_state.get("sessionRole") or "") == "launcher_control_surface":
+        workbench["sessionRole"] = "launcher_control_surface"
+        workbench["desiredState"] = "closed"
+        workbench["observedState"] = "closed"
+        workbench["phase"] = "steady"
+        workbench["lastReason"] = "launcher_control_surface"
+        workbench["statusLine"] = text_for(
+            get_web_language(),
+            zh="Launcher 控制台正在运行，项目生命周期尚未启动。",
+            en="The Launcher control surface is running; the project lifecycle has not been started.",
+        )
+        workbench["url"] = str(launcher_state.get("url") or workbench.get("url") or "")
+        workbench["backendPid"] = int(launcher_state.get("backendPid") or workbench.get("backendPid") or 0)
+        workbench["browserWindowPid"] = int(launcher_state.get("browserWindowPid") or 0)
+        workbench["browserManaged"] = bool(launcher_state.get("browserManaged", False))
+        workbench["browserWindowAlive"] = False
+        workbench["frontendOrphaned"] = False
     lifecycle = runtime.get("lifecycleProof") if isinstance(runtime.get("lifecycleProof"), dict) else {}
     frontend_dist_ready = not bool(workbench.get("frontendOrphaned"))
     backend_component = _component_state(
@@ -290,6 +308,7 @@ def _project_bundle_from_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
         "schemaVersion": 1,
         "id": "vibelution-project",
         "mode": "bundled",
+        "sessionRole": str(workbench.get("sessionRole") or "workbench"),
         "desiredState": str(workbench.get("desiredState") or "closed"),
         "observedState": str(workbench.get("observedState") or "closed"),
         "phase": str(workbench.get("phase") or "steady"),

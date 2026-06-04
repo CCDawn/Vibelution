@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("toggle", "start", "open", "stop", "close", "restart", "status")]
-    [string]$Action = "start",
+    [ValidateSet("launcher", "toggle", "start", "open", "stop", "close", "restart", "status")]
+    [string]$Action = "launcher",
     [switch]$NoBrowser
 )
 
@@ -329,7 +329,8 @@ function Convert-ToLauncherAction {
     param([string]$RequestedAction)
 
     switch ($RequestedAction.ToLowerInvariant()) {
-        "open" { return "start" }
+        "open" { return "launcher" }
+        "start" { return "launcher" }
         "close" { return "stop" }
         default { return $RequestedAction }
     }
@@ -338,7 +339,7 @@ function Convert-ToLauncherAction {
 function Test-DesktopEntryStartAction {
     param([string]$LauncherAction)
 
-    return ([string]$LauncherAction).ToLowerInvariant() -eq "start"
+    return @("launcher", "start") -contains ([string]$LauncherAction).ToLowerInvariant()
 }
 
 function Test-DesktopEntryFeedbackSuppressed {
@@ -453,7 +454,7 @@ try {
     }
 
     $launcherAction = Convert-ToLauncherAction -RequestedAction $Action
-    $monitorWouldAttach = @("start", "open", "restart") -contains $Action.ToLowerInvariant()
+    $monitorWouldAttach = @("launcher", "start", "open", "restart") -contains $Action.ToLowerInvariant()
 
     Write-DesktopEntryLog `
         -Event "desktop_entry.started" `

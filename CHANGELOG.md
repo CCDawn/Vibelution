@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.13 - 2026-06-04
+
+- Changed the desktop launch chain so Start Menu / desktop entry opens the Launcher control surface first instead of directly starting the full workbench lifecycle.
+- Added a `launcher_control_surface` session role so runtime and launcher status distinguish Launcher-only backend/control UI from a started project bundle.
+- Hardened launcher stale-state cleanup by ignoring tracked backend PIDs whose command line no longer matches a launcher-managed backend.
+
 ## 0.10.12 - 2026-06-04
 
 - Restored provider-agnostic LLM reasoning capture for OpenAI-compatible/local providers by centralizing reasoning field aliases and explicit `<think>` / `<thinking>` tag extraction.

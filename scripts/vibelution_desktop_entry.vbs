@@ -73,7 +73,7 @@ WScript.Quit 0
 
 Function ResolveAction()
     Dim candidate, i, value, lowered
-    candidate = "start"
+    candidate = "launcher"
     For i = 0 To WScript.Arguments.Count - 1
         value = Trim(WScript.Arguments(i))
         lowered = LCase(value)
@@ -94,7 +94,7 @@ Function ResolveAction()
         ElseIf Left(lowered, 9) = "--action=" Then
             candidate = LCase(Trim(Mid(value, 10)))
             Exit For
-        ElseIf Left(value, 1) <> "-" And candidate = "start" Then
+        ElseIf Left(value, 1) <> "-" And candidate = "launcher" Then
             candidate = LCase(value)
         End If
     Next
@@ -115,7 +115,7 @@ End Function
 
 Function IsAllowedAction(value)
     Select Case LCase(Trim(value))
-        Case "toggle", "start", "open", "stop", "close", "restart", "status"
+        Case "launcher", "toggle", "start", "open", "stop", "close", "restart", "status"
             IsAllowedAction = True
         Case Else
             IsAllowedAction = False

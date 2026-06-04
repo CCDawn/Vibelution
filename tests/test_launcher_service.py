@@ -162,6 +162,57 @@ def test_launcher_status_exposes_control_plane_evidence(tmp_path, monkeypatch):
     assert evidence["events"]["recent"][0]["type"] == "daemon.stopped"
 
 
+def test_launcher_status_prefers_launcher_control_surface_state(tmp_path, monkeypatch):
+    launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
+    launcher_state_path.parent.mkdir(parents=True, exist_ok=True)
+    launcher_state_path.write_text(
+        json.dumps(
+            {
+                "sessionRole": "launcher_control_surface",
+                "url": "http://127.0.0.1:8000",
+                "backendPid": 10952,
+                "browserManaged": False,
+                "browserWindowPid": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", launcher_state_path)
+    monkeypatch.setattr(launcher_service, "_is_process_alive", lambda pid: False)
+    monkeypatch.setattr(
+        launcher_service,
+        "get_runtime_summary",
+        lambda: {
+            "workbench": {
+                "sessionRole": "workbench",
+                "desiredState": "open",
+                "observedState": "open",
+                "phase": "steady",
+                "backendPid": 10952,
+                "backendAlive": True,
+                "backendHealthy": True,
+                "backendPort": 8000,
+                "backendPortListening": True,
+                "browserManaged": True,
+                "browserWindowPid": 4001,
+                "browserWindowAlive": True,
+                "url": "http://127.0.0.1:8000",
+            },
+            "runtimeManager": {"running": True, "runtimeState": "running", "managerPid": 3210},
+            "lifecycleProof": {"overallState": "ready"},
+        },
+    )
+
+    payload = launcher_service.get_launcher_status()
+
+    bundle = payload["projectBundle"]
+    assert bundle["sessionRole"] == "launcher_control_surface"
+    assert bundle["desiredState"] == "closed"
+    assert bundle["observedState"] == "closed"
+    assert bundle["browser"]["managed"] is False
+    assert "Launcher 控制台正在运行" in bundle["statusLine"]
+
+
 def test_launcher_supervisor_snapshot_reports_recorded_dead_pid(tmp_path, monkeypatch):
     launcher_state_path = tmp_path / ".runtime" / "launcher" / "state.json"
     launcher_state_path.parent.mkdir(parents=True, exist_ok=True)

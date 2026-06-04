@@ -1174,6 +1174,7 @@ class RuntimeManagerDaemon:
         workbench = state.setdefault("workbench", {})
         desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"
         observed_state = str(observation.get("observedState") or "closed").strip() or "closed"
+        session_role = str(observation.get("sessionRole") or "workbench").strip() or "workbench"
         phase = str(workbench.get("phase") or "steady").strip() or "steady"
         command_state = state.setdefault("command", {})
         active_command = str(command_state.get("activeCommandId") or "").strip()
@@ -1290,6 +1291,7 @@ class RuntimeManagerDaemon:
                 "observedState": observed_state,
                 "phase": phase,
                 "sessionId": str(observation.get("sessionId") or "").strip(),
+                "sessionRole": session_role,
                 "backendPid": int(observation.get("backendPid") or 0),
                 "browserLaunchPid": int(observation.get("browserLaunchPid") or 0),
                 "browserWindowPid": int(observation.get("browserWindowPid") or 0),

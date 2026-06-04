@@ -643,7 +643,8 @@ def test_runtime_restart_queues_runtime_manager_and_records_lifecycle(monkeypatc
     assert accepted_event[3]["fields"]["commandId"] == "cmd-restart-web"
 
 
-def test_launcher_status_exposes_project_bundle(monkeypatch):
+def test_launcher_status_exposes_project_bundle(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher_service, "LAUNCHER_STATE_PATH", tmp_path / "missing-launcher-state.json")
     monkeypatch.setattr(
         launcher_service,
         "get_runtime_summary",

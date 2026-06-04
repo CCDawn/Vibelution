@@ -1,6 +1,6 @@
 param(
-    [ValidateSet("toggle", "start", "stop", "restart", "status", "monitor", "supervise", "internal-start", "internal-stop", "internal-restart", "internal-status")]
-    [string]$Action = "start",
+    [ValidateSet("launcher", "toggle", "start", "stop", "restart", "status", "monitor", "supervise", "internal-start", "internal-stop", "internal-restart", "internal-status")]
+    [string]$Action = "launcher",
     [switch]$NoBrowser,
     [string]$SessionId
 )
@@ -358,6 +358,7 @@ function Get-RuntimeSceneTriggerIndexToken {
 
     $normalized = ([string]$Trigger).Trim().ToLowerInvariant()
     switch ($normalized) {
+        "launcher" { return "launcher-control" }
         "start" { return "workbench-start" }
         "internal-start" { return "workbench-start" }
         "restart" { return "workbench-restart" }
@@ -469,6 +470,7 @@ function Get-RuntimeSceneTriggerDisplayLabel {
 
     $normalized = ([string]$Trigger).Trim().ToLowerInvariant()
     switch ($normalized) {
+        "launcher" { return "Launcher 控制台" }
         "start" { return "工作台启动" }
         "internal-start" { return "工作台启动" }
         "restart" { return "工作台重启" }
@@ -3002,13 +3004,13 @@ function Get-ManagedBackendCandidatePids {
     $state = Get-State
     if ($state -and $state.backendPid) {
         $trackedPid = [int]$state.backendPid
-        if (Test-ProcessAlive $trackedPid) {
+        if (Test-ProcessLooksLikeManagedBackend -ProcessId $trackedPid) {
             [void]$pids.Add($trackedPid)
         }
     }
     if ($state -and $state.backendLaunchPid) {
         $trackedLaunchPid = [int]$state.backendLaunchPid
-        if (Test-ProcessAlive $trackedLaunchPid) {
+        if (Test-ProcessLooksLikeManagedBackend -ProcessId $trackedLaunchPid) {
             [void]$pids.Add($trackedLaunchPid)
         }
     }
@@ -3036,6 +3038,20 @@ function Get-ManagedBackendCandidatePids {
     }
 
     return @($pids | Sort-Object -Unique)
+}
+
+function Test-ProcessLooksLikeManagedBackend {
+    param([int]$ProcessId)
+
+    if (-not $ProcessId -or -not (Test-ProcessAlive $ProcessId)) {
+        return $false
+    }
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction SilentlyContinue
+    if (-not $process) {
+        return $false
+    }
+    $commandLine = [string](Get-ObjectPropertyValue -Object $process -Name "CommandLine" -Default "")
+    return Test-CommandLineLooksLikeManagedBackend -CommandLine $commandLine
 }
 
 function Test-CommandLineLooksLikeManagedBackend {
@@ -3830,15 +3846,23 @@ function Start-ManagedBackend {
 }
 
 function Start-ManagedBrowser {
-    param([string]$BrowserExecutable)
+    param(
+        [string]$BrowserExecutable,
+        [string]$AppUrl = $url,
+        [string]$WindowPurpose = "workbench"
+    )
 
     Invoke-ManagedBrowserRenderCacheCleanup
+    $resolvedAppUrl = ([string]$AppUrl).Trim()
+    if (-not $resolvedAppUrl) {
+        $resolvedAppUrl = $url
+    }
 
     $windowMode = if ($script:workbenchWindowMode) { [string]$script:workbenchWindowMode } else { "windowed" }
     $fullscreenForced = ($windowMode -eq "fullscreen")
     $browserArgs = @(
         "--user-data-dir=$browserProfileDir",
-        "--app=$url",
+        "--app=$resolvedAppUrl",
         "--force-dark-mode",
         "--no-first-run",
         "--no-default-browser-check",
@@ -3858,7 +3882,7 @@ function Start-ManagedBrowser {
 
     Write-Note "Starting managed Edge app window ($windowMode mode) ..."
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window ($windowMode mode)."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -3871,6 +3895,8 @@ function Start-ManagedBrowser {
                 launch_api = "gui_process_without_console"
                 console_window_suppressed = $true
                 app_chrome_theme = "dark"
+                app_url = $resolvedAppUrl
+                window_purpose = $WindowPurpose
                 window_mode = $windowMode
                 fullscreen_forced = $fullscreenForced
                 profile_dir = $browserProfileDir
@@ -3886,7 +3912,7 @@ function Start-ManagedBrowser {
     if (-not $windowProcess) {
         Stop-ProcessesById (Get-ManagedBrowserPids)
         if ($script:currentRuntimeSceneId) {
-            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir } }
+            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
             Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window did not open successfully."
             Write-RuntimeSceneEvent `
                 -Component "browser" `
@@ -3900,6 +3926,8 @@ function Start-ManagedBrowser {
                     launch_pid = $proc.Id
                     launch_api = "gui_process_without_console"
                     console_window_suppressed = $true
+                    app_url = $resolvedAppUrl
+                    window_purpose = $WindowPurpose
                     window_mode = $windowMode
                     fullscreen_forced = $fullscreenForced
                     profile_dir = $browserProfileDir
@@ -3909,7 +3937,7 @@ function Start-ManagedBrowser {
     }
 
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window opened (launch PID=$($proc.Id), window PID=$($windowProcess.Id))."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -3923,6 +3951,8 @@ function Start-ManagedBrowser {
                 window_pid = $windowProcess.Id
                 launch_api = "gui_process_without_console"
                 console_window_suppressed = $true
+                app_url = $resolvedAppUrl
+                window_purpose = $WindowPurpose
                 window_mode = $windowMode
                 fullscreen_forced = $fullscreenForced
                 profile_dir = $browserProfileDir
@@ -3934,6 +3964,8 @@ function Start-ManagedBrowser {
     return [pscustomobject]@{
         LaunchPid = $proc.Id
         WindowPid = $windowProcess.Id
+        AppUrl = $resolvedAppUrl
+        WindowPurpose = $WindowPurpose
     }
 }
 
@@ -4019,12 +4051,14 @@ function Save-SessionState {
         [int]$BrowserLaunchPid,
         [int]$BrowserWindowPid,
         [int]$SupervisorPid,
-        [bool]$BrowserManaged
+        [bool]$BrowserManaged,
+        [string]$SessionRole = "workbench"
 )
 
     $rawPaths = Get-RuntimeSceneRelativePaths
     Save-State @{
         mode = $mode
+        sessionRole = $SessionRole
         sessionId = $ManagedSessionId
         host = $bindHost
         port = $port
@@ -4124,7 +4158,8 @@ function Adopt-Or-FocusSession {
             -BrowserLaunchPid 0 `
             -BrowserWindowPid $Snapshot.BrowserWindowPid `
             -SupervisorPid $supervisorPid `
-            -BrowserManaged $true
+            -BrowserManaged $true `
+            -SessionRole "workbench"
     }
 
     Write-Note "Vibelution is already running. Focusing the existing app window."
@@ -4192,7 +4227,8 @@ function Complete-HeadlessSessionWithBrowser {
         -BrowserLaunchPid $browserInfo.LaunchPid `
         -BrowserWindowPid $browserInfo.WindowPid `
         -SupervisorPid $supervisorPid `
-        -BrowserManaged $true
+        -BrowserManaged $true `
+        -SessionRole "workbench"
 
     $focusResult = [bool](Focus-ManagedBrowserWindow)
     Write-RuntimeSceneEvent `
@@ -4204,6 +4240,153 @@ function Complete-HeadlessSessionWithBrowser {
         -Fields @{ url = $url; backend_pid = $Snapshot.BackendPid; browser_window_pid = $browserInfo.WindowPid; supervisor_pid = $supervisorPid; focus_requested = $focusResult }
     Write-Note "Vibelution is live in a managed Edge app window at $url"
     return $true
+}
+
+function Open-LauncherControlSurface {
+    Ensure-Directories
+    $controlSurfaceUrl = "$url/launcher"
+    $snapshot = Get-SessionSnapshot
+
+    if ($snapshot.SessionRunning) {
+        Write-LauncherControlLog `
+            -Event "launcher.control_surface.focus_existing_workbench" `
+            -Message "Launcher control surface found an existing managed workbench session." `
+            -Fields @{
+                backend_pid = $snapshot.BackendPid
+                browser_window_pid = $snapshot.BrowserWindowPid
+                url = $controlSurfaceUrl
+            }
+        [void](Focus-ManagedBrowserWindow)
+        return
+    }
+
+    if ($snapshot.BackendHealthy -and $snapshot.BrowserWindowCount -gt 0) {
+        Write-LauncherControlLog `
+            -Event "launcher.control_surface.focus_existing_window" `
+            -Message "Launcher control surface found an existing browser window with a healthy backend." `
+            -Fields @{
+                backend_pid = $snapshot.BackendPid
+                browser_window_pid = $snapshot.BrowserWindowPid
+                url = $controlSurfaceUrl
+            }
+        [void](Focus-ManagedBrowserWindow)
+        return
+    }
+
+    if ($snapshot.BackendPids.Count -gt 0 -or $snapshot.BrowserPids.Count -gt 0 -or $snapshot.State) {
+        if (-not ($snapshot.BackendHealthy -and $snapshot.BrowserWindowCount -eq 0)) {
+            Write-Note "Found an incomplete launcher control surface session. Cleaning it up before opening Launcher."
+            Stop-ManagedSession -Reason "launcher control surface cleanup"
+            $snapshot = Get-SessionSnapshot
+        }
+    }
+
+    Initialize-RuntimeScene -Trigger "launcher" -BrowserManaged $true
+
+    try {
+        Assert-LauncherSystemPrerequisites -BrowserRequired (-not $NoBrowser)
+        Ensure-ProjectPythonDependencies
+        Ensure-WebBuild
+
+        $pythonRuntime = $null
+        $backendPid = 0
+        $backendLaunchPid = 0
+        if ($snapshot.BackendHealthy -and $snapshot.BackendPid) {
+            $backendPid = [int]$snapshot.BackendPid
+            $backendLaunchPid = if ($snapshot.State -and $snapshot.State.backendLaunchPid) { [int]$snapshot.State.backendLaunchPid } else { $backendPid }
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "control_surface" `
+                -EventCode "launcher.control_surface.backend.reused" `
+                -Message "Reusing an existing healthy backend for the Launcher control surface." `
+                -Outcome "observed" `
+                -Fields @{ backend_pid = $backendPid; url = $controlSurfaceUrl }
+        } else {
+            $portPid = Get-ListeningPid $port
+            if ($portPid) {
+                throw "Port $port is already in use by PID=$portPid. Stop that process first."
+            }
+            $pythonRuntime = Resolve-PythonRuntime
+            $backendProc = Start-ManagedBackend -PythonRuntime $pythonRuntime
+            $backendPid = [int]$backendProc.Id
+            $backendLaunchPid = [int]$backendProc.LauncherPid
+        }
+
+        $managedSessionId = if ($snapshot.State -and $snapshot.State.sessionId) {
+            [string]$snapshot.State.sessionId
+        } else {
+            [guid]::NewGuid().ToString()
+        }
+
+        if ($NoBrowser) {
+            Save-SessionState `
+                -ManagedSessionId $managedSessionId `
+                -BackendPid $backendPid `
+                -BackendLaunchPid $backendLaunchPid `
+                -PythonRuntime $pythonRuntime `
+                -BrowserExecutable $null `
+                -BrowserLaunchPid 0 `
+                -BrowserWindowPid 0 `
+                -SupervisorPid 0 `
+                -BrowserManaged $false `
+                -SessionRole "launcher_control_surface"
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "control_surface" `
+                -EventCode "launcher.control_surface.backend_live" `
+                -Message "Launcher control surface backend is live without opening a browser." `
+                -Outcome "succeeded" `
+                -Fields @{ url = $controlSurfaceUrl; backend_pid = $backendPid }
+            Write-Note "Vibelution Launcher backend is live at $controlSurfaceUrl"
+            return
+        }
+
+        $browserExecutable = Resolve-EdgeExecutable
+        $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable -AppUrl $controlSurfaceUrl -WindowPurpose "launcher_control_surface"
+
+        Save-SessionState `
+            -ManagedSessionId $managedSessionId `
+            -BackendPid $backendPid `
+            -BackendLaunchPid $backendLaunchPid `
+            -PythonRuntime $pythonRuntime `
+            -BrowserExecutable $browserExecutable `
+            -BrowserLaunchPid $browserInfo.LaunchPid `
+            -BrowserWindowPid $browserInfo.WindowPid `
+            -SupervisorPid 0 `
+            -BrowserManaged $true `
+            -SessionRole "launcher_control_surface"
+
+        $focusResult = [bool](Focus-ManagedBrowserWindow)
+        Write-RuntimeSceneEvent `
+            -Component "launcher" `
+            -Phase "control_surface" `
+            -EventCode "launcher.control_surface.ready" `
+            -Message "Launcher control surface is ready." `
+            -Outcome "succeeded" `
+            -Fields @{ url = $controlSurfaceUrl; backend_pid = $backendPid; browser_window_pid = $browserInfo.WindowPid; supervisor_started = $false; focus_requested = $focusResult }
+        Write-Note "Vibelution Launcher is live in a managed Edge app window at $controlSurfaceUrl"
+    } catch {
+        if ($script:currentRuntimeSceneId) {
+            Write-RuntimeSceneEvent `
+                -Component "launcher" `
+                -Phase "control_surface" `
+                -EventCode "launcher.control_surface.failed" `
+                -Message "Launcher control surface startup failed." `
+                -Level "error" `
+                -Outcome "failed" `
+                -Fields @{ reason = $_.Exception.Message }
+            Update-RuntimeSceneManifest @{
+                status = "failed"
+                result = "launcher_control_surface_failed"
+                stop_reason = $_.Exception.Message
+                ended_at = (Get-Date).ToUniversalTime().ToString("o")
+            }
+        }
+        Stop-ManagedBrowserProcesses
+        Stop-ManagedBackendProcesses
+        Remove-State
+        throw
+    }
 }
 
 function Stop-ManagedBrowserProcesses {
@@ -4758,7 +4941,8 @@ function Start-ManagedSession {
                 -BrowserLaunchPid 0 `
                 -BrowserWindowPid 0 `
                 -SupervisorPid 0 `
-                -BrowserManaged $false
+                -BrowserManaged $false `
+                -SessionRole "workbench"
             Write-RuntimeSceneEvent `
                 -Component "launcher" `
                 -Phase "session" `
@@ -4782,7 +4966,8 @@ function Start-ManagedSession {
             -BrowserLaunchPid $browserInfo.LaunchPid `
             -BrowserWindowPid $browserInfo.WindowPid `
             -SupervisorPid 0 `
-            -BrowserManaged $true
+            -BrowserManaged $true `
+            -SessionRole "workbench"
 
         $supervisorPid = Start-Supervisor -ManagedSessionId $managedSessionId
 
@@ -4795,7 +4980,8 @@ function Start-ManagedSession {
             -BrowserLaunchPid $browserInfo.LaunchPid `
             -BrowserWindowPid $browserInfo.WindowPid `
             -SupervisorPid $supervisorPid `
-            -BrowserManaged $true
+            -BrowserManaged $true `
+            -SessionRole "workbench"
 
         $focusResult = [bool](Focus-ManagedBrowserWindow)
         Write-RuntimeSceneEvent `
@@ -5108,6 +5294,9 @@ Acquire-LauncherMutex
 try {
     Sync-LauncherEndpointFromState
     switch ($Action) {
+        "launcher" {
+            Open-LauncherControlSurface
+        }
         "toggle" {
             $snapshot = Get-SessionSnapshot
             if ($snapshot.BackendPids.Count -gt 0 -or $snapshot.BrowserPids.Count -gt 0 -or $snapshot.State) {

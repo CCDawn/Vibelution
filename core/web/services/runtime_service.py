@@ -817,6 +817,7 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
 
     desired_state = str(workbench.get("desiredState") or "closed").strip() or "closed"
     observed_state = str(workbench.get("observedState") or "closed").strip() or "closed"
+    session_role = str(workbench.get("sessionRole") or "workbench").strip() or "workbench"
     phase = str(workbench.get("phase") or "steady").strip() or "steady"
     failure_message = str(workbench.get("failureMessage") or "").strip()
     lifecycle_consistency = str(workbench.get("lifecycleConsistency") or "consistent").strip() or "consistent"
@@ -846,6 +847,12 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
             zh="正在打开工作台。",
             en="The runtime manager is opening the workbench.",
         )
+    elif session_role == "launcher_control_surface":
+        status_line = text_for(
+            lang,
+            zh="Launcher 控制台正在运行，项目生命周期尚未启动。",
+            en="The Launcher control surface is running; the project lifecycle has not been started.",
+        )
     elif observed_state == "open":
         status_line = text_for(
             lang,
@@ -862,6 +869,7 @@ def _workbench_payload(lang: str, runtime_manager: dict) -> dict[str, object]:
     return {
         "desiredState": desired_state,
         "observedState": observed_state,
+        "sessionRole": session_role,
         "phase": phase,
         "backendPid": int(workbench.get("backendPid") or 0),
         "browserWindowPid": int(workbench.get("browserWindowPid") or 0),
@@ -889,6 +897,7 @@ def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, 
     verified_at = _utc_now_iso()
     desired_state = str(workbench.get("desiredState") or "closed").strip().lower() or "closed"
     observed_state = str(workbench.get("observedState") or "closed").strip().lower() or "closed"
+    session_role = str(workbench.get("sessionRole") or "workbench").strip() or "workbench"
     phase = str(workbench.get("phase") or "steady").strip().lower() or "steady"
     failure_message = str(workbench.get("failureMessage") or "").strip()
     manager_running = bool(runtime_manager.get("daemonRunning"))
@@ -1079,6 +1088,7 @@ def _runtime_lifecycle_proof(lang: str, runtime_manager: dict, workbench: dict, 
         "verifiedAt": verified_at,
         "desiredState": desired_state,
         "observedState": observed_state,
+        "sessionRole": session_role,
         "phase": phase,
         "browserManaged": browser_managed,
         "projectRootMatches": project_root_matches,
