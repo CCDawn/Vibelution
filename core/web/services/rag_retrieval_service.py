@@ -24,6 +24,27 @@ class RagRetrievalError(ValueError):
     """Raised when a RAG retrieval request is invalid."""
 
 
+def get_rag_retrieval_health() -> dict[str, Any]:
+    """Return read-only RAG provider readiness for the memory platform."""
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "provider": "local",
+        "status": "ready",
+        "providers": [
+            {
+                "provider": "local",
+                "status": "ready",
+                "vectorEnabled": False,
+                "indexedItemCount": 0,
+                "staleItemCount": 0,
+            },
+        ],
+        "retrievalPolicy": _retrieval_policy("local"),
+        "updatedAt": utc_now_iso(),
+    }
+
+
 def retrieve_rag_contexts(
     *,
     agent_id: str = "",
@@ -101,11 +122,7 @@ def retrieve_rag_contexts(
         "contexts": contexts,
         "citations": citations,
         "retrievalPolicy": {
-            "provider": normalized_provider,
-            "honorsKnowledgeAcl": True,
-            "honorsMemoryPolicy": True,
-            "mutatesFormalKnowledge": False,
-            "injectsPromptByDefault": False,
+            **_retrieval_policy(normalized_provider),
         },
         "updatedAt": utc_now_iso(),
     }
@@ -186,6 +203,16 @@ def _trim_context_text(text: str, max_chars: int) -> str:
 def _context_id(knowledge_item_id: str, rank: int) -> str:
     digest = hashlib.sha1(f"{knowledge_item_id}:{rank}".encode("utf-8")).hexdigest()[:12]
     return f"ctx-{digest}"
+
+
+def _retrieval_policy(provider: str) -> dict[str, Any]:
+    return {
+        "provider": str(provider or "local").strip().lower() or "local",
+        "honorsKnowledgeAcl": True,
+        "honorsMemoryPolicy": True,
+        "mutatesFormalKnowledge": False,
+        "injectsPromptByDefault": False,
+    }
 
 
 def _clamp_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:

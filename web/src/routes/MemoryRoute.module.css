@@ -2392,6 +2392,32 @@
   min-width: 0;
 }
 
+.ragHealthStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.ragHealthStrip span {
+  min-width: 0;
+  padding: 5px 6px;
+  overflow: hidden;
+  border: 1px solid rgba(34, 197, 94, 0.24);
+  border-radius: var(--radius-control);
+  background: rgba(34, 197, 94, 0.08);
+  color: var(--fg-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ragHealthStrip span[data-stale="true"] {
+  border-color: rgba(245, 158, 11, 0.32);
+  background: rgba(245, 158, 11, 0.1);
+}
+
 .ragPolicyStrip span {
   min-width: 0;
   padding: 5px 6px;

@@ -32,6 +32,7 @@ import {
   KnowledgeIngestionPackageResponse,
   KnowledgeOperationsHealthPayload,
   KnowledgePermissionAuditPayload,
+  KnowledgeRagHealthPayload,
   KnowledgeRatingSuggestionBulkReviewResponse,
   KnowledgeRatingSuggestion,
   KnowledgeRatingSuggestionReviewResponse,
@@ -265,6 +266,11 @@ type Copy = {
   ragRetrieval: string;
   ragContextCandidates: string;
   ragRetrievalHint: string;
+  ragHealth: string;
+  ragProvider: string;
+  ragVector: string;
+  ragIndexed: string;
+  ragStale: string;
   ragTopK: string;
   ragContextBudget: string;
   ragNoPromptInjection: string;
@@ -637,6 +643,11 @@ const COPY: Record<"zh" | "en", Copy> = {
     ragRetrieval: "RAG 检索",
     ragContextCandidates: "上下文候选",
     ragRetrievalHint: "基于已审核正式知识生成带引用的上下文候选；不会自动注入 prompt。",
+    ragHealth: "健康态",
+    ragProvider: "Provider",
+    ragVector: "向量",
+    ragIndexed: "索引",
+    ragStale: "过期",
     ragTopK: "候选数",
     ragContextBudget: "单条预算",
     ragNoPromptInjection: "不默认注入",
@@ -916,6 +927,11 @@ const COPY: Record<"zh" | "en", Copy> = {
     ragRetrieval: "RAG retrieval",
     ragContextCandidates: "Context candidates",
     ragRetrievalHint: "Builds cited context candidates from reviewed formal knowledge; it does not inject them into prompts.",
+    ragHealth: "Health",
+    ragProvider: "Provider",
+    ragVector: "Vector",
+    ragIndexed: "Indexed",
+    ragStale: "Stale",
     ragTopK: "Candidates",
     ragContextBudget: "Context budget",
     ragNoPromptInjection: "Not injected",
@@ -1994,6 +2010,13 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
     refetchInterval: false,
   });
+  const knowledgeRagHealthQuery = useQuery({
+    queryKey: queryKeys.knowledgeRagHealth(),
+    queryFn: () => fetchJson<KnowledgeRagHealthPayload>("/api/knowledge/rag/health"),
+    enabled: forcedView === "knowledge",
+    refetchInterval: resolvePollingInterval(pageVisible, 60_000),
+    refetchIntervalInBackground: false,
+  });
   const knowledgeRagRetrieveQuery = useQuery({
     queryKey: queryKeys.knowledgeRagRetrieve(
       activeKnowledgeBaseForItems,
@@ -2067,7 +2090,9 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
   });
   const knowledgeSearchResults = knowledgeSearchQuery.data?.results ?? [];
   const knowledgeRagContexts = knowledgeRagRetrieveQuery.data?.contexts ?? [];
-  const knowledgeRagPolicy = knowledgeRagRetrieveQuery.data?.retrievalPolicy;
+  const knowledgeRagHealth = knowledgeRagHealthQuery.data;
+  const localRagProviderHealth = knowledgeRagHealth?.providers.find((provider) => provider.provider === "local") ?? knowledgeRagHealth?.providers[0];
+  const knowledgeRagPolicy = knowledgeRagHealth?.retrievalPolicy ?? knowledgeRagRetrieveQuery.data?.retrievalPolicy;
   const ratingSuggestions = (ratingSuggestionsQuery.data?.suggestions ?? []).filter((suggestion) =>
     ratingSuggestionPriority === "all" ? true : suggestion.reviewPriority === ratingSuggestionPriority,
   );
@@ -3947,6 +3972,14 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 <span className={styles.countPill}>{knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}</span>
               </div>
               <p>{copy.ragRetrievalHint}</p>
+              <div className={styles.ragHealthStrip} aria-label={copy.ragHealth}>
+                <span>{copy.ragProvider}: {localRagProviderHealth?.provider ?? knowledgeRagHealth?.provider ?? "local"} · {localRagProviderHealth?.status ?? knowledgeRagHealth?.status ?? copy.loading}</span>
+                <span>{copy.ragVector}: {localRagProviderHealth?.vectorEnabled ? copy.yes : copy.no}</span>
+                <span>{copy.ragIndexed}: {localRagProviderHealth?.indexedItemCount ?? 0}</span>
+                <span data-stale={Number(localRagProviderHealth?.staleItemCount ?? 0) > 0 ? "true" : "false"}>
+                  {copy.ragStale}: {localRagProviderHealth?.staleItemCount ?? 0}
+                </span>
+              </div>
               <div className={styles.ragPolicyStrip}>
                 <span>{copy.ragNoPromptInjection}: {knowledgeRagPolicy?.injectsPromptByDefault ? copy.no : copy.yes}</span>
                 <span>ACL: {knowledgeRagPolicy?.honorsKnowledgeAcl ? copy.yes : copy.no}</span>

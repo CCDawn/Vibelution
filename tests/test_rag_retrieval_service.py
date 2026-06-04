@@ -145,6 +145,31 @@ def test_local_rag_retrieval_returns_contexts_with_citations(rag_knowledge_env):
     assert citation["sourceArtifactIds"] == context["source"]["sourceArtifactIds"]
 
 
+def test_rag_retrieval_health_reports_local_provider_ready():
+    from core.web.services import rag_retrieval_service
+
+    payload = rag_retrieval_service.get_rag_retrieval_health()
+
+    assert payload["schemaVersion"] == 1
+    assert payload["provider"] == "local"
+    assert payload["status"] == "ready"
+    assert payload["providers"] == [
+        {
+            "provider": "local",
+            "status": "ready",
+            "vectorEnabled": False,
+            "indexedItemCount": 0,
+            "staleItemCount": 0,
+        }
+    ]
+    assert payload["retrievalPolicy"]["provider"] == "local"
+    assert payload["retrievalPolicy"]["honorsKnowledgeAcl"] is True
+    assert payload["retrievalPolicy"]["honorsMemoryPolicy"] is True
+    assert payload["retrievalPolicy"]["mutatesFormalKnowledge"] is False
+    assert payload["retrievalPolicy"]["injectsPromptByDefault"] is False
+    assert payload["updatedAt"]
+
+
 def test_rag_retrieval_honors_knowledge_acl(rag_knowledge_env):
     from core.web.services import rag_retrieval_service
 
