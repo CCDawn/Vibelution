@@ -6,6 +6,8 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -19,6 +21,28 @@ from .errors import classify_exception
 from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .streaming import extract_message_tool_calls, extract_text_content
 from .types import LLMCapabilities, LLMError, StreamChunk, UsageStats
+
+
+_LLM_STATUS_CONTEXT: ContextVar[Dict[str, str]] = ContextVar(
+    "vibelution_llm_status_context",
+    default={},
+)
+
+
+@contextmanager
+def llm_status_context(**fields: str):
+    """Attach safe session breadcrumbs to LLM status events in this call context."""
+
+    normalized = {
+        str(key): str(value or "").strip()
+        for key, value in fields.items()
+        if str(value or "").strip()
+    }
+    token = _LLM_STATUS_CONTEXT.set(normalized)
+    try:
+        yield
+    finally:
+        _LLM_STATUS_CONTEXT.reset(token)
 
 
 def _record_llm_scene_event(
@@ -44,6 +68,22 @@ def _record_llm_scene_event(
             fields=fields or {},
             lifecycle=lifecycle,
         )
+    except Exception:
+        return
+
+
+def _publish_llm_status_event(status: str, **fields: Any) -> None:
+    """Publish a small LLM status breadcrumb for live session surfaces."""
+    context = dict(_LLM_STATUS_CONTEXT.get({}) or {})
+    payload = {
+        "status": str(status or "").strip(),
+        **context,
+        **{key: value for key, value in fields.items() if value is not None},
+    }
+    try:
+        from core.infrastructure.event_bus import EventNames, get_event_bus
+
+        get_event_bus().publish(EventNames.LLM_STATUS, payload, source="LLMClient")
     except Exception:
         return
 
@@ -788,6 +828,12 @@ class LLMClient:
             },
             lifecycle=True,
         )
+        _publish_llm_status_event(
+            "fallback_invoke_started",
+            reason=last_error.category,
+            message_count=message_count,
+            tool_count=tool_count,
+        )
         try:
             response = self._invoke_payload_once(payload)
         except Exception as exc:
@@ -811,6 +857,11 @@ class LLMClient:
                     llm_error=llm_error,
                 ),
                 lifecycle=True,
+            )
+            _publish_llm_status_event(
+                "failed",
+                category=llm_error.category,
+                retryable=llm_error.retryable,
             )
             raise llm_error from exc
 
@@ -847,6 +898,12 @@ class LLMClient:
                 "latencyMs": latency_ms,
             },
             lifecycle=True,
+        )
+        _publish_llm_status_event(
+            "fallback_invoke_succeeded",
+            reason=last_error.category,
+            content_chars=len(text or ""),
+            tool_call_count=len(tool_calls or []),
         )
         if reasoning.text.strip():
             yield StreamChunk(type="reasoning_delta", text=reasoning.text, provider_payload={**message, "reasoning_source": reasoning.source})
@@ -891,6 +948,13 @@ class LLMClient:
                 fields=fields,
                 lifecycle=True,
             )
+            _publish_llm_status_event(
+                "failed",
+                attempt=attempt,
+                max_attempts=max_attempts,
+                category=llm_error.category,
+                retryable=llm_error.retryable,
+            )
             return False
         wait_seconds = _retry_policy_backoff_seconds(self.profile, attempt)
         _record_llm_scene_event(
@@ -901,6 +965,14 @@ class LLMClient:
             outcome="retrying",
             fields={**fields, "nextAttempt": attempt + 1, "waitSeconds": wait_seconds},
             lifecycle=True,
+        )
+        _publish_llm_status_event(
+            "retrying",
+            attempt=attempt,
+            max_attempts=max_attempts,
+            category=llm_error.category,
+            next_attempt=attempt + 1,
+            wait_seconds=wait_seconds,
         )
         time.sleep(wait_seconds)
         return True

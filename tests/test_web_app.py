@@ -6220,6 +6220,93 @@ def test_capture_session_ui_stream_records_tool_error_next_state_signal(tmp_path
     assert any(item["metadata"]["toolName"] == "read_file_tool" for item in signals)
 
 
+def test_capture_session_ui_stream_surfaces_llm_retry_status(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    lifecycle_events: list[dict] = []
+    monkeypatch.setattr(
+        session_service,
+        "_record_session_turn_lifecycle_event",
+        lambda session_id, phase, **kwargs: lifecycle_events.append(
+            {"session_id": session_id, "phase": phase, **kwargs}
+        ),
+    )
+    published: list[str] = []
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda session_id: published.append(session_id))
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live", turn_id="turn-llm")
+    with session_service._capture_session_ui_stream("session-live", capture):
+        session_service.get_event_bus().publish(
+            session_service.EventNames.LLM_STATUS,
+            {
+                "status": "retrying",
+                "attempt": 2,
+                "max_attempts": 5,
+                "category": "network_error",
+            },
+        )
+
+    live_state = session_service._snapshot_session_live_output("session-live")
+    assert live_state is not None
+    assert live_state.stage == "model_retry"
+    assert "模型连接正在重试" in live_state.content
+    assert "2/5" in live_state.content
+    assert published == ["session-live"]
+    assert any(item["phase"] == "llm_status_retrying" for item in lifecycle_events)
+
+
+def test_capture_session_ui_stream_filters_llm_status_by_event_context(tmp_path, monkeypatch):
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    published: list[str] = []
+    monkeypatch.setattr(session_service, "_publish_session_detail_snapshot", lambda session_id: published.append(session_id))
+    stub_ui = SimpleNamespace(
+        stream_thought=lambda *args, **kwargs: None,
+        clear_thought_stream=lambda *args, **kwargs: None,
+        stream_response=lambda *args, **kwargs: None,
+        clear_response_stream=lambda *args, **kwargs: None,
+        set_pet_mental_state=lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr("core.ui.get_ui", lambda: stub_ui)
+
+    capture = session_service.SessionTurnCapture(session_id="session-live", turn_id="turn-llm")
+    with session_service._capture_session_ui_stream("session-live", capture):
+        session_service.get_event_bus().publish(
+            session_service.EventNames.LLM_STATUS,
+            {
+                "status": "retrying",
+                "session_id": "other-session",
+                "turn_id": "turn-llm",
+                "attempt": 1,
+                "max_attempts": 5,
+                "category": "network_error",
+            },
+        )
+        session_service.get_event_bus().publish(
+            session_service.EventNames.LLM_STATUS,
+            {
+                "status": "retrying",
+                "session_id": "session-live",
+                "turn_id": "turn-llm",
+                "attempt": 2,
+                "max_attempts": 5,
+                "category": "network_error",
+            },
+        )
+
+    live_state = session_service._snapshot_session_live_output("session-live")
+    assert live_state is not None
+    assert live_state.stage == "model_retry"
+    assert "2/5" in live_state.content
+    assert published == ["session-live"]
+
+
 def test_turn_circuit_breaker_records_next_state_signal_with_turn_id(tmp_path, monkeypatch):
     monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -7257,6 +7344,51 @@ def test_submit_session_message_keeps_streamed_reply_when_final_result_is_contro
     assert assistant["content"] == "项目审查完成：核心问题集中在会话持久化和前端状态冗余。"
     assert "[outcome=done]" not in json.dumps(payload, ensure_ascii=False)
     assert payload["activeTask"]["latestSummary"] == "项目审查完成：核心问题集中在会话持久化和前端状态冗余。"
+
+
+def test_submit_session_message_keeps_fallback_streamed_reply_when_final_result_is_control_marker(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="reading")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        session_service,
+        "get_web_chat_config",
+        lambda: SimpleNamespace(max_continuation_turns=1),
+    )
+
+    class FallbackReplyAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            from core.ui import get_ui
+
+            get_ui().stream_response("非流式回答已返回：这是最终可见正文。", done=True)
+            return {
+                "status": "completed",
+                "summary": "[outcome=done]",
+                "raw_output": "[outcome=done]",
+                "outcome": "done",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: FallbackReplyAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续并给出最终回答"},
+    )
+
+    assert response.status_code == 202, response.json()
+    payload = response.json()
+    assistant = payload["messages"][-1]
+    assert assistant["content"] == "非流式回答已返回：这是最终可见正文。"
+    assert payload["activeTask"]["latestSummary"] == "非流式回答已返回：这是最终可见正文。"
 
 
 def test_submit_session_message_continues_progress_until_done(tmp_path, monkeypatch):

@@ -501,6 +501,7 @@ def test_invoke_retries_retryable_timeout_up_to_profile_limit(monkeypatch):
         }
     )
     recorded = []
+    statuses = []
     attempts = {"count": 0}
 
     def backend(_payload):
@@ -514,6 +515,7 @@ def test_invoke_retries_retryable_timeout_up_to_profile_limit(monkeypatch):
 
     monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
     monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+    monkeypatch.setattr("core.llm.client._publish_llm_status_event", lambda status, **fields: statuses.append((status, fields)))
 
     client = LLMClient(config=config, backend=backend)
     message = client.invoke([{"role": "user", "content": "ping"}])
@@ -538,6 +540,7 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
         }
     )
     recorded = []
+    statuses = []
     attempts = {"count": 0}
 
     def failing_before_first_chunk():
@@ -552,6 +555,7 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
 
     monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
     monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+    monkeypatch.setattr("core.llm.client._publish_llm_status_event", lambda status, **fields: statuses.append((status, fields)))
 
     client = LLMClient(config=config, backend=backend)
     events = list(client.stream_events([{"role": "user", "content": "ping"}]))
@@ -561,6 +565,8 @@ def test_stream_retries_retryable_failure_before_first_event(monkeypatch):
     assert events[0].text == "ok"
     retry_events = [item for item in recorded if item[0][1] == "llm.stream.failed.retrying"]
     assert [event[1]["fields"]["attempt"] for event in retry_events] == [1, 2]
+    assert [item[0] for item in statuses] == ["retrying", "retrying"]
+    assert [item[1]["attempt"] for item in statuses] == [1, 2]
 
 
 def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(monkeypatch):
@@ -576,6 +582,7 @@ def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(m
         }
     )
     recorded = []
+    statuses = []
     payloads = []
 
     def failing_before_first_chunk():
@@ -598,6 +605,7 @@ def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(m
 
     monkeypatch.setattr("core.llm.client.time.sleep", lambda _seconds: None)
     monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+    monkeypatch.setattr("core.llm.client._publish_llm_status_event", lambda status, **fields: statuses.append((status, fields)))
 
     client = LLMClient(config=config, backend=backend)
     events = list(client.stream_events([{"role": "user", "content": "ping"}]))
@@ -608,6 +616,7 @@ def test_stream_falls_back_to_non_streaming_after_retryable_pre_chunk_failures(m
     event_codes = [item[0][1] for item in recorded]
     assert "llm.stream.fallback.invoke_started" in event_codes
     assert "llm.stream.fallback.invoke_succeeded" in event_codes
+    assert [item[0] for item in statuses] == ["retrying", "failed", "fallback_invoke_started", "fallback_invoke_succeeded"]
 
 
 def test_stream_records_success_event_with_safe_summary(monkeypatch):
