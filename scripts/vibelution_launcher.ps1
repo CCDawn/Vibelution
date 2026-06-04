@@ -1856,6 +1856,48 @@ function Test-WebHealthy {
     }
 }
 
+function Test-LauncherRestartActiveWorkBlocked {
+    if (-not (Test-WebHealthy)) {
+        return $false
+    }
+
+    $statusUrl = "$url/api/launcher/status"
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -Uri $statusUrl -TimeoutSec 3
+        if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+            return $false
+        }
+        $payload = $response.Content | ConvertFrom-Json -ErrorAction Stop
+        $lifecycleProof = Get-ObjectPropertyValue -Object $payload -Name "lifecycleProof" -Default $null
+        $activeWorkRuns = Get-ObjectPropertyValue -Object $lifecycleProof -Name "activeWorkRuns" -Default $null
+        $activeCount = Get-ObjectPropertyValue -Object $activeWorkRuns -Name "count" -Default 0
+        $count = 0
+        if (-not [int]::TryParse([string]$activeCount, [ref]$count)) {
+            $items = @(Get-ObjectPropertyValue -Object $activeWorkRuns -Name "items" -Default @())
+            $count = $items.Count
+        }
+        if ($count -le 0) {
+            return $false
+        }
+
+        $message = "有进行中的任务，无法重启 Vibelution。请等待任务完成或先停止任务。"
+        Write-Note $message
+        Write-LauncherControlLog `
+            -Event "launcher.restart.blocked_active_work" `
+            -Message $message `
+            -Level "warning" `
+            -Fields @{ active_work_count = $count; status_url = $statusUrl }
+        return $true
+    } catch {
+        Write-LauncherControlLog `
+            -Event "launcher.restart.active_work_probe_failed" `
+            -Message "Launcher restart active-work probe failed; allowing recovery restart." `
+            -Level "warning" `
+            -Fields @{ status_url = $statusUrl; error = $_.Exception.Message }
+        return $false
+    }
+}
+
 function Resolve-NpmCommand {
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $npm) {
@@ -5278,6 +5320,9 @@ if ($runtimeManagerClientActions -contains $Action) {
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "close_workbench" -Reason "launcher_stop" -StopManager
         }
         "restart" {
+            if (Test-LauncherRestartActiveWorkBlocked) {
+                exit 11
+            }
             $clientExitCode = Invoke-RuntimeManagerClient -Mode "command" -CommandType "restart_workbench" -Reason "launcher_restart" -ForwardNoBrowser:$NoBrowser
         }
         "status" {
