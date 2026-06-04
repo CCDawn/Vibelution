@@ -182,6 +182,53 @@ def _text_length(value: Any) -> int:
     return len(extract_text_content(value))
 
 
+
+def _content_blocks_have_cache_control(value: Any) -> bool:
+    if not isinstance(value, list):
+        return False
+    for block in value:
+        if isinstance(block, dict) and block.get("cache_control"):
+            return True
+    return False
+
+
+def _messages_have_prompt_cache_control(messages: List[Any]) -> bool:
+    for message in list(messages or []):
+        content: Any = None
+        if isinstance(message, dict):
+            content = message.get("content")
+        elif isinstance(message, BaseMessage):
+            content = getattr(message, "content", None)
+        if _content_blocks_have_cache_control(content):
+            return True
+    return False
+
+
+def _strip_cache_control_from_content(value: Any) -> Any:
+    if not isinstance(value, list):
+        return value
+    stripped: List[Any] = []
+    for block in value:
+        if isinstance(block, dict) and "cache_control" in block:
+            cleaned = dict(block)
+            cleaned.pop("cache_control", None)
+            stripped.append(cleaned)
+        else:
+            stripped.append(block)
+    return stripped
+
+
+def _strip_cache_control_from_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cleaned_messages: List[Dict[str, Any]] = []
+    for message in list(messages or []):
+        if not isinstance(message, dict):
+            cleaned_messages.append(message)
+            continue
+        cleaned = dict(message)
+        cleaned["content"] = _strip_cache_control_from_content(cleaned.get("content"))
+        cleaned_messages.append(cleaned)
+    return cleaned_messages
+
 def _safe_payload_shape_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
     messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
     role_text_chars: Dict[str, int] = {}
@@ -552,18 +599,51 @@ class LLMClient:
         selected_tools = list(self.bound_tools)
         if tools is not None:
             selected_tools = list(tools or [])
+        has_prompt_cache_control = _messages_have_prompt_cache_control(messages)
+        prompt_cache_mode = str(
+            getattr(getattr(self.profile, "prompt_cache", None), "mode", "") or "disabled"
+        ).strip().lower()
+        if has_prompt_cache_control and prompt_cache_mode == "unsupported":
+            raise LLMError(
+                "prompt_cache_unsupported",
+                (
+                    "当前模型配置声明不支持 prompt cache；"
+                    f"profile `{self.profile_id}` provider `{self.provider.kind}` "
+                    f"transport `{getattr(self.profile, 'transport', '') or 'chat_completions'}` "
+                    f"model `{self.profile.model}`。请在模型配置中设置 prompt_cache.mode，"
+                    "或关闭系统提示词缓存强制要求。"
+                ),
+                retryable=False,
+                provider=str(self.provider.kind or ""),
+                model=str(self.profile.model or ""),
+                details={
+                    "profile_id": self.profile_id,
+                    "provider_kind": str(self.provider.kind or ""),
+                    "transport": str(getattr(self.profile, "transport", "") or "chat_completions"),
+                    "model": str(self.profile.model or ""),
+                    "prompt_cache_mode": prompt_cache_mode,
+                },
+            )
         has_image_content = any(
             isinstance(item, dict) and _content_blocks_have_image(item.get("content"))
             for item in messages
         )
+        preserve_cache_control = has_prompt_cache_control and prompt_cache_mode == "explicit_cache_control"
+        preserve_structured_content = (
+            self.adapter.preserves_structured_content
+            or has_image_content
+            or has_prompt_cache_control
+        )
         normalized_messages = [
             _message_to_openai_dict(
                 item,
-                preserve_structured_content=self.adapter.preserves_structured_content or has_image_content,
+                preserve_structured_content=preserve_structured_content,
                 preserve_reasoning_content=self.adapter.should_preserve_reasoning_content(),
             )
             for item in messages
         ]
+        if has_prompt_cache_control and not preserve_cache_control:
+            normalized_messages = _strip_cache_control_from_messages(normalized_messages)
         if has_image_content:
             transport = str(getattr(self.profile, "transport", "") or "").strip().lower()
             for item in normalized_messages:
@@ -578,6 +658,14 @@ class LLMClient:
             "api_key": self.config.get_api_key_for_profile(profile_id=self.profile_id),
             "base_url": self.provider.base_url,
         }
+        prompt_cache = getattr(self.profile, "prompt_cache", None)
+        if prompt_cache_mode == "automatic":
+            prompt_cache_key = str(getattr(prompt_cache, "key", "") or "").strip()
+            prompt_cache_retention = str(getattr(prompt_cache, "retention", "") or "").strip()
+            if prompt_cache_key:
+                payload["prompt_cache_key"] = prompt_cache_key
+            if prompt_cache_retention:
+                payload["prompt_cache_retention"] = prompt_cache_retention
         if stream and self.adapter.supports_stream_usage_options():
             payload["stream_options"] = {"include_usage": True}
         headers = self.provider.extra_headers or {}

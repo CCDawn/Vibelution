@@ -415,6 +415,7 @@ def test_invoke_records_safe_payload_shape_without_prompt_text(monkeypatch):
             "llm.providers.default.base_url": "https://api.anthropic.com",
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
         }
     )
     recorded = []
@@ -960,6 +961,7 @@ def test_native_anthropic_payload_preserves_structured_content_blocks_by_default
             "llm.providers.default.base_url": "https://api.anthropic.com",
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "claude-3-5-sonnet-20241022",
+            "llm.profiles.primary.prompt_cache.mode": "explicit_cache_control",
         }
     )
 
@@ -971,7 +973,7 @@ def test_native_anthropic_payload_preserves_structured_content_blocks_by_default
     assert payload["messages"][0]["content"] == content
 
 
-def test_openai_compatible_payload_flattens_structured_content_blocks():
+def test_prompt_cache_disabled_strips_cache_control_and_allows_request():
     config = make_config(
         **{
             "llm.providers.default.kind": "local",
@@ -979,6 +981,7 @@ def test_openai_compatible_payload_flattens_structured_content_blocks():
             "llm.providers.default.base_url": "http://localhost:8000/v1",
             "llm.profiles.primary.provider_id": "default",
             "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.prompt_cache.mode": "disabled",
         }
     )
 
@@ -986,7 +989,70 @@ def test_openai_compatible_payload_flattens_structured_content_blocks():
     client = LLMClient(config=config, backend=lambda payload: payload)
     payload = client._build_payload([{"role": "system", "content": content}])
 
-    assert payload["messages"][0]["content"] == "plain"
+    assert payload["messages"][0]["content"] == [{"type": "text", "text": "plain"}]
+
+
+def test_prompt_cache_unsupported_rejects_cache_control_without_backend_call():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "local",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen-32b-awq",
+            "llm.profiles.primary.prompt_cache.mode": "unsupported",
+        }
+    )
+
+    content = [{"type": "text", "text": "plain", "cache_control": {"type": "ephemeral"}}]
+    backend_called = False
+
+    def backend(_payload):
+        nonlocal backend_called
+        backend_called = True
+        return {"choices": [{"message": {"role": "assistant", "content": "should-not-run"}}]}
+
+    client = LLMClient(config=config, backend=backend)
+    with pytest.raises(LLMError) as raised:
+        client.invoke([{"role": "system", "content": content}])
+
+    assert backend_called is False
+    assert raised.value.category == "prompt_cache_unsupported"
+    assert raised.value.retryable is False
+    assert raised.value.details["provider_kind"] == "local"
+    assert raised.value.details["prompt_cache_mode"] == "unsupported"
+
+
+def test_openai_compatible_automatic_prompt_cache_strips_cache_control_and_keeps_payload_valid():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "relay",
+            "llm.providers.default.api_key": "test-key",
+            "llm.providers.default.base_url": "https://ai-pixel.online",
+            "llm.providers.default.compat_mode": "openai",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "gpt-5.5",
+            "llm.profiles.primary.transport": "responses",
+            "llm.profiles.primary.prompt_cache.mode": "automatic",
+            "llm.profiles.primary.prompt_cache.key": "vibelution-primary",
+            "llm.profiles.primary.prompt_cache.retention": "24h",
+        }
+    )
+
+    content = [
+        {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "dynamic"},
+    ]
+    client = LLMClient(config=config, backend=lambda payload: payload)
+    payload = client._build_payload([{"role": "system", "content": content}])
+
+    assert payload["model"] == "openai/responses/gpt-5.5"
+    assert payload["prompt_cache_key"] == "vibelution-primary"
+    assert payload["prompt_cache_retention"] == "24h"
+    assert payload["messages"][0]["content"] == [
+        {"type": "text", "text": "stable"},
+        {"type": "text", "text": "dynamic"},
+    ]
 
 
 def test_openai_compatible_payload_preserves_image_blocks_for_chat_completions():

@@ -122,6 +122,37 @@ class RetryPolicyConfig(BaseModel):
     backoff_base_seconds: float = Field(default=2.0, ge=0.1)
 
 
+class PromptCacheConfig(BaseModel):
+    """Prompt cache behavior declared by the model configuration."""
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str = Field(default="disabled")
+    key: str = Field(default="")
+    retention: str = Field(default="")
+
+    @field_validator("mode")
+    @classmethod
+    def normalize_mode(cls, v: str) -> str:
+        value = (v or "disabled").strip().lower()
+        if value not in {"disabled", "automatic", "explicit_cache_control", "unsupported"}:
+            raise ValueError(
+                "prompt_cache.mode must be one of: disabled, automatic, explicit_cache_control, unsupported"
+            )
+        return value
+
+    @field_validator("key")
+    @classmethod
+    def normalize_key(cls, v: str) -> str:
+        return (v or "").strip()
+
+    @field_validator("retention")
+    @classmethod
+    def normalize_retention(cls, v: str) -> str:
+        value = (v or "").strip().lower()
+        if value not in {"", "in_memory", "24h"}:
+            raise ValueError("prompt_cache.retention must be one of: in_memory, 24h")
+        return value
+
 class ProviderConfig(BaseModel):
     """Provider 级配置。"""
     model_config = ConfigDict(extra="ignore")
@@ -180,6 +211,7 @@ class LLMProfile(BaseModel):
     streaming: bool = Field(default=True)
     tool_calling_mode: str = Field(default="auto")
     retry_policy: RetryPolicyConfig = Field(default_factory=RetryPolicyConfig)
+    prompt_cache: PromptCacheConfig = Field(default_factory=PromptCacheConfig)
     discovery_enabled: bool = Field(default=True)
     supports_image_input: Optional[bool] = Field(
         default=None,

@@ -7434,6 +7434,8 @@ def _record_session_turn_error(
                 "sessionId": str(session_id or "").strip(),
                 "turnId": str(turn_error.get("turn_id") or turn_error.get("turnId") or "").strip(),
                 "errorType": error_type,
+                "reasonCode": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
+                "reasonSummary": str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip(),
                 "recoverable": bool(turn_error.get("recoverable", True)),
                 "rawErrorPreview": trim_lines(raw_error, max_lines=2),
             },
@@ -7444,6 +7446,8 @@ def _record_session_turn_error(
                 "status": status,
                 "error_type": error_type,
                 "message": str(turn_error.get("message") or "").strip(),
+                "reason_code": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
+                "reason_summary": str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip(),
                 "recoverable": bool(turn_error.get("recoverable", True)),
             },
         )
@@ -7855,6 +7859,8 @@ def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
     return {
         "message": message,
         "errorType": str(value.get("errorType") or value.get("error_type") or "runtime_error").strip() or "runtime_error",
+        "reasonCode": str(value.get("reasonCode") or value.get("reason_code") or "").strip(),
+        "reasonSummary": str(value.get("reasonSummary") or value.get("reason_summary") or "").strip(),
         "recoverable": bool(value.get("recoverable", True)),
         "timestamp": str(value.get("timestamp") or value.get("createdAt") or value.get("created_at") or "").strip(),
         "turnId": str(value.get("turnId") or value.get("turn_id") or "").strip(),
@@ -7863,9 +7869,12 @@ def _normalize_session_turn_error(value: Any) -> dict[str, Any] | None:
 
 def _make_session_turn_error(raw_error: Any, *, lang: str, error_type: str = "", turn_id: str = "") -> dict[str, Any]:
     normalized_error_type = str(error_type or _failure_error_type(str(raw_error or ""))).strip() or "runtime_error"
+    provider_reason = _provider_error_user_reason(raw_error, lang=lang)
     return {
-        "message": _user_visible_failure_summary(raw_error, lang=lang),
+        "message": _user_visible_failure_summary(raw_error, lang=lang, provider_reason=provider_reason),
         "error_type": normalized_error_type,
+        "reason_code": provider_reason["code"],
+        "reason_summary": provider_reason["summary"],
         "recoverable": normalized_error_type.startswith("provider_") or normalized_error_type in {"server_error", "network_error"},
         "timestamp": _now_timestamp(),
         "turn_id": str(turn_id or "").strip(),
@@ -8074,7 +8083,9 @@ def _make_provider_failure_chat_message(
             "errorType": str(error_type or "").strip(),
             "turnId": str(turn_id or "").strip(),
             "recoverable": bool(turn_error.get("recoverable")),
-            "providerFailure": True,
+            "providerFailure": str(error_type or "").strip() != "prompt_cache_unsupported",
+            "reasonCode": str(turn_error.get("reason_code") or turn_error.get("reasonCode") or "").strip(),
+            "reasonSummary": str(turn_error.get("reason_summary") or turn_error.get("reasonSummary") or "").strip(),
         },
     )
     message["timestamp"] = timestamp
@@ -8084,6 +8095,12 @@ def _make_provider_failure_chat_message(
 def _is_provider_failed_result(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
+    if any(
+        "prompt_cache_unsupported" in str(result.get(key) or "").lower()
+        or "不支持显式 prompt cache" in str(result.get(key) or "")
+        for key in ("error", "raw_error", "rawError", "summary", "raw_output")
+    ):
+        return True
     if any(
         _looks_like_provider_error_text(result.get(key))
         for key in ("error", "raw_error", "rawError")
@@ -8138,6 +8155,8 @@ def _looks_like_provider_error_text(text: Any) -> bool:
 def _failure_error_type(raw_error: str, *, exc: Exception | None = None) -> str:
     value = str(raw_error or "").strip().lower()
     exc_type = type(exc).__name__ if exc is not None else ""
+    if "prompt_cache_unsupported" in value:
+        return "prompt_cache_unsupported"
     if _looks_like_provider_error_text(value):
         if any(
             marker in value
@@ -8160,14 +8179,69 @@ def _failure_error_type(raw_error: str, *, exc: Exception | None = None) -> str:
     return exc_type or "runtime_error"
 
 
-def _user_visible_failure_summary(raw_error: Any, *, lang: str | None = None, exc: Exception | None = None) -> str:
+def _provider_error_user_reason(raw_error: Any, *, lang: str | None = None) -> dict[str, str]:
+    language = lang or get_web_language()
+    value = str(raw_error or "").strip()
+    lower = value.lower()
+
+    def reason(code: str, zh: str, en: str) -> dict[str, str]:
+        return {"code": code, "summary": text_for(language, zh=zh, en=en)}
+
+    if "api key" in lower and ("额度" in value or "限额" in value or "用完" in value or "quota" in lower or "rate_limit" in lower):
+        return reason("quota_exhausted", "API Key 额度或当日限额已用完", "API key quota or daily limit is exhausted")
+    if "prompt_cache_unsupported" in lower or "不支持显式 prompt cache" in value:
+        return reason("prompt_cache_unsupported", "当前模型通道不支持显式 prompt cache", "the current model channel does not support explicit prompt cache")
+    if "rate limit" in lower or "rate_limit" in lower or "429" in lower:
+        return reason("rate_limited", "provider 正在限流", "provider is rate limiting requests")
+    if "temperature" in lower and ("deprecated" in lower or "not supported" in lower or "unsupported" in lower):
+        return reason("deprecated_sampling_parameter", "模型不接受当前采样参数，例如 temperature", "model rejected a sampling parameter such as temperature")
+    if "top_p" in lower or "top_k" in lower:
+        return reason("deprecated_sampling_parameter", "模型不接受当前采样参数，例如 top_p/top_k", "model rejected a sampling parameter such as top_p/top_k")
+    if "context_length" in lower or "context length" in lower or "maximum context" in lower or "too many tokens" in lower:
+        return reason("context_limit", "输入上下文超过模型限制", "input context exceeded the model limit")
+    if "auth" in lower or "unauthorized" in lower or "forbidden" in lower or "401" in lower or "403" in lower:
+        return reason("auth_failed", "provider 认证失败，请检查 API Key 或权限", "provider authentication failed; check the API key or permissions")
+    if "upstream_error" in lower or "badgateway" in lower or "bad gateway" in lower or "service unavailable" in lower:
+        return reason("upstream_unavailable", "provider 上游服务不可用或网关失败", "provider upstream service is unavailable or failed at the gateway")
+    if "timeout" in lower:
+        return reason("timeout", "provider 响应超时", "provider response timed out")
+    if _looks_like_provider_error_text(value):
+        return reason("provider_error", "provider 返回了协议或服务错误", "provider returned a protocol or service error")
+    return {"code": "", "summary": ""}
+
+
+def _user_visible_failure_summary(
+    raw_error: Any,
+    *,
+    lang: str | None = None,
+    exc: Exception | None = None,
+    provider_reason: dict[str, str] | None = None,
+) -> str:
     language = lang or get_web_language()
     text = str(raw_error or "").strip()
-    if _looks_like_provider_error_text(text):
+    if "prompt_cache_unsupported" in text.lower() or "不支持显式 prompt cache" in text:
+        reason_summary = str((provider_reason or {}).get("summary") or "").strip()
+        reason_line = text_for(
+            language,
+            zh=f"原因：{reason_summary}。" if reason_summary else "原因：当前模型通道不支持显式 prompt cache。",
+            en=f"Reason: {reason_summary}." if reason_summary else "Reason: the current model channel does not support explicit prompt cache.",
+        )
         return text_for(
             language,
-            zh="模型服务上游暂时失败，本轮没有完成。完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
-            en='The model provider failed upstream, so this turn did not complete. The full provider error was written to runtime logs; retry later or send "continue".',
+            zh=f"模型配置不满足本轮 prompt cache 要求，本轮已停止。{reason_line}请切换支持显式 prompt cache 的模型通道，或关闭缓存强制要求。",
+            en=f"The model configuration does not satisfy this turn's prompt-cache requirement, so the turn was stopped. {reason_line} Switch to a model channel that supports explicit prompt cache, or disable the cache requirement.",
+        )
+    if _looks_like_provider_error_text(text):
+        reason_summary = str((provider_reason or {}).get("summary") or "").strip()
+        reason_line = text_for(
+            language,
+            zh=f"原因：{reason_summary}。" if reason_summary else "原因：provider 返回了错误。",
+            en=f"Reason: {reason_summary}." if reason_summary else "Reason: the provider returned an error.",
+        )
+        return text_for(
+            language,
+            zh=f"模型服务上游暂时失败，本轮没有完成。{reason_line}完整 provider 错误已写入运行日志；可以稍后直接重试或发送“继续”。",
+            en=f'The model provider failed upstream, so this turn did not complete. {reason_line} The full provider error was written to runtime logs; retry later or send "continue".',
         )
     reason = trim_lines(text, max_lines=2)
     summary = text_for(

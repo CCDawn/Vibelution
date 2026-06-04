@@ -1690,17 +1690,7 @@ class SelfEvolvingAgent:
             elif isinstance(msg, SystemMessage):
                 clean_messages.append(SystemMessage(content=msg.content or ""))
             elif isinstance(msg, dict) and msg.get("role") == "system":
-                # build_system_message 返回 dict 格式（带 cache_control），
-                # 提取文本转为 SystemMessage
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    text = "\n\n".join(
-                        block.get("text", "") for block in content
-                        if isinstance(block, dict)
-                    )
-                else:
-                    text = str(content)
-                clean_messages.append(SystemMessage(content=text))
+                clean_messages.append(dict(msg))
             else:
                 clean_messages.append(msg)
 

@@ -56,6 +56,7 @@ MODEL_LIBRARY_DETAIL_FIELDS = (
     "connect_timeout",
     "streaming",
     "tool_calling_mode",
+    "prompt_cache",
     "discovery_enabled",
     "supports_image_input",
     "capability_status",
@@ -860,6 +861,8 @@ def _delete_user_env_var(name: str) -> None:
 def _coerce_model_library_detail(key: str, value):
     if value in ("", None):
         return None
+    if key == "prompt_cache":
+        return copy.deepcopy(value) if isinstance(value, dict) else {"mode": str(value).strip()}
     if key == "api_key_env":
         return str(value).strip()
     if key in {

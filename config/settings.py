@@ -87,6 +87,7 @@ PROFILE_REFERENCE_OVERRIDE_FIELDS = (
     "connect_timeout",
     "streaming",
     "tool_calling_mode",
+    "prompt_cache",
     "discovery_enabled",
     "supports_image_input",
     "capability_status",
