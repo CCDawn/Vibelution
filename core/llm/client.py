@@ -16,6 +16,7 @@ from config import AppConfig, get_config
 from .adapters import get_provider_adapter
 from .discovery import discover_model
 from .errors import classify_exception
+from .reasoning_extractor import extract_reasoning_text, strip_think_tag_reasoning
 from .streaming import extract_message_tool_calls, extract_text_content
 from .types import LLMCapabilities, LLMError, StreamChunk, UsageStats
 
@@ -620,7 +621,8 @@ class LLMClient:
         tool_calls = extract_message_tool_calls(message)
         usage = self._usage_from_response(response, latency_ms)
         additional_kwargs = {"tool_calls_raw": [call.provider_payload for call in tool_calls]}
-        reasoning_content = extract_text_content(message.get("reasoning_content") or "")
+        reasoning = extract_reasoning_text(message, extract_text_content)
+        reasoning_content = reasoning.text
         if reasoning_content.strip():
             additional_kwargs["reasoning_content"] = reasoning_content
         _record_llm_scene_event(
@@ -643,6 +645,8 @@ class LLMClient:
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
                 "cachedInputTokens": usage.cached_input_tokens,
+                "reasoningSource": reasoning.source,
+                "reasoningChars": len(reasoning_content),
                 "cacheHitRate": round(usage.cached_input_tokens / usage.input_tokens, 4)
                 if usage.input_tokens > 0
                 else 0.0,
@@ -652,7 +656,7 @@ class LLMClient:
             lifecycle=False,
         )
         return AIMessage(
-            content=extract_text_content(message.get("content") or ""),
+            content=strip_think_tag_reasoning(message.get("content") or "", extract_text_content),
             tool_calls=[
                 {"id": call.id, "name": call.name, "args": call.arguments}
                 for call in tool_calls
@@ -812,8 +816,8 @@ class LLMClient:
 
         latency_ms = int((time.time() - start) * 1000)
         message = self._choice_message(response)
-        text = extract_text_content(message.get("content") or "")
-        reasoning = extract_text_content(message.get("reasoning_content") or "")
+        text = strip_think_tag_reasoning(message.get("content") or "", extract_text_content)
+        reasoning = extract_reasoning_text(message, extract_text_content)
         tool_calls = extract_message_tool_calls(message)
         usage = self._usage_from_response(response, latency_ms)
         _record_llm_scene_event(
@@ -831,6 +835,8 @@ class LLMClient:
                 **route_summary,
                 **(metadata or {}),
                 "toolCallCount": len(tool_calls),
+                "reasoningSource": reasoning.source,
+                "reasoningChars": len(reasoning.text),
                 "inputTokens": usage.input_tokens,
                 "outputTokens": usage.output_tokens,
                 "totalTokens": usage.total_tokens,
@@ -842,8 +848,8 @@ class LLMClient:
             },
             lifecycle=True,
         )
-        if reasoning.strip():
-            yield StreamChunk(type="reasoning_delta", text=reasoning, provider_payload=message)
+        if reasoning.text.strip():
+            yield StreamChunk(type="reasoning_delta", text=reasoning.text, provider_payload={**message, "reasoning_source": reasoning.source})
         if text.strip():
             yield StreamChunk(type="text_delta", text=text, provider_payload=message)
         if tool_calls:
@@ -940,6 +946,8 @@ class LLMClient:
             chunk_count = 0
             text_delta_count = 0
             reasoning_delta_count = 0
+            reasoning_chars = 0
+            reasoning_sources: set[str] = set()
             tool_call_count = 0
             usage_observation = UsageStats()
             try:
@@ -973,6 +981,11 @@ class LLMClient:
                         text_delta_count += 1
                     elif event.type == "reasoning_delta":
                         reasoning_delta_count += 1
+                        reasoning_chars += len(event.text or "")
+                        if isinstance(event.provider_payload, dict):
+                            source = str(event.provider_payload.get("reasoning_source") or "").strip()
+                            if source:
+                                reasoning_sources.add(source)
                     elif event.type == "tool_call_final":
                         tool_call_count += len(event.tool_calls or [])
                     elif event.type == "done" and event.usage is not None:
@@ -995,6 +1008,8 @@ class LLMClient:
                         "chunkCount": chunk_count,
                         "textDeltaCount": text_delta_count,
                         "reasoningDeltaCount": reasoning_delta_count,
+                        "reasoningChars": reasoning_chars,
+                        "reasoningSources": sorted(reasoning_sources),
                         "toolCallCount": tool_call_count,
                         "inputTokens": usage_observation.input_tokens,
                         "outputTokens": usage_observation.output_tokens,
