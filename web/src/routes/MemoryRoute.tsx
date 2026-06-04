@@ -38,6 +38,7 @@ import {
   KnowledgeRatingSuggestionsPayload,
   KnowledgeRefinementProposal,
   KnowledgeReviewResponse,
+  KnowledgeRagRetrievalPayload,
   KnowledgeSearchPayload,
   KnowledgeSourceArtifact,
   KnowledgeStewardOverview,
@@ -261,6 +262,14 @@ type Copy = {
   teamKnowledgeDomain: string;
   governance: string;
   knowledgeSearch: string;
+  ragRetrieval: string;
+  ragContextCandidates: string;
+  ragRetrievalHint: string;
+  ragTopK: string;
+  ragContextBudget: string;
+  ragNoPromptInjection: string;
+  ragCitations: string;
+  ragNoContexts: string;
   searchQuery: string;
   ratingSuggestions: string;
   submitRatingSuggestion: string;
@@ -417,6 +426,8 @@ type KnowledgeSearchDraft = {
   query: string;
   tags: string;
   searchMode: "exact" | "semantic" | "hybrid";
+  ragTopK: number;
+  ragMaxContextChars: number;
 };
 type RatingSuggestionStatusFilter = "pending" | "applied" | "rejected" | "all";
 type RatingSuggestionPriorityFilter = "all" | "urgent" | "elevated" | "normal";
@@ -623,6 +634,14 @@ const COPY: Record<"zh" | "en", Copy> = {
     teamKnowledgeDomain: "团队知识库",
     governance: "治理",
     knowledgeSearch: "知识检索",
+    ragRetrieval: "RAG 检索",
+    ragContextCandidates: "上下文候选",
+    ragRetrievalHint: "基于已审核正式知识生成带引用的上下文候选；不会自动注入 prompt。",
+    ragTopK: "候选数",
+    ragContextBudget: "单条预算",
+    ragNoPromptInjection: "不默认注入",
+    ragCitations: "引用",
+    ragNoContexts: "当前没有可用上下文候选。",
     searchQuery: "检索词",
     ratingSuggestions: "评级建议",
     submitRatingSuggestion: "提交评级建议",
@@ -894,6 +913,14 @@ const COPY: Record<"zh" | "en", Copy> = {
     teamKnowledgeDomain: "Team knowledge base",
     governance: "Governance",
     knowledgeSearch: "Knowledge search",
+    ragRetrieval: "RAG retrieval",
+    ragContextCandidates: "Context candidates",
+    ragRetrievalHint: "Builds cited context candidates from reviewed formal knowledge; it does not inject them into prompts.",
+    ragTopK: "Candidates",
+    ragContextBudget: "Context budget",
+    ragNoPromptInjection: "Not injected",
+    ragCitations: "Citations",
+    ragNoContexts: "No context candidates available.",
     searchQuery: "Search query",
     ratingSuggestions: "Rating suggestions",
     submitRatingSuggestion: "Submit suggestion",
@@ -1418,6 +1445,8 @@ function newKnowledgeSearchDraft(): KnowledgeSearchDraft {
     query: "",
     tags: "",
     searchMode: "hybrid",
+    ragTopK: 5,
+    ragMaxContextChars: 1200,
   };
 }
 
@@ -1965,6 +1994,33 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
     refetchInterval: false,
   });
+  const knowledgeRagRetrieveQuery = useQuery({
+    queryKey: queryKeys.knowledgeRagRetrieve(
+      activeKnowledgeBaseForItems,
+      knowledgeSearchDraft.query,
+      knowledgeSearchDraft.tags,
+      knowledgeSearchDraft.searchMode,
+      knowledgeSearchDraft.ragTopK,
+      knowledgeSearchDraft.ragMaxContextChars,
+    ),
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (activeKnowledgeBaseForItems) {
+        params.set("knowledgeBaseId", activeKnowledgeBaseForItems);
+      }
+      if (knowledgeSearchDraft.query.trim()) {
+        params.set("query", knowledgeSearchDraft.query.trim());
+      }
+      commaList(knowledgeSearchDraft.tags).forEach((tag) => params.append("tags", tag));
+      params.set("retrievalMode", knowledgeSearchDraft.searchMode);
+      params.set("provider", "local");
+      params.set("topK", String(knowledgeSearchDraft.ragTopK));
+      params.set("maxContextChars", String(knowledgeSearchDraft.ragMaxContextChars));
+      return fetchJson<KnowledgeRagRetrievalPayload>(`/api/knowledge/rag/retrieve?${params.toString()}`);
+    },
+    enabled: forcedView === "knowledge" && Boolean(activeKnowledgeBaseForItems),
+    refetchInterval: false,
+  });
   const ratingSuggestionsQuery = useQuery({
     queryKey: queryKeys.knowledgeRatingSuggestions(activeKnowledgeBaseForItems, ratingSuggestionStatus, ratingSuggestionPriority),
     queryFn: () => {
@@ -2010,6 +2066,8 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
     refetchInterval: false,
   });
   const knowledgeSearchResults = knowledgeSearchQuery.data?.results ?? [];
+  const knowledgeRagContexts = knowledgeRagRetrieveQuery.data?.contexts ?? [];
+  const knowledgeRagPolicy = knowledgeRagRetrieveQuery.data?.retrievalPolicy;
   const ratingSuggestions = (ratingSuggestionsQuery.data?.suggestions ?? []).filter((suggestion) =>
     ratingSuggestionPriority === "all" ? true : suggestion.reviewPriority === ratingSuggestionPriority,
   );
@@ -3832,6 +3890,36 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                   <option value="hybrid">{copy.hybridSearch}</option>
                 </select>
               </label>
+              <label>
+                <span>{copy.ragTopK}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={knowledgeSearchDraft.ragTopK}
+                  onChange={(event) =>
+                    setKnowledgeSearchDraft({
+                      ...knowledgeSearchDraft,
+                      ragTopK: Math.min(20, Math.max(1, Number(event.target.value) || 5)),
+                    })
+                  }
+                />
+              </label>
+              <label>
+                <span>{copy.ragContextBudget}</span>
+                <input
+                  type="number"
+                  min={120}
+                  max={4000}
+                  value={knowledgeSearchDraft.ragMaxContextChars}
+                  onChange={(event) =>
+                    setKnowledgeSearchDraft({
+                      ...knowledgeSearchDraft,
+                      ragMaxContextChars: Math.min(4000, Math.max(120, Number(event.target.value) || 1200)),
+                    })
+                  }
+                />
+              </label>
             </div>
             <div className={styles.knowledgeProposalList}>
               {knowledgeSearchResults.map((item) => (
@@ -3850,6 +3938,42 @@ export function MemoryRoute({ forcedView = "overview" }: MemoryRouteProps) {
                 </section>
               ) : null}
             </div>
+            <section className={styles.ragPreviewPanel} aria-label={copy.ragRetrieval}>
+              <div className={styles.ragPreviewHeader}>
+                <div>
+                  <p className={styles.panelEyebrow}>{copy.ragRetrieval}</p>
+                  <h3>{copy.ragContextCandidates}</h3>
+                </div>
+                <span className={styles.countPill}>{knowledgeRagRetrieveQuery.data?.summary.contextCount ?? 0}</span>
+              </div>
+              <p>{copy.ragRetrievalHint}</p>
+              <div className={styles.ragPolicyStrip}>
+                <span>{copy.ragNoPromptInjection}: {knowledgeRagPolicy?.injectsPromptByDefault ? copy.no : copy.yes}</span>
+                <span>ACL: {knowledgeRagPolicy?.honorsKnowledgeAcl ? copy.yes : copy.no}</span>
+                <span>{copy.noDirectApply}: {knowledgeRagPolicy?.mutatesFormalKnowledge ? copy.no : copy.yes}</span>
+                <span>{copy.ragCitations}: {knowledgeRagRetrieveQuery.data?.summary.citationCount ?? 0}</span>
+              </div>
+              <div className={styles.ragContextList}>
+                {knowledgeRagContexts.map((context) => (
+                  <article key={context.contextId} className={styles.ragContextCard}>
+                    <div className={styles.ragContextMeta}>
+                      <strong>{context.rank}. {context.title || context.contextId}</strong>
+                      <span>{Math.round(Number(context.score || 0) * 100)}% · {context.matchReason || context.retrievalMode}</span>
+                    </div>
+                    <p>{context.text}</p>
+                    <small>
+                      {copy.ragCitations}: {context.source.teamName || context.source.teamId} · {context.source.knowledgeBaseName || context.source.knowledgeBaseId} · {context.source.knowledgeItemId}
+                    </small>
+                  </article>
+                ))}
+                {!knowledgeRagRetrieveQuery.isPending && !knowledgeRagContexts.length ? (
+                  <section className={styles.emptyDetail}>
+                    <Link2 size={20} />
+                    <strong>{copy.ragNoContexts}</strong>
+                  </section>
+                ) : null}
+              </div>
+            </section>
           </section>
 
           <section className={styles.managementPanel}>

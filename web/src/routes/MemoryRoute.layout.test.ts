@@ -150,6 +150,10 @@ describe("MemoryRoute layout contract", () => {
     expect(memoryCssSource).toContain(".graphRelationPanel");
     expect(memoryCssSource).toContain(".graphRelationGroup button");
     expect(memoryCssSource).toContain(".graphRelationEmpty");
+    expect(memoryCssSource).toContain(".ragPreviewPanel");
+    expect(memoryCssSource).toContain(".ragPolicyStrip");
+    expect(memoryCssSource).toContain(".ragContextCard");
+    expect(memoryCssSource).toContain("-webkit-line-clamp: 3");
     expect(memoryCssSource).toContain('[data-node-type="knowledge_base"]');
     expect(routerSource).toContain('path: "memory/graph"');
     expect(routerSource).toContain('<MemoryRoute forcedView="graph" />');
@@ -168,6 +172,16 @@ describe("MemoryRoute layout contract", () => {
     expect(routeSource).toContain("/ingestion-packages");
     expect(routeSource).toContain("/review");
     expect(routeSource).toContain("/api/knowledge/search");
+    expect(routeSource).toContain("queryKeys.knowledgeRagRetrieve");
+    expect(routeSource).toContain("/api/knowledge/rag/retrieve");
+    expect(routeSource).toContain("fetchJson<KnowledgeRagRetrievalPayload>");
+    expect(routeSource).toContain("copy.ragRetrieval");
+    expect(routeSource).toContain("copy.ragContextCandidates");
+    expect(routeSource).toContain("copy.ragNoPromptInjection");
+    expect(routeSource).toContain("copy.ragCitations");
+    expect(routeSource).toContain("styles.ragPreviewPanel");
+    expect(routeSource).toContain("styles.ragPolicyStrip");
+    expect(routeSource).toContain("styles.ragContextCard");
     expect(routeSource).toContain("/api/knowledge/governance/tasks");
     expect(routeSource).toContain("/api/knowledge/operations/health");
     expect(routeSource).toContain("/api/knowledge/governance/plan");

@@ -561,6 +561,76 @@ export type KnowledgeSearchPayload = {
   updatedAt: string;
 };
 
+export type KnowledgeRagContext = {
+  contextId: string;
+  text: string;
+  title: string;
+  score: number;
+  rank: number;
+  retrievalMode: "exact" | "semantic" | "hybrid" | string;
+  provider: string;
+  matchReason: string;
+  source: {
+    teamId: string;
+    teamName: string;
+    knowledgeBaseId: string;
+    knowledgeBaseName: string;
+    knowledgeItemId: string;
+    sourceArtifactIds: string[];
+  };
+  metadata: {
+    tags: string[];
+    importanceLevel: string;
+    confidence: number | null;
+    stability: string;
+  };
+};
+
+export type KnowledgeRagCitation = {
+  contextId: string;
+  rank: number;
+  title: string;
+  teamId: string;
+  teamName: string;
+  knowledgeBaseId: string;
+  knowledgeBaseName: string;
+  knowledgeItemId: string;
+  sourceArtifactIds: string[];
+  provider: string;
+  retrievalMode: string;
+};
+
+export type KnowledgeRagRetrievalPayload = {
+  schemaVersion: number;
+  agentId: string;
+  request: {
+    queryLength: number;
+    teamId: string;
+    knowledgeBaseId: string;
+    tags: string[];
+    retrievalMode: string;
+    provider: string;
+    topK: number;
+    maxContextChars: number;
+  };
+  summary: {
+    candidateCount: number;
+    contextCount: number;
+    citationCount: number;
+    scannedKnowledgeBaseCount: number;
+  };
+  contexts: KnowledgeRagContext[];
+  citations: KnowledgeRagCitation[];
+  retrievalPolicy: {
+    provider: string;
+    injectsPromptByDefault: boolean;
+    honorsKnowledgeAcl: boolean;
+    honorsMemoryPolicy: boolean;
+    mutatesFormalKnowledge: boolean;
+  };
+  updatedAt: string;
+};
+
 export type KnowledgePermissionAuditPayload = {
   schemaVersion: number;
   agentId: string;
