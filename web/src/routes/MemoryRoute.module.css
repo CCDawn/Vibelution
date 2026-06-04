@@ -2352,6 +2352,116 @@
   white-space: nowrap;
 }
 
+.ragPreviewPanel {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel-muted);
+}
+
+.ragPreviewHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ragPreviewHeader h3 {
+  margin: 1px 0 0;
+  color: var(--fg-primary);
+  font-size: 0.92rem;
+  line-height: 1.15;
+}
+
+.ragPreviewPanel > p {
+  margin: 0;
+  color: var(--fg-secondary);
+  font-size: 0.73rem;
+  line-height: 1.4;
+}
+
+.ragPolicyStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 6px;
+  min-width: 0;
+}
+
+.ragPolicyStrip span {
+  min-width: 0;
+  padding: 5px 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+  color: var(--fg-secondary);
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ragContextList {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.ragContextCard {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface-panel);
+}
+
+.ragContextMeta {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+  align-items: center;
+}
+
+.ragContextMeta strong,
+.ragContextMeta span,
+.ragContextCard small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ragContextMeta strong {
+  color: var(--fg-primary);
+  font-size: 0.78rem;
+}
+
+.ragContextMeta span,
+.ragContextCard small {
+  color: var(--fg-tertiary);
+  font-size: 0.68rem;
+}
+
+.ragContextCard p {
+  display: -webkit-box;
+  max-height: 4.2em;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg-secondary);
+  font-size: 0.74rem;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .governanceMiniPanel {
   display: grid;
   gap: 3px;
@@ -3151,6 +3261,8 @@
   .graphWorkspace,
   .knowledgeFormGrid,
   .knowledgeRow,
+  .ragPolicyStrip,
+  .ragContextMeta,
   .stewardGrid,
   .ratingControls {
     grid-template-columns: 1fr;

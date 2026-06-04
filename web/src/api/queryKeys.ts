@@ -41,6 +41,8 @@ export const queryKeys = {
   knowledgeStewardWorkbench: (agentId = "") => ["knowledge", "steward", "workbench", agentId] as const,
   knowledgeItems: (knowledgeBaseId: string) => ["knowledge", "items", knowledgeBaseId] as const,
   knowledgeSearch: (knowledgeBaseId: string, query: string, tags: string) => ["knowledge", "search", knowledgeBaseId, query, tags] as const,
+  knowledgeRagRetrieve: (knowledgeBaseId: string, query: string, tags: string, mode: string, topK: number, maxContextChars: number) =>
+    ["knowledge", "rag", "retrieve", knowledgeBaseId, query, tags, mode, topK, maxContextChars] as const,
   knowledgeRatingSuggestions: (knowledgeBaseId: string, status = "", priority = "") =>
     ["knowledge", "rating-suggestions", knowledgeBaseId, status, priority] as const,
   knowledgePermissionAudit: (agentId: string) => ["knowledge", "permissions", agentId] as const,
