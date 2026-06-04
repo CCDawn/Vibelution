@@ -237,15 +237,38 @@ def _open_request_already_satisfied(observation: dict[str, Any], *, no_browser: 
     return bool(observation.get("launcherStatePresent"))
 
 
-def _open_request_ready(observation: dict[str, Any], *, no_browser: bool) -> bool:
-    if str(observation.get("observedState") or "closed") != "open":
+def _open_backend_ready(observation: dict[str, Any], *, launcher_confirmed: bool = False) -> bool:
+    if bool(observation.get("backendPortConflict")):
         return False
-    backend_ready = (
+    health_ready = (
         bool(observation.get("backendHealthy"))
         and bool(observation.get("backendObserved"))
-        and not bool(observation.get("backendPortConflict"))
     )
-    if not backend_ready:
+    if health_ready:
+        return True
+    if not launcher_confirmed:
+        return False
+    return (
+        bool(observation.get("backendObserved"))
+        and bool(observation.get("backendPortListening"))
+        and bool(observation.get("backendPortOwnerTrusted"))
+    )
+
+
+def _open_backend_ready_source(observation: dict[str, Any], *, launcher_confirmed: bool = False) -> str:
+    if bool(observation.get("backendPortConflict")):
+        return "port_conflict"
+    if bool(observation.get("backendHealthy")) and bool(observation.get("backendObserved")):
+        return "health_probe"
+    if _open_backend_ready(observation, launcher_confirmed=launcher_confirmed):
+        return "launcher_confirmed_port"
+    return "not_ready"
+
+
+def _open_request_ready(observation: dict[str, Any], *, no_browser: bool, launcher_confirmed: bool = False) -> bool:
+    if str(observation.get("observedState") or "closed") != "open":
+        return False
+    if not _open_backend_ready(observation, launcher_confirmed=launcher_confirmed):
         return False
     if no_browser:
         return True
@@ -265,11 +288,7 @@ def _restart_should_preserve_visible_browser(observation: dict[str, Any]) -> boo
 
 
 def _open_verification_failure_message(observation: dict[str, Any], *, no_browser: bool) -> str:
-    backend_ready = (
-        bool(observation.get("backendHealthy"))
-        and bool(observation.get("backendObserved"))
-        and not bool(observation.get("backendPortConflict"))
-    )
+    backend_ready = _open_backend_ready(observation, launcher_confirmed=True)
     browser_ready = bool(no_browser) or (
         bool(observation.get("browserManaged")) and bool(observation.get("browserWindowAlive"))
     )
@@ -287,6 +306,7 @@ def _open_verification_failure_message(observation: dict[str, Any], *, no_browse
         f"browserWindowAlive={bool(observation.get('browserWindowAlive'))}",
         f"noBrowser={bool(no_browser)}",
         f"backendReady={backend_ready}",
+        f"backendReadySource={_open_backend_ready_source(observation, launcher_confirmed=True)}",
         f"browserReady={browser_ready}",
     ]
     return " ".join(parts)
@@ -309,6 +329,8 @@ def _open_verification_event_payload(
         "backendPid": int(observation.get("backendPid") or 0),
         "backendHealthy": bool(observation.get("backendHealthy")),
         "backendObserved": bool(observation.get("backendObserved")),
+        "backendReady": _open_backend_ready(observation, launcher_confirmed=True),
+        "backendReadySource": _open_backend_ready_source(observation, launcher_confirmed=True),
         "backendPort": int(observation.get("backendPort") or 0),
         "backendPortListening": bool(observation.get("backendPortListening")),
         "backendPortOwnerPid": int(observation.get("backendPortOwnerPid") or 0),
@@ -342,7 +364,7 @@ def _open_verification_event_payload(
 
 
 def _open_verification_should_retry_stale_session(observation: dict[str, Any], *, no_browser: bool) -> bool:
-    if _open_request_ready(observation, no_browser=no_browser):
+    if _open_request_ready(observation, no_browser=no_browser, launcher_confirmed=True):
         return False
     if not bool(observation.get("launcherStatePresent")):
         return False
@@ -351,11 +373,7 @@ def _open_verification_should_retry_stale_session(observation: dict[str, Any], *
     if bool(observation.get("backendPortConflict")):
         return False
 
-    backend_ready = (
-        bool(observation.get("backendHealthy"))
-        and bool(observation.get("backendObserved"))
-        and not bool(observation.get("backendPortConflict"))
-    )
+    backend_ready = _open_backend_ready(observation, launcher_confirmed=True)
     browser_ready = bool(no_browser) or (
         bool(observation.get("browserManaged")) and bool(observation.get("browserWindowAlive"))
     )
@@ -369,7 +387,7 @@ def _wait_for_open_verification(*, no_browser: bool) -> tuple[bool, dict[str, An
     while True:
         attempts += 1
         latest = observe_workbench()
-        if _open_request_ready(latest, no_browser=no_browser):
+        if _open_request_ready(latest, no_browser=no_browser, launcher_confirmed=True):
             return True, latest, attempts
         if time.monotonic() >= deadline:
             return False, latest, attempts
@@ -1659,10 +1677,87 @@ class RuntimeManagerDaemon:
                     "requestedSource": str(args.get("source") or ""),
                 },
             )
-        result = restart_workbench(no_browser=effective_no_browser)
-        if result.returncode != 0:
-            raise RuntimeError(_launcher_error_detail(result, "Restarting the workbench failed."))
-        return self._finish_command(command_id, ok=True, message="Workbench restarted.")
+        close_result = close_workbench()
+        if close_result.returncode != 0:
+            raise RuntimeError(_launcher_error_detail(close_result, "Closing the workbench for restart failed."))
+        cleanup_result = self._cleanup_residual_workbench_processes()
+        closed, close_verification, close_attempts = _wait_for_close_verification()
+        if not closed:
+            message = _close_verification_failure_message(close_verification)
+            _append_event(
+                "workbench.restart.close_verification_failed",
+                _close_verification_event_payload(
+                    close_verification,
+                    command_id=command_id,
+                    message=message,
+                    cleanup_result=cleanup_result,
+                    launcher_result=close_result,
+                )
+                | {"attempts": close_attempts},
+            )
+            raise RuntimeError(message)
+        _append_event(
+            "workbench.restart.close_verification_succeeded",
+            _close_verification_event_payload(
+                close_verification,
+                command_id=command_id,
+                cleanup_result=cleanup_result,
+                launcher_result=close_result,
+            )
+            | {"attempts": close_attempts},
+        )
+
+        state = load_state()
+        workbench = state.setdefault("workbench", {})
+        workbench.update(
+            {
+                "desiredState": "open",
+                "phase": "opening",
+                "lastReason": str(args.get("reason") or "explicit_restart"),
+                "lastSource": str(args.get("source") or "").strip(),
+                "lastTransitionAt": now_iso(),
+                "failureMessage": "",
+            }
+        )
+        save_state(self._reconcile_observation(state))
+        open_result = open_workbench(no_browser=effective_no_browser)
+        if open_result.returncode != 0:
+            raise RuntimeError(_launcher_error_detail(open_result, "Opening the workbench for restart failed."))
+        ready, open_verification, open_attempts = _wait_for_open_verification(no_browser=effective_no_browser)
+        if not ready:
+            message = _open_verification_failure_message(open_verification, no_browser=effective_no_browser)
+            _append_event(
+                "workbench.restart.open_verification_failed",
+                _open_verification_event_payload(
+                    open_verification,
+                    no_browser=effective_no_browser,
+                    message=message,
+                    command_id=command_id,
+                    launcher_result=open_result,
+                )
+                | {"attempts": open_attempts},
+            )
+            raise RuntimeError(message)
+        _append_event(
+            "workbench.restart.open_verification_succeeded",
+            _open_verification_event_payload(
+                open_verification,
+                no_browser=effective_no_browser,
+                command_id=command_id,
+                launcher_result=open_result,
+            )
+            | {"attempts": open_attempts},
+        )
+        return self._finish_command(
+            command_id,
+            ok=True,
+            message="Workbench restarted.",
+            result_data={
+                "residualCleanup": cleanup_result,
+                "requestedNoBrowser": requested_no_browser,
+                "effectiveNoBrowser": effective_no_browser,
+            },
+        )
 
     def _handle_toggle_workbench(self, *, command_id: str, args: dict[str, Any]) -> dict[str, Any]:
         state = load_state()
