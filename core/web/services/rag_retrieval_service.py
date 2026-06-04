@@ -8,7 +8,7 @@ from typing import Any
 from core.chat.chat_task_types import trim_lines
 from core.chatroom.store import utc_now_iso
 
-from . import team_knowledge_service
+from . import rag_vector_index_service, team_knowledge_service
 
 
 SCHEMA_VERSION = 1
@@ -27,6 +27,7 @@ class RagRetrievalError(ValueError):
 def get_rag_retrieval_health() -> dict[str, Any]:
     """Return read-only RAG provider readiness for the memory platform."""
 
+    vector_health = rag_vector_index_service.get_vector_index_health()
     return {
         "schemaVersion": SCHEMA_VERSION,
         "provider": "local",
@@ -38,6 +39,19 @@ def get_rag_retrieval_health() -> dict[str, Any]:
                 "vectorEnabled": False,
                 "indexedItemCount": 0,
                 "staleItemCount": 0,
+            },
+            {
+                "provider": "vector",
+                "status": str(vector_health.get("status") or "unavailable"),
+                "vectorEnabled": bool(vector_health.get("vectorEnabled")),
+                "indexedItemCount": int(vector_health.get("indexedItemCount") or 0),
+                "staleItemCount": int(vector_health.get("staleItemCount") or 0),
+                "missingItemCount": int(vector_health.get("missingItemCount") or 0),
+                "failedItemCount": int(vector_health.get("failedItemCount") or 0),
+                "indexableItemCount": int(vector_health.get("indexableItemCount") or 0),
+                "embeddingProvider": str(vector_health.get("embeddingProvider") or ""),
+                "embeddingModel": str(vector_health.get("embeddingModel") or ""),
+                "lastIndexedAt": str(vector_health.get("lastIndexedAt") or ""),
             },
         ],
         "retrievalPolicy": _retrieval_policy("local"),

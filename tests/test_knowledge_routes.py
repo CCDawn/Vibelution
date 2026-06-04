@@ -275,15 +275,13 @@ def test_knowledge_rag_health_route_reports_local_provider_ready(tmp_path, monke
     assert payload["schemaVersion"] == 1
     assert payload["provider"] == "local"
     assert payload["status"] == "ready"
-    assert payload["providers"] == [
-        {
-            "provider": "local",
-            "status": "ready",
-            "vectorEnabled": False,
-            "indexedItemCount": 0,
-            "staleItemCount": 0,
-        }
-    ]
+    providers = {provider["provider"]: provider for provider in payload["providers"]}
+    assert providers["local"]["status"] == "ready"
+    assert providers["local"]["vectorEnabled"] is False
+    assert providers["vector"]["status"] == "unavailable"
+    assert providers["vector"]["vectorEnabled"] is False
+    assert providers["vector"]["indexedItemCount"] == 0
+    assert providers["vector"]["staleItemCount"] == 0
     assert payload["retrievalPolicy"]["honorsKnowledgeAcl"] is True
     assert payload["retrievalPolicy"]["honorsMemoryPolicy"] is True
     assert payload["retrievalPolicy"]["mutatesFormalKnowledge"] is False

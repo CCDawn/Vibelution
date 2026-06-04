@@ -606,6 +606,12 @@ export type KnowledgeRagProviderHealth = {
   vectorEnabled: boolean;
   indexedItemCount: number;
   staleItemCount: number;
+  missingItemCount?: number;
+  failedItemCount?: number;
+  indexableItemCount?: number;
+  embeddingProvider?: string;
+  embeddingModel?: string;
+  lastIndexedAt?: string;
 };
 
 export type KnowledgeRagHealthPayload = {
