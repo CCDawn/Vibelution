@@ -79,6 +79,7 @@ def submit_command(
         )
         _complete_rejected_shutdown_command(command, shutdown_state=shutdown_state)
         return command
+    superseded_commands = _supersede_pending_open_commands_for_close(command)
     joined_command_id = _joinable_open_command_id(command)
     if joined_command_id:
         command["commandId"] = joined_command_id
@@ -93,7 +94,10 @@ def submit_command(
         )
         return command
     _atomic_write_json(INBOX_DIR / f"{command['commandId']}.json", command)
-    _append_queue_event("command_queue.command_queued", command_event_payload(command))
+    queued_payload = command_event_payload(command)
+    if superseded_commands:
+        queued_payload["supersededPendingCommands"] = superseded_commands
+    _append_queue_event("command_queue.command_queued", queued_payload)
     return command
 
 
@@ -207,7 +211,7 @@ def _workbench_is_already_closed(state: Any) -> bool:
     desired = str(workbench.get("desiredState") or "").strip()
     observed = str(workbench.get("observedState") or "").strip()
     phase = str(workbench.get("phase") or "").strip()
-    return desired == "closed" and observed == "closed" and phase in {"", "steady"}
+    return desired == "closed" and observed == "closed" and phase in {"", "steady", "closing"}
 
 
 def complete_command(path: Path, result: dict[str, Any]) -> None:
@@ -265,6 +269,55 @@ def reject_pending_commands_for_shutdown(*, shutdown_state: dict[str, Any] | Non
         "count": len(rejected),
         "items": rejected,
     }
+
+
+def _supersede_pending_open_commands_for_close(command: dict[str, Any]) -> list[dict[str, Any]]:
+    command_type = str(command.get("type") or "").strip()
+    if command_type != "close_workbench":
+        return []
+    superseded: list[dict[str, Any]] = []
+    state = load_state()
+    state_version = int(state.get("stateVersion") or 0) if isinstance(state, dict) else 0
+    for path in sorted(INBOX_DIR.glob("*.json")):
+        payload = _load_command_file(path)
+        pending_type = str(payload.get("type") or "").strip()
+        if pending_type not in {"open_workbench", "restart_workbench"}:
+            continue
+        command_id = str(payload.get("commandId") or path.stem).strip() or path.stem
+        payload["commandId"] = command_id
+        result = {
+            "commandId": command_id,
+            "accepted": True,
+            "completed": True,
+            "ok": False,
+            "message": "Command superseded by a close_workbench request.",
+            "errorType": "SupersededByCloseWorkbench",
+            "supersededByCommandId": str(command.get("commandId") or ""),
+            "stateVersion": state_version,
+        }
+        try:
+            complete_command(path, result)
+        except OSError as exc:
+            superseded.append(
+                {
+                    "commandId": command_id,
+                    "type": pending_type,
+                    "status": "failed",
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        superseded.append({"commandId": command_id, "type": pending_type, "status": "superseded"})
+    if superseded:
+        _append_queue_event(
+            "command_queue.pending_open_superseded_by_close",
+            {
+                "commandId": str(command.get("commandId") or ""),
+                "count": len(superseded),
+                "commands": superseded,
+            },
+        )
+    return superseded
 
 
 def _shutdown_in_progress_state() -> dict[str, Any] | None:
