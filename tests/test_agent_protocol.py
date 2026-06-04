@@ -149,6 +149,46 @@ class TestToolMessageFlow:
         assert captured["messages"][0] is assistant_msg
         assert captured["messages"][1] is tool_msg
 
+    def test_invoke_llm_preserves_structured_system_cache_control(self, monkeypatch):
+        captured = {}
+
+        class DummyContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class DummyUI:
+            def thinking(self, _label):
+                return DummyContext()
+
+            def add_log(self, *_args, **_kwargs):
+                return None
+
+        class DummyLLM:
+            def invoke(self, msgs):
+                captured["messages"] = msgs
+                return SimpleNamespace(content="", tool_calls=[])
+
+        monkeypatch.setattr(agent_module, "get_ui", lambda: DummyUI())
+
+        agent = SelfEvolvingAgent.__new__(SelfEvolvingAgent)
+        agent.llm_with_tools = DummyLLM()
+        system_message = {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": "stable", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "dynamic"},
+            ],
+        }
+
+        result = agent._invoke_llm([system_message, build_chat_user_message("hi")])
+
+        assert result is not None
+        assert captured["messages"][0] == system_message
+        assert captured["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
     def test_invoke_llm_returns_none_for_exhausted_llmerror(self, monkeypatch):
         calls = {"count": 0}
 

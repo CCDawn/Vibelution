@@ -8432,15 +8432,67 @@ def test_submit_session_message_surfaces_provider_error_inside_messages(tmp_path
     assert payload["messages"][-2]["content"] == "继续当前对话"
     assert payload["messages"][-1]["role"] == "assistant"
     assert "模型服务上游暂时失败" in payload["messages"][-1]["content"]
+    assert "provider 上游服务不可用或网关失败" in payload["messages"][-1]["content"]
     assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
     assert payload["messages"][-1]["metadata"]["providerFailure"] is True
+    assert payload["messages"][-1]["metadata"]["reasonCode"] == "upstream_unavailable"
     assert payload["lastTurnError"]["errorType"] == "provider_upstream_error"
+    assert payload["lastTurnError"]["reasonCode"] == "upstream_unavailable"
+    assert "provider 上游服务不可用或网关失败" in payload["lastTurnError"]["reasonSummary"]
     assert "模型服务上游暂时失败" in payload["lastTurnError"]["message"]
     assert "litellm.BadGatewayError" not in payload["lastTurnError"]["message"]
     assert "litellm.BadGatewayError" not in payload["messages"][-1]["content"]
     latest_run = session_service._WORK_RUN_STORE.load_latest_snapshot("chat_turn")
     assert latest_run["errorType"] == "provider_upstream_error"
     assert "litellm.BadGatewayError" in latest_run["error"]
+
+
+def test_submit_session_message_surfaces_prompt_cache_unsupported_inside_messages(tmp_path, monkeypatch):
+    _seed_chat_state(tmp_path, task_status="done")
+    monkeypatch.setattr(session_service, "PROJECT_ROOT", tmp_path)
+
+    cache_error = (
+        "prompt_cache_unsupported: 当前模型通道不支持显式 prompt cache；"
+        "profile `primary` provider `relay` transport `responses` model `gpt-5.5`。"
+    )
+
+    class CacheUnsupportedAgent:
+        def seed_chat_history(self, messages):
+            self.messages = list(messages)
+
+        def run_single_turn(self, initial_prompt=None):
+            return {
+                "status": "failed",
+                "summary": cache_error,
+                "raw_output": cache_error,
+                "error": cache_error,
+                "outcome": "blocked",
+                "tool_call_count": 0,
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(session_service, "create_chat_agent", lambda: CacheUnsupportedAgent())
+    monkeypatch.setattr(
+        session_service,
+        "_schedule_session_turn",
+        lambda context: session_service._run_session_turn(context),
+    )
+
+    response = client.post(
+        "/api/sessions/session-live/messages",
+        json={"content": "继续当前对话"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["messages"][-1]["role"] == "assistant"
+    assert "模型配置不满足本轮 prompt cache 要求" in payload["messages"][-1]["content"]
+    assert "当前模型通道不支持显式 prompt cache" in payload["messages"][-1]["content"]
+    assert "模型服务上游暂时失败" not in payload["messages"][-1]["content"]
+    assert payload["messages"][-1]["metadata"]["kind"] == "turn_error"
+    assert payload["messages"][-1]["metadata"]["reasonCode"] == "prompt_cache_unsupported"
+    assert payload["lastTurnError"]["errorType"] == "prompt_cache_unsupported"
+    assert payload["lastTurnError"]["reasonCode"] == "prompt_cache_unsupported"
 
 
 def test_submit_session_message_omits_mental_snapshot_when_disabled(tmp_path, monkeypatch):
