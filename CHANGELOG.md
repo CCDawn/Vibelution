@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.12 - 2026-06-04
+
+- Restored provider-agnostic LLM reasoning capture for OpenAI-compatible/local providers by centralizing reasoning field aliases and explicit `<think>` / `<thinking>` tag extraction.
+- Kept hidden reasoning out of visible assistant content, including streamed think tags split across chunks.
+- Added runtime-scene reasoning diagnostics with source and character-count summaries for invoke, stream, and stream fallback paths.
+
 ## 0.7.5 - 2026-06-01
 
 - Added `/api/memory/usage-contract` as the cross-system contract for how Agent private memory, Team knowledge, Team chat, self evolution, supervised evolution, and external artifacts use the memory platform.

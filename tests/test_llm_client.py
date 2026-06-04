@@ -309,6 +309,69 @@ def test_invoke_preserves_reasoning_content_in_ai_message():
     assert message.additional_kwargs["reasoning_content"] == "先分析再作答"
 
 
+def test_invoke_extracts_reasoning_alias_and_strips_think_tags():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "llamacpp",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3-local",
+        }
+    )
+
+    def backend(_payload):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "<think>先看日志</think>结论",
+                        "reasoning": "先看日志",
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    client = LLMClient(config=config, backend=backend)
+    message = client.invoke([{"role": "user", "content": "hi"}])
+
+    assert message.content == "结论"
+    assert message.additional_kwargs["reasoning_content"] == "先看日志"
+
+
+def test_invoke_extracts_think_tags_when_provider_has_no_reasoning_field():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "llamacpp",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3-local",
+        }
+    )
+
+    def backend(_payload):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "role": "assistant",
+                        "content": "<thinking>先判断工具是否可用</thinking>\n可以继续。",
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    client = LLMClient(config=config, backend=backend)
+    message = client.invoke([{"role": "user", "content": "hi"}])
+
+    assert message.content == "\n可以继续。"
+    assert message.additional_kwargs["reasoning_content"] == "先判断工具是否可用"
+
+
 def test_invoke_records_cached_input_token_observation(monkeypatch):
     config = make_config(
         **{
@@ -1230,6 +1293,83 @@ def test_stream_exposes_reasoning_deltas_without_polluting_content():
     assert streamed[0].additional_kwargs["reasoning_content_delta"] == "先看"
     assert streamed[1].additional_kwargs["reasoning_content_delta"] == "日志"
     assert streamed[2].content == "结论"
+
+
+def test_stream_exposes_reasoning_aliases_and_strips_think_tags_from_content():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "llamacpp",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3-local",
+        }
+    )
+    chunks = [
+        {"choices": [{"delta": {"reasoning": "先看"}}]},
+        {"choices": [{"delta": {"thinking": "日志"}}]},
+        {"choices": [{"delta": {"content": "<think>不要进回答</think>结论"}}]},
+    ]
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    streamed = list(client.stream([{"role": "user", "content": "read"}]))
+
+    assert streamed[0].additional_kwargs["reasoning_content_delta"] == "先看"
+    assert streamed[1].additional_kwargs["reasoning_content_delta"] == "日志"
+    assert streamed[2].additional_kwargs["reasoning_content_delta"] == "不要进回答"
+    assert streamed[3].content == "结论"
+
+
+def test_stream_splits_reasoning_when_think_tags_span_chunks():
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "llamacpp",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3-local",
+        }
+    )
+    chunks = [
+        {"choices": [{"delta": {"content": "<think>"}}]},
+        {"choices": [{"delta": {"content": "先看"}}]},
+        {"choices": [{"delta": {"content": "日志"}}]},
+        {"choices": [{"delta": {"content": "</think>"}}]},
+        {"choices": [{"delta": {"content": "结论"}}]},
+    ]
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    streamed = list(client.stream([{"role": "user", "content": "read"}]))
+
+    assert [chunk.additional_kwargs.get("reasoning_content_delta") for chunk in streamed[:2]] == ["先看", "日志"]
+    assert streamed[2].content == "结论"
+
+
+def test_stream_events_record_reasoning_source_summary(monkeypatch):
+    config = make_config(
+        **{
+            "llm.providers.default.kind": "llamacpp",
+            "llm.providers.default.requires_api_key": False,
+            "llm.providers.default.base_url": "http://localhost:8000/v1",
+            "llm.profiles.primary.provider_id": "default",
+            "llm.profiles.primary.model": "qwen3-local",
+        }
+    )
+    chunks = [
+        {"choices": [{"delta": {"reasoning": "先看"}}]},
+        {"choices": [{"delta": {"content": "结论"}}]},
+    ]
+    recorded = []
+    monkeypatch.setattr("core.llm.client._record_llm_scene_event", lambda *args, **kwargs: recorded.append((args, kwargs)))
+
+    client = LLMClient(config=config, backend=lambda payload: iter(chunks))
+    events = list(client.stream_events([{"role": "user", "content": "read"}]))
+
+    assert [event.type for event in events] == ["reasoning_delta", "text_delta", "done"]
+    success_event = next(item for item in recorded if item[0][1] == "llm.stream.succeeded")
+    assert success_event[1]["fields"]["reasoningDeltaCount"] == 1
+    assert success_event[1]["fields"]["reasoningChars"] == 2
+    assert success_event[1]["fields"]["reasoningSources"] == ["reasoning"]
 
 
 def test_stream_events_drop_incomplete_tool_calls_with_empty_name():

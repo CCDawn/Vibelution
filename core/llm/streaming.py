@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, Iterable, Iterator, List
 
+from .reasoning_extractor import ThinkTagStreamParser, extract_reasoning_text
 from .types import StreamChunk, ToolCall, UsageStats
 
 
@@ -125,6 +126,7 @@ class LiteLLMStreamNormalizer:
     def __init__(self) -> None:
         self._tool_calls = ToolCallAccumulator()
         self._usage: UsageStats | None = None
+        self._think_tags = ThinkTagStreamParser()
 
     def events(self, raw_chunks: Iterable[Any]) -> Iterator[StreamChunk]:
         for raw_chunk in raw_chunks:
@@ -134,15 +136,26 @@ class LiteLLMStreamNormalizer:
             delta = self._extract_delta(raw_chunk)
             if not delta:
                 continue
-            reasoning = extract_text_content(delta.get("reasoning_content") or "")
-            if reasoning:
-                yield StreamChunk(type="reasoning_delta", text=reasoning, provider_payload=delta)
-            content = extract_text_content(delta.get("content") or "")
-            if content:
-                yield StreamChunk(type="text_delta", text=content, provider_payload=delta)
+            reasoning = extract_reasoning_text(delta, extract_text_content, include_content_tags=False)
+            if reasoning.text:
+                yield StreamChunk(type="reasoning_delta", text=reasoning.text, provider_payload={**delta, "reasoning_source": reasoning.source})
+            content_split = self._think_tags.feed(delta.get("content") or "", extract_text_content)
+            if content_split.reasoning_text:
+                yield StreamChunk(
+                    type="reasoning_delta",
+                    text=content_split.reasoning_text,
+                    provider_payload={**delta, "reasoning_source": "think_tag"},
+                )
+            if content_split.visible_text:
+                yield StreamChunk(type="text_delta", text=content_split.visible_text, provider_payload=delta)
             tool_deltas = delta.get("tool_calls") or []
             if tool_deltas:
                 self._tool_calls.add_deltas(tool_deltas)
+        flushed = self._think_tags.flush()
+        if flushed.reasoning_text:
+            yield StreamChunk(type="reasoning_delta", text=flushed.reasoning_text, provider_payload={"reasoning_source": "think_tag"})
+        if flushed.visible_text:
+            yield StreamChunk(type="text_delta", text=flushed.visible_text, provider_payload={})
         final_calls = self._tool_calls.final_calls()
         if final_calls:
             yield StreamChunk(type="tool_call_final", tool_calls=final_calls)
