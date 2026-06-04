@@ -286,6 +286,8 @@ def _run_desktop_entry_with_fake_launcher(
     *,
     action: str,
     no_browser: bool = False,
+    launcher_source: str | None = None,
+    env_overrides: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
     project_dir = tmp_path / "project"
     scripts_dir = project_dir / "scripts"
@@ -296,7 +298,8 @@ def _run_desktop_entry_with_fake_launcher(
     (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
     shutil.copyfile(DESKTOP_ENTRY_SCRIPT, scripts_dir / "vibelution_desktop_entry.ps1")
     (scripts_dir / "vibelution_launcher.ps1").write_text(
-        """
+        launcher_source
+        or """
 param(
     [string]$Action = "",
     [switch]$NoBrowser
@@ -335,6 +338,8 @@ Add-Content -LiteralPath (Join-Path $logDir "fake-launcher-calls.jsonl") -Value 
     env = os.environ.copy()
     env["VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"] = "1"
     env["VIBELUTION_DESKTOP_ENTRY_START_MUTEX_NAME"] = f"Local\\Vibelution.Tests.{tmp_path.name}.{action}"
+    if env_overrides:
+        env.update(env_overrides)
     result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, env=env, check=False, timeout=30)
     assert result.returncode == 0, result.stderr or result.stdout
 
@@ -1914,7 +1919,7 @@ Write-Output "ok"
     assert result.stdout.strip().splitlines()[-1] == "ok"
 
 
-def test_launcher_control_surface_opens_launcher_without_runtime_manager_or_supervisor(tmp_path):
+def test_launcher_entry_opens_control_surface_and_ensures_workbench_without_direct_restart(tmp_path):
     result = _run_launcher_ast_harness(
         tmp_path,
         """
@@ -1945,8 +1950,11 @@ if ($null -eq $controlAst) {
 $controlText = $controlAst.Extent.Text
 foreach ($required in @(
     '$controlSurfaceUrl = "$url/launcher"',
+    '$startedControlBackend = $false',
+    '$preserveExistingStateOnFailure = [bool]$snapshot.State',
     "Start-ManagedBackend",
     "Start-ManagedBrowser",
+    '-ProfileDir $launcherBrowserProfileDir',
     "launcher_control_surface",
     "launcher.control_surface.ready",
     'supervisor_started = $false'
@@ -1961,6 +1969,17 @@ if ($controlText -match "Start-Supervisor") {
 if ($controlText -match "Invoke-RuntimeManagerClient" -or $controlText -match "open_workbench") {
     throw "Launcher control surface should not queue runtime manager open_workbench."
 }
+if ($controlText -notmatch 'if\\s*\\(\\s*\\$startedControlBackend\\s*\\)\\s*\\{\\s*Stop-ManagedBackendProcesses\\s*\\}') {
+    throw "Launcher control surface failure cleanup must only stop a backend it started."
+}
+if ($controlText -notmatch 'if\\s*\\(\\s*-not\\s+\\$preserveExistingStateOnFailure\\s*\\)\\s*\\{\\s*Remove-State\\s*\\}') {
+    throw "Launcher control surface failure cleanup must preserve existing workbench state."
+}
+foreach ($requiredProfile in @("launcher-control-profile", "workbench-app-profile")) {
+    if ($source -notmatch [regex]::Escape($requiredProfile)) {
+        throw "Launcher script is missing browser profile '$requiredProfile'."
+    }
+}
 
 $scriptText = $ast.EndBlock.Extent.Text
 if ($scriptText -notmatch '\\$runtimeManagerClientActions\\s*=\\s*@\\("toggle", "start", "stop", "restart", "status"\\)') {
@@ -1969,8 +1988,32 @@ if ($scriptText -notmatch '\\$runtimeManagerClientActions\\s*=\\s*@\\("toggle", 
 if ($scriptText -match '\\$runtimeManagerClientActions\\s*=\\s*@\\([^\\)]*"launcher"') {
     throw "launcher action must stay out of runtime-manager client actions."
 }
-if ($scriptText -notmatch '"launcher"\\s*\\{\\s*Open-LauncherControlSurface\\s*\\}') {
-    throw "launcher action does not open the Launcher control surface."
+if ($scriptText -notmatch '"launcher"\\s*\\{\\s*Open-LauncherAndEnsureWorkbench\\s*\\}') {
+    throw "launcher action does not open the Launcher control surface and ensure the workbench."
+}
+
+$entryAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Open-LauncherAndEnsureWorkbench"
+}, $true)
+if ($null -eq $entryAst) {
+    throw "Open-LauncherAndEnsureWorkbench was not found."
+}
+$entryText = $entryAst.Extent.Text
+foreach ($required in @(
+    "Open-LauncherControlSurface",
+    "Get-SessionSnapshot",
+    "Adopt-Or-FocusSession",
+    "Start-ManagedSession",
+    "launcher.control_surface.workbench_start_requested"
+)) {
+    if ($entryText -notmatch [regex]::Escape($required)) {
+        throw "Launcher entry is missing '$required'."
+    }
+}
+if ($entryText -match "restart_workbench") {
+    throw "Launcher entry should not submit a direct restart_workbench command."
 }
 
 Write-Output "ok"
@@ -3525,8 +3568,11 @@ if ($null -eq $functionAst) {
 $script:port = 8000
 $script:selfProcessId = 123
 $script:currentRuntimeSceneId = ""
+$script:workbenchBrowserProfileDir = "C:\\Users\\17533\\Desktop\\Vibelution\\.runtime\\launcher\\workbench-app-profile"
 $script:browserStopCalls = 0
 $script:browserWaitCalls = 0
+$script:browserStopProfiles = @()
+$script:browserWaitProfiles = @()
 $script:removedState = $false
 $script:notes = @()
 $script:controlEvents = @()
@@ -3559,11 +3605,14 @@ function Wait-ForPortClosed {
 }
 function Stop-ProcessesById { param([int[]]$ProcessIds) }
 function Stop-ManagedBrowserProcesses {
+    param([string]$ProfileDir = "", [string]$Role = "workbench")
     $script:browserStopCalls += 1
+    $script:browserStopProfiles += ,@{ profileDir = $ProfileDir; role = $Role }
 }
 function Wait-ForBrowserStopped {
-    param([int]$TimeoutSeconds)
+    param([int]$TimeoutSeconds, [string]$ProfileDir = "", [string]$Role = "workbench")
     $script:browserWaitCalls += 1
+    $script:browserWaitProfiles += ,@{ profileDir = $ProfileDir; role = $Role }
     return $true
 }
 function Get-ManagedSessionClosureSnapshot {
@@ -3610,6 +3659,8 @@ try {
 $payload = @{
     browserStopCalls = $script:browserStopCalls
     browserWaitCalls = $script:browserWaitCalls
+    browserStopProfiles = @($script:browserStopProfiles)
+    browserWaitProfiles = @($script:browserWaitProfiles)
     removedState = $script:removedState
     notes = @($script:notes)
     controlEvents = @($script:controlEvents)
@@ -3623,6 +3674,9 @@ Write-Output $payload
     payload = json.loads(result.stdout.strip().splitlines()[-1])
     assert payload["browserStopCalls"] == 1
     assert payload["browserWaitCalls"] == 1
+    assert payload["browserStopProfiles"][0]["role"] == "workbench"
+    assert payload["browserWaitProfiles"][0]["role"] == "workbench"
+    assert payload["browserStopProfiles"][0]["profileDir"].endswith("workbench-app-profile")
     assert payload["removedState"] is False
     assert "backend did not stop" in payload["errorMessage"]
     assert "browser did not stop" not in payload["errorMessage"]
@@ -4109,6 +4163,119 @@ def test_desktop_entry_maps_start_to_launcher_without_monitor(tmp_path):
     ]
 
 
+def test_desktop_entry_launcher_action_times_out_and_logs_failure(tmp_path):
+    project_dir = tmp_path / "project"
+    scripts_dir = project_dir / "scripts"
+    scripts_dir.mkdir(parents=True)
+    venv_scripts_dir = project_dir / ".venv" / "Scripts"
+    venv_scripts_dir.mkdir(parents=True)
+    (venv_scripts_dir / "python.exe").write_text("console python", encoding="utf-8")
+    shutil.copyfile(DESKTOP_ENTRY_SCRIPT, scripts_dir / "vibelution_desktop_entry.ps1")
+    (scripts_dir / "vibelution_launcher.ps1").write_text(
+        """
+param([string]$Action = "")
+Start-Sleep -Seconds 30
+""".strip(),
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"] = "1"
+    env["VIBELUTION_DESKTOP_ENTRY_ACTION_TIMEOUT_SECONDS"] = "1"
+    env["VIBELUTION_DESKTOP_ENTRY_START_MUTEX_NAME"] = f"Local\\Vibelution.Tests.{tmp_path.name}.timeout"
+    command = [
+        _powershell_exe(),
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(scripts_dir / "vibelution_desktop_entry.ps1"),
+        "-Action",
+        "open",
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, env=env, check=False, timeout=15)
+
+    assert result.returncode == 1
+    log_path = project_dir / ".runtime" / "launcher" / "desktop-entry.log"
+    events = [json.loads(line) for line in log_path.read_text(encoding="utf-8-sig").splitlines() if line.strip()]
+    event_names = [item["event"] for item in events]
+    assert "desktop_entry.launcher_action.timed_out" in event_names
+    assert "desktop_entry.failed" in event_names
+
+
+def test_desktop_entry_defines_launcher_action_timeout_and_process_tree_cleanup(tmp_path):
+    result = _run_desktop_entry_ast_harness(
+        tmp_path,
+        """
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$DesktopEntryPath
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$source = Get-Content -Raw -LiteralPath $DesktopEntryPath
+$tokens = $null
+$parseErrors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($source, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors -and $parseErrors.Count -gt 0) {
+    throw "Desktop entry script parse failed: $($parseErrors[0].Message)"
+}
+
+foreach ($functionName in @("Invoke-HiddenLauncherAction", "Resolve-DesktopEntryActionTimeoutSeconds", "Stop-DesktopEntryProcessTree")) {
+    $functionAst = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $functionName
+    }, $true)
+    if ($null -eq $functionAst) {
+        throw "$functionName was not found."
+    }
+    . ([scriptblock]::Create($functionAst.Extent.Text))
+}
+
+$invokeText = ($ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Invoke-HiddenLauncherAction"
+}, $true)).Extent.Text
+foreach ($required in @(
+    "desktop_entry.launcher_action.timed_out",
+    "Stop-DesktopEntryProcessTree",
+    "stream_capture_timed_out"
+)) {
+    if ($invokeText -notmatch [regex]::Escape($required)) {
+        throw "Invoke-HiddenLauncherAction is missing timeout behavior: $required"
+    }
+}
+
+$timeoutText = ($ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Resolve-DesktopEntryActionTimeoutSeconds"
+}, $true)).Extent.Text
+if ($timeoutText -notmatch "VIBELUTION_DESKTOP_ENTRY_ACTION_TIMEOUT_SECONDS") {
+    throw "Timeout resolver should honor VIBELUTION_DESKTOP_ENTRY_ACTION_TIMEOUT_SECONDS."
+}
+
+$env:VIBELUTION_DESKTOP_ENTRY_ACTION_TIMEOUT_SECONDS = "7"
+if ((Resolve-DesktopEntryActionTimeoutSeconds -LauncherAction "launcher") -ne 7) {
+    throw "Configured timeout was not honored."
+}
+$env:VIBELUTION_DESKTOP_ENTRY_ACTION_TIMEOUT_SECONDS = ""
+if ((Resolve-DesktopEntryActionTimeoutSeconds -LauncherAction "launcher") -lt 120) {
+    throw "Default launcher timeout should leave enough time for build/start."
+}
+
+Write-Output "ok"
+""",
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+
+
 def test_desktop_entry_failure_is_logged_without_blocking_popup(tmp_path):
     project_dir = tmp_path / "project"
     scripts_dir = project_dir / "scripts"
@@ -4143,6 +4310,7 @@ throw "synthetic launcher failure"
     ]
     env = os.environ.copy()
     env["VIBELUTION_DESKTOP_ENTRY_SUPPRESS_FEEDBACK"] = "1"
+    env["VIBELUTION_DESKTOP_ENTRY_START_MUTEX_NAME"] = f"Local\\Vibelution.Tests.{tmp_path.name}.failure.{time.time_ns()}"
     result = subprocess.run(command, capture_output=True, text=True, cwd=project_dir, env=env, check=False, timeout=30)
 
     assert result.returncode == 1
@@ -4317,7 +4485,7 @@ if ($parseErrors -and $parseErrors.Count -gt 0) {
     throw "Desktop entry script parse failed: $($parseErrors[0].Message)"
 }
 
-foreach ($functionName in @("Enter-DesktopEntryStartGate", "Exit-DesktopEntryStartGate", "Test-DesktopEntryStartAction", "Show-DesktopEntryFeedback", "Test-DesktopEntryFeedbackSuppressed", "Test-DesktopEntryFeedbackEnabled")) {
+foreach ($functionName in @("Enter-DesktopEntryStartGate", "Exit-DesktopEntryStartGate", "Test-DesktopEntryStartAction", "Show-DesktopEntryFeedback", "Test-DesktopEntryFeedbackSuppressed", "Test-DesktopEntryFeedbackEnabled", "Clear-StaleDesktopEntryStartProcesses")) {
     $functionAst = $ast.Find({
         param($node)
         $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -4346,6 +4514,30 @@ if ($gateText -notmatch "Show-DesktopEntryFeedback") {
 }
 if ($gateText -notmatch 'return\\s+\\$false') {
     throw "Start gate should skip duplicate starts."
+}
+
+$cleanupAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq "Clear-StaleDesktopEntryStartProcesses"
+}, $true)
+$cleanupText = $cleanupAst.Extent.Text
+foreach ($required in @(
+    "desktop_entry.stale_start_process.cleaned",
+    "Stop-DesktopEntryProcessTree",
+    "Test-DesktopEntryStartAction",
+    "stale_after_seconds"
+)) {
+    if ($cleanupText -notmatch [regex]::Escape($required)) {
+        throw "Stale desktop entry cleanup is missing '$required'."
+    }
+}
+
+$endBlockText = $ast.EndBlock.Extent.Text
+$cleanupIndex = $endBlockText.IndexOf("Clear-StaleDesktopEntryStartProcesses")
+$gateIndex = $endBlockText.IndexOf("Enter-DesktopEntryStartGate")
+if ($cleanupIndex -lt 0 -or $gateIndex -lt 0 -or $cleanupIndex -gt $gateIndex) {
+    throw "Stale desktop entry cleanup should run before start gate acquisition."
 }
 
 if (-not (Test-DesktopEntryStartAction -LauncherAction "start")) {

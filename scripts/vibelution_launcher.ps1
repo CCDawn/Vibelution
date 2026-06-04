@@ -22,7 +22,9 @@ $launcherDir = Join-Path $runtimeDir "launcher"
 $runtimeManagerStatePath = Join-Path $runtimeDir "runtime-manager\state.json"
 $launcherControlLogPath = Join-Path $launcherDir "launcher-control.log"
 $runtimeSceneRoot = Join-Path $projectDir "logs\runtime_scenes"
-$browserProfileDir = Join-Path $launcherDir "edge-app-profile"
+$workbenchBrowserProfileDir = Join-Path $launcherDir "workbench-app-profile"
+$launcherBrowserProfileDir = Join-Path $launcherDir "launcher-control-profile"
+$browserProfileDir = $workbenchBrowserProfileDir
 $statePath = Join-Path $launcherDir "state.json"
 $activeRuntimeScenePath = Join-Path $launcherDir "active-runtime-scene.json"
 $pythonDepsStampPath = Join-Path $launcherDir "python-deps.stamp"
@@ -323,7 +325,7 @@ function Invoke-RuntimeManagerClient {
 }
 
 function Ensure-Directories {
-    foreach ($path in @($runtimeDir, $launcherDir, $browserProfileDir, $runtimeSceneRoot)) {
+    foreach ($path in @($runtimeDir, $launcherDir, $workbenchBrowserProfileDir, $launcherBrowserProfileDir, $runtimeSceneRoot)) {
         if (-not (Test-Path $path)) {
             New-Item -ItemType Directory -Path $path -Force | Out-Null
         }
@@ -3352,7 +3354,14 @@ function Invoke-RepoResidualWorkbenchCleanup {
 }
 
 function Get-ManagedBrowserProcessMemoryPayload {
-    param([string]$ProfileDir = $browserProfileDir)
+    param([string]$ProfileDir = "")
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
 
     $pythonPath = Resolve-ResidualCleanupPythonPath
     if (-not $pythonPath) {
@@ -3431,20 +3440,35 @@ function Get-ManagedBrowserProcessMemoryPayload {
 }
 
 function Write-ManagedBrowserProcessMemorySnapshot {
-    param([string]$Reason = "startup")
+    param(
+        [string]$Reason = "startup",
+        [string]$ProfileDir = ""
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
 
     if (-not $script:currentRuntimeSceneId) {
         return
     }
 
-    $snapshot = Get-ManagedBrowserProcessMemoryPayload
+    $snapshot = Get-ManagedBrowserProcessMemoryPayload -ProfileDir $ProfileDir
     $items = @()
     if ($snapshot -and $snapshot.items) {
         $items = @($snapshot.items)
     }
     $topProcesses = @($items | Select-Object -First 8)
     $snapshotSupported = [bool](Get-ObjectPropertyValue -Object $snapshot -Name "supported" -Default $false)
-    $snapshotProfileDir = [string](Get-ObjectPropertyValue -Object $snapshot -Name "profileDir" -Default $browserProfileDir)
+    $snapshotProfileDirDefault = ""
+    $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+    if ($profileDirVariable) {
+        $snapshotProfileDirDefault = [string]$profileDirVariable.Value
+    }
+    $snapshotProfileDir = [string](Get-ObjectPropertyValue -Object $snapshot -Name "profileDir" -Default $snapshotProfileDirDefault)
     $snapshotCount = [int](Get-ObjectPropertyValue -Object $snapshot -Name "count" -Default 0)
     $snapshotWorkingSetMB = [double](Get-ObjectPropertyValue -Object $snapshot -Name "totalWorkingSetMB" -Default 0)
     $snapshotPrivateMB = [double](Get-ObjectPropertyValue -Object $snapshot -Name "totalPrivateMB" -Default 0)
@@ -3488,6 +3512,15 @@ function Write-ManagedBrowserProcessMemorySnapshot {
 }
 
 function Invoke-ManagedBrowserRenderCacheCleanup {
+    param([string]$ProfileDir = "")
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
     $relativeCacheDirs = @(
         "GraphiteDawnCache",
         "GrShaderCache",
@@ -3499,19 +3532,19 @@ function Invoke-ManagedBrowserRenderCacheCleanup {
     $skipped = @()
     $failed = @()
 
-    if (-not (Test-Path -LiteralPath $browserProfileDir)) {
+    if (-not (Test-Path -LiteralPath $ProfileDir)) {
         return
     }
 
     try {
-        $profileRoot = (Resolve-Path -LiteralPath $browserProfileDir).Path
+        $profileRoot = (Resolve-Path -LiteralPath $ProfileDir).Path
     } catch {
         return
     }
     $profilePrefix = $profileRoot.TrimEnd("\") + "\"
 
     foreach ($relativePath in $relativeCacheDirs) {
-        $target = Join-Path $browserProfileDir $relativePath
+        $target = Join-Path $ProfileDir $relativePath
         if (-not (Test-Path -LiteralPath $target)) {
             continue
         }
@@ -3545,7 +3578,7 @@ function Invoke-ManagedBrowserRenderCacheCleanup {
             -Message "Managed browser render cache cleanup completed." `
             -Outcome "observed" `
             -Fields @{
-                profile_dir = $browserProfileDir
+                profile_dir = $ProfileDir
                 deleted = @($deleted)
                 skipped = @($skipped)
                 failed = @($failed)
@@ -3594,23 +3627,69 @@ function Test-ManagedBackendAlive {
 }
 
 function Get-ManagedBrowserCandidatePids {
+    param(
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
     $pids = New-Object System.Collections.Generic.List[int]
     $state = Get-State
-    if ($state -and $state.browserWindowPid) {
-        $trackedWindowPid = [int]$state.browserWindowPid
+    function Get-StateIntProperty {
+        param(
+            [object]$Source,
+            [string]$Name
+        )
+        if (-not $Source) {
+            return 0
+        }
+        $property = $Source.PSObject.Properties[$Name]
+        if (-not $property -or -not $property.Value) {
+            return 0
+        }
+        return [int]$property.Value
+    }
+    $trackedWindowPid = 0
+    $trackedLaunchPid = 0
+    if ($Role -eq "launcher_control_surface") {
+        $trackedWindowPid = Get-StateIntProperty -Source $state -Name "launcherBrowserWindowPid"
+        $trackedLaunchPid = Get-StateIntProperty -Source $state -Name "launcherBrowserLaunchPid"
+    } else {
+        $stateRole = "workbench"
+        if ($state) {
+            $stateRoleProperty = $state.PSObject.Properties["sessionRole"]
+            if ($stateRoleProperty -and $stateRoleProperty.Value) {
+                $stateRole = [string]$stateRoleProperty.Value
+            }
+        }
+        $trackedWindowPid = Get-StateIntProperty -Source $state -Name "workbenchBrowserWindowPid"
+        if ($trackedWindowPid -le 0 -and $stateRole -ne "launcher_control_surface") {
+            $trackedWindowPid = Get-StateIntProperty -Source $state -Name "browserWindowPid"
+        }
+        $trackedLaunchPid = Get-StateIntProperty -Source $state -Name "workbenchBrowserLaunchPid"
+        if ($trackedLaunchPid -le 0 -and $stateRole -ne "launcher_control_surface") {
+            $trackedLaunchPid = Get-StateIntProperty -Source $state -Name "browserLaunchPid"
+        }
+    }
+    if ($trackedWindowPid -gt 0) {
         if (Test-ProcessAlive $trackedWindowPid) {
             [void]$pids.Add($trackedWindowPid)
         }
     }
-    if ($state -and $state.browserLaunchPid) {
-        $trackedLaunchPid = [int]$state.browserLaunchPid
+    if ($trackedLaunchPid -gt 0) {
         if (Test-ProcessAlive $trackedLaunchPid) {
             [void]$pids.Add($trackedLaunchPid)
         }
     }
 
     Ensure-Directories
-    $profileMarker = [regex]::Escape([System.IO.Path]::GetFullPath($browserProfileDir))
+    $profileMarker = [regex]::Escape([System.IO.Path]::GetFullPath($ProfileDir))
     $profileProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
         $_.Name -ieq "msedge.exe" -and $_.CommandLine -and $_.CommandLine -match $profileMarker
     })
@@ -3622,7 +3701,19 @@ function Get-ManagedBrowserCandidatePids {
 }
 
 function Get-ManagedBrowserProcesses {
-    $candidatePids = @(Get-ManagedBrowserCandidatePids)
+    param(
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
+    $candidatePids = @(Get-ManagedBrowserCandidatePids -ProfileDir $ProfileDir -Role $Role)
     if ($candidatePids.Count -eq 0) {
         return @()
     }
@@ -3633,11 +3724,35 @@ function Get-ManagedBrowserProcesses {
 }
 
 function Get-ManagedBrowserPids {
-    return @(Get-ManagedBrowserProcesses | ForEach-Object { [int]$_.Id } | Sort-Object -Unique)
+    param(
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
+    return @(Get-ManagedBrowserProcesses -ProfileDir $ProfileDir -Role $Role | ForEach-Object { [int]$_.Id } | Sort-Object -Unique)
 }
 
 function Get-ManagedBrowserWindowProcesses {
-    $browserPids = @(Get-ManagedBrowserPids)
+    param(
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
+    $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
     if ($browserPids.Count -eq 0) {
         return @()
     }
@@ -3648,7 +3763,19 @@ function Get-ManagedBrowserWindowProcesses {
 }
 
 function Get-ManagedBrowserWindowProcess {
-    $windowProcesses = @(Get-ManagedBrowserWindowProcesses)
+    param(
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
+    $windowProcesses = @(Get-ManagedBrowserWindowProcesses -ProfileDir $ProfileDir -Role $Role)
     if ($windowProcesses.Count -gt 0) {
         return $windowProcesses[0]
     }
@@ -3658,17 +3785,26 @@ function Get-ManagedBrowserWindowProcess {
 function Wait-ForBrowserWindow {
     param(
         [int]$LaunchProcessId,
-        [int]$TimeoutSeconds = 18
+        [int]$TimeoutSeconds = 18,
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
     )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        $windowProcess = Get-ManagedBrowserWindowProcess
+        $windowProcess = Get-ManagedBrowserWindowProcess -ProfileDir $ProfileDir -Role $Role
         if ($windowProcess) {
             return $windowProcess
         }
 
-        $browserPids = @(Get-ManagedBrowserPids)
+        $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
         if ($browserPids.Count -eq 0 -and -not (Test-ProcessAlive $LaunchProcessId)) {
             return $null
         }
@@ -3679,11 +3815,22 @@ function Wait-ForBrowserWindow {
 }
 
 function Wait-ForBrowserStopped {
-    param([int]$TimeoutSeconds = 12)
+    param(
+        [int]$TimeoutSeconds = 12,
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
-        if (@(Get-ManagedBrowserPids).Count -eq 0) {
+        if (@(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role).Count -eq 0) {
             return $true
         }
         Start-Sleep -Milliseconds 300
@@ -3711,15 +3858,30 @@ namespace VibelutionLauncher {
 }
 
 function Focus-ManagedBrowserWindow {
-    $windowProcess = Get-ManagedBrowserWindowProcess
+    param(
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+
+    $windowProcess = Get-ManagedBrowserWindowProcess -ProfileDir $ProfileDir -Role $Role
     if (-not $windowProcess) {
+        $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
         Write-LauncherControlLog `
             -Event "launcher.browser.focus.failed" `
             -Message "No managed browser window was available to focus." `
             -Level "warning" `
             -Fields @{
                 reason = "window_not_found"
-                browser_pids = @(Get-ManagedBrowserPids)
+                browser_pids = @($browserPids)
+                profile_dir = $ProfileDir
+                window_purpose = $Role
             }
         if ($script:currentRuntimeSceneId) {
             Write-RuntimeSceneEvent `
@@ -3731,7 +3893,9 @@ function Focus-ManagedBrowserWindow {
                 -Outcome "failed" `
                 -Fields @{
                     reason = "window_not_found"
-                    browser_pids = @(Get-ManagedBrowserPids)
+                    browser_pids = @($browserPids)
+                    profile_dir = $ProfileDir
+                    window_purpose = $Role
                 }
         }
         return $false
@@ -3766,6 +3930,8 @@ function Focus-ManagedBrowserWindow {
         show_window = [bool]$showWindowResult
         set_foreground = [bool]$setForegroundResult
         app_activate = [bool]$appActivateResult
+        profile_dir = $ProfileDir
+        window_purpose = $Role
     }
     if ($focusError) {
         $fields.error = $focusError
@@ -3891,10 +4057,17 @@ function Start-ManagedBrowser {
     param(
         [string]$BrowserExecutable,
         [string]$AppUrl = $url,
-        [string]$WindowPurpose = "workbench"
+        [string]$WindowPurpose = "workbench",
+        [string]$ProfileDir = ""
     )
 
-    Invoke-ManagedBrowserRenderCacheCleanup
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+    Invoke-ManagedBrowserRenderCacheCleanup -ProfileDir $ProfileDir
     $resolvedAppUrl = ([string]$AppUrl).Trim()
     if (-not $resolvedAppUrl) {
         $resolvedAppUrl = $url
@@ -3903,7 +4076,7 @@ function Start-ManagedBrowser {
     $windowMode = if ($script:workbenchWindowMode) { [string]$script:workbenchWindowMode } else { "windowed" }
     $fullscreenForced = ($windowMode -eq "fullscreen")
     $browserArgs = @(
-        "--user-data-dir=$browserProfileDir",
+        "--user-data-dir=$ProfileDir",
         "--app=$resolvedAppUrl",
         "--force-dark-mode",
         "--no-first-run",
@@ -3924,7 +4097,7 @@ function Start-ManagedBrowser {
 
     Write-Note "Starting managed Edge app window ($windowMode mode) ..."
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "launching"; executable = $BrowserExecutable; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Launching managed browser window ($windowMode mode)."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -3941,7 +4114,7 @@ function Start-ManagedBrowser {
                 window_purpose = $WindowPurpose
                 window_mode = $windowMode
                 fullscreen_forced = $fullscreenForced
-                profile_dir = $browserProfileDir
+                profile_dir = $ProfileDir
                 launch_flags = @($browserArgs | Where-Object { $_ -notlike "--app=*" -and $_ -notlike "--user-data-dir=*" })
             }
     }
@@ -3950,11 +4123,11 @@ function Start-ManagedBrowser {
         -ArgumentList $browserArgs `
         -WorkingDirectory $projectDir
 
-    $windowProcess = Wait-ForBrowserWindow -LaunchProcessId $proc.Id
+    $windowProcess = Wait-ForBrowserWindow -LaunchProcessId $proc.Id -ProfileDir $ProfileDir -Role $WindowPurpose
     if (-not $windowProcess) {
-        Stop-ProcessesById (Get-ManagedBrowserPids)
+        Stop-ProcessesById (Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $WindowPurpose)
         if ($script:currentRuntimeSceneId) {
-            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
+            Update-RuntimeSceneManifest @{ browser = @{ status = "failed"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = 0; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
             Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window did not open successfully."
             Write-RuntimeSceneEvent `
                 -Component "browser" `
@@ -3972,14 +4145,14 @@ function Start-ManagedBrowser {
                     window_purpose = $WindowPurpose
                     window_mode = $windowMode
                     fullscreen_forced = $fullscreenForced
-                    profile_dir = $browserProfileDir
+                    profile_dir = $ProfileDir
                 }
         }
         throw "Managed Edge app window did not open successfully."
     }
 
     if ($script:currentRuntimeSceneId) {
-        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $browserProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
+        Update-RuntimeSceneManifest @{ browser = @{ status = "open"; executable = $BrowserExecutable; launch_pid = $proc.Id; window_pid = $windowProcess.Id; window_mode = $windowMode; fullscreen_forced = $fullscreenForced; profile_dir = $ProfileDir; app_url = $resolvedAppUrl; window_purpose = $WindowPurpose } }
         Append-RuntimeSceneRawLog -RelativePath (Get-RuntimeSceneRelativePaths).Browser -Message "Managed browser window opened (launch PID=$($proc.Id), window PID=$($windowProcess.Id))."
         Write-RuntimeSceneEvent `
             -Component "browser" `
@@ -3997,17 +4170,18 @@ function Start-ManagedBrowser {
                 window_purpose = $WindowPurpose
                 window_mode = $windowMode
                 fullscreen_forced = $fullscreenForced
-                profile_dir = $browserProfileDir
+                profile_dir = $ProfileDir
             }
     }
 
-    Write-ManagedBrowserProcessMemorySnapshot -Reason "browser_opened"
+    Write-ManagedBrowserProcessMemorySnapshot -Reason "browser_opened" -ProfileDir $ProfileDir
 
     return [pscustomobject]@{
         LaunchPid = $proc.Id
         WindowPid = $windowProcess.Id
         AppUrl = $resolvedAppUrl
         WindowPurpose = $WindowPurpose
+        ProfileDir = $ProfileDir
     }
 }
 
@@ -4052,10 +4226,21 @@ function Start-Supervisor {
 }
 
 function Get-SessionSnapshot {
+    param(
+        [string]$BrowserRole = "workbench",
+        [string]$ProfileDir = ""
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
     $state = Get-State
     $backendPids = @(Get-ManagedBackendCandidatePids)
-    $browserPids = @(Get-ManagedBrowserPids)
-    $browserWindowProcesses = @(Get-ManagedBrowserWindowProcesses)
+    $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $BrowserRole)
+    $browserWindowProcesses = @(Get-ManagedBrowserWindowProcesses -ProfileDir $ProfileDir -Role $BrowserRole)
 
     $backendPid = $null
     if ($state -and $state.backendPid -and (Test-ProcessAlive ([int]$state.backendPid))) {
@@ -4080,7 +4265,49 @@ function Get-SessionSnapshot {
         BrowserWindowPid = if ($browserWindowProcesses.Count -gt 0) { [int]$browserWindowProcesses[0].Id } else { $null }
         SupervisorPid = $supervisorPid
         SessionRunning = [bool]($backendPid) -and (Test-WebHealthy) -and ($browserWindowProcesses.Count -gt 0)
+        BrowserRole = $BrowserRole
+        BrowserProfileDir = $ProfileDir
     }
+}
+
+function Save-LauncherControlWindowState {
+    param(
+        [int]$BackendPid,
+        [int]$BackendLaunchPid,
+        [pscustomobject]$PythonRuntime,
+        [string]$BrowserExecutable,
+        [int]$BrowserLaunchPid,
+        [int]$BrowserWindowPid,
+        [string]$ManagedSessionId
+    )
+
+    $existingState = Get-State
+    if ($existingState -and [string](Get-ObjectPropertyValue -Object $existingState -Name "sessionRole" -Default "") -ne "launcher_control_surface") {
+        $payload = @{}
+        foreach ($property in $existingState.PSObject.Properties) {
+            $payload[$property.Name] = $property.Value
+        }
+        $payload["launcherBrowserProfileDir"] = $launcherBrowserProfileDir
+        $payload["workbenchBrowserProfileDir"] = $workbenchBrowserProfileDir
+        $payload["launcherBrowserLaunchPid"] = $BrowserLaunchPid
+        $payload["launcherBrowserWindowPid"] = $BrowserWindowPid
+        $payload["launcherControlUrl"] = "$url/launcher"
+        $payload["launcherControlStartedAt"] = (Get-Date).ToString("o")
+        Save-State $payload
+        return
+    }
+
+    Save-SessionState `
+        -ManagedSessionId $ManagedSessionId `
+        -BackendPid $BackendPid `
+        -BackendLaunchPid $BackendLaunchPid `
+        -PythonRuntime $PythonRuntime `
+        -BrowserExecutable $BrowserExecutable `
+        -BrowserLaunchPid $BrowserLaunchPid `
+        -BrowserWindowPid $BrowserWindowPid `
+        -SupervisorPid 0 `
+        -BrowserManaged $true `
+        -SessionRole "launcher_control_surface"
 }
 
 function Save-SessionState {
@@ -4098,7 +4325,44 @@ function Save-SessionState {
 )
 
     $rawPaths = Get-RuntimeSceneRelativePaths
-    Save-State @{
+    $existingState = Get-State
+    $workbenchBrowserLaunchPid = 0
+    $workbenchBrowserWindowPid = 0
+    $launcherBrowserLaunchPid = 0
+    $launcherBrowserWindowPid = 0
+    if ($existingState) {
+        $workbenchBrowserLaunchPid = [int](Get-ObjectPropertyValue -Object $existingState -Name "workbenchBrowserLaunchPid" -Default 0)
+        $workbenchBrowserWindowPid = [int](Get-ObjectPropertyValue -Object $existingState -Name "workbenchBrowserWindowPid" -Default 0)
+        $launcherBrowserLaunchPid = [int](Get-ObjectPropertyValue -Object $existingState -Name "launcherBrowserLaunchPid" -Default 0)
+        $launcherBrowserWindowPid = [int](Get-ObjectPropertyValue -Object $existingState -Name "launcherBrowserWindowPid" -Default 0)
+        $existingRole = [string](Get-ObjectPropertyValue -Object $existingState -Name "sessionRole" -Default "")
+        if ($existingRole -ne "launcher_control_surface") {
+            if ($workbenchBrowserLaunchPid -le 0) {
+                $workbenchBrowserLaunchPid = [int](Get-ObjectPropertyValue -Object $existingState -Name "browserLaunchPid" -Default 0)
+            }
+            if ($workbenchBrowserWindowPid -le 0) {
+                $workbenchBrowserWindowPid = [int](Get-ObjectPropertyValue -Object $existingState -Name "browserWindowPid" -Default 0)
+            }
+        } else {
+            if ($launcherBrowserLaunchPid -le 0) {
+                $launcherBrowserLaunchPid = [int](Get-ObjectPropertyValue -Object $existingState -Name "browserLaunchPid" -Default 0)
+            }
+            if ($launcherBrowserWindowPid -le 0) {
+                $launcherBrowserWindowPid = [int](Get-ObjectPropertyValue -Object $existingState -Name "browserWindowPid" -Default 0)
+            }
+        }
+    }
+    $profileDirForRole = if ($SessionRole -eq "launcher_control_surface") { $launcherBrowserProfileDir } else { $workbenchBrowserProfileDir }
+    if ($SessionRole -eq "launcher_control_surface") {
+        $launcherBrowserLaunchPid = $BrowserLaunchPid
+        $launcherBrowserWindowPid = $BrowserWindowPid
+    } else {
+        $workbenchBrowserLaunchPid = $BrowserLaunchPid
+        $workbenchBrowserWindowPid = $BrowserWindowPid
+    }
+    $compatBrowserLaunchPid = if ($SessionRole -eq "launcher_control_surface") { $launcherBrowserLaunchPid } else { $workbenchBrowserLaunchPid }
+    $compatBrowserWindowPid = if ($SessionRole -eq "launcher_control_surface") { $launcherBrowserWindowPid } else { $workbenchBrowserWindowPid }
+    $statePayload = @{
         mode = $mode
         sessionRole = $SessionRole
         sessionId = $ManagedSessionId
@@ -4114,9 +4378,15 @@ function Save-SessionState {
         pythonLabel = if ($PythonRuntime) { $PythonRuntime.Label } else { $null }
         browserManaged = $BrowserManaged
         browserExecutable = $BrowserExecutable
-        browserProfileDir = $browserProfileDir
-        browserLaunchPid = $BrowserLaunchPid
-        browserWindowPid = $BrowserWindowPid
+        browserProfileDir = $profileDirForRole
+        workbenchBrowserProfileDir = $workbenchBrowserProfileDir
+        launcherBrowserProfileDir = $launcherBrowserProfileDir
+        browserLaunchPid = $compatBrowserLaunchPid
+        browserWindowPid = $compatBrowserWindowPid
+        workbenchBrowserLaunchPid = $workbenchBrowserLaunchPid
+        workbenchBrowserWindowPid = $workbenchBrowserWindowPid
+        launcherBrowserLaunchPid = $launcherBrowserLaunchPid
+        launcherBrowserWindowPid = $launcherBrowserWindowPid
         supervisorPid = $SupervisorPid
         supervisorStdout = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.Supervisor } else { $null }
         supervisorStderr = if ($script:currentRuntimeSceneDir) { Get-CurrentRuntimeSceneFilePath $rawPaths.SupervisorStderr } else { $null }
@@ -4124,6 +4394,7 @@ function Save-SessionState {
         runtimeSceneDir = $script:currentRuntimeSceneDir
         startedAt = (Get-Date).ToString("o")
     }
+    Save-State $statePayload
 }
 
 function Get-SessionReferenceTime {
@@ -4207,7 +4478,7 @@ function Adopt-Or-FocusSession {
     Write-Note "Vibelution is already running. Focusing the existing app window."
     if ($Snapshot.State -and $Snapshot.State.runtimeSceneId -and $Snapshot.State.runtimeSceneDir) {
         Set-CurrentRuntimeSceneContext -SceneId ([string]$Snapshot.State.runtimeSceneId) -SceneDir ([string]$Snapshot.State.runtimeSceneDir)
-        $focusResult = [bool](Focus-ManagedBrowserWindow)
+        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
         Write-RuntimeSceneEvent `
             -Component "launcher" `
             -Phase "session" `
@@ -4216,7 +4487,7 @@ function Adopt-Or-FocusSession {
             -Level $(if ($focusResult) { "info" } else { "warning" }) `
             -Outcome $(if ($focusResult) { "succeeded" } else { "failed" })
     } else {
-        [void](Focus-ManagedBrowserWindow)
+        [void](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
         return $true
     }
     return $true
@@ -4247,7 +4518,7 @@ function Complete-HeadlessSessionWithBrowser {
     }
 
     $browserExecutable = Resolve-EdgeExecutable
-    $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable
+    $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable -ProfileDir $workbenchBrowserProfileDir -WindowPurpose "workbench"
     $managedSessionId = if ($Snapshot.State -and $Snapshot.State.sessionId) {
         [string]$Snapshot.State.sessionId
     } else {
@@ -4272,7 +4543,7 @@ function Complete-HeadlessSessionWithBrowser {
         -BrowserManaged $true `
         -SessionRole "workbench"
 
-    $focusResult = [bool](Focus-ManagedBrowserWindow)
+    $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
     Write-RuntimeSceneEvent `
         -Component "launcher" `
         -Phase "session" `
@@ -4287,38 +4558,29 @@ function Complete-HeadlessSessionWithBrowser {
 function Open-LauncherControlSurface {
     Ensure-Directories
     $controlSurfaceUrl = "$url/launcher"
+    $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
     $snapshot = Get-SessionSnapshot
+    $startedControlBackend = $false
+    $preserveExistingStateOnFailure = [bool]$snapshot.State
 
-    if ($snapshot.SessionRunning) {
+    if ($launcherSnapshot.BackendHealthy -and $launcherSnapshot.BrowserWindowCount -gt 0) {
         Write-LauncherControlLog `
-            -Event "launcher.control_surface.focus_existing_workbench" `
-            -Message "Launcher control surface found an existing managed workbench session." `
+            -Event "launcher.control_surface.focus_existing_launcher" `
+            -Message "Launcher control surface found an existing Launcher window." `
             -Fields @{
-                backend_pid = $snapshot.BackendPid
-                browser_window_pid = $snapshot.BrowserWindowPid
+                backend_pid = $launcherSnapshot.BackendPid
+                browser_window_pid = $launcherSnapshot.BrowserWindowPid
                 url = $controlSurfaceUrl
             }
-        [void](Focus-ManagedBrowserWindow)
+        [void](Focus-ManagedBrowserWindow -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface")
         return
     }
 
-    if ($snapshot.BackendHealthy -and $snapshot.BrowserWindowCount -gt 0) {
-        Write-LauncherControlLog `
-            -Event "launcher.control_surface.focus_existing_window" `
-            -Message "Launcher control surface found an existing browser window with a healthy backend." `
-            -Fields @{
-                backend_pid = $snapshot.BackendPid
-                browser_window_pid = $snapshot.BrowserWindowPid
-                url = $controlSurfaceUrl
-            }
-        [void](Focus-ManagedBrowserWindow)
-        return
-    }
-
-    if ($snapshot.BackendPids.Count -gt 0 -or $snapshot.BrowserPids.Count -gt 0 -or $snapshot.State) {
-        if (-not ($snapshot.BackendHealthy -and $snapshot.BrowserWindowCount -eq 0)) {
+    if ($launcherSnapshot.BrowserPids.Count -gt 0) {
+        if (-not ($launcherSnapshot.BackendHealthy -and $launcherSnapshot.BrowserWindowCount -eq 0)) {
             Write-Note "Found an incomplete launcher control surface session. Cleaning it up before opening Launcher."
-            Stop-ManagedSession -Reason "launcher control surface cleanup"
+            Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
+            $launcherSnapshot = Get-SessionSnapshot -BrowserRole "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
             $snapshot = Get-SessionSnapshot
         }
     }
@@ -4352,6 +4614,7 @@ function Open-LauncherControlSurface {
             $backendProc = Start-ManagedBackend -PythonRuntime $pythonRuntime
             $backendPid = [int]$backendProc.Id
             $backendLaunchPid = [int]$backendProc.LauncherPid
+            $startedControlBackend = $true
         }
 
         $managedSessionId = if ($snapshot.State -and $snapshot.State.sessionId) {
@@ -4384,21 +4647,18 @@ function Open-LauncherControlSurface {
         }
 
         $browserExecutable = Resolve-EdgeExecutable
-        $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable -AppUrl $controlSurfaceUrl -WindowPurpose "launcher_control_surface"
+        $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable -AppUrl $controlSurfaceUrl -WindowPurpose "launcher_control_surface" -ProfileDir $launcherBrowserProfileDir
 
-        Save-SessionState `
+        Save-LauncherControlWindowState `
             -ManagedSessionId $managedSessionId `
             -BackendPid $backendPid `
             -BackendLaunchPid $backendLaunchPid `
             -PythonRuntime $pythonRuntime `
             -BrowserExecutable $browserExecutable `
             -BrowserLaunchPid $browserInfo.LaunchPid `
-            -BrowserWindowPid $browserInfo.WindowPid `
-            -SupervisorPid 0 `
-            -BrowserManaged $true `
-            -SessionRole "launcher_control_surface"
+            -BrowserWindowPid $browserInfo.WindowPid
 
-        $focusResult = [bool](Focus-ManagedBrowserWindow)
+        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface")
         Write-RuntimeSceneEvent `
             -Component "launcher" `
             -Phase "control_surface" `
@@ -4424,15 +4684,60 @@ function Open-LauncherControlSurface {
                 ended_at = (Get-Date).ToUniversalTime().ToString("o")
             }
         }
-        Stop-ManagedBrowserProcesses
-        Stop-ManagedBackendProcesses
-        Remove-State
+        Stop-ManagedBrowserProcesses -ProfileDir $launcherBrowserProfileDir -Role "launcher_control_surface"
+        if ($startedControlBackend) {
+            Stop-ManagedBackendProcesses
+        }
+        if (-not $preserveExistingStateOnFailure) {
+            Remove-State
+        }
         throw
     }
 }
 
+function Open-LauncherAndEnsureWorkbench {
+    Open-LauncherControlSurface
+
+    $snapshot = Get-SessionSnapshot
+    if ($snapshot.SessionRunning) {
+        if (Adopt-Or-FocusSession -Snapshot $snapshot) {
+            Write-LauncherControlLog `
+                -Event "launcher.control_surface.workbench_focused" `
+                -Message "Launcher entry focused an already running workbench." `
+                -Fields @{
+                    backend_pid = $snapshot.BackendPid
+                    browser_window_pid = $snapshot.BrowserWindowPid
+                    url = $url
+                }
+            return
+        }
+    }
+
+    Write-LauncherControlLog `
+        -Event "launcher.control_surface.workbench_start_requested" `
+        -Message "Launcher entry requested a workbench start after opening the control surface." `
+        -Fields @{
+            backend_pid = $snapshot.BackendPid
+            browser_window_count = [int]$snapshot.BrowserWindowCount
+            state_present = [bool]$snapshot.State
+            url = $url
+        }
+    Start-ManagedSession
+}
+
 function Stop-ManagedBrowserProcesses {
-    $windowProcesses = @(Get-ManagedBrowserWindowProcesses)
+    param(
+        [string]$ProfileDir = "",
+        [string]$Role = "workbench"
+    )
+
+    if (-not $ProfileDir) {
+        $profileDirVariable = Get-Variable -Scope Script -Name "browserProfileDir" -ErrorAction SilentlyContinue
+        if ($profileDirVariable) {
+            $ProfileDir = [string]$profileDirVariable.Value
+        }
+    }
+    $windowProcesses = @(Get-ManagedBrowserWindowProcesses -ProfileDir $ProfileDir -Role $Role)
     foreach ($windowProcess in $windowProcesses) {
         try {
             $null = $windowProcess.CloseMainWindow()
@@ -4442,7 +4747,7 @@ function Stop-ManagedBrowserProcesses {
     Start-Sleep -Milliseconds 600
 
     for ($attempt = 1; $attempt -le 4; $attempt++) {
-        $browserPids = @(Get-ManagedBrowserPids)
+        $browserPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
         if ($browserPids.Count -eq 0) {
             return
         }
@@ -4456,6 +4761,8 @@ function Stop-ManagedBrowserProcesses {
                     attempt = $attempt
                     browser_pids = @($browserPids)
                     window_pids = @($windowProcesses | ForEach-Object { [int]$_.Id })
+                    profile_dir = $ProfileDir
+                    window_purpose = $Role
                 }
         }
 
@@ -4463,7 +4770,7 @@ function Stop-ManagedBrowserProcesses {
         Start-Sleep -Milliseconds $(if ($attempt -eq 1) { 450 } else { 650 })
     }
 
-    $remainingPids = @(Get-ManagedBrowserPids)
+    $remainingPids = @(Get-ManagedBrowserPids -ProfileDir $ProfileDir -Role $Role)
     if ($remainingPids.Count -gt 0) {
         Write-LauncherControlLog `
             -Event "launcher.browser.stop.incomplete" `
@@ -4472,6 +4779,8 @@ function Stop-ManagedBrowserProcesses {
             -Fields @{
                 browser_pids = @($remainingPids)
                 window_pids = @($windowProcesses | ForEach-Object { [int]$_.Id })
+                profile_dir = $ProfileDir
+                window_purpose = $Role
             }
     }
 }
@@ -4770,8 +5079,8 @@ function Stop-ManagedSession {
                 backend_stop_trace = $backendStopTrace
             }
     }
-    Stop-ManagedBrowserProcesses
-    $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20
+    Stop-ManagedBrowserProcesses -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
+    $browserStopped = Wait-ForBrowserStopped -TimeoutSeconds 20 -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
 
     $closure = Get-ManagedSessionClosureSnapshot
     if ($script:currentRuntimeSceneId) {
@@ -4997,7 +5306,7 @@ function Start-ManagedSession {
         }
 
         $browserExecutable = Resolve-EdgeExecutable
-        $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable
+        $browserInfo = Start-ManagedBrowser -BrowserExecutable $browserExecutable -ProfileDir $workbenchBrowserProfileDir -WindowPurpose "workbench"
 
         Save-SessionState `
             -ManagedSessionId $managedSessionId `
@@ -5025,7 +5334,7 @@ function Start-ManagedSession {
             -BrowserManaged $true `
             -SessionRole "workbench"
 
-        $focusResult = [bool](Focus-ManagedBrowserWindow)
+        $focusResult = [bool](Focus-ManagedBrowserWindow -ProfileDir $workbenchBrowserProfileDir -Role "workbench")
         Write-RuntimeSceneEvent `
             -Component "launcher" `
             -Phase "session" `
@@ -5051,7 +5360,7 @@ function Start-ManagedSession {
                 ended_at = (Get-Date).ToUniversalTime().ToString("o")
             }
         }
-        Stop-ManagedBrowserProcesses
+        Stop-ManagedBrowserProcesses -ProfileDir $workbenchBrowserProfileDir -Role "workbench"
         Stop-ManagedBackendProcesses
         Remove-State
         throw
@@ -5066,6 +5375,11 @@ function Run-SupervisorLoop {
     }
 
     $reportedBackendPidMismatch = $false
+    $supervisorBrowserProfileDir = ""
+    $workbenchProfileVariable = Get-Variable -Scope Script -Name "workbenchBrowserProfileDir" -ErrorAction SilentlyContinue
+    if ($workbenchProfileVariable) {
+        $supervisorBrowserProfileDir = [string]$workbenchProfileVariable.Value
+    }
 
     while ($true) {
         $state = Get-State
@@ -5100,7 +5414,7 @@ function Run-SupervisorLoop {
             $reportedBackendPidMismatch = $true
         }
 
-        $browserWindowCount = @(Get-ManagedBrowserWindowProcesses).Count
+        $browserWindowCount = @(Get-ManagedBrowserWindowProcesses -ProfileDir $supervisorBrowserProfileDir -Role "workbench").Count
 
         if (-not $backendAlive) {
             $workbench = Get-RuntimeManagerWorkbench
@@ -5340,7 +5654,7 @@ try {
     Sync-LauncherEndpointFromState
     switch ($Action) {
         "launcher" {
-            Open-LauncherControlSurface
+            Open-LauncherAndEnsureWorkbench
         }
         "toggle" {
             $snapshot = Get-SessionSnapshot
