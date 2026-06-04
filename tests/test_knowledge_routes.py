@@ -265,6 +265,31 @@ def test_knowledge_rag_retrieve_route_rejects_invalid_mode(tmp_path, monkeypatch
     assert "Unsupported RAG retrieval mode" in response.json()["detail"]
 
 
+def test_knowledge_rag_health_route_reports_local_provider_ready(tmp_path, monkeypatch):
+    client, _team, _lead, _member, _outsider = _setup(tmp_path, monkeypatch)
+
+    response = client.get("/api/knowledge/rag/health")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["schemaVersion"] == 1
+    assert payload["provider"] == "local"
+    assert payload["status"] == "ready"
+    assert payload["providers"] == [
+        {
+            "provider": "local",
+            "status": "ready",
+            "vectorEnabled": False,
+            "indexedItemCount": 0,
+            "staleItemCount": 0,
+        }
+    ]
+    assert payload["retrievalPolicy"]["honorsKnowledgeAcl"] is True
+    assert payload["retrievalPolicy"]["honorsMemoryPolicy"] is True
+    assert payload["retrievalPolicy"]["mutatesFormalKnowledge"] is False
+    assert payload["retrievalPolicy"]["injectsPromptByDefault"] is False
+
+
 def test_knowledge_ingestion_package_route_creates_pending_candidate_only(tmp_path, monkeypatch):
     client, team, lead, member, outsider = _setup(tmp_path, monkeypatch)
     base = client.post(

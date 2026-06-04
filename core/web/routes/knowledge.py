@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from core.web.services.rag_retrieval_service import RagRetrievalError, retrieve_rag_contexts
+from core.web.services.rag_retrieval_service import RagRetrievalError, get_rag_retrieval_health, retrieve_rag_contexts
 from core.web.services.team_knowledge_service import (
     TeamKnowledgeError,
     TeamKnowledgeNotFoundError,
@@ -246,6 +246,11 @@ def knowledge_rag_retrieve(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (RagRetrievalError, TeamKnowledgeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/knowledge/rag/health")
+def knowledge_rag_health() -> dict:
+    return get_rag_retrieval_health()
 
 
 @router.get("/knowledge/permissions/audit")

@@ -600,6 +600,29 @@ export type KnowledgeRagCitation = {
   retrievalMode: string;
 };
 
+export type KnowledgeRagProviderHealth = {
+  provider: string;
+  status: "ready" | "degraded" | "unavailable" | string;
+  vectorEnabled: boolean;
+  indexedItemCount: number;
+  staleItemCount: number;
+};
+
+export type KnowledgeRagHealthPayload = {
+  schemaVersion: number;
+  provider: string;
+  status: "ready" | "degraded" | "unavailable" | string;
+  providers: KnowledgeRagProviderHealth[];
+  retrievalPolicy: {
+    provider: string;
+    injectsPromptByDefault: boolean;
+    honorsKnowledgeAcl: boolean;
+    honorsMemoryPolicy: boolean;
+    mutatesFormalKnowledge: boolean;
+  };
+  updatedAt: string;
+};
+
 export type KnowledgeRagRetrievalPayload = {
   schemaVersion: number;
   agentId: string;
