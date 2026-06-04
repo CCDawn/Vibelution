@@ -29,6 +29,7 @@ from core.chat.chat_task_types import trim_lines
 from core.chat.skill_registry import build_skill_runtime_context, skill_descriptor_for_log
 from core.chat.slash_commands import SkillSlashCommand, parse_skill_slash_command
 from core.infrastructure.event_bus import EventNames, get_event_bus
+from core.llm.client import llm_status_context
 from core.mental_model_flags import is_mental_model_enabled
 from core.evaluation.chat_dataset_capture import ChatDatasetCaptureService
 from core.evaluation.chat_next_state_signals import (
@@ -8685,6 +8686,80 @@ def _set_session_turn_progress_live_output(session_id: str, stage: str, *, turn_
     )
 
 
+def _set_session_llm_status_live_output(
+    session_id: str,
+    status: str,
+    *,
+    turn_id: str = "",
+    fields: dict[str, Any] | None = None,
+) -> None:
+    language = get_web_language()
+    status_key = str(status or "").strip().lower()
+    data = fields if isinstance(fields, dict) else {}
+    attempt = _coerce_nonnegative_int(data.get("attempt"))
+    max_attempts = _coerce_nonnegative_int(data.get("max_attempts") or data.get("maxAttempts"))
+    category = str(data.get("category") or data.get("reason") or "").strip()
+    fallback_profile_id = str(data.get("fallback_profile_id") or data.get("fallbackProfileId") or "").strip()
+    content_chars = _coerce_nonnegative_int(data.get("content_chars") or data.get("contentChars"))
+
+    if status_key == "retrying":
+        attempt_line = (
+            text_for(language, zh=f"第 {attempt}/{max_attempts} 次", en=f"attempt {attempt}/{max_attempts}")
+            if attempt and max_attempts
+            else text_for(language, zh="正在重试", en="retrying")
+        )
+        reason_line = category or text_for(language, zh="上游连接暂时不稳定", en="temporary upstream connection issue")
+        content = text_for(
+            language,
+            zh=f"模型连接正在重试...\n{attempt_line}；原因：{reason_line}。本轮仍在继续，请不要重复提交。",
+            en=f"Retrying the model connection...\n{attempt_line}; reason: {reason_line}. This turn is still running.",
+        )
+        stage = "model_retry"
+    elif status_key == "fallback_invoke_started":
+        reason_line = category or text_for(language, zh="连续流式失败", en="repeated stream failure")
+        profile_line = f"\nFallback: {fallback_profile_id}" if fallback_profile_id else ""
+        content = text_for(
+            language,
+            zh=f"流式输出不稳定，正在切换到非流式回答...\n原因：{reason_line}。{profile_line}",
+            en=f"Streaming is unstable; switching to a non-streaming response...\nReason: {reason_line}.{profile_line}",
+        )
+        stage = "model_fallback"
+    elif status_key == "fallback_invoke_succeeded":
+        content = text_for(
+            language,
+            zh=f"非流式回答已返回，正在写入会话...\n正文约 {content_chars} 个字符。",
+            en=f"The non-streaming response returned and is being written to the session...\nAbout {content_chars} characters.",
+        )
+        stage = "model_fallback"
+    elif status_key == "failed":
+        reason_line = category or text_for(language, zh="模型调用失败", en="model call failed")
+        content = text_for(
+            language,
+            zh=f"模型请求失败。\n原因：{reason_line}。",
+            en=f"The model request failed.\nReason: {reason_line}.",
+        )
+        stage = "model_failed"
+    else:
+        return
+
+    _set_session_live_output(session_id, turn_id=turn_id, stage=stage, content=content)
+    _record_session_turn_lifecycle_event(
+        session_id,
+        f"llm_status_{status_key}",
+        turn_id=turn_id,
+        outcome="running" if status_key != "failed" else "failed",
+        fields={
+            "llmStatus": status_key,
+            "attempt": attempt,
+            "maxAttempts": max_attempts,
+            "category": trim_lines(category, max_lines=1),
+            "fallbackProfileId": fallback_profile_id,
+            "contentChars": content_chars,
+            "messageLength": len(content),
+        },
+    )
+
+
 def _clear_session_live_output(session_id: str) -> None:
     with _SESSION_LIVE_OUTPUTS_LOCK:
         _SESSION_LIVE_OUTPUTS.pop(session_id, None)
@@ -8955,6 +9030,31 @@ def _capture_session_ui_stream(
                 },
             )
 
+    def llm_status_event_proxy(event):
+        context = _SESSION_UI_CAPTURE_CONTEXT.get({})
+        data = event.data if isinstance(event.data, dict) else {}
+        event_session_id = str(data.get("session_id") or data.get("sessionId") or "").strip()
+        event_turn_id = str(data.get("turn_id") or data.get("turnId") or "").strip()
+        expected_session_id = str(context.get("sessionId") or session_id or "").strip() if isinstance(context, dict) else str(session_id or "").strip()
+        if event_session_id and event_session_id != expected_session_id:
+            return
+        if event_turn_id and capture.turn_id and event_turn_id != capture.turn_id:
+            return
+        if not event_session_id and (not isinstance(context, dict) or context.get("capture") is not capture):
+            return
+        target_session_id = event_session_id or expected_session_id
+        if not target_session_id:
+            return
+        status = str(data.get("status") or "").strip()
+        if not status:
+            return
+        _set_session_llm_status_live_output(
+            target_session_id,
+            status,
+            turn_id=capture.turn_id,
+            fields=data,
+        )
+
     for event_name in (EventNames.TOOL_START, EventNames.TOOL_SUCCESS, EventNames.TOOL_ERROR):
         callback_ids.append(
             event_bus.subscribe(
@@ -8963,20 +9063,28 @@ def _capture_session_ui_stream(
                 callback_id=f"web_chat_{session_id}_{event_name}_{id(capture)}",
             )
         )
-    token = _SESSION_UI_CAPTURE_CONTEXT.set(
-        {
-            "ui": ui,
-            "sessionId": session_id,
-            "capture": capture,
-            "mentalModelEnabled": mental_model_enabled,
-        }
+    callback_ids.append(
+        event_bus.subscribe(
+            EventNames.LLM_STATUS,
+            llm_status_event_proxy,
+            callback_id=f"web_chat_{session_id}_{EventNames.LLM_STATUS}_{id(capture)}",
+        )
     )
-    try:
-        yield
-    finally:
-        _SESSION_UI_CAPTURE_CONTEXT.reset(token)
-        for callback_id in callback_ids:
-            event_bus.unsubscribe_by_id(callback_id)
+    with llm_status_context(session_id=session_id, turn_id=capture.turn_id):
+        token = _SESSION_UI_CAPTURE_CONTEXT.set(
+            {
+                "ui": ui,
+                "sessionId": session_id,
+                "capture": capture,
+                "mentalModelEnabled": mental_model_enabled,
+            }
+        )
+        try:
+            yield
+        finally:
+            _SESSION_UI_CAPTURE_CONTEXT.reset(token)
+            for callback_id in callback_ids:
+                event_bus.unsubscribe_by_id(callback_id)
 
 
 def _ensure_session_ui_capture_hooks(ui: Any) -> None:

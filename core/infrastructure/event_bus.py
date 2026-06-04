@@ -90,6 +90,7 @@ class EventNames:
     LLM_RESPONSE = "llm:response"
     LLM_THINKING = "llm:thinking"
     LLM_ERROR = "llm:error"
+    LLM_STATUS = "llm:status"
 
     # 工具事件
     TOOL_CALL = "tool:call"

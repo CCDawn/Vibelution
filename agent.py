@@ -1763,7 +1763,16 @@ class SelfEvolvingAgent:
                                 response_metadata=getattr(full_chunk, "response_metadata", None) or {},
                             )
                     self._raise_if_turn_stop_requested()
-                    return llm_for_turn.invoke(clean_messages)
+                    invoke_response = llm_for_turn.invoke(clean_messages)
+                    if disable_streaming_for_retry:
+                        final_content = ResponseProcessor.coerce_content_text(
+                            getattr(invoke_response, "content", "")
+                        )
+                        if final_content.strip():
+                            stream_response = getattr(ui, "stream_response", None)
+                            if callable(stream_response):
+                                stream_response(final_content, done=True)
+                    return invoke_response
                 except TurnStopRequested:
                     raise
                 except KeyboardInterrupt:
